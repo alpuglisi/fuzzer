@@ -155,3 +155,89 @@ def test_the_scanner_guard_flags_a_crawler_without_it():
     import ast
     assert _scan_script_calls(ast.parse("routes = re.findall(r'path:', text)")) == 0
     assert _scan_script_calls(ast.parse("got = spa.scan_script(text)")) == 1
+
+
+# --- BUG-0522: harvest loads and restores after failed loads (a real browser) -----------
+class _FailingSite:
+    """``/missing<..>``: 404 with an empty body (Chromium commits its own error page);
+    any other path: a small page."""
+
+    def __init__(self):
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        from fuzzlab.core.net import require_loopback
+        require_loopback("127.0.0.1")              # PA-0130
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):  # noqa: N802 - http.server API
+                if self.path.startswith("/missing"):
+                    self.send_response(404)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                body = b"<html><body><a href='/x'>x</a><button>b</button></body></html>"
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.base = f"http://127.0.0.1:{self.server.server_address[1]}/"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+
+import pytest  # noqa: E402
+
+
+@pytest.mark.parametrize("failures", [1, 2])
+def test_disco_harvest_and_restore_after_failed_loads(failures, monkeypatch):
+    """BUG-0522 in disco's real paths: harvest loads of empty error answers (`_load`
+    catches each failure and goes on with the same page), then the next harvest load
+    counts no error, and a `restore` (its about:blank, then its entry URL) lands -- its
+    fingerprint check stubbed, so only its navigations are judged. Before: the late
+    error page overtook them (C0: 13-17/20 lost)."""
+    from playwright.sync_api import sync_playwright
+
+    from fuzzlab.disco.explore import ExploreOptions, State
+    from fuzzlab.tools import navguard
+    from tests._browser import skip_or_fail
+    from tests._spa_fixture import chromium_or_skip
+    chromium_or_skip(monkeypatch)
+    site = _FailingSite()
+    try:
+        ex = Explorer(site.base, scope_urls=[site.base], proxy="http://127.0.0.1:9",
+                      options=ExploreOptions(idle_ms=100, max_quiet_ms=2000))
+        ex.reproduces = lambda *a, **k: True
+        with sync_playwright() as pw:
+            try:
+                browser = pw.chromium.launch(**navguard.chromium_launch_kwargs(
+                    navguard.browser_launch_args([site.base])))
+            except Exception as exc:  # noqa: BLE001 - a launch failure is no verdict
+                skip_or_fail(f"chromium could not launch: {exc}")
+            ex._ctx = ex._new_context(browser, pw)
+            page = ex._ctx.new_page()
+            try:
+                for i in range(4):
+                    for j in range(failures):
+                        ex._load(f"{site.base}missing{i}_{j}", page)
+                    before = ex.report.errors
+                    ex._load(f"{site.base}ok{i}", page)
+                    assert ex.report.errors == before, f"rep {i}: the harvest load failed"
+                    for j in range(failures):
+                        ex._load(f"{site.base}missing{i}_r{j}", page)
+                    assert ex.restore(page, ex._ctx, State(
+                        "x", f"{site.base}ok{i}", f"{site.base}ok{i}")), f"rep {i}: restore"
+            finally:
+                navguard.release(ex._ctx)
+                browser.close()
+    finally:
+        site.close()

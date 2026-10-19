@@ -939,10 +939,14 @@ fuzzer.
   therefore looks to the page as if the click or script did nothing; it is visible
   only through the crawl's `skipped_*` records and its summary (review A-N1). *(BUG-0136
   review, X1:)* when the crawl's **own** `goto` fails (a refused target or redirect
-  landing, a timeout, anything), `_fetch_rendered` first sends the page to
-  `about:blank`, so the previous document, which ERR_ABORTED left alive, stops: its
-  timers and fetches are never sent or captured under the URLs crawled next. Then the
-  withheld check, `SessionWithheld` or the static fallback run as before.
+  landing, a timeout, anything), `_fetch_rendered` first ends the previous document
+  through `navguard.end_failed_load` (SP-01; *CC-CRAWL-0049, BUG-0522*): when the
+  failure settled on the browser's own error page, that page has already replaced it
+  and nothing more is navigated; otherwise the page goes to `about:blank`, so a
+  document ERR_ABORTED left alive stops. Either way its timers and fetches are never
+  sent or captured under the URLs crawled next. Then the withheld check,
+  `SessionWithheld` or the static fallback run as before. A seed, probe or reveal
+  window that cannot close cleanly leaves its page the same way.
   *(CC-CRAWL-0030, BUG-0138:)* **no guarded navigation waits for a load a refused
   navigation can cancel.** A script that navigates to a refused URL while the page is
   parsed stops the page's loading, so `domcontentloaded` never fires.
@@ -951,6 +955,20 @@ fuzzer.
     most the caller's timeout, cut short 300 ms after a main-frame navigation fails.
     Only failures reported at or after this navigation's commit count, so a previous
     page's pending navigation, cancelled by this one, never cuts the wait (review Q1).
+  - *(CC-CRAWL-0049, BUG-0522:)* **a failed navigation raises only once the commits its
+    failure starts have landed.** Only the first line of the error decides:
+    - a network error other than an abort (an empty error answer) waits for the
+      browser's own error page;
+    - "interrupted by another navigation to chrome-error://" waits for that page and
+      then for the overtaken navigation's own late commit.
+
+    A commit counts only if a listener registered before the navigation saw it. The
+    page's current URL never counts: after one failure it already shows an error page.
+    The wait is bounded by `ERROR_PAGE_WAIT_MS` (3 s); every expiry is counted
+    (`navguard.error_page_waits()`) and logged. An abort, a download or a timeout
+    raises at once, as before. Without this, the late error page overtook the next
+    navigation of every caller: the next crawl load, a seed, disco's harvest and
+    restore.
   - `networkidle` is waited for (`wait_for_state`) only after a completed load. The
     body text is read without waiting for a body.
   - A page whose load did not complete is read without a second request (review Q2).
@@ -969,9 +987,14 @@ fuzzer.
     - Query probes and seeds (FR-CRAWL-17) take the same path.
   - A reveal's restore whose reload did not complete leaves for `about:blank` (review
     B-N1).
-  - No other module of fuzzlab navigates a page or waits for a load state itself.
+  - No other module of fuzzlab navigates a page or waits for a load state itself. A
+    failed load's cleanup is `navguard.end_failed_load`. Every other `about:blank`
+    navigation outside navguard is allow-listed by function, with its reason: a fresh
+    document before a query load or a disco restore, a window's exit, an unfinished
+    reload's stop. None of them sits in an `except` or `finally` (BUG-0522).
   - Enforced by (the abort code, per reason; BUG-0136): `navguard.make_route_handler` (`abort()`, `_abort_code`) — `tests/test_navigation_aborts.py::test_every_abort_reason_keeps_the_document_for_a_navigation`, `tests/test_navigation_aborts.py::test_a_script_navigation_out_of_scope_keeps_the_page_crawled`, `tests/test_navigation_aborts.py::test_a_script_navigation_to_a_destructive_url_keeps_the_page_crawled`, `tests/test_navigation_aborts.py::test_goto_of_a_refused_target_still_raises_and_the_page_stays`, `tests/test_navigation_aborts.py::test_the_crawls_own_target_redirected_to_a_refused_url_raises_and_falls_back`, `tests/test_navigation_aborts.py::test_a_refused_post_form_submission_keeps_the_page_crawled`, `tests/test_navigation_aborts.py::test_a_refused_iframe_keeps_its_parent_crawled`
-  - Enforced by (a failed load ends the previous document; BUG-0136 review X1): `LocalSpider._fetch_rendered` (`about:blank` before the fallback) — `tests/test_navigation_aborts.py::test_a_failed_load_ends_the_previous_document`
+  - Enforced by (a failed load ends the previous document; BUG-0136 review X1, BUG-0522): `navguard.end_failed_load`, called by `LocalSpider._fetch_rendered` — `tests/test_navigation_aborts.py::test_a_failed_load_ends_the_previous_document`, `tests/test_navigation_aborts.py::test_an_error_page_ends_the_previous_document`
+  - Enforced by (a failed navigation settles before it raises; the cleanup has one owner; BUG-0522): `navguard.navigate` / `reload` (`_settle_failure`), `navguard.end_failed_load` — `tests/test_navigation_aborts.py::test_a_failed_navigation_returns_after_its_own_error_page`, `tests/test_navigation_aborts.py::test_a_navigation_overtaken_by_an_error_page_waits_for_it`, `tests/test_navigation_aborts.py::test_only_the_leading_code_decides_a_wait_for_an_error_page`, `tests/test_navigation_aborts.py::test_a_refused_load_naming_a_network_error_in_its_url_is_not_waited_for`, `tests/test_navigation_aborts.py::test_the_spiders_load_after_failed_loads_is_rendered`, `tests/test_navigation_aborts.py::test_a_query_load_after_a_failed_load_is_rendered`, `tests/test_disco_harvest.py::test_disco_harvest_and_restore_after_failed_loads`, `tests/test_shared_primitives.py::test_every_about_blank_navigation_is_a_reasoned_exception`, `tests/test_shared_primitives.py::test_the_about_blank_guard_catches_synthetic_offenders`
   - Enforced by (no navigation waits for a load a refused navigation cancelled; one helper; BUG-0138): `navguard.navigate` / `reload` / `wait_for_state` / `response_html`, `LocalSpider._goto_and_parse` — `tests/test_guarded_navigation.py::test_a_head_script_navigation_to_a_refused_url_is_not_waited_out`, `tests/test_guarded_navigation.py::test_a_slow_page_is_still_waited_for`, `tests/test_guarded_navigation.py::test_query_probe_and_seed_loads_are_not_waited_out`, `tests/test_guarded_navigation.py::test_every_guarded_navigation_goes_through_the_one_helper`, `tests/test_guarded_navigation.py::test_the_navigation_guard_catches_synthetic_offenders`, `tests/test_guarded_navigation.py::test_a_failure_reported_before_the_commit_never_cuts_the_wait`, `tests/test_guarded_navigation.py::test_a_previous_pages_pending_navigation_never_cuts_the_next_load`, `tests/test_guarded_navigation.py::test_a_merely_slow_page_keeps_its_rendered_text`, `tests/test_guarded_navigation.py::test_another_document_never_fills_this_urls_row`, `tests/test_guarded_navigation.py::test_a_same_path_document_with_another_query_never_fills_this_urls_row`
   - Enforced by (scope, per layer): `LocalSpider._in_scope`, `navguard.guard_page` / `make_route_handler` / `make_ws_handler` / `browser_launch_args` / `checked_api_request` — `tests/test_spider_scope.py::test_loopback_start_treats_aliases_as_one_host`, `tests/test_browser_scope.py::test_a_rendered_crawl_never_leaves_the_target_origin`, `tests/test_browser_scope.py::test_the_launch_args_alone_confine_an_unrouted_page_to_the_origin`, `tests/test_browser_scope.py::test_a_redirect_hop_out_of_scope_is_never_requested`, `tests/test_browser_scope.py::test_out_of_scope_requests_are_aborted_and_reported`, `tests/test_browser_scope.py::test_allow_never_lifts_scope`, `tests/test_browser_scope.py::test_websockets_are_scope_checked`, `tests/test_browser_scope.py::test_the_spiders_isolated_submit_refuses_an_out_of_scope_action`, `tests/test_browser_scope.py::test_every_browser_path_in_fuzzlab_is_scoped`, `tests/test_browser_scope.py::test_the_browser_guard_catches_synthetic_offenders`, `tests/test_browser_scope.py::test_scope_is_checked_before_any_fetch`
   *(CC-CRAWL-0039, BUG-0503:)* **a URL source feeding the queue returns only GET-safe

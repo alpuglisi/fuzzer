@@ -3,6 +3,33 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0104 — M6's navigations settle a failure before they raise (BUG-0522) (2026-10-19)
+- Placement: written above CC-FUZZ-0103 (DG-UNPLACEABLE, merging first) as pre-assigned.
+- Change: none in `fuzzlab/tools/browserexec.py` or the oracle. The executor's
+  `navigate` calls (lines 537 and 561 on main) go through SP-01, which now waits for
+  the error page an empty error answer starts before it raises (CC-CRAWL-0049).
+- Reason: BUG-0522 (S-d of DG-NAVBLANK's gate).
+- Impact:
+  - **Trace spans include the wait.** `browserexec`'s `navigate_done` spans (FR-FUZZ-62)
+    now include that wait whenever a navigation fails with a network error: p50 under
+    50 ms, at most 3 s, expiries counted and logged.
+  - **M6 step bounds (BUG-0526).** `tests/test_m6_navigation_failures.py`
+    (`max(navs) < 3.5`) and `tests/test_guarded_navigation.py` (`FAST = 3.5`) bound
+    steps close to a 3 s expiry plus the goto. Each case was checked:
+    - M6 `/inline`: the page commits, then its script's navigation is refused. No
+      `goto` raises, so there is no wait.
+    - M6 `/redir`: a refused redirect raises `net::ERR_ABORTED`. No wait.
+    - `test_guarded_navigation`'s `FAST` cases: a refused script navigation while
+      parsing, seeds, probes, login navigations. Their failures are aborts or they
+      commit.
+    - Measured, not only read: the two files were run with `navguard.error_page_waits()`
+      recorded at the session's end (`navblank/m6_waits.log`): 43 passed, `{waited: 0, expired: 0}`. No case
+      reaches the wait.
+- Risk: low.
+- Deliverables:
+  - [x] no code; the classification check above — done
+- Effectiveness: pending.
+
 ### CC-FUZZ-0102 — The browser (M6) and out-of-band (M8) confirmations record each step they perform (FR-FUZZ-62, BUG-0520) (2026-10-19)
 - Change:
   - `fuzzlab/tools/browserexec.py`:

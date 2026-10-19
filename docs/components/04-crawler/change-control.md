@@ -3,6 +3,120 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0049 — A failed navigation settles on its own error page before it raises; a failed load's cleanup has one owner (SP-01, BUG-0522) (2026-10-19)
+- Placement: pre-assigned before CC-CRAWL-0050 was written (PA-0031), so it lands above that higher-numbered entry.
+- Change (`fuzzlab/tools/navguard.py`, SP-01's owner; `fuzzlab/tools/spider.py`):
+  - `_NavigationFailures.commits`: the main frame's commit URLs since this navigation
+    started (its existing `framenavigated` listener, registered before `goto`).
+  - `_settle_failure(page, failures, exc)`, called in `navigate`'s and `reload`'s
+    failure path before re-raising. `_settles_on_error_page` reads only the first line
+    of the error:
+    - `^\S+: net::ERR_(?!ABORTED\b)[A-Z_]+ at ` waits for one fresh `chrome-error:`
+      commit;
+    - `^\S+: Navigation to ".*" is interrupted by another navigation to "chrome-error://[^"]*"$`
+      waits for that commit and then one more (the overtaken navigation landing);
+    - anything else does not wait.
+    The wait polls with `page.wait_for_timeout(20)` for at most `ERROR_PAGE_WAIT_MS =
+    3000`. The last commit is set on the exception (`NAVIGATION_SETTLED_ATTR`; None on
+    expiry). Expiries are counted (`error_page_waits()`) and logged as a warning.
+  - `end_failed_load(page, error, *, timeout_ms)`: "error-page" (nothing navigated) when
+    `error` settled on the browser's error page, else `about:blank` (suppressed), "blank".
+  - `LocalSpider._fetch_rendered`'s and `_window`'s `except` call `end_failed_load`
+    instead of a hand-written `about:blank`. An error not raised by `navigate` (a key
+    press, the session check) carries no record, so it gets `about:blank`. The
+    `_navigation_withheld` docstring is updated.
+  - Disco has no code change; its harvest `_load` and `restore` are covered through
+    `navigate`.
+- Reason: BUG-0522. Chromium commits its own error page for an empty error answer tens
+  of milliseconds after `goto` raised, and any navigation made meanwhile is overtaken. An
+  overtaken navigation still lands later (measured 30/30, 6–69 ms), overtaking the next
+  one. Losses before the fix, as ranges over the a8b81df batch, two passes on bf1356a
+  (`navblank/batch_r2.log`, `navblank/batch_sa.log`) and the reviewer's run
+  (`gate6/r2_corroborate.log`):
+
+  | Path | Lost |
+  |---|---|
+  | Spider's next load after one empty 404 | 14–19/20 |
+  | Same, after two or three in a row | 14–20/20 |
+  | Spider, a refused load then a 404 | 11–20/20 |
+  | Auditor, after one empty 404 | 10–16/20 |
+  | Auditor, after two or three in a row | 13–20/20 |
+  | `navigate` straight after a failure | 24–40/40 |
+  | Disco harvest load | 11–20/20 |
+  | Disco restore | 15–20/20 |
+  | A seed after a failed load | 8–15/20 |
+  | `_leave` raised after a failed seed | 8–20/20 |
+  | Next load after a failed seed | 3–18/20 |
+
+  The r1 draft judged the error page by the page's current URL. It still lost 9–18/20
+  (spider) and 7–15/20 (auditor) after two or three empty 404s in a row.
+- Impact:
+  - **Every SP-01 caller, by construction.** A failed navigation with a network error
+    now raises after its error page commits. The sweep, with its call sites:
+
+    | Caller | Effect |
+    |---|---|
+    | spider (`_goto_and_parse`, `_restore`, session re-adoption, anonymous submissions, reveals) | covered |
+    | auditor `fetch` | covered (CC-AUD-0053) |
+    | disco `explore` 811/812, 1005, 1083 | covered |
+    | disco `ede._load` | a failure ends `_page`; the next page gets a new context |
+    | `session.browserlogin` 530/537 | covered (CC-SESS-0027) |
+    | `tools.browserexec` 537/561 on main | covered (CC-FUZZ-0104) |
+
+  - **Cost.** An abort (ERR_ABORTED), a download or a timeout raises at once, as before.
+    In the overtaken case `navigate` still raises, so that one load is lost (a static
+    fallback, or `restore` returning False); the one after it is not.
+  - **Measured after the fix** (one process at a time; `navblank/batch_r2.log` and
+    `navblank/verify_load.log`):
+    - 0 lost in every order of Table 1;
+    - 0/40 straight `navigate`;
+    - 0/20 disco harvest and restore;
+    - 0/20 seeds, `_leave` raised 0/20.
+
+    Wait p50 24–44 ms, max 304 ms, 0 expired in 760 waits.
+  - **Under the harness's parallel load.** The implemented code, unpatched (only its wait
+    timed), was measured while another lane's `scripts/verify_change.py` parallel pass
+    (`-n 3`) and this change's mutant runs were going: 280 waits, p50 25 ms, max 182 ms,
+    0 expired; next load lost 0/20 in each order (`navblank/verify_load.log`). No timing
+    assertion was added (PA-0526).
+  - **Contracts.** SP-01's row is extended (owner `end_failed_load`, three guard tests).
+    No contract, schema or traffic is added; fallback requests the interruptions caused
+    go away.
+- Risk: low to medium.
+  - (a) Each failed navigation with a network error waits for its error page (p50
+    under 50 ms).
+  - (b) An expiry (3 s) reopens the race for that navigation. It is counted and
+    warned, never silent.
+  - (c) The overtaken case waits for one more commit. If one never came, the wait would
+    expire.
+  - (d) The classification depends on Playwright's message format (1.56). A change
+    means no wait, today's race, and X1 still holds. Pinned by the classifier test.
+  - (e) `chrome-error:` is Chromium's, and Chromium is pinned (1194).
+  - (f) The record is an attribute on Playwright's exception. If it cannot be set, the
+    cleanup goes to `about:blank`, as before.
+- Deliverables:
+  - [x] code — done
+  - [x] Tests in `tests/test_navigation_aborts.py`, mutant results in the report — done:
+    - `test_the_spiders_load_after_failed_loads_is_rendered[404,404x2,404x3,refused-404,404-refused]`
+      (404-refused is not a pinning test: it passes on the old code);
+    - `test_a_failed_navigation_returns_after_its_own_error_page[1,2,3]`;
+    - `test_a_navigation_overtaken_by_an_error_page_waits_for_it`;
+    - `test_only_the_leading_code_decides_a_wait_for_an_error_page`;
+    - `test_a_refused_load_naming_a_network_error_in_its_url_is_not_waited_for`;
+    - `test_an_error_page_ends_the_previous_document`;
+    - `test_a_query_load_after_a_failed_load_is_rendered`.
+  - [x] `tests/test_disco_harvest.py::test_disco_harvest_and_restore_after_failed_loads[1,2]`
+    — done
+  - [x] `tests/test_shared_primitives.py::test_every_about_blank_navigation_is_a_reasoned_exception`,
+    `::test_the_about_blank_guard_catches_synthetic_offenders` — done
+  - [x] The X1 tests and `test_the_send_time_oracle_sees_a_document_left_alive` kept
+    green — done
+  - [x] BUG-0522; FR-CRAWL X1 and SP-01 text in `requirements.md` — done
+  - [ ] ERROR_LOG, PA-0522, the SP-01 row, CHANGELOG, ARCHITECTURE, failure record —
+    orchestrator, at merge
+- Effectiveness: pending (on a real crawl: static fallbacks after error answers, and
+  `error_page_waits()`).
+
 ### CC-CRAWL-0050 — `fuzzlab disco capture --store` records the capture's trace live; a capture refuses a directory holding an earlier run's files (FR-CRAWL-30, BUG-0525) (2026-10-19)
 - Change:
   - **`fuzzlab/disco/livetrace.py` (new): `LiveTrace(run_dir, store_path, run_id)`.**

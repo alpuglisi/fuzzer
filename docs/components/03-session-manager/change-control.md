@@ -3,6 +3,22 @@
 Component code: **SESS**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SESS-0027 — The browser login's navigations settle a failure before they raise (BUG-0522) (2026-10-19)
+- Change: none in `fuzzlab/session/`. `session.browserlogin`'s `navigate` calls (lines
+  530 and 537) go through SP-01, which now waits for the error page an empty error
+  answer starts before it raises (CC-CRAWL-0049).
+- Reason: BUG-0522 (S-d of DG-NAVBLANK's gate: a component affected by construction is
+  recorded).
+- Impact: a login route that fails with a network error raises after its error page
+  commits (p50 under 50 ms, at most 3 s, expiries counted and logged); the login then
+  fails loudly, as before. An abort or a timeout raises at once, as before. No
+  requirement changes.
+- Risk: low.
+- Deliverables:
+  - [x] no code; covered by SP-01's tests and `tests/test_guarded_navigation.py`
+    (login navigations, `FAST`) in the change's verification — done
+- Effectiveness: pending.
+
 ### CC-SESS-0026 — JSON login from the page's own script (FR-SESS-21) (2026-10-19)
 - Change: `fuzzlab/session/detect.py` (`LoginForm.json_url`; `json_login_target`:
   the one login URL an inline JSON-building script POSTs; read only for a form with no

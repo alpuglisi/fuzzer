@@ -171,7 +171,10 @@ budget where a vulnerability is plausible.
   *(CC-AUD-0042, BUG-0136 review:)* each URL's rendered result (its DOM and its XHR
   list) comes from that URL's page only. When the browser cannot load a URL (a refused
   navigation, a timeout), `ContentFetcher.fetch` sends its one page to `about:blank`
-  before the static fallback. The page shown before, which ERR_ABORTED leaves alive,
+  before the static fallback -- *(CC-AUD-0053, BUG-0522:)* through
+  `navguard.end_failed_load`: when the failure settled on the browser's own error
+  page (SP-01 waits for it before raising), that page has replaced it and nothing
+  more is navigated, else `about:blank`. The page shown before, which ERR_ABORTED leaves alive,
   stops, and its requests are never listed under a later URL. *(CC-AUD-0043,
   BUG-0138:)* the rendered fetch navigates through `navguard.navigate` and waits for
   `networkidle` only after a completed load. A page whose load did not complete is
@@ -179,6 +182,7 @@ budget where a vulnerability is plausible.
   - superseded, or replaced by another document, the HTML the browser received for it;
   - merely slow, its live DOM.
   - Enforced by (a failed load ends the previous document; CC-AUD-0042): `ContentFetcher.fetch` — `tests/test_navigation_aborts.py::test_the_auditors_failed_load_ends_the_previous_document`
+  - Enforced by (the fetch after failed loads is rendered; CC-AUD-0053, BUG-0522): `ContentFetcher.fetch` → `navguard.navigate` / `end_failed_load` — `tests/test_navigation_aborts.py::test_the_auditors_load_after_failed_loads_is_rendered`
   - Enforced by (no wait for a load a refused navigation cancelled; CC-AUD-0043, BUG-0138): `ContentFetcher.fetch` → `navguard.navigate` — `tests/test_guarded_navigation.py::test_the_auditor_reads_the_page_without_waiting_it_out`
 
 - **FR-AUD-19** *(`CC-AUD-0031`, 2026-10-13).* A form point's candidate evidence
