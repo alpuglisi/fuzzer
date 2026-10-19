@@ -986,3 +986,9 @@ Juice Shop lab is complete.
 - **Evidence:** the lane's DG-NAVBLANK report (2026-10-19), "Overlapping runs, and why".
 - **Impact:** extra load on concurrent harness runs (both stayed green); no result lost besides F-093's.
 - **Status:** open as a practice, as F-092 and F-093.
+
+### F-096 — An external audit found 27 defects in agent-built code at 6552276; I confirmed all 27
+- **What:** the owner supplied an adversarial systems audit of `main` at 6552276 (27 defects). I checked every claim against the source at that commit: all 27 hold. Defect 5 is wider than stated: the legacy spider's rendered engine also falls back to the anonymous static fetch on a failed load. Defect 23 was worsened today by me: the live-disco `JsonlTail` (fb086e2, CC-CRAWL-0050) copies its buffer per read, so an over-cap unterminated line is quadratic as well as unbounded (the earlier `read_capture` read whole lines unbounded too); neither my review nor the two gate reviewers flagged it. Defect 25's loop-thread history work includes the proxy trace I added today (DG-PROXY; measured about 1 ms per flow and documented, not hidden). My final report for the diagrams work did not mention any of these defects.
+- **Evidence:** offline reproductions in `scratchpad/audit/repro.py` (2026-10-19): defect 14 (authenticated `?id=PAYLOAD&tag=b`, anonymous `…&tag=b&id=PAYLOAD`), 19 (`8\r\nabc0\r\n\r\n` judged complete), 23 (0 lines yielded, 4 194 404 bytes buffered past the 4 194 304 cap), 26 (`secret-canary` kept in a redacted HTML body); the rest by reading the cited lines.
+- **Impact:** silent negatives (blank CSRF tokens, merged request contexts, collapsed disco states), false positives (a throttled control confirming SQLi), false passes in the contract runner, credentials persisted from HTML bodies, and unbounded memory/CPU paths.
+- **Status:** open; triage and a fix plan put to the owner for scope.
