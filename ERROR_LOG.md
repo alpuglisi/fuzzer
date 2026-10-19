@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-19 — lab environment (secDevLabs bring-up: Docker daemon, Docker Hub limit, Mongection on modern Node)
+- **Symptom:** (1) `docker` reported "Cannot connect to the Docker daemon" after the session's container restarted (a stale `/var/run/docker.pid`); (2) pulling `php:8.3-apache` from Docker Hub answered `429 Too Many Requests`; (3) the Mongection app exited on its first failed login ("Cannot set headers after they are sent", then Node's exit).
+- **Root cause:** (1) the restart left no daemon running; (2) Docker Hub's anonymous pull rate limit for this host; (3) upstream's `/login` answers a failed login twice, and Node 15+ exits on that unhandled rejection where the Node of the app's era only warned (not our code).
+- **Remediation:** (1) removed the stale pid file and started `dockerd`; (2) new bases come from `mirror.gcr.io` (as bWAPP's PHP image already did), pinned by digest (CC-LAB-0307..0309); (3) the fixture sets `NODE_OPTIONS=--unhandled-rejections=warn`, documented in its compose file (CC-LAB-0309).
+- **Status:** Environment (fixed in the fixtures / the session)
+
 ## 2026-10-18 — crawler / browser guard (teardown let a refused navigation out; BUG-0504, PA-0504)
 - **Symptom:** under parallel load the M6 test `..._fires_before_a_refused_navigation_is_executed` saw `/logout.php` reach the server (8/24, then 18/80 stress runs); it passed alone.
 - **Root cause:** `navguard.release` closed pages then `unroute_all`ed; a navigation the page had just started was paused at interception and went out un-intercepted (BUG-0504).
