@@ -18,6 +18,24 @@ Format per entry:
 
 ---
 
+## 2026-10-19 — crawler (the spider never saw an SPA form's request with submission off; Juice Shop's login SQL injection was never probed)
+- **Symptom:** spider-fed `auto` on Juice Shop (CC-LAB-0317): no `/rest/user/login` row in the spider DB, so `email` (sqli, the answer key's first entry) was found from the ground truth only.
+- **Root cause:** a form's request shape was learnt only by sending it (`--submit-spa-forms`, off by default because it changes lab state); the reveal window blocked writes and discarded their shape (BUG-0506).
+- **Remediation:** dry submission by default -- clicked inside the write-blocking window, the write recorded and aborted, the client state rolled back, a password form in a fresh context -- and every write a reveal window aborts recorded (FR-CRAWL-26, CC-CRAWL-0045, PA-0506).
+- **Status:** Fixed
+
+## 2026-10-19 — crawler (disco explored a catch-all's copy of Juice Shop and never loaded script-declared routes)
+- **Symptom:** disco-fed `auto` on Juice Shop: fp=1 (`/sitemap.xml#/search`, a duplicate of `/#/search`), and `#/track-result` `id` (DOM XSS) never reached.
+- **Root cause:** a state's identity held its document path, so the shell served at `/sitemap.xml` was a second app; disco had no script-route scanner (the spider's) and its harvest followed links only (BUG-0505).
+- **Remediation:** document aliases (same body, hash-routed or rendering a known state) are not explored; script routes and seeds read with `spa.scan_script` (SP-47) and loaded first; harvest loads logged for the importer (FR-CRAWL-27, CC-CRAWL-0044, PA-0505).
+- **Status:** Fixed
+
+## 2026-10-19 — lab (Juice Shop exited again after a disco-fed `auto` run; Docker daemon down a fifth time)
+- **Symptom:** (1) after the scored disco-fed `auto` run the Juice Shop container was `Exited (1)`; (2) earlier in the session `docker` could not reach its daemon.
+- **Root cause:** (1) not verified -- the container was recreated by `labctl.sh up` and its log went with it; the run probed the same crawled `/rest/products/{id}/reviews` template whose `$where` evaluation crashed it before (the entry below), so the same cause is likely; (2) the container restarted and nothing starts `dockerd`.
+- **Remediation:** (1) `./labctl.sh up juice-shop --authorized`; the detection gap and the missing restart policy stay open (below); (2) stale pid removed, `dockerd` started; the setup script is still the lasting fix.
+- **Status:** Environment
+
 ## 2026-10-19 — lab (Juice Shop exited during a crawl-sourced `auto` run; a probe reached its server-side JavaScript)
 - **Symptom:** `fuzzlab auto --disco-run` on Juice Shop: five path-point checks inconclusive ("no response: ConnectionResetError / RemoteDisconnected"); the container had exited (code 1, not OOM) at 07:38, with no restart policy.
 - **Root cause:** the app's own flaw, newly reached: FR-AUD-26 discovered `/rest/products/{id}/reviews` from the crawl, and Juice Shop evaluates that id inside a `$where` JavaScript expression (`this.product == <id>`); a boolean SQLi probe's token became an undefined identifier (`ReferenceError: fz23e3b3 is not defined`), uncaught, so Node exited. fuzzlab handled the lost responses as designed (inconclusive, never negative).

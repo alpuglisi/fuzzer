@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-19 (discovery gaps behind the Juice Shop misses remediated)
+- **What:** disco reads the routes the app's scripts declare (the spider's scanner, SP-47) and no longer explores a document served under another path as a second app (CC-CRAWL-0044, BUG-0505); the spider dry-submits SPA forms -- clicked inside the write-blocking window, the write recorded and aborted, client state rolled back -- and records every write a reveal window blocks (CC-CRAWL-0045, BUG-0506).
+- **Why:** the owner asked for the algorithmic gaps behind disco's misses and the spider's missed login SQL injection to be remediated, not worked around.
+
 ## 2026-10-19 (Juice Shop measured with every tool)
 - **What:** ground-truth `auto` tp=5 fp=0; spider-fed tp=5 fp=0; disco-fed tp=4 fp=1 (a duplicate route); crawled path discovery reached a real server-side JavaScript sink and crashed the app (CC-LAB-0317, ERROR_LOG).
 - **Why:** the owner asked to run the tools on the Juice Shop lab.

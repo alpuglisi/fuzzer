@@ -791,6 +791,54 @@ fuzzer.
   finding is a candidate: a field used only after an interaction is reported too. The
   replayed answers never reach the target; the pages and their assets do (hence
   `--authorized`); an existing `ede.json` is never overwritten.
+- **FR-CRAWL-26 (dry submission and blocked writes recorded, CC-CRAWL-0045,
+  BUG-0506)** In the Playwright engine with SPA routes on and `--submit-spa-forms` not
+  given, each eligible form on an SPA route is dry-submitted unless `--no-dry-submit` is
+  given. Eligible means it passes `spa.form_refusal`, is taken once per signature, and
+  is within `spa.MAX_SUBMISSIONS`. A dry submission:
+  - fills the form with the fillers (a password control gets the filler, never a
+    credential);
+  - clicks its vetted button inside the write-blocking window (W1-W3), never lifted;
+  - records the write the click makes (an `xhr`/`fetch` that is not GET, HEAD or
+    OPTIONS and that the window refuses) in `discovered_requests` with source
+    `dry-submit`, through `record_request`'s redaction;
+  - lets the window abort that write, so the server receives nothing.
+
+  Session safety:
+  - A form with a password input is dry-submitted only in a fresh unauthenticated
+    context.
+  - Any other form's click runs between a snapshot and a rollback of the client state
+    (the context's cookies, the page origin's `localStorage` and `sessionStorage`)
+    inside the window.
+  - In an authenticated crawl, the client-side session check follows. A loss stops dry
+    submission and is reported.
+
+  A write any other non-query window aborts (a reveal or G1 click) is recorded the same
+  way with source `reveal-blocked`. A seed or probe window (FR-CRAWL-17) records none,
+  since its URLs carry markers. Nothing is recorded while a vetted submission has
+  lifted the window. `forms_dry_submitted`, `requests_captured_dry` and
+  `requests_captured_blocked` count stored effects and are reported. The importer takes
+  every `discovered_requests` row as a captured request whatever its source (SP-37).
+- **FR-CRAWL-27 (disco's harvest: script routes and document aliases, CC-CRAWL-0044,
+  BUG-0505)** Disco reads every JavaScript response body with `spa.scan_script` (SP-47,
+  the spider's scanner):
+  - each route `spa.classify_route` calls OK, and each paired route-query seed
+    `spa.query_url_refusal` admits, is queued in the page's routing mode. The mode is
+    hash when the page URL or one of its links holds a `#/` route, as the spider
+    decides it;
+  - these URLs go in a harvest queue loaded before the linked URLs;
+  - a harvest load of a hash-route URL writes an `actions.jsonl` line of kind `load`
+    (every action key present), so the importer gives its query as `fragment`
+    parameters.
+
+  An HTML document whose body (sha256) was first loaded under another path is an alias
+  (`harvest_aliases`), and no state is taken from it, when either:
+  - the page is hash-routed (its URL or a link holds `#/`), or
+  - its rendered state, read as if at the first path, is already a known state.
+
+  Otherwise it is explored: a history-mode route renders its own view from the same
+  shell. **Known gap:** the spider's FR-CRAWL-17 probe loads (marker reflection of
+  unpaired query names) have no disco counterpart.
 
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default

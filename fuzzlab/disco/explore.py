@@ -52,14 +52,17 @@ from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
-from urllib.parse import urldefrag, urljoin
+from urllib.parse import urldefrag, urljoin, urlsplit, urlunsplit
 
 from fuzzlab.core.redaction import redact_url
 from fuzzlab.core.urls import (destructive_reason, in_origin_scope, origin_scope,
-                               text_destructive_reason)
+                               spa_route, text_destructive_reason)
 from fuzzlab.disco import formfill
 from fuzzlab.disco.capture import ACTION_HEADER
 from fuzzlab.disco.fingerprint import element_signature, normalise_route, state_fingerprint
+# the one script-route scanner both crawlers share (SP-47; D70's allowlist)
+from fuzzlab.tools.spa import (ROUTE_OK, classify_route, query_url_refusal, route_url,
+                               scan_script, seed_url, spa_fragment)
 from fuzzlab.session.detect import looks_like_login_url
 from fuzzlab.tools import navguard
 from fuzzlab.tools.netquiet import Inflight
@@ -328,6 +331,15 @@ class ExploreReport:
     harvest_found: int = 0
     harvest_loads: int = 0
     harvest_states: int = 0
+    #: harvest loads answered with a document already known under another path (an
+    #: app's catch-all shell, a soft 404): never explored again (BUG-0505)
+    harvest_aliases: int = 0
+    #: routes and route-query seeds read from the app's own scripts (FR-CRAWL-27; FR-CRAWL-12/17's
+    #: scanners, `tools.spa.scan_script`), queued for the harvest
+    script_routes: int = 0
+    script_route_seeds: int = 0
+    #: script bodies over `tools.spa.MAX_SCRIPT_BYTES`: not scanned for routes
+    scripts_too_large: int = 0
     errors: int = 0
     session_lost: int = 0
     aborted: int = 0
@@ -364,7 +376,13 @@ class _Shared:
         #: page or response links that nothing requested yet (`Explorer._gather`)
         self.requested: set[str] = set()
         self.harvest: dict[str, None] = {}
+        #: routes and route-query seeds the app's scripts declare: loaded before any
+        #: other harvest URL (the app's own navigable surface, not a linked asset)
+        self.harvest_routes: dict[str, None] = {}
         self.bodies_read: set[str] = set()
+        #: sha256 of each HTML document body loaded -> the path it was first loaded at:
+        #: the same body under another path is an alias, never a new state (BUG-0505)
+        self.documents: dict[str, str] = {}
 
 
 def refusal(el: dict, deny: tuple[str, ...]) -> str | None:
@@ -564,6 +582,7 @@ class Explorer:
         except _pw_error():  # the page moved on under the read
             pass
         responses, self._responses = self._responses, []
+        routes: list[str] = []
         for resp in responses:
             try:
                 headers = resp.headers or {}
@@ -571,17 +590,22 @@ class Explorer:
                 media = (headers.get("content-type") or "").split(";", 1)[0].strip()
                 if media in _BODY_MEDIA and resp.url not in shared.bodies_read:
                     shared.bodies_read.add(resp.url)
-                    found += response_urls(resp.url, media, resp.text(), {})
+                    text = resp.text()
+                    found += response_urls(resp.url, media, text, {})
+                    if "javascript" in media:          # its declared routes (FR-CRAWL-12)
+                        routes += self._script_routes(text, page)
             except (_pw_error(), UnicodeDecodeError):  # a body the driver let go
                 continue
         with shared.lock:
-            for url in found:
-                if url in shared.requested or url in shared.harvest:
-                    continue
-                if not self._in_scope(url) or destructive_reason(url):
-                    continue
-                shared.harvest[url] = None
-                self.report.harvest_found += 1
+            for queue, urls in ((shared.harvest_routes, routes), (shared.harvest, found)):
+                for url in urls:
+                    if url in shared.requested or url in shared.harvest or \
+                            url in shared.harvest_routes:
+                        continue
+                    if not self._in_scope(url) or destructive_reason(url):
+                        continue
+                    queue[url] = None
+                    self.report.harvest_found += 1
 
     def _on_done(self, req) -> None:
         self._net.ended(req)
@@ -844,6 +868,19 @@ class Explorer:
         with self._shared.lock, open(self.actions_log, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(rec, sort_keys=True) + "\n")
 
+    def _log_load(self, url: str) -> None:
+        """One ``actions.jsonl`` line for a harvest load of a route URL (``kind``
+        ``load``): its query names reach the importer only from here, as an action's
+        page URL does (`store_adapter.import_disco` reads every line's ``url``). Every
+        key an action line has is present, empty: a load acts on no element."""
+        if self.actions_log is None:
+            return
+        rec = {"seq": self._action_seq, "state": None, "route": normalise_route(url),
+               "signature": None, "occurrence": 0, "kind": "load", "label": "",
+               "new_state": None, "url": redact_url(url)}
+        with self._shared.lock, open(self.actions_log, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(rec, sort_keys=True) + "\n")
+
     # --- the loop ----------------------------------------------------------------------
     def _explored_states(self) -> int:
         """States counted against ``max_states``: the harvest's documents are not."""
@@ -955,8 +992,9 @@ class Explorer:
         """The start state: loaded, read and queued (the caller holds `busy`)."""
         shared = self._shared
         self._tag(ctx, "nav")
-        navguard.navigate(page, self.start_url, timeout_ms=self.opts.nav_timeout_ms,
-                          wait_until="load")
+        nav = navguard.navigate(page, self.start_url, timeout_ms=self.opts.nav_timeout_ms,
+                                wait_until="load")
+        self._document_first(nav.response, self.start_url)    # records the start document
         self.mark_activity()
         self.wait_quiet(page)
         got = self.settled_fingerprint(page, ctx)
@@ -1012,15 +1050,16 @@ class Explorer:
         """The next harvest URL nothing has requested since it was queued, within
         ``max_harvest`` (the caller holds the lock)."""
         shared = self._shared
-        while shared.harvest:
-            if self.report.harvest_loads >= self.opts.max_harvest:
-                self._note_budget("max_harvest")
-                return None
-            url = next(iter(shared.harvest))
-            del shared.harvest[url]
-            if url not in shared.requested:
-                self.report.harvest_loads += 1
-                return url
+        for queue in (shared.harvest_routes, shared.harvest):   # the app's routes first
+            while queue:
+                if self.report.harvest_loads >= self.opts.max_harvest:
+                    self._note_budget("max_harvest")
+                    return None
+                url = next(iter(queue))
+                del queue[url]
+                if url not in shared.requested:
+                    self.report.harvest_loads += 1
+                    return url
         return None
 
     def _load(self, url: str, page):
@@ -1040,8 +1079,18 @@ class Explorer:
         self.wait_quiet(page)
         resp = nav.response
         media = ((resp.headers or {}).get("content-type", "") if resp else "").lower()
-        if "html" in media:
+        route = spa_route(url) is not None
+        if route:                 # a hash route's query lives only in the URL: logged
+            self._log_load(url)
+        # a script-declared route's URL may load as a same-document navigation (no
+        # response); its fragment still names a route to explore
+        if "html" in media or route:
             got = self.settled_fingerprint(page, ctx)
+            first = None if route else self._document_first(resp, url)
+            if first is not None and self._alias_state(page, first, got):
+                with shared.lock:
+                    self.report.harvest_aliases += 1     # the same app: not a new state
+                return page
             if got is not None:
                 state = State(got[0], page.url, page.url,
                               core=frozenset(e["signature"] for e in got[1]))
@@ -1056,6 +1105,83 @@ class Explorer:
                             self.report.route_capped += 1
         self._gather(page)
         return page
+
+    def _document_first(self, resp, url: str) -> str | None:
+        """The path an HTML body identical to ``resp``'s (a document load of ``url``)
+        was first loaded at, when that is another path; None for a body not seen before
+        (recorded under ``url``'s path), the same path, or a body the driver cannot
+        give (BUG-0505)."""
+        import hashlib
+        if resp is None:
+            return None
+        try:
+            body = resp.body()
+        except _pw_error():
+            return None
+        digest = hashlib.sha256(body).hexdigest()
+        path = urlsplit(url).path or "/"
+        with self._shared.lock:
+            first = self._shared.documents.setdefault(digest, path)
+        return first if first != path else None
+
+    @staticmethod
+    def _hash_routed(page) -> bool:
+        """Whether the page routes by its fragment: its URL or one of its links holds a
+        ``#/`` (or ``#!/``) route -- the spider's evidence for hash mode (FR-CRAWL-12)."""
+        if spa_fragment(page.url) is not None:
+            return True
+        try:
+            hrefs = page.eval_on_selector_all("a[href]", "els => els.map(e => e.href)")
+        except _pw_error():  # the page moved on under the read
+            return False
+        return any(spa_fragment(h) is not None for h in hrefs)
+
+    def _alias_state(self, page, first: str, got) -> bool:
+        """Whether a document already loaded at path ``first`` and now rendered in
+        ``page`` is an alias, not a new state (BUG-0505): the app routes by its
+        fragment (a hash router never reads the path, so every state of the document
+        is the first path's), or the rendered state, read as if at ``first``, is a
+        state already known (a soft 404, a catch-all). A history-mode route renders
+        another view from the same shell: not an alias, explored."""
+        if self._hash_routed(page):
+            return True
+        if got is None:
+            return False
+        rebased = urlunsplit(urlsplit(page.url)._replace(path=first))
+        with self._shared.lock:
+            return state_fingerprint(rebased, got[1]) in self._shared.known
+
+    def _script_routes(self, text: str, page) -> list[str]:
+        """The routes and route-query seeds an app script declares (the spider's own
+        scanners and refusals, `tools.spa`): each route's URL in the page's routing mode
+        (hash when the page's URL or one of its links routes by fragment, as the spider
+        decides it), and for each route a query names a seed with those names set to
+        the filler. A parameterised, destructive or non-route path is left out, and a
+        seed `query_url_refusal` refuses."""
+        got = scan_script(text)
+        if got is None:
+            self._bump("scripts_too_large")
+            return []
+        routes, query = got
+        if not routes and not query.pairs:
+            return []
+        page_url = page.url
+        hash_mode = self._hash_routed(page)
+        out: list[str] = []
+        for path in routes:
+            if classify_route(path)[0] == ROUTE_OK:
+                out.append(route_url(page_url, path, hash_mode=hash_mode,
+                                     base=self.start_url))
+                self._bump("script_routes")
+        for path, names in query.pairs.items():
+            if classify_route(path)[0] != ROUTE_OK or not names:
+                continue
+            seed = seed_url(route_url(page_url, path, hash_mode=hash_mode,
+                                      base=self.start_url), names)
+            if query_url_refusal(seed) is None:
+                out.append(seed)
+                self._bump("script_route_seeds")
+        return out
 
     def _release(self) -> None:
         with self._shared.lock:

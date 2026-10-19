@@ -394,6 +394,20 @@ def _write_key(method, url):
 _LOCAL_STORAGE_JS = ("names => Object.fromEntries(names.map(n => "
                      "[n, window.localStorage.getItem(n)]))")
 
+#: FR-CRAWL-26: the page origin's two storages, read before a dry click ...
+_STORAGE_SNAPSHOT_JS = """() => {
+  const read = (st) => { const o = {}; for (let i = 0; i < st.length; i++) {
+    const k = st.key(i); o[k] = st.getItem(k); } return o; };
+  return {local: read(window.localStorage), session: read(window.sessionStorage)};
+}"""
+#: ... and put back after it (cleared, then refilled)
+_STORAGE_ROLLBACK_JS = """(snap) => {
+  for (const [st, saved] of [[window.localStorage, snap.local],
+                             [window.sessionStorage, snap.session]]) {
+    st.clear(); for (const [k, v] of Object.entries(saved)) st.setItem(k, v);
+  }
+}"""
+
 
 class SessionWithheld(RuntimeError):
     """A navigation met a document on another origin than the authenticated session's
@@ -454,6 +468,7 @@ class LocalSpider:
                  engine="auto", timeout_ms=10000, resume=False,
                  session_manager=None, identity=None, selector_forms=None,
                  spa_routes=True, submit_spa_forms=None, reveal=True, spa_query=True,
+                 dry_submit=True,
                  workers=1):
         self._sh = {}                    # the crawl-wide fields (`_shared_field`)
         if not 1 <= workers <= MAX_WORKERS:
@@ -575,6 +590,10 @@ class LocalSpider:
         self._submit_routes = (None if submit_spa_forms is None else
                                frozenset(spa.normalise_route(r) for r in submit_spa_forms
                                          if spa.normalise_route(r)))
+        # FR-CRAWL-26: with real submission off, each eligible SPA form is filled and
+        # clicked inside the write-blocking window, and the write its click makes is
+        # recorded (method, URL, body) and aborted: its request shape, nothing sent
+        self._dry_on = bool(dry_submit) and self._spa_on and self._submit_routes is None
         if self._submit_routes is not None and not self._spa_on:
             logging.warning("--submit-spa-forms needs the Playwright engine with SPA routes "
                             "on; no SPA form will be submitted")
@@ -605,6 +624,8 @@ class LocalSpider:
             "routes_skipped_parameterised", "scripts_scanned", "scripts_too_large",
             "scripts_over_page_cap", "transport_urls_skipped", "requests_captured",
             "requests_not_recorded", "deletes_blocked", "forms_submitted",
+            # FR-CRAWL-26 (dry submission): clicks made, writes recorded
+            "forms_dry_submitted", "requests_captured_dry", "requests_captured_blocked",
             "forms_refused", "forms_not_submittable", "forms_not_found_anonymous",
             "submissions_over_cap", "clicks_dispatched", "forms_label_changed",
             # forms phase 4 (FR-CRAWL-15/16; persisted in crawl_stats, PA-0110)
@@ -921,7 +942,7 @@ class LocalSpider:
             yield self._win
             return
         win = {"context": context, "lifted_for": None, "own_nav": frozenset(),
-               "aborted": 0, "navs": [], "restore_aborted": 0,
+               "aborted": 0, "navs": [], "restore_aborted": 0, "page_url": page_url,
                "pages": list(getattr(context, "pages", []) or []), "query": query}
         if query:
             win["own_nav"] = frozenset({_nav_key(page_url)})
@@ -1131,6 +1152,7 @@ class LocalSpider:
             if request.resource_type not in ("document", "xhr", "fetch", "websocket",
                                              "eventsource"):
                 self._subresources.add(urldefrag(request.url)[0])
+            self._dry_request(request)                # FR-CRAWL-26: the window aborts it
             if request.resource_type in ("xhr", "fetch"):
                 self._xhr_urls.append(request.url)
                 win = self._win
@@ -1547,6 +1569,9 @@ class LocalSpider:
             if (self._submit_routes is not None and self._last_html is not None
                     and self._is_spa_page(url) and not seed):
                 self._submit_spa_forms(final or url)
+            elif (self._dry_on and self._last_html is not None
+                    and self._is_spa_page(url) and not seed):
+                self._dry_submit_spa_forms(final or url)
         if self._reveal_on and self._last_html is not None and self._rendered_ok \
                 and not seed:
             # G2 (FR-CRAWL-16): menus, dialogs and drawers, inside the reveal window
@@ -1899,6 +1924,207 @@ class LocalSpider:
                                     f"{self.spa_submit_stopped}")
                     return
 
+    def _dry_submit_spa_forms(self, page_url):
+        """FR-CRAWL-26: each eligible form on this SPA route (`spa.form_refusal`, once
+        per signature, the submission cap) is filled with the fillers and its vetted
+        button clicked **inside the write-blocking window** (W1-W3), never lifted: the
+        write the click makes is recorded as a captured request (`_record_dry`, source
+        ``dry-submit``) and aborted. Nothing reaches the server, so no lab state
+        changes; a password control gets the filler, never a credential. The window's
+        close reloads the route.
+
+        Nothing is sent, but the app's own code still runs: an aborted request is a
+        failed one to it, and an app may clear its session on a failed login (Juice
+        Shop's login view removes its token on any error) or in a submit handler before
+        any request. So the context rules of real submission hold here too: a form with
+        a password input is dry-submitted only in a fresh unauthenticated context. Any
+        other form is dry-submitted in the crawl's own context with its client state
+        (cookies, ``localStorage``, ``sessionStorage``) snapshotted before the click
+        and rolled back after it, inside the window (`_client_snapshot`): the server saw
+        nothing, so the session is whole again. In an authenticated crawl the
+        client-side session check (`_client_session_intact`, no network) follows, and a
+        loss (the rollback failed) stops dry submission and is reported."""
+        if self.spa_submit_stopped:
+            return
+        route = spa.route_of(page_url, self._last_base or self._app_base)
+        try:
+            forms = self._page.evaluate(spa.FORMS_JS, 20)
+        except PlaywrightError as exc:
+            logging.info(f"could not read the forms on {page_url} ({exc})")
+            return
+        for form in forms:
+            sig = spa.form_signature(form)
+            if sig in self._submitted_sigs:
+                continue
+            self._submitted_sigs.add(sig)
+            why = spa.form_refusal(form, route, named=None)
+            if why:
+                self.spa_counts["forms_refused"] += 1
+                logging.info(f"SPA form on {page_url} not dry-submitted: {why}")
+                continue
+            if self.spa_counts["forms_dry_submitted"] >= spa.MAX_SUBMISSIONS:
+                self.spa_counts["submissions_over_cap"] += 1
+                continue
+            if spa.has_password(form):
+                self._dry_submit_anonymously(page_url, sig)
+                continue
+            with self._window(self._page, self._context, page_url) as win:
+                win["dry"] = page_url
+                live = self._refind_form(self._page, sig)
+                snap = self._client_snapshot(self._page, self._context)
+                try:
+                    clicked = live is not None and self._dry_click(self._page, live,
+                                                                   page_url)
+                finally:
+                    self._client_rollback(self._page, self._context, snap)
+                    win.pop("dry", None)
+            if clicked:
+                self.spa_counts["forms_dry_submitted"] += 1
+                if self._authenticated:
+                    intact, why = self._client_session_intact()
+                    if not intact:
+                        self.spa_submit_stopped = (
+                            f"the crawl's session was lost after dry-submitting a "
+                            f"form on {route!r} ({why})")
+                        logging.warning(f"SPA dry submission stopped: "
+                                        f"{self.spa_submit_stopped}")
+                        return
+
+    def _dry_submit_anonymously(self, page_url, sig):
+        """`_dry_submit_spa_forms` for a password form: the route loaded in a fresh
+        unauthenticated context (same browser and guard, as `_submit_anonymously`), the
+        form with this signature dry-clicked there inside the window, its requests
+        watched for the write (`_dry_request`); the context is closed afterwards."""
+        from fuzzlab.tools.navguard import release
+        context = self._browser.new_context(service_workers="block")
+        self._guard(context, scripts=False)
+        try:
+            page = context.new_page()
+            self._track(page)
+            page.on("request", self._dry_request)
+            navguard.navigate(page, page_url, timeout_ms=self.timeout_ms)
+            self._settle(page)
+            forms = page.evaluate(spa.FORMS_JS, 20)
+            if not any(spa.form_signature(f) == sig for f in forms):
+                self.spa_counts["forms_not_found_anonymous"] += 1
+                logging.info(f"SPA form on {page_url} not found in an unauthenticated "
+                             f"context: not dry-submitted")
+                return
+            with self._window(page, context, page_url) as win:
+                win["dry"] = page_url
+                live = self._refind_form(page, sig)
+                clicked = live is not None and self._dry_click(page, live, page_url)
+                win.pop("dry", None)
+            if clicked:
+                self.spa_counts["forms_dry_submitted"] += 1
+        except PlaywrightError as exc:
+            self.spa_counts["forms_not_submittable"] += 1
+            logging.info(f"unauthenticated dry submission on {page_url} failed "
+                         f"({str(exc).splitlines()[0][:80]})")
+        finally:
+            release(context)
+            context.close()
+
+    def _client_snapshot(self, page, context):
+        """The client state a dry click may change (FR-CRAWL-26): the context's cookies
+        and the page origin's ``localStorage`` and ``sessionStorage``; None for a part
+        that cannot be read."""
+        snap = {"cookies": None, "storage": None}
+        with contextlib.suppress(PlaywrightError):
+            snap["cookies"] = context.cookies()
+        with contextlib.suppress(PlaywrightError):
+            snap["storage"] = page.evaluate(_STORAGE_SNAPSHOT_JS)
+        return snap
+
+    def _client_rollback(self, page, context, snap):
+        """Put back what `_client_snapshot` read: every cookie of the context replaced
+        by the snapshot's, the origin's two storages cleared and refilled. A failure is
+        logged; the session check after it decides (fail closed)."""
+        try:
+            if snap["cookies"] is not None:
+                context.clear_cookies()
+                if snap["cookies"]:
+                    context.add_cookies(snap["cookies"])
+            if snap["storage"] is not None:
+                page.evaluate(_STORAGE_ROLLBACK_JS, snap["storage"])
+        except PlaywrightError as exc:
+            logging.info(f"the client state could not be rolled back after a dry "
+                         f"submission ({str(exc).splitlines()[0][:80]})")
+
+    def _dry_request(self, request):
+        """A page's request while a window is open: a write (an ``xhr``/``fetch`` that
+        is not GET, HEAD or OPTIONS) the window aborts is recorded (`_record_dry`) -- a
+        dry submission's (source ``dry-submit``) or a reveal's or G1 interaction's
+        (``reveal-blocked``): its shape is evidence of the app's API, its effect never
+        happens (FR-CRAWL-26). Never in a seed or probe window (FR-CRAWL-17: its URLs
+        carry the probe's markers), nor while a vetted submission lifted the window
+        (that request is sent and recorded as the submission's)."""
+        win = self._win
+        if win is None or win.get("query") or win["lifted_for"] is not None:
+            return
+        method = (request.method or "").upper()
+        if request.resource_type not in ("xhr", "fetch") or \
+                method in ("GET", "HEAD", "OPTIONS"):
+            return
+        if spa.window_request_refusal(method, request.url, False) is None:
+            return                                    # let through: not a blocked write
+        dry = win.get("dry")
+        self._record_dry(dry or win["page_url"], request,
+                         "dry-submit" if dry else "reveal-blocked")
+
+    def _dry_click(self, page, form, page_url):
+        """Fill ``form`` and click its vetted button once, the window's write block on
+        (never lifted). True when the click happened."""
+        self._fill_controls(page, form)
+        button = form.get("button_id")
+        selector = f'[data-fuzzlab-id="{button}"]'
+        try:
+            if not button or not page.is_enabled(selector, timeout=self.timeout_ms):
+                self.spa_counts["forms_not_submittable"] += 1
+                return False
+            how = self._click_vetted(page, selector, [
+                form.get("button") or "", form.get("button_aria") or "",
+                form.get("button_icons") or ""])
+            if how is None:
+                return False
+            self._settle(page)
+            return True
+        except PlaywrightError as exc:
+            self.spa_counts["forms_not_submittable"] += 1
+            logging.info(f"SPA form on {page_url} could not be dry-clicked "
+                         f"({str(exc).splitlines()[0][:80]})")
+            return False
+
+    def _record_dry(self, page_url, request, source):
+        """A write a window aborts (FR-CRAWL-26; `_dry_request`): recorded as a captured
+        request with ``source`` through the one write site (`record_request`: redacted
+        there), counted only when stored -- the effect, never the click (PA-0502). The
+        window aborts the request itself."""
+        if spa.is_transport_url(request.url):
+            return
+        body = request.post_data_buffer
+        if not body:
+            return
+        content_type = (request.headers or {}).get("content-type", "")
+        why = self.storage.record_request(page_url, request.method, request.url,
+                                          content_type, body, source)
+        if why is None:
+            self.spa_counts["requests_captured_dry" if source == "dry-submit"
+                            else "requests_captured_blocked"] += 1
+
+    def _fill_controls(self, page, form):
+        """Fill ``form``'s typed controls with the fillers (a sensitive non-password
+        control left alone)."""
+        for (name, kind), cid in zip(form["controls"], form["ids"]):
+            if not spa.fillable(kind) or (kind != "password"
+                                          and spa.sensitive_control(name)):
+                continue
+            try:
+                page.fill(f'[data-fuzzlab-id="{cid}"]', spa.filler(kind),
+                          timeout=self.timeout_ms)
+            except PlaywrightError:
+                pass                                    # e.g. a range or read-only input
+
     def _fill_and_click(self, page, context, form, page_url, explicit):
         """Fill ``form``'s typed controls with our fillers and click its button once.
         Returns True when the click happened (counted). A DELETE it causes is allowed
@@ -1917,15 +2143,7 @@ class LocalSpider:
                                             g1=True)
 
     def _fill_and_click_now(self, page, context, form, page_url, explicit, *, g1):
-        for (name, kind), cid in zip(form["controls"], form["ids"]):
-            if not spa.fillable(kind) or (kind != "password"
-                                          and spa.sensitive_control(name)):
-                continue
-            try:
-                page.fill(f'[data-fuzzlab-id="{cid}"]', spa.filler(kind),
-                          timeout=self.timeout_ms)
-            except PlaywrightError:
-                pass                                    # e.g. a range or read-only input
+        self._fill_controls(page, form)
         button = form.get("button_id")
         selector = f'[data-fuzzlab-id="{button}"]'
         if g1:
@@ -2612,6 +2830,13 @@ class LocalSpider:
                          f"{c['forms_not_found_anonymous']} not found unauthenticated, "
                          f"{c['clicks_dispatched']} click(s) dispatched past an overlay, "
                          f"{c['submissions_over_cap']} over the cap.")
+        if self._dry_on:
+            lines.append(f"SPA forms dry-submitted (FR-CRAWL-26: clicked inside the "
+                         f"write-blocking window, nothing sent): "
+                         f"{c['forms_dry_submitted']} clicked, "
+                         f"{c['requests_captured_dry']} request(s) recorded, "
+                         f"{c['forms_refused']} refused, "
+                         f"{c['forms_not_submittable']} not submittable.")
         if self.spa_submit_stopped:
             lines.append(f"SPA form submission stopped: {self.spa_submit_stopped}.")
         if c["g1_controls_filled"] or c["g1_forms_unsatisfiable"]:
@@ -2630,7 +2855,8 @@ class LocalSpider:
         if c["reveal_writes_blocked"] or c["reveal_ws_dropped"]:
             lines.append(f"The reveal window blocked {c['reveal_writes_blocked']} "
                          f"request(s) and dropped {c['reveal_ws_dropped']} WebSocket "
-                         f"message(s).")
+                         f"message(s); {c['requests_captured_blocked']} blocked "
+                         f"write(s) recorded (FR-CRAWL-26).")
         if c["revealed_forms"]:
             lines.append("Revealed forms are recorded (spider table revealed_forms: "
                          "route and signature); they are submitted only on a route "
@@ -3080,6 +3306,12 @@ def build_parser():
                         "only those. Off by default: a submission changes lab state. "
                         "Destructive, settings, transaction, credential-change, 2FA and "
                         "file-upload forms are never submitted (FR-CRAWL-13).")
+    p.add_argument("--no-dry-submit", action="store_true",
+                   help="Do not dry-submit SPA forms. On by default in the Playwright "
+                        "engine when --submit-spa-forms is not given: each eligible form "
+                        "is filled and clicked inside the write-blocking window, and the "
+                        "request its click makes is recorded and aborted -- its shape is "
+                        "captured, nothing is sent (FR-CRAWL-26).")
     p.add_argument("--no-reveal", action="store_true",
                    help="Do not open menus, dialogs and drawers to find the links and "
                         "forms behind them. On by default in the Playwright engine: "
@@ -3122,6 +3354,7 @@ def spider_kwargs(args, session_manager=None) -> dict:
         spa_routes=not args.no_spa_routes,
         submit_spa_forms=spa_route_names(args.submit_spa_forms),
         reveal=not args.no_reveal,
+        dry_submit=not args.no_dry_submit,
         spa_query=not args.no_spa_query,
         workers=args.workers,
     )

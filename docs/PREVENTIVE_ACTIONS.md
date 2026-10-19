@@ -2444,3 +2444,29 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
      teardown**, in the real browser, and a race is measured under parallel load before
      it is called fixed. (from BUG-0504)
   - Enforced by: tests/test_navigation_aborts.py::test_a_navigation_started_at_teardown_is_refused_never_sent, tests/test_shared_primitives.py::test_a_guarded_page_is_closed_only_through_close_pages, tests/test_browser_scope.py::test_release_closes_every_page_before_unrouting
+
+- **PA-0505** — Strengthens `PA-0502(3)` and `PA-0041`, after BUG-0505: the disco
+  harvest explored Juice Shop a second time under `/sitemap.xml` (a catch-all answered
+  with the app's shell) and scored a duplicate finding; and it never loaded a route the
+  app's scripts declare, which the spider's scanner finds. PA-0502(3) named element
+  identity only; PA-0041 named sender transport settings only and was not enforced.
+  1. **A discovery mechanism identifies what it has seen by its content, never by the
+     address it was reached at**: the same document under two addresses is one
+     document unless it renders differently there (a history-mode route).
+  2. **Two tools that discover the same surface share each kind of evidence's
+     mechanism** (one owner in `docs/SHARED_PRIMITIVES.md`); a mechanism one has and
+     the other lacks is added to the other in the same change or recorded as a known
+     gap in its requirements. (from BUG-0505)
+  - Enforced by: tests/test_disco_harvest.py::test_the_shell_under_another_path_of_a_hash_routed_app_is_an_alias, tests/test_disco_harvest.py::test_a_history_mode_route_from_the_same_shell_is_explored, tests/test_disco_harvest.py::test_both_crawlers_read_an_apps_routes_through_the_one_scanner, tests/test_disco_e2e.py::test_a_catch_all_document_is_an_alias_never_a_second_app, tests/test_disco_e2e.py::test_a_route_only_the_script_declares_is_loaded_with_its_query
+
+- **PA-0506** — Extends `PA-0503`, after BUG-0506: with SPA form submission off (the
+  safe default), the spider never saw a form's request, so Juice Shop's login SQL
+  injection had no point; the reveal window blocked writes and discarded their shape.
+  1. **A safety gate withholds an action's effect, not its discovery**: where a
+     request's shape can be learnt without sending it (blocked in the browser and
+     recorded), discovery does so by default; a gate that discards what it blocked is a
+     defect.
+  2. **A dry action leaves no trace**: nothing reaches the server, client state the
+     app's own code changed during it is rolled back before the crawl goes on, and a
+     session-bearing context is checked after it (fail closed). (from BUG-0506)
+  - Enforced by: tests/test_spa_capture.py::test_dry_submission_records_each_forms_write_and_sends_nothing, tests/test_spa_capture.py::test_dry_submission_keeps_an_authenticated_crawls_session, tests/test_forms_phase4.py::test_a_write_the_reveal_window_blocks_is_recorded_never_sent

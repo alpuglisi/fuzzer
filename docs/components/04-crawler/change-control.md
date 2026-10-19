@@ -3,6 +3,70 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0045 — The spider dry-submits SPA forms and records every write a window blocks (FR-CRAWL-26, BUG-0506) (2026-10-19)
+- Change (`fuzzlab/tools/spider.py`, `fuzzlab/cli_taxonomy.py`):
+  - `dry_submit=True` / `--no-dry-submit`: `_dry_submit_spa_forms`, `_dry_click`,
+    `_dry_submit_anonymously` (a password form, fresh context), `_client_snapshot` /
+    `_client_rollback` (cookies, `localStorage`, `sessionStorage`, inside the window),
+    the client-side session check after each own-context click in an authenticated
+    crawl (a loss stops and is reported); `_fill_controls` extracted from
+    `_fill_and_click_now`.
+  - `_dry_request` / `_record_dry`: a write a non-query window aborts while no vetted
+    submission has lifted it is recorded through `record_request` (source `dry-submit`
+    or `reveal-blocked`); the window's dict keeps its `page_url`.
+  - Counters `forms_dry_submitted`, `requests_captured_dry`,
+    `requests_captured_blocked` (stored rows, PA-0502), and their summary lines.
+- Reason: the owner asked why the spider missed Juice Shop's login SQL injection and
+  for the gap to be remediated (BUG-0506): with submission off, a form's request was
+  never seen.
+- Impact: a default Playwright crawl now records the request shapes of its SPA forms
+  and of writes reveals make; nothing more reaches the target (each is aborted in the
+  browser). The importer already takes every `discovered_requests` row (SP-37), so the
+  points reach `auto`. More clicks per route; the crawl is slower by one window per
+  eligible form.
+- Risk: medium-low. An app's own code runs during a dry click: a handler that changes
+  client state is rolled back, and an authenticated crawl fails closed on a loss. A
+  form whose handler sends nothing (it navigates) records nothing.
+- Deliverables:
+  - [x] code; `tests/test_spa_capture.py` (the write recorded and never sent, redacted,
+    the gate first; an authenticated crawl keeps its session, the login dry-submitted
+    unauthenticated; `--no-dry-submit`), `tests/test_forms_phase4.py` (the reveal's
+    blocked POST recorded); each proven to fail with the rollback or the fresh-context
+    rule removed — done
+  - [x] BUG-0506, PA-0506, ERROR_LOG, F-073, FR-CRAWL-26, ARCHITECTURE, CHANGELOG — done
+- Effectiveness: pending (the Juice Shop crawl and its scored `auto` run are measuring it).
+
+### CC-CRAWL-0044 — Disco's harvest reads script routes and skips alias documents (FR-CRAWL-27, BUG-0505) (2026-10-19)
+- Change (`fuzzlab/disco/explore.py`, `fuzzlab/disco/cli.py`):
+  - `_script_routes`: each JavaScript body read in `_gather` is scanned with
+    `spa.scan_script` (SP-47); OK routes and admitted route-query seeds are queued in
+    `harvest_routes`, loaded before the linked URLs, in the page's routing mode
+    (`_hash_routed`: a `#/` in the page URL or a link). `script_routes`,
+    `script_route_seeds`, `scripts_too_large` counted and printed.
+  - `_document_first` / `_alias_state`: a harvest load whose HTML body was first loaded
+    under another path is not explored when the page is hash-routed or renders a known
+    state (`harvest_aliases`); the start document is recorded at the seed.
+  - `_log_load`: a harvest load of a hash route writes an `actions.jsonl` line (kind
+    `load`, every action key) the importer reads.
+  - `tests/test_disco_isolation.py`: the SP-47 names allowed by name (D70 amended).
+- Reason: BUG-0505 -- on Juice Shop disco explored the shell served at `/sitemap.xml`
+  as a second app (a duplicate finding) and never loaded `#/track-result`, which only
+  the app's code names. The owner asked for the algorithmic gap to be remediated rather
+  than worked around by a logged-in run.
+- Impact: `fuzzlab/disco` only; the run directory's `actions.jsonl` gains `load` lines.
+  A history-mode route served from the same shell is still explored.
+- Risk: low. An alias is decided on the body hash plus the routing evidence or a known
+  state; a dynamic page (a token in its body) is never an alias.
+- Deliverables:
+  - [x] code; `tests/test_disco_harvest.py` (alias rules incl. the history-mode
+    negative, routing mode, oversized script, the SP-47 guard and its offender),
+    `tests/test_disco_e2e.py` (a script-only route loaded with its query and imported
+    as a `fragment` point; a catch-all `/sitemap.xml` not explored), the fixture's
+    catch-all, route table and `#/` link — done
+  - [x] BUG-0505, PA-0505, SP-47, D70 amendment, ERROR_LOG, F-072, F-073, FR-CRAWL-27,
+    ARCHITECTURE, CHANGELOG — done
+- Effectiveness: pending (the Juice Shop disco run and its scored `auto` run are measuring it).
+
 ### CC-CRAWL-0043 — The crawler's store import names the crawl's start as the main origin (2026-10-19)
 - Change: `fuzzlab/tools/spider.py` (`--store`: `import_spider(..., base_url=args.start)`).
 - Reason: FR-AUD-27 (CC-AUD-0048): rows on another origin than the run's main one keep

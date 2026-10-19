@@ -837,3 +837,20 @@ Juice Shop lab is complete.
 - **Evidence:** that selection's one failure (ERROR_LOG 2026-10-19).
 - **Impact:** none outside the sandbox; caught before commit.
 - **Status:** fixed. Working rule for myself: a new or widened `base_url` parameter means running `tests/test_base_url_subpath_registry.py` before anything else.
+
+### F-072 — I offered a workaround for a discovery gap instead of its root cause
+- **What:** I reported disco's Juice Shop misses (`/profile`, `#/track-result`) and suggested running disco logged in. That does not explain why `#/track-result` was missed: it needs no session, and was missed because disco has no route scanner. I also had not asked why the spider missed the login SQL injection.
+- **Evidence:** the owner's reply (2026-10-19): "I don't want to run disco logged in, I want the gap in the algorithm that let that occur to be remediated". The root causes were found afterwards (BUG-0505, BUG-0506).
+- **Impact:** a turn spent on a proposal the owner rejected. No code was affected.
+- **Status:** corrected by BUG-0505 and BUG-0506.
+
+### F-073 — Three defects in my own fix, found only on review, one after a measurement had started
+- **What:**
+  1. I gave the spider's dry submission the ID `FR-CRAWL-18`, already disco's interception layer.
+  2. My first alias rule (the same HTML body under another path is never explored) would have stopped every history-mode SPA route, since each answers with the same shell.
+  3. My first dry submission clicked a login form in an authenticated crawl's own context. Juice Shop's login clears its token on any error, and an aborted request is an error.
+
+  I started a 45-minute Juice Shop measurement crawl on that third version before finding it.
+- **Evidence:** review of the uncommitted diff (2026-10-19). The crawl was stopped. The fixture's profile form, which clears its cookie in the handler, fails the session test with the rollback removed (`spa_submit_stopped` set).
+- **Impact:** none committed. One measurement crawl was discarded.
+- **Status:** fixed before commit (`FR-CRAWL-26`; the content-and-render alias rule; a password form in a fresh context and a client-state rollback). Each rule has a test proven to fail on the defective version.

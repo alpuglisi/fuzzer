@@ -488,6 +488,19 @@ def test_w2_a_reveal_can_only_read(revealed):
     assert sp.spa_counts["reveal_writes_blocked"] >= 5
 
 
+def test_a_write_the_reveal_window_blocks_is_recorded_never_sent(revealed):
+    """FR-CRAWL-26 (the PA-0506 sweep): the menu's POST is aborted by the window and its
+    shape recorded (source ``reveal-blocked``), so its endpoint is not lost with it; the
+    counter counts what was stored."""
+    lab, sp, db, _logs = revealed
+    assert _paths(lab, "POST") == []
+    rows = db_rows(db, "SELECT method, url, body_json FROM discovered_requests "
+                       "WHERE source = 'reveal-blocked'")
+    assert ("POST", "/api/reveal-post", {"opened": True}) in \
+        [(m, "/" + u.split("/", 3)[-1], json.loads(b)) for m, u, b in rows]
+    assert sp.spa_counts["requests_captured_blocked"] == len(rows)
+
+
 def test_w2_a_menu_items_navigation_is_queued_never_sent_during_the_reveal(revealed):
     """G2b + W2: the profile item navigates by script (Juice Shop's account menu). The
     navigation is aborted inside the window and its target queued: /profile is

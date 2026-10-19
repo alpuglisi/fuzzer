@@ -97,6 +97,38 @@ def test_the_harvest_loads_what_pages_and_known_files_link_and_explores_it(disco
     assert report.harvest_loads >= 3 and report.harvest_states >= 1
 
 
+def test_a_route_only_the_script_declares_is_loaded_with_its_query(discovered, tmp_path):
+    """BUG-0505: the route table and a ``navigate("/track?id=")`` behind a key nobody
+    presses are read from the app's script (the spider's scanners); the seed loads in
+    the page's hash-routing mode, its view's request is made, and the load is logged so
+    the importer gives the route's query as a point."""
+    from fuzzlab.core.store import Store
+    from fuzzlab.tools import store_adapter
+    assert "/api/track" in discovered["app"].paths()
+    report = discovered["report"]
+    assert report.script_routes >= 2 and report.script_route_seeds >= 1
+    actions = [json.loads(ln) for ln in (discovered["out"] / "actions.jsonl").open()]
+    loads = [a["url"] for a in actions if a["kind"] == "load"]
+    assert any("#/track?id=" in u for u in loads), loads
+    with Store(tmp_path / "s.db") as store:
+        run = store.start_run("crawl", "h")
+        store_adapter.import_disco(discovered["out"], store, run)
+        points = {(r[0], r[1], r[2]) for r in store.conn.execute(
+            "SELECT e.url, p.name, p.location FROM parameter p JOIN endpoint e "
+            "ON p.endpoint_id = e.id WHERE p.run_id = ?", (run,))}
+    assert ("/#/track", "id", "fragment") in points, points
+
+
+def test_a_catch_all_document_is_an_alias_never_a_second_app(discovered):
+    """BUG-0505: ``/sitemap.xml`` (a known file) answers with the app's shell; the
+    hash-routed app it renders is the start path's, so nothing is explored under it --
+    before, every state was explored again there and its findings came out twice."""
+    assert "/sitemap.xml" in discovered["app"].paths()
+    assert discovered["report"].harvest_aliases >= 1
+    actions = [json.loads(ln) for ln in (discovered["out"] / "actions.jsonl").open()]
+    assert not [a for a in actions if "/sitemap.xml" in (a.get("route") or "")]
+
+
 def test_destructive_controls_and_other_origins_are_never_reached(discovered):
     paths = discovered["app"].paths()
     assert "/api/account/remove" not in paths and "/logout" not in paths

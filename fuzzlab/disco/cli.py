@@ -173,6 +173,14 @@ def _capture(ns) -> int:
     if report.harvest_found:
         print(f"  harvest: {report.harvest_found} linked URL(s) never requested found, "
               f"{report.harvest_loads} loaded, {report.harvest_states} state(s) from them")
+    if report.script_routes or report.script_route_seeds:
+        print(f"  routes from the app's scripts: {report.script_routes} route(s), "
+              f"{report.script_route_seeds} route-query seed(s), queued for the harvest")
+    if report.scripts_too_large:
+        print(f"  scripts too large to scan for routes: {report.scripts_too_large}")
+    if report.harvest_aliases:
+        print(f"  harvest loads answered with a document already known under another "
+              f"path (not explored again): {report.harvest_aliases}")
     if report.captcha_submissions:
         print(f"  CAPTCHA forms sent with a filler answer (D71): "
               f"{report.captcha_submissions}")

@@ -471,7 +471,12 @@ chose within it, each open for the owner:
   auto` (the pipeline the held-out metric is measured with) reads its spider DB, and
   `navguard` / `spa` / `formnav` are shared with the auditor, the session manager and
   M6. `disco` imports none of the spider's modules (guarded). Removal follows once
-  `auto` reads a disco inventory.
+  `auto` reads a disco inventory. *Amended 2026-10-19 (agent, open for the owner;
+  BUG-0505, PA-0505(2)):* one named exception -- the script-route scanner
+  (`spa.scan_script` and the route URL rules it needs, SP-47) is shared by both
+  crawlers, imported by name only (`tests/test_disco_isolation.py::SHARED_SPA`). It
+  already serves the session manager, so it outlives the spider; the spider's form,
+  reveal and window policy stays its own.
 - **mitmproxy, through navguard.** The browser keeps both navguard confinement layers.
   The proxy is a third layer. Measured: the guarded driver's fetches honour the launch
   proxy.

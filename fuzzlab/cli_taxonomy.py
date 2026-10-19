@@ -201,7 +201,8 @@ FLAG_CLASSES: dict[str, dict[str, str]] = {
     },
     "crawl": _all("B", ["start", "max_depth", "db", "engine", "timeout", "resume", "store",
                         "identity", "follow_selector_forms", "no_spa_routes",
-                        "submit_spa_forms", "no_reveal", "dry_run", "auth_origin",
+                        "submit_spa_forms", "no_reveal", "no_dry_submit", "dry_run",
+                        "auth_origin",
                         "no_spa_query", "workers"]),
     "disco": {
         **_all("B", [f"capture:{d}" for d in (

@@ -451,6 +451,8 @@ def test_route_names_are_parsed_from_the_cli():
     assert spa_route_names(args.submit_spa_forms) == ["login", "search", "contact"]
     assert spa_route_names(["login search"]) == ["login", "search"]             # web form
     assert p.parse_args(["--no-spa-routes"]).no_spa_routes is True
+    assert p.parse_args([]).no_dry_submit is False                       # FR-CRAWL-26
+    assert p.parse_args(["--no-dry-submit"]).no_dry_submit is True
 
 
 # =====================================================================================
@@ -700,3 +702,69 @@ def test_submissions_are_capped_and_the_cap_is_reported(lab, tmp_path, monkeypat
     assert sp.spa_counts["forms_submitted"] == 2
     assert sp.spa_counts["submissions_over_cap"] >= 1
     assert any("over the cap" in ln for ln in sp.spa_summary())
+
+
+# =====================================================================================
+# Dry submission (FR-CRAWL-26): clicked inside the write-blocking window, nothing sent
+# =====================================================================================
+def _dry(db):
+    return {k: body for k, (body, src) in _requests(db).items() if src == "dry-submit"}
+
+
+def test_dry_submission_records_each_forms_write_and_sends_nothing(lab, tmp_path):
+    """Measured on Juice Shop (2026-10-19): with submission off, the login form's JSON
+    request was never made, so its ``email`` point never existed and its SQL injection
+    was never probed. Each eligible form is now filled and clicked inside the window:
+    the write is recorded and aborted -- the server never sees it."""
+    spa_lab, other = lab
+    sp, db = _crawl(spa_lab, tmp_path)
+    for method, path in (("POST", "/rest/user/login"), ("POST", "/api/Feedbacks"),
+                         ("POST", "/api/questions"), ("PATCH", "/api/profile")):
+        assert spa_lab.seen(method, path) == [], path
+    dry = _dry(db)
+    assert dry[("POST", "rest/user/login")] == {"email": "fuzzlab", "password": ""}
+    assert dry[("POST", "api/Feedbacks")] == {"comment": "fuzzlab", "rating": 1,
+                                              "captchaId": "", "UserId": 7}
+    assert ("PATCH", "api/profile") in dry
+    # the counter counts what was stored, never the click (PA-0502)
+    assert sp.spa_counts["requests_captured_dry"] == len(dry_rows(db))
+    assert sp.spa_counts["forms_dry_submitted"] >= 4
+    assert sp.spa_counts["forms_submitted"] == 0
+    # the gate runs first: transaction, upload, 2FA and registration forms are refused
+    assert sp.spa_counts["forms_refused"] == 4 and ("POST", "checkout") not in dry
+    assert spa_lab.seen("DELETE") == [] and other.requests == []
+    assert spa.PASSWORD_FILLER not in db_text(db)
+    assert any("dry-submitted" in ln for ln in sp.spa_summary())
+
+
+def dry_rows(db):
+    return db_rows(db, "SELECT url FROM discovered_requests WHERE source = 'dry-submit'")
+
+
+def test_dry_submission_keeps_an_authenticated_crawls_session(lab, tmp_path):
+    """The profile form's handler clears the session cookie before its request (an
+    app's own code runs even when nothing is sent): the client state is rolled back
+    inside the window, so the crawl keeps its session; the login form, whose failure
+    clears the token, is dry-submitted only in a fresh unauthenticated context."""
+    spa_lab, _other = lab
+    sp, db = _crawl(spa_lab, tmp_path, session_manager=_Manager(), identity="alice")
+    assert sp.spa_submit_stopped is None
+    dry = _dry(db)
+    assert ("PATCH", "api/profile") in dry and ("POST", "rest/user/login") in dry
+    assert spa_lab.seen("PATCH", "/api/profile") == []
+    assert spa_lab.seen("POST", "/rest/user/login") == []
+    # the login route was loaded without the session: the fresh context's view
+    assert any(r[1] == "/rest/marker/login" and TOKEN not in r[2] and r[3] == ""
+               for r in spa_lab.requests)
+    authed = [r for r in spa_lab.requests if r[3] == BEARER]
+    assert authed and f"token={TOKEN}" in authed[-1][2]       # still there at the end
+    text = db_text(db)
+    for secret in (TOKEN, "SECRETHEADER", BEARER, spa.PASSWORD_FILLER):
+        assert secret not in text, secret
+
+
+def test_no_dry_submit_records_no_dry_write(lab, tmp_path):
+    spa_lab, _other = lab
+    sp, db = _crawl(spa_lab, tmp_path, dry_submit=False)
+    assert _dry(db) == {} and sp.spa_counts["forms_dry_submitted"] == 0
+    assert not any("dry-submitted" in ln for ln in sp.spa_summary())

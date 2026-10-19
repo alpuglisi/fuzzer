@@ -33,7 +33,15 @@ particular lab, built to exercise what static crawling cannot see:
   fetched;
 * resources only a harvest reaches (CC-CRAWL-0038): an image named only by a stylesheet
   rule nothing matches, and a page named only by ``robots.txt``, whose button's request
-  happens only if that page is explored.
+  happens only if that page is explored;
+* a route only the script declares (a route table entry and a ``navigate("/track?id=")``
+  bound to a key the explorer never presses): ``#/track?id=<v>`` fetches
+  ``GET /api/track?id=<v>``, so it is reached only from the script (BUG-0505, measured
+  on Juice Shop's ``#/track-result``);
+* a catch-all: any other non-API ``GET`` answers with the shell (as an SPA server's
+  fallback route does; measured on Juice Shop's ``/sitemap.xml``), so a harvest load of
+  ``/sitemap.xml`` is the same app under another path -- an alias, never a second app
+  to explore (BUG-0505).
 """
 
 from __future__ import annotations
@@ -104,6 +112,8 @@ function home() {
   bar.appendChild(theme);
   const help = document.createElement('a'); help.href = '/help'; help.textContent = 'Help';
   bar.appendChild(help);
+  const top = document.createElement('a'); top.href = '#/'; top.textContent = 'Home';
+  bar.appendChild(top);
   const danger = document.createElement('button');
   danger.textContent = 'Delete account';
   danger.addEventListener('click', () => api('/api/account/remove', 'POST', {}));
@@ -171,9 +181,19 @@ function dialog(pid) {
   f.addEventListener('input', (ev) => ev.target.classList.add('is-touched', 'field--dirty'));
   root.appendChild(f);
 }
-function route() {                         // a hash router: '#/' and '#/projects'
+function track() {                         // reads its id from the route's query
+  const id = new URLSearchParams(location.hash.split('?')[1] || '').get('id');
+  if (id) api('/api/track?id=' + encodeURIComponent(id));
+}
+const ROUTES = [{path: 'projects'}, {path: 'track'}];
+function navigate(url) { location.hash = '#' + url; }
+window.addEventListener('keydown', (ev) => {   // a shortcut the explorer never presses
+  if (ev.key === 'F9') navigate("/track?id=" + ev.code);
+});
+function route() {                         // a hash router: '#/', '#/projects', '#/track'
   home();
   if (location.hash === '#/projects') projects();
+  if (location.hash.startsWith('#/track')) track();
 }
 window.addEventListener('hashchange', route);
 welcome(); notice(); route();
@@ -234,6 +254,8 @@ class DiscoApp:
                     return self._send(200, [])
                 if method == "GET" and path == "/api/settings":
                     return self._send(200, {"theme": "light", "page_size": 20})
+                if method == "GET" and path == "/api/track":
+                    return self._send(200, {"status": "unknown"})
                 parts = path.strip("/").split("/")
                 if parts[:2] == ["api", "projects"] and len(parts) == 4 and parts[3] == "tasks":
                     if method == "GET":
@@ -256,6 +278,8 @@ class DiscoApp:
                     return self._send(202, {"queued": True})
                 if path == "/api/account/remove":
                     return self._send(200, {"removed": True})
+                if method == "GET" and not path.startswith("/api/"):
+                    return self._send(200, SHELL, "text/html; charset=utf-8")  # catch-all
                 return self._send(404, {"error": "not found"})
 
             def do_GET(self):

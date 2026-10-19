@@ -3,7 +3,10 @@
 1. **Isolation from the legacy spider.** No disco module imports
    ``fuzzlab.tools.spider``, ``spa`` or ``formnav``: the new architecture never leans
    on the deprecated crawler (it shares only the browser primitives every component
-   uses, `navguard`).
+   uses, `navguard`). One exception, by name (D70 amended 2026-10-19, PA-0505(2)):
+   the script-route scanner both crawlers share (SP-47, `SHARED_SPA`), imported as
+   ``from fuzzlab.tools.spa import <names>`` -- never the module, never another name
+   (the spider's form, reveal and window policy stays its own).
 2. **One send path.** The package issues HTTP in exactly one place,
    `fuzzlab.disco.runner.Runner.send`, where the scope and destructive gates sit
    (PA-0083(1)). Any other ``.request(`` / ``requests.<verb>(`` / ``urlopen(`` call in
@@ -24,6 +27,10 @@ pytestmark = pytest.mark.package_guard
 ROOT = Path(__file__).resolve().parents[1]
 DISCO = ROOT / "fuzzlab" / "disco"
 LEGACY = ("fuzzlab.tools.spider", "fuzzlab.tools.spa", "fuzzlab.tools.formnav")
+#: SP-47: the script-route scanner and the URL rules its routes need, shared by both
+#: crawlers (`docs/SHARED_PRIMITIVES.md`); nothing else of `tools.spa`.
+SHARED_SPA = frozenset({"scan_script", "classify_route", "ROUTE_OK", "route_url",
+                        "spa_fragment", "seed_url", "query_url_refusal"})
 _SEND_CALLS = {"request", "urlopen", "get", "post", "put", "patch", "delete", "head",
                "options", "send"}
 #: The one place disco sends HTTP: (file, class.function).
@@ -37,7 +44,10 @@ def legacy_imports(source: str) -> list[str]:
             found += [a.name for a in node.names if a.name.startswith(LEGACY)]
         elif isinstance(node, ast.ImportFrom):
             mod = node.module or ""
-            if mod.startswith(LEGACY):
+            if mod == "fuzzlab.tools.spa":
+                found += [f"{mod}.{a.name}" for a in node.names
+                          if a.name not in SHARED_SPA]
+            elif mod.startswith(LEGACY):
                 found.append(mod)
             elif mod == "fuzzlab.tools":
                 found += [f"{mod}.{a.name}" for a in node.names
@@ -74,6 +84,11 @@ def test_the_isolation_guard_catches_synthetic_offenders():
                 "from fuzzlab.tools import spa\n", "import fuzzlab.tools.formnav as f\n"):
         assert legacy_imports(src), src
     assert legacy_imports("from fuzzlab.tools import navguard\n") == []
+    # the SP-47 allowlist: its names only, and only by name
+    assert legacy_imports("from fuzzlab.tools.spa import scan_script, route_url\n") == []
+    assert legacy_imports("from fuzzlab.tools.spa import scan_script, form_refusal\n") \
+        == ["fuzzlab.tools.spa.form_refusal"]
+    assert legacy_imports("import fuzzlab.tools.spa\n")
 
 
 def test_disco_sends_http_only_through_the_runner_s_gated_send():

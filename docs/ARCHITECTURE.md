@@ -1421,8 +1421,13 @@ tracked in the requirements files, not here.
     across list elements); a field whose removal leaves the page unchanged (baseline
     noise masked, non-deterministic pages skipped) is reported unused at load, with no
     value.
+  - The harvest (FR-CRAWL-23/27): linked URLs, plus the routes and route-query
+    seeds the app's scripts declare (read with the spider's scanner, SP-47; loaded
+    first); an HTML document already loaded under another path is an alias, not a new
+    state, unless it renders its own view (a history-mode route; BUG-0505).
   - Imports nothing from `tools/spider.py`, `tools/spa.py`, `tools/formnav.py`
-    (`tests/test_disco_isolation.py`).
+    except the SP-47 scanner names, by name (D70 amended;
+    `tests/test_disco_isolation.py`).
 - **The legacy spider (`tools/spider.py`) is deprecated (FR-CRAWL-21).** It runs
   unchanged. `fuzzlab auto` reads a disco run as crawl points since CC-FUZZ-0090
   (`--disco-run`, `store_adapter.import_disco`, FR-AUD-23) as well as a spider DB; its
@@ -1433,7 +1438,10 @@ tracked in the requirements files, not here.
   navigation, URL normalization, crawl budget. Built for single-page apps (forms
   phase 3, `tools/spa.py`): SPA route discovery from loaded scripts (hash and history
   mode), canonical page keys, request-body capture (`discovered_requests`) and opt-in
-  SPA form submission (FR-CRAWL-12/13). An authenticated Playwright crawl adopts the
+  SPA form submission (FR-CRAWL-12/13); by default each eligible SPA form is
+  dry-submitted -- clicked inside the write-blocking window, its write recorded and
+  aborted, the client state rolled back -- and every write a reveal window aborts is
+  recorded too (FR-CRAWL-26, BUG-0506). An authenticated Playwright crawl adopts the
   session before its context opens: a browser login's `storage_state` (in-scope
   origins only), and session headers added by the guarded route only, never
   `set_extra_http_headers` (FR-CRAWL-14, CC-CRAWL-0022; the auditor and the M6
