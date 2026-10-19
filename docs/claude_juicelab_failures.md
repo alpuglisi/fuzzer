@@ -885,3 +885,9 @@ Juice Shop lab is complete.
 - **Impact:** one harness cycle; nothing merged or pushed in that state.
 - **Status:** fixed in fc83761 (the contract updated deliberately, the tests exact).
 
+### F-079 — My diagrams slice shipped seven defects that the skipped review then found
+- **What:** the review gate I skipped (F-076), once run, found BUG-0512..0518 in my own code: a disco workflow correlation built on an assumed id prefix; replays by other senders untraced while I wrote "every send"; a weaker URL redactor than the project's own record boundary, so tokens reached exports; views drawing failed, blocked and refused requests as traffic; an order-dependent reducer while I wrote "order-independent"; one body key with two meanings; and UI requirements stated for every element but tested on one. ede72b9 was pushed with them.
+- **Evidence:** the two reviewers' reports (2026-10-19); each fix's test fails on the old code.
+- **Impact:** the pushed diagrams overstated their evidence and could expose tokens in exports until the fix.
+- **Status:** fixed (CC-CORE-0064, CC-FUZZ-0101, CC-AUD-0052, CC-CRAWL-0048, CC-UI-0062, CC-PROXY-0027; PA-0512..0518).
+

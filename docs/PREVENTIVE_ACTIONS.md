@@ -2523,3 +2523,61 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
   2. **The new oracle is proven on the defect it guards** (`PA-0034(2)`): here, with the
      document left alive. (from BUG-0511)
   - Enforced by: tests/test_no_arrival_order_oracle.py::test_no_test_judges_a_concurrent_actor_by_arrival_after_a_mark, tests/test_no_arrival_order_oracle.py::test_the_guard_catches_bug_0511_and_each_synthetic_offender, tests/test_navigation_aborts.py::test_the_send_time_oracle_sees_a_document_left_alive
+
+- **PA-0512** — Strengthens `PA-0510(1)`, after BUG-0512: the disco importer composed an
+  action's workflow id from its number and an assumed prefix, while disco names actions
+  `act-`, `nav-` or `harvest-`. PA-0510's sweep listed the importer by event, not by
+  each field it derives.
+  1. **A correlation id or key is copied from what the producer wrote, never composed by
+     the consumer.** When the producer does not write it, it is made to.
+  2. **The test covers every id form the producer makes**, and that each correlated
+     item shares its scope with what it correlates. (from BUG-0512)
+  - Enforced by: tests/test_diagram_e2e.py::test_a_capture_gives_origins_auth_contexts_workflows_and_external_refs
+
+- **PA-0513** — Strengthens `PA-0510(2)`, after BUG-0513: "every send" was instrumented
+  at the run's own sender only; the cross-account check's peer and unauthenticated
+  senders were never traced.
+  1. **An "every X" instrumentation claim is verified against an independent count on a
+     run that exercises every configuration creating an X.** (from BUG-0513)
+  - Enforced by: tests/test_cross_account.py::test_run_auto_traces_the_peer_and_unauthenticated_replays
+
+- **PA-0514** — Strengthens `PA-0507(2)` and `PA-0100`, after BUG-0514: the trace's URL
+  redactor was chosen by analogy (the crawler's, query values only) while the project's
+  record boundary already stripped userinfo, matrix parameters and token fragments.
+  1. **A new sink of target-derived text uses the strongest existing redactor for each
+     kind of value it stores** (searched for, not chosen by analogy).
+  2. **It is tested against the full list of token shapes**: userinfo, a matrix
+     parameter, a query-shaped fragment, a path token, a relative URL. (from BUG-0514)
+  - Enforced by: tests/test_trace_model.py::test_safe_ref_withholds_every_token_shape, tests/test_trace_model.py::test_scrub_event_passes_relative_urls_under_url_keys
+
+- **PA-0515** — After BUG-0515: the diagrams drew a failed load as a reply, blocked
+  requests and spider loads as browser traffic, refused hosts as solid flows, groupings
+  as observed, and counted other sends as executed.
+  1. **Every drawn element and count names the event field that supports it.**
+  2. **Each view has a negative fixture for each kind of non-traffic it can receive**
+     (failed, blocked, refused, grouped, not a test's own send). (from BUG-0515)
+  - Enforced by: tests/test_diagram_e2e.py::test_a_failed_spider_load_is_drawn_lost_never_as_a_reply, tests/test_diagram_e2e.py::test_the_data_flow_shows_the_application_and_keeps_testing_separate, tests/test_trace_model.py::test_executed_counts_a_tests_own_sends_on_its_interface
+
+- **PA-0516** — After BUG-0516: the reducer's kind and capped attributes depended on event
+  order, and the recorder's counters were written only at close.
+  1. **An order- or batching-independence claim is tested on permutations and batch
+     sizes that cross every boundary the code has** (a cap, a conflict, a flush), and
+     against a rebuild.
+  2. **A health counter the spec asks to expose is written while the run is live.**
+     (from BUG-0516)
+  - Enforced by: tests/test_trace_model.py::test_kind_and_capped_attributes_do_not_depend_on_order, tests/test_trace_model.py::test_the_counters_are_written_while_the_run_is_live
+
+- **PA-0517** — After BUG-0517: the trace's `location` key held both where a value was
+  injected and a response's redirect target.
+  1. **An event body key has one meaning across every producer**; a new field is checked
+     against the existing keys before it is named. (from BUG-0517)
+  - Enforced by: tests/test_diagram_e2e.py::test_a_redirect_is_shown_with_its_target
+
+- **PA-0518** — After BUG-0518: the diagrams page's origin list was built once from a
+  filtered model, the application box had no evidence link, and a malformed scope gave
+  a 500.
+  1. **A UI requirement stated for every element or for "a change" is tested on each
+     kind of element and on a change after the first load.**
+  2. **A route's parameter that the view parses is validated in the view and refused
+     with 400.** (from BUG-0518)
+  - Enforced by: tests/test_web_diagrams.py::test_the_page_renders_labels_as_text_navigates_evidence_and_updates_live, tests/test_web_diagrams.py::test_exports_download_and_bad_requests_are_refused

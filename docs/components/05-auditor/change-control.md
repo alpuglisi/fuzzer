@@ -3,6 +3,25 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0052 — Disco actions in their own workflow, stable keys; spider failures and loads honest (BUG-0512, BUG-0515, BUG-0517) (2026-10-19)
+- Change (`fuzzlab/tools/observe.py`):
+  - an explorer action's scope is the id disco logs (`action_id`); an older log falls
+    back to the id a capture record with the same number carries; its key is
+    `<tag>:action:line<n>`;
+  - a spider page's status 0 is None, with outcome "no response recorded (status 0)";
+    its events carry `by: crawler`;
+  - a capture record's redirect target is `redirect`.
+- Reason: review findings A-B1/B-B3, B-N2, B-B2 and B-S7 (F-076).
+- Impact: correct workflows. Re-importing a grown capture no longer duplicates actions.
+- Risk: low.
+- Review: this entry follows the two-reviewer gate run after the fact over the diagrams series (F-076); both reviewers disagreed, and every confirmed finding in this component is fixed here or answered below.
+- Deliverables:
+  - [x] code; `tests/test_diagram_e2e.py`: the capture test (nav-/harvest- workflows,
+    the old-log fallback, a re-import writes nothing) and
+    `::test_a_failed_spider_load_is_drawn_lost_never_as_a_reply` — done
+  - [x] FR-AUD-28 edited in place; BUG-0512; PA-0512 — done
+- Effectiveness: verified offline.
+
 ### CC-AUD-0051 — Spider events carry the page's time and initiator when the DB has them (FR-AUD-28) (2026-10-19)
 - Change (`fuzzlab/tools/observe.py`): `observe_spider` sets an event's `t` from the
   row's `seen_at` (`_seen`; None when the column is absent or NULL) and a page event's

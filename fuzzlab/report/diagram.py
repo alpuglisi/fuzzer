@@ -40,6 +40,11 @@ from fuzzlab.core import trace
 
 SCHEMA = "fuzzlab.diagram/1"
 COVERAGE = ("discovered", "captured", "scheduled", "executed", "evaluated", "finding")
+#: The units: *discovered* and *captured* count observations (captured: browser traffic
+#: that was answered); *scheduled* counts tests; *executed* counts a test's own sends,
+#: answered or not (a follow-up, a restore and a retry are part of a send, not one);
+#: *evaluated* counts strategy runs that reached a verdict; *finding* counts findings.
+_NOT_A_TEST_SEND = frozenset({"follow-up", "restore", "retry"})
 #: Exchanges of one role in a row above this many are collapsed in a sequence.
 COLLAPSE_AFTER = 3
 #: Steps a sequence returns at most (the rest is reported as truncated).
@@ -119,7 +124,8 @@ def dataflow(conn, run_id: int, *, overlay: bool = False, origin: str | None = N
             continue
         flows.append({"id": r["fid"], "src": r["src"], "dst": r["dst"], "view": r["view"],
                       "protocol": r["protocol"], "direction": "request/response"
-                      if r["protocol"] == "http" else "bidirectional messages",
+                      if r["protocol"] == "http" else "never sent"
+                      if r["protocol"] == "blocked" else "bidirectional messages",
                       "knowledge": r["knowledge"], "first_seen": r["first_seen"],
                       "last_seen": r["last_seen"], "attrs": _attrs(r),
                       "observations": counts.get(r["fid"], 0)})
@@ -146,16 +152,19 @@ def dataflow(conn, run_id: int, *, overlay: bool = False, origin: str | None = N
     boundaries = [{
         "id": "boundary:client-server",
         "label": "client / server (network)",
-        "inside": [trace.BROWSER, trace.EXPLORER],
+        "inside": [trace.BROWSER, trace.EXPLORER, trace.SPIDER],
         "basis": "observed: every application flow crosses a network connection from "
                  "the browser; how origins group into trust zones is unknown (a shared "
                  "or different host name is not evidence of either)"}, {
         "id": "boundary:testing",
         "label": "testing infrastructure (not part of the application)",
-        "inside": [trace.TOOL, trace.EXPLORER],
+        "inside": [trace.TOOL, trace.EXPLORER, trace.SPIDER],
         "basis": "explicit configuration: fuzzlab's own processes"}]
+    # every origin of the run, whatever the filters: the page's origin list
+    origins = sorted(n["label"] for n in entities.values() if n["kind"] == "origin")
     return {"schema": SCHEMA, "run_id": run_id, "overlay": overlay, "nodes": nodes,
-            "flows": flows, "boundaries": boundaries, "status": status(conn, run_id)}
+            "flows": flows, "boundaries": boundaries, "origins": origins,
+            "status": status(conn, run_id)}
 
 
 def interface_coverage(conn, run_id: int) -> dict[str, dict]:
@@ -170,10 +179,11 @@ def interface_coverage(conn, run_id: int) -> dict[str, dict]:
         "SELECT kind, json_extract(body,'$.origin') o, json_extract(body,'$.method') m, "
         "json_extract(body,'$.url') u, json_extract(body,'$.test') test, "
         "json_extract(body,'$.src') src, json_extract(body,'$.status') status, "
-        "json_extract(body,'$.outcome') outcome, COUNT(*) n FROM trace_event "
+        "json_extract(body,'$.outcome') outcome, json_extract(body,'$.role') role, "
+        "COUNT(*) n FROM trace_event "
         "WHERE run_id=? AND kind IN ('observe.exchange','observe.page','test.start',"
         "'exchange','test.strategy','finding') GROUP BY kind, o, m, u, test, src, "
-        "status IS NULL, outcome", (run_id,)).fetchall()
+        "status IS NULL, outcome, role", (run_id,)).fetchall()
     tests: dict[str, str] = {}
     for r in rows:
         if r["kind"] == "test.start" and r["o"]:
@@ -188,8 +198,10 @@ def interface_coverage(conn, run_id: int) -> dict[str, dict]:
                 bump(eid, "captured", n)
         elif kind == "test.start" and r["test"] in tests:
             bump(tests[r["test"]], "scheduled", n)
-        elif kind == "exchange" and r["o"] and r["outcome"] == "response":
-            bump(trace.interface_id(r["o"], r["m"], r["u"] or ""), "executed", n)
+        elif kind == "exchange" and r["test"] in tests and \
+                r["role"] not in _NOT_A_TEST_SEND and r["outcome"] != "not_sent":
+            # a test's own sends, answered or not, on the test's interface (BUG-0515)
+            bump(tests[r["test"]], "executed", n)
         elif kind == "test.strategy" and r["test"] in tests and \
                 r["outcome"] in ("confirmed", "not_confirmed", "inconclusive"):
             bump(tests[r["test"]], "evaluated", n)
@@ -284,6 +296,8 @@ def sequence(conn, run_id: int, scope: str) -> dict:
     if kind == "test":
         return _test_sequence(conn, run_id, ident, scope)
     if kind == "finding":
+        if not ident.isdigit():
+            return {"scope": scope, "error": "bad scope: a finding is a number"}
         return _finding_sequence(conn, run_id, int(ident), scope)
     if kind == "workflow":
         return _capture_sequence(conn, run_id, _rows(conn, run_id, "scope=?", [scope]),
@@ -337,6 +351,15 @@ def _origin_party(seq: _Seq, origin) -> str:
     return seq.party(f"origin:{origin}", origin or "(unknown origin)", "target")
 
 
+def _redirect(b: dict) -> str | None:
+    """A response's redirect target: ``redirect`` (BUG-0517), or, in an event written
+    before it, a ``location`` holding a path (an injection location is one word)."""
+    if b.get("redirect"):
+        return b["redirect"]
+    loc = b.get("location")
+    return loc if isinstance(loc, str) and "/" in loc else None
+
+
 def _exchange_pair(seq: _Seq, row: dict, src: str) -> None:
     """One tool exchange: the request, then what came back -- or a lost arrow."""
     b = row["body"]
@@ -352,7 +375,7 @@ def _exchange_pair(seq: _Seq, row: dict, src: str) -> None:
              evidence=[row["key"]])
     outcome = b.get("outcome")
     if outcome == "response":
-        extra = f" → {_short(b.get('location'))}" if b.get("location") else ""
+        extra = f" → {_short(_redirect(b))}" if _redirect(b) else ""
         seq.step(type="message", src=dst, dst=src, kind="response",
                  label=f"{b.get('status')} ({b.get('elapsed_ms')} ms){extra}",
                  evidence=[row["key"]])
@@ -483,7 +506,7 @@ def _capture_sequence(conn, run_id, rows, scope, *, correlated: bool) -> dict:
             seq.step(type="message", src=proxy, dst=dst, kind="forward",
                      label="forwarded", evidence=[row["key"]])
             if b.get("status") is not None:
-                extra = f" → {_short(b.get('location'))}" if b.get("location") else ""
+                extra = f" → {_short(_redirect(b))}" if _redirect(b) else ""
                 seq.step(type="message", src=dst, dst=proxy, kind="response",
                          label=f"{b.get('status')}{extra}", evidence=[row["key"]])
                 seq.step(type="message", src=proxy, dst=browser, kind="response",
@@ -515,9 +538,14 @@ def _spider_sequence(rows, scope) -> dict:
             continue
         seq.step(type="message", src=spider, dst=dst, kind="request", label=label,
                  evidence=[row["key"]])
-        if b.get("status") is not None:
+        status = b.get("status") or None            # 0 in an older event: no reply
+        if status is not None:
             seq.step(type="message", src=dst, dst=spider, kind="response",
-                     label=str(b.get("status")), evidence=[row["key"]])
+                     label=str(status), evidence=[row["key"]])
+        elif b.get("by") == "crawler" or "discovered_pages" in str(b.get("ref")):
+            seq.step(type="lost", src=dst, dst=spider, kind="no-response",
+                     label=b.get("outcome") or "no response recorded",
+                     evidence=[row["key"]])
     return seq.out()
 
 
@@ -561,7 +589,7 @@ def _proxy_sequence(rows, scope) -> dict:
                      evidence=ev)
             continue
         shown = str(b["status"]) if b.get("status") is not None else "no status line"
-        extra = f" → {_short(b.get('location'))}" if b.get("location") else ""
+        extra = f" → {_short(_redirect(b))}" if _redirect(b) else ""
         resp_edited = "response edited" in intercept
         # the proxy records the response it sent on: after an edit, not the origin's
         seq.step(type="message", src=dst, dst=proxy, kind="response",
@@ -625,9 +653,17 @@ def mermaid_flow(model: dict) -> str:
     for top in children.get(None, []):
         emit(top, 1)
     for f in model["flows"]:
-        arrow = "-.->" if f["knowledge"] != "observed" or f["view"] == "test" else "-->"
-        label = mermaid_text(f"{f['protocol']} ×{f['observations']}"
-                             f"{' (test)' if f['view'] == 'test' else ''}")
+        # a request refused or blocked before sending is never drawn as traffic
+        refused = bool(f["attrs"].get("refused"))
+        arrow = "-.->" if refused or f["knowledge"] != "observed" or f["view"] == "test" \
+            else "-->"
+        if refused:
+            text = (f"{'blocked' if f['protocol'] == 'blocked' else 'refused'}, never "
+                    f"sent ×{f['observations']}")
+        else:
+            text = (f"{f['protocol']} ×{f['observations']}"
+                    f"{' (test)' if f['view'] == 'test' else ''}")
+        label = mermaid_text(text)
         lines.append(f"  {nid(f['src'])} {arrow}|\"{label}\"| {nid(f['dst'])}")
     return "\n".join(lines) + "\n"
 

@@ -1160,11 +1160,14 @@ tracked in the requirements files, not here.
 - **Trace (the diagrams' evidence model)** `[built]` (`core/trace.py`, SP-48/49,
   FR-CORE-505): append-only, versioned, per-run-keyed `trace_event` rows recorded at the
   real execution points -- discovery import (`tools/observe.py`, FR-AUD-28), every probe
-  send (`harness/tracing.py`), each test, strategy outcome and finding (FR-FUZZ-60) --
-  and the diagram model derived from them (`dg_entity`, `dg_flow`, `dg_evidence`) by an
-  idempotent, order-independent reducer, rebuildable by replay. One writer per producer
-  thread: a bounded buffer, batched transactions, a scrub at the write (PA-0100),
-  dropped events, queue pressure and lag counted in `run_metrics`. Observed / inferred
+  send of every sender a run hands a strategy (`harness/tracing.py`), each try, each
+  test, strategy outcome and finding (FR-FUZZ-60/61), the intercepting proxy's flows
+  (FR-PROXY-13) -- and the diagram model derived from them (`dg_entity`, `dg_flow`,
+  `dg_evidence`) by an idempotent reducer, independent of order and batching (tested on
+  permutations, BUG-0516), rebuildable by replay. One writer per producer on its own
+  store connection: a bounded buffer, batched transactions, a scrub at the write
+  (PA-0100; URLs through the record boundary, BUG-0514), dropped events, queue pressure
+  and lag counted in `run_metrics` while the run is live. Observed / inferred
   / unknown on every entity and flow; nothing server-side is ever created.
 - **Features** `[built]`: one versioned extractor with golden-file tests
   (`core/features.py`, `features_json` + `feature_version`).

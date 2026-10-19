@@ -311,7 +311,7 @@ def flow_event(flow_id: int, rec: FlowRecord, url: str, req_raw: bytes,
     body = {"src": "proxy", "ref": f"flow id {flow_id}",
             "method": (rec.method or "GET").upper(), "url": ref,
             "origin": canonical_origin(url), "status": rec.status, "error": rec.error,
-            "outcome": outcome, "location": location, "profile": rec.identity,
+            "outcome": outcome, "redirect": location, "profile": rec.identity,
             "ctype": ctype.split(";", 1)[0].strip() or None, "params": params,
             "via": rec.protocol}
     if rec.intercept:

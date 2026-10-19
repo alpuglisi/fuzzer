@@ -1597,11 +1597,14 @@ rewards) derives from it.
   the active `core.trace` recorder, or one it opens:
   - `run.start` (the run's origins, the identity by name) and `run.end` (`complete`
     or `aborted: <error class>`), in a `finally`.
-  - Every send, through `harness.tracing.TracingSender` directly around the real
-    sender: one `exchange` event with its test, strategy and role (from the execution
+  - Every send, through `harness.tracing.TracingSender` directly around each real
+    sender the run hands a strategy: its own sender and, for the cross-account check
+    (FR-FUZZ-55), the peer account's (identity: its name) and the unauthenticated one
+    (`anonymous`) (BUG-0513). One `exchange` event with its test, strategy and role (from the execution
     context), the point's method, redacted URL, parameter name and location, the
     value's digest and length and a 64-character preview (none for a sensitive
-    parameter), and the outcome -- `response` with status, time and redirect target;
+    parameter), and the outcome -- `response` with status, time and redirect target
+    (`redirect`; `location` stays where the value was injected, BUG-0517);
     `timeout`; `unobserved` (no response, BUG-0147); `not_sent` (refused before
     sending); `error` with its class. A PRG follow-up the sender sent is its own
     exchange (`follow-up`, `parent` = the probe), observed or not (BUG-0510). Each

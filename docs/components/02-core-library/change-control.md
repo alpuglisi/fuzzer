@@ -3,6 +3,43 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0064 — Trace review fixes: redaction, honest model, order independence, live counters (BUG-0514, BUG-0515, BUG-0516) (2026-10-19)
+- Change (`fuzzlab/core/trace.py`):
+  - `safe_ref`: `redact_url_identifiers`, then `redaction.redact_for_record` (userinfo,
+    sensitive matrix parameters, query-shaped fragments), then identifier-like matrix,
+    fragment and path values blanked; a path token becomes `REDACTED_SEGMENT`, which
+    `interface_path` groups as `{id}`. Interface paths drop `;name=value`.
+  - `scrub_event`: any string with a `/` under a URL key (`_URL_KEYS`) goes through
+    `safe_ref`; the schema keys' exemption is documented.
+  - Reducer: an entity's kind is the strongest by rank; a capped attribute keeps the
+    `MAX_ATTR_VALUES` smallest values in a fixed order, and `<key>_more` is a flag.
+    Proof: the stored set is always the smallest 40 of all values seen, since a value
+    left out was larger than 40 kept ones; the flag is true iff more than 40 distinct
+    values were seen. Both are therefore independent of order and batching, and equal
+    to a rebuild.
+  - A templated interface is `inferred`. The spider's own loads (`by: crawler`) come
+    from a new `SPIDER` actor. A blocked request is a `blocked` flow with `refused`.
+    A status 0 is no status.
+  - `TraceRecorder` writes its counters at the first flush, at most every
+    `METRICS_SECONDS` (1 s) after, at once after a drop, and at `close`.
+- Reason: the after-the-fact review of the diagrams series (F-076): BUG-0514, BUG-0515
+  and BUG-0516.
+- Impact: event bodies redact more. Interface ids for token-shaped paths become `{id}`
+  groupings, and matrix parameters leave interface ids. Stores written before this keep
+  their old bodies; a `--rebuild` regroups them. Each live run gets one extra
+  `run_metrics` rewrite per second at most.
+- Risk: low-medium. Redaction now also blanks identifier-like path segments, so a
+  hashed asset name groups as `{id}`; this is accepted (fails closed).
+- Review: this entry follows the two-reviewer gate run after the fact over the diagrams series (F-076); both reviewers disagreed, and every confirmed finding in this component is fixed here or answered below.
+- Deliverables:
+  - [x] code; `tests/test_trace_model.py`: token shapes, relative URLs under URL keys,
+    kind and capped attributes over three orders and three batch sizes, live counters,
+    and *executed*; each new test fails on the old code — done
+  - [x] FR-CORE-505 edited in place; BUG-0514, BUG-0515, BUG-0516; PA-0514..0516;
+    ERROR_LOG; CHANGELOG — done
+- Effectiveness: verified offline (the tests above); reviewer findings S2, S3, S6 and
+  S7 (A) and B1, S1, S3, S4 and N1 (B) are closed.
+
 ### CC-CORE-0063 — The trace: the evidence model behind the data-flow and sequence diagrams (FR-CORE-505) (2026-10-19)
 - Change: migration 24 (`trace_event`, `dg_entity`, `dg_flow`, `dg_evidence` and their
   indexes); new `fuzzlab/core/trace.py`:

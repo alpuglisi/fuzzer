@@ -3,6 +3,18 @@
 Component code: **PROXY**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PROXY-0027 — A proxied flow's redirect target keeps its own key (BUG-0517) (2026-10-19)
+- Change (`fuzzlab/proxy/history.py::flow_event`): the redacted `Location` is
+  `redirect`, not `location`.
+- Reason: one event key, one meaning across producers (PA-0517).
+- Impact: proxy events gain `redirect`. Readers fall back to an older event's
+  path-valued `location`.
+- Risk: low.
+- Review: this entry follows the two-reviewer gate run after the fact over the diagrams series (F-076); both reviewers disagreed, and every confirmed finding in this component is fixed here or answered below.
+- Deliverables:
+  - [x] code; `tests/test_proxy_trace.py` updated — done
+- Effectiveness: verified offline.
+
 ### CC-PROXY-0026 — A closed proxy run records its end (FR-PROXY-13) (2026-10-19)
 - Change:
   - `proxy/history.py`: `HistoryWriter.close(run_end=None)`. Given a status, it emits a

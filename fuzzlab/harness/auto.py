@@ -716,6 +716,17 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
         own = recorder = trace.TraceRecorder(store, run_id)
     if recorder is not None:
         sender = TracingSender(sender, identity=getattr(sender, "_identity", None))
+        if peer is not None:
+            # every sender a strategy is given is traced: the peer account's and the
+            # unauthenticated replays are the evidence of an access finding (BUG-0513)
+            import dataclasses
+            peer = dataclasses.replace(
+                peer,
+                sender=None if peer.sender is None else TracingSender(
+                    peer.sender, identity=getattr(peer.sender, "_identity", None)
+                    or peer.peer_name or "peer"),
+                anonymous=None if peer.anonymous is None else TracingSender(
+                    peer.anonymous, identity="anonymous"))
     counting = _CountingSender(sender)
     # crawl points: a fragment is never sent over HTTP (forms phase 3, PA-0115)
     probing = counting if source == "ground-truth" else _FragmentGuard(counting)

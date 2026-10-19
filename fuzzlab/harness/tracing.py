@@ -112,7 +112,7 @@ class TracingSender:
                 else:
                     body.update(outcome="response", status=probe.status,
                                 resent=probe.resent,
-                                location=trace.safe_ref(
+                                redirect=trace.safe_ref(
                                     (probe.headers or {}).get("Location")
                                     or (probe.headers or {}).get("location") or "")
                                 or None,

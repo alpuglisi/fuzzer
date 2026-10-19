@@ -668,9 +668,16 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
   - the data flow as an SVG (actors | the application with its origins and
     interfaces | the tool), origins collapsible (all open under 30 interfaces), flows
     into a collapsed origin merged with summed counts; an interface table with its
-    six coverage states; a sequence as an SVG (lost responses as a cross, collapsed
+    six coverage states, each in its own unit (`report.diagram.COVERAGE`): discovered
+    and captured count observations (captured: browser traffic that was answered, from
+    disco's capture or the intercepting proxy), scheduled counts tests, executed counts
+    a test's own sends answered or not (never a follow-up, restore or retry), evaluated
+    counts strategy runs that reached a verdict, finding counts findings (BUG-0515); a sequence as an SVG (lost responses as a cross, collapsed
     repeats, notes for evaluations and findings).
-  - every box, flow and step opens its supporting events (paged); the status line shows
+  - every box (the application's too), flow and step opens its supporting events
+    (paged); a request refused or blocked before sending is drawn as never sent; the
+    origin filter lists every origin of the run, whatever is selected (BUG-0518); a
+    malformed sequence scope is refused with 400; the status line shows
     the completeness state, run end, written / dropped / duplicate events, forced
     flushes and the maximum lag, with warnings for a partial model.
   - live: the store version is taken before the first read and polled every
@@ -694,7 +701,8 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
     Origin→Proxy with the status (and the redirect target) and Proxy→Browser with the
     status, or a lost arrow "no response (<error>)" when no response came, with no
     reply to the browser;
-  - an `intercept` saying the request was dropped: a note "dropped by the operator:
+  - an `intercept` saying the request was dropped (FR-PROXY-13 records no flow for a
+    dropped message today, so this is drawn only for an event that carries it): a note "dropped by the operator:
     never forwarded" and no forward; the response dropped: a note and no reply to the
     browser; the response edited: a note, and the origin's reply is labelled as not
     recorded (the proxy records what it sent on);

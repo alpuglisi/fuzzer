@@ -102,10 +102,16 @@ def observe_spider(spider_db) -> int:
             origin = canonical_origin(url)
             via = row["source"] if "source" in row.keys() else "link"
             kind = "observe.exchange" if via == "xhr" else "observe.page"
+            # status 0: the spider's load got no response it kept (a failed load, or a
+            # landing on another origin it withheld) -- never a reply (BUG-0515)
+            status = row["status_code"] or None
             trace.emit(kind, {
-                "src": "spider", "ref": f"discovered_pages row {row['rid']}",
+                "src": "spider", "by": "crawler",
+                "ref": f"discovered_pages row {row['rid']}",
                 "method": "GET", "url": trace.safe_ref(url), "origin": origin,
-                "status": row["status_code"], "via": via, "params": _query_params(url),
+                "status": status, "via": via, "params": _query_params(url),
+                "outcome": "response" if status is not None
+                else "no response recorded (status 0)",
                 "referer": _path(_column(row, "found_from")),
                 "order": row["rid"]}, key=f"{tag}:page:{row['rid']}", scope="spider",
                 t=_seen(row))
@@ -155,7 +161,7 @@ def observe_disco(run_dir, records) -> int:
             "outcome": ("response" if status is not None else
                         f"no response ({rec.error or 'unknown'})"),
             "ws": rec.ws_direction if rec.kind == "ws" else None,
-            "location": trace.safe_ref(res.get("location", "")) or None,
+            "redirect": trace.safe_ref(res.get("location", "")) or None,
             "referer": _path(headers.get("referer")), "profile": rec.profile,
             "action": rec.action_id, "ctype": rec.req_ctype,
             "latency_ms": rec.latency_ms, "params": params},
@@ -164,23 +170,33 @@ def observe_disco(run_dir, records) -> int:
         n += 1
     actions = run_dir / "actions.jsonl"
     if actions.exists():
+        # an action's workflow is the id its requests carry (BUG-0512): the log's own
+        # ``action_id``, or, in a log from before it, the id a record carries with the
+        # same number (``act-``/``nav-``/``harvest-`` share one counter)
+        ids = {}
+        for rec in records:
+            prefix, _d, num = (rec.action_id or "").rpartition("-")
+            if prefix and num.isdigit():
+                ids[int(num)] = rec.action_id
         with open(actions, encoding="utf-8") as fh:
-            for line in fh:
+            for lineno, line in enumerate(fh, 1):
                 try:
                     doc = json.loads(line)
                 except ValueError:
                     continue
                 if not isinstance(doc, dict) or "seq" not in doc:
                     continue
-                prefix = "load" if doc.get("kind") == "load" else "act"
+                seq = doc.get("seq")
+                action_id = doc.get("action_id") or ids.get(seq) or \
+                    f"{'harvest' if doc.get('kind') == 'load' else 'act'}-{seq}"
                 trace.emit("observe.action", {
                     "seq": doc.get("seq"), "kind": doc.get("kind"),
                     "label": str(doc.get("label") or "")[:60],
                     "route": trace.safe_ref(doc.get("route") or ""),
                     "url": trace.safe_ref(doc.get("url") or ""),
                     "fields": [f[0] for f in doc.get("fields") or [] if f]},
-                    key=f"{tag}:action:{prefix}:{doc.get('seq')}:{n}",
-                    scope=f"workflow:act-{doc.get('seq')}", t=None)
+                    key=f"{tag}:action:line{lineno}",     # stable: the log is appended
+                    scope=f"workflow:{action_id}", t=None)
                 n += 1
     stats = run_dir / "capture.jsonl.stats.json"
     if stats.exists():

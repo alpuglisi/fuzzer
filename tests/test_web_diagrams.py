@@ -85,6 +85,10 @@ def test_exports_download_and_bad_requests_are_refused(client):
     r = c.get(f"/api/diagram/{run}/export/sequence.mmd", params={"scope": "test:t1"})
     assert r.text.startswith("sequenceDiagram") and "<img" not in r.text
     assert c.get(f"/api/diagram/{run}/sequence").status_code == 400
+    for bad in ("finding:abc", "nosuch:1"):                 # never a 500
+        assert c.get(f"/api/diagram/{run}/sequence?scope={bad}").status_code == 400
+        assert c.get(f"/api/diagram/{run}/export/sequence.mmd?scope={bad}"
+                     ).status_code == 400
     assert c.get(f"/api/diagram/{run}/dataflow?knowledge=bogus").status_code == 400
     assert c.get(f"/api/diagram/{run}/finding/99").status_code == 404
 
@@ -134,6 +138,25 @@ def test_the_page_renders_labels_as_text_navigates_evidence_and_updates_live(tmp
                                               "origin": O, "status": 201}, t=2.0)
                 rec.close()
             page.locator("#dg-ifaces").get_by_text("POST /late").wait_for(timeout=10000)
+            # the application box opens its own evidence (BUG-0518)
+            page.locator("#dg-flow text.head", has_text="Target application").click()
+            page.locator("#dg-ev-list").get_by_text("run.start").first.wait_for(
+                timeout=10000)
+            # an origin found later is listed; choosing one keeps every origin listed
+            other = "http://127.0.0.1:9003"
+            with Store(path) as store:
+                rec = trace.TraceRecorder(store, run)
+                rec.emit("observe.exchange", {"src": "capture", "ref": "record 10",
+                                              "method": "GET", "url": other + "/x",
+                                              "origin": other, "status": 200}, t=3.0)
+                rec.close()
+            page.locator(f"#dg-origin option[value='{other}']").wait_for(
+                state="attached", timeout=10000)
+            page.select_option("#dg-origin", O)
+            page.wait_for_timeout(1200)                       # two polls
+            values = page.eval_on_selector_all("#dg-origin option",
+                                               "els => els.map(e => e.value)")
+            assert values == ["", O, other]
             browser.close()
     finally:
         server.stop()

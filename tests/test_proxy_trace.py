@@ -166,8 +166,8 @@ def test_each_recorded_flow_is_one_event_live_with_a_stable_key(proxied):
     login = events[0]["body"]
     assert login["method"] == "POST" and login["status"] == 302
     assert login["origin"] == proxied["base"]
-    assert login["location"].startswith(proxied["base"] + "/home") or \
-        login["location"].startswith("/home")
+    assert login["redirect"].startswith(proxied["base"] + "/home") or \
+        login["redirect"].startswith("/home")
     assert login["params"] == [["token", "query"], ["next", "query"],
                                ["user", "body"], ["password", "body"]]
     assert events[1]["body"]["params"] == [["name", "json"], ["api_key", "json"]]

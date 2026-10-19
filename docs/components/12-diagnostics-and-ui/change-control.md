@@ -3,6 +3,36 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0062 — Diagram views honest; origin list, application evidence, scope validation (BUG-0515, BUG-0518) (2026-10-19)
+- Change:
+  - `report/diagram.py`:
+    - `interface_coverage`: *executed* counts a test's own sends, answered or not, on
+      the test's interface (never a follow-up, restore or retry); the units are defined
+      (`COVERAGE`);
+    - the spider sequence draws a load with no status lost;
+    - `mermaid_flow` draws a refused or blocked flow dashed, "never sent";
+    - `dataflow` returns every origin of the run (`origins`) and puts the spider on the
+      client side of the boundaries;
+    - a malformed finding scope is an error;
+    - redirects are read from `redirect`.
+  - `web/diagram_routes.py`: a sequence or export with a malformed or unknown scope is
+    a 400.
+  - `web/static/js/diagrams.js`: the origin list comes from `origins`; the application
+    heading opens its evidence.
+- Reason: review findings (F-076): BUG-0515, BUG-0518.
+- Impact: read-only views. Coverage numbers change meaning to the documented units.
+- Risk: low.
+- Review: this entry follows the two-reviewer gate run after the fact over the diagrams series (F-076); both reviewers disagreed, and every confirmed finding in this component is fixed here or answered below.
+- Deliverables:
+  - [x] code; `tests/test_web_diagrams.py` (the browser test: a later origin listed,
+    both kept after choosing one, the application's evidence; fails on the old script;
+    400s), `tests/test_diagram_e2e.py`, `tests/test_trace_model.py` — done
+  - [x] FR-UI-510 and FR-UI-512 edited in place; `docs/DIAGRAMS.md`; BUG-0518;
+    PA-0518 — done
+- Effectiveness: verified offline. Not done: an exchange-key sequence for a proxy flow
+  key (`proxy:flow:<n>`) returns the whole proxy sequence (reviewer A nit), and is
+  recorded as a known limit.
+
 ### CC-UI-0061 — Proxied traffic counts as captured; the web proxy's stop records the run's end (FR-UI-510, FR-PROXY-13) (2026-10-19)
 - Change:
   - `report/diagram.py::interface_coverage`: an `observe.exchange` from the

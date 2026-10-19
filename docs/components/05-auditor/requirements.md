@@ -320,7 +320,9 @@ budget where a vulnerability is plausible.
   spider time and initiator `CC-AUD-0051`).*
   `import_spider` and `import_disco` first record what the crawl observed
   (`tools.observe`, with the active `core.trace` recorder; none, nothing):
-  - each spider page (`observe.page`, or `observe.exchange` for an `xhr` row; its
+  - each spider page (`observe.page`, or `observe.exchange` for an `xhr` row; `by`
+    `crawler`: the spider's own load, never browser traffic; a stored status 0 is no
+    status, "no response recorded" (BUG-0515); its
     `found_from` page as the initiator, `referer`, path only) and each captured request
     (`observe.exchange`, its `page_url` as the initiator, a `dry-submit` /
     `reveal-blocked` row marked "blocked by the tool's write window: never reached the
@@ -332,13 +334,16 @@ budget where a vulnerability is plausible.
   - each disco capture record (`observe.exchange`, scope its action id or `capture`):
     method, URL, status or "no response (error)", a redirect's `Location`, the
     WebSocket direction, the `Referer` path, the auth profile name, the time.
-  - each explorer action (`observe.action`) and each host the capture proxy refused
-    (`observe.external`, with its count).
+  - each explorer action (`observe.action`, scope `workflow:<its action id>`: the
+    `action_id` the explorer logs (`act-`, `nav-`, `harvest-`; one counter), or, in a
+    log from before it, the id a capture record with the same number carries;
+    BUG-0512) and each host the capture proxy refused (`observe.external`, with its
+    count).
 
   Only parameter **names** and locations are kept (query, form, top-level JSON keys),
   never a value or a header. Keys are `<source tag>:<table>:<row>` (the tag a digest of
-  the source's resolved path), so importing the same crawl twice into a run adds
-  nothing.
+  the source's resolved path; an action's `<tag>:action:line<n>`, its line in the
+  append-only log), so importing the same crawl twice into a run adds nothing.
 - **FR-AUD-26** *(path parameters from crawls; `CC-AUD-0047`, 2026-10-19).*
   `import_spider` and `import_disco` each pass the run's answered URLs (status below
   400 or unknown; a spider's write seeds excluded; a disco run's API GETs included,

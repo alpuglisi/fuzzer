@@ -53,7 +53,11 @@ Every producer records what it actually saw or did as one `trace_event` row:
 
 Events are append-only. Each carries a version and a key that is unique within its
 run, so a repeated delivery or a re-import adds nothing. Bodies are redacted twice:
-by the producer, and again at the write (`trace.scrub_event`, PA-0100).
+by the producer, and again at the write (`trace.scrub_event`, PA-0100). A URL loses
+sensitive and identifier-like query values, userinfo, `;jsessionid=`-style parameters,
+token fragments (`#access_token=`) and token-shaped path segments (shown `{redacted}`,
+grouped as `{id}`); only parameter names, never values, are kept for what the target
+or the browser sent.
 
 ### The diagram model
 
@@ -91,16 +95,30 @@ Capture records with no action id are listed as uncorrelated.
   grouped as `{id}` because they are id-shaped.
 - **Unknown:** not established.
 
+An interface whose path holds a template segment (`{id}`) is drawn *inferred*: the
+requests to it were observed, the grouping is not. The spider's own page loads come from
+a "Spider (crawler, tool)" actor, never the browser. A request learnt in the browser and
+blocked before sending is drawn dashed, "blocked, never sent"; a host the scope refused,
+"refused, never sent".
+
 Each origin states that its internals are unknown. No server-side component, store or
 internal call is ever drawn. Trust zones between origins are unknown too: a host name
 is not evidence.
 
 ### Coverage
 
-Each interface counts six states separately: *discovered*, *captured*, *scheduled*,
-*executed*, *evaluated* and *finding*. *Captured* means browser traffic that
-was answered: disco's capture or the intercepting proxy. An interface with no finding
-shows what was tested; it is never presented as "secure".
+Each interface counts six states separately, each in its own unit:
+
+- *discovered*: observations of it (crawl rows, capture records, proxied flows);
+- *captured*: browser traffic to it that was answered (disco's capture or the
+  intercepting proxy);
+- *scheduled*: tests on it;
+- *executed*: those tests' own sends, answered or not (a follow-up, a restore or a retry
+  is part of a send, not one);
+- *evaluated*: strategy runs that reached a verdict;
+- *finding*: findings.
+
+An interface with no finding shows what was tested; it is never presented as "secure".
 
 ### Roles of a send
 
@@ -116,7 +134,9 @@ where the code knows which it is:
   exchange, with `parent` the exchange it retried and `attempt` its number. The
   exchange carries `attempts`, its count of tries (FR-FUZZ-61).
 
-Every other send is `probe`: its strategy does not say.
+Every other send is `probe`: its strategy does not say. Each send names the identity
+it went out as: the run's account, and for the cross-account check the peer account and
+`anonymous`.
 
 ### Responses that never came
 
@@ -142,7 +162,8 @@ Every other send is `probe`: its strategy does not say.
 
 `status` (on the page, and with `--format status`) reports:
 
-- the run's state: `complete`, `partial` or `empty`;
+- the run's state: `complete`, `partial` or `empty`, while the run is live too (the
+  counters are written at least every second);
 - whether a run end was recorded, and how the run ended;
 - the recorder's written, dropped and duplicate events, forced flushes (queue
   pressure) and maximum lag;
@@ -171,6 +192,8 @@ A run that stopped, or a batch that could not be written, shows as **partial**.
 - The proxy's trace costs about 1 ms per flow on its event-loop thread (p95 up to
   13 ms; measured, FR-PROXY-13). `HistoryWriter(trace=False)` turns it off; there is no
   command-line switch for it yet.
+- A sequence for one proxied flow's key (`proxy:flow:<n>`) is not offered; the `proxy`
+  scope shows every flow.
 - External hosts come from the capture proxy's refusal counts. The browser's own
   background traffic, such as autofill services, is included and labelled as possibly
   the browser's.

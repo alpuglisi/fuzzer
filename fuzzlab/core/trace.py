@@ -44,8 +44,12 @@ from urllib.parse import urlsplit
 EVENT_VERSION = 1
 #: Knowledge levels, weakest first.
 KNOWLEDGE = ("unknown", "inferred", "observed")
-#: Values kept per attribute set (the rest counted as ``"<key>_more"``).
+#: Values kept per attribute set: the smallest, in a fixed order, so the kept set does
+#: not depend on event order; ``"<key>_more": true`` says there were more.
 MAX_ATTR_VALUES = 40
+#: How often a live recorder rewrites its counters to ``run_metrics`` (seconds); a drop
+#: and `TraceRecorder.close` write them at once.
+METRICS_SECONDS = 1.0
 #: The recorder's buffer bound (events) and its time bound (seconds).
 MAX_BUFFER = 512
 FLUSH_SECONDS = 0.25
@@ -61,7 +65,13 @@ MAX_PREVIEW = 64
 APP = "app:target"
 BROWSER = "actor:browser"
 EXPLORER = "actor:explorer"
+SPIDER = "actor:spider"
 TOOL = "actor:tool"
+#: An identifier-like path segment `safe_ref` withheld; grouped as ``{id}``.
+REDACTED_SEGMENT = "{redacted}"
+#: An entity kind's rank: the strongest kind any event gives an entity is kept, so the
+#: kind does not depend on event order (an interface also loaded as a page).
+_KIND_RANK = {"page": 0, "interface": 1}
 
 # --- the execution context: which test, strategy and role a send belongs to ----------
 _TEST: contextvars.ContextVar[str | None] = contextvars.ContextVar("fl_trace_test",
@@ -126,11 +136,12 @@ def interface_path(url: str) -> tuple[str, bool]:
     """The path an interface is keyed by, and whether segments were grouped: a segment
     that is a crawled placeholder (``{id}``), id-shaped (`core.pathtemplate.id_shaped`)
     or a JavaScript placeholder becomes ``{id}``. Nothing else is merged -- distinct
-    words stay distinct interfaces. The query and fragment are never part of it."""
+    words stay distinct interfaces. The query, the fragment and a segment's
+    ``;name=value`` parameters are never part of it (BUG-0514: ``;jsessionid=``)."""
     path = urlsplit(url).path or "/"
     out, grouped = [], False
     for seg in path.split("/"):
-        shaped, kept = _segment(seg)
+        shaped, kept = _segment(seg.split(";", 1)[0])
         out.append(kept)
         grouped = grouped or shaped
     return "/".join(out) or "/", grouped
@@ -143,6 +154,8 @@ def _segment(seg: str) -> tuple[bool, str]:
 
     from fuzzlab.core.pathtemplate import JS_PLACEHOLDERS, id_shaped
     raw = unquote(seg)
+    if raw == REDACTED_SEGMENT:
+        return True, "{id}"
     if raw.startswith("{") and raw.endswith("}") and len(raw) > 2:
         return False, raw
     if raw and (raw in JS_PLACEHOLDERS or id_shaped(raw)):
@@ -159,13 +172,60 @@ def origin_id(origin: str) -> str:
 
 
 def safe_ref(url: str) -> str:
-    """A URL fit for a diagram or an export: sensitive query values and identifier-like
-    values blanked (`core.redaction.redact_url_identifiers`)."""
-    from fuzzlab.core.redaction import redact_url_identifiers
+    """A URL fit for a diagram or an export (BUG-0514):
+
+    - sensitive and identifier-like query values blanked, a SPA route's query too
+      (`core.redaction.redact_url_identifiers`);
+    - userinfo, sensitive ``;name=value`` path parameters and a query-shaped fragment's
+      sensitive values (``#access_token=…``) replaced, by the record boundary
+      (`core.redaction.redact_for_record`, PA-0003: one implementation);
+    - every other ``;name=value`` and fragment value that looks like an identifier
+      blanked;
+    - an identifier-like path segment (a JWT, a reset token, a UUID) replaced by
+      `REDACTED_SEGMENT`, which an interface groups as ``{id}``.
+
+    Total: a URL it cannot parse is withheld whole."""
+    from fuzzlab.core.redaction import redact_for_record, redact_url_identifiers
     try:
-        return redact_url_identifiers(url or "")
+        text = redact_for_record("", redact_url_identifiers(url or ""))
+        return _blank_identifiers(text)
     except Exception:  # noqa: BLE001 - never let a malformed URL leak through
         return "(unparseable URL withheld)"
+
+
+def _blank_identifiers(url: str) -> str:
+    """`safe_ref`'s last step: identifier-like path segments, matrix values and fragment
+    values (the query's are already done)."""
+    from urllib.parse import unquote
+
+    from fuzzlab.core.redaction import looks_like_identifier
+    head, hashmark, fragment = url.partition("#")
+    base, qmark, query = head.partition("?")
+    scheme, sep, rest = base.partition("://")
+    if not sep:
+        scheme, rest = "", base
+    authority, slash, path = rest.partition("/") if sep else ("", "", rest)
+    segments = []
+    for seg in path.split("/"):
+        name, semi, params = seg.partition(";")
+        if name and looks_like_identifier(unquote(name)):
+            name = REDACTED_SEGMENT
+        if semi:
+            params = ";".join(
+                f"{k}=" if eq and looks_like_identifier(unquote(v)) else part
+                for part in params.split(";")
+                for k, eq, v in [part.partition("=")])
+        segments.append(name + semi + params)
+    path = "/".join(segments)
+    if hashmark and "=" in fragment:
+        route, q, fquery = fragment.rpartition("?") if "?" in fragment \
+            else ("", "", fragment)
+        fquery = "&".join(
+            f"{k}=" if eq and looks_like_identifier(unquote(v)) else part
+            for part in fquery.split("&") for k, eq, v in [part.partition("=")])
+        fragment = route + q + fquery
+    out = (f"{scheme}://{authority}{slash}" if sep else "") + path
+    return out + qmark + query + hashmark + fragment
 
 
 def data_category(name: str) -> str:
@@ -195,11 +255,19 @@ def value_preview(name: str, value) -> str | None:
 # --- the write-site boundary (PA-0100) ------------------------------------------------
 #: Characters a string in an event body keeps at most.
 MAX_TEXT = 512
-#: Body keys this module writes itself whose *values* are names or labels, not data.
+#: Body keys whose *values* are names, labels or the tool's own words, never target
+#: data: exempt from blanking by key name (``auth``, ``session``, ``identity`` and
+#: ``profile`` hold an account's *name*, which the name rule would otherwise blank;
+#: ``error`` an exception class; ``detail`` a verdict's own fields, whose nested keys
+#: still pass the rule). Producers put nothing else there (BUG-0514).
 _SCHEMA_KEYS = frozenset({"param", "params", "fields", "label", "kind", "role", "outcome",
                           "strategy", "mechanism", "vuln_class", "category", "rule",
                           "location", "src", "ref", "via", "delivery", "error", "detail",
                           "identity", "profile", "auth", "session", "test", "action"})
+#: Body keys that hold a URL or a path, absolute or relative: always through `safe_ref`
+#: (``location`` is also an injection location's word, which has no ``/``).
+_URL_KEYS = frozenset({"url", "location", "redirect", "referer", "route", "base_url",
+                       "page_url", "found_from", "example", "initiator"})
 
 
 def scrub_event(value, key: str | None = None):
@@ -214,7 +282,8 @@ def scrub_event(value, key: str | None = None):
     if isinstance(value, (list, tuple)):
         return [scrub_event(v, key) for v in value]
     if isinstance(value, str):
-        text = safe_ref(value) if "://" in value else value
+        url_shaped = "://" in value or (key in _URL_KEYS and "/" in value)
+        text = safe_ref(value) if url_shaped else value
         return text[:MAX_TEXT] + ("…" if len(text) > MAX_TEXT else "")
     return value
 
@@ -252,6 +321,7 @@ class _Batch:
                                              "parent": parent, "knowledge": knowledge,
                                              "first": t, "last": t})
         r = acc.row
+        r["kind"] = _stronger_kind(r["kind"], kind)
         r["knowledge"] = _strong(r["knowledge"], knowledge)
         r["parent"] = r["parent"] or parent
         _span(r, t)
@@ -281,6 +351,11 @@ class _Batch:
             acc.keys.add(key)
 
 
+def _stronger_kind(a: str, b: str) -> str:
+    """The kind an entity keeps whatever the order (`_KIND_RANK`; ties keep ``a``)."""
+    return b if _KIND_RANK.get(b, -1) > _KIND_RANK.get(a, -1) else a
+
+
 def _span(row: dict, t) -> None:
     if t is None:
         return
@@ -300,10 +375,25 @@ def _interface(b: _Batch, origin, method, url, *, t, key, basis, kind="interface
     path, grouped = interface_path(url)
     eid = f"iface:{origin}|{(method or 'GET').upper()}|{path}"
     extra = {"grouping": "inferred: id-shaped path segments grouped"} if grouped else {}
+    # an interface whose path holds a template segment is a grouping: inferred, never
+    # observed as such (the requests to it are; BUG-0515)
+    templated = "{" in path
     b.entity(eid, kind, f"{(method or 'GET').upper()} {path}", parent=origin_id(origin),
+             knowledge="inferred" if templated else "observed",
              t=t, key=key, basis=basis, example=safe_ref(url) if grouped else None,
              **extra, **attrs)
     return eid
+
+
+def _observer(body: dict) -> str:
+    """Who made an observed request: the spider itself for its own page loads (``by``
+    "crawler", or a ``discovered_pages`` row from before ``by`` existed), else the
+    browser (BUG-0515: the spider's loads are not browser traffic)."""
+    by = body.get("by")
+    if by == "crawler" or (by is None and body.get("src") == "spider"
+                           and str(body.get("ref") or "").startswith("discovered_pages")):
+        return SPIDER
+    return BROWSER
 
 
 def _apply(b: _Batch, key: str, kind: str, body: dict, t) -> None:
@@ -318,21 +408,32 @@ def _apply(b: _Batch, key: str, kind: str, body: dict, t) -> None:
         if not origin:
             return
         src = body.get("src") or "capture"
-        basis = f"browser instrumentation ({src}): {body.get('ref')}"
-        b.entity(BROWSER, "actor", "Browser / client application", t=t, key=key,
-                 basis=f"browser instrumentation ({src})")
+        actor = _observer(body)
+        basis = (f"browser instrumentation ({src}): {body.get('ref')}" if actor == BROWSER
+                 else f"crawler request ({src}): {body.get('ref')}")
+        if actor == BROWSER:
+            b.entity(BROWSER, "actor", "Browser / client application", t=t, key=key,
+                     basis=f"browser instrumentation ({src})")
+        else:
+            b.entity(SPIDER, "actor", "Spider (crawler, tool)", t=t, key=key,
+                     basis="tool: the spider's own page loads")
         _origin_entities(b, origin, t, key, basis)
         params = body.get("params") or []
         iface = _interface(b, origin, body.get("method"), body.get("url") or "", t=t,
                            key=key, basis=basis,
                            kind="page" if kind == "observe.page" else "interface",
-                           status=body.get("status"), ctype=body.get("ctype"),
+                           status=body.get("status") or None, ctype=body.get("ctype"),
                            param=[f"{n} ({loc})" for n, loc in params])
         protocol = "ws" if body.get("ws") else "http"
-        b.flow(BROWSER, iface, "app", protocol, t=t, key=key, basis=basis,
-               status=body.get("status"), error=body.get("error"),
+        refused = None
+        if body.get("delivery") and body["delivery"] != "sent":
+            # learnt in the browser and blocked: never sent (BUG-0515)
+            protocol, refused = "blocked", body["delivery"]
+        b.flow(actor, iface, "app", protocol, t=t, key=key, basis=basis, refused=refused,
+               status=body.get("status") or None, error=body.get("error"),
                auth=body.get("profile"), workflow=body.get("action"),
-               initiator=body.get("referer"), redirect=body.get("location"),
+               initiator=body.get("referer"),
+               redirect=body.get("redirect") or body.get("location"),
                via=body.get("via"), delivery=body.get("delivery"),
                outcome=body.get("outcome"),
                data=[f"{data_category(n)}:{loc}" for n, loc in params],
@@ -385,14 +486,15 @@ def reduce(conn, run_id: int, events) -> None:
         old = conn.execute("SELECT kind, parent, label, knowledge, first_seen, last_seen, "
                            "attrs FROM dg_entity WHERE run_id=? AND eid=?",
                            (run_id, r["eid"])).fetchone()
-        attrs, first, last, knowledge, parent = _merge(old, acc, r)
+        attrs, first, last, knowledge, parent, kind = _merge(old, acc, r)
         conn.execute(
             "INSERT INTO dg_entity (run_id, eid, kind, parent, label, knowledge, "
             "first_seen, last_seen, attrs) VALUES (?,?,?,?,?,?,?,?,?) "
-            "ON CONFLICT(run_id, eid) DO UPDATE SET parent=excluded.parent, "
+            "ON CONFLICT(run_id, eid) DO UPDATE SET kind=excluded.kind, "
+            "parent=excluded.parent, "
             "knowledge=excluded.knowledge, first_seen=excluded.first_seen, "
             "last_seen=excluded.last_seen, attrs=excluded.attrs",
-            (run_id, r["eid"], r["kind"], parent, r["label"], knowledge, first, last,
+            (run_id, r["eid"], kind, parent, r["label"], knowledge, first, last,
              json.dumps(attrs, sort_keys=True)))
         _evidence(conn, run_id, r["eid"], acc.keys)
     for acc in b.flows.values():
@@ -400,7 +502,7 @@ def reduce(conn, run_id: int, events) -> None:
         old = conn.execute("SELECT src, dst, view, knowledge, first_seen, last_seen, "
                            "attrs FROM dg_flow WHERE run_id=? AND fid=?",
                            (run_id, r["fid"])).fetchone()
-        attrs, first, last, knowledge, _p = _merge(old, acc, r)
+        attrs, first, last, knowledge, _p, _k = _merge(old, acc, r)
         conn.execute(
             "INSERT INTO dg_flow (run_id, fid, src, dst, view, protocol, knowledge, "
             "first_seen, last_seen, attrs) VALUES (?,?,?,?,?,?,?,?,?,?) "
@@ -414,33 +516,34 @@ def reduce(conn, run_id: int, events) -> None:
 
 def _merge(old, acc: _Acc, r: dict):
     attrs = {k: set(v) for k, v in acc.attrs.items()}
+    more_before: set[str] = set()
     first, last, knowledge, parent = r["first"], r["last"], r["knowledge"], r.get("parent")
+    kind = r.get("kind")
     if old is not None:
         prev = json.loads(old["attrs"] or "{}")
         for k, v in prev.items():
             if k.endswith("_more"):
+                if v:
+                    more_before.add(k[:-5])
                 continue
             attrs.setdefault(k, set()).update(v)
-        for k in prev:
-            if k.endswith("_more"):
-                attrs.setdefault(k, set()).add(prev[k])
         if old["first_seen"] is not None:
             first = old["first_seen"] if first is None else min(first, old["first_seen"])
         if old["last_seen"] is not None:
             last = old["last_seen"] if last is None else max(last, old["last_seen"])
         knowledge = _strong(old["knowledge"], knowledge)
         parent = parent or (old["parent"] if "parent" in old.keys() else None)
+        if "kind" in old.keys() and kind is not None:
+            kind = _stronger_kind(old["kind"], kind)
+    # the MAX_ATTR_VALUES smallest values, and whether there were more: both the same
+    # whatever the order the events came in, and equal to a rebuild (BUG-0516)
     out: dict = {}
     for k, values in attrs.items():
-        if k.endswith("_more"):
-            continue
         ordered = sorted(values, key=lambda x: (str(type(x)), x))
         out[k] = ordered[:MAX_ATTR_VALUES]
-        more = len(ordered) - MAX_ATTR_VALUES + sum(
-            v for v in attrs.get(k + "_more", ()) if isinstance(v, int))
-        if more > 0:
-            out[k + "_more"] = more
-    return out, first, last, knowledge, parent
+        if k in more_before or len(ordered) > MAX_ATTR_VALUES:
+            out[k + "_more"] = True
+    return out, first, last, knowledge, parent, kind
 
 
 def _evidence(conn, run_id: int, ref: str, keys) -> None:
@@ -489,6 +592,8 @@ class TraceRecorder:
         self.stats = {"emitted": 0, "written": 0, "duplicates": 0, "dropped": 0,
                       "flushes": 0, "forced_flushes": 0, "flush_ms": 0.0,
                       "max_lag_ms": 0.0, "buffer_peak": 0}
+        self._metrics_at: float | None = None
+        self._dropped_written = 0
 
     def emit(self, kind: str, body: dict, *, key: str | None = None,
              scope: str | None = None, t=NOW) -> str:
@@ -547,10 +652,14 @@ class TraceRecorder:
         self.stats["flushes"] += 1
         self.stats["flush_ms"] += (time.perf_counter() - started) * 1000
         self.stats["max_lag_ms"] = max(self.stats["max_lag_ms"], lag)
+        # live: the counters a running run's status shows (BUG-0516); a drop at once
+        if self._metrics_at is None or self.stats["dropped"] != self._dropped_written \
+                or self.clock() - self._metrics_at >= METRICS_SECONDS:
+            self._write_metrics()
 
-    def close(self) -> dict:
-        """Flush and record the counters in ``run_metrics`` (``trace_*``)."""
-        self.flush()
+    def _write_metrics(self) -> None:
+        """Record the counters in ``run_metrics`` (``trace_*``), replacing the last."""
+        self._metrics_at = self.clock()
         rows = [(self.run_id, f"trace_{k}", float(v)) for k, v in self.stats.items()]
         with contextlib.suppress(Exception):
             self.store.conn.execute("DELETE FROM run_metrics WHERE run_id=? AND key LIKE "
@@ -558,6 +667,12 @@ class TraceRecorder:
             self.store.conn.executemany(
                 "INSERT INTO run_metrics (run_id, key, value) VALUES (?,?,?)", rows)
             self.store.conn.commit()
+            self._dropped_written = self.stats["dropped"]
+
+    def close(self) -> dict:
+        """Flush and record the counters in ``run_metrics`` (``trace_*``)."""
+        self.flush()
+        self._write_metrics()
         return dict(self.stats)
 
 

@@ -113,3 +113,43 @@ def test_peer_identity_is_refused_before_the_store_opens(tmp_path, capsys, monke
         auto_cli.main(base + ["--identity", "a", "--peer-identity", "b"])
     assert "no stored credential for identity 'a'" in capsys.readouterr().err
     assert not (tmp_path / "s.db").exists()
+
+
+def test_run_auto_traces_the_peer_and_unauthenticated_replays(tmp_path, monkeypatch):
+    """BUG-0513: every sender a strategy is given passes the trace. The peer's and the
+    unauthenticated replays are the evidence of an access finding: each is an exchange
+    with its own identity, and the strategy's run cites them."""
+    import json
+
+    from fuzzlab.core import trace
+    from fuzzlab.core.store import Store
+    from fuzzlab.harness import auto
+    from fuzzlab.harness.pipeline import PipelineResult
+
+    def pipeline(points, store, run_id, sender, plan, *, peer=None, **_kw):
+        with trace.test_scope("t1"), trace.strategy_scope("cross-account"):
+            verdict = CrossAccountReplayStrategy(peer).confirm(_cand(), sender)
+            cited = trace.collected()
+        assert verdict is not None and verdict.confirmed
+        pipeline.cited = cited
+        return PipelineResult(plan=plan, points_audited=0, candidates=[], negatives=[],
+                              findings=[], metrics={})
+    monkeypatch.setattr(auto, "run_pipeline", pipeline)
+    monkeypatch.setattr(auto, "_points_from_store", lambda *a, **k: [], raising=False)
+    accounts = PeerAccounts(sender=_App("broken", "bob"), owner="alice", peer_name="bob",
+                            anonymous=_App("broken", None))
+    alice = _App("broken", "alice")
+    alice._identity = "alice"
+    with Store(tmp_path / "s.db") as store:
+        run = store.start_run("auto", "h")
+        auto.run_auto(base_url="http://127.0.0.1:9/", store=store, run_id=run,
+                      sender=alice, mode="manual",
+                      selected_categories=["access-control"], points_source="crawl",
+                      peer=accounts)
+        rows = [(r["key"], json.loads(r["body"])) for r in store.conn.execute(
+            "SELECT key, body FROM trace_event WHERE run_id=? AND kind='exchange' "
+            "ORDER BY seq", (run,))]
+    # A's own view and the other-value check, then B's two replays, which confirm
+    assert [b["identity"] for _k, b in rows] == ["alice", "alice", "bob", "bob"]
+    assert len(rows) == len(alice.sent) + len(accounts.sender.sent)
+    assert pipeline.cited == [k for k, _b in rows]              # the finding cites all

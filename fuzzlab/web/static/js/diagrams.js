@@ -206,8 +206,12 @@ function initDiagrams() {
     const appBox = svg("rect", { x: xA, y: appTop, width: wA, height: y - appTop + 4, rx: 8,
       class: "dg-box app" });
     titled(appBox, app ? `${app.label}: ${(app.attrs.basis || []).join("; ")}` : "application");
-    body.prepend(appBox, svg("text", { x: xA + 10, y: appTop + 17, class: "dg-text head" },
-      app ? app.label : "Target application"));
+    const appHead = svg("text", { x: xA + 10, y: appTop + 17, class: "dg-text head dg-hit" },
+      app ? app.label : "Target application");
+    if (app) {             // the application's own evidence (its configuration events)
+      appHead.addEventListener("click", () => { select(appBox); showEvidence(app.id, app.label); });
+    }
+    body.prepend(appBox, appHead);
     // actors, external references, the tool
     let ly = 40;
     const drawSide = (n, x, w, yy) => {
@@ -447,10 +451,12 @@ function initDiagrams() {
   }
 
   function fillOrigins(model) {
+    // the run's whole origin list, never the filtered model's (an origin found later
+    // appears; choosing one keeps the others listed)
     const keep = originSel.value;
-    if (originSel.options.length > 1 && !keep) return;
-    const origins = model.nodes.filter((n) => n.kind === "origin").map((n) => n.label);
-    if (originSel.options.length - 1 === origins.length) return;
+    const origins = model.origins || [];
+    const listed = [...originSel.options].slice(1).map((o) => o.value);
+    if (listed.length === origins.length && listed.every((o, i) => o === origins[i])) return;
     originSel.replaceChildren(el("option", { value: "", text: "All origins" }),
       ...origins.map((o) => el("option", { value: o, text: o })));
     originSel.value = keep;

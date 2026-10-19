@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-19 — diagrams (the after-the-fact review found seven defects; BUG-0512..0518)
+- **Symptom:** the two-reviewer gate, run late over the diagrams series (F-076), found: explorer actions filed under another workflow than their requests (BUG-0512); peer and unauthenticated replays untraced (BUG-0513); userinfo, `;jsessionid=`, `#access_token=` and path tokens kept in trace bodies and exports (BUG-0514); failed loads drawn as replies, blocked requests and spider loads drawn as browser traffic, groupings as observed, other sends counted as executed (BUG-0515); order-dependent kind and capped attributes, counters only at close (BUG-0516); the injection location overwritten by a redirect (BUG-0517); a stale origin filter, no application evidence, a 500 on a bad scope (BUG-0518).
+- **Root cause:** per bug report; common to all, the entries were never reviewed before implementation and the tests checked expected shapes, not producers' truth or negative cases.
+- **Remediation:** CC-CORE-0064, CC-FUZZ-0101, CC-AUD-0052, CC-CRAWL-0048, CC-UI-0062, CC-PROXY-0027; PA-0512..0518, each test proven to fail on the old code.
+- **Status:** Fixed
+
 ## 2026-10-19 — crawler (two-worker spider filed one worker's fetches under another's page)
 - **Symptom:** in a two-worker Playwright crawl, `/b`'s fetch and XHR URLs were recorded under `/a` (or lost); found by FR-CRAWL-29's new test.
 - **Root cause:** `LocalSpider._clone` copied the first worker's `__dict__` after its browser started, including Playwright's cached bound-method listener wrappers (`_pw_impl_instance_*`), so every clone registered the first worker's handlers (BUG-0509).

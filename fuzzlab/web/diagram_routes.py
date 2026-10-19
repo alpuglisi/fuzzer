@@ -78,7 +78,10 @@ def register(app: FastAPI, *, templates, shell_context: Callable[[], dict],
     def diagram_sequence(run_id: int, scope: str = ""):
         if not scope or len(scope) > 200:
             return JSONResponse({"error": "scope required"}, status_code=400)
-        return _read(lambda c: diagram.sequence(c, run_id, scope))
+        found = _read(lambda c: diagram.sequence(c, run_id, scope))
+        if isinstance(found, dict) and found.get("error"):
+            return JSONResponse({"error": found["error"]}, status_code=400)
+        return found
 
     @app.get("/api/diagram/{run_id}/evidence")
     def diagram_evidence(run_id: int, ref: str = "", after: int = 0):
@@ -114,8 +117,10 @@ def register(app: FastAPI, *, templates, shell_context: Callable[[], dict],
     def diagram_export_sequence(run_id: int, scope: str = ""):
         if not scope or len(scope) > 200:
             return JSONResponse({"error": "scope required"}, status_code=400)
-        text = with_store(lambda s: diagram.mermaid_sequence(
-            diagram.sequence(s.conn, run_id, scope)), None)
-        if text is None:
+        seq = with_store(lambda s: diagram.sequence(s.conn, run_id, scope), None)
+        if seq is None:
             return JSONResponse({"error": "not found"}, status_code=404)
+        if seq.get("error"):
+            return JSONResponse({"error": seq["error"]}, status_code=400)
+        text = diagram.mermaid_sequence(seq)
         return _download(text, f"fuzzlab-run-{run_id}-sequence.mmd", "text/plain")

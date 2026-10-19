@@ -863,7 +863,9 @@ class Explorer:
         user could see (`store_adapter.import_disco` reads both)."""
         if self.actions_log is None:
             return
-        rec = {"seq": action_id_seq, "state": state.fp, "route": normalise_route(state.url),
+        # ``action_id``: the id its requests carry (``act-``, ``nav-``), BUG-0512
+        rec = {"seq": action_id_seq, "action_id": self._tag_headers.get(ACTION_HEADER),
+               "state": state.fp, "route": normalise_route(state.url),
                "signature": el["signature"], "occurrence": step.occurrence,
                "kind": step.kind,
                "label": str(el.get("label") or "")[:60], "new_state": new_fp,
@@ -881,7 +883,8 @@ class Explorer:
         key an action line has is present, empty: a load acts on no element."""
         if self.actions_log is None:
             return
-        rec = {"seq": self._action_seq, "state": None, "route": normalise_route(url),
+        rec = {"seq": self._action_seq, "action_id": self._tag_headers.get(ACTION_HEADER),
+               "state": None, "route": normalise_route(url),
                "signature": None, "occurrence": 0, "kind": "load", "label": "",
                "new_state": None, "url": redact_url(url)}
         with self._shared.lock, open(self.actions_log, "a", encoding="utf-8") as fh:

@@ -636,7 +636,7 @@ plugin registry. It is the layer that makes the store the integration bus.
   2026-10-19).* `core.trace` (SP-48). **Events:** `trace_event` (migration 24) is
   append-only, one row per event: `run_id`, `key` (`UNIQUE(run_id, key)`: a repeated
   delivery or replay is ignored), `v` (the body schema, `EVENT_VERSION` 1), `kind`,
-  `scope` (`test:<id>`, `workflow:<action>`, `capture`, `spider`, `run`), `seq` (the
+  `scope` (`test:<id>`, `workflow:<action>`, `capture`, `spider`, `proxy`, `run`), `seq` (the
   producer's order), `t` (when it happened; NULL when the source records no time --
   never replaced by "now") and a JSON `body`. Kinds: `run.start` / `run.end`,
   `observe.exchange` / `observe.page` / `observe.action` / `observe.external`,
@@ -644,22 +644,44 @@ plugin registry. It is the layer that makes the store the integration bus.
   - **Model:** `dg_entity` (actors, the application, origins, interfaces, external
     hosts), `dg_flow` (`view` `app` or `test`) and `dg_evidence` (each entity or flow's
     supporting event keys) are derived by `reduce`, idempotently and independently of
-    order: first/last seen min/max, attributes set unions capped at `MAX_ATTR_VALUES`
-    with a `_more` count, knowledge only strengthens (`unknown` < `inferred` <
-    `observed`), observation counts are counted from `dg_evidence`. `rebuild` replays a
-    run's events into fresh rows. An origin always carries "internals unknown"; nothing
+    order and batching (tested with permutations and batch sizes, BUG-0516): first/last
+    seen min/max; attributes set unions keeping the `MAX_ATTR_VALUES` smallest values
+    in a fixed order, with `<key>_more: true` when there were more; an entity's kind
+    the strongest any event gives it (`interface` over `page`); knowledge only
+    strengthens (`unknown` < `inferred` < `observed`); observation counts are counted
+    from `dg_evidence`. `rebuild` replays a run's events into fresh rows and equals the
+    incremental model. An origin always carries "internals unknown"; nothing
     server-side is created.
+  - **What is drawn as what (BUG-0515):** an interface whose path holds a template
+    segment (`{id}`, a crawled `{x}`) is `inferred` (a grouping; the requests to it are
+    observed). The spider's own page loads come from a "Spider (crawler, tool)" actor,
+    never the browser. A request learnt in the browser and blocked before sending
+    (`delivery` not `sent`) is a separate `blocked` flow with `refused`, never traffic.
+    A status of 0 is no status.
   - **Interface identity** (SP-49): `interface_id(origin, method, url)` -- the origin,
     the method and the path with crawled placeholders kept and id-shaped or
     JavaScript-placeholder segments grouped as `{id}` (the grouping recorded as
-    inferred); never the query or fragment; words are never merged.
+    inferred), as is a segment `safe_ref` withheld; never the query, the fragment or a
+    segment's `;name=value` parameters; words are never merged.
+  - **`safe_ref`** (BUG-0514): sensitive and identifier-like query values blanked (a
+    SPA route's too), userinfo, sensitive `;name=value` parameters and a query-shaped
+    fragment's sensitive values replaced by the record boundary
+    (`redaction.redact_for_record`), other identifier-like matrix and fragment values
+    blanked, and an identifier-like path segment (a JWT, a reset token, a UUID)
+    replaced by `{redacted}`.
   - **The writer:** `TraceRecorder(store, run_id, max_buffer=512, flush_seconds=0.25)`,
-    one per producer thread on that thread's store: a bounded buffer, a batch written
-    with its reduction in one transaction, every body through `scrub_event` (PA-0100:
-    URL-looking strings redacted, values under sensitive key names blanked, strings
-    capped at `MAX_TEXT`); a full buffer flushes synchronously (counted
+    one per producer, used only on the thread that owns its `Store` (a `Store` is one
+    connection): a bounded buffer, a batch written with its reduction in one
+    transaction, every body through `scrub_event` (PA-0100: strings with `://`, and any
+    string with a `/` under a URL key (`url`, `location`, `redirect`, `referer`,
+    `route`, ...), through `safe_ref`; values under sensitive key names blanked except
+    the schema's own keys, whose values are names, labels or the tool's own words
+    (`auth`, `session`, `identity`, `profile`: an account's name; `error`: a class);
+    strings capped at `MAX_TEXT`); a full buffer flushes synchronously (counted
     `forced_flushes`); a batch that cannot be written is counted `dropped` and logged.
-    `close` writes the counters to `run_metrics` (`trace_*`). Execution points call
+    The counters reach `run_metrics` (`trace_*`) while the run is live: at the first
+    flush, at most every `METRICS_SECONDS` (1 s) after, at once after a drop, and at
+    `close` (BUG-0516). Execution points call
     `trace.emit` (a no-op without an active recorder, `trace.recording`) and read the
     context (`test_scope`, `strategy_scope`, `role`, `collected`).
 - **FR-CORE-500** *(one reader for a run's target; one method key; `CC-CORE-0500`,

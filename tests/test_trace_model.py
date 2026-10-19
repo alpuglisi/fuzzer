@@ -247,3 +247,106 @@ def test_a_unit_of_work_closing_is_written_at_once(tmp_path):
         rec.emit("test.strategy", {"test": "t1", "outcome": "not_confirmed"}, key="s1")
         assert store.conn.execute("SELECT COUNT(*) FROM trace_event").fetchone()[0] == 2
         rec.close()
+
+
+def test_executed_counts_a_tests_own_sends_on_its_interface(tmp_path):
+    """BUG-0515: *executed* is a test's own sends, answered or not, on the test's
+    interface; its follow-up, restore or retry never counts, on any interface."""
+    from fuzzlab.report.diagram import interface_coverage
+    ex = {"origin": O, "method": "GET", "test": "t1"}
+    events = [
+        ("test.start", {"test": "t1", "url": O + "/a", "origin": O, "method": "GET"},
+         "ts", 1.0),
+        ("exchange", ex | {"url": O + "/a?q=1", "role": "probe", "outcome": "response",
+                           "status": 200}, "x1", 2.0),
+        ("exchange", ex | {"url": O + "/a?q=2", "role": "mutation", "outcome": "timeout"},
+         "x2", 3.0),
+        ("exchange", ex | {"url": O + "/b", "role": "follow-up", "outcome": "response",
+                           "status": 200, "parent": "x1"}, "x3", 4.0),
+        ("exchange", ex | {"url": O + "/a?q=3", "role": "retry", "outcome": "unobserved",
+                           "parent": "x2"}, "x4", 5.0),
+        ("exchange", ex | {"url": O + "/c", "role": "restore", "outcome": "response",
+                           "status": 200}, "x5", 6.0),
+        ("exchange", {"origin": O, "method": "GET", "url": O + "/d", "role": "baseline",
+                      "outcome": "response", "status": 200}, "x6", 7.0)]
+    with Store(tmp_path / "s.db") as store:
+        run = store.start_run("auto", "h")
+        _record(store, run, events)
+        cov = interface_coverage(store.conn, run)
+    assert cov[f"iface:{O}|GET|/a"]["executed"] == 2
+    for other in ("/b", "/c", "/d"):
+        assert cov.get(f"iface:{O}|GET|{other}", {}).get("executed", 0) == 0
+
+
+def test_kind_and_capped_attributes_do_not_depend_on_order(tmp_path):
+    """BUG-0516: an entity's kind and a capped attribute set are the same whatever the
+    order and batching of the events, and equal to a rebuild."""
+    many = [("observe.exchange", {"src": "capture", "ref": f"r{i}", "method": "GET",
+                                  "url": O + "/p", "origin": O, "status": 100 + i},
+             f"s{i}", float(i)) for i in range(trace.MAX_ATTR_VALUES + 5)]
+    page = [("observe.page", {"src": "spider", "url": O + "/p", "origin": O,
+                              "ref": "discovered_pages row 1"}, "pg", None)]
+    snaps = []
+    with Store(tmp_path / "s.db") as store:
+        for order, batch in ((page + many, 3), (many[::-1] + page, 1000),
+                             (many[7:] + page + many[:7], 2)):
+            run = store.start_run("auto", "h")
+            _record(store, run, order, max_buffer=batch)
+            snap = _snapshot(store.conn, run)
+            trace.rebuild(store.conn, run)
+            assert _snapshot(store.conn, run) == snap            # rebuild == incremental
+            snaps.append(snap)
+        assert snaps[0] == snaps[1] == snaps[2]
+        ents = snaps[0][0]
+        iface = ents[f"iface:{O}|GET|/p"]
+        assert iface[3]["status"] == list(range(100, 100 + trace.MAX_ATTR_VALUES))
+        assert iface[3]["status_more"] is True
+        kind = store.conn.execute("SELECT kind FROM dg_entity WHERE eid=?",
+                                  (f"iface:{O}|GET|/p",)).fetchall()
+        assert {r[0] for r in kind} == {"interface"}             # the stronger kind
+
+
+def test_the_counters_are_written_while_the_run_is_live(tmp_path):
+    """BUG-0516: dropped events and lag reach ``run_metrics`` during the run, not only
+    at close."""
+    clock = [0.0]
+    with Store(tmp_path / "s.db") as store:
+        run = store.start_run("auto", "h")
+        rec = trace.TraceRecorder(store, run, clock=lambda: clock[0])
+        rec.emit("run.start", {"origins": [O]}, key="r")
+        metrics = dict(store.conn.execute(
+            "SELECT key, value FROM run_metrics WHERE run_id=?", (run,)).fetchall())
+        assert metrics["trace_written"] == 1.0                   # before any close
+        clock[0] = trace.METRICS_SECONDS + 0.1
+        rec.emit("test.start", {"test": "t1"}, key="t")
+        metrics = dict(store.conn.execute(
+            "SELECT key, value FROM run_metrics WHERE run_id=?", (run,)).fetchall())
+        assert metrics["trace_written"] == 2.0
+        rec.close()
+
+
+JWT = ("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0."
+       "dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U")
+
+
+@pytest.mark.parametrize("url,secret", [
+    ("http://admin:hunter2@h/x", "hunter2"),                      # userinfo
+    ("http://h/a;jsessionid=0123456789ABCDEFabcdef/b", "0123456789ABCDEFabcdef"),
+    (f"http://h/cb#access_token={JWT}&state=1", JWT),             # an implicit grant
+    (f"http://h/cb#code=Zq8vLm3NpR7sTw2X", "Zq8vLm3NpR7sTw2X"),
+    (f"http://h/reset/{JWT}", JWT),                               # a token in the path
+    ("/r?token=plain", "plain"),                                  # relative
+])
+def test_safe_ref_withholds_every_token_shape(url, secret):
+    """BUG-0514: what `safe_ref` returns never holds the secret, and a path token is
+    grouped like any id."""
+    assert secret not in trace.safe_ref(url)
+    path, _grouped = trace.interface_path(trace.safe_ref(url))
+    assert secret not in path and ";" not in path
+
+
+def test_scrub_event_passes_relative_urls_under_url_keys():
+    body = trace.scrub_event({"url": "/r?token=x9", "redirect": f"/cb#access_token={JWT}",
+                              "location": "query", "identity": "alice"})
+    assert "x9" not in body["url"] and JWT not in body["redirect"]
+    assert body["location"] == "query" and body["identity"] == "alice"

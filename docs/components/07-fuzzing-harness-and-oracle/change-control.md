@@ -3,6 +3,25 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0101 — Peer and unauthenticated replays traced; the redirect target keeps its own key (BUG-0513, BUG-0517) (2026-10-19)
+- Change:
+  - `harness/auto.py::run_auto`: with a recorder, `PeerAccounts.sender` (identity: its
+    name) and `.anonymous` (`anonymous`) are wrapped in `TracingSender`.
+  - `harness/tracing.py`: a response's `Location` is recorded as `redirect`; `location`
+    stays where the value was injected, and a retry copies the right one.
+- Reason: review findings A-B2/B-S2 and A-S1 (F-076).
+- Impact: a cross-account finding cites every replay. Exchange bodies gain `redirect`;
+  readers fall back to an older event's path-valued `location`.
+- Risk: low. The wrapper adds records only (the sender-conformance shapes are
+  unchanged).
+- Review: this entry follows the two-reviewer gate run after the fact over the diagrams series (F-076); both reviewers disagreed, and every confirmed finding in this component is fixed here or answered below.
+- Deliverables:
+  - [x] code; `tests/test_cross_account.py::test_run_auto_traces_the_peer_and_unauthenticated_replays`
+    (fails without the wrapping);
+    `tests/test_diagram_e2e.py::test_a_redirect_is_shown_with_its_target` — done
+  - [x] FR-FUZZ-60 edited in place; BUG-0513, BUG-0517; PA-0513, PA-0517 — done
+- Effectiveness: verified offline.
+
 ### CC-FUZZ-0100 — Each HTTP try is its own evidence; a PRG follow-up is recorded whether or not it was observed (FR-FUZZ-61, BUG-0510) (2026-10-19)
 - Change:
   - `fuzzlab/oracle/probe.py`:

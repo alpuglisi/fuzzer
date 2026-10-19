@@ -72,6 +72,8 @@ def run(tmp_path_factory):
         (base + "/go?to=x", "link"), (base + "/hangup?x=1", "link"),
         (base + "/slow?s=1", "link"), (base + "/x/" + EVIL, "link"),
         (base + f"/login?token={SECRETS[1]}", "link")])
+    # a load that failed: the spider stores status 0 (BUG-0515: never a reply)
+    con.execute("INSERT INTO discovered_pages VALUES (?,0,'link')", (base + "/gone",))
     con.execute("CREATE TABLE discovered_requests (id INTEGER PRIMARY KEY, page_url TEXT, "
                 "method TEXT, url TEXT, content_type TEXT, body_json TEXT, source TEXT, "
                 "signature TEXT)")
@@ -127,10 +129,17 @@ def test_the_data_flow_shows_the_application_and_keeps_testing_separate(run):
     assert orig["label"] == origin and orig["attrs"]["internals"][0].startswith("unknown")
     product = f"iface:{origin}|GET|/product/{{id}}"
     flow = next(f for f in app["flows"] if f["dst"] == product)
-    assert flow["src"] == trace.BROWSER and flow["observations"] == 2
+    # the spider's own page loads are the crawler's, not a browser's (BUG-0515)
+    assert flow["src"] == trace.SPIDER and flow["observations"] == 2
+    ids = {n["id"]: n for n in app["nodes"]}
+    assert ids[product]["knowledge"] == "inferred"           # a grouping, not a request
+    # a write the browser made and the spider blocked was never sent: drawn refused,
+    # apart from any traffic that was sent (BUG-0515)
     blocked = next(f for f in app["flows"] if f["dst"].endswith("|POST|/api/login"))
-    assert blocked["attrs"]["delivery"][0].startswith("blocked")
+    assert blocked["src"] == trace.BROWSER and blocked["protocol"] == "blocked"
+    assert blocked["attrs"]["refused"][0].startswith("blocked")
     assert blocked["attrs"]["data"] == ["credential:json", "data:json"]
+    assert "-.->|\"blocked" in diagram.mermaid_flow(app)
     with_tests = diagram.dataflow(conn, run["run"], overlay=True)
     tool = [f for f in with_tests["flows"] if f["view"] == "test"]
     assert tool and all(f["src"] == trace.TOOL for f in tool)
@@ -185,10 +194,25 @@ def test_missing_responses_and_timeouts_are_never_drawn_as_replies(run):
         assert "-x" in diagram.mermaid_sequence(seq)
 
 
+def test_a_failed_spider_load_is_drawn_lost_never_as_a_reply(run):
+    conn, run_id = run["store"].conn, run["run"]
+    seq = diagram.sequence(conn, run_id, "spider")
+    i = next(i for i, s in enumerate(seq["steps"]) if "/gone" in s.get("label", ""))
+    after = seq["steps"][i + 1]
+    assert after["type"] == "lost" and "no response" in after["label"]
+    assert not any(s["kind"] == "response" and s["label"] == "0" for s in seq["steps"])
+    gone = next(f for f in diagram.dataflow(conn, run_id)["flows"]
+                if f["dst"].endswith("|GET|/gone"))
+    assert "status" not in gone["attrs"]
+
+
 def test_a_redirect_is_shown_with_its_target(run):
     conn, run_id = run["store"].conn, run["run"]
     redirects = _exchanges(conn, run_id, status=302)
-    assert redirects and all(b["location"].endswith("/landing") for _k, b in redirects)
+    assert redirects and all(b["redirect"].endswith("/landing") for _k, b in redirects)
+    # the response's target never replaces where the value was injected (BUG-0517)
+    assert all(b["location"] in ("query", "body", "header", "path", "cookie")
+               for _k, b in redirects if b.get("param"))
 
 
 def test_no_secret_reaches_events_model_or_exports(run):
@@ -278,9 +302,16 @@ def test_a_capture_gives_origins_auth_contexts_workflows_and_external_refs(tmp_p
     rec(6.0, "WS", api.replace("http", "ws") + "/socket", kind="ws", ws="client",
         status=101, body="hello")
     rec(7.0, "GET", page + "/beacon", action=None)
-    (run_dir / "actions.jsonl").write_text(json.dumps(
+    rec(8.0, "GET", page + "/about", action="nav-2")
+    rec(9.0, "GET", page + "/#/route", action="harvest-3")
+    (run_dir / "actions.jsonl").write_text("\n".join(json.dumps(d) for d in (
         {"seq": 1, "kind": "click", "label": '<img src=x onerror=alert(1)>',
-         "route": page + "/", "url": page + "/", "state": "s"}) + "\n")
+         "route": page + "/", "url": page + "/", "state": "s"},
+        # a link click logged before ``action_id`` existed: its id is the records'
+        {"seq": 2, "kind": "click", "label": "About", "route": page + "/",
+         "url": page + "/about", "state": "s"},
+        {"seq": 3, "action_id": "harvest-3", "kind": "load", "label": "",
+         "route": page + "/#/route", "url": page + "/#/route", "state": None})) + "\n")
     (run_dir / "capture.jsonl.stats.json").write_text(json.dumps(
         {"blocked": {"evil.example.com": 3}, "recorded": 7}))
     with Store(tmp_path / "s.db") as store:
@@ -309,6 +340,20 @@ def test_a_capture_gives_origins_auth_contexts_workflows_and_external_refs(tmp_p
         assert kinds[0] == "action" and "forward" in kinds and "ws" in kinds
         lost = [s for s in seq["steps"] if s["type"] == "lost"]
         assert len(lost) == 1 and "ConnectionResetError" in lost[0]["label"]
+        # BUG-0512: an action and the requests it caused share one workflow, whatever
+        # its id's prefix; no workflow holds an action alone
+        for action, path in (("nav-2", "/about"), ("harvest-3", "/")):
+            wf = diagram.sequence(conn, run_id, f"workflow:{action}")
+            assert wf["steps"][0]["kind"] == "action"
+            assert any(path in s["label"] for s in wf["steps"] if s["kind"] == "request")
+        workflows = {s["scope"] for s in diagram.scopes(conn, run_id)
+                     if s["kind"] == "workflow"}
+        assert workflows == {"workflow:act-1", "workflow:nav-2", "workflow:harvest-3"}
+        # stable keys: importing the same run again adds nothing
+        again = trace.TraceRecorder(store, run_id)
+        with trace.recording(again):
+            store_adapter.import_disco(run_dir, store, run_id, base_url=page)
+        assert again.close()["written"] == 0
         unc = diagram.sequence(conn, run_id, "capture")
         assert "uncorrelated" in unc["notes"][0]
         blob = json.dumps(diagram.export_json(conn, run_id)) + "".join(

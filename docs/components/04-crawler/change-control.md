@@ -3,6 +3,18 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0048 — Disco logs each action's own id (BUG-0512) (2026-10-19)
+- Change (`fuzzlab/disco/explore.py`): `_log_action` and `_log_load` write
+  `action_id`, the id the action's requests carry (`act-`, `nav-`, `harvest-`).
+- Reason: the importer had to guess the prefix (BUG-0512).
+- Impact: one more key per `actions.jsonl` line. Readers that ignore it are unaffected.
+- Risk: low.
+- Review: this entry follows the two-reviewer gate run after the fact over the diagrams series (F-076); both reviewers disagreed, and every confirmed finding in this component is fixed here or answered below.
+- Deliverables:
+  - [x] code; covered by the capture test in `tests/test_diagram_e2e.py` (the log's own
+    `action_id` and the fallback for an old log) — done
+- Effectiveness: verified offline; a live disco run will carry it.
+
 ### CC-CRAWL-0047 — The spider records which page queued each page, and when it saw pages and captured requests (FR-CRAWL-29); a copied crawl worker no longer keeps the first worker's browser listeners (BUG-0509) (2026-10-19)
 - Change (`fuzzlab/tools/spider.py`):
   - Spider DB: `discovered_pages` gains `found_from TEXT` and `seen_at REAL`,
