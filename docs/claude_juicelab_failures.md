@@ -901,11 +901,17 @@ Juice Shop lab is complete.
 - **What:** `docs/DIAGRAMS.md` ("Known limits") and `report.diagram.status()`'s unsupported list, both mine (CC-UI-0058), say the M6 browser confirmation "records its HTTP sends". Its store request and page loads go through the Playwright driver, never `TracingSender`, so none is traced. My own test comment (`test_a_unit_of_work_closing_is_written_at_once`) already said M6 "sends nothing through the sender". I did not count M6's requests against the target's log (the check PA-0513 now requires).
 - **Evidence:** DG-M6M8 phase 1 (2026-10-19): a loopback `run_pipeline` with a browser: the target received 8 requests for two M6 tests, the trace held 0 M6 exchanges, and the `/dom` finding cites none (BUG-0520).
 - **Impact:** pushed docs and the status line overstated the evidence; M6 tests and findings show no target traffic, and *executed* undercounts them.
-- **Status:** open: CC-FUZZ-0102 (DG-M6M8) is under the review gate.
+- **Status:** open: CC-FUZZ-0102 (with CC-CORE-0065, CC-UI-0064) revised after gate round 1 (2026-10-19); round 2 awaits the owner. Fixed when it lands with its server-count test green.
 
 ### F-082 — My BUG-0514 redaction fix missed a token inside a segment
 - **What:** the token-shape list I tested for BUG-0514 held standalone URLs only; the tool's own out-of-band payloads embed a URL followed by `)` or a backtick, and my segment-level check kept their canary token.
 - **Evidence:** BUG-0521, measured on 9b17d0d: `$(curl …/cb/<tok>)` and `` `curl …/cb/<tok>` `` previews kept the token.
 - **Impact:** pushed traces and exports of command-injection probes carried the canary token.
 - **Status:** fixed (CC-CORE-0066, PA-0521).
+
+### F-083 — A lane wrote that no test double implements `wait_for`; two do
+- **What:** draft CC-FUZZ-0102 (revision 1, DG-M6M8) said adding `wait_for(..., cites=)` was safe because no double implements `wait_for` ("searched"). The search's output was piped through `| head`, which hid `tests/test_probe_unobserved.py:345` and `:577`; the proposed signature would have broken both.
+- **Evidence:** both gate reviewers, round 1 (2026-10-19); re-checked by the lane.
+- **Impact:** none landed; one review round spent.
+- **Status:** fixed in revision 2 (`oob.py` unchanged; one helper in `strategies.py`; a test running those doubles through it).
 
