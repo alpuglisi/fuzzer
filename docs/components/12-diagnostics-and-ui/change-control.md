@@ -3,6 +3,46 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0064 — Sequences draw the confirmation steps; *executed* counts M6 loads; the status names the remaining limits (FR-UI-511, FR-FUZZ-62) (2026-10-19)
+- Change: `fuzzlab/report/diagram.py`:
+  - `_test_sequence` draws `browser.step` (`_browser_step`) and `oob.wait`
+    (`_oob_step`), with participants "Browser driven by the tool (M6)", "Out-of-band
+    listener (tool, loopback)" and "Callback source <address>".
+    - Only `response` is drawn as a reply.
+    - `no_status`, `not_sent`, a failed launch, `load` `not_fired`, `end` and a missing
+      callback are notes; a refusal, `timeout` and `error` are lost arrows.
+    - Two stamps less than 100 ms apart are drawn "at about load time".
+  - The strategy filter of the finding's sequence includes the two kinds.
+  - The finding note's evidence and `finding_links` gain `steps`.
+  - `interface_coverage` counts as *executed* a test's `store` and `navigate` steps that
+    are not `not_sent`. Page counts are not counted.
+  - `M6_BROWSER` is added to every actor-id list at `56ede12`: the finding keep-set and
+    the client-server and testing boundaries.
+  - `status()["unsupported"]` replaces the false M6 line with the limits that remain.
+  - Only the existing step types are used, so `mermaid_sequence` and `diagrams.js` are
+    unchanged.
+  - FR-UI-511 is edited in place.
+- Reason: FR-FUZZ-62 (CC-FUZZ-0102); BUG-0520.
+- Impact:
+  - Export shapes are unchanged; sequences, `finding_links` and the boundaries gain
+    content.
+  - Merges after CC-UI-0063 (DG-FINDLINK), which replaces the finding keep-set with a
+    relation-based one. On rebase, `M6_BROWSER`'s entry there is dropped if CC-UI-0063
+    needs no list.
+- Risk: low to medium (a merge with CC-UI-0063 in the same functions); implemented
+  after it.
+- Review: covered by the CC-FUZZ-0102 gate (3/3 on revision 3).
+- Deliverables:
+  - [x] the code — done
+  - [x] tests — done:
+    - `tests/test_diagram_e2e.py::test_m6_and_m8_steps_are_drawn_in_the_test_and_finding_sequences`
+    - `tests/test_diagram_e2e.py::test_each_confirmation_non_event_is_drawn_lost_or_absent`
+      (12 negative fixtures)
+    - `tests/test_diagram_e2e.py::test_confirmation_steps_export_to_mermaid_and_status_names_only_the_remaining_limits`
+    - `tests/test_trace_model.py::test_executed_counts_an_m6_visits_store_and_observe_loads`
+  - [x] the FR-UI-511 edit — done
+  - [ ] rebase onto CC-UI-0063 — todo
+- Effectiveness (assessed 2026-10-19): each test fails on `56ede12`: UI_PROOFS
 ### CC-UI-0065 — The ⚑ count on an interface reads the exact coverage (BUG-0519 sweep) (2026-10-19)
 - Change (`fuzzlab/web/static/js/diagrams.js`): an interface's ⚑ count is
   `coverage.finding` (counted in SQL), not the length of the capped `attrs.finding`; a

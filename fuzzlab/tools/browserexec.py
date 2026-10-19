@@ -13,9 +13,11 @@ from __future__ import annotations
 import logging
 import re
 import time
+import uuid
 from contextlib import suppress
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
+from fuzzlab.core import trace
 from fuzzlab.oracle.browser import SENTINEL, ExecObservation, ExecRequest, NotObserved
 from fuzzlab.oracle.probe import UnplaceableLocation
 
@@ -88,6 +90,276 @@ def _failure_reason(exc) -> str:
 
 
 
+class _VisitTrace:
+    """One M6 visit's steps (FR-FUZZ-62), noted where each happens, emitted once.
+
+    Created by `PlaywrightBrowserExecutor.run` only when a trace recorder is active; it
+    reads the test and strategy (`trace.current`) there, on the strategy's own greenlet.
+    Playwright runs its callbacks (the route handler, the sentinel binding, page
+    events) in other greenlets, where that context and the recorder are not visible
+    (measured, CC-FUZZ-0102): so a callback only notes a stamped fact here, and `emit`,
+    called by `run` once the browser and its driver are gone, records the visit's
+    events, each with the stamp its step took (``time.time()`` when Python received the
+    driver's event: not the browser's clock). Every method is total: the trace never
+    changes what the visit does or returns."""
+
+    #: Characters of an ``end`` detail kept.
+    MAX_DETAIL = 200
+
+    def __init__(self, request: ExecRequest, token: str):
+        self.visit = uuid.uuid4().hex[:12]
+        self.test, self.strategy, _role = trace.current()
+        self._token = str(token)
+        self._steps: list[tuple[float, int, dict]] = []
+        self._ended = False
+        self._launch_error: str | None = None
+        self._unavailable = False
+        self._paged = False
+        self.answered = 0
+        self._failed: list[str] = []
+        self._refused: list[tuple[float, str, str]] = []
+        self._load = None                  # (wall stamp, monotonic stamp) of `load`
+        self._sentinel: float | None = None
+        self._commit: float | None = None  # `Navigation.committed_at` (monotonic)
+        self._superseded = False
+        self._wait: tuple[float, float] | None = None
+
+    # --- noting (each total) -----------------------------------------------------------
+    def _note(self, step: str, body: dict, t: float | None = None) -> None:
+        try:
+            self._steps.append((time.time() if t is None else t, len(self._steps),
+                                {"step": step, **body}))
+        except Exception:  # noqa: BLE001 - the trace never changes the visit
+            pass
+
+    @staticmethod
+    def _sent(url, param, value, location) -> dict:
+        from fuzzlab.core.urls import canonical_origin
+        body = {"url": trace.safe_ref(url), "origin": canonical_origin(url),
+                "param": param, "location": location}
+        if param is not None and value is not None:
+            digest, length = trace.value_digest(value)
+            body.update(value_sha=digest, value_len=length,
+                        value_preview=trace.value_preview(param, value))
+        return body
+
+    @staticmethod
+    def _failure(exc) -> dict:
+        name = type(exc).__name__
+        return {"outcome": "timeout" if "Timeout" in name else "error", "error": name}
+
+    def refused_placement(self, step: str, request: ExecRequest, detail: str) -> None:
+        """A placement refusal before any browser starts: the request is not sent, and
+        the visit ends ``unplaceable`` here, never derived from the returned observation
+        (which would read as "did not fire")."""
+        try:
+            if step == "store":
+                s = request.store
+                body = self._sent(s.url, s.param, s.value, s.location) | {
+                    "method": (s.method or "").upper()}
+            else:
+                body = self._sent(request.url, request.param, request.value,
+                                  request.location) | {"method": "GET"}
+            self._note(step, body | {"outcome": "not_sent", "detail": detail[:120]})
+            self.end("unplaceable", detail=detail)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def launch_failed(self, exc) -> None:
+        """The browser or its driver could not start: its class only, never its text."""
+        self._launch_error = type(exc).__name__
+        self._note("launch", {"outcome": "failed", "error": self._launch_error})
+
+    def unavailable(self) -> None:
+        self._unavailable = True
+
+    @staticmethod
+    def started() -> tuple[float, float]:
+        return time.time(), time.perf_counter()
+
+    def store_done(self, started, s, status, exc=None) -> None:
+        try:
+            t, clock = started
+            body = self._sent(s.url, s.param, s.value, s.location) | {
+                "method": "GET" if s.location == "query" else (s.method or "").upper(),
+                "elapsed_ms": round((time.perf_counter() - clock) * 1000, 1)}
+            if isinstance(exc, PermissionError):     # `checked_api_request`'s refusal
+                body.update(outcome="not_sent", detail="out of scope")
+            elif exc is not None:
+                body.update(self._failure(exc))
+            elif isinstance(status, int):
+                body.update(outcome="response", status=status)
+            else:
+                body.update(outcome="no_status")     # a double, or no response object
+            self._note("store", body, t)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def navigate_done(self, started, request: ExecRequest, nav=None, exc=None) -> None:
+        try:
+            t, clock = started
+            located = request.param is not None
+            body = self._sent(request.url, request.param, request.value,
+                              request.location if located else None)
+            body.update(method="GET",
+                        elapsed_ms=round((time.perf_counter() - clock) * 1000, 1))
+            if located:
+                body["value_sent"] = request.location != "fragment"
+            if exc is not None:
+                body.update(self._failure(exc))
+            else:
+                status = getattr(getattr(nav, "response", None), "status", None)
+                body.update({"outcome": "response", "status": status}
+                            if isinstance(status, int) else {"outcome": "no_status"})
+                committed = getattr(nav, "committed_at", None)
+                self._commit = committed if isinstance(committed, (int, float)) else None
+                self._superseded = getattr(nav, "superseded", False) is True
+            self._note("navigate", body, t)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def binding(self, hits: set):
+        """The sentinel binding: today's ``hits.add``, and the stamp of this visit's own
+        token."""
+        def _hit(_source, t):
+            hits.add(str(t))
+            try:
+                if str(t) == self._token and self._sentinel is None:
+                    self._sentinel = time.time()
+            except Exception:  # noqa: BLE001
+                pass
+        return _hit
+
+    def on_load(self, load_at: list):
+        """The ``load`` callback: today's ``load_at`` stamp, and this step's."""
+        def _loaded(*_):
+            load_at.__setitem__(0, time.monotonic())
+            try:
+                if self._load is None:
+                    self._load = (time.time(), load_at[0])
+            except Exception:  # noqa: BLE001
+                pass
+        return _loaded
+
+    def on_abort(self, url, reason) -> None:
+        """The guard refused a request (a destructive URL): never sent."""
+        try:
+            self._refused.append((time.time(), str(url), str(reason)))
+        except Exception:  # noqa: BLE001
+            pass
+
+    def on_out_of_scope(self, url) -> None:
+        """The guard refused a request or a WebSocket outside the scope: never sent."""
+        self.on_abort(url, "out of scope")
+
+    def on_response(self, _response) -> None:
+        self.answered += 1
+
+    def on_failed(self, request) -> None:
+        try:
+            self._failed.append(str(request.url))
+        except Exception:  # noqa: BLE001
+            pass
+
+    def listen(self, page) -> None:
+        """The page's network events, counted only: what the page received, and its
+        requests that failed."""
+        try:
+            page.on("response", self.on_response)
+            page.on("requestfailed", self.on_failed)
+            self._paged = True
+        except Exception:  # noqa: BLE001
+            pass
+
+    def waited(self, window_ms: float, waited_s: float) -> None:
+        self._wait = (window_ms, round(waited_s * 1000, 1))
+
+    # --- the end ----------------------------------------------------------------------
+    def end(self, outcome: str, detail: str | None = None) -> None:
+        if self._ended:
+            return
+        self._ended = True
+        body = {"outcome": outcome}
+        if detail:
+            body["detail"] = str(detail)[:self.MAX_DETAIL]
+        if self._wait is not None:
+            body.update(window_ms=self._wait[0], waited_ms=self._wait[1])
+        self._note("end", body)
+
+    def end_returned(self, obs) -> None:
+        try:
+            self.end("executed" if getattr(obs, "executed", False) is True
+                     else "not_executed")
+        except Exception:  # noqa: BLE001
+            pass
+
+    def end_raised(self, exc) -> None:
+        """`NotObserved` first: it subclasses `UnplaceableLocation`."""
+        try:
+            if isinstance(exc, NotObserved):
+                self.end("not_observed", detail=str(exc))
+            elif isinstance(exc, UnplaceableLocation):
+                if self._unavailable:
+                    detail = "browser unavailable for this run"
+                elif self._launch_error is not None:
+                    detail = f"browser unavailable ({self._launch_error})"
+                else:
+                    detail = f"not placed ({type(exc).__name__})"
+                self.end("unplaceable", detail=detail)
+            else:
+                self.end("error", detail=type(exc).__name__)
+        except Exception:  # noqa: BLE001
+            pass
+
+    # --- the one emit -------------------------------------------------------------------
+    def _derived(self) -> None:
+        """The steps known only once the visit is over: ``load``, ``sentinel``, the first
+        refusal and the page counts."""
+        if self._commit is not None:
+            if self._load is not None:
+                self._note("load", {"outcome": "fired", "after_commit_ms": round(
+                    (self._load[1] - self._commit) * 1000, 1)}, self._load[0])
+            else:
+                self._note("load", {"outcome": "not_fired",
+                                    "superseded": self._superseded})
+        if self._sentinel is not None:
+            self._note("sentinel", {"outcome": "fired", "after_load_ms": round(
+                (self._sentinel - self._load[0]) * 1000, 1) if self._load else None},
+                self._sentinel)
+        if self._refused:
+            from fuzzlab.core.urls import canonical_origin
+            t, url, reason = self._refused[0]
+            self._note("refused", {"url": trace.safe_ref(url),
+                                   "origin": canonical_origin(url),
+                                   "detail": reason[:120], "outcome": "not_sent"}, t)
+        if self._paged:
+            failed = list(self._failed)
+            for _t, url, _r in self._refused:       # refused: never sent, not failed
+                if url in failed:
+                    failed.remove(url)
+            self._note("page", {"outcome": "counted", "answered": self.answered,
+                                "failed": len(failed), "refused": len(self._refused)})
+
+    def emit(self) -> None:
+        """Record the visit's events, each with its own stamp, in stamp order (the
+        ``end`` last). Contained: a failure is logged with its class only and never
+        replaces the visit's result."""
+        try:
+            self._derived()
+            base = {"test": self.test, "strategy": self.strategy, "visit": self.visit}
+            scope = f"test:{self.test}" if self.test else "run"
+            last = max((t for t, _n, _b in self._steps), default=0.0)
+            closing = {"page": 1, "end": 2}          # the visit's summary, then its end
+            ordered = sorted(self._steps, key=lambda s: (
+                closing.get(s[2]["step"], 0), s[0], s[1]))
+            for t, _n, body in ordered:
+                when = max(t, last) if body["step"] in ("page", "end") else t
+                trace.emit_step("browser.step", base | body, scope=scope, t=when)
+        except Exception as exc:  # noqa: BLE001 - the trace never changes the visit
+            logging.warning(f"M6: the visit's trace steps were not recorded "
+                            f"({type(exc).__name__})")
+
+
 class PlaywrightBrowserExecutor:
     """Drive a headless browser to confirm stored/DOM XSS. Lab-only, loopback targets."""
 
@@ -137,32 +409,60 @@ class PlaywrightBrowserExecutor:
         return token in hits
 
     def run(self, request: ExecRequest, token: str) -> ExecObservation:
-        # refuse, never relocate (BUG-0115, PA-0115): checked before any browser starts
-        if request.param is not None and request.location not in ("query", "fragment"):
-            return ExecObservation(False, detail=f"unplaceable location {request.location!r}")
-        if request.store is not None:
-            refusal, _body = _store_plan(request.store)
-            if refusal is not None:
-                return ExecObservation(False, detail=refusal)
-        from playwright.sync_api import Error as PlaywrightError
-        from playwright.sync_api import sync_playwright
+        # FR-FUZZ-62: one visit's steps, only with an active recorder (none: ``None``,
+        # and every ``visit`` use below is skipped)
+        visit = _VisitTrace(request, token) if trace.active() is not None else None
+        manager = PlaywrightError = None
+        entered = False
+        try:
+            # refuse, never relocate (BUG-0115, PA-0115): checked before any browser
+            # starts
+            if request.param is not None and request.location not in ("query", "fragment"):
+                detail = f"unplaceable location {request.location!r}"
+                if visit is not None:
+                    visit.refused_placement("navigate", request, detail)
+                return ExecObservation(False, detail=detail)
+            if request.store is not None:
+                refusal, _body = _store_plan(request.store)
+                if refusal is not None:
+                    if visit is not None:
+                        visit.refused_placement("store", request, refusal)
+                    return ExecObservation(False, detail=refusal)
+            from playwright.sync_api import Error as PlaywrightError
+            from playwright.sync_api import sync_playwright
 
-        if self._unavailable is not None:              # BUG-0126: no browser, no verdict
-            raise UnplaceableLocation(self._unavailable)
-        try:
-            manager = sync_playwright()
-            pw = manager.__enter__()                   # the driver itself may not start
-        except Exception as exc:  # noqa: BLE001 - reviewer A: a driver that cannot start
-            self._launch_failed(exc)                   # is the same as no browser
-        try:
+            if self._unavailable is not None:          # BUG-0126: no browser, no verdict
+                if visit is not None:
+                    visit.unavailable()
+                raise UnplaceableLocation(self._unavailable)
+            try:
+                manager = sync_playwright()
+                pw = manager.__enter__()               # the driver itself may not start
+            except Exception as exc:  # noqa: BLE001 - reviewer A: a driver that cannot
+                if visit is not None:                  # start is the same as no browser
+                    visit.launch_failed(exc)
+                self._launch_failed(exc)
+            entered = True
             # a result, or the probe's own no-verdict (NotObserved / a launch failure),
             # or a defect: the driver's stop below never replaces any of them (Z2)
-            return self._in_browser(pw, request, token, PlaywrightError)
+            obs = self._in_browser(pw, request, token, PlaywrightError, visit)
+            if visit is not None:
+                visit.end_returned(obs)
+            return obs
+        except BaseException as exc:
+            if visit is not None:
+                visit.end_raised(exc)                  # contained; re-raised unchanged
+            raise
         finally:
-            self._stop_driver(manager, PlaywrightError)
+            try:
+                if entered:
+                    self._stop_driver(manager, PlaywrightError)
+            finally:
+                if visit is not None:
+                    visit.emit()                       # contained (FR-FUZZ-62)
 
     def _in_browser(self, pw, request: ExecRequest, token: str,
-                    error) -> ExecObservation:
+                    error, visit: _VisitTrace | None = None) -> ExecObservation:
         from fuzzlab.core.urls import in_origin_scope, origin_scope, url_key
         from fuzzlab.tools.navguard import (browser_launch_args, checked_api_request,
                                             chromium_launch_kwargs, guard_page,
@@ -178,6 +478,8 @@ class PlaywrightBrowserExecutor:
         try:
             browser = pw.chromium.launch(**launch)
         except Exception as exc:  # noqa: BLE001 - any launch failure: no browser here
+            if visit is not None:
+                visit.launch_failed(exc)
             self._launch_failed(exc)
         self._failures = 0
         context = page = None
@@ -187,8 +489,11 @@ class PlaywrightBrowserExecutor:
             context = browser.new_context(service_workers="block")   # BUG-0111
             # the sentinel is a binding: every document of the page calls back here,
             # so a hit survives the page navigating afterwards (reviewer B)
-            context.expose_binding(SENTINEL, lambda _source, t: hits.add(str(t)))
+            context.expose_binding(SENTINEL, (lambda _source, t: hits.add(str(t)))
+                                   if visit is None else visit.binding(hits))
             page = context.new_page()
+            if visit is not None:                         # FR-FUZZ-62: counted only
+                visit.listen(page)
             # Abort destructive subresources/redirects; the navigation targets
             # themselves are the explicit (ground-truth) points (BUG-0111).
             allowed = {url_key(request.url)}
@@ -196,8 +501,13 @@ class PlaywrightBrowserExecutor:
                 allowed.add(url_key(request.store.url))
             # storage headers go through the guarded route only, in scope, never
             # set_extra_http_headers (FR-CRAWL-14's mechanism, CC-FUZZ-0076)
-            guard_page(context, allow=frozenset(allowed), in_scope=in_scope,
-                       headers=dict(self._headers) or None)
+            if visit is None:
+                guard_page(context, allow=frozenset(allowed), in_scope=in_scope,
+                           headers=dict(self._headers) or None)
+            else:                                         # + recording-only refusals
+                guard_page(context, frozenset(allowed), visit.on_abort,
+                           in_scope=in_scope, on_out_of_scope=visit.on_out_of_scope,
+                           headers=dict(self._headers) or None)
             # a dialog is dismissed and never counted: the payloads call the
             # sentinel, and an app's own alert/confirm is not the probe's doing
             # (BUG-0129)
@@ -206,22 +516,33 @@ class PlaywrightBrowserExecutor:
             if request.store is not None:                 # stored XSS: plant first
                 s = request.store
                 _refusal, store_body = _store_plan(s)
-                if store_body is not None:
-                    # API requests bypass `route`: scope-check, never redirect
-                    checked_api_request(in_scope, s.url)
-                    context.request.fetch(s.url, method=s.method.upper(), data=store_body,
-                                          headers={"Content-Type": "application/json"},
-                                          max_redirects=0)
-                elif s.location == "body":
-                    # API requests bypass `route`: scope-check, never redirect
-                    checked_api_request(in_scope, s.url)
-                    context.request.fetch(s.url, method=s.method.upper(),
-                                          form={s.param: s.value}, max_redirects=0)
-                else:
-                    # the commit, then a bounded load, as the observe navigation
-                    # (BUG-0137 review A-N3; the one helper since BUG-0138)
-                    navigate(page, _with_query(s.url, s.param, s.value),
-                             timeout_ms=self._timeout, wait_until="load", wait_ms=load_ms)
+                started = visit.started() if visit is not None else None
+                try:
+                    if store_body is not None:
+                        # API requests bypass `route`: scope-check, never redirect
+                        checked_api_request(in_scope, s.url)
+                        resp = context.request.fetch(
+                            s.url, method=s.method.upper(), data=store_body,
+                            headers={"Content-Type": "application/json"},
+                            max_redirects=0)
+                    elif s.location == "body":
+                        # API requests bypass `route`: scope-check, never redirect
+                        checked_api_request(in_scope, s.url)
+                        resp = context.request.fetch(s.url, method=s.method.upper(),
+                                                     form={s.param: s.value},
+                                                     max_redirects=0)
+                    else:
+                        # the commit, then a bounded load, as the observe navigation
+                        # (BUG-0137 review A-N3; the one helper since BUG-0138)
+                        resp = navigate(page, _with_query(s.url, s.param, s.value),
+                                        timeout_ms=self._timeout, wait_until="load",
+                                        wait_ms=load_ms).response
+                except BaseException as exc:
+                    if visit is not None:
+                        visit.store_done(started, s, None, exc)
+                    raise
+                if visit is not None:
+                    visit.store_done(started, s, getattr(resp, "status", None))
 
             target = request.url
             if request.param is not None and request.value is not None:
@@ -229,16 +550,28 @@ class PlaywrightBrowserExecutor:
                           else _with_query)(request.url, request.param, request.value)
             # when the observe navigation's `load` fires (BUG-0137 review Z3)
             load_at: list = [None]
-            page.once("load", lambda *_: load_at.__setitem__(0, time.monotonic()))
+            page.once("load", (lambda *_: load_at.__setitem__(0, time.monotonic()))
+                      if visit is None else visit.on_load(load_at))
             # BUG-0137: wait for the commit only, then for `load` briefly: a load
             # that a refused navigation superseded never comes, and is not waited
             # out (it was `timeout_ms`, then a raise); the one helper (BUG-0138),
             # which also ends the wait once that refused navigation is reported
-            nav = navigate(page, target, timeout_ms=self._timeout, wait_until="load",
-                           wait_ms=load_ms)
+            started = visit.started() if visit is not None else None
+            try:
+                nav = navigate(page, target, timeout_ms=self._timeout, wait_until="load",
+                               wait_ms=load_ms)
+            except BaseException as exc:
+                if visit is not None:
+                    visit.navigate_done(started, request, exc=exc)
+                raise
+            if visit is not None:
+                visit.navigate_done(started, request, nav)
+            waiting = time.monotonic()
             fired = self._wait_for_token(                  # BUG-0126: async sinks
                 page, hits, token, error, load_at,
                 cap=nav.committed_at + (self._timeout + self.SETTLE_MS) / 1000)
+            if visit is not None:
+                visit.waited(self.SETTLE_MS, time.monotonic() - waiting)
             loaded = fired or load_state_reached(page, "load")
             if fired or token in hits:                     # re-read after the load check
                 return ExecObservation(executed=True, detail="playwright")

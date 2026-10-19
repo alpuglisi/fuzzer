@@ -1396,6 +1396,38 @@ def _send_blind(send: Callable[[], object]) -> bool:
         return True
     return False
 
+def _await_callback(listener, token: str, canary: str, timeout: float):
+    """Wait for ``token``'s callback exactly as before (`OobListener.wait_for`) and, with
+    an active recorder, record what the wait saw as one ``oob.wait`` step (FR-FUZZ-62):
+    on the strategy's own thread, where the trace context is visible (the listener's
+    handler thread has none). One clock, ``time.time()``, the one behind
+    `OobHit.received_at`; a hit without ``received_at`` (a test double) has no
+    ``after_wait_ms``. The record is contained: it never changes the hit returned."""
+    if trace.active() is None:
+        return listener.wait_for(token, timeout=timeout)
+    import time
+    started = time.time()
+    hit = listener.wait_for(token, timeout=timeout)
+    ended = time.time()
+    try:
+        received = getattr(hit, "received_at", None) if hit is not None else None
+        test, strategy, _role = trace.current()
+        trace.emit_step("oob.wait", {
+            "test": test, "strategy": strategy, "url": trace.safe_ref(canary),
+            "window_ms": round(timeout * 1000, 1),
+            "waited_ms": round((ended - started) * 1000, 1),
+            "outcome": "received" if hit is not None else "none",
+            "after_wait_ms": round((received - started) * 1000, 1)
+            if isinstance(received, (int, float)) else None,
+            "remote": getattr(hit, "remote_addr", None) if hit is not None else None},
+            t=received if isinstance(received, (int, float)) else ended)
+    except Exception as exc:  # noqa: BLE001 - the trace never changes the confirmation
+        from fuzzlab.core.obs import get_logger
+        get_logger("trace").warning("out-of-band step not recorded",
+                                    extra={"error": type(exc).__name__})
+    return hit
+
+
 #: What an out-of-band mechanism raises when a probe got no response and no callback came.
 _OOB_UNOBSERVED = "no response: an out-of-band probe got no response and no callback"
 
@@ -1427,7 +1459,7 @@ class CommandInjectionOobStrategy(ConfirmationStrategy):
             canary = _canary(self._listener, token)
             value = (candidate.base_value or "") + template.format(url=canary)
             unobserved |= _send_blind(lambda v=value: self._send(sender, candidate, v))
-            hit = self._listener.wait_for(token, timeout=self._timeout)
+            hit = _await_callback(self._listener, token, canary, self._timeout)
             if hit is not None:
                 return Verdict(True, self.vuln_class, self.mechanism,
                                {"canary": canary, "template": template,
@@ -1502,7 +1534,7 @@ class SsrfOobStrategy(ConfirmationStrategy):
         token = self._listener.register()
         canary = _canary(self._listener, token)
         unobserved = _send_blind(lambda: self._send(sender, candidate, canary))
-        hit = self._listener.wait_for(token, timeout=self._timeout)
+        hit = _await_callback(self._listener, token, canary, self._timeout)
         if hit is not None:
             return Verdict(True, self.vuln_class, self.mechanism,
                            {"canary": canary, "hit_path": hit.path,
@@ -1888,7 +1920,7 @@ class XxeOobStrategy(ConfirmationStrategy):
             candidate.url, candidate.param, _xxe_payload(canary, _XXE_ENTITY_WRAPPERS[0]),
             method=candidate.method, location=candidate.location,
             content_type="application/xml"))
-        hit = self._listener.wait_for(token, timeout=self._timeout)
+        hit = _await_callback(self._listener, token, canary, self._timeout)
         if hit is not None:
             return Verdict(True, self.vuln_class, self.mechanism,
                            {"canary": canary, "hit_path": hit.path})

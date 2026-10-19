@@ -3,6 +3,39 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0065 — Trace steps a strategy run cites, and the M6 browser in the testing overlay (FR-CORE-505, FR-FUZZ-62) (2026-10-19)
+- Change: `fuzzlab/core/trace.py`:
+  - `strategy_scope` also resets a new `_STEPS` contextvar.
+  - New `emit_step(kind, body, *, scope=None, t=NOW)` emits and adds the key to
+    `_STEPS`; the scope defaults to `test:<test>` or `run`.
+  - New `collected_steps()`.
+  - New `M6_BROWSER = "actor:tool-browser"`.
+  - New `_apply` branch. A `browser.step` with `step` `store` or `navigate`, an
+    `origin` and an outcome other than `not_sent` adds:
+    - the `M6_BROWSER` actor ("Browser driven by the tool (M6)");
+    - the origin and the interface (`tested`);
+    - a `test`-view `http` flow from `M6_BROWSER`, keyed apart from the tool's exchange
+      flow to the same interface (PA-0515(1)).
+
+    `oob.wait` adds nothing to the model.
+  - FR-CORE-505 is edited in place.
+- Reason: FR-FUZZ-62 (CC-FUZZ-0102). A finding cites the confirmation steps its
+  strategy run recorded, as it cites exchanges. The M6 browser's sends are traffic of
+  their own.
+- Impact:
+  - Additive, with no migration. `scrub_event` is unchanged; every new body key passes
+    its name rule (measured).
+  - Read by FUZZ (the producers) and UI (the views).
+- Risk: low. Only the existing set and min/max merges are used, and the SP-48 guards
+  stay green.
+- Review: covered by the CC-FUZZ-0102 gate (3/3 on revision 3).
+- Deliverables (done):
+  - the code;
+  - `tests/test_trace_model.py::test_the_m6_browsers_overlay_flow_is_keyed_apart_from_the_tools_exchanges`;
+  - `tests/test_trace_model.py::test_browser_steps_reduce_independently_of_order`;
+  - the FR-CORE-505 edit.
+- Effectiveness (assessed 2026-10-19): both tests fail on `56ede12`: CORE_PROOFS
+
 ### CC-CORE-0066 — `safe_ref` blanks a token inside a path segment (BUG-0521) (2026-10-19)
 - Change (`fuzzlab/core/trace.py::_blank_identifiers`): besides a whole identifier-like
   segment, an identifier-like run (`_TOKEN_RUN`, `[A-Za-z0-9_-+=]{8,}`) inside a segment is

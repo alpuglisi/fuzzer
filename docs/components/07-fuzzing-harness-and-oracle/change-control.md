@@ -3,6 +3,110 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0102 — The browser (M6) and out-of-band (M8) confirmations record each step they perform (FR-FUZZ-62, BUG-0520) (2026-10-19)
+- Change:
+  - `fuzzlab/tools/browserexec.py`:
+    - New `_VisitTrace`: one `PlaywrightBrowserExecutor.run` call is one *visit*.
+    - It is created only when `trace.active()` is set. It reads the test and strategy
+      (`trace.current()`) on the strategy's greenlet and mints `visit`.
+    - Callbacks only note a stamped fact, each method total:
+      - the sentinel binding, beside `hits.add`;
+      - the `load` callback, beside `load_at`;
+      - two recording-only `guard_page(on_abort=, on_out_of_scope=)` callbacks, which
+        cover the WebSocket handler too;
+      - counting-only `page.on("response")` and `page.on("requestfailed")`.
+    - `emit()` records the visit's `browser.step` events once, in stamp order, after the
+      browser is closed and the driver stopped. It is contained.
+  - `run` is restructured into an outer `try / except BaseException (end_raised,
+    re-raise) / finally (try _stop_driver, finally emit)`:
+    - the placement refusals and the driver's `__enter__` failure are recorded;
+    - a placement refusal ends `unplaceable` at the refusal;
+    - `end_raised` checks `NotObserved` before `UnplaceableLocation`;
+    - a launch failure ends with "browser unavailable (<class>)", and `_unavailable`
+      with "browser unavailable for this run": a class or a fixed phrase only.
+  - `_in_browser(…, visit=None)` notes the store (an API request's status by
+    `getattr`, `no_status` when there is none; a query store's navigation status) and
+    the observe navigation (status, commit, `superseded`; a raise is `timeout` or
+    `error` with its class), and the sentinel wait's window.
+  - `fuzzlab/oracle/strategies.py`:
+    - New `_await_callback(listener, token, canary, timeout)` replaces the three
+      `wait_for` calls in `CommandInjectionOobStrategy`, `SsrfOobStrategy` and
+      `XxeOobStrategy`, with the same arguments and the same return.
+    - With a recorder it emits one contained `oob.wait` on the strategy's thread. `t` is
+      `received_at`, or the end of the wait; one clock (`time.time()`) throughout;
+      `getattr` for a double's hit.
+    - `oracle/oob.py` is unchanged.
+  - `fuzzlab/oracle/oracle.py`: `test.strategy` and `finding` carry `steps`
+    (`trace.collected_steps()`).
+  - With no recorder, `run` adds one `trace.active()` call, the `visit is None` checks,
+    the outer `try` (which re-raises unchanged and stops the driver exactly as before),
+    try/except-reraise around the store and the observe navigation, and the store
+    result kept in a local. `_in_browser` passes today's lambdas and `guard_page`
+    arguments, and adds no listener.
+- Reason:
+  - DG-M6M8: the known limit "the browser's own steps inside M6 and M8 are not traced".
+  - BUG-0520, a recurrence of BUG-0513: M6 recorded none of its sends while the
+    diagrams said it recorded them (F-081).
+- Measured before design (gate rounds 1–3; scripts in the lane's scratchpad):
+  - Playwright's callbacks run in other greenlets, where `trace.current()` and the
+    recorder are not visible; the OOB handler thread likewise.
+  - Page events see the guard's answers and Chromium's own landing re-request. Neither
+    page events nor `observe=` see the guard's own redirect-hop fetches.
+  - A failed page request may still have reached the server.
+  - Visits take 1.0–2.5 s with `SETTLE_MS` lowered to 300–1500 ms; the launch takes
+    645–857 ms of that.
+- Impact:
+  - CORE: CC-CORE-0065 (`emit_step`, `collected_steps`, `M6_BROWSER`, the reducer
+    branch).
+  - UI: CC-UI-0064 (sequences, coverage, status), after CC-UI-0063.
+  - New event kinds `browser.step` and `oob.wait`. `test.strategy` and `finding` gain
+    `steps`.
+  - Not changed (T7): what is sent, every `ExecObservation` or exception, the
+    verdicts, findings, candidate statuses and request counts, and the listener's hits.
+    The windows are unchanged by construction: no trace work runs inside them.
+- Risk: medium (callbacks inside a verdict path; three components). Mitigations:
+  - callbacks only note, and every recording method is total;
+  - the emit runs after the driver stops and is contained;
+  - the OOB emit is contained;
+  - a recorder that fails on the new kinds changes nothing (T7);
+  - every fake Playwright the executor's tests use runs under a recorder (T9);
+  - R3 (timing) is argued from structure and measured (Effectiveness), not tested.
+- Review: pre-change gate, 3/3 on revision 3 (round 1: both reviewers disagreed; round
+  2: reviewer 2 agreed, reviewer 1 disagreed on P1's layer; round 3: reviewer 1
+  agreed).
+- Deliverables:
+  - [x] `tools/browserexec.py`, `oracle/strategies.py`, `oracle/oracle.py` — done
+  - [x] `tests/test_confirm_trace.py` (new) — done:
+    - T1 `test_an_m6_visit_records_each_step_where_it_happens`
+    - T2 `test_a_sink_that_never_fires_ends_not_executed_with_its_window`
+    - T3 `test_refused_navigations_are_recorded_and_drawn_never_sent`
+    - T4 `test_a_page_that_never_loads_ends_not_observed`
+    - T5 `test_each_store_kind_records_its_request`
+    - T6 `test_the_traced_browser_sends_match_what_the_server_received`
+    - T7 `test_tracing_changes_nothing_sent_and_no_verdict`
+    - T8 `test_browser_and_oob_steps_withhold_every_token_shape`
+    - T9 `test_the_fake_playwright_doubles_run_unchanged_under_a_recorder` (7 cases,
+      the 4 doubles)
+    - `test_a_launch_failure_is_one_failed_launch_step`
+    - `test_a_placement_refusal_ends_unplaceable_at_the_refusal`
+    - T11 `test_an_oob_wait_records_the_callback_at_the_listeners_stamp`
+    - T12 `test_no_callback_within_the_window_is_recorded_and_drawn_as_absence`
+    - T14 `test_the_canary_token_never_reaches_the_trace_the_model_or_the_exports`
+    - T15 `test_the_oob_helper_takes_listener_doubles_without_received_at`
+    - P1 `test_every_send_of_a_run_is_counted_by_the_server`
+    - P2 `test_the_count_test_covers_every_sending_keyword_of_run_auto`
+    - P3 `test_the_keyword_guard_catches_a_synthetic_new_keyword`
+  - [x] FR-FUZZ-62 added; FR-FUZZ-60 edited; BUG-0520 report — done
+  - [ ] Rebase onto DG-FINDLINK's merge; `scripts/verify_change.py --base <main>` —
+    todo (after DG-FINDLINK)
+  - [ ] CHANGELOG, ERROR_LOG, PA-0520, SHARED_PRIMITIVES, DIAGRAMS.md, ARCHITECTURE
+    (the orchestrator's files; the text is handed over) — todo
+- Effectiveness (assessed 2026-10-19, before the rebase):
+  - Each new test was shown to fail on `56ede12` (the old code) or with its own part
+    reverted. The failing lines are quoted below. EFFECTIVENESS_PROOFS
+  - Measured wall time per visit, 20 visits each, with and without a recorder: R3_TIMING
+  - The on-host Juice Shop check is pending.
+
 ### CC-FUZZ-0101 — Peer and unauthenticated replays traced; the redirect target keeps its own key (BUG-0513, BUG-0517) (2026-10-19)
 - Change:
   - `harness/auto.py::run_auto`: with a recorder, `PeerAccounts.sender` (identity: its

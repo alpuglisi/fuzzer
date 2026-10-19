@@ -640,7 +640,8 @@ plugin registry. It is the layer that makes the store the integration bus.
   producer's order), `t` (when it happened; NULL when the source records no time --
   never replaced by "now") and a JSON `body`. Kinds: `run.start` / `run.end`,
   `observe.exchange` / `observe.page` / `observe.action` / `observe.external`,
-  `test.start` / `test.strategy` / `test.end`, `exchange`, `finding`.
+  `test.start` / `test.strategy` / `test.end`, `exchange`, `finding`, and (FR-FUZZ-62,
+  `CC-CORE-0065`) `browser.step` / `oob.wait`, the M6 and M8 confirmations' steps.
   - **Model:** `dg_entity` (actors, the application, origins, interfaces, external
     hosts), `dg_flow` (`view` `app` or `test`) and `dg_evidence` (each entity or flow's
     supporting event keys) are derived by `reduce`, idempotently and independently of
@@ -657,7 +658,10 @@ plugin registry. It is the layer that makes the store the integration bus.
     observed). The spider's own page loads come from a "Spider (crawler, tool)" actor,
     never the browser. A request learnt in the browser and blocked before sending
     (`delivery` not `sent`) is a separate `blocked` flow with `refused`, never traffic.
-    A status of 0 is no status.
+    A status of 0 is no status. A `browser.step` `store` or `navigate` that was sent is
+    a `test`-view flow from `M6_BROWSER` ("Browser driven by the tool (M6)",
+    `CC-CORE-0065`), never merged with the tool's exchange flow to the same interface;
+    `oob.wait` adds nothing to the model.
   - **Interface identity** (SP-49): `interface_id(origin, method, url)` -- the origin,
     the method and the path with crawled placeholders kept and id-shaped or
     JavaScript-placeholder segments grouped as `{id}` (the grouping recorded as
@@ -684,7 +688,9 @@ plugin registry. It is the layer that makes the store the integration bus.
     flush, at most every `METRICS_SECONDS` (1 s) after, at once after a drop, and at
     `close` (BUG-0516). Execution points call
     `trace.emit` (a no-op without an active recorder, `trace.recording`) and read the
-    context (`test_scope`, `strategy_scope`, `role`, `collected`).
+    context (`test_scope`, `strategy_scope`, `role`, `collected`). A confirmation step
+    is emitted with `emit_step`, which also adds its key to the strategy run's
+    `collected_steps` (reset by `strategy_scope`; `CC-CORE-0065`).
 - **FR-CORE-500** *(one reader for a run's target; one method key; `CC-CORE-0500`,
   2026-10-15).*
   - `fuzzlab/core/runtarget.py` is the one reader of the `target` table (PA-0063(1)): a

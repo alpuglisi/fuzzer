@@ -365,3 +365,86 @@ def test_scrub_event_passes_relative_urls_under_url_keys():
                               "location": "query", "identity": "alice"})
     assert "x9" not in body["url"] and JWT not in body["redirect"]
     assert body["location"] == "query" and body["identity"] == "alice"
+
+
+# --- FR-FUZZ-62 (CC-CORE-0065): the M6 browser's steps -------------------------------
+def _m6(step, **body):
+    return {"test": "t1", "strategy": "xss-dom:browser-execution", "visit": "v1",
+            "step": step, "method": "GET", "origin": O} | body
+
+
+def test_executed_counts_an_m6_visits_store_and_observe_loads(tmp_path):
+    """FR-FUZZ-62: an M6 visit's store and observe loads are the test's own sends
+    (a ``no_status`` one was made too); a refused placement and the page counts are
+    not."""
+    from fuzzlab.report.diagram import interface_coverage
+    events = [
+        ("test.start", {"test": "t1", "url": O + "/a", "origin": O, "method": "GET"},
+         "ts", 1.0),
+        ("browser.step", _m6("navigate", url=O + "/a", outcome="response", status=200),
+         "b1", 2.0),
+        ("browser.step", _m6("store", url=O + "/s", method="POST", outcome="response",
+                             status=200), "b2", 3.0),
+        ("browser.step", _m6("store", url=O + "/s", method="POST", outcome="no_status"),
+         "b3", 4.0),
+        ("browser.step", _m6("navigate", url=O + "/a", outcome="not_sent"), "b4", 5.0),
+        ("browser.step", _m6("page", answered=7, failed=1, refused=2,
+                             outcome="counted"), "b5", 6.0),
+        ("browser.step", _m6("end", outcome="executed"), "b6", 7.0)]
+    with Store(tmp_path / "s.db") as store:
+        run = store.start_run("auto", "h")
+        _record(store, run, events)
+        cov = interface_coverage(store.conn, run)
+    assert cov[f"iface:{O}|GET|/a"]["executed"] == 3
+    assert cov.get(f"iface:{O}|POST|/s", {}).get("executed", 0) == 0
+
+
+def test_the_m6_browsers_overlay_flow_is_keyed_apart_from_the_tools_exchanges(tmp_path):
+    """FR-FUZZ-62 (PA-0515(1)): the tool's exchange and the M6 browser's load of one
+    interface are two flows, each with its own evidence; a refused placement is
+    none."""
+    events = [
+        ("exchange", {"test": "t1", "origin": O, "method": "GET", "url": O + "/a?q=1",
+                      "role": "probe", "outcome": "response", "status": 200}, "x1", 1.0),
+        ("browser.step", _m6("navigate", url=O + "/a", outcome="response", status=200),
+         "b1", 2.0),
+        ("browser.step", _m6("navigate", url=O + "/a", outcome="timeout"), "b2", 3.0),
+        ("browser.step", _m6("navigate", url=O + "/c", outcome="not_sent"), "b3", 4.0)]
+    with Store(tmp_path / "s.db") as store:
+        run = store.start_run("auto", "h")
+        _record(store, run, events)
+        ents, flows, ev = _snapshot(store.conn, run)
+    iface = f"iface:{O}|GET|/a"
+    tool = f"flow:test:{trace.TOOL}->{iface}:http"
+    m6 = f"flow:test:{trace.M6_BROWSER}->{iface}:http"
+    assert {tool, m6} <= set(flows)
+    assert [k for r, k in ev if r == tool] == ["x1"]
+    assert sorted(k for r, k in ev if r == m6) == ["b1", "b2"]
+    assert ents[trace.M6_BROWSER][0] == "observed"
+    assert f"iface:{O}|GET|/c" not in ents                  # never sent: no interface
+
+
+def test_browser_steps_reduce_independently_of_order(tmp_path):
+    """FR-FUZZ-62 (PA-0516): the M6 branch is order- and batching-independent and equal
+    to a rebuild."""
+    steps = [("browser.step", _m6("navigate", url=O + f"/p{i % 3}", outcome="response",
+                                  status=200 + i), f"b{i}", float(i)) for i in range(9)]
+    steps += [("exchange", {"test": "t1", "origin": O, "method": "GET",
+                            "url": O + "/p1", "role": "probe", "outcome": "response",
+                            "status": 200}, "x", 4.5),
+              ("browser.step", _m6("store", url=O + "/s", method="POST",
+                                   outcome="error", error="Error"), "bs", 0.5)]
+    snaps = []
+    with Store(tmp_path / "s.db") as store:
+        for order, batch in ((steps, 2), (steps[::-1], 1000),
+                             (steps[4:] + steps[:4], 3)):
+            run = store.start_run("auto", "h")
+            _record(store, run, order, max_buffer=batch)
+            snap = _snapshot(store.conn, run)
+            trace.rebuild(store.conn, run)
+            assert _snapshot(store.conn, run) == snap
+            snaps.append(snap)
+    assert snaps[0] == snaps[1] == snaps[2]
+    flows = snaps[0][1]
+    assert flows[f"flow:test:{trace.M6_BROWSER}->iface:{O}|POST|/s:http"][3]["outcome"] \
+        == ["error"]

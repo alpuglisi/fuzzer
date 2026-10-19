@@ -478,3 +478,182 @@ def test_a_finding_past_the_attribute_cap_keeps_its_interface_and_flows(tmp_path
         model = diagram.dataflow(store.conn, bare, overlay=True, finding=fid)
         assert {f["src"] for f in model["flows"]} == {trace.SPIDER, trace.BROWSER}
         _assert_draws_exactly_its_flows(store.conn, bare, fid)
+# --- FR-FUZZ-62 (CC-UI-0064): the browser and out-of-band confirmations' steps --------
+P = "http://127.0.0.1:9002"
+M6 = "xss-dom:browser-execution"
+
+
+def _step(kind, **body):
+    test, strategy, _r = trace.current()
+    return trace.emit_step(kind, {"test": test, "strategy": strategy, **body})
+
+
+def _m6(step, **body):
+    return _step("browser.step", visit="v1", step=step, **body)
+
+
+def _confirmed_m6_and_unconfirmed_m8(tmp_path):
+    """A DOM-XSS test confirmed by one visit (t1), a second strategy's steps in it that
+    the finding does not cite, and an SSRF test whose out-of-band wait saw nothing
+    (t2), as the producers record them."""
+    store = Store(tmp_path / "s.db")
+    run = store.start_run("auto", "h")
+    rec = trace.TraceRecorder(store, run)
+    keys = {}
+    with trace.recording(rec):
+        rec.emit("test.start", {"test": "t1", "url": P + "/dom", "origin": P,
+                                "method": "GET", "param": "q", "location": "query",
+                                "category": "xss"}, key="ts1", scope="test:t1")
+        with trace.test_scope("t1"):
+            with trace.strategy_scope("xss-stored:browser-execution"):
+                _m6("store", method="POST", url=P + "/post", origin=P, param="c",
+                    location="body", outcome="error", error="TimeoutError")
+                _m6("end", outcome="error", detail="TimeoutError")
+            with trace.strategy_scope(M6):
+                _m6("navigate", method="GET", url=P + "/dom", origin=P, param="q",
+                    location="query", value_preview="<img>", value_sent=True,
+                    outcome="response", status=200, elapsed_ms=40.0)
+                _m6("load", outcome="fired", after_commit_ms=30.0)
+                _m6("sentinel", outcome="fired", after_load_ms=850.0)
+                _m6("page", outcome="counted", answered=2, failed=0, refused=0)
+                _m6("end", outcome="executed")
+                keys["steps"] = trace.collected_steps()
+                rec.emit("test.strategy", {"test": "t1", "strategy": M6,
+                                           "outcome": "confirmed", "exchanges": [],
+                                           "steps": trace.collected_steps()},
+                         scope="test:t1")
+                rec.emit("finding", {"finding_id": 1, "test": "t1", "strategy": M6,
+                                     "mechanism": "browser-execution",
+                                     "vuln_class": "xss-dom", "url": P + "/dom",
+                                     "method": "GET", "param": "q", "origin": P,
+                                     "location": "query", "exchanges": [],
+                                     "steps": trace.collected_steps()},
+                         key="finding:1", scope="test:t1")
+        rec.emit("test.start", {"test": "t2", "url": P + "/fetch", "origin": P,
+                                "method": "GET", "param": "url", "location": "query",
+                                "category": "ssrf"}, key="ts2", scope="test:t2")
+        with trace.test_scope("t2"), trace.strategy_scope("ssrf:oob-fetch-callback"):
+            rec.emit("exchange", {"test": "t2", "strategy": "ssrf:oob-fetch-callback",
+                                  "role": "probe", "method": "GET",
+                                  "url": P + "/fetch", "origin": P, "param": "url",
+                                  "outcome": "response", "status": 200},
+                     scope="test:t2")
+            _step("oob.wait", url="http://127.0.0.1:9/cb/{redacted}", window_ms=3000.0,
+                  waited_ms=3011.0, outcome="none", after_wait_ms=None, remote=None)
+    rec.close()
+    return store, run, keys
+
+
+def test_m6_and_m8_steps_are_drawn_in_the_test_and_finding_sequences(tmp_path):
+    """FR-FUZZ-62: the steps are drawn in the test's sequence and, filtered to the
+    finding's strategy, in the finding's; the finding cites them; its filtered data
+    flow keeps the M6 browser's flow to the interface."""
+    store, run, keys = _confirmed_m6_and_unconfirmed_m8(tmp_path)
+    try:
+        conn = store.conn
+        labels = [s["label"] for s in diagram.sequence(conn, run, "test:t1")["steps"]]
+        assert any(lb.startswith("[observe] GET /dom q=") for lb in labels)
+        assert "payload executed: the sentinel fired (+850.0 ms after load)" in labels
+        assert any("[store] POST /post" in lb for lb in labels)    # its other strategy
+        fseq = diagram.sequence(conn, run, "finding:1")
+        flabels = [s["label"] for s in fseq["steps"]]
+        assert "payload executed: the sentinel fired (+850.0 ms after load)" in flabels
+        assert not any("[store]" in lb for lb in flabels)          # not this strategy
+        assert fseq["finding"]["steps"] == keys["steps"] and len(keys["steps"]) == 5
+        note = next(s for s in fseq["steps"] if s["kind"] == "finding")
+        assert set(keys["steps"]) <= set(note["evidence"])
+        assert "5 confirmation step(s)" in fseq["notes"][-1]
+        parties = {p["label"] for p in fseq["participants"]}
+        assert "Browser driven by the tool (M6)" in parties
+        flow = diagram.dataflow(conn, run, overlay=True, finding=1)
+        ids = {n["id"] for n in flow["nodes"]}
+        assert trace.M6_BROWSER in ids
+        iface = f"iface:{P}|GET|/dom"
+        assert any(f["src"] == trace.M6_BROWSER and f["dst"] == iface
+                   for f in flow["flows"])
+        t2 = diagram.sequence(conn, run, "test:t2")
+        assert [s["label"] for s in t2["steps"] if s.get("kind") == "absence"] == \
+            ["no callback within 3.0 s (waited 3011.0 ms)"]
+    finally:
+        store.close()
+
+
+NON_EVENTS = [
+    ("browser.step", {"step": "navigate", "method": "GET", "url": P + "/a", "origin": P,
+                      "param": "q", "outcome": "not_sent", "detail": "unplaceable "
+                      "location 'header'"}, "note",
+     "[observe] not sent: the tool refused to place it"),
+    ("browser.step", {"step": "end", "outcome": "unplaceable",
+                      "detail": "unplaceable location 'header'"}, "note",
+     "not placed: unplaceable location 'header'"),
+    ("browser.step", {"step": "launch", "outcome": "failed", "error": "RuntimeError"},
+     "note", "the browser could not start (RuntimeError): no verdict"),
+    ("browser.step", {"step": "store", "method": "POST", "url": P + "/s", "origin": P,
+                      "outcome": "not_sent", "detail": "out of scope"}, "note",
+     "[store] not sent"),
+    ("browser.step", {"step": "store", "method": "POST", "url": P + "/s", "origin": P,
+                      "outcome": "no_status"}, "note", "request made; no status recorded"),
+    ("browser.step", {"step": "store", "method": "POST", "url": P + "/s", "origin": P,
+                      "outcome": "timeout", "error": "TimeoutError"}, "lost", "timeout"),
+    ("browser.step", {"step": "navigate", "method": "GET", "url": P + "/a", "origin": P,
+                      "outcome": "error", "error": "Error"}, "lost", "error (Error)"),
+    ("browser.step", {"step": "refused", "url": P + "/logout.php", "origin": P,
+                      "detail": "logout", "outcome": "not_sent"}, "lost",
+     "refused by the guard, never sent: /logout.php (logout)"),
+    ("browser.step", {"step": "load", "outcome": "not_fired", "superseded": True}, "note",
+     "load did not fire (superseded by a failed navigation)"),
+    ("browser.step", {"step": "end", "outcome": "not_executed", "window_ms": 4000,
+                      "waited_ms": 4012.0}, "note",
+     "the sentinel did not fire within 4000 ms (waited 4012.0 ms): not executed"),
+    ("browser.step", {"step": "end", "outcome": "not_observed", "detail": "the page "
+                      "did not load"}, "note", "not observed: the page did not load"),
+    ("oob.wait", {"url": "http://127.0.0.1:9/cb/{redacted}", "window_ms": 1500.0,
+                  "waited_ms": 1504.0, "outcome": "none"}, "note",
+     "no callback within 1.5 s (waited 1504.0 ms)"),
+]
+
+
+@pytest.mark.parametrize("kind,body,shape,label", NON_EVENTS,
+                         ids=[f"{b.get('step', k)}-{b.get('outcome')}"
+                              for k, b, _s, _l in NON_EVENTS])
+def test_each_confirmation_non_event_is_drawn_lost_or_absent(tmp_path, kind, body,
+                                                             shape, label):
+    """FR-FUZZ-62, PA-0515(2): a step that did not happen is a note or a lost arrow,
+    never a reply, never "executed" or "fired"."""
+    with Store(tmp_path / "s.db") as store:
+        run = store.start_run("auto", "h")
+        rec = trace.TraceRecorder(store, run)
+        rec.emit(kind, {"test": "t1", "strategy": M6, "visit": "v1"} | body,
+                 key="e1", scope="test:t1")
+        rec.close()
+        steps = diagram.sequence(store.conn, run, "test:t1")["steps"]
+    drawn = [s for s in steps if "e1" in s["evidence"]]
+    assert not any(s.get("kind") == "response" for s in drawn)
+    assert not any("executed:" in s["label"] or "fired (" in s["label"]
+                   for s in drawn if s["type"] != "message")
+    assert any(s["type"] == shape and s["label"].startswith(label) for s in drawn), drawn
+
+
+def test_confirmation_steps_export_to_mermaid_and_status_names_only_the_remaining_limits(
+        tmp_path):
+    """FR-FUZZ-62: the steps use only the existing step types, so the Mermaid export
+    carries them (a lost arrow as ``-x``, notes as notes, no new syntax); the status no
+    longer says M6 records its HTTP sends (BUG-0520) and names what is not traced."""
+    store, run, _keys = _confirmed_m6_and_unconfirmed_m8(tmp_path)
+    try:
+        for scope in ("test:t1", "test:t2", "finding:1"):
+            seq = diagram.sequence(store.conn, run, scope)
+            assert {s["type"] for s in seq["steps"]} <= {"message", "lost", "note",
+                                                         "group"}
+            mm = diagram.mermaid_sequence(seq)
+            for line in mm.splitlines()[1:]:
+                assert re.match(r"  (participant |Note over |p\d+(->>|-->>|-x)p\d+: |"
+                                r"loop |end$)", line), line
+        mm = diagram.mermaid_sequence(diagram.sequence(store.conn, run, "test:t1"))
+        assert "-xp" in mm                                       # the store's lost reply
+        unsupported = " ".join(diagram.status(store.conn, run)["unsupported"])
+        assert "record their HTTP sends" not in unsupported
+        assert "redirect-hop fetches are not counted" in unsupported
+        assert "callback after its window" in unsupported
+    finally:
+        store.close()

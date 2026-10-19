@@ -1609,7 +1609,9 @@ rewards) derives from it.
     sending); `error` with its class. A PRG follow-up the sender sent is its own
     exchange (`follow-up`, `parent` = the probe), observed or not (BUG-0510). Each
     earlier try of an exchange is its own `retry` event (FR-FUZZ-61); before
-    CC-FUZZ-0100 a re-send was only counted (`resent`).
+    CC-FUZZ-0100 a re-send was only counted (`resent`). The M6 browser's requests are
+    made by the Playwright driver and Chromium, never through a sender: they are
+    recorded per visit as `browser.step` (FR-FUZZ-62, BUG-0520), not as `exchange`.
   - Each confirmation key is a test (`t1`, `t2`, ... in the pipeline's order):
     `test.start` (the point, category, rule, candidate ids) and `test.end` (`confirmed`,
     `inconclusive`, `not_confirmed`, `stopped`, or `error` when it raised).
@@ -1617,7 +1619,8 @@ rewards) derives from it.
     collected, and `test.strategy` records its outcome (`confirmed`, `not_confirmed`,
     `inconclusive`, `unobserved`, `unplaceable`) with exactly those exchange keys.
   - `finding` (written by `_write_finding`, keyed `finding:<id>`) cites its test, its
-    strategy and exactly the exchanges of that strategy run.
+    strategy and exactly the exchanges of that strategy run, and (FR-FUZZ-62) its
+    browser and out-of-band steps (`steps`), as `test.strategy` does.
   - Roles are set only where the code knows them: `baseline` (the pipeline's
     fingerprint send, a differential's B0/B, a timing check's samples), `control` (a
     differential's V, the SQL error check's controls), `mutation` (a differential's D,
@@ -1653,6 +1656,83 @@ rewards) derives from it.
     and `resent` = `attempts - 1`.
   - **Unchanged:** what is sent and how often, `Probe.resent`, `followed`, `prg`, the
     run's `requests` and every verdict.
+
+- **FR-FUZZ-62 (the browser and out-of-band confirmations' own steps, `CC-FUZZ-0102`,
+  2026-10-19; BUG-0520)**
+  - **Recorded where each step happens, correlated explicitly.** With an active
+    recorder, the M6 executor (`tools/browserexec.PlaywrightBrowserExecutor`) and the M8
+    wait (`oracle/strategies._await_callback`) record the steps they perform.
+    - Each step carries the test and strategy from `trace.current()`, read on the
+      strategy's own thread or greenlet.
+    - Its key joins the strategy run's `steps` (`trace.emit_step`), which
+      `test.strategy` and `finding` cite.
+    - `t` is the stamp the step took: Python's receipt of the driver's event for a
+      browser callback, or `OobHit.received_at` for a callback to the listener. Two
+      stamps less than 100 ms apart are not ordered.
+    - Playwright callbacks only note. A visit's events are emitted once, after the
+      browser is closed and the driver stopped, and are contained: they never replace
+      the visit's result.
+    - Without a recorder, no listener, callback or stamp is added.
+  - **`browser.step`** (M6): one visit is one `run` call. Every step carries `test`,
+    `strategy`, `visit`, `step` and `outcome`.
+
+    | `step` | other keys | `outcome` |
+    | --- | --- | --- |
+    | `launch` (failed only) | `error` (a class) | `failed` |
+    | `store` | `method`, `url`, `origin`, `param`, `location` (`body`/`json`: an API request; `query`: a browser navigation), `value_sha`, `value_len`, `value_preview`, `status`, `elapsed_ms`, `error`, `detail` (a refusal) | `response`, `no_status`, `not_sent`, `timeout`, `error` |
+    | `navigate` (the observe navigation) | the same keys, `location` `query`/`fragment`, `value_sent` (false for a fragment); `elapsed_ms` includes the bounded load wait | as `store` |
+    | `refused` (the visit's first refused request, HTTP or WebSocket) | `url`, `origin`, `detail` (the rule's word, or `out of scope`) | `not_sent` |
+    | `load` | `after_commit_ms`, or `superseded` | `fired`, `not_fired` |
+    | `sentinel` | `after_load_ms` (null when there was no `load`) | `fired` |
+    | `page` | `answered`, `failed`, `refused` | `counted` |
+    | `end` | `detail`; `window_ms`, `waited_ms` when the sentinel wait ran | `executed`, `not_executed`, `not_observed`, `unplaceable`, `error` |
+
+    - A placement refusal ends `unplaceable` at the refusal, never from the returned
+      observation.
+    - A raise is checked for `NotObserved` before `UnplaceableLocation`.
+    - A launch failure's `detail` is "browser unavailable (<class>)", and
+      `_unavailable`'s is "browser unavailable for this run"; never the exception's
+      text.
+    - URLs go through `trace.safe_ref`. Values are digested and previewed as in an
+      `exchange` (no preview for a sensitive parameter).
+  - **What `page` counts:**
+    - `answered`: the page's `response` events (what the guard fulfilled, its redirect
+      to a checked landing included; what Chromium fetched itself, such as the landing
+      re-request; the observe document, and a query store's document);
+    - `failed`: its `requestfailed` events, less one per guard refusal of the same URL.
+      A failed request may have reached the server;
+    - `refused`: every guard refusal, route and WebSocket. Never sent.
+  - **The send equation** (enforced, PA-0520). Per visit, the server received:
+
+    > the API `store` steps not `not_sent` + `answered` + `failed` + the redirect hops
+    > the guard fetched itself
+
+    The last term is unseen for every request type; it is the documented gap.
+  - **`oob.wait`** (M8): one per out-of-band wait. It carries `test`, `strategy`,
+    `url` (the canary, through `safe_ref`), `window_ms`, `waited_ms`, `outcome`
+    (`received` or `none`), `after_wait_ms` (null when the hit records no time; negative
+    when the callback came during the send) and `remote`.
+    - `t` is `received_at`, or the end of the wait.
+    - The planting send is the strategy run's `exchange` before it, in the recorder's
+      order.
+  - **Drawn** (in the test's and the finding's sequences, `report.diagram`; FR-UI-511).
+    A step that did not happen (no `load`, no hit, a refusal, no callback, not sent,
+    not observed) is a note or a lost arrow, never a reply or "executed".
+  - **Counted.** *Executed* also counts a test's `store` and `navigate` steps that are
+    not `not_sent`. In the testing overlay they are the M6 browser's own flow
+    (`trace.M6_BROWSER`), apart from the tool's exchanges.
+  - **Not traced:**
+    - each page request one by one;
+    - the guard's own redirect-hop fetches;
+    - in-scope WebSockets;
+    - popups' requests;
+    - Chromium's background traffic;
+    - a callback after its window;
+    - the in-band marker checks' callbacks;
+    - `FakeBrowserExecutor`.
+  - **Unchanged (tested):** what is sent, every `ExecObservation`, verdict, finding,
+    candidate status and request count, and the listener's hits. The windows are
+    unchanged by construction.
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
   finding must reproduce.

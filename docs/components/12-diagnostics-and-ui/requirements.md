@@ -698,6 +698,18 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
   status|scopes [--scope] [--overlay] [--out] [--rebuild]`, read-only but for
   `--rebuild`. Downloads: `/api/diagram/{run}/export.json`, `export/flow.mmd`,
   `export/sequence.mmd?scope=`.
+  - **The confirmations' steps** *(CC-UI-0064, FR-FUZZ-62)*. A test's sequence, and a
+    finding's (filtered to its strategy), draw `browser.step` and `oob.wait`, with
+    participants "Browser driven by the tool (M6)", "Out-of-band listener (tool,
+    loopback)" and "Callback source <address>".
+    - Only a `response` is a reply. `timeout`, `error` and a refusal are lost arrows.
+      `no_status`, `not_sent`, a failed launch, `load`, the sentinel, the page counts,
+      `end` and a missing callback are notes.
+    - The finding's note and `finding_links` cite `steps`.
+    - *Executed* counts a test's `store` and `navigate` steps that are not `not_sent`.
+    - `M6_BROWSER` is in both boundaries and the finding filter.
+    - `status()["unsupported"]` names the limits FR-FUZZ-62 leaves.
+    - Only the existing step types are used.
 - **FR-UI-512** *(added CC-UI-0059)* **The proxy sequence scope.** `report.diagram.scopes`
   lists `proxy` ("proxied traffic (intercepting proxy): <n>") when the run has events
   with scope `proxy` (FR-PROXY-13), and `sequence(conn, run, "proxy")` draws them:

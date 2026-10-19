@@ -40,13 +40,15 @@ def finding_url(candidate: Candidate) -> str:
 
 def _trace_strategy(outcome: str, verdict: Verdict | None = None,
                     detail: str | None = None) -> None:
-    """FR-FUZZ-60: one strategy run's outcome, with the exchanges it made. A run that
-    does not confirm is ``not_confirmed`` -- never "secure"."""
+    """FR-FUZZ-60: one strategy run's outcome, with the exchanges it made and (FR-FUZZ-62)
+    the browser and out-of-band steps it recorded. A run that does not confirm is
+    ``not_confirmed`` -- never "secure"."""
     test, strategy, _role = trace.current()
     trace.emit("test.strategy", {
         "test": test, "strategy": strategy, "outcome": outcome,
         "mechanism": verdict.mechanism if verdict is not None else None,
-        "detail": detail, "exchanges": trace.collected()},
+        "detail": detail, "exchanges": trace.collected(),
+        "steps": trace.collected_steps()},                # FR-FUZZ-62
         scope=f"test:{test}" if test else "run")
 
 
@@ -454,5 +456,6 @@ class Oracle:
             "url": trace.safe_ref(url), "method": candidate.method,
             "param": candidate.param, "location": candidate.location,
             "origin": canonical_origin(candidate.url),
-            "exchanges": trace.collected()},
+            "exchanges": trace.collected(),
+            "steps": trace.collected_steps()},             # FR-FUZZ-62
             key=f"finding:{cur.lastrowid}", scope=f"test:{test}" if test else "run")

@@ -100,8 +100,12 @@ def status(conn, run_id: int) -> dict:
             "unsupported": [
                 "server-side components, stores and internal calls: never observable "
                 "from traffic, never drawn",
-                "browser-only (M6) and out-of-band (M8) confirmations record their HTTP "
-                "sends only; the browser's own steps inside them are not traced"]}
+                "the M6 browser's page requests are counted per visit, not drawn one by "
+                "one; the browser guard's own redirect-hop fetches are not counted; "
+                "in-scope WebSockets, popups and Chromium's background traffic are not "
+                "traced (FR-FUZZ-62)",
+                "an out-of-band callback after its window, and the in-band marker "
+                "checks' callbacks, are not traced (FR-FUZZ-62)"]}
 
 
 # --- data flow ---------------------------------------------------------------------------
@@ -163,13 +167,13 @@ def dataflow(conn, run_id: int, *, overlay: bool = False, origin: str | None = N
     boundaries = [{
         "id": "boundary:client-server",
         "label": "client / server (network)",
-        "inside": [trace.BROWSER, trace.EXPLORER, trace.SPIDER],
+        "inside": [trace.BROWSER, trace.EXPLORER, trace.SPIDER, trace.M6_BROWSER],
         "basis": "observed: every application flow crosses a network connection from "
                  "the browser; how origins group into trust zones is unknown (a shared "
                  "or different host name is not evidence of either)"}, {
         "id": "boundary:testing",
         "label": "testing infrastructure (not part of the application)",
-        "inside": [trace.TOOL, trace.EXPLORER, trace.SPIDER],
+        "inside": [trace.TOOL, trace.EXPLORER, trace.SPIDER, trace.M6_BROWSER],
         "basis": "explicit configuration: fuzzlab's own processes"}]
     # every origin of the run, whatever the filters: the page's origin list
     origins = sorted(n["label"] for n in entities.values() if n["kind"] == "origin")
@@ -191,10 +195,10 @@ def interface_coverage(conn, run_id: int) -> dict[str, dict]:
         "json_extract(body,'$.url') u, json_extract(body,'$.test') test, "
         "json_extract(body,'$.src') src, json_extract(body,'$.status') status, "
         "json_extract(body,'$.outcome') outcome, json_extract(body,'$.role') role, "
-        "COUNT(*) n FROM trace_event "
+        "json_extract(body,'$.step') step, COUNT(*) n FROM trace_event "
         "WHERE run_id=? AND kind IN ('observe.exchange','observe.page','test.start',"
-        "'exchange','test.strategy','finding') GROUP BY kind, o, m, u, test, src, "
-        "status IS NULL, outcome, role", (run_id,)).fetchall()
+        "'exchange','test.strategy','finding','browser.step') GROUP BY kind, o, m, u, "
+        "test, src, status IS NULL, outcome, role, step", (run_id,)).fetchall()
     tests: dict[str, str] = {}
     for r in rows:
         if r["kind"] == "test.start" and r["o"]:
@@ -212,6 +216,10 @@ def interface_coverage(conn, run_id: int) -> dict[str, dict]:
         elif kind == "exchange" and r["test"] in tests and \
                 r["role"] not in _NOT_A_TEST_SEND and r["outcome"] != "not_sent":
             # a test's own sends, answered or not, on the test's interface (BUG-0515)
+            bump(tests[r["test"]], "executed", n)
+        elif kind == "browser.step" and r["test"] in tests and \
+                r["step"] in ("store", "navigate") and r["outcome"] != "not_sent":
+            # FR-FUZZ-62: an M6 visit's store and observe loads; page counts are not
             bump(tests[r["test"]], "executed", n)
         elif kind == "test.strategy" and r["test"] in tests and \
                 r["outcome"] in ("confirmed", "not_confirmed", "inconclusive"):
@@ -252,7 +260,8 @@ def finding_links(conn, run_id: int, finding_id: int) -> dict | None:
         "SELECT fid FROM dg_flow WHERE run_id=? AND dst=?", (run_id, iface))]
     return {"finding_id": finding_id, "test": b.get("test"), "strategy": b.get("strategy"),
             "mechanism": b.get("mechanism"), "vuln_class": b.get("vuln_class"),
-            "exchanges": b.get("exchanges") or [], "interface": iface, "flows": flows,
+            "exchanges": b.get("exchanges") or [], "steps": b.get("steps") or [],
+            "interface": iface, "flows": flows,
             "sequence_scope": f"finding:{finding_id}"}
 
 
@@ -474,6 +483,115 @@ def _exchange_pair(seq: _Seq, row: dict, src: str) -> None:
                  evidence=[row["key"]])
 
 
+#: The confirmation steps' kinds (FR-FUZZ-62), drawn in a test's and a finding's sequence.
+CONFIRMATION_KINDS = ("browser.step", "oob.wait")
+#: Two stamps nearer than this are not ordered (the sync API's 100 ms pumping).
+STAMP_RESOLUTION_MS = 100
+
+
+def _m6_party(seq: _Seq) -> str:
+    return seq.party("m6-browser", "Browser driven by the tool (M6)", "tool")
+
+
+def _browser_step(seq: _Seq, row: dict, tool: str) -> None:
+    """One M6 visit step (FR-FUZZ-62). Only ``response`` is drawn as a reply; a step
+    that did not happen is a note or a lost arrow, never "executed"."""
+    b, ev = row["body"], [row["key"]]
+    step, outcome = b.get("step"), b.get("outcome")
+    br = _m6_party(seq)
+    if step == "launch":
+        seq.step(type="note", over=[br], kind="browser",
+                 label=f"the browser could not start ({b.get('error')}): no verdict",
+                 evidence=ev)
+    elif step in ("store", "navigate"):
+        tag = "store" if step == "store" else "observe"
+        param, value = b.get("param"), b.get("value_preview")
+        shown = ""
+        if param and b.get("value_sent") is False:
+            shown = f" {param} in the fragment, not sent to the server"
+        elif param:
+            shown = f" {param}={value!r}" if value is not None else f" {param}=(withheld)"
+        if outcome == "not_sent":
+            seq.step(type="note", over=[br], kind="tool",
+                     label=f"[{tag}] not sent: the tool refused to place it"
+                           f"{(' (' + b['detail'] + ')') if b.get('detail') else ''}",
+                     evidence=ev)
+            return
+        dst = _origin_party(seq, b.get("origin"))
+        seq.step(type="message", src=br, dst=dst, kind="request",
+                 label=f"[{tag}] {b.get('method')} {_short(b.get('url'))}{shown}",
+                 evidence=ev)
+        if outcome == "response":
+            # a navigation's time includes its bounded load wait (`navguard.navigate`)
+            loaded = step == "navigate" or b.get("location") == "query"
+            seq.step(type="message", src=dst, dst=br, kind="response",
+                     label=f"{b.get('status')} ({b.get('elapsed_ms')} ms"
+                           f"{', with the load wait' if loaded else ''})", evidence=ev)
+        elif outcome == "no_status":
+            seq.step(type="note", over=[br], kind="browser",
+                     label="request made; no status recorded", evidence=ev)
+        else:
+            seq.step(type="lost", src=dst, dst=br, kind="no-response",
+                     label=f"{outcome or 'no response'}"
+                           f"{(' (' + b['error'] + ')') if b.get('error') else ''}",
+                     evidence=ev)
+    elif step == "refused":
+        dst = _origin_party(seq, b.get("origin"))
+        seq.step(type="lost", src=br, dst=dst, kind="blocked",
+                 label=f"refused by the guard, never sent: {_short(b.get('url'))} "
+                       f"({b.get('detail')})", evidence=ev)
+    elif step == "load":
+        if outcome == "fired":
+            label = f"load fired (+{b.get('after_commit_ms')} ms after commit)"
+        else:
+            label = "load did not fire" + (" (superseded by a failed navigation)"
+                                           if b.get("superseded") else "")
+        seq.step(type="note", over=[br], kind="browser", label=label, evidence=ev)
+    elif step == "sentinel":
+        n = b.get("after_load_ms")
+        when = ("no load" if n is None else "at about load time"
+                if abs(n) < STAMP_RESOLUTION_MS else f"+{n} ms after load" if n > 0
+                else f"{-n} ms before load")
+        seq.step(type="note", over=[br], kind="execution",
+                 label=f"payload executed: the sentinel fired ({when})", evidence=ev)
+    elif step == "page":
+        seq.step(type="note", over=[br], kind="browser",
+                 label=f"{b.get('answered')} page request(s) answered, "
+                       f"{b.get('failed')} failed, {b.get('refused')} refused",
+                 evidence=ev)
+    elif step == "end":
+        detail = b.get("detail")
+        waited = (f" (waited {b['waited_ms']} ms)" if b.get("waited_ms") is not None
+                  else "")
+        label = {
+            "executed": "visit result: executed",
+            "not_executed": f"the sentinel did not fire within {b.get('window_ms')} ms"
+                            f"{waited}: not executed",
+            "not_observed": f"not observed: {detail}{waited}",
+            "unplaceable": f"not placed: {detail}",
+        }.get(outcome, f"the visit ended with an error ({detail})")
+        seq.step(type="note", over=[br], kind="evaluation" if outcome == "executed"
+                 else "absence", label=label, evidence=ev)
+
+
+def _oob_step(seq: _Seq, row: dict) -> None:
+    """One out-of-band wait (FR-FUZZ-62): a callback received, or its absence."""
+    b, ev = row["body"], [row["key"]]
+    listener = seq.party("oob-listener", "Out-of-band listener (tool, loopback)", "tool")
+    if b.get("outcome") == "received":
+        remote = b.get("remote") or "unknown address"
+        src = seq.party(f"callback:{remote}", f"Callback source {remote}", "target")
+        after = b.get("after_wait_ms")
+        when = ("time not recorded" if after is None else
+                "during the send" if after < 0 else f"+{after} ms after the wait began")
+        seq.step(type="message", src=src, dst=listener, kind="callback",
+                 label=f"callback received from {remote} ({when})", evidence=ev)
+    else:
+        seq.step(type="note", over=[listener], kind="absence",
+                 label=f"no callback within {round((b.get('window_ms') or 0) / 1000, 2)} s"
+                       f" (waited {b.get('waited_ms')} ms)", evidence=ev)
+
+
 def _exchange_steps(rows, scope, basis) -> dict:
     seq = _Seq(scope, basis)
     tool = seq.party("tool", "Fuzzer (tool)", "tool")
@@ -510,7 +628,7 @@ def _test_sequence(conn, run_id, test_id, scope, only_strategy=None) -> dict:
     for row in rows:
         b = row["body"]
         if only_strategy and b.get("strategy") not in (None, only_strategy) and \
-                row["kind"] in ("exchange", "test.strategy"):
+                row["kind"] in ("exchange", "test.strategy", *CONFIRMATION_KINDS):
             continue
         if row["kind"] == "exchange":
             key = (b.get("strategy"), b.get("role"))
@@ -520,7 +638,11 @@ def _test_sequence(conn, run_id, test_id, scope, only_strategy=None) -> dict:
             run.append(row)
             continue
         flush_run()
-        if row["kind"] == "test.start":
+        if row["kind"] == "browser.step":
+            _browser_step(seq, row, tool)
+        elif row["kind"] == "oob.wait":
+            _oob_step(seq, row)
+        elif row["kind"] == "test.start":
             seq.step(type="note", over=[tool], kind="tool",
                      label=f"test {test_id}: {b.get('method')} {_short(b.get('url'))} "
                            f"{b.get('param')} ({b.get('location')}), "
@@ -529,13 +651,14 @@ def _test_sequence(conn, run_id, test_id, scope, only_strategy=None) -> dict:
             seq.step(type="note", over=[ev], kind="evaluation",
                      label=f"{b.get('strategy')}: {b.get('outcome')}"
                            f"{(' — ' + b['detail']) if b.get('detail') else ''}",
-                     evidence=[row["key"]] + list(b.get("exchanges") or []))
+                     evidence=[row["key"]] + list(b.get("exchanges") or [])
+                     + list(b.get("steps") or []))
         elif row["kind"] == "finding":
             seq.step(type="note", over=[ev], kind="finding",
                      label=f"finding {b.get('finding_id')} created: {b.get('vuln_class')} "
                            f"({b.get('mechanism')}) — a tool record, not a target "
-                           f"response", evidence=[row["key"]] + list(b.get("exchanges")
-                                                                       or []))
+                           f"response", evidence=[row["key"]]
+                     + list(b.get("exchanges") or []) + list(b.get("steps") or []))
         elif row["kind"] == "test.end":
             seq.step(type="note", over=[ev], kind="evaluation",
                      label=f"test {test_id} ended: {b.get('outcome')}",
@@ -553,7 +676,8 @@ def _finding_sequence(conn, run_id, finding_id, scope) -> dict:
     doc = _test_sequence(conn, run_id, links["test"], scope,
                          only_strategy=links["strategy"])
     doc["notes"].append(f"filtered to strategy {links['strategy']}; the finding cites "
-                        f"{len(links['exchanges'])} exchange(s)")
+                        f"{len(links['exchanges'])} exchange(s) and "
+                        f"{len(links['steps'])} confirmation step(s)")
     doc["finding"] = links
     return doc
 

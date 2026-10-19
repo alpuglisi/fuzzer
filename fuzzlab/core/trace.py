@@ -68,6 +68,9 @@ BROWSER = "actor:browser"
 EXPLORER = "actor:explorer"
 SPIDER = "actor:spider"
 TOOL = "actor:tool"
+#: The browser the tool drives for the M6 confirmation (FR-FUZZ-62): its own actor, so
+#: its flows never share an id or an evidence count with the tool's HTTP exchanges.
+M6_BROWSER = "actor:tool-browser"
 #: An identifier-like path segment `safe_ref` withheld; grouped as ``{id}``.
 REDACTED_SEGMENT = "{redacted}"
 #: A run of identifier characters inside a path segment (`safe_ref`, BUG-0521).
@@ -85,6 +88,9 @@ _ROLE: contextvars.ContextVar[str | None] = contextvars.ContextVar("fl_trace_rol
                                                                   default=None)
 _EXCHANGES: contextvars.ContextVar[list | None] = contextvars.ContextVar(
     "fl_trace_exchanges", default=None)
+#: The keys of the confirmation steps (`emit_step`) recorded in the current strategy run.
+_STEPS: contextvars.ContextVar[list | None] = contextvars.ContextVar(
+    "fl_trace_steps", default=None)
 
 #: Roles a send can carry. ``probe`` is a send whose code did not say what it is.
 ROLES = ("baseline", "mutation", "control", "follow-up", "restore", "retry",
@@ -115,19 +121,28 @@ def test_scope(test_id: str | None):
 @contextlib.contextmanager
 def strategy_scope(name: str | None):
     """The sends inside belong to strategy ``name``; their exchange keys are collected
-    (`collected`) so a finding can cite exactly them."""
+    (`collected`), and the keys of its confirmation steps (`collected_steps`), so a
+    finding can cite exactly them."""
     token = _STRATEGY.set(name)
     keys = _EXCHANGES.set([])
+    steps = _STEPS.set([])
     try:
         yield
     finally:
         _STRATEGY.reset(token)
         _EXCHANGES.reset(keys)
+        _STEPS.reset(steps)
 
 
 def collected() -> list[str]:
     """The exchange keys recorded in the current `strategy_scope`."""
     return list(_EXCHANGES.get() or [])
+
+
+def collected_steps() -> list[str]:
+    """The confirmation-step keys (`emit_step`) recorded in the current `strategy_scope`
+    (FR-FUZZ-62)."""
+    return list(_STEPS.get() or [])
 
 
 def current() -> tuple[str | None, str | None, str | None]:
@@ -474,6 +489,23 @@ def _apply(b: _Batch, key: str, kind: str, body: dict, t) -> None:
                outcome=body.get("outcome"), status=body.get("status"),
                strategy=body.get("strategy"), auth=body.get("identity"),
                test=body.get("test"), param=body.get("param"))
+    elif kind == "browser.step":
+        # FR-FUZZ-62: the M6 browser's own store and observe loads that went out, as
+        # its own testing-overlay flow (never merged with the tool's exchanges)
+        origin = body.get("origin")
+        if body.get("step") not in ("store", "navigate") or not origin or \
+                body.get("outcome") == "not_sent":
+            return
+        basis = "the tool's browser (M6 confirmation, this run)"
+        b.entity(M6_BROWSER, "actor", "Browser driven by the tool (M6)", t=t, key=key,
+                 basis=basis)
+        _origin_entities(b, origin, t, key, basis)
+        iface = _interface(b, origin, body.get("method"), body.get("url") or "", t=t,
+                           key=key, basis=basis, tested=body.get("test"))
+        b.flow(M6_BROWSER, iface, "test", "http", t=t, key=key, basis=basis,
+               step=body.get("step"), outcome=body.get("outcome"),
+               status=body.get("status"), strategy=body.get("strategy"),
+               test=body.get("test"), param=body.get("param"))
     elif kind == "finding":
         origin = body.get("origin")
         if origin:
@@ -710,3 +742,20 @@ def emit(kind: str, body: dict, **kw) -> str | None:
     if rec is None:
         return None
     return rec.emit(kind, body, **kw)
+
+
+def emit_step(kind: str, body: dict, *, scope: str | None = None, t=NOW) -> str | None:
+    """Record one confirmation step (FR-FUZZ-62: ``browser.step``, ``oob.wait``) and
+    add its key to the current strategy run's `collected_steps`, which its
+    ``test.strategy`` and ``finding`` cite. ``scope`` defaults to the body's test
+    (``test:<id>``), else ``run``. No recorder, no event."""
+    rec = _RECORDER.get()
+    if rec is None:
+        return None
+    if scope is None:
+        scope = f"test:{body['test']}" if body.get("test") else "run"
+    key = rec.emit(kind, body, scope=scope, t=t)
+    steps = _STEPS.get()
+    if steps is not None and key:
+        steps.append(key)
+    return key
