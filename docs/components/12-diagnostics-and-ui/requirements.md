@@ -659,6 +659,31 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
   used: a long-lived stream holds uvicorn's graceful shutdown, and with it the
   lifespan shutdown that stops launched jobs (BUG-0125).
 
+- **FR-UI-510** *(added CC-UI-0058)* **Diagrams page.** `/diagrams` (nav "Diagrams")
+  draws a run's data flow and sequences from its trace model (`report.diagram`) through
+  read-only `/api/diagram/*` routes (`web/diagram_routes.py`):
+  - filters: the run, the origin, the evidence level (observed / inferred / unknown),
+    a finding, and the testing overlay; the sequence scope (a test, a captured
+    workflow, the uncorrelated capture, the spider's trace, a finding).
+  - the data flow as an SVG (actors | the application with its origins and
+    interfaces | the tool), origins collapsible (all open under 30 interfaces), flows
+    into a collapsed origin merged with summed counts; an interface table with its
+    six coverage states; a sequence as an SVG (lost responses as a cross, collapsed
+    repeats, notes for evaluations and findings).
+  - every box, flow and step opens its supporting events (paged); the status line shows
+    the completeness state, run end, written / dropped / duplicate events, forced
+    flushes and the maximum lag, with warnings for a partial model.
+  - live: the store version is taken before the first read and polled every
+    `diagram_poll_ms` (3000); a change reloads the run.
+  - text only (`textContent` / `createElementNS`; the page scripts' banned-sink guard).
+- **FR-UI-511** *(added CC-UI-0058)* **Diagram views and exports.** `report.diagram`:
+  `status`, `dataflow`, `interface_coverage`, `scopes`, `sequence`, `evidence`,
+  `finding_links`, `export_json` (`fuzzlab.diagram/1`: the model with each item's
+  evidence keys), `mermaid_flow`, `mermaid_sequence` (labels through `mermaid_text`,
+  SP-50). `fuzzlab diagram [--store] [--run] --format json|mermaid-flow|mermaid-seq|
+  status|scopes [--scope] [--overlay] [--out] [--rebuild]`, read-only but for
+  `--rebuild`. Downloads: `/api/diagram/{run}/export.json`, `export/flow.mmd`,
+  `export/sequence.mmd?scope=`.
 ## 4. Non-functional requirements
 - **NFR-UI-localhost** The web app binds to loopback only, is never exposed, and is
   served separately from the vulnerable target (different origin/port; never in the

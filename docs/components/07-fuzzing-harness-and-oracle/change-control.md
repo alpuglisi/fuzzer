@@ -3,6 +3,35 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0099 — The pipeline records its sends, tests, strategy outcomes and findings (FR-FUZZ-60) (2026-10-19)
+- Change:
+  - new `fuzzlab/harness/tracing.py` (`TracingSender`, directly around the real
+    sender);
+  - `harness/auto.py` (`run_auto(trace_events=True)`, the recorder, `run.start` /
+    `run.end`);
+  - `harness/auto_cli.py` (the recorder around import and run; `--no-trace`);
+  - `harness/pipeline.py` (a test per confirmation key; the fingerprint baseline's
+    role);
+  - `oracle/oracle.py` (a `strategy_scope` per strategy run; `test.strategy`; the
+    `finding` event citing its exchanges; the restore's role);
+  - `oracle/strategies.py` (roles: differential B/V/D, timing baseline/delays, SQL
+    error payloads/controls);
+  - `cli_taxonomy.py` (`no_trace`).
+- Reason: as CC-CORE-0063. A finding had no link to its candidate or exchanges, and
+  non-confirming verdicts were discarded.
+- Impact: every `auto` run records its trace unless `--no-trace` is given. Sends,
+  verdicts and findings are unchanged: the wrapper forwards every protocol argument
+  (the sender-conformance guard now checks it as a wrapper) and re-raises everything.
+- Risk: low. The overhead is measured (effectiveness).
+- Deliverables:
+  - [x] code; `tests/test_diagram_e2e.py`: real HTTP on a loopback app; a finding cites
+    exactly its strategy's exchanges; mutation and control roles; a reset and a
+    timeout never drawn as replies; a redirect's target; no secret anywhere; replay and
+    re-import add nothing. `tests/test_sender_conformance.py` passes with the wrapper
+    — done
+  - [x] FR-FUZZ-60, CHANGELOG — done
+- Effectiveness: pending (the Juice Shop on/off comparison is running).
+
 ### CC-FUZZ-0098 — `auto` probes a crawled row at its own origin, loopback only (FR-FUZZ-59) (2026-10-19)
 - Change: `fuzzlab/harness/auto.py` (`_crawl_url`, `_stored_key`;
   `injection_points_from_store`, `_login_form_paths` and `header_points_from_store`

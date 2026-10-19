@@ -81,6 +81,9 @@ def main(argv: list[str] | None = None) -> int:
     if command == "report":
         from fuzzlab.report import cli as report_cli
         return report_cli.main(rest)
+    if command == "diagram":
+        from fuzzlab.report import diagram_cli
+        return diagram_cli.main(rest)
 
     if command == "flow-anomaly":
         from fuzzlab.harness import flow_anomaly_cli

@@ -53,6 +53,10 @@ def build_parser() -> argparse.ArgumentParser:
                         "request is replayed as this account and unauthenticated, and "
                         "the run's own account's data reaching either is broken access "
                         "control (FR-FUZZ-55). Both accounts' usernames must be stored.")
+    p.add_argument("--no-trace", action="store_true",
+                   help="Record no trace events for the diagrams (FR-CORE-505). On by "
+                        "default: every discovery observation, send, test, strategy "
+                        "outcome and finding is recorded, redacted, in the store.")
     p.add_argument("--no-login", action="store_true",
                    help="Log no account in: --identity (and --peer-identity) only name the "
                         "accounts whose stored usernames and account values the run uses, "
@@ -345,6 +349,21 @@ def _precheck_environment(p, args) -> None:
 
 
 def _run(p, args, store, run_id: int, plugins, selected, ground_truth) -> int:
+    """`_run_traced` with the run's trace recorder active (FR-CORE-505): discovery
+    import and the pipeline record into one event stream; the recorder's counters land
+    in ``run_metrics`` however the run ends."""
+    from fuzzlab.core import trace
+    if getattr(args, "no_trace", False):
+        return _run_traced(p, args, store, run_id, plugins, selected, ground_truth)
+    recorder = trace.TraceRecorder(store, run_id)
+    try:
+        with trace.recording(recorder):
+            return _run_traced(p, args, store, run_id, plugins, selected, ground_truth)
+    finally:
+        recorder.close()
+
+
+def _run_traced(p, args, store, run_id: int, plugins, selected, ground_truth) -> int:
     writes = getattr(args, "fuzz_json_writes", False)
     counts = import_spider(args.spider_db, store, run_id, fuzz_json_writes=writes,
                            base_url=args.base_url) if \
@@ -406,7 +425,8 @@ def _run(p, args, store, run_id: int, plugins, selected, ground_truth) -> int:
                           confirm_budget=args.confirm_budget,
                           header_names=args.header_names, peer=peer,
                           writes=bool(getattr(args, "fuzz_json_writes", False)),
-                          account_values=account_values)
+                          account_values=account_values,
+                          trace_events=not getattr(args, "no_trace", False))
     except RunModeError as exc:
         p.error(str(exc))            # D15 fail-safe: loud, non-zero exit
     finally:

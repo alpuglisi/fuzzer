@@ -555,6 +555,62 @@ ALTER TABLE project ADD COLUMN copy_kind TEXT;
 """
 
 
+_M0024 = """
+-- The evidence model behind the data-flow and sequence diagrams (FR-CORE-505):
+-- trace_event is append-only and the only source of truth; dg_* are materialized
+-- from it by `core.trace.reduce` and can be rebuilt from it at any time.
+CREATE TABLE IF NOT EXISTS trace_event (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id      INTEGER NOT NULL REFERENCES run(id),
+    key         TEXT NOT NULL,
+    v           INTEGER NOT NULL,
+    kind        TEXT NOT NULL,
+    scope       TEXT,
+    seq         INTEGER NOT NULL,
+    t           REAL,
+    body        TEXT NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (run_id, key)
+);
+CREATE INDEX IF NOT EXISTS idx_trace_event_kind ON trace_event(run_id, kind);
+CREATE INDEX IF NOT EXISTS idx_trace_event_scope ON trace_event(run_id, scope);
+CREATE TABLE IF NOT EXISTS dg_entity (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id      INTEGER NOT NULL REFERENCES run(id),
+    eid         TEXT NOT NULL,
+    kind        TEXT NOT NULL,
+    parent      TEXT,
+    label       TEXT NOT NULL,
+    knowledge   TEXT NOT NULL,
+    first_seen  REAL,
+    last_seen   REAL,
+    attrs       TEXT NOT NULL DEFAULT '{}',
+    UNIQUE (run_id, eid)
+);
+CREATE TABLE IF NOT EXISTS dg_flow (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id      INTEGER NOT NULL REFERENCES run(id),
+    fid         TEXT NOT NULL,
+    src         TEXT NOT NULL,
+    dst         TEXT NOT NULL,
+    view        TEXT NOT NULL,
+    protocol    TEXT NOT NULL,
+    knowledge   TEXT NOT NULL,
+    first_seen  REAL,
+    last_seen   REAL,
+    attrs       TEXT NOT NULL DEFAULT '{}',
+    UNIQUE (run_id, fid)
+);
+CREATE TABLE IF NOT EXISTS dg_evidence (
+    run_id      INTEGER NOT NULL REFERENCES run(id),
+    ref         TEXT NOT NULL,
+    event_key   TEXT NOT NULL,
+    UNIQUE (run_id, ref, event_key)
+);
+CREATE INDEX IF NOT EXISTS idx_dg_evidence_event ON dg_evidence(run_id, event_key);
+"""
+
+
 def _backfill_project_uuid(conn: sqlite3.Connection) -> None:
     """Migration 23's post-step: give an existing project row its ``uuid``."""
     import secrets as _secrets
@@ -643,6 +699,7 @@ MIGRATIONS: list[tuple[int, str]] = [
     (21, _M0021),
     (22, _M0022),
     (23, _M0023),
+    (24, _M0024),
 ]
 
 

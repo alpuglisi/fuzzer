@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-19 — environment (Docker daemon down a sixth time; the lab with it)
+- **Symptom:** the Juice Shop overhead comparison's four runs failed at once (no target); `docker` could not reach its daemon.
+- **Root cause:** as the earlier entries: the container restarted, and nothing starts `dockerd`.
+- **Remediation:** stale pid removed, `dockerd` started, `./labctl.sh up juice-shop --authorized`, the comparison repeated. The setup script is still the lasting fix (outside the repo).
+- **Status:** Environment
+
 ## 2026-10-19 — core / importers (path variation took sibling routes and files for parameters)
 - **Symptom:** every crawl-fed `auto` run on Juice Shop imported and probed `/api/{api}`, `/rest/{rest}`, `/rest/admin/{admin}`, `/ftp/{ftp}` (and from disco `/rest/web3/{web3}`); `/rest/basket/NaN` was not a parameter.
 - **Root cause:** `core.pathtemplate`'s variation rule took any two varying values for a parameter: a second implementation of the decision `disco.synth` had fixed for the same Juice Shop shape the day before (BUG-0501), measured only on an app without sibling routes (BUG-0507).

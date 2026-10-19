@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}fuzzlab &mdash; Diagrams{% endblock %}
+{% block crumb %}Diagrams{% endblock %}
+{% block styles %}<link rel="stylesheet" href="/static/css/diagrams.css">{% endblock %}
+{% block content %}
+<!-- Diagrams (FR-UI-510): the run's data flow and its sequences, both drawn from the one
+     persisted trace model (report.diagram). Filled by diagrams.js from the read-only
+     /api/diagram/* routes, as text only (never parsed HTML). -->
+<section class="dg" aria-labelledby="dg-h1" id="diagrams-root" data-poll-ms="{{ poll_ms }}">
+  <h1 id="dg-h1" class="visually-hidden">Diagrams</h1>
+
+  <form class="card dg-toolbar" id="dg-filters" aria-label="Choose what the diagrams show">
+    <label class="dg-field">Run <select id="dg-run" name="run"></select></label>
+    <label class="dg-field">Origin
+      <select id="dg-origin" name="origin"><option value="">All origins</option></select>
+    </label>
+    <label class="dg-field">Evidence
+      <select id="dg-knowledge" name="knowledge">
+        <option value="">Observed, inferred and unknown</option>
+        <option value="observed">Observed only</option>
+        <option value="inferred">Inferred only</option>
+        <option value="unknown">Unknown only</option>
+      </select>
+    </label>
+    <label class="dg-field">Finding
+      <select id="dg-finding" name="finding"><option value="">All</option></select>
+    </label>
+    <label class="dg-chip"><input type="checkbox" id="dg-overlay" name="overlay">
+      Testing overlay (the tool's own traffic)</label>
+    <span class="dg-exports" id="dg-exports"></span>
+  </form>
+
+  <div class="card dg-status" id="dg-status" aria-live="polite">
+    <p class="muted" id="dg-status-text">Loading&hellip;</p>
+    <ul class="dg-warnings" id="dg-warnings"></ul>
+    <details class="dg-about">
+      <summary>How to read these diagrams</summary>
+      <ul class="muted">
+        <li><strong>Observed</strong>: directly supported by captured traffic, a browser
+          event, a tool exchange or explicit configuration. <strong>Inferred</strong>: the
+          basis is shown. <strong>Unknown</strong>: not established.</li>
+        <li>No server-side component, data store or internal call is ever drawn: traffic
+          shows that a browser talked to an origin, not what runs behind it.</li>
+        <li>Coverage counts what happened to an interface: discovered, captured,
+          scheduled, executed, evaluated, finding. No finding is not "secure".</li>
+        <li>In sequences, a missing response is drawn lost (&#x2715;), and a finding is a
+          tool record, never a target response.</li>
+      </ul>
+    </details>
+  </div>
+
+  <div class="dg-panes">
+    <div class="card dg-flow-pane">
+      <h2 class="dg-pane-h" id="dg-flow-h">Data flow</h2>
+      <p class="muted" id="dg-flow-empty" hidden>No flows recorded for this run.</p>
+      <div class="dg-svg-wrap" id="dg-flow" role="group" aria-labelledby="dg-flow-h"></div>
+      <details class="dg-table-box" open>
+        <summary>Interfaces and coverage</summary>
+        <table class="dg-table" id="dg-ifaces">
+          <caption class="visually-hidden">Interfaces with their evidence and coverage</caption>
+          <thead><tr><th scope="col">interface</th><th scope="col">evidence</th>
+            <th scope="col">obs.</th><th scope="col">discovered</th><th scope="col">captured</th>
+            <th scope="col">scheduled</th><th scope="col">executed</th>
+            <th scope="col">evaluated</th><th scope="col">findings</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </details>
+    </div>
+    <div class="dg-right">
+      <div class="card dg-seq-pane">
+        <h2 class="dg-pane-h" id="dg-seq-h">Sequence</h2>
+        <label class="dg-field">Scope <select id="dg-scope"></select></label>
+        <p class="muted" id="dg-seq-notes"></p>
+        <div class="dg-svg-wrap" id="dg-seq" role="group" aria-labelledby="dg-seq-h"></div>
+      </div>
+      <div class="card dg-evidence" id="dg-evidence" tabindex="-1">
+        <h2 class="dg-pane-h">Evidence</h2>
+        <p class="muted" id="dg-ev-empty">Select a box, a flow or a sequence step.</p>
+        <p class="dg-ev-ref" id="dg-ev-ref"></p>
+        <ol class="dg-ev-list" id="dg-ev-list"></ol>
+        <button type="button" id="dg-ev-more" hidden>Show more</button>
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}<script type="module" src="/static/js/diagrams.js"></script>{% endblock %}

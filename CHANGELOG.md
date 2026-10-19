@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-19 (data-flow and sequence diagrams)
+- **What:** every `auto` run records an append-only, redacted event trace at its real execution points (discovery import, each send, test, strategy outcome and finding), reduced into a persisted diagram model with observed / inferred / unknown evidence; `fuzzlab diagram` and the web Diagrams page draw the run's data flow and its sequences with evidence drill-down, live refresh and JSON / Mermaid exports (CC-CORE-0063, CC-FUZZ-0099, CC-AUD-0050, CC-UI-0058, D72, `docs/DIAGRAMS.md`).
+- **Why:** the owner asked for data-flow and sequence diagrams backed by honest, correlated evidence; nothing persisted probes, test ids or finding-to-exchange links before.
+
 ## 2026-10-19 (path variation decided on evidence)
 - **What:** a varying URL segment is a parameter only when the app's code does not name its values (both crawlers record the path segments their scripts hold) -- one decision shared with disco's synthesizer; `undefined`/`NaN` segments are parameters; documents and archives are files (CC-CORE-0062, CC-CRAWL-0046, CC-AUD-0049, BUG-0507).
 - **Why:** the owner asked for the path variation rules to be fixed: on Juice Shop sibling API routes and FTP files became parameters, the defect BUG-0501 had fixed in synth.

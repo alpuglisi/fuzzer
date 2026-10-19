@@ -17,6 +17,7 @@ from fractions import Fraction
 from typing import Callable
 from urllib.parse import quote, quote_plus
 
+from fuzzlab.core import trace
 from fuzzlab.oracle.baseline import build_baseline
 from fuzzlab.oracle.browser import (
     SENTINEL,
@@ -339,12 +340,14 @@ class ConfirmationStrategy:
                 return memo[id(p)]
             return lambda a, b: a.status == b.status and norm(a) == norm(b)
 
-        b0 = self._send(sender, candidate, base)
+        with trace.role("baseline"):                  # FR-FUZZ-60: B0
+            b0 = self._send(sender, candidate, base)
         count = 1
         order = rng.choice(_SCREEN_ORDERS)
         got, values = {}, {"V": family.keep(base), "D": family.disc(base)}
         for slot in order:
-            got[slot] = send(values[slot])
+            with trace.role(_SLOT_ROLE[slot]):
+                got[slot] = send(values[slot])
         count += 2
         same = judge()
         if not same(got["V"], b0) or same(got["D"], b0):
@@ -356,11 +359,12 @@ class ConfirmationStrategy:
             order = rng.choice(_ROUND_ORDERS)
             got = {}
             for slot in order:
-                if slot == "B":
-                    got[slot] = self._send(sender, candidate, base)
-                else:
-                    got[slot] = send(family.keep(base) if slot == "V"
-                                     else family.disc(base))
+                with trace.role(_SLOT_ROLE[slot]):
+                    if slot == "B":
+                        got[slot] = self._send(sender, candidate, base)
+                    else:
+                        got[slot] = send(family.keep(base) if slot == "V"
+                                         else family.disc(base))
             count += 3
             same = judge()
             if (not same(got["V"], b0) or not same(got["B"], b0)
@@ -392,14 +396,17 @@ class ConfirmationStrategy:
         baseline (median/MAD), a floor above jitter, and a rising-delay check across
         two requested delays — never one slow response.
         """
-        base = build_baseline([
-            self._send(sender, candidate, baseline_value, timing=True).elapsed
-            for _ in range(self.baseline_samples)
-        ])
+        with trace.role("baseline"):                  # FR-FUZZ-60: the samples
+            base = build_baseline([
+                self._send(sender, candidate, baseline_value, timing=True).elapsed
+                for _ in range(self.baseline_samples)
+            ])
         for template in templates:
             measured, ok = {}, True
             for d in self.delays:
-                probe = self._send(sender, candidate, template.format(d=d), timing=True)
+                with trace.role("mutation"):
+                    probe = self._send(sender, candidate, template.format(d=d),
+                                       timing=True)
                 measured[d] = probe.elapsed
                 if not base.exceeds(probe.elapsed, k=self.k, floor=self.floor):
                     ok = False
@@ -413,6 +420,11 @@ class ConfirmationStrategy:
                                 "measured": {str(k): round(v, 4) for k, v in measured.items()},
                                 "template": template})
         return None
+
+
+#: FR-FUZZ-60: what each differential slot is -- B the base value, V the benign variant
+#: (a control: it must behave like the base), D the payload (the mutation).
+_SLOT_ROLE = {"B": "baseline", "V": "control", "D": "mutation"}
 
 
 def _signature(text: str):
@@ -460,14 +472,16 @@ class SqliErrorStrategy(ConfirmationStrategy):
         controls: dict[str, tuple[bool, bool]] = {}  # value -> (signature, via PRG)
         token = _sqli_token()
         for payload in self._probes:
-            probe = self._send(sender, candidate, payload)
+            with trace.role("mutation"):              # FR-FUZZ-60
+                probe = self._send(sender, candidate, payload)
             found = _signature(_observed(probe).text)
             if found is None:
                 continue
             needed = [token] + ([f"1{token}"] if payload[:1].isdigit() else [])
             for value in needed:
                 if value not in controls:
-                    control = self._send(sender, candidate, value)
+                    with trace.role("control"):
+                        control = self._send(sender, candidate, value)
                     controls[value] = (_signature(_observed(control).text) is not None,
                                        _via_prg(control))
             if any(controls[v][0] for v in needed):

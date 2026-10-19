@@ -1592,6 +1592,33 @@ rewards) derives from it.
   "another origin, not loopback (D11)". The run's session goes only to its own origins
   (FR-SESS-20), so such probes go without it unless `--auth-origin` names the origin.
 
+- **FR-FUZZ-60 (the pipeline's trace, `CC-FUZZ-0099`, 2026-10-19)** `run_auto` (with
+  `trace_events=True`, the default; `fuzzlab auto --no-trace` turns it off) records into
+  the active `core.trace` recorder, or one it opens:
+  - `run.start` (the run's origins, the identity by name) and `run.end` (`complete`
+    or `aborted: <error class>`), in a `finally`.
+  - Every send, through `harness.tracing.TracingSender` directly around the real
+    sender: one `exchange` event with its test, strategy and role (from the execution
+    context), the point's method, redacted URL, parameter name and location, the
+    value's digest and length and a 64-character preview (none for a sensitive
+    parameter), and the outcome -- `response` with status, time and redirect target;
+    `timeout`; `unobserved` (no response, BUG-0147); `not_sent` (refused before
+    sending); `error` with its class. A PRG follow-up is its own exchange (`follow-up`,
+    `parent` = the probe). A sender's re-send is counted (`resent`), not recorded as an
+    attempt.
+  - Each confirmation key is a test (`t1`, `t2`, ... in the pipeline's order):
+    `test.start` (the point, category, rule, candidate ids) and `test.end` (`confirmed`,
+    `inconclusive`, `not_confirmed`, `stopped`, or `error` when it raised).
+  - Each strategy run in `Oracle._confirm_outcome` is a `strategy_scope`: its sends are
+    collected, and `test.strategy` records its outcome (`confirmed`, `not_confirmed`,
+    `inconclusive`, `unobserved`, `unplaceable`) with exactly those exchange keys.
+  - `finding` (written by `_write_finding`, keyed `finding:<id>`) cites its test, its
+    strategy and exactly the exchanges of that strategy run.
+  - Roles are set only where the code knows them: `baseline` (the pipeline's
+    fingerprint send, a differential's B0/B, a timing check's samples), `control` (a
+    differential's V, the SQL error check's controls), `mutation` (a differential's D,
+    timing delays, the SQL error check's payloads), `restore` (a PRG restore),
+    `follow-up`; every other send is `probe`.
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
   finding must reproduce.

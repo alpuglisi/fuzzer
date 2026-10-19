@@ -632,6 +632,36 @@ plugin registry. It is the layer that makes the store the integration bus.
   `://` stays a path). `is_loopback_origin` holds for 127.0.0.0/8, `localhost` and `::1`
   (SP-46).
 
+- **FR-CORE-505** *(the trace: the evidence model behind the diagrams; `CC-CORE-0063`,
+  2026-10-19).* `core.trace` (SP-48). **Events:** `trace_event` (migration 24) is
+  append-only, one row per event: `run_id`, `key` (`UNIQUE(run_id, key)`: a repeated
+  delivery or replay is ignored), `v` (the body schema, `EVENT_VERSION` 1), `kind`,
+  `scope` (`test:<id>`, `workflow:<action>`, `capture`, `spider`, `run`), `seq` (the
+  producer's order), `t` (when it happened; NULL when the source records no time --
+  never replaced by "now") and a JSON `body`. Kinds: `run.start` / `run.end`,
+  `observe.exchange` / `observe.page` / `observe.action` / `observe.external`,
+  `test.start` / `test.strategy` / `test.end`, `exchange`, `finding`.
+  - **Model:** `dg_entity` (actors, the application, origins, interfaces, external
+    hosts), `dg_flow` (`view` `app` or `test`) and `dg_evidence` (each entity or flow's
+    supporting event keys) are derived by `reduce`, idempotently and independently of
+    order: first/last seen min/max, attributes set unions capped at `MAX_ATTR_VALUES`
+    with a `_more` count, knowledge only strengthens (`unknown` < `inferred` <
+    `observed`), observation counts are counted from `dg_evidence`. `rebuild` replays a
+    run's events into fresh rows. An origin always carries "internals unknown"; nothing
+    server-side is created.
+  - **Interface identity** (SP-49): `interface_id(origin, method, url)` -- the origin,
+    the method and the path with crawled placeholders kept and id-shaped or
+    JavaScript-placeholder segments grouped as `{id}` (the grouping recorded as
+    inferred); never the query or fragment; words are never merged.
+  - **The writer:** `TraceRecorder(store, run_id, max_buffer=512, flush_seconds=0.25)`,
+    one per producer thread on that thread's store: a bounded buffer, a batch written
+    with its reduction in one transaction, every body through `scrub_event` (PA-0100:
+    URL-looking strings redacted, values under sensitive key names blanked, strings
+    capped at `MAX_TEXT`); a full buffer flushes synchronously (counted
+    `forced_flushes`); a batch that cannot be written is counted `dropped` and logged.
+    `close` writes the counters to `run_metrics` (`trace_*`). Execution points call
+    `trace.emit` (a no-op without an active recorder, `trace.recording`) and read the
+    context (`test_scope`, `strategy_scope`, `role`, `collected`).
 - **FR-CORE-500** *(one reader for a run's target; one method key; `CC-CORE-0500`,
   2026-10-15).*
   - `fuzzlab/core/runtarget.py` is the one reader of the `target` table (PA-0063(1)): a
@@ -676,10 +706,14 @@ plugin registry. It is the layer that makes the store the integration bus.
 - **NFR-CORE-no-bypass** No tool constructs HTTP or session state outside core.
   - Not yet enforced: the spider, the auditor, the standalone fuzzer, `RequestsProbeSender`, the greybox sender and the login fetcher build their own `requests.Session`, and the proxy uses sockets; there is no guard test. The destructive-URL gate (BUG-0111/0112) is enforced at each of them instead. (BUG-0111 sweep; reported to the operator.)
 
+- **NFR-CORE-trace-overhead** *(CC-CORE-0063)* The trace never blocks a send on more
+  than one batched SQLite transaction, and its cost is measured, not assumed
+  (`scripts/measure_diagrams.py`; the figures are in CC-CORE-0063's effectiveness).
 ## 5. Interfaces and data contracts
 Owns the store schema and migrations. Writes `run`, `schema_version`,
-`request_budget`, `model`, `metric_series`, `saved_views`, and (CC-CORE-0450) `project`
-and `launch`. Exposes Python APIs
+`request_budget`, `model`, `metric_series`, `saved_views`, (CC-CORE-0450) `project`
+and `launch`, and (CC-CORE-0063, `core.trace` only) `trace_event`, `dg_entity`,
+`dg_flow`, `dg_evidence`. Exposes Python APIs
 consumed by every tool and ML component.
 
 ## 6. Dependencies (components)

@@ -1,0 +1,58 @@
+/* Diagrams (FR-UI-510). Tokens only (tokens.css); no inline styles anywhere (CSP):
+   every SVG mark takes its look from a class here. */
+.dg { display: flex; flex-direction: column; gap: .75rem; min-width: 0; }
+.dg-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1rem; }
+.dg-field { display: inline-flex; align-items: center; gap: .35rem; font-size: .85rem; }
+.dg-field select { max-width: 22rem; }
+.dg-chip { display: inline-flex; align-items: center; gap: .3rem; font-size: .85rem; }
+.dg-exports { display: inline-flex; gap: .6rem; font-size: .85rem; margin-left: auto; }
+.dg-status p { margin: 0; }
+.dg-warnings { margin: .3rem 0 0; color: var(--high); font-size: .85rem; }
+.dg-panes { display: grid; grid-template-columns: minmax(24rem, 3fr) minmax(22rem, 2fr);
+  gap: .75rem; align-items: start; min-width: 0; }
+.dg-right { display: flex; flex-direction: column; gap: .75rem; min-width: 0; }
+.dg-pane-h { font-size: .95rem; margin: 0 0 .5rem; }
+.dg-svg-wrap { overflow: auto; max-height: 70vh; border: 1px solid var(--border);
+  border-radius: 6px; background: var(--surface); }
+.dg-svg-wrap svg { display: block; }
+.dg-table { width: 100%; border-collapse: collapse; font-size: .8rem; }
+.dg-table th, .dg-table td { padding: .2rem .35rem; border-bottom: 1px solid var(--border);
+  text-align: left; }
+.dg-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.dg-table tr { cursor: pointer; }
+.dg-table tr:hover { background: var(--surface2); }
+.dg-ev-ref { font-family: var(--mono); font-size: .8rem; word-break: break-all; }
+.dg-ev-list { font-size: .8rem; padding-left: 1.2rem; max-height: 40vh; overflow: auto; }
+.dg-ev-list pre { white-space: pre-wrap; word-break: break-all; margin: .2rem 0 .5rem;
+  font-family: var(--mono); font-size: .75rem; background: var(--surface2); padding: .3rem; }
+
+/* SVG marks */
+.dg-box { fill: var(--surface2); stroke: var(--border); }
+.dg-box.origin { fill: var(--surface); stroke: var(--accent); }
+.dg-box.app { fill: none; stroke: var(--muted); stroke-dasharray: 6 4; }
+.dg-box.actor, .dg-box.tool { fill: var(--accent-weak); stroke: var(--accent); }
+.dg-box.external { fill: var(--surface2); stroke: var(--muted); stroke-dasharray: 2 3; }
+.dg-box.k-inferred { stroke-dasharray: 5 3; }
+.dg-box.k-unknown { stroke-dasharray: 1 3; }
+.dg-box.sel, .dg-flow.sel { stroke: var(--high); stroke-width: 2.5; }
+.dg-box.boundary { fill: none; stroke: var(--muted); stroke-dasharray: 10 4 2 4; }
+.dg-text { fill: var(--text); font-size: 12px; font-family: var(--mono); }
+.dg-text.small { font-size: 10px; fill: var(--muted); }
+.dg-text.head { font-weight: 600; }
+.dg-flow { stroke: var(--accent); stroke-width: 1.5; fill: none; cursor: pointer; }
+.dg-flow.test { stroke: var(--muted); stroke-dasharray: 6 4; }
+.dg-flow.k-inferred { stroke-dasharray: 5 3; }
+.dg-flow.refused { stroke: var(--high); stroke-dasharray: 2 3; }
+.dg-hit { cursor: pointer; }
+.dg-life { stroke: var(--border); stroke-dasharray: 4 4; }
+.dg-msg { stroke: var(--text); stroke-width: 1.2; fill: none; }
+.dg-msg.response { stroke-dasharray: 5 3; }
+.dg-msg.lost { stroke: var(--high); stroke-dasharray: 2 3; }
+.dg-msg.action { stroke: var(--accent); }
+.dg-head { fill: var(--text); }
+.dg-head.lost { fill: var(--high); }
+.dg-note { fill: var(--accent-weak); stroke: var(--accent); }
+.dg-note.finding { fill: var(--surface2); stroke: var(--high); stroke-width: 2; }
+.dg-group { fill: none; stroke: var(--muted); stroke-dasharray: 3 3; }
+.dg-step { cursor: pointer; }
+.dg-step:hover .dg-text { fill: var(--accent); }

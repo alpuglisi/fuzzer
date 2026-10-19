@@ -105,6 +105,8 @@ def import_spider(spider_db: str | Path, store: Store, run_id: int, *,
     A URL keeps its origin when it is not the run's main one (``base_url``'s, else the
     first crawled URL's): stored as an absolute URL, never as a bare path that would be
     re-rooted at the base (`core.urls.store_url`, FR-AUD-27)."""
+    from fuzzlab.tools.observe import observe_spider
+    observe_spider(spider_db)              # FR-AUD-28: what the crawl observed, as events
     src = sqlite3.connect(str(spider_db))
     src.row_factory = sqlite3.Row
     counts = {"page": 0, "endpoint": 0, "parameter": 0}
@@ -243,6 +245,8 @@ def import_disco(run_dir: str | Path, store: Store, run_id: int, *,
     from fuzzlab.disco.capture import read_capture
     run_dir = Path(run_dir)
     read = read_capture(run_dir / "capture.jsonl")
+    from fuzzlab.tools.observe import observe_disco
+    observe_disco(run_dir, read.records)   # FR-AUD-28: what the capture observed
     counts = {"page": 0, "endpoint": 0, "parameter": 0, "quarantined": read.quarantined}
     for key in ("request", "request_json", "request_form", "request_refused"):
         counts.setdefault(key, 0)

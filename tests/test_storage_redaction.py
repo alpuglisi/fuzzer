@@ -118,6 +118,8 @@ _REDACTORS = {"redact", "redact_url", "redact_body", "redact_body_for", "_prepar
 #: The crawler's captured requests (forms phase 3, FR-CRAWL-13): a producer must call
 #: **both** capture redactors of `core.redaction` (the body and the URLs).
 _CAPTURE_REDACTORS = {"redact_captured_body", "redact_url_identifiers"}
+#: The diagram trace's events (FR-CORE-505): the writer scrubs every body at the write.
+_TRACE_REDACTORS = {"scrub_event"}
 
 
 def traffic_producers(source: str) -> list[tuple[str, int]]:
@@ -132,13 +134,15 @@ def traffic_producers(source: str) -> list[tuple[str, int]]:
                   if isinstance(n, ast.Constant) and isinstance(n.value, str)]
         flow = any("INSERT INTO flow" in c for c in consts)
         capture = any("INSERT INTO discovered_requests" in c for c in consts)
-        if not flow and not capture:
+        traced = any("INTO trace_event" in c for c in consts)
+        if not flow and not capture and not traced:
             continue
         called = {(n.func.attr if isinstance(n.func, ast.Attribute) else
                    getattr(n.func, "id", None)) for n in ast.walk(fn)
                   if isinstance(n, ast.Call)}
         if (flow and not called & _REDACTORS) or \
-                (capture and not _CAPTURE_REDACTORS <= called):
+                (capture and not _CAPTURE_REDACTORS <= called) or \
+                (traced and not called & _TRACE_REDACTORS):
             out.append((fn.name, fn.lineno))
     return out
 
@@ -213,3 +217,19 @@ def test_a_gzip_body_with_a_secret_is_omitted_by_history(tmp_path):
         fid = store.conn.execute("SELECT id FROM flow").fetchone()["id"]
         stored = h.raw_request(fid)
     assert gz not in stored and OMIT_UNSAFE in stored and b"Content-Encoding" not in stored
+
+
+def test_the_trace_writer_is_seen_by_the_guard_and_scrubs():
+    """FR-CORE-505: the trace's one writer passes every body through `scrub_event`;
+    not vacuous (a writer without it is caught), and the scrub itself blanks a
+    sensitive key, redacts a URL token and caps a string."""
+    from fuzzlab.core.trace import MAX_TEXT, scrub_event
+    src = (REPO / "fuzzlab" / "core" / "trace.py").read_text()
+    assert "INTO trace_event" in src and traffic_producers(src) == []
+    broken = src.replace("body = scrub_event(body)", "body = body")
+    assert [name for name, _line in traffic_producers(broken)] == ["flush"]
+    out = scrub_event({"password": "SECRET", "param": "password",
+                       "url": "http://h/x?token=SECRETTOKEN123456abcdef",
+                       "note": "x" * (MAX_TEXT + 50)})
+    assert out["password"] == "" and out["param"] == "password"
+    assert "SECRETTOKEN" not in out["url"] and len(out["note"]) == MAX_TEXT + 1

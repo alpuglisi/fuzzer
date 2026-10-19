@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
 from fuzzlab.audit import InjectionPoint, evaluate
+from fuzzlab.core import trace
 from fuzzlab.core.dedup import TemplateClusterer
 from fuzzlab.core.fingerprint import fingerprint
 from fuzzlab.core.oracle_status import (CHECKED, INCONCLUSIVE,  # migration 13
@@ -82,6 +83,11 @@ def _candidate_of(ev: dict) -> Candidate:
                                    if ev.get("entries") else None),
                      base_value=ev.get("base_value"),
                      redirect_seed=ev.get("redirect_seed"))
+
+
+def _origin_of(url: str) -> str | None:
+    from fuzzlab.core.urls import canonical_origin
+    return canonical_origin(url)
 
 
 def _fingerprint_point(points: list[InjectionPoint]) -> InjectionPoint | None:
@@ -146,7 +152,8 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
     probe = None
     if fp_point is not None:
         try:
-            probe = _baseline(sender, fp_point)
+            with trace.role("baseline"):      # FR-FUZZ-60: the fingerprint baseline
+                probe = _baseline(sender, fp_point)
         except ProbeUnobserved:
             # no response to the baseline (BUG-0147): an unprobed target row, as for
             # header points only; the candidates still run
@@ -240,17 +247,40 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
     stopped_keys: set[tuple] = set()
     breaker: list[str] = []
 
+    tests = {"n": 0}
+
     def _confirm(key: tuple, ev: dict) -> None:
         if breaker and ev.get("location") == "header":
             stopped_keys.add(key)
             return
         candidate = _candidate_of(ev)
+        # FR-FUZZ-60: one test per confirmation key; its sends, strategy outcomes and
+        # finding carry its id (explicit correlation, never a time window)
+        tests["n"] += 1
+        test_id = f"t{tests['n']}"
+        trace.emit("test.start", {
+            "test": test_id, "url": trace.safe_ref(candidate.url),
+            "origin": _origin_of(candidate.url), "method": candidate.method,
+            "param": candidate.param, "location": candidate.location,
+            "category": candidate.category, "rule": ev.get("rule_id"),
+            "candidates": [cid for cid, _ev in keyed.get(key, [])]},
+            key=f"test.start:{test_id}", scope=f"test:{test_id}")
+        outcome, mechanism = "error", None
         try:
-            verdict, unsure = oracle.confirm_outcome(candidate, sender)
+            with trace.test_scope(test_id):
+                verdict, unsure = oracle.confirm_outcome(candidate, sender)
+            outcome = ("confirmed" if verdict is not None else
+                       "inconclusive" if unsure is not None else "not_confirmed")
+            mechanism = (verdict or unsure).mechanism if (verdict or unsure) else None
         except HeaderPointsStopped as exc:
+            outcome = "stopped"
             breaker.append(str(exc))
             stopped_keys.add(key)
             return
+        finally:
+            trace.emit("test.end", {"test": test_id, "outcome": outcome,
+                                    "mechanism": mechanism},
+                       key=f"test.end:{test_id}", scope=f"test:{test_id}")
         if verdict is not None:
             confirmed_keys.add(key)
         elif unsure is not None:                         # FR-FUZZ-45: never a negative

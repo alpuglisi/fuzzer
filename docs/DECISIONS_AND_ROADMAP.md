@@ -504,6 +504,32 @@ is unchanged: destructive labels, credential changes, password forms, sensitive
 controls, the named-route rule and the write window. Supersedes the CC-CRAWL-0023 G1e
 refusal (CC-CRAWL-0033).
 
+
+### D72 — Diagrams are drawn from one append-only event trace (agent, 2026-10-19; open for the owner)
+
+**The owner's instruction:** data-flow and sequence diagrams over one shared, persistent
+model, with evidence for every element (observed / inferred / unknown), no invented
+architecture, durable versioned events with stable ids, idempotent under duplicates,
+reordering, retries and replay, live during a scan, exportable (Mermaid and structured),
+redacted and measured (CC-CORE-0063, CC-FUZZ-0099, CC-AUD-0050, CC-UI-0058). What the
+agent chose within it, each open for the owner:
+- **Events are the truth; the model is derived.** `trace_event` is append-only. The
+  diagram tables are a reduction of it, rebuilt by replay, rather than
+  mutable records producers update directly.
+- **Correlation only where the code knows it.** Test ids, strategy scopes, action ids
+  and parent exchanges are recorded at the execution points. A send's role is labelled
+  only where the code knows it (`probe` otherwise). Nothing is joined by time windows.
+- **The testing overlay is a separate view** (`dg_flow.view`), off by default. The
+  explorer and the capture proxy are tools in the sequences, never users.
+- **Interfaces group id-shaped path segments only.** The grouping is recorded as
+  inferred, and a word is never merged.
+- **One recorder per producer thread, on its own connection.** A full buffer flushes
+  synchronously and is counted. Nothing is dropped silently: a batch the store refuses
+  is counted and logged. This trades a bounded stall for never losing evidence
+  silently.
+- **The web page draws its own SVG** (no Mermaid in the browser: the CSP allows
+  `'self'` scripts only, and nothing is vendored). Mermaid is an export, with every
+  label entity-encoded.
 ### Deferred decisions (revisit at the noted point)
 
 - **Classifier false-positive tolerance (conformal α)** — decide at the

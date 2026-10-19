@@ -231,6 +231,7 @@ NAV: list[dict[str, Any]] = [
         {"id": "findings", "label": "Findings", "href": "/findings", "icon": "⚑"},
         # CC-UI-0500/0502: the site tree, labelled "Site map" (UI research §12.1).
         {"id": "sitetree", "label": "Site map", "href": "/sitetree", "icon": "⌥"},
+        {"id": "diagrams", "label": "Diagrams", "href": "/diagrams", "icon": "⇶"},
         {"id": "results", "label": "Results", "href": "/results", "icon": "▤"},
     ]},
     {"group": "Analysis", "links": [
@@ -708,6 +709,14 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
         store_path=lambda: cfg.get("store_path"),
         poll_ms=int(cfg.get("sitetree_poll_ms", 5000)))
     # --- end site tree -------------------------------------------------------------
+
+    # --- diagrams (FR-UI-510): data flow and sequences over the run's trace model ----
+    from fuzzlab.web import diagram_routes
+    diagram_routes.register(
+        app, templates=templates,
+        shell_context=lambda: _shell_context(cfg, active="diagrams"),
+        with_store=lambda fn, default: _with_store(cfg, fn, default),
+        poll_ms=int(cfg.get("diagram_poll_ms", 3000)))
 
     # --- diagnostics API (U5/CC-UI-0032) — cross-run trends, intra-run series,
     # snapshots; all read-only, no new backend beyond these routes (R-05/R-12). ---

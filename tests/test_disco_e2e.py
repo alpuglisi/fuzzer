@@ -301,3 +301,39 @@ def test_two_workers_reach_the_same_surface_without_repeating_a_step(tmp_path):
     tagged = [r.action_id for r in read_capture(tmp_path / "capture.jsonl").records
               if "/api/" in r.url]
     assert tagged and all(tagged)
+
+
+def test_the_real_capture_builds_the_diagram_model(discovered, tmp_path):
+    """FR-AUD-28 on a real capture (a guarded browser through mitmdump): each explorer
+    action is a workflow whose exchanges went through the capture proxy; the app's API
+    calls are interfaces of its origin, observed by the browser; nothing is drawn behind
+    the origin; an import alone records no run end, and the status says so."""
+    from fuzzlab.core import trace
+    from fuzzlab.core.store import Store
+    from fuzzlab.report import diagram
+    from fuzzlab.tools import store_adapter
+    with Store(tmp_path / "s.db") as store:
+        run = store.start_run("crawl", "h")
+        rec = trace.TraceRecorder(store, run)
+        with trace.recording(rec):
+            store_adapter.import_disco(discovered["out"], store, run,
+                                       base_url=discovered["app"].url)
+        stats = rec.close()
+        conn = store.conn
+        assert stats["dropped"] == 0 and stats["written"] > 0
+        model = diagram.dataflow(conn, run)
+        labels = {n["label"] for n in model["nodes"] if n["kind"] == "interface"}
+        assert {"GET /api/projects", "GET /api/projects/{id}/tasks",
+                "POST /api/projects/{id}/tasks"} <= labels, labels
+        post = next(f for f in model["flows"]
+                    if f["dst"].endswith("|POST|/api/projects/{id}/tasks"))
+        assert post["src"] == trace.BROWSER and post["knowledge"] == "observed"
+        assert "data:json" in post["attrs"]["data"]
+        workflows = [s["scope"] for s in diagram.scopes(conn, run)
+                     if s["kind"] == "workflow"]
+        assert workflows
+        seq = diagram.sequence(conn, run, workflows[0])
+        assert {p["kind"] for p in seq["participants"]} >= {"tool", "actor", "target"}
+        assert diagram.status(conn, run)["state"] == "partial"
+        mm = diagram.mermaid_flow(model)
+        assert mm.startswith("flowchart LR") and "subgraph" in mm

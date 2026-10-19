@@ -3,6 +3,38 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0063 — The trace: the evidence model behind the data-flow and sequence diagrams (FR-CORE-505) (2026-10-19)
+- Change: migration 24 (`trace_event`, `dg_entity`, `dg_flow`, `dg_evidence` and their
+  indexes); new `fuzzlab/core/trace.py`:
+  - the event vocabulary and execution context (`test_scope`, `strategy_scope`, `role`,
+    `collected`, `recording`, `emit`);
+  - `TraceRecorder`: bounded buffer, batched transaction, `scrub_event` at the write,
+    dropped / duplicate / forced-flush / lag counters to `run_metrics`; `t` stays NULL
+    when the source records none (`NOW` is the default);
+  - `reduce`: idempotent and order-independent; `rebuild`;
+  - `interface_id` / `interface_path`: id-shaped segments grouped, memoized per
+    segment.
+
+  Tests: `tests/_downgrade.py` undoes migration 24.
+- Reason: the owner asked for data-flow and sequence diagrams backed by one persisted
+  model, with observed / inferred / unknown evidence, stable ids, idempotency under
+  duplicates, reordering, retries, restart and replay, and measured overhead. The
+  survey found no event log, no persisted probe, no test ids and no
+  finding-to-exchange link.
+- Impact: four new tables, written only by `core.trace` (SP-48). A store of this
+  version is refused by an older build (`SchemaTooNew`), as for every migration.
+- Risk: low-medium. The store grows with traffic: 68.6 MB for 50,022 events, measured.
+  A failed batch is dropped and counted, and the view says so.
+- Deliverables:
+  - [x] code; `tests/test_trace_model.py`: duplicates, out of order, replay equals
+    incremental, restart and re-import, unknown time, backpressure, a failed batch
+    counted, four concurrent runs on their own threads, interface grouping, and the
+    SP-48 writer guard with its offender. `tests/test_storage_redaction.py`: the trace
+    writer under the PA-0100 guard, with its offender — done
+  - [x] FR-CORE-505, NFR-CORE-trace-overhead, SP-48/49, ARCHITECTURE, D72,
+    `docs/DIAGRAMS.md`, CHANGELOG — done
+- Effectiveness: pending (`scripts/measure_diagrams.py` and the Juice Shop on/off comparison are running).
+
 ### CC-CORE-0062 — Path variation decided on code and data evidence; JS placeholders; files (BUG-0507) (2026-10-19)
 - Change (`fuzzlab/core/pathtemplate.py`): `varying_is_parameter` (the one variation
   decision, SP-45), `code_segments` (+ `MAX_CODE_SEGMENTS`), `JS_PLACEHOLDERS` as shape

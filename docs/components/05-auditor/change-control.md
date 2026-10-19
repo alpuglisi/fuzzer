@@ -3,6 +3,21 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0050 — Discovery observations as trace events (FR-AUD-28) (2026-10-19)
+- Change: new `fuzzlab/tools/observe.py` (`observe_spider`, `observe_disco`), called
+  first by `import_spider` and `import_disco`.
+- Reason: as CC-CORE-0063. Import kept points and dropped the evidence: a record's
+  time, status, error, action, referer, redirect and auth profile.
+- Impact: none without an active recorder. With one, one event per spider row, capture
+  record, explorer action and refused host. Parameter names only.
+- Risk: low.
+- Deliverables:
+  - [x] code; `tests/test_diagram_e2e.py::test_a_capture_gives_origins_auth_contexts_workflows_and_external_refs`
+    (the production importer on `make_record` records),
+    `tests/test_disco_e2e.py::test_the_real_capture_builds_the_diagram_model` (a real
+    browser through mitmdump) — done
+  - [x] FR-AUD-28 — done
+
 ### CC-AUD-0049 — The importers pass the crawl's code segments to path templating (FR-AUD-26, BUG-0507) (2026-10-19)
 - Change (`fuzzlab/tools/store_adapter.py`): `import_spider` reads `script_segments`
   (absent: none), `import_disco` reads `script_segments.json` (`_disco_code_segments`;

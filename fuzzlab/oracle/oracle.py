@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 
-from fuzzlab.core import jsonbody
+from fuzzlab.core import jsonbody, trace
 from fuzzlab.core.forms import FormEntries
 from fuzzlab.core.urls import to_path, to_route_path, url_key
 from fuzzlab.oracle.probe import (PRG_UNOBSERVED, Candidate, Probe, ProbeUnobserved,
@@ -36,6 +36,18 @@ def finding_url(candidate: Candidate) -> str:
     if candidate.location == "fragment":
         return to_route_path(candidate.url)
     return to_path(candidate.url)
+
+
+def _trace_strategy(outcome: str, verdict: Verdict | None = None,
+                    detail: str | None = None) -> None:
+    """FR-FUZZ-60: one strategy run's outcome, with the exchanges it made. A run that
+    does not confirm is ``not_confirmed`` -- never "secure"."""
+    test, strategy, _role = trace.current()
+    trace.emit("test.strategy", {
+        "test": test, "strategy": strategy, "outcome": outcome,
+        "mechanism": verdict.mechanism if verdict is not None else None,
+        "detail": detail, "exchanges": trace.collected()},
+        scope=f"test:{test}" if test else "run")
 
 
 class _CostCounter:
@@ -313,7 +325,8 @@ class Oracle:
                 "query", "body", jsonbody.LOCATION):
             return
         try:
-            ConfirmationStrategy._send(sender, candidate, _restore_value(candidate))
+            with trace.role("restore"):
+                ConfirmationStrategy._send(sender, candidate, _restore_value(candidate))
         except Exception as exc:                     # noqa: BLE001 - containment boundary
             counts["prg_restore_failed"] += 1
             from urllib.parse import urlsplit
@@ -341,67 +354,77 @@ class Oracle:
         inconclusive: Verdict | None = None
         placed, unplaceable = False, None
         for strategy in ordered:
-            # FR-FUZZ-49 (P1): PRG observation is a property of an opt-in strategy's
-            # whole run, set here once, never per send by the strategy
-            opted = getattr(strategy, "prg", False) is True   # a plugin may lack it
-            run = _PrgRun(sender, counts) if opted and prg_ok else sender
-            notes = _SessionNotes(run)                   # FR-SESS-20 (O2)
-            try:
-                if self.scheduler is not None:
-                    probe = _CostCounter(notes)          # measure this mechanism's cost
-                    verdict = strategy.confirm(candidate, probe)
-                else:
-                    verdict = strategy.confirm(candidate, notes)
-            except UnplaceableLocation as exc:
-                # this mechanism cannot place the point (PA-0115): no verdict from it,
-                # and no reward or cost for its arm; the others still run
-                unplaceable = unplaceable or str(exc)
-                continue
-            except ProbeUnobserved as exc:
-                # a probe got no response (BUG-0147, PA-0137(1), PA-0153): no verdict
-                # from this mechanism, never a negative, and the others still run.
-                # The unit is the mechanism, not the probe (a recorded deviation from
-                # PA-0137(4)): an HTTP strategy cannot tell a stand-in probe from a
-                # real one, so continuing could confirm on a response that never came.
-                # The sender has already retried an idempotent probe once. Reward 0 and
-                # the probes it sent, as for any inconclusive arm. Logged with the host
-                # and the error class only.
-                placed = True
-                if self.scheduler is not None:
-                    self.scheduler.update(ctx, strategy.arm, 0.0, cost=max(1, probe.count))
-                if inconclusive is None:
-                    inconclusive = Verdict(False, candidate.vuln_class or "", UNOBSERVED,
-                                           {"unobserved": str(exc)[:200],
-                                            "mechanism": getattr(strategy, "arm",
-                                                                 type(strategy).__name__)},
-                                           inconclusive=True)
-                from urllib.parse import urlsplit
+            # the sends of this strategy run, and its verdict, are one scope of the
+            # trace (FR-FUZZ-60): explicit, never inferred from timestamps
+            with trace.strategy_scope(getattr(strategy, "arm",
+                                              type(strategy).__name__)):
+                # FR-FUZZ-49 (P1): PRG observation is a property of an opt-in strategy's
+                # whole run, set here once, never per send by the strategy
+                opted = getattr(strategy, "prg", False) is True   # a plugin may lack it
+                run = _PrgRun(sender, counts) if opted and prg_ok else sender
+                notes = _SessionNotes(run)                   # FR-SESS-20 (O2)
+                try:
+                    if self.scheduler is not None:
+                        probe = _CostCounter(notes)          # measure this mechanism's cost
+                        verdict = strategy.confirm(candidate, probe)
+                    else:
+                        verdict = strategy.confirm(candidate, notes)
+                except UnplaceableLocation as exc:
+                    # this mechanism cannot place the point (PA-0115): no verdict from it,
+                    # and no reward or cost for its arm; the others still run
+                    unplaceable = unplaceable or str(exc)
+                    _trace_strategy("unplaceable", detail=str(exc)[:120])
+                    continue
+                except ProbeUnobserved as exc:
+                    # a probe got no response (BUG-0147, PA-0137(1), PA-0153): no verdict
+                    # from this mechanism, never a negative, and the others still run.
+                    # The unit is the mechanism, not the probe (a recorded deviation from
+                    # PA-0137(4)): an HTTP strategy cannot tell a stand-in probe from a
+                    # real one, so continuing could confirm on a response that never came.
+                    # The sender has already retried an idempotent probe once. Reward 0 and
+                    # the probes it sent, as for any inconclusive arm. Logged with the host
+                    # and the error class only.
+                    placed = True
+                    if self.scheduler is not None:
+                        self.scheduler.update(ctx, strategy.arm, 0.0, cost=max(1, probe.count))
+                    if inconclusive is None:
+                        inconclusive = Verdict(False, candidate.vuln_class or "", UNOBSERVED,
+                                               {"unobserved": str(exc)[:200],
+                                                "mechanism": getattr(strategy, "arm",
+                                                                     type(strategy).__name__)},
+                                               inconclusive=True)
+                    from urllib.parse import urlsplit
 
-                from fuzzlab.core.obs import get_logger
-                get_logger("oracle").warning(
-                    "probe got no response",
-                    extra={"host": urlsplit(candidate.url).hostname or "",
-                           "error": type(exc.__cause__ or exc).__name__})
-                continue
-            placed = True
-            if verdict is not None and notes.notes:
-                # the probes went without the run's session (FR-SESS-20, O2)
-                verdict.evidence["session"] = "; ".join(sorted(notes.notes))
-            confirmed = verdict is not None and verdict.confirmed
-            if (not confirmed and verdict is not None and verdict.inconclusive
-                    and inconclusive is None):
-                inconclusive = verdict
-            if self.scheduler is not None:               # reward+cost only the tried arms
-                self.scheduler.update(ctx, strategy.arm, 1.0 if confirmed else 0.0,
-                                      cost=max(1, probe.count))
-            if confirmed:
-                self._write_finding(candidate, verdict)
-                if self.plugins is not None:             # on_finding: observe (never writes)
-                    self.plugins.on_finding({
-                        "vuln_class": verdict.vuln_class, "url": finding_url(candidate),
-                        "method": candidate.method, "param": candidate.param,
-                        "mechanism": verdict.mechanism})
-                return verdict, None
+                    from fuzzlab.core.obs import get_logger
+                    get_logger("oracle").warning(
+                        "probe got no response",
+                        extra={"host": urlsplit(candidate.url).hostname or "",
+                               "error": type(exc.__cause__ or exc).__name__})
+                    _trace_strategy("unobserved", detail=type(exc.__cause__ or exc).__name__)
+                    continue
+                placed = True
+                if verdict is not None and notes.notes:
+                    # the probes went without the run's session (FR-SESS-20, O2)
+                    verdict.evidence["session"] = "; ".join(sorted(notes.notes))
+                confirmed = verdict is not None and verdict.confirmed
+                if (not confirmed and verdict is not None and verdict.inconclusive
+                        and inconclusive is None):
+                    inconclusive = verdict
+                _trace_strategy("confirmed" if confirmed else
+                                "inconclusive" if verdict is not None
+                                and verdict.inconclusive else "not_confirmed", verdict)
+                if self.scheduler is not None:               # reward+cost only the tried arms
+                    self.scheduler.update(ctx, strategy.arm, 1.0 if confirmed else 0.0,
+                                          cost=max(1, probe.count))
+                if confirmed:
+                    self._write_finding(candidate, verdict)
+                    if self.plugins is not None:             # on_finding: observe (never writes)
+                        self.plugins.on_finding({
+                            "vuln_class": verdict.vuln_class, "url": finding_url(candidate),
+                            "method": candidate.method, "param": candidate.param,
+                            "mechanism": verdict.mechanism})
+                    return verdict, None
+
         if not placed and unplaceable is not None:
             # no mechanism could place it: unlabelled, never a negative (PA-0108)
             return None, Verdict(False, candidate.vuln_class or "", UNPLACEABLE,
@@ -412,7 +435,7 @@ class Oracle:
     def _write_finding(self, candidate: Candidate, verdict: Verdict) -> None:
         if self.store is None or self.run_id is None:
             return
-        self.store.conn.execute(
+        cur = self.store.conn.execute(
             "INSERT INTO finding (run_id, vuln_class, label, confidence, evidence, "
             "url, method, param) VALUES (?,?,?,?,?,?,?,?)",
             (self.run_id, verdict.vuln_class, 1, verdict.mechanism,
@@ -420,3 +443,16 @@ class Oracle:
              candidate.param),
         )
         self.store.conn.commit()
+        # FR-FUZZ-60: the finding cites the test, the strategy run and exactly the
+        # exchanges that run made (its trace scope), never a time window
+        from fuzzlab.core.urls import canonical_origin
+        test, strategy, _role = trace.current()
+        url = finding_url(candidate)
+        trace.emit("finding", {
+            "finding_id": cur.lastrowid, "test": test, "strategy": strategy,
+            "mechanism": verdict.mechanism, "vuln_class": verdict.vuln_class,
+            "url": trace.safe_ref(url), "method": candidate.method,
+            "param": candidate.param, "location": candidate.location,
+            "origin": canonical_origin(candidate.url),
+            "exchanges": trace.collected()},
+            key=f"finding:{cur.lastrowid}", scope=f"test:{test}" if test else "run")

@@ -316,6 +316,23 @@ budget where a vulnerability is plausible.
   - **Stated gaps:** the web site tree places only rows that start with `/`, so a row on
     another origin shows as unplaced; `import_audit` keeps paths (the auditor's own
     findings).
+- **FR-AUD-28** *(discovery observations as trace events; `CC-AUD-0050`, 2026-10-19).*
+  `import_spider` and `import_disco` first record what the crawl observed
+  (`tools.observe`, with the active `core.trace` recorder; none, nothing):
+  - each spider page (`observe.page`, or `observe.exchange` for an `xhr` row) and each
+    captured request (`observe.exchange`, its `page_url` as the initiator, a
+    `dry-submit` / `reveal-blocked` row marked "blocked by the tool's write window:
+    never reached the server"). No time: the spider records none.
+  - each disco capture record (`observe.exchange`, scope its action id or `capture`):
+    method, URL, status or "no response (error)", a redirect's `Location`, the
+    WebSocket direction, the `Referer` path, the auth profile name, the time.
+  - each explorer action (`observe.action`) and each host the capture proxy refused
+    (`observe.external`, with its count).
+
+  Only parameter **names** and locations are kept (query, form, top-level JSON keys),
+  never a value or a header. Keys are `<source tag>:<table>:<row>` (the tag a digest of
+  the source's resolved path), so importing the same crawl twice into a run adds
+  nothing.
 - **FR-AUD-26** *(path parameters from crawls; `CC-AUD-0047`, 2026-10-19).*
   `import_spider` and `import_disco` each pass the run's answered URLs (status below
   400 or unknown; a spider's write seeds excluded; a disco run's API GETs included,

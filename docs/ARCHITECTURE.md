@@ -1155,8 +1155,17 @@ tracked in the requirements files, not here.
 - **HTTP client** `[built]`: one send helper behind an injectable seam; requires a
   session context; records raw bytes (`core/http.py`).
 - **Store** `[built]`: SQLite access, schema, and numbered forward-only migrations
-  (`core/store.py`, `core/migrations.py`; head = migration 5 — core, finding
-  url/method/param, session_state, evaluation, bandit cost columns).
+  (`core/store.py`, `core/migrations.py`; head = migration 24 -- the last, the trace
+  model's tables, FR-CORE-505).
+- **Trace (the diagrams' evidence model)** `[built]` (`core/trace.py`, SP-48/49,
+  FR-CORE-505): append-only, versioned, per-run-keyed `trace_event` rows recorded at the
+  real execution points -- discovery import (`tools/observe.py`, FR-AUD-28), every probe
+  send (`harness/tracing.py`), each test, strategy outcome and finding (FR-FUZZ-60) --
+  and the diagram model derived from them (`dg_entity`, `dg_flow`, `dg_evidence`) by an
+  idempotent, order-independent reducer, rebuildable by replay. One writer per producer
+  thread: a bounded buffer, batched transactions, a scrub at the write (PA-0100),
+  dropped events, queue pressure and lag counted in `run_metrics`. Observed / inferred
+  / unknown on every entity and flow; nothing server-side is ever created.
 - **Features** `[built]`: one versioned extractor with golden-file tests
   (`core/features.py`, `features_json` + `feature_version`).
 - **Request budget + concurrency** `[built]`: per-component caps, and a per-host mutex
@@ -1809,6 +1818,12 @@ tracked in the requirements files, not here.
   runs and results, surfacing oracle findings and the advisory model scores with their
   flag/abstain/drop decision (`web/app.py`, `web/results.py`). The `run_metrics` table
   and structured audit/debug logs are built.
+- **Diagrams** `[built]` (FR-UI-510/511, `report/diagram.py`, `web/diagram_routes.py`,
+  `fuzzlab diagram`): a run's data flow (actors | application → origin → interface |
+  the testing overlay, coverage per interface) and its sequences (a test, a captured
+  workflow, the spider's trace, a finding), drawn from the trace model only, with
+  evidence drill-down, live refresh while a run writes, and JSON / Mermaid exports
+  (labels through `mermaid_text`, SP-50). User guide: `docs/DIAGRAMS.md`.
 - **Project files** `[built — back end, start screen and pages laid out from the UI
   research; three code-review rounds; merged 2026-10-15]` (CC-UI-0450): `web/projects.py`
   (`ProjectManager`: one open project, new / open / temporary / save as / snapshot /
@@ -2054,6 +2069,7 @@ detail):
 | `request_budget` | all tools | budget manager, UI |
 | `run_plugin` (attached plugins: name, version, priority; `config`, `status`, `error` — migration 15) | `PluginManager.record` / `finalize` | `fuzzlab report` (per run) |
 | coverage / fault signals | grey-box hooks | fuzzer, scheduler, mutation |
+| `trace_event` (append-only events: `run_id`, per-run unique `key`, body version `v`, `kind`, `scope`, `seq`, `t` or NULL, scrubbed JSON `body`; migration 24, FR-CORE-505) and `dg_entity` / `dg_flow` / `dg_evidence` (the diagram model derived from it) | `core.trace` only (SP-48): `TraceRecorder`, fed by `tools/observe.py` (import), `harness/tracing.py`, the pipeline and the oracle | `report.diagram` (the web Diagrams page, `fuzzlab diagram`) |
 | `metric_series` (cross-run scalars: `run_id, source, key, step, ts, value`; migration 11) | per-step emitters via `core.store.log_scalar`/`MetricLogger`: coverage frontier (`greybox/run.py::run_greybox`, `source="coverage"`, landed `CC-FUZZ-0021`) landed; GBT/logistic, bandit loop, `MutationSearch`, stage timing still pending as later, separate lanes | diagnostics UI (U5) |
 
 ## Dependency ordering

@@ -639,7 +639,8 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
              coverage=None, dbfault=None,
              scheduler=None, plugins=None, confirm_budget: int | None = None,
              prioritizer=None, header_names=None, peer=None,
-             writes: bool = False, account_values=None) -> PipelineResult:
+             writes: bool = False, account_values=None,
+             trace_events: bool = True) -> PipelineResult:
     """Resolve the plan (D14/D15) and run the Phase 2 pipeline.
 
     ``plugins`` (a `PluginManager`) is recorded on the run, may contribute the budget
@@ -658,6 +659,9 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
     default to ``None`` (no-op) same as ``browser``/``oob``. ``writes``
     (``--fuzz-json-writes``) admits the ground truth's PUT/PATCH points (FR-FUZZ-56);
     ``account_values`` are the run's own account's stored values (FR-LAB-309).
+    ``trace_events`` (default on): every send, test, strategy outcome and finding is
+    recorded as a trace event (FR-FUZZ-60) with the active `core.trace` recorder, or
+    one opened for this run.
     """
     source, plan = plan_run(mode=mode, ground_truth=ground_truth,
                             selected_categories=selected_categories,
@@ -703,15 +707,43 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
                 prioritizer = plugins.guarded_prioritizer()
             except ValueError as exc:          # PluginConflict: two would order it
                 raise RunModeError(str(exc)) from exc
+    from fuzzlab.core import trace
+    from fuzzlab.core.urls import canonical_origin
+    from fuzzlab.harness.tracing import TracingSender
+    recorder = trace.active()
+    own = None
+    if recorder is None and trace_events:
+        own = recorder = trace.TraceRecorder(store, run_id)
+    if recorder is not None:
+        sender = TracingSender(sender, identity=getattr(sender, "_identity", None))
     counting = _CountingSender(sender)
     # crawl points: a fragment is never sent over HTTP (forms phase 3, PA-0115)
     probing = counting if source == "ground-truth" else _FragmentGuard(counting)
-    result = run_pipeline(points, store, run_id, probing, plan,
-                          ground_truth=ground_truth, pages_html=pages_html,
-                          budget=counting, browser=browser, oob=oob,
-                          coverage=coverage, dbfault=dbfault, scheduler=scheduler,
-                          plugins=plugins, confirm_budget=confirm_budget,
-                          prioritizer=prioritizer, peer=peer)
+    origins = sorted({o for o in [canonical_origin(base_url)]
+                      + [canonical_origin(p.url) for p in points] if o})
+    status = "aborted"
+    with trace.recording(recorder):
+        trace.emit("run.start", {"base_url": trace.safe_ref(base_url), "origins": origins,
+                                 "points": source, "mode": mode, "n_points": len(points),
+                                 "identity": getattr(sender, "_identity", None)
+                                 or "anonymous"}, key="run.start", scope="run")
+        try:
+            result = run_pipeline(points, store, run_id, probing, plan,
+                                  ground_truth=ground_truth, pages_html=pages_html,
+                                  budget=counting, browser=browser, oob=oob,
+                                  coverage=coverage, dbfault=dbfault, scheduler=scheduler,
+                                  plugins=plugins, confirm_budget=confirm_budget,
+                                  prioritizer=prioritizer, peer=peer)
+            status = "complete"
+        except BaseException as exc:
+            status = f"aborted: {type(exc).__name__}"
+            raise
+        finally:
+            trace.emit("run.end", {"status": status}, key="run.end", scope="run")
+            if own is not None:
+                own.close()
+            elif recorder is not None:
+                recorder.flush()
     result.metrics["points_source"] = source
     result.metrics["header_points"] = sum(1 for p in points if p.location == "header"
                                           and p.origin == "crawl")

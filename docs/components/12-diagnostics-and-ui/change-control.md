@@ -3,6 +3,31 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0058 — Data-flow and sequence diagrams: views, exports, CLI and web page (FR-UI-510, FR-UI-511) (2026-10-19)
+- Change:
+  - new `fuzzlab/report/diagram.py` (`status`, `dataflow`, `interface_coverage`,
+    `scopes`, `sequence`, `evidence`, `finding_links`, `export_json`, `mermaid_flow`,
+    `mermaid_sequence`, `mermaid_text`);
+  - new `fuzzlab/report/diagram_cli.py` (`fuzzlab diagram`), registered in
+    `fuzzlab/cli.py` and `cli_taxonomy.py`;
+  - new `web/diagram_routes.py`, registered in `web/app.py`, with the nav entry
+    "Diagrams";
+  - new `web/templates/sections/diagrams.html`, `web/static/js/diagrams.js` (SVG via
+    `createElementNS`, text only) and `web/static/css/diagrams.css` (no inline
+    styles).
+- Reason: as CC-CORE-0063.
+- Impact: a new page, API and command, all read-only except `fuzzlab diagram
+  --rebuild`, and none sends traffic.
+- Risk: low. Captured labels are untrusted: escaped in the page (text only) and
+  entity-encoded in Mermaid (SP-50).
+- Deliverables:
+  - [x] code; `tests/test_web_diagrams.py`: API, exports with download headers, refused
+    bad requests, the banned-sink guard, and a real browser showing an injected label
+    as text, opening evidence, and picking up a write made while the page is open.
+    `tests/test_cli_taxonomy.py` passes — done
+  - [x] FR-UI-510/511, SP-50, ARCHITECTURE, `docs/DIAGRAMS.md`, CHANGELOG — done
+- Effectiveness: pending (the Juice Shop exports are being taken).
+
 ### CC-UI-0057 — `auto --peer-identity` classified for project launches (2026-10-19)
 - Change: `fuzzlab/web/projects.py` `OPTION_CLASS` gains `("auto", "peer_identity")`:
   not a path, like `identity`.

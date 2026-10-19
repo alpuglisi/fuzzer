@@ -1,0 +1,154 @@
+# Data-flow and sequence diagrams
+
+fuzzlab draws two kinds of diagram for every `fuzzlab auto` run, from one persisted
+evidence model (FR-CORE-505, FR-FUZZ-60, FR-AUD-28, FR-UI-510/511):
+
+- **Data flow**: who talks to whom. Actors (the browser, the automated explorer),
+  the target application, its origins and their interfaces, and external hosts the
+  browser asked for. The tool's own traffic is an optional overlay.
+- **Sequences**: the order of events in one scope. A scope is a test, a captured
+  explorer workflow, the spider's crawl, one exchange, or a finding.
+
+## Running it
+
+The trace is on by default; `--no-trace` turns it off.
+
+```
+fuzzlab auto --base-url http://127.0.0.1:3000 --spider-db crawl.db --points crawl --authorized
+fuzzlab auto --base-url http://127.0.0.1:3000 --disco-run out/ --points crawl --authorized
+```
+
+Then:
+
+- **Web:** `fuzzlab web`, then **Diagrams**. The page refreshes while a run writes,
+  checking every 3 s (`diagram_poll_ms`).
+- **CLI** (read-only; no traffic):
+
+```
+fuzzlab diagram --run latest --format status        # completeness, dropped events, lag
+fuzzlab diagram --run 7 --format json --out run7.json
+fuzzlab diagram --run 7 --format mermaid-flow --overlay
+fuzzlab diagram --run 7 --format scopes             # the sequence scopes
+fuzzlab diagram --run 7 --format mermaid-seq --scope finding:3
+fuzzlab diagram --run 7 --rebuild                   # replay the events into the model
+```
+
+## How the model works
+
+### Events
+
+Every producer records what it actually saw or did as one `trace_event` row:
+
+- discovery import: one event per spider row and per capture record, plus explorer
+  actions and refused external hosts;
+- the pipeline: every send, each test's start and end, each strategy run's outcome,
+  and each finding.
+
+Events are append-only. Each carries a version and a key that is unique within its
+run, so a repeated delivery or a re-import adds nothing. Bodies are redacted twice:
+by the producer, and again at the write (`trace.scrub_event`, PA-0100).
+
+### The diagram model
+
+`dg_entity`, `dg_flow` and `dg_evidence` are derived from the events:
+
+- incrementally, as each batch is written;
+- or completely, with `--rebuild`.
+
+Reduction is idempotent and does not depend on event order:
+
+- first and last seen are taken as the minimum and maximum;
+- attributes are sets, so conflicting observations (two statuses, two auth
+  contexts) are both kept;
+- observation counts are counted from evidence links, never incremented.
+
+### Correlation
+
+Correlation is explicit and is never inferred from timestamps:
+
+- a test id for every confirmation;
+- a strategy scope for each strategy run, whose exchange keys a finding cites
+  exactly;
+- the explorer's action id, carried on its requests through the capture proxy;
+- a follow-up's parent exchange.
+
+Capture records with no action id are listed as uncorrelated.
+
+### Knowledge levels
+
+- **Observed:** directly supported by captured traffic, a browser event, a tool
+  exchange or explicit configuration.
+- **Inferred:** supported indirectly; the basis is shown. For example, path segments
+  grouped as `{id}` because they are id-shaped.
+- **Unknown:** not established.
+
+Each origin states that its internals are unknown. No server-side component, store or
+internal call is ever drawn. Trust zones between origins are unknown too: a host name
+is not evidence.
+
+### Coverage
+
+Each interface counts six states separately: *discovered*, *captured*, *scheduled*,
+*executed*, *evaluated* and *finding*. An interface with no finding shows what was
+tested; it is never presented as "secure".
+
+### Roles of a send
+
+A send is labelled `baseline`, `mutation`, `control`, `follow-up` or `restore` only
+where the code knows which it is:
+
+- the pipeline's fingerprint baseline;
+- a differential's base value, benign variant and payload;
+- a timing check's baseline samples and its delays;
+- the SQL error check's payloads and controls;
+- a PRG restore.
+
+Every other send is `probe`: its strategy does not say.
+
+### Responses that never came
+
+- A missing response is drawn as a lost arrow (Mermaid `-x`), labelled `timeout`,
+  `unobserved` (connection reset or cut off), `not_sent` (refused before sending) or
+  `error`.
+- A request the browser made inside the tool's write-blocking window (FR-CRAWL-26) is
+  marked *blocked, never sent*.
+- A finding is a tool record (an evaluator note), never a target response.
+
+## Exports
+
+- **JSON** (`fuzzlab.diagram/1`): the whole model, with each entity's and flow's
+  evidence keys, the sequence scopes, and the completeness status. Mermaid cannot carry
+  most of this metadata; the JSON is the full record.
+- **Mermaid:** a `flowchart` for the data flow and a `sequenceDiagram` per scope. Every
+  label is reduced to a safe alphabet, with numeric entities for everything else
+  (`diagram.mermaid_text`). Captured text can never become diagram syntax.
+
+## Completeness
+
+`status` (on the page, and with `--format status`) reports:
+
+- the run's state: `complete`, `partial` or `empty`;
+- whether a run end was recorded, and how the run ended;
+- the recorder's written, dropped and duplicate events, forced flushes (queue
+  pressure) and maximum lag;
+- the gaps listed below.
+
+A run that stopped, or a batch that could not be written, shows as **partial**.
+
+## Known limits
+
+- The browser-only (M6) and out-of-band (M8) confirmations record their HTTP sends;
+  the browser's own steps inside them are not traced.
+- A sender's re-send after a reset is counted on its exchange, not recorded as its
+  own attempt: the senders do not expose each try.
+- The spider records no timestamps and no initiator for a page. Its events have no
+  first or last seen time, and its sequence is in crawl order.
+- WebSocket messages appear only from a disco capture. The pipeline sends none.
+- External hosts come from the capture proxy's refusal counts. The browser's own
+  background traffic, such as autofill services, is included and labelled as possibly
+  the browser's.
+
+## Measured cost
+
+See `scripts/measure_diagrams.py`, and CC-CORE-0063's effectiveness for the recorded
+numbers.
