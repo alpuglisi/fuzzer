@@ -3,6 +3,24 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0047 — Crawled URLs give path parameters; `R-SQLI-PARAM` on path points (FR-AUD-26) (2026-10-19)
+- Change: `fuzzlab/tools/store_adapter.py` (`_import_path_templates`, `_answered`;
+  `import_spider` and `import_disco` collect their answered GET URLs and call it once);
+  `fuzzlab/audit/rules_data/default_rules.json` (`R-SQLI-PARAM` adds `path`).
+- Reason: the owner asked for path parameter discovery from crawls (2026-10-19).
+- Impact: crawl-sourced runs gain path points (one per template); before, a crawled
+  `/product/12` gave none.
+- Risk: medium-low: more probes on GET URLs the crawl already loaded; the destructive
+  and transaction checks run on the template (`_crawl_url_refusal`).
+- Deliverables:
+  - [x] code; `tests/test_path_discovery.py` (a crawl's path parameters, an identifier
+    example blanked, broken links and write seeds ignored; a disco run's API GET) — done
+  - [x] FR-AUD-26, SP-37 row, CHANGELOG — done
+- Effectiveness (live, 2026-10-19): `fuzzlab auto --disco-run` of secdevlabs-streaming's
+  capture: 2 path parameters (`/live/username/{username}`, `/play/{play}`), SQL
+  injection and access control probed (42 requests), no finding (no SQL injection
+  there; the API template was probed at the page's origin: the stated gap).
+
 ### CC-AUD-0046 — `R-ACCESS-CONTROL-PATH`: an id-shaped path segment (FR-AUD-25) (2026-10-19)
 - Change: `fuzzlab/audit/rules_data/default_rules.json` gains `R-ACCESS-CONTROL-PATH`
   (GET, `location_in: ["path"]`, a name `id`/`uuid`/`guid`, `*_id`, `*-id`, or

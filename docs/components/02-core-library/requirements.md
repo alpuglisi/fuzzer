@@ -598,6 +598,17 @@ plugin registry. It is the layer that makes the store the integration bus.
   (refused when there is no credential); `attributes(host, identity)` reads them
   (empty when none). A new `set` of the credential drops them (SP-43).
 
+- **FR-CORE-503** *(path templates from crawled URLs; `CC-CORE-0060`, 2026-10-19).*
+  `core.pathtemplate.path_templates(urls)` returns, in first-seen order, one
+  `PathTemplate(origin, path, param, example)` per (origin, template path), each path
+  with one placeholder segment: a segment that is `id_shaped` (digits, a UUID, mixed
+  hex of 8+ characters, or `looks_like_identifier`) even when seen once, named `id`;
+  and, among URLs of one origin with as many segments that agree on all but one
+  position (never the first), a position with two or more values, named after the
+  segment before it. A URL whose last segment is a static asset (`ASSET_EXTENSIONS`)
+  gives none; a file name (`FILE_EXTENSIONS`) or a placeholder is never a value. A URL
+  with two parameters gives two templates, the other segment concrete (SP-45). Pure.
+
 - **FR-CORE-500** *(one reader for a run's target; one method key; `CC-CORE-0500`,
   2026-10-15).*
   - `fuzzlab/core/runtarget.py` is the one reader of the `target` table (PA-0063(1)): a

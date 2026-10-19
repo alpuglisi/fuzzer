@@ -112,10 +112,14 @@ def import_spider(spider_db: str | Path, store: Store, run_id: int, *,
         ).fetchall()
     except sqlite3.Error:
         rows = []
+    path_urls = []
     for row in rows:
         source = row["source"] if "source" in row.keys() else "link"
         _import_page_url(store, run_id, row["url"], row["status_code"], source, counts,
                          seen_pages, link_sets)
+        if source != _write_seed_source() and _answered(row["status_code"]):
+            path_urls.append(row["url"])
+    _import_path_templates(store, run_id, path_urls, "link", counts)
     _import_forms(src, store, run_id, counts)
     _import_requests(src, store, run_id, counts, fuzz_json_writes=fuzz_json_writes)
     _import_link_sets(store, run_id, link_sets, counts)   # after forms: forms win
@@ -160,6 +164,36 @@ def _import_page_url(store: Store, run_id: int, raw: str, status, source: str,
     _import_route_query(store, run_id, raw, source, counts)
 
 
+def _answered(status) -> bool:
+    """A crawled URL that answered (no status recorded counts): a broken link is no
+    evidence of a route."""
+    try:
+        return status is None or int(status) < 400
+    except (TypeError, ValueError):
+        return False
+
+
+def _import_path_templates(store: Store, run_id: int, urls, source: str,
+                           counts: dict) -> None:
+    """The run's URLs -> ``path`` parameters (FR-AUD-26): each `core.pathtemplate`
+    template is an endpoint (its path with one ``{param}`` segment, GET) with one
+    ``path`` parameter whose example is the crawled value, blanked when it looks like
+    an identifier (PA-0100). Both importers call it once, after their URLs."""
+    from fuzzlab.core.pathtemplate import path_templates
+    from fuzzlab.core.redaction import looks_like_identifier
+    for t in path_templates(urls):
+        endpoint_id = _upsert_endpoint(store, run_id, t.path, "GET", source)
+        if _get_parameter(store, run_id, endpoint_id, t.param) is not None:
+            continue
+        counts["endpoint"] += 1
+        example = "" if looks_like_identifier(t.example) else t.example
+        store.conn.execute(
+            "INSERT INTO parameter (run_id, endpoint_id, name, location, example) "
+            "VALUES (?,?,?,?,?)", (run_id, endpoint_id, t.param, "path", example))
+        counts["parameter"] += 1
+        counts["path_parameter"] = counts.get("path_parameter", 0) + 1
+
+
 #: The ``source`` of rows imported from a disco run (D70).
 DISCO_SOURCE = "disco"
 #: Response media types whose GET is a page (not an asset) in a disco run.
@@ -191,10 +225,13 @@ def import_disco(run_dir: str | Path, store: Store, run_id: int, *,
     seen_pages: set[tuple[str, str]] = set()
     link_sets: list[tuple[int, list[tuple[str, str, str]]]] = []
     page_urls, visible = _disco_actions(run_dir / "actions.jsonl", counts)
+    path_urls = []
     for rec in read.records:
         if rec.kind != "http" or rec.status is None:
             continue
         if rec.method == "GET":
+            if _answered(rec.status):
+                path_urls.append(rec.url)      # an API GET's path too (FR-AUD-26)
             media = (rec.res_ctype or "").split(";", 1)[0].strip().lower()
             if urlparse(rec.url).query or media in _PAGE_MEDIA:
                 _import_page_url(store, run_id, rec.url, rec.status, DISCO_SOURCE,
@@ -220,6 +257,7 @@ def import_disco(run_dir: str | Path, store: Store, run_id: int, *,
     for url in page_urls:
         _import_page_url(store, run_id, url, None, DISCO_SOURCE, counts, seen_pages,
                          link_sets)
+    _import_path_templates(store, run_id, path_urls + page_urls, DISCO_SOURCE, counts)
     _import_link_sets(store, run_id, link_sets, counts)
     store.conn.commit()
     return counts

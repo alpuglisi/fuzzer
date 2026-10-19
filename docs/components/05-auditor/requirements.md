@@ -305,6 +305,20 @@ budget where a vulnerability is plausible.
     user field (`username`, `login`) of a JSON login is pinned, so it is not fuzzed;
     an identifier-like value blanked by the crawler before import reads as an empty
     example; other query parameters of an SPA route are not sent with a fragment probe.
+- **FR-AUD-26** *(path parameters from crawls; `CC-AUD-0047`, 2026-10-19).*
+  `import_spider` and `import_disco` each pass the run's answered URLs (status below
+  400 or unknown; a spider's write seeds excluded; a disco run's API GETs included,
+  JSON answers without a query too) once to `_import_path_templates`: every
+  `core.pathtemplate` template (FR-CORE-503) is a GET endpoint at its template path
+  with one `path` parameter, its example the crawled value, blanked when it looks like
+  an identifier (PA-0100). `R-SQLI-PARAM` now includes `path`; `R-ACCESS-CONTROL-PATH`
+  (FR-AUD-25) and the location-agnostic rules apply as to any point.
+  - **Stated gaps:** a template on another origin than the run's base is stored as a
+    path, so it is probed at the base's origin (as every crawl point is: the importer
+    keeps paths only); variation can template sibling pages (`/docs/intro`,
+    `/docs/setup` -> `/docs/{docs}`), which costs probes, not safety (the destructive
+    and transaction checks judge the template); path parameters of POST requests are
+    not discovered.
 - **FR-AUD-25** *(an id-shaped path segment; `CC-AUD-0046`, 2026-10-19, FR-FUZZ-57).*
   `R-ACCESS-CONTROL-PATH` fires on a GET `path` point whose name is `id`, `uuid` or
   `guid`, ends in `_id`/`-id` (or `_uuid`/`-guid`…), or is camelCase `…Id`/`…Uuid`

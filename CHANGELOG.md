@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-19 (path parameters from crawls)
+- **What:** a crawl's or disco run's URLs now yield path parameters (`/product/{id}` from id-shaped segments, `/live/username/{username}` from variation across URLs), stored as `path` points and probed by `auto`; SQL injection now covers path segments (CC-CORE-0060, CC-AUD-0047, CC-FUZZ-0097).
+- **Why:** the owner asked for path parameter discovery from crawls; before, only an answer key could name one.
+
 ## 2026-10-19 (JSON API login)
 - **What:** the session manager logs in through a login form that the page's own script sends as JSON (the one login URL an inline JSON-building script POSTs), confirmed against a wrong-password control; ecommerce-api now runs with real sessions (CC-SESS-0026, CC-LAB-0316, FR-SESS-21).
 - **Why:** the owner asked for JSON API login support; the session manager posted such forms natively (405) and the run stopped.

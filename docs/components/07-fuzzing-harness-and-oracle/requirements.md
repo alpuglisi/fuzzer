@@ -1573,7 +1573,9 @@ rewards) derives from it.
   (BUG-0115); greybox and the M6 executor refuse a path point. `R-ACCESS-CONTROL-PATH`
   draws the access-control strategies onto a GET path segment with an id-shaped name
   (`id`, `uuid`, `guid`, `*_id`, `*Id`); `CrossAccountReplayStrategy` takes path
-  points as query points.
+  points as query points. *(CC-FUZZ-0097:)* a crawl gives path points too (FR-AUD-26);
+  `injection_points_from_store` builds them at the base origin plus the template path,
+  carrying the crawled value as their entry when it was kept.
 - **FR-FUZZ-58 (runs that log no account in, `CC-FUZZ-0096`, 2026-10-19)** `fuzzlab auto
   --no-login` (needs `--identity`): `--identity` and `--peer-identity` only name the
   accounts whose stored usernames (the cross-account markers) and account values

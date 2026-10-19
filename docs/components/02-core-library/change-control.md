@@ -3,6 +3,22 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0060 — `core.pathtemplate`: path templates from crawled URLs (FR-CORE-503) (2026-10-19)
+- Change: new `fuzzlab/core/pathtemplate.py` (`path_templates`, `id_shaped`,
+  `PathTemplate`, `ASSET_EXTENSIONS`, `FILE_EXTENSIONS`).
+- Reason: the owner asked for path parameter discovery from crawls (2026-10-19).
+  Measured on secdevlabs-streaming's disco capture: `/live/username/matthewpets` and
+  `/mr.robot` (one varying position, word values: shape alone misses them), `/play/@…`
+  routes, per-streamer assets under `/assets/images/lives/<name>/thumb.png` (must not
+  template), and a dotted value (`mr.robot`) that is not a file.
+- Impact: new module; used by the importers (CC-AUD-0047).
+- Risk: low; pure.
+- Deliverables:
+  - [x] code; `tests/test_path_discovery.py` (the streaming crawl's URLs; id shapes
+    seen once; two parameters, two templates; no template without evidence; variation
+    within one origin, named after the segment before) — done
+  - [x] FR-CORE-503, SP-45 — done
+
 ### CC-CORE-0059 — Path-segment placement; account values with a credential (FR-CORE-501, FR-CORE-502) (2026-10-19)
 - Change: `fuzzlab/core/urls.py` (`place_path_param`, `path_placeholder`,
   `PathPlacementError`); `fuzzlab/core/credentials.py`

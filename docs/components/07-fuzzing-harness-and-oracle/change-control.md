@@ -3,6 +3,18 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0097 — Crawl-sourced path points carry their crawled value (FR-FUZZ-57) (2026-10-19)
+- Change: `fuzzlab/harness/auto.py` (`injection_points_from_store`: a `path`
+  parameter's example becomes its `base_entries`, as a query link's value does).
+- Reason: FR-AUD-26 (CC-AUD-0047): crawled path parameters reach `auto`.
+- Impact: only path points, which crawls did not give before.
+- Risk: low.
+- Deliverables:
+  - [x] code; `tests/test_path_discovery.py::test_auto_confirms_sql_injection_in_a_crawled_path_segment`
+    (a crawl of `/product/1`, `/product/2` on a local app whose segment breaks its SQL:
+    the point `/product/{id}` with entry `id=1`, confirmed `sqli` at `/product/{id}`) — done
+  - [x] FR-FUZZ-57 — done
+
 ### CC-FUZZ-0096 — Path-segment parameters, account values in auto, `--no-login` (FR-FUZZ-57, FR-FUZZ-58) (2026-10-19)
 - Change: `fuzzlab/tools/probesender.py` (`PATH_LOCATION`, `_path_url`; both senders
   place a path value with `core.urls.place_path_param` after the send check on the

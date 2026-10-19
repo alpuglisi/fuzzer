@@ -1294,7 +1294,8 @@ tracked in the requirements files, not here.
       (`/ticket/{id}`, kept as the point's URL; placed by `core.urls.place_path_param`,
       SP-42) and may name an `account_value`, a value of the run's own account that the
       lab's bootstrap stored with its credential (SP-43); `--no-login` uses accounts for
-      their values and names only;
+      their values and names only; a crawl gives path points too (FR-AUD-26:
+      `core.pathtemplate`, SP-45, by id shape or variation across the run's URLs);
   - **Forms phase 3, lane S — single-page apps in the crawler (CC-CRAWL-0016 /
     CC-CRAWL-0017 / CC-CORE-0047, no store migration):**
     - `tools/spa.py`: route declarations read from the page's already-loaded

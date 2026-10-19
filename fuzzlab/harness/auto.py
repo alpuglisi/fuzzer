@@ -388,6 +388,9 @@ def injection_points_from_store(store, run_id: int, base_url: str,
                 entries = tuple((n, _send_value(v)) for n, v in json.loads(r["entries"]))
             except (ValueError, TypeError):
                 entries = None
+        elif location == "path" and r["example"]:
+            # a crawled path segment (FR-AUD-26): its value, as a query link's is
+            entries = ((r["name"], _send_value(r["example"])),)
         example = r["example"]
         shapes = _shapes(example)
         if example in (None, "") or is_filler(example):
