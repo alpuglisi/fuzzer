@@ -69,6 +69,20 @@ def test_no_verdict_for_an_owner_check_or_a_page_that_always_names_the_owner(mod
     assert v is None
 
 
+def test_a_peer_session_with_no_response_is_inconclusive_not_negative():
+    """PA-0153: the peer's own transport failing mid-check is "no verdict"."""
+    from fuzzlab.oracle.oracle import Oracle
+    from fuzzlab.oracle.probe import ProbeUnobserved
+
+    class Dead:
+        def send(self, *a, **kw):
+            raise ProbeUnobserved("no response: ConnectionError")
+    accounts = PeerAccounts(sender=Dead(), owner="alice", peer_name="bob")
+    confirmed, inconclusive = Oracle(strategies=[CrossAccountReplayStrategy(accounts)]) \
+        .confirm_outcome(_cand(), _App("broken", "alice"))
+    assert confirmed is None and inconclusive is not None and inconclusive.inconclusive
+
+
 def test_no_peer_no_post_no_value_no_probe():
     app = _App("broken", "alice")
     assert CrossAccountReplayStrategy(None).confirm(_cand(), app) is None

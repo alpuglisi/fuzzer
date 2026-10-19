@@ -18,6 +18,21 @@ Format per entry:
 
 ---
 
+## 2026-10-19 — Cloud container: nine `lab-generate --check` tests failed because gitleaks and scikit-learn were missing (environment; recurrence of the 2026-10-15 entry)
+- **Symptom:** `verify_change --base 259c190` on bed382f failed nine labgen
+  `test_cli_check_passes_end_to_end*` tests: `secret scanner: 'gitleaks' executable
+  not found on PATH` and `metadata leakage gate ... requires scikit-learn`.
+- **Root cause:** environment. Each session starts in a fresh container: the
+  `gitleaks` installed on 2026-10-15 was gone and the `labgen` extra was never
+  installed. Both gates correctly fail closed. The harness selected these files only
+  now because the change touched `fuzzlab.labels`; the same test failed identically at
+  the base 259c190.
+- **Remediation:** installed gitleaks 8.21.2 from its GitHub release (sha256 checked
+  against the release's checksum file) and `scikit-learn` (the `labgen` extra); the
+  tests then passed at 259c190 and in the re-verify. Lasting fix, outside the repo:
+  the environment's setup script should install both.
+- **Status:** Environment (fixed in the session; recurs in a new container until the setup script installs them)
+
 ## 2026-10-19 — lab environment (secDevLabs bring-up: Docker daemon, Docker Hub limit, Mongection on modern Node)
 - **Symptom:** (1) `docker` reported "Cannot connect to the Docker daemon" after the session's container restarted (a stale `/var/run/docker.pid`); (2) pulling `php:8.3-apache` from Docker Hub answered `429 Too Many Requests`; (3) the Mongection app exited on its first failed login ("Cannot set headers after they are sent", then Node's exit).
 - **Root cause:** (1) the restart left no daemon running; (2) Docker Hub's anonymous pull rate limit for this host; (3) upstream's `/login` answers a failed login twice, and Node 15+ exits on that unhandled rejection where the Node of the app's era only warned (not our code).

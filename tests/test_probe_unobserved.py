@@ -34,6 +34,7 @@ from fuzzlab.oracle.probe import (
     ProbeUnobserved,
     Verdict,
 )
+from fuzzlab.oracle.strategies import PeerAccounts
 from fuzzlab.tools.probesender import RequestsProbeSender, SeamProbeSender
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -361,11 +362,14 @@ def _candidates(strategy) -> list[Candidate]:
     vc, cat = strategy.vuln_class, getattr(strategy, "category", None)
     base = "http://127.0.0.1:9/p"
     return [Candidate(base, "q", vuln_class=vc, category=cat),
+            Candidate(base, "q", vuln_class=vc, category=cat, base_entries=(("q", "7"),)),
             Candidate(base, "q", method="POST", location="body", vuln_class=vc, category=cat),
             Candidate(base, "body", method="POST", location="body", vuln_class=vc,
                       category=cat, content_type="application/xml"),
             Candidate(base, "body", method="POST", location="body", vuln_class=vc,
-                      category=cat, content_type="application/json")]
+                      category=cat, content_type="application/json"),
+            Candidate(base, "q", method="POST", location="json", vuln_class=vc,
+                      category=cat, base_entries=((("q",), "x"), (("p",), "y")))]
 
 
 #: Default mechanisms that refuse before sending anything when their own dependency is
@@ -388,7 +392,9 @@ def test_no_default_mechanism_turns_a_probe_without_response_into_a_negative(run
     ordinary "not mine", not a transport failure. With the listener stopped, every
     listener user is inconclusive (no verdict) for every shape it applies to."""
     from fuzzlab.oracle.strategies import default_strategies
-    strategies = default_strategies(oob=_Listener(running))
+    peer = PeerAccounts(sender=_DeadSender(), owner="alice", peer_name="bob",
+                        anonymous=_DeadSender())
+    strategies = default_strategies(oob=_Listener(running), peer=peer)
     names = {type(s).__name__ for s in strategies}
     assert EXEMPT.keys() <= names and LISTENER_USERS <= names
     exercised = set()

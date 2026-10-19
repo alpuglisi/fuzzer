@@ -3,6 +3,22 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0094 — The no-response guard covers the NoSQL and cross-account strategies (PA-0153) (2026-10-19)
+- Change: `tests/test_probe_unobserved.py` (two more candidate shapes: a JSON-leaf
+  point with siblings, and a query point carrying the value the crawl saw; the
+  strategies get a peer account whose senders never answer), `tests/
+  test_cross_account.py` (a peer session that stops answering mid-check is
+  inconclusive).
+- Reason: `verify_change` on bed382f failed the PA-0153 whole-package guard: no shape
+  it built reached `NoSqlOperatorStrategy` (JSON leaves only), and after 10fc6ca none
+  reached `CrossAccountReplayStrategy` (it needs a peer). The guard did its job; the
+  shapes had to grow with the strategies.
+- Impact: tests only; both strategies already turned a probe with no response into
+  "no verdict" through the oracle, which the guard now proves.
+- Risk: none (no product code).
+- Deliverables:
+  - [x] tests; CHANGELOG — done
+
 ### CC-FUZZ-0093 — Cross-account access control with a peer account (FR-FUZZ-55) (2026-10-19)
 - Change: `fuzzlab/oracle/strategies.py` (`PeerAccounts`, `CrossAccountReplayStrategy`,
   `default_strategies(peer=)`), `fuzzlab/oracle/oracle.py`, `fuzzlab/harness/
