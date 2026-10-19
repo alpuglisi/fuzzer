@@ -36,6 +36,7 @@ NOT_SAFETY = {
     "NFR-CORE-central-connection": "connection configuration",
     "NFR-CORE-deterministic": "reproducibility",
     "NFR-CORE-single-writer": "concurrency (WAL, one writer path)",
+    "NFR-CORE-trace-overhead": "performance of the diagram trace",
     "NFR-CRAWL-bounded": "crawl termination",
     "NFR-CRAWL-reproducible": "reproducibility",
     "NFR-FUZZ-deterministic": "reproducibility",

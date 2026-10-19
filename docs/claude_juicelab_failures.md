@@ -860,3 +860,10 @@ Juice Shop lab is complete.
 - **Evidence:** BUG-0507; `synth.template_paths`'s docstring cites BUG-0501 and Juice Shop's `/api/Users/`, `/api/Products/`.
 - **Impact:** every crawl-fed run on Juice Shop since CC-CORE-0060 probed four or five false path endpoints.
 - **Status:** fixed (one decision, `varying_is_parameter`, SP-45; PA-0507(2) requires the search).
+
+### F-075 — A test I wrote read a server's log order as the order of sending
+- **What:** the failed-load tests I wrote for BUG-0137 and X1 asserted that the server logged no tick after the fallback's request. That oracle depends on delivery order between two concurrent actors (the browser's ticker and the fallback), the class PA-0150 named the next day; its sweep did not reach them.
+- **Evidence:** BUG-0511: the auditor test failed in a loaded verification run; the browser-clocked experiment showed every late-logged tick was sent 0.9–2.2 s before the page ended.
+- **Impact:** one verification run of the diagrams change red; no product defect.
+- **Status:** fixed (send-time oracle, a proof on the defect, and an AST guard; PA-0511).
+

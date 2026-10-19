@@ -5,6 +5,7 @@ Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
 ## 2026-10-19 (data-flow and sequence diagrams)
+- **What:** the two failed-load tests judge each tick by the browser clock it carries when sent, not by the server's log order; an AST guard forbids the arrival-order oracle. **Why:** under CPU load, ticks sent before the page ended reached the server after the fallback's request and failed a verification run on correct code (BUG-0511, PA-0511). Also: the trace's measured cost recorded in CC-CORE-0063, CC-FUZZ-0099 and CC-UI-0058.
 - **What:** every `auto` run records an append-only, redacted event trace at its real execution points (discovery import, each send, test, strategy outcome and finding), reduced into a persisted diagram model with observed / inferred / unknown evidence; `fuzzlab diagram` and the web Diagrams page draw the run's data flow and its sequences with evidence drill-down, live refresh and JSON / Mermaid exports (CC-CORE-0063, CC-FUZZ-0099, CC-AUD-0050, CC-UI-0058, D72, `docs/DIAGRAMS.md`).
 - **Why:** the owner asked for data-flow and sequence diagrams backed by honest, correlated evidence; nothing persisted probes, test ids or finding-to-exchange links before.
 

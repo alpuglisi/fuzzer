@@ -17,6 +17,7 @@ recorded.
 from __future__ import annotations
 
 import glob
+import json
 import sqlite3
 import threading
 import time
@@ -153,12 +154,12 @@ class _Site:
     ``redirects`` a path to a 302
     ``Location``, ``delays`` a path to seconds its answer is held back. Every GET path
     is recorded in ``requests``, every POST path in ``posts``, and both in order in
-    ``log`` as ``(method, path)``."""
+    ``log`` as ``(method, path)``; every POST body in ``bodies``."""
 
     def __init__(self, host="127.0.0.1"):
         require_loopback(host)                    # PA-0130
         self.pages, self.redirects, self.delays = {}, {}, {}
-        self.requests, self.posts, self.log = [], [], []
+        self.requests, self.posts, self.log, self.bodies = [], [], [], []
         site = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -188,7 +189,8 @@ class _Site:
                 self._answer()
 
             def do_POST(self):  # noqa: N802 - http.server API
-                self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                site.bodies.append(
+                    self.rfile.read(int(self.headers.get("Content-Length") or 0)))
                 site.posts.append(self.path)
                 site.log.append(("POST", self.path))
                 self._answer()
@@ -398,23 +400,34 @@ def test_a_refused_iframe_keeps_its_parent_crawled(where, monkeypatch, tmp_path)
     _nothing_refused_was_sent(where, sp, a, b)
 
 
+#: A 50 ms POST ticker. Each tick's key is its own (`k<n>`, so the spider keeps every
+#: one) and its value is the browser's clock when it was sent.
+_TICKER = ("<script>let n = 0; setInterval(() => fetch('/tick', {method: 'POST', "
+           "headers: {'content-type': 'application/json'}, "
+           "body: JSON.stringify({['k' + (n++)]: Date.now()})}), 50)</script>")
+
+
+def _ticks_sent_after(bodies, ended):
+    """The send times in `bodies` (raw or JSON text) later than `ended`."""
+    times = [t for body in bodies for t in json.loads(body).values()]
+    assert times                                    # not vacuous: A did tick
+    return [t for t in times if t > ended]
+
+
 def test_a_failed_load_ends_the_previous_document(monkeypatch, tmp_path):
     """X1 (B-M1): after a refused `goto` the previous page is still alive; its timers
     and fetches would be filed under the URLs crawled next. The failed load sends the
     page to ``about:blank`` before the fallback: A's 50 ms POST ticker stops there, so
-    the server sees no tick once the fallback's own request is sent, and nothing is
-    captured but what A sent before it ended (whereas before, the
-    ticks queued during the fallback were sent and captured under /next, the next URL
-    crawled)."""
+    no tick the server gets or the spider captures was sent after that (BUG-0511).
+    Before, the ticks queued during the fallback were sent and captured under /next,
+    the next URL crawled."""
     import time
     marks = {}
 
     def build(a, b):
         a.pages["/"] = (
             "<html><body><p>A-OWN-CONTENT</p><a href='/go'>g</a><a href='/next'>n</a>"
-            "<script>let n = 0; setInterval(() => fetch('/tick', {method: 'POST', "
-            "headers: {'content-type': 'application/json'}, "
-            "body: JSON.stringify({['k' + (n++)]: 1})}), 50)</script></body></html>")
+            f"{_TICKER}</body></html>")
         a.redirects["/go"] = "/logout.php"
 
     def hook(sp, a, b):
@@ -423,44 +436,32 @@ def test_a_failed_load_ends_the_previous_document(monkeypatch, tmp_path):
         def fetch_static(url):
             # what the page shows, what the server saw and what was captured, when the
             # fallback starts; then time for a live document's ticker to run
-            captured = sp.storage.cursor.execute(
-                "SELECT COALESCE(MAX(id), 0) FROM discovered_requests").fetchone()[0]
-            marks[url] = (sp._page.url, len(a.log), captured)
+            marks[url] = (sp._page.url, sp._page.evaluate("Date.now()"))
             time.sleep(0.4)
             return real(url)
         sp._fetch_static = fetch_static
     sp, a, b, rows = _crawl(tmp_path, monkeypatch, build, hook, timeout_ms=3000)
-    shown, seen, captured = marks[a.base + "go"]
+    shown, ended = marks[a.base + "go"]
     db = sqlite3.connect(str(tmp_path / "s.db"))
-    ticks = db.execute("SELECT id, page_url FROM discovered_requests "
+    ticks = db.execute("SELECT page_url, body_json FROM discovered_requests "
                        "WHERE url LIKE '%/tick%'").fetchall()
-    assert any(page == a.base for _id, page in ticks)          # the ticker was captured
+    assert any(page == a.base for page, _body in ticks)        # the ticker was captured
     assert shown == "about:blank"                              # the failed load ended A
-    # the fallback's own GET /go was sent 400 ms after A ended: no tick after it. A
-    # tick A sent before it ended may still be in flight then (it reaches the server
-    # or is captured just after the mark); every captured tick is one the server got
-    # before the fallback's request, so none was sent by a document left alive
-    fallback = a.log.index(("GET", "/go"), seen)
-    assert ("POST", "/tick") not in a.log[fallback:]
-    assert a.log[seen:fallback].count(("POST", "/tick")) <= 2
-    late = [i for i, _page in ticks if i > captured]
-    assert len(late) <= 2
-    assert len(ticks) <= a.log[:fallback].count(("POST", "/tick"))
+    # each tick carries the browser's clock when A sent it, and `ended` is that clock
+    # once the page shows about:blank: no tick, received or captured, was sent after
+    # it. Arrival order is not the test (BUG-0511): under load a tick sent before A
+    # ended can reach the server after the fallback's own request.
+    assert _ticks_sent_after(a.bodies, ended) == []
+    assert _ticks_sent_after([body for _page, body in ticks], ended) == []
     assert "/next" in a.requests and "/logout.php" not in a.requests
 
 
-_TICKER = ("<script>let n = 0; setInterval(() => fetch('/tick', {method: 'POST', "
-           "headers: {'content-type': 'application/json'}, "
-           "body: JSON.stringify({['k' + (n++)]: 1})}), 50)</script>")
 
 
-def test_the_auditors_failed_load_ends_the_previous_document(monkeypatch):
-    """X1's twin in the auditor (CC-AUD-0042): `ContentFetcher.fetch` keeps one page
-    for the whole audit. After a refused `goto` (/go redirects to /logout.php) it sends
-    the page to ``about:blank`` before the static fallback: A's ticker stops there, so
-    the server sees no tick once the fallback's own request is sent, and the next
-    URL's XHR list holds none of A's ticks (before, the ticks queued during the
-    fallback were listed under the next URL)."""
+def _audit_through_a_refused_load(monkeypatch):
+    """Fetch A (ticking), then /go (refused: it redirects to /logout.php), then /next,
+    with one `ContentFetcher`. Returns the site, what the page showed and the browser
+    clock when the static fallback for /go started, and /next's XHR list."""
     import time
 
     from tests._browser import skip_or_fail
@@ -475,7 +476,7 @@ def test_the_auditors_failed_load_ends_the_previous_document(monkeypatch):
             real = fetcher._static_fetch
 
             def static_fetch(url):
-                marks[url] = (fetcher._page.url, len(a.log))
+                marks[url] = (fetcher._page.url, fetcher._page.evaluate("Date.now()"))
                 time.sleep(0.4)                  # time for a live document's ticker
                 return real(url)
             fetcher._static_fetch = static_fetch
@@ -488,12 +489,39 @@ def test_the_auditors_failed_load_ends_the_previous_document(monkeypatch):
             _status, _ct, _html, next_xhr = fetcher.fetch(a.base + "next")
     finally:
         a.close()
-    shown, seen = marks[a.base + "go"]
+    shown, ended = marks[a.base + "go"]
+    return a, shown, ended, next_xhr
+
+
+def test_the_auditors_failed_load_ends_the_previous_document(monkeypatch):
+    """X1's twin in the auditor (CC-AUD-0042): `ContentFetcher.fetch` keeps one page
+    for the whole audit. After a refused `goto` (/go redirects to /logout.php) it sends
+    the page to ``about:blank`` before the static fallback: A's ticker stops there, so
+    no tick the server gets was sent after that (BUG-0511), and the next URL's XHR list
+    holds none of A's ticks (before, the ticks queued during the fallback were listed
+    under the next URL)."""
+    a, shown, ended, next_xhr = _audit_through_a_refused_load(monkeypatch)
     assert shown == "about:blank"                              # the failed load ended A
-    fallback = a.log.index(("GET", "/go"), seen)
-    assert ("POST", "/tick") not in a.log[fallback:]           # no tick after that
+    assert _ticks_sent_after(a.bodies, ended) == []            # no tick sent after that
     assert not any("/tick" in url for url in next_xhr)         # none filed under /next
     assert "/logout.php" not in a.requests
+
+
+def test_the_send_time_oracle_sees_a_document_left_alive(monkeypatch):
+    """BUG-0511's oracle on the defect it guards (PA-0034(2)): with the failed load's
+    ``about:blank`` step removed, A keeps ticking through the fallback's 400 ms, and
+    those ticks carry send times after the mark."""
+    from fuzzlab.tools import navguard
+    real = navguard.navigate
+
+    def navigate(page, url, **kw):
+        if url == "about:blank":
+            return None                          # the defect: A is left alive
+        return real(page, url, **kw)
+    monkeypatch.setattr(navguard, "navigate", navigate)
+    a, shown, ended, _next_xhr = _audit_through_a_refused_load(monkeypatch)
+    assert shown != "about:blank"
+    assert _ticks_sent_after(a.bodies, ended)
 
 
 # --- the M6 executor (X2, B-S1) -----------------------------------------------------

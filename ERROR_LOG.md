@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-19 — tests (the failed-load tests read the server's log order as send order)
+- **Symptom:** `test_the_auditors_failed_load_ends_the_previous_document` failed in the diagrams verification run (three other harness runs on the host); it passed 3 of 3 alone.
+- **Root cause:** the tests asserted no tick in the server log after the fallback's request. Under CPU load, ticks the browser sent 0.9–2.2 s before the page ended were handled after that request (measured with the browser clock in each tick): delayed delivery, not a live document (BUG-0511).
+- **Remediation:** each tick carries its send time; both tests assert none was sent after the browser clock at the mark, and a proof test shows the oracle fails with the document left alive; an AST guard forbids the arrival-order shape (PA-0511). 3 of 3 under 12 CPU-bound processes.
+- **Status:** Fixed
+
 ## 2026-10-19 — environment (Docker daemon down a sixth time; the lab with it)
 - **Symptom:** the Juice Shop overhead comparison's four runs failed at once (no target); `docker` could not reach its daemon.
 - **Root cause:** as the earlier entries: the container restarted, and nothing starts `dockerd`.

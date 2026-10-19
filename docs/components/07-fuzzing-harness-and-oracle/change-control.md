@@ -30,7 +30,10 @@ Newest first.
     re-import add nothing. `tests/test_sender_conformance.py` passes with the wrapper
     — done
   - [x] FR-FUZZ-60, CHANGELOG — done
-- Effectiveness: pending (the Juice Shop on/off comparison is running).
+- Effectiveness (assessed 2026-10-19): Juice Shop spider-fed `auto` with the trace on
+  sent the same 314 requests and scored the same tp=6 as with it off, in two
+  alternating pairs. Its trace: 314 exchanges, 33 tests, 102 strategy outcomes and 6
+  findings, each finding linked to exactly the exchanges of its strategy run.
 
 ### CC-FUZZ-0098 — `auto` probes a crawled row at its own origin, loopback only (FR-FUZZ-59) (2026-10-19)
 - Change: `fuzzlab/harness/auto.py` (`_crawl_url`, `_stored_key`;

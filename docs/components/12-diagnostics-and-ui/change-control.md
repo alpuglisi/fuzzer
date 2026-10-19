@@ -26,7 +26,12 @@ Newest first.
     as text, opening evidence, and picking up a write made while the page is open.
     `tests/test_cli_taxonomy.py` passes — done
   - [x] FR-UI-510/511, SP-50, ARCHITECTURE, `docs/DIAGRAMS.md`, CHANGELOG — done
-- Effectiveness: pending (the Juice Shop exports are being taken).
+- Effectiveness (assessed 2026-10-19): the Juice Shop run's exports were taken from the
+  store with no traffic: state `complete`, 0 dropped; JSON 199 kB (71 nodes, 76 flows,
+  2 boundaries, 40 sequence scopes); the Mermaid flowchart 6.5 kB. A finding's sequence
+  shows its two sends, the 406 and the 302, and the finding as an evaluator note. On the
+  50,022-event trace the data flow takes 400–590 ms, a sequence 1.5 ms, an evidence page
+  26–40 ms, and the JSON export 0.7–1.0 s.
 
 ### CC-UI-0057 — `auto --peer-identity` classified for project launches (2026-10-19)
 - Change: `fuzzlab/web/projects.py` `OPTION_CLASS` gains `("auto", "peer_identity")`:

@@ -36,7 +36,16 @@ Newest first.
     writer under the PA-0100 guard, with its offender — done
   - [x] FR-CORE-505, NFR-CORE-trace-overhead, SP-48/49, ARCHITECTURE, D72,
     `docs/DIAGRAMS.md`, CHANGELOG — done
-- Effectiveness: pending (`scripts/measure_diagrams.py` and the Juice Shop on/off comparison are running).
+- Effectiveness (assessed 2026-10-19, measured):
+  - loopback pipeline (`scripts/measure_diagrams.py`, 40 points, 480 requests, 5 runs
+    each): median 1.214 s with the trace, 1.100 s without (+0.114 s, +10.4 %); the
+    recorder's own time 42 ms, 0.087 ms per request;
+  - a 50,022-event trace (2,000 interfaces, 218 tests): written at 6.3k events/s,
+    0 dropped, maximum lag 3.8 ms; store 68.6 MB; replay (`rebuild`) 5.3–5.9 s;
+  - Juice Shop, spider-fed `auto`, alternating on/off: 250.8 / 255.3 s and 265.1 /
+    291.7 s, 314 requests and tp=6 in all four (the second pair under other lanes'
+    load): no overhead measurable at that noise. 646 events, 193 flushes, recorder
+    287 ms in all, maximum lag 0.41 s after `FLUSH_KINDS` (38.7 s before).
 
 ### CC-CORE-0062 — Path variation decided on code and data evidence; JS placeholders; files (BUG-0507) (2026-10-19)
 - Change (`fuzzlab/core/pathtemplate.py`): `varying_is_parameter` (the one variation

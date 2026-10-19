@@ -2484,3 +2484,16 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
      records); one found becomes the owner, or both decide through one owner, in the
      same change. (from BUG-0507)
   - Enforced by: tests/test_path_discovery.py::test_routes_the_code_names_are_not_values_and_placeholders_are_parameters, tests/test_path_discovery.py::test_the_streaming_values_are_data_its_code_never_names, tests/test_path_discovery.py::test_every_path_templating_rule_decides_variation_through_the_one_owner
+
+- **PA-0511** — Strengthens `PA-0150`, after BUG-0511: two failed-load tests asserted
+  that the server logged no tick after the fallback's request. Under load, ticks sent
+  seconds before the mark arrived after it, and the auditor's test failed on correct
+  code. PA-0150 covered exact counts, was enforced only by the test it fixed, and its
+  sweep did not reach request order.
+  1. **An absence claim about a concurrent actor is judged by a stamp the actor gave the
+     event when it acted** (its clock, or a sequence it assigned), never by where an
+     observer's log received it. Arrival order is send order only when nothing delays
+     delivery.
+  2. **The new oracle is proven on the defect it guards** (`PA-0034(2)`): here, with the
+     document left alive. (from BUG-0511)
+  - Enforced by: tests/test_no_arrival_order_oracle.py::test_no_test_judges_a_concurrent_actor_by_arrival_after_a_mark, tests/test_no_arrival_order_oracle.py::test_the_guard_catches_bug_0511_and_each_synthetic_offender, tests/test_navigation_aborts.py::test_the_send_time_oracle_sees_a_document_left_alive
