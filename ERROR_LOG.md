@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-19 — crawler (two-worker spider filed one worker's fetches under another's page)
+- **Symptom:** in a two-worker Playwright crawl, `/b`'s fetch and XHR URLs were recorded under `/a` (or lost); found by FR-CRAWL-29's new test.
+- **Root cause:** `LocalSpider._clone` copied the first worker's `__dict__` after its browser started, including Playwright's cached bound-method listener wrappers (`_pw_impl_instance_*`), so every clone registered the first worker's handlers (BUG-0509).
+- **Remediation:** `_clone` skips Playwright's cached wrappers; two tests prove it, each failing with the old copy (CC-CRAWL-0047, PA-0509).
+- **Status:** Fixed
+
 ## 2026-10-19 — fuzzing harness (trace: unobserved follow-ups missing, BUG-0510)
 - **Symptom:** a PRG follow-up that got another redirect, a timeout or no response was sent but had no `exchange` event; an exchange's `resent` counted its follow-up's re-sends.
 - **Root cause:** `TracingSender` worked out "a follow-up was sent" from `Probe.followed`, which is the observation, and copied the run counter `Probe.resent`.

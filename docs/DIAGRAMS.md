@@ -77,6 +77,8 @@ Correlation is explicit and is never inferred from timestamps:
 - a strategy scope for each strategy run, whose exchange keys a finding cites
   exactly;
 - the explorer's action id, carried on its requests through the capture proxy;
+- the spider's `found_from`: the page whose load queued a page, carried in the crawl
+  queue entry (FR-CRAWL-29);
 - a follow-up's parent exchange.
 
 Capture records with no action id are listed as uncorrelated.
@@ -156,8 +158,11 @@ A run that stopped, or a batch that could not be written, shows as **partial**.
   sender never re-sends, and records a failed try only when it reached the network; an
   error after the response arrived (the store write or the session's `observe`) is not
   recorded as a try.
-- The spider records no timestamps and no initiator for a page. Its events have no
-  first or last seen time, and its sequence is in crawl order.
+- A spider DB from before FR-CRAWL-29 records no times and no initiator for a page,
+  so its events have no first or last seen time. A newer one records when each page's
+  load began and which page's load queued it (none for the start URL and the
+  well-known files). Links found in a load that redirected are attributed to the URL
+  loaded, not to the landing. The spider's sequence stays in crawl order.
 - WebSocket messages appear only from a disco capture. The pipeline sends none.
 - The `proxy` sequence draws Browser → Intercepting proxy → origin per flow, ordered by
   the time the proxy received each request. An edited request is noted on the forward;

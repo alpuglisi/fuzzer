@@ -496,8 +496,11 @@ def _capture_sequence(conn, run_id, rows, scope, *, correlated: bool) -> dict:
 
 
 def _spider_sequence(rows, scope) -> dict:
-    seq = _Seq(scope, "order: the spider's row order (crawl order); the spider records "
-                      "no timestamps, and a page's initiator is not recorded")
+    seq = _Seq(scope, "order: the spider's row order (crawl order: pages, then captured "
+                      "requests); 'from' names the page whose load queued a page "
+                      "(FR-CRAWL-29); a step's time, when recorded, is when the page's "
+                      "load began or the request was captured. Both are unknown in a "
+                      "spider DB from before FR-CRAWL-29")
     spider = seq.party("spider", "Spider (tool)", "tool")
     for row in rows:
         b = row["body"]

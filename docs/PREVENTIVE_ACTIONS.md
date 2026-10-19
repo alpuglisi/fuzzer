@@ -2485,6 +2485,17 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
      same change. (from BUG-0507)
   - Enforced by: tests/test_path_discovery.py::test_routes_the_code_names_are_not_values_and_placeholders_are_parameters, tests/test_path_discovery.py::test_the_streaming_values_are_data_its_code_never_names, tests/test_path_discovery.py::test_every_path_templating_rule_decides_variation_through_the_one_owner
 
+- **PA-0509** — After BUG-0509: `LocalSpider._clone` copied the first worker's
+  `__dict__` after its browser had started, including Playwright's cached
+  bound-method listener wrappers, so every other worker's page events reached the
+  first worker's handlers.
+  1. **An object copied to make another worker copies only state the code owns.** A
+     clone made by copying `__dict__` after the original was handed to a library (as a
+     listener, route or callback) drops the library's per-object attributes.
+  2. **A multi-worker test judges each worker's events by what that worker recorded
+     itself** (PA-0511). (from BUG-0509)
+  - Enforced by: tests/test_spider_trace.py::test_a_cloned_worker_never_inherits_playwrights_cached_listeners, tests/test_spider_trace.py::test_each_workers_page_events_reach_that_worker
+
 - **PA-0510** — Strengthens `PA-0078` (no count reconstructed from parameters that also
   encode something else) from displayed counts to every evidence record, after
   BUG-0510: the trace took a PRG follow-up's observation for its send, and a run

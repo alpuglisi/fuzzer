@@ -1406,6 +1406,10 @@ tracked in the requirements files, not here.
   every host — the Puppy Fort Factory and the external validation labs (D10).
 
 ### 4. Crawler / spider `[built; to harden]` -- behavioural discovery `fuzzlab/disco` `[built offline; held-out measurement pending]`, the legacy spider `[deprecated, D70]`
+- **Spider trace data (FR-CRAWL-29, CC-CRAWL-0047):** the legacy spider records which
+  page's load queued each page (`found_from`) and when it loaded pages and captured
+  requests (`seen_at`); its trace events carry them (FR-AUD-28). Each crawl worker's
+  browser listeners are its own (BUG-0509).
 - **Behavioural discovery (D70, CC-CRAWL-0031, FR-CRAWL-18..21) -- `fuzzlab/disco/`,
   `fuzzlab disco capture|synth`.** Protocol-level, stack-independent discovery: what
   the application sends is recorded, not what its HTML says.

@@ -879,3 +879,9 @@ Juice Shop lab is complete.
 - **Impact:** the diagrams and coverage missed sends the tool made; `resent` overstated.
 - **Status:** fixed (CC-FUZZ-0100, PA-0510).
 
+### F-078 — The spider lane's first harness run failed on two contract tests the lane had not found
+- **What:** DG-SPIDER added columns to the spider's `discovered_pages` / `discovered_requests` without finding the two tests that pin those tables as the importer's contract (`test_spa_capture`, `test_json_points`); its first harness run had 3 of 4 failures from its own change. It also committed a new two-worker test after one local pass; the test failed about 1 run in 8, which the harness caught (the cause was BUG-0509, but repeated runs before committing would have found it).
+- **Evidence:** `verify_change.py --base ede72b9` on 4370324: 79 files, 3093 passed, 4 failed.
+- **Impact:** one harness cycle; nothing merged or pushed in that state.
+- **Status:** fixed in fc83761 (the contract updated deliberately, the tests exact).
+
