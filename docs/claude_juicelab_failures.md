@@ -939,3 +939,9 @@ Juice Shop lab is complete.
 - **Impact:** none further.
 - **Status:** fixed.
 
+### F-088 — BUG-0115's fix returned the browser executor's placement refusal as an observation
+- **What:** BUG-0115's corrective action ("the executor refuses an unplaceable location before starting a browser") was built, by the agent, as a returned `ExecObservation(False, "unplaceable …")`, which its only reader takes as "observed, not executed". A stored-XSS store in a header or path therefore became a plain negative, against FR-FUZZ-47, and four tests were written pinning that contract. PA-0115's enforcement covered senders only and was never checked at the consumer (the candidate's final status).
+- **Evidence:** BUG-0523, measured by DG-UNPLACEABLE on 685259e: `confirm_outcome` returns `(None, None)`; `run_auto` leaves the candidate `checked`, `oracle_rejected` 1; the trace's visits end `unplaceable` while `test.strategy` says `not_confirmed`.
+- **Impact:** scored negatives and ML negatives on cases the tool never tested.
+- **Status:** open: CC-FUZZ-0103 / CC-AUD-0055 (option C) under the review gate.
+
