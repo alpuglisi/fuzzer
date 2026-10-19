@@ -1195,10 +1195,11 @@ rewards) derives from it.
       authenticated runs;
     - a numeric or bool leaf is sent as a string, so a type-validated leaf may draw a
       400 and not confirm (a false negative; a typed variant is the stated next option);
-    - operator/object payloads (NoSQL `{"$ne": …}`) are not sent: only string payloads
-      (coverage gap; same next option);
-    - reflected XSS is not nominated on a JSON leaf, and stored XSS through a JSON body
-      is not confirmed (the M6 store step posts a form);
+    - operator/object payloads (NoSQL `{"$ne": …}`): sent by `NoSqlOperatorStrategy`
+      since FR-FUZZ-54; every other mechanism sends strings;
+    - reflected XSS is not nominated on a JSON leaf; stored XSS through a JSON body is
+      confirmed only for a ground-truth case whose store point is enumerated
+      (FR-FUZZ-56), not yet for a crawled one;
     - a JSON request needing a fresh token per request (a CAPTCHA answer, a CSRF
       header) does not confirm;
     - a fragment probe sends only the probed route parameter, not the route's others.
@@ -1541,6 +1542,27 @@ rewards) derives from it.
   unauthenticated control's, getting A's view twice confirms (evidence: who and the
   statuses, no data). Without `--peer-identity` it no-ops. Known false positive: a
   shared resource that names its owner. Scoped by `R-ACCESS-CONTROL`.
+- **FR-FUZZ-56 (PUT and PATCH in a ground truth, `CC-FUZZ-0095`, 2026-10-19)** A
+  ground-truth case or point may be `PUT` or `PATCH` (the schemas' method enum; never
+  `DELETE`, which stays refused at every send, FR-FUZZ-47). `points_from_ground_truth`
+  probes such a point like a POST one (a `json_body` point as a JSON leaf) **only with
+  `fuzzlab auto --fuzz-json-writes`**, the opt-in crawled PUT/PATCH requests already
+  need (each probe updates what the request targets); without it the point is skipped
+  with `"<METHOD> probed only with --fuzz-json-writes"`. The methods the opt-in gates
+  are one set, `store_adapter.WRITE_METHODS` (SP-41). A DOM point (client-only,
+  fragment, `rendering: js`) is a GET page: one with another method is skipped, never
+  rewritten into a GET (BUG-0115).
+  - **Stored XSS through the app's own store request.** A stored case's store request
+    is the ground truth's point at its `source_url` with the case's param: its method,
+    and for a `json_body` point a JSON body carrying the other leaves (`InjectionPoint`
+    / `Candidate` `store_method`, `store_location="json"`, `store_entries`; the auditor's
+    evidence carries them). A PUT/PATCH store needs `--fuzz-json-writes` as above. With
+    no such point, the store request stays a form POST. The M6 executor plants with
+    `context.request.fetch` at that method (a JSON body built by `jsonbody.body_for`),
+    scope-checked and never redirected; it refuses before any browser starts a store
+    method outside POST/PUT/PATCH, a non-GET query store, or a JSON leaf the body lacks.
+    Checked on a real browser: a chat that accepts only a JSON PUT is confirmed, and the
+    old form POST to it gives no verdict.
 
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed

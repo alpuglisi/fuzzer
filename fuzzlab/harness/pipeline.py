@@ -73,6 +73,10 @@ def _candidate_of(ev: dict) -> Candidate:
     return Candidate(url=ev["url"], param=ev["param"], method=ev.get("method", "GET"),
                      location=ev.get("location", "query"), category=ev.get("category", ""),
                      store_url=ev.get("store_url"), store_param=ev.get("store_param"),
+                     store_method=ev.get("store_method", "POST"),
+                     store_location=ev.get("store_location", "body"),
+                     store_entries=(tuple(tuple(e) for e in ev["store_entries"])
+                                    if ev.get("store_entries") else None),
                      content_type=ev.get("body_content_type"),
                      base_entries=(tuple(tuple(e) for e in ev["entries"])
                                    if ev.get("entries") else None),

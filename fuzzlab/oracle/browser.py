@@ -39,7 +39,9 @@ class StoreStep:
     param: str
     value: str
     method: str = "POST"
-    location: str = "body"
+    location: str = "body"                  # body (a form) | query (a GET) | json
+    #: a JSON body's leaves (`core.jsonbody` entries); the payload replaces ``param``'s
+    entries: tuple | None = None
 
 
 @dataclass

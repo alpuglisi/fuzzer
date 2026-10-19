@@ -394,7 +394,7 @@ def test_the_m6_browser_is_launched_scoped_and_plants_without_redirects(monkeypa
 
     class Context:
         request = types.SimpleNamespace(
-            post=lambda url, **kw: seen["posts"].append((url, kw)))
+            fetch=lambda url, **kw: seen["posts"].append((url, kw)))
 
         def add_init_script(self, s):
             pass
@@ -443,7 +443,7 @@ def test_the_m6_browser_is_launched_scoped_and_plants_without_redirects(monkeypa
     assert "--no-proxy-server" in seen["launch"]["args"]
     assert _resolver_rules(seen["launch"]["args"]).startswith("MAP 127.0.0.1:8090 ")
     assert seen["posts"] == [("http://127.0.0.1:8090/post.php",
-                              {"form": {"c": "x"}, "max_redirects": 0})]
+                              {"method": "POST", "form": {"c": "x"}, "max_redirects": 0})]
     # the guard's route, then the teardown's refuse-all route (BUG-0504, `release`)
     (handler, _teardown), (ws_handler,) = seen["routes"], seen["ws"]
     for url, outcome in [("http://127.0.0.1:8090/app.js", "fulfill"),

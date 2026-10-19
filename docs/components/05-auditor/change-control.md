@@ -3,6 +3,17 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0045 — The store request rides on a stored-XSS candidate (FR-AUD-24) (2026-10-19)
+- Change: `fuzzlab/audit/engine.py`: `InjectionPoint.store_method`, `store_location`,
+  `store_entries`; a fired candidate's evidence records them with `store_url`.
+- Reason: FR-FUZZ-56 (CC-FUZZ-0095): the oracle plants stored XSS through the request
+  the ground truth enumerates (a JSON PUT, say), not always a form POST.
+- Impact: defaults (`POST`, `body`, none) keep every existing candidate as it was.
+- Risk: low.
+- Deliverables:
+  - [x] code; `tests/test_put_patch.py::test_the_store_request_reaches_the_candidate`;
+    FR-AUD-24 — done
+
 ### CC-AUD-0044 — A disco run imports as crawl points through the spider's own import path (FR-AUD-23, D70) (2026-10-18)
 - Change (`fuzzlab/tools/store_adapter.py`):
   - `_import_page_url`: `import_spider`'s per-URL step (page row, query parameters and

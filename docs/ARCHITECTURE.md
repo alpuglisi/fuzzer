@@ -1283,6 +1283,11 @@ tracked in the requirements files, not here.
       separately as `oracle_unplaceable`), never a negative; a `fragment` point draws
       only client-side rules (`location_not_in`), and its finding keeps its route
       (`oracle.finding_url` → `to_route_path`);
+    - since FR-FUZZ-56 (CC-FUZZ-0095) the ground-truth contract also admits PUT and
+      PATCH (never DELETE), probed only with `--fuzz-json-writes` (one method set,
+      `store_adapter.WRITE_METHODS`, SP-41); a stored-XSS case plants through its
+      enumerated store point's method and JSON body (`store_method`/`store_location`/
+      `store_entries` from the auditor's evidence to the M6 executor's `fetch`);
   - **Forms phase 3, lane S — single-page apps in the crawler (CC-CRAWL-0016 /
     CC-CRAWL-0017 / CC-CORE-0047, no store migration):**
     - `tools/spa.py`: route declarations read from the page's already-loaded

@@ -2516,7 +2516,8 @@ class StoredXssStrategy(_BrowserXssStrategy):
             raise UnplaceableLocation("stored XSS needs the candidate's store URL")
         store = StoreStep(url=candidate.store_url, param=candidate.store_param or candidate.param,
                           value=payload, method=candidate.store_method,
-                          location=candidate.store_location)
+                          location=candidate.store_location,
+                          entries=candidate.store_entries)
         return self._executor.run(ExecRequest(url=candidate.url, store=store), token)
 
 

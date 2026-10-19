@@ -6435,9 +6435,9 @@ lane) can submit a payload as
   **Not built, and why** (2026-10-18):
   - `streaming` (Spring Boot + Angular + MariaDB): its second origin is expressible now
     (FR-LAB-308; the backend builds offline from a host-resolved Maven repository and
-    the repo's prebuilt bundle matches its source), but its chat messages are added with
-    `PUT /live/{id}/messages`, and a ground truth admits GET and POST only (`auto`
-    audits nothing else).
+    the repo's prebuilt bundle matches its source); its chat messages are added with
+    `PUT /live/{id}/messages`, which a ground truth admits since FR-FUZZ-56 (2026-10-19;
+    the lab itself is the next change).
   - The other categories (screened 2026-10-18): `tictactoe`, `ecommerce-api` and
     `snake-pro` hard-code `localhost:<their upstream port>` in their pages; the A1/A7
     apps (access control, authentication) need several identities per lab; A4

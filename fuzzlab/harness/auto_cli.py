@@ -145,8 +145,9 @@ def build_parser() -> argparse.ArgumentParser:
                         "are refused (FR-FUZZ-43).")
     p.add_argument("--fuzz-json-writes", action="store_true",
                    help="Also import captured PUT/PATCH requests as JSON points (forms "
-                        "phase 3). Off by default: each probe updates the row the request "
-                        "targets. DELETE is never imported.")
+                        "phase 3) and probe the ground truth's PUT/PATCH points. Off by "
+                        "default: each probe updates the row the request targets. DELETE "
+                        "is never imported.")
     p.add_argument("--authorized", action="store_true",
                    help="Required: confirm you are authorized to test this lab target")
     from fuzzlab.cli_dryrun import add_dry_run_flag
@@ -374,7 +375,8 @@ def _run(p, args, store, run_id: int, plugins, selected, ground_truth) -> int:
                           browser=browser, oob=oob, coverage=coverage, dbfault=dbfault,
                           scheduler=scheduler, plugins=plugins,
                           confirm_budget=args.confirm_budget,
-                          header_names=args.header_names, peer=peer)
+                          header_names=args.header_names, peer=peer,
+                          writes=bool(getattr(args, "fuzz_json_writes", False)))
     except RunModeError as exc:
         p.error(str(exc))            # D15 fail-safe: loud, non-zero exit
     finally:

@@ -819,3 +819,9 @@ Juice Shop lab is complete.
 - **Evidence:** `verify_change` on e587d8e: the two guard failures (ERROR_LOG 2026-10-19).
 - **Impact:** none outside the sandbox; nothing was pushed. Another 15-minute verify cycle.
 - **Status:** fixed (CC-LAB-0313, CC-UI-0057).
+
+### F-069 — I told the owner `auto` audits only GET and POST; it already fuzzed crawled PUT/PATCH
+- **What:** explaining the streaming blocker, I wrote that `auto` "only sends test requests to GET and POST endpoints and skips everything else". In fact crawled PUT/PATCH JSON requests have been probed since forms phase 3, behind `--fuzz-json-writes` (FR-FUZZ-47). Only answer keys (GET/POST in the schema) and the M6 store step (a form POST) were limited. FR-LAB-306's note said the same wrong thing ("`auto` audits nothing else").
+- **Evidence:** `fuzzlab/tools/store_adapter.py` `REQUEST_METHODS`/`WRITE_METHODS`, `auto_cli --fuzz-json-writes`; my message of 2026-10-19.
+- **Impact:** the owner decided on PUT/PATCH with an overstated gap; the decision stands (the answer-key and store-step gaps were real), but the framing was wrong.
+- **Status:** corrected in the reply and in FR-LAB-306 (CC-FUZZ-0095).

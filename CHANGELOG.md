@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-19 (PUT and PATCH)
+- **What:** answer keys may name PUT and PATCH (never DELETE); `auto` probes them only with `--fuzz-json-writes`, as it already did for crawled PUT/PATCH requests; a stored-XSS case plants through the store request its answer key enumerates (method and JSON body), confirmed on a real browser (CC-FUZZ-0095, CC-AUD-0045, FR-FUZZ-56).
+- **Why:** the owner approved PUT and PATCH, not DELETE, for secDevLabs streaming, whose chat is a JSON PUT.
+
 ## 2026-10-19 (two omissions fixed before push)
 - **What:** Comment Killer's API store point is labelled `server-json` (CC-LAB-0313); the web launcher classifies `auto --peer-identity` (CC-UI-0057).
 - **Why:** `verify_change` on the unpushed secDevLabs commits failed the guards that pin each.

@@ -25,7 +25,7 @@
           "pattern": "^https?://[^/?#]+$",
           "description": "another origin of the lab this point lives on (a loopback origin the app itself hard-codes, e.g. its API's); url stays a path. Default: the lab's base (FR-LAB-308)."
         },
-        "method": { "enum": ["GET", "POST"] },
+        "method": { "enum": ["GET", "POST", "PUT", "PATCH"] },
         "param": { "type": "string" },
         "location": { "enum": ["query", "body", "fragment", "header", "path", "cookie"] },
         "rendering": { "enum": ["server", "js", "server-json"] },

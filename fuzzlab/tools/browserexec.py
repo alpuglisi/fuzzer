@@ -47,6 +47,29 @@ def _with_fragment(url: str, param: str, value: str) -> str:
 
 
 #: What a failure text may not keep: a quoted string, or a ``scheme://`` token.
+
+
+def _store_plan(store) -> tuple[str | None, bytes | None]:
+    """``(refusal, json_body)`` of a store step: why it cannot be placed (checked before
+    any browser starts; refuse, never relocate, PA-0115), and the JSON body a ``json``
+    store sends (FR-FUZZ-56: the app's own body, the payload in the store leaf)."""
+    from fuzzlab.tools.store_adapter import WRITE_METHODS   # SP-41
+    method = (store.method or "").upper()
+    # POST, or PUT/PATCH from an enumerated point (FR-FUZZ-56); never DELETE
+    store_methods = WRITE_METHODS | {"POST"}
+    if store.location not in ("body", "query", "json") or (
+            store.location == "query" and method != "GET") or (
+            store.location != "query" and method not in store_methods):
+        return f"unplaceable store request {method} {store.location!r}", None
+    if store.location != "json":
+        return None, None
+    from fuzzlab.core.jsonbody import JsonPlacementError, body_for
+    try:
+        return None, body_for(store.param, store.value, store.entries)
+    except JsonPlacementError as exc:
+        return f"unplaceable store leaf: {exc}", None
+
+
 _QUOTED = re.compile(r"\"[^\"]*\"|'[^']*'")
 _URL_TOKEN = re.compile(r"\S*://\S*")
 
@@ -117,9 +140,10 @@ class PlaywrightBrowserExecutor:
         # refuse, never relocate (BUG-0115, PA-0115): checked before any browser starts
         if request.param is not None and request.location not in ("query", "fragment"):
             return ExecObservation(False, detail=f"unplaceable location {request.location!r}")
-        if request.store is not None and request.store.location not in ("body", "query"):
-            return ExecObservation(False, detail="unplaceable store location "
-                                                 f"{request.store.location!r}")
+        if request.store is not None:
+            refusal, _body = _store_plan(request.store)
+            if refusal is not None:
+                return ExecObservation(False, detail=refusal)
         from playwright.sync_api import Error as PlaywrightError
         from playwright.sync_api import sync_playwright
 
@@ -181,11 +205,18 @@ class PlaywrightBrowserExecutor:
 
             if request.store is not None:                 # stored XSS: plant first
                 s = request.store
-                if s.location == "body":
+                _refusal, store_body = _store_plan(s)
+                if store_body is not None:
                     # API requests bypass `route`: scope-check, never redirect
                     checked_api_request(in_scope, s.url)
-                    context.request.post(s.url, form={s.param: s.value},
-                                         max_redirects=0)
+                    context.request.fetch(s.url, method=s.method.upper(), data=store_body,
+                                          headers={"Content-Type": "application/json"},
+                                          max_redirects=0)
+                elif s.location == "body":
+                    # API requests bypass `route`: scope-check, never redirect
+                    checked_api_request(in_scope, s.url)
+                    context.request.fetch(s.url, method=s.method.upper(),
+                                          form={s.param: s.value}, max_redirects=0)
                 else:
                     # the commit, then a bounded load, as the observe navigation
                     # (BUG-0137 review A-N3; the one helper since BUG-0138)

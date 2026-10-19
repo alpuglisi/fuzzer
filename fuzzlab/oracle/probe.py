@@ -77,7 +77,8 @@ class Candidate:
     store_url: str | None = None
     store_param: str | None = None
     store_method: str = "POST"
-    store_location: str = "body"
+    store_location: str = "body"               # body | query | json (FR-FUZZ-56)
+    store_entries: tuple | None = None         # a JSON store body's other leaves
     # A whole-body point's real content type (e.g. "application/json"), from
     # `fuzzlab.audit.engine.InjectionPoint.body_content_type` -- `None` unless
     # the ground truth positively declared the format (CC-FUZZ-0032/FR-FUZZ-19).

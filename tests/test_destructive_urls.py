@@ -544,7 +544,7 @@ def test_the_m6_browser_aborts_destructive_subresources_but_loads_its_targets(mo
             pass
 
     class Context:
-        request = types.SimpleNamespace(post=lambda *a, **k: None)
+        request = types.SimpleNamespace(fetch=lambda *a, **k: None)
 
         def add_init_script(self, s):
             pass

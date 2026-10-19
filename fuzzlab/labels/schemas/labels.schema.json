@@ -27,7 +27,7 @@
           "pattern": "^https?://[^/?#]+$",
           "description": "another origin of the lab this case lives on (a loopback origin the app itself hard-codes, e.g. its API's); url stays a path. Default: the lab's base (FR-LAB-308)."
         },
-        "method": { "enum": ["GET", "POST"] },
+        "method": { "enum": ["GET", "POST", "PUT", "PATCH"] },
         "param": { "type": "string" },
         "location": { "enum": ["query", "body", "fragment", "header", "path", "cookie"] },
         "vuln_class": { "enum": ["sqli", "nosqli", "xss-reflected", "xss-stored", "xss-dom", "webhook_signature", "mass_assignment", "insecure_deserialization", "prototype_pollution", "redos", "ssti", "xxe", "webhook_signature_bypass", "ssrf", "outbound_header_injection", "http_header_injection", "open_redirect", "csv_formula_injection", "price_integrity_bypass", "spel_injection", "access_control", "jwt_algorithm_confusion", "weak_token_entropy", "unrestricted_file_upload", "path_traversal", "none"] },

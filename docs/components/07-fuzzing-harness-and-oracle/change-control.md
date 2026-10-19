@@ -3,6 +3,41 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0095 — PUT and PATCH in a ground truth; stored XSS through the app's own store request (FR-FUZZ-56) (2026-10-19)
+- Change: `fuzzlab/labels/schemas/{labels,injection-points}.schema.json` (method enum
+  adds `PUT`, `PATCH`); `fuzzlab/harness/auto.py` (`points_from_ground_truth(writes=)`:
+  PUT/PATCH points only with it; a non-GET DOM point skipped; a stored case's store
+  request from its enumerated point; `run_auto(writes=)`); `fuzzlab/harness/
+  auto_cli.py` (`--fuzz-json-writes` passed as `writes`, help text); `fuzzlab/harness/
+  pipeline.py` and `fuzzlab/oracle/probe.py` (`store_method`, `store_location`,
+  `store_entries` on the candidate); `fuzzlab/oracle/browser.py` (`StoreStep.entries`);
+  `fuzzlab/oracle/strategies.py` (`StoredXssStrategy` passes them);
+  `fuzzlab/tools/browserexec.py` (`_store_plan`; the plant is `context.request.fetch`
+  at the store method, a JSON body by `jsonbody.body_for`); SP-41.
+- Reason: the owner approved PUT and PATCH, not DELETE (2026-10-19), for secDevLabs
+  streaming, whose chat is `PUT /live/{id}/messages` with a JSON body rendered through
+  `innerHTML`. Crawled PUT/PATCH requests were already probed behind
+  `--fuzz-json-writes` (FR-FUZZ-47); a ground truth could not name them, and the M6
+  store step could only post a form.
+- Impact: answer keys without PUT/PATCH and stored cases without an enumerated store
+  point behave as before (the store request stays a form POST, now sent through
+  `fetch(method="POST", form=...)`). A PUT/PATCH point or store needs
+  `--fuzz-json-writes`.
+- Risk: medium-low: PUT/PATCH probes write. Gated by the existing opt-in, lab-only and
+  `--authorized`; DELETE still refused at every send.
+- Deliverables:
+  - [x] code; `tests/test_put_patch.py` (contract admits PUT/PATCH and refuses
+    DELETE; probed only with `writes`; a non-GET DOM point skipped; the store request
+    from the enumerated point, a form POST without one; the store fields reach the
+    candidate through the auditor's evidence; the executor's refusals before any
+    browser; a real-browser stored XSS through a JSON PUT, the form POST giving no
+    verdict; SP-41's guard and its synthetic offender); the fake executors in
+    `test_browser_scope.py` and `test_destructive_urls.py` record `fetch` — done
+  - [x] FR-FUZZ-56, FR-FUZZ-47's residuals, FR-AUD-24, FR-LAB-306's streaming note,
+    SHARED_PRIMITIVES, CHANGELOG — done
+- Not yet: stored XSS through a crawled JSON request (no source/observe pair is known
+  from a crawl); the streaming lab (next change).
+
 ### CC-FUZZ-0094 — The no-response guard covers the NoSQL and cross-account strategies (PA-0153) (2026-10-19)
 - Change: `tests/test_probe_unobserved.py` (two more candidate shapes: a JSON-leaf
   point with siblings, and a query point carrying the value the crawl saw; the

@@ -27,6 +27,12 @@ class InjectionPoint:
     # Stored-XSS: where the payload is planted before it renders on `url` (M6).
     store_url: str | None = None
     store_param: str | None = None
+    # The store request's method and location, and a JSON store body's other leaves
+    # (``store_location="json"``; FR-FUZZ-56): from the ground truth's point at the
+    # store URL. A form POST when that point is not enumerated.
+    store_method: str = "POST"
+    store_location: str = "body"
+    store_entries: tuple | None = None
     # A whole-body point's real content type (e.g. "application/json") -- set
     # only when the ground truth says so (CC-FUZZ-0032/FR-FUZZ-19); a sender
     # must never assume JSON for every `param="body"` point (some are XML/
@@ -96,6 +102,10 @@ def evaluate(points: list[InjectionPoint], store, run_id: int,
                 if point.store_url:                      # stored-XSS store endpoint (M6)
                     evidence["store_url"] = point.store_url
                     evidence["store_param"] = point.store_param or point.param
+                    evidence["store_method"] = point.store_method
+                    evidence["store_location"] = point.store_location
+                    if point.store_entries is not None:
+                        evidence["store_entries"] = [list(e) for e in point.store_entries]
                 if point.body_content_type:
                     evidence["body_content_type"] = point.body_content_type
                 if point.base_entries is not None:

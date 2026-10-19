@@ -23,7 +23,8 @@ from fuzzlab.core.runmode import (RunModeError, RunPlan, categories_from_vuln_cl
 from fuzzlab.harness.pipeline import PipelineResult, run_pipeline
 
 
-def points_from_ground_truth(ground_truth, base_url: str, browser_available: bool = False):
+def points_from_ground_truth(ground_truth, base_url: str, browser_available: bool = False,
+                             writes: bool = False):
     """Injection points from the enumerated ground-truth contract (detection benchmark).
 
     Returns ``(points, skipped)``. Server-rendered **GET query**, **POST body**,
@@ -37,7 +38,14 @@ def points_from_ground_truth(ground_truth, base_url: str, browser_available: boo
     method, param, reason) so the gap is explicit and they score as false
     negatives until a browser is provided -- the only remaining "skipped"
     reason this function has.
+
+    A **PUT/PATCH** point (FR-FUZZ-56) is probed like a POST one, only with ``writes``
+    (`fuzzlab auto --fuzz-json-writes`, the opt-in crawled PUT/PATCH requests need:
+    each probe updates what the request targets); without it, it is skipped. A DOM
+    point is a GET page; a DOM point with another method is skipped, never rewritten
+    into a GET (BUG-0115). DELETE is not in the contract.
     """
+    from fuzzlab.tools.store_adapter import WRITE_METHODS   # the one opt-in set
     base = base_url.rstrip("/")
     points: list[InjectionPoint] = []
     skipped: list[tuple[str, str, str, str]] = []
@@ -85,7 +93,12 @@ def points_from_ground_truth(ground_truth, base_url: str, browser_available: boo
         path = gp.url if gp.url.startswith("/") else "/" + gp.url
         is_dom = (gp.client_only or (gp.rendering or "") == "js"
                   or gp.location == "fragment")
-        if not is_dom and gp.method.upper() in ("GET", "POST") \
+        method = gp.method.upper()
+        if method in WRITE_METHODS and not writes:
+            skipped.append((path, gp.method, gp.param,
+                            f"{method} probed only with --fuzz-json-writes"))
+            continue
+        if not is_dom and method in ("GET", "POST", *WRITE_METHODS) \
                 and gp.location in ("query", "body", "header"):
             # A whole-body point (`param="body"`) whose ground truth marks it
             # `rendering="server-json"` declares its real content type, so the
@@ -118,6 +131,9 @@ def points_from_ground_truth(ground_truth, base_url: str, browser_available: boo
                                              base_entries=entries,
                                              sink_context=sink_context,
                                              origin="ground-truth"))
+        elif is_dom and method != "GET":
+            skipped.append((path, gp.method, gp.param,
+                            f"a DOM point is a GET page, not {method}"))
         elif is_dom and browser_available:
             # BUG-0115 sweep: no ground-truth DOM point has another location today
             # (pinned by tests/test_forms_phase2.py); the rewrite is left as is
@@ -140,11 +156,29 @@ def points_from_ground_truth(ground_truth, base_url: str, browser_available: boo
         store_url = case.source_url if "://" in case.source_url else \
             base + (case.source_url if case.source_url.startswith("/")
                     else "/" + case.source_url)
-        if browser_available:
+        # FR-FUZZ-56: the store request as the ground truth enumerates it (its point at
+        # the store URL: method, JSON body); a form POST when it is not enumerated
+        store_method, store_location, store_entries = "POST", "body", None
+        for sp in ground_truth.points:
+            spath = sp.url if sp.url.startswith("/") else "/" + sp.url
+            if (sp.origin or base) + spath == store_url and sp.param == case.param:
+                store_method, store_location = sp.method.upper(), sp.location
+                if sp.json_body is not None and sp.location == "body":
+                    from fuzzlab.core import jsonbody
+                    store_location = jsonbody.LOCATION
+                    store_entries = tuple((p, _send_value(v)) for p, v in
+                                          jsonbody.leaves(sp.json_body) or ())
+                break
+        if store_method in WRITE_METHODS and not writes:
+            skipped.append((opath, case.method, case.param,
+                            f"stored XSS through {store_method}: probed only with "
+                            "--fuzz-json-writes"))
+        elif browser_available:
             points.append(InjectionPoint(
                 url=(case.origin or base) + opath, param=case.param, method=case.method,
                 location=case.location, store_url=store_url, store_param=case.param,
-                origin="ground-truth"))
+                store_method=store_method, store_location=store_location,
+                store_entries=store_entries, origin="ground-truth"))
         else:
             skipped.append((opath, case.method, case.param,
                             "stored XSS (needs browser execution, M6)"))
@@ -560,7 +594,8 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
              pages_html: dict[str, str] | None = None, browser=None, oob=None,
              coverage=None, dbfault=None,
              scheduler=None, plugins=None, confirm_budget: int | None = None,
-             prioritizer=None, header_names=None, peer=None) -> PipelineResult:
+             prioritizer=None, header_names=None, peer=None,
+             writes: bool = False) -> PipelineResult:
     """Resolve the plan (D14/D15) and run the Phase 2 pipeline.
 
     ``plugins`` (a `PluginManager`) is recorded on the run, may contribute the budget
@@ -576,7 +611,8 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
     ``oob`` (an already-started `OobListener`) enables M8 out-of-band confirmation
     of blind command injection. ``coverage``/``dbfault`` (a `CoverageSource`/
     `DbFaultSource`) enable M10 grey-box confirmation of sql-injection/xss; both
-    default to ``None`` (no-op) same as ``browser``/``oob``.
+    default to ``None`` (no-op) same as ``browser``/``oob``. ``writes``
+    (``--fuzz-json-writes``) admits the ground truth's PUT/PATCH points (FR-FUZZ-56).
     """
     source, plan = plan_run(mode=mode, ground_truth=ground_truth,
                             selected_categories=selected_categories,
@@ -587,7 +623,7 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
     isolated: set[str] = set()
     if source == "ground-truth":
         points, skipped = points_from_ground_truth(
-            ground_truth, base_url, browser_available=browser is not None)
+            ground_truth, base_url, browser_available=browser is not None, writes=writes)
         # The operator enumerated these: they may be probed even if they look
         # destructive (NFR-FUZZ-safe's send-time gate, BUG-0112).
         if hasattr(sender, "allow_explicit"):

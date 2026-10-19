@@ -305,6 +305,12 @@ budget where a vulnerability is plausible.
     user field (`username`, `login`) of a JSON login is pinned, so it is not fuzzed;
     an identifier-like value blanked by the crawler before import reads as an empty
     example; other query parameters of an SPA route are not sent with a fragment probe.
+- **FR-AUD-24** *(the store request on a stored-XSS candidate; `CC-AUD-0045`,
+  2026-10-19, FR-FUZZ-56).* An `InjectionPoint` with a `store_url` also carries
+  `store_method` (default `POST`), `store_location` (`body`, `query` or `json`) and,
+  for a JSON store, `store_entries` (the body's other leaves); a fired rule's candidate
+  evidence records all three (`store_entries` as lists) so the oracle plants through
+  the request the ground truth enumerates.
 - **FR-AUD-23** *(a disco run as crawl points; `CC-AUD-0044`, 2026-10-18, D70).*
   `store_adapter.import_disco(run_dir, store, run_id, fuzz_json_writes=)` imports a
   `fuzzlab disco capture` run directory as `import_spider` imports a crawl, through
