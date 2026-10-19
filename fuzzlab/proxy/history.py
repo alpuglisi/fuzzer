@@ -254,12 +254,22 @@ class HistoryWriter:
             return None
         return self.store.get_body(row["sha"])
 
-    def close(self) -> None:
+    def close(self, run_end: str | None = None) -> None:
         """Flush; emit the events still waiting for a transaction the writer did not
-        own (when it is gone); record the trace counters (``run_metrics`` ``trace_*``)."""
+        own (when it is gone); record the run's end when the caller states it
+        (``run_end``: ``complete`` for an operator's stop, ``aborted: <class>``
+        otherwise), so the run's diagram status is not left partial; record the trace
+        counters (``run_metrics`` ``trace_*``)."""
         self.flush()
         with self._lock:
             self._trace([])
+            if run_end and self.trace and self.run_id is not None and \
+                    not self.store.conn.in_transaction:
+                with contextlib.suppress(Exception):
+                    if self._recorder is None:
+                        from fuzzlab.core.trace import TraceRecorder
+                        self._recorder = TraceRecorder(self.store, self.run_id)
+                    self._recorder.emit("run.end", {"status": run_end}, key="run.end")
             if self._recorder is not None:
                 with contextlib.suppress(Exception):
                     self._recorder.close()

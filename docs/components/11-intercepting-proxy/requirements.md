@@ -132,7 +132,15 @@ that shares the store, never a mandatory pipeline (D5).
     always has one: `flow.run_id` is NOT NULL); `HistoryWriter(trace=False)`.
   - **Failures** never fail the history: a trace event that cannot be built or written
     is counted `dropped`, logged, and the counters are written (`run_metrics`
-    `trace_*`); `HistoryWriter.close()` writes them at the end (`fuzzlab proxy` calls it).
+    `trace_*`); `HistoryWriter.close()` writes them at the end.
+  - **The run's end** (CC-PROXY-0026): `HistoryWriter.close(run_end=...)` records a
+    `run.end` event. `fuzzlab proxy` passes `complete` on Ctrl-C (the operator's stop)
+    and `aborted: <class>` on any other exit; the web proxy's `stop()` passes
+    `complete`. A closed proxy run's diagram status is therefore `complete`, not
+    `partial` for want of an end.
+  - **Measured cost** (CC-PROXY-0025): 400 flows at `batch_size=1` on the event-loop
+    thread; per flow, median 0.30–0.38 ms without the trace and 1.38–1.46 ms with it,
+    p95 1.3–2.5 ms without and 5.8–13.4 ms with.
 - **FR-PROXY-400** *(`--record`; `CC-PROXY-0400`, 2026-10-15).* Flow recording stays
   opt-in.
   - `--record` records into the resolved store (FR-CORE-400).

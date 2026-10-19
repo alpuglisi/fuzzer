@@ -7,7 +7,8 @@ evidence model (FR-CORE-505, FR-FUZZ-60, FR-AUD-28, FR-UI-510/511):
   the target application, its origins and their interfaces, and external hosts the
   browser asked for. The tool's own traffic is an optional overlay.
 - **Sequences**: the order of events in one scope. A scope is a test, a captured
-  explorer workflow, the spider's crawl, one exchange, or a finding.
+  explorer workflow, the spider's crawl, the traffic through the intercepting proxy,
+  one exchange, or a finding.
 
 ## Running it
 
@@ -16,7 +17,10 @@ The trace is on by default; `--no-trace` turns it off.
 ```
 fuzzlab auto --base-url http://127.0.0.1:3000 --spider-db crawl.db --points crawl --authorized
 fuzzlab auto --base-url http://127.0.0.1:3000 --disco-run out/ --points crawl --authorized
+fuzzlab proxy --record --authorized     # browser traffic through the proxy, live
 ```
+
+The web proxy records the same way when it has a store.
 
 Then:
 
@@ -42,7 +46,10 @@ Every producer records what it actually saw or did as one `trace_event` row:
 - discovery import: one event per spider row and per capture record, plus explorer
   actions and refused external hosts;
 - the pipeline: every send, each test's start and end, each strategy run's outcome,
-  and each finding.
+  and each finding;
+- the intercepting proxy: one event per recorded in-scope flow, written as soon as the
+  flow is stored, and the run's end when the proxy stops (`proxy/history.py`,
+  FR-PROXY-13).
 
 Events are append-only. Each carries a version and a key that is unique within its
 run, so a repeated delivery or a re-import adds nothing. Bodies are redacted twice:
@@ -89,8 +96,9 @@ is not evidence.
 ### Coverage
 
 Each interface counts six states separately: *discovered*, *captured*, *scheduled*,
-*executed*, *evaluated* and *finding*. An interface with no finding shows what was
-tested; it is never presented as "secure".
+*executed*, *evaluated* and *finding*. *Captured* means browser traffic that
+was answered: disco's capture or the intercepting proxy. An interface with no finding
+shows what was tested; it is never presented as "secure".
 
 ### Roles of a send
 
@@ -151,6 +159,13 @@ A run that stopped, or a batch that could not be written, shows as **partial**.
 - The spider records no timestamps and no initiator for a page. Its events have no
   first or last seen time, and its sequence is in crawl order.
 - WebSocket messages appear only from a disco capture. The pipeline sends none.
+- The `proxy` sequence draws Browser → Intercepting proxy → origin per flow, ordered by
+  the time the proxy received each request. An edited request is noted on the forward;
+  a missing response is a lost arrow. Messages the operator dropped and repeater
+  replays are not recorded as flows, so they are not traced.
+- The proxy's trace costs about 1 ms per flow on its event-loop thread (p95 up to
+  13 ms; measured, FR-PROXY-13). `HistoryWriter(trace=False)` turns it off; there is no
+  command-line switch for it yet.
 - External hosts come from the capture proxy's refusal counts. The browser's own
   background traffic, such as autofill services, is included and labelled as possibly
   the browser's.

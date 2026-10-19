@@ -98,7 +98,8 @@ class ProxyController:
         if self.server is not None:
             await self.server.stop()
         if self._history is not None:
-            self._history.flush()
+            # flush, the run's end and the trace counters (FR-PROXY-13)
+            self._history.close(run_end="complete")
         if self._store is not None:
             self._store.close()
         self._running = False

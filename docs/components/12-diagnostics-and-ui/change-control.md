@@ -3,6 +3,26 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0061 — Proxied traffic counts as captured; the web proxy's stop records the run's end (FR-UI-510, FR-PROXY-13) (2026-10-19)
+- Change:
+  - `report/diagram.py::interface_coverage`: an `observe.exchange` from the
+    intercepting proxy (`src` "proxy") with a status counts as *captured*, as one from
+    disco's capture does. Both are browser traffic that was answered. A failed upstream
+    (no status) is *discovered* only.
+  - `web/proxycontrol.py::ProxyController.stop`: `close(run_end="complete")` replaces
+    `flush()` (CC-PROXY-0026).
+- Reason: DG-PROXY's lane report. Coverage counted only disco's capture as captured,
+  under-reporting interfaces the operator's own browser exercised through the proxy.
+  The web proxy's stop left its run `partial` and its counters unwritten.
+- Impact: read-only views; one `run.end` per stopped web-proxy run.
+- Risk: low.
+- Deliverables:
+  - [x] code; `tests/test_proxy_trace.py::test_the_data_flow_shows_the_proxied_interfaces_seen_from_the_browser`
+    (an answered flow is captured, the refused upstream is not) and
+    `::test_stopping_the_web_proxy_records_its_end_and_its_counters` — done
+  - [x] `docs/DIAGRAMS.md`, CHANGELOG — done
+- Effectiveness: verified offline (the tests above).
+
 ### CC-UI-0060 — Sequences show each try of an exchange (FR-UI-511, with FR-FUZZ-61) (2026-10-19)
 - Change (`fuzzlab/report/diagram.py`):
   - an exchange's sequence also holds its follow-up's retries (the follow-up's

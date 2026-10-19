@@ -212,6 +212,11 @@ def test_the_data_flow_shows_the_proxied_interfaces_seen_from_the_browser(proxie
     assert flow["attrs"]["auth"] == ["alice"] and flow["attrs"]["status"] == [302]
     assert "credential:body" in flow["attrs"]["data"]
     assert not [f for f in model["flows"] if f["src"] == trace.TOOL]   # not tool traffic
+    # an answered proxied flow is captured browser traffic; a failed upstream is not
+    cov = diagram.interface_coverage(conn, run_id)
+    assert cov[login]["discovered"] == cov[login]["captured"] == 1
+    refused = f"iface:{proxied['dead']}|GET|/refused"
+    assert cov[refused]["discovered"] == 1 and cov[refused]["captured"] == 0
 
 
 def test_the_proxy_sequence_forwards_and_draws_a_failed_upstream_lost(proxied):
@@ -385,3 +390,30 @@ def test_the_event_is_a_pure_function_of_the_written_flow():
     assert a == b and a[0] == f"{TRACE_KEY}7" and a[2] == 1000.0
     assert "SECRETTOKEN1234567abc" not in json.dumps(a)
     assert a[1]["params"] == [["token", "query"], ["a", "query"]]
+
+
+def test_stopping_the_web_proxy_records_its_end_and_its_counters(upstream, tmp_path):
+    """The web proxy's stop closes the writer with the run's end, so a stopped proxy
+    run reads complete, with the recorder's counters (never 'partial' for want of an
+    end); the CLI does the same on Ctrl-C."""
+    from fuzzlab.report import diagram
+    from fuzzlab.web.proxycontrol import ProxyConfig, ProxyController
+    path = tmp_path / "s.db"
+    Store(path).close()                  # the app makes the project file exist
+    ctrl = ProxyController(ProxyConfig(port=0, scope_hosts=("127.0.0.1",),
+                                       store_path=str(path)))
+
+    async def scenario():
+        await ctrl.start()
+        try:
+            await _through(ctrl.server.port,
+                           _request("GET", f"http://127.0.0.1:{upstream}/page?q=1"))
+        finally:
+            await ctrl.stop()
+    asyncio.run(scenario())
+    with Store(path) as store:
+        run = store.conn.execute("SELECT MAX(id) FROM run").fetchone()[0]
+        doc = diagram.status(store.conn, run)
+        assert doc["run_end"] == "complete" and doc["state"] == "complete"
+        assert doc["by_kind"] == {"observe.exchange": 1, "run.end": 1}
+        assert doc["recorder"]["written"] == 2.0 and doc["recorder"]["dropped"] == 0.0

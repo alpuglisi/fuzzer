@@ -183,7 +183,8 @@ def interface_coverage(conn, run_id: int) -> dict[str, dict]:
         if kind in ("observe.exchange", "observe.page") and r["o"]:
             eid = trace.interface_id(r["o"], r["m"], r["u"] or "")
             bump(eid, "discovered", n)
-            if r["src"] == "capture" and r["status"] is not None:
+            # browser traffic answered: disco's capture or the intercepting proxy
+            if r["src"] in ("capture", "proxy") and r["status"] is not None:
                 bump(eid, "captured", n)
         elif kind == "test.start" and r["test"] in tests:
             bump(tests[r["test"]], "scheduled", n)

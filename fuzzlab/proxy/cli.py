@@ -141,13 +141,17 @@ def main(argv: list[str]) -> int:
         finally:
             await server.stop()
 
+    ended = "complete"                    # Ctrl-C: the operator's stop
     try:
         asyncio.run(_serve())
     except KeyboardInterrupt:
         pass
+    except BaseException as exc:
+        ended = f"aborted: {type(exc).__name__}"
+        raise
     finally:
         if history is not None:
-            history.close()               # flush, and record the trace counters
+            history.close(run_end=ended)  # flush, the run's end, the trace counters
         if store is not None:
             store.close()
     return 0

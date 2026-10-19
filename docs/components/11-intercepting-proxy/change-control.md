@@ -3,6 +3,28 @@
 Component code: **PROXY**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PROXY-0026 — A closed proxy run records its end (FR-PROXY-13) (2026-10-19)
+- Change:
+  - `proxy/history.py`: `HistoryWriter.close(run_end=None)`. Given a status, it emits a
+    `run.end` event through the writer's recorder (created if no flow made one), when
+    no transaction it does not own is open, then writes the counters.
+  - `proxy/cli.py`: `fuzzlab proxy` closes the writer with `complete` on Ctrl-C, or
+    `aborted: <class>` when the loop raised.
+  - `web/proxycontrol.py::ProxyController.stop` (UI component, CC-UI-0061) calls
+    `close(run_end="complete")` instead of `flush()`.
+- Reason: found in CC-PROXY-0025's lane report. A proxy run never recorded an end, so
+  its diagram status always read `partial`. The web proxy's stop only flushed, so its
+  trace counters were never written.
+- Impact: one `run.end` event per closed proxy run. Flow history is unchanged.
+- Risk: low. A failure to record the end is suppressed; the status then reads
+  `partial`, which is honest.
+- Deliverables:
+  - [x] code; `tests/test_proxy_trace.py::test_stopping_the_web_proxy_records_its_end_and_its_counters`
+    drives the real `ProxyController` with a store: after `stop()` the run's status is
+    `complete` with its counters. It fails with the old `flush()` (`run_end` None) — done
+  - [x] FR-PROXY-13 edited in place; CHANGELOG — done
+- Effectiveness: verified offline (the test above).
+
 ### CC-PROXY-0025 — The proxy's recorded flows are trace events, live (FR-PROXY-13) (2026-10-19)
 - Change:
   - **`proxy/history.py`:** `HistoryWriter` owns a `core.trace.TraceRecorder` (created

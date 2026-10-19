@@ -1759,6 +1759,10 @@ tracked in the requirements files, not here.
   tracked tree. Release builds come from a clean checkout.
 
 ### 11. Intercepting proxy `[partial — full offline stack built; live TLS serving on-host]` (Phase 6)
+- **Trace producer** `[built]` (FR-PROXY-13, CC-PROXY-0025/0026): each recorded in-scope
+  flow is one `observe.exchange` event (scope `proxy`), and a closed run records its
+  end, written through `core.trace.TraceRecorder` (SP-48) by `HistoryWriter` on its own
+  thread and connection; read by `report.diagram`.
 - **Dual-path core** `[built]` (D4, `fuzzlab/proxy/`): the **raw byte path**
   (`message.py::RawMessage`) — byte-exact, round-trips received bytes and edits by byte
   surgery so untouched lines stay verbatim (NFR-PROXY-byte-exact) — and the **parsed
