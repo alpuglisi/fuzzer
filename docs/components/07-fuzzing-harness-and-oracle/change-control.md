@@ -145,7 +145,14 @@ Newest first.
   - **Lab ground truths** (22 directories): no stored case has an unplaceable store,
     so a run with a browser changes no lab case. When the browser cannot start, the 3
     stored cases and 5 DOM points are `inconclusive` instead of `checked`.
-  - **Harness:** VERIFY_RESULT
+  - **Harness:** `FUZZLAB_REQUIRE_BROWSER=1 scripts/verify_change.py --base bf1356a
+    --wait-other 5400` on `9817abc`:
+    - 139 test files, all in one parallel pass, 0 serial;
+    - 3869 passed, 0 failed, 0 errors, 14 xfailed;
+    - 5 skipped: `test_packaging`'s wheel build (bdist_wheel is unavailable on this
+      host) and 4 live external-lab tests (`FUZZLAB_LIVE_EXTERNAL_LABS` is not set);
+    - no browser test skipped.
+  - The on-host scored check is still pending (PA-0042/0047).
 
 ### CC-FUZZ-0102 — The browser (M6) and out-of-band (M8) confirmations record each step they perform (FR-FUZZ-62, BUG-0520) (2026-10-19)
 - Change:
