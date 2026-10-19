@@ -927,3 +927,9 @@ Juice Shop lab is complete.
 - **Impact:** none further.
 - **Status:** fixed.
 
+### F-086 — The diagrams' external hosts were only the capture proxy's refusals, while I described them as the hosts the browser asked for
+- **What:** `docs/DIAGRAMS.md` says the data flow shows "external hosts the browser asked for". `observe_disco` (mine, CC-AUD-0050) reads only the capture proxy's refusal stats; the explorer's own browser guard refuses out-of-scope hosts first (`explore.json`), so those hosts never reach the proxy and are never traced.
+- **Evidence:** DG-LIVEDISCO phase 1 (2026-10-19), a loopback disco capture: the browser guard refused the out-of-scope origin 22-41 times per run, the proxy 0 times; the model held no external host, by import or live (BUG-0524).
+- **Impact:** the data flow showed no external references for captures whose browser guard did the refusing, while the docs implied it did.
+- **Status:** open: fixed with DG-LIVEDISCO (CC-AUD-0054), under the review gate.
+
