@@ -1264,6 +1264,8 @@ tracked in the requirements files, not here.
       rules off ground truth. `SHAPE_CATEGORIES` is the one shape → categories table
       (url → open-redirect, ssrf; BUG-0124), and `redirect_seed` is the one stated
       exception to sending app-supplied hosts (the open-redirect retry, FR-AUD-21);
+      a candidate's evidence carries `decided_by` (the one deciding arm) only in the
+      category that arm belongs to (FR-AUD-30, CC-AUD-0055);
     - POST selector forms are fuzzed unless settings-like; the spider's
       `selector_verdicts` records what a submitted picker did;
     - BUG-0115: placement is a conformance contract (`UnplaceableLocation`);
@@ -1294,9 +1296,13 @@ tracked in the requirements files, not here.
       `/#/search` (`core.urls.to_route_path`), built only with a browser; in a crawl run
       an HTTP send at `fragment` is refused (`harness.auto._FragmentGuard`) and the M6
       executor places the payload in the route's own query;
-    - the oracle takes `UnplaceableLocation` from a mechanism as no verdict; a candidate
-      no mechanism could place is `inconclusive` (mechanism `unplaceable`, counted
-      separately as `oracle_unplaceable`), never a negative; a `fragment` point draws
+    - the oracle takes `UnplaceableLocation` from a mechanism as no verdict (the M6
+      executor raises its placement refusals too, CC-FUZZ-0103); a candidate whose
+      evidence names its deciding mechanism (`decided_by`, FR-AUD-30: a stored case, a
+      ground-truth DOM point) is decided only by that mechanism, and is `inconclusive`
+      (`unplaceable`) when it could not place the point, gave no verdict or did not run;
+      any other candidate no mechanism could place is `inconclusive` (mechanism
+      `unplaceable`, counted separately as `oracle_unplaceable`), never a negative; a `fragment` point draws
       only client-side rules (`location_not_in`), and its finding keeps its route
       (`oracle.finding_url` → `to_route_path`);
     - since FR-FUZZ-56 (CC-FUZZ-0095) the ground-truth contract also admits PUT and

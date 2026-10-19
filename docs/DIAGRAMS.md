@@ -137,7 +137,8 @@ Each interface counts six states separately, each in its own unit:
 - *scheduled*: tests on it;
 - *executed*: those tests' own sends, answered or not (a follow-up, a restore or a retry
   is part of a send, not one), and an M6 visit's store and observe loads;
-- *evaluated*: strategy runs that reached a verdict;
+- *evaluated*: strategy runs that reached a verdict on the test's candidate (a run that
+  does not decide it, and did not confirm it, reached none);
 - *finding*: findings.
 
 An interface with no finding shows what was tested; it is never presented as "secure".
@@ -206,6 +207,10 @@ An M6 visit is drawn under "Browser driven by the tool (M6)":
 - "N page request(s) answered, N failed, N refused";
 - the result: executed, "the sentinel did not fire within N ms", "not observed: …" or
   "not placed: …".
+
+A strategy run that does not decide its candidate (the candidate's `decided_by` names
+another mechanism, FR-AUD-30) is drawn "(does not decide this candidate)"; a confirmation
+always counts, whoever made it.
 
 An out-of-band wait is drawn as "callback received from <address>" or "no callback
 within N s". A step that did not happen is never drawn as a reply or as executed. Stamps

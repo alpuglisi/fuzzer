@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-19 — oracle (an unplaceable stored-XSS store was a negative; BUG-0523, a recurrence of BUG-0115)
+- **Symptom:** a store point in a header or path gave the stored case `oracle_status` `checked` and `oracle_rejected` 1, and the trace disagreed with itself (`test.strategy` said not_confirmed, the visits said unplaceable). A browser-only candidate whose browser could not start was `checked` too.
+- **Root cause:** the M6 executor returned its placement refusal as an observation, and the oracle counted any mechanism's placement as a check of the candidate.
+- **Remediation:** CC-FUZZ-0103, CC-AUD-0055, CC-UI-0066 (`decided_by`, FR-AUD-30); PA-0523, SP-54.
+- **Status:** Fixed
+
 ## 2026-10-19 — diagrams (hosts the browser guard refused were never traced; BUG-0524, a recurrence of BUG-0513/BUG-0520)
 - **Symptom:** in 7 loopback captures the browser guard refused the out-of-scope origin 22-41 times (`explore.json`) and the capture proxy 0 times; the trace and the data flow showed no external host.
 - **Root cause:** `observe_disco` took refused hosts from the capture proxy's stats only; the guard refuses first and records its count in `explore.json`.
