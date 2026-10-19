@@ -12,6 +12,7 @@ import pytest
 from fuzzlab.core import trace
 from fuzzlab.core.config import load_config
 from fuzzlab.core.store import Store
+from fuzzlab.report import diagram
 from fuzzlab.web.app import create_app
 from tests._webclient import web_client
 
@@ -162,3 +163,161 @@ def test_the_page_renders_labels_as_text_navigates_evidence_and_updates_live(tmp
         server.stop()
     assert errors == []
     assert run == 1
+
+
+# --- a finding's deep link (FR-UI-513) ---------------------------------------------------
+def _bad_link(param: str) -> str:
+    return (f"bad diagram link: {param} must be given once, as a whole number from 1 to "
+            f"{diagram.MAX_LINK_ID}\n")
+
+
+def test_a_deep_link_is_validated_and_never_reflected(tmp_path):
+    """The oracle for the link's validation: a malformed or incomplete link is a 400 whose
+    body is the fixed message (so no value can be reflected); a well-formed link that
+    does not hold applies nothing and says why, in fixed text; a valid link carries
+    exactly the run, the finding and its scope to the page script."""
+    from tests._finding_runs import pipeline_runs, recorded_finding
+    path = tmp_path / "s.db"
+    (run, fid), (untraced, ufid) = pipeline_runs(path, tmp_path, traced=(True, False))
+    with Store(path) as store:
+        lost_run, lost_fid = recorded_finding(store, event=False)
+    c = web_client(create_app(load_config(overrides={"store_path": str(path)},
+                                          environ={})))
+    bad_values = ["abc", "0", "01", "-1", "+1", "1.0", "", " 1", "1 ", "1e3", "١",
+                  str(diagram.MAX_LINK_ID + 1), "9" * 40, XSS]
+    cases = [([("run", str(run))], "finding"), ([("finding", str(fid))], "run"),
+             ([("run", str(run)), ("run", str(run)), ("finding", str(fid))], "run"),
+             ([("run", str(run)), ("finding", str(fid)), ("finding", str(fid))],
+              "finding")]
+    cases += [([("run", v), ("finding", str(fid))], "run") for v in bad_values]
+    cases += [([("run", str(run)), ("finding", v)], "finding") for v in bad_values]
+    for params, param in cases:
+        r = c.get("/diagrams", params=params)
+        assert r.status_code == 400 and r.text == _bad_link(param), (params, r.text)
+        assert r.headers["content-type"].startswith("text/plain")
+    foreign = {(untraced, fid): f"finding #{fid} belongs to another run",
+               (run, 10 ** 9): "no such finding in the open project",
+               (untraced, ufid): "its run has no trace (recorded before diagrams, or "
+                                 "with --no-trace)",
+               (lost_run, lost_fid): "its trace event was not recorded"}
+    for (r_id, f_id), why in foreign.items():
+        page = c.get("/diagrams", params={"run": r_id, "finding": f_id})
+        assert page.status_code == 200
+        assert (f"The link to run #{r_id}, finding #{f_id} was not applied: {why}."
+                in page.text)
+        assert "data-link-" not in page.text
+    page = c.get("/diagrams", params={"run": run, "finding": fid})
+    assert page.status_code == 200 and 'id="dg-link-notice"' not in page.text
+    assert (f'data-link-run="{run}" data-link-finding="{fid}"\n  '
+            f'data-link-scope="finding:{fid}"') in page.text
+    plain = c.get("/diagrams").text                     # no link: nothing applied
+    assert "data-link-" not in plain and 'id="dg-link-notice"' not in plain
+
+
+def test_the_deep_link_builder_and_parser_agree():
+    for r, f in ((1, 7), (7, 1), (diagram.MAX_LINK_ID, diagram.MAX_LINK_ID)):
+        link = diagram.finding_deep_link(r, f)
+        assert link == f"/diagrams?run={r}&finding={f}"
+        query = [tuple(p.split("=")) for p in link.split("?", 1)[1].split("&")]
+        assert diagram.parse_deep_link(query) == (r, f)
+    for r, f in ((0, 1), (1, 0), (diagram.MAX_LINK_ID + 1, 1), (True, 1), ("1", 1)):
+        with pytest.raises(ValueError):
+            diagram.finding_deep_link(r, f)
+    assert diagram.parse_deep_link([("other", "x")]) is None
+
+
+def test_a_finding_link_opens_exactly_its_run_sequence_and_data_flow(tmp_path):
+    """From the Findings page, a finding with a trace opens exactly its run (one the run
+    list's 200 newest leave out), its sequence and its filtered data flow; a finding
+    without one says so and has no link. The run and the finding stay through a reload
+    the store's writes cause, until the operator chooses another run."""
+    from urllib.parse import quote
+
+    from playwright.sync_api import sync_playwright
+
+    from tests._browser import Server, free_port, launch_browser_or_skip
+    from tests._finding_runs import pipeline_runs
+    path = tmp_path / "s.db"
+    (run_a, fid), (run_c, fid_c) = pipeline_runs(path, tmp_path, traced=(True, False))
+
+    def traced_run(**event) -> int:
+        with Store(path) as store:
+            rid = store.start_run("auto", "h")
+            rec = trace.TraceRecorder(store, rid)
+            rec.emit("run.start", {"origins": [O]}, key="run.start")
+            if event:
+                rec.emit("observe.exchange", event, t=1.0)
+            rec.close()
+        return rid
+
+    for _ in range(200):                     # run A is beyond the run list's 200 newest
+        traced_run()
+    (run_b, _fid_b), = pipeline_runs(path, tmp_path, traced=(True,))
+    port = free_port()
+    cfg = load_config(overrides={"store_path": str(path), "web_port": port,
+                                 "diagram_poll_ms": 400}, environ={})
+    server = Server(create_app(cfg), port)
+    server.start()
+    errors: list[str] = []
+    try:
+        with sync_playwright() as pw:
+            browser = launch_browser_or_skip(pw)
+            page = browser.new_page()
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            base = f"http://127.0.0.1:{port}"
+            # 1. the Findings page: a link for A's finding only
+            page.goto(base + "/findings")
+            row_a = page.locator(f'#findings-table tr[data-row-id="{fid}"]')
+            row_c = page.locator(f'#findings-table tr[data-row-id="{fid_c}"]')
+            row_c.wait_for()
+            assert "No diagram: run #%d has no trace" % run_c in row_c.inner_text()
+            assert row_c.locator('a[href^="/diagrams"]').count() == 0
+            link = row_a.locator('a[href^="/diagrams"]')
+            assert link.count() == 1
+            assert link.get_attribute("href") == f"/diagrams?run={run_a}&finding={fid}"
+            # 2. it opens exactly that run, the finding's sequence and its data flow
+            link.click()
+            page.wait_for_url(f"**/diagrams?run={run_a}&finding={fid}")
+            page.locator("#dg-seq text", has_text=f"finding {fid} created").first.wait_for(
+                timeout=10000)
+            assert page.input_value("#dg-run") == str(run_a)
+            assert page.input_value("#dg-scope") == f"finding:{fid}"
+            assert page.input_value("#dg-finding") == str(fid)
+            assert page.is_checked("#dg-overlay")
+            assert page.locator("#dg-flow path.dg-flow").count() >= 1
+            # 3. a write reloads the runs: the linked run stays, though not listed
+            new = traced_run()
+            page.locator(f"#dg-run option[value='{new}']").wait_for(state="attached",
+                                                                    timeout=10000)
+            assert page.input_value("#dg-run") == str(run_a)
+            assert page.input_value("#dg-scope") == f"finding:{fid}"
+            # 4. the operator chooses another run: the link is released, and a later
+            # write's reload shows that run's whole data flow, not the linked finding's
+            page.select_option("#dg-run", str(run_b))
+            page.locator("#dg-status-text", has_text=f"Run {run_b}:").wait_for(
+                timeout=10000)
+            with Store(path) as store:
+                b_origin = store.conn.execute(
+                    "SELECT label FROM dg_entity WHERE run_id=? AND kind='origin'",
+                    (run_b,)).fetchone()["label"]
+                rec = trace.TraceRecorder(store, run_b)
+                rec.emit("observe.exchange", {"src": "capture", "ref": "record 99",
+                                              "method": "GET", "url": b_origin + "/late-b",
+                                              "origin": b_origin, "status": 200}, t=2.0)
+                rec.close()
+            page.locator("#dg-ifaces").get_by_text("GET /late-b").wait_for(timeout=10000)
+            assert page.input_value("#dg-run") == str(run_b)
+            assert page.input_value("#dg-finding") == ""
+            # 5. smoke check only (the 400 matrix of the test above is the oracle): a
+            # hostile run is refused, a foreign pair is named, and nothing runs
+            resp = page.goto(f"{base}/diagrams?run={quote(XSS)}&finding={fid}")
+            assert resp.status == 400 and "<img" not in resp.text()
+            page.goto(f"{base}/diagrams?run={run_a}&finding={fid_c}")
+            page.locator("#dg-link-notice").wait_for()
+            assert "belongs to another run" in page.text_content("#dg-link-notice")
+            assert page.evaluate("window.__xss") is None
+            assert page.locator("#diagrams-root img").count() == 0
+            browser.close()
+    finally:
+        server.stop()
+    assert errors == []

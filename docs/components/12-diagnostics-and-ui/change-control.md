@@ -3,6 +3,135 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0063 — A finding opens its own sequence and data flow; the Diagrams page takes a validated deep link; the finding filter follows the finding's own relation (FR-UI-513, FR-UI-510, FR-UI-13, BUG-0519) (2026-10-19)
+- Change:
+  - `fuzzlab/report/diagram.py`:
+    - `dataflow(..., finding=F)` (BUG-0519): F's interface is taken from F's own trace
+      event (`finding_links(...)["interface"]`), the relation `finding_links` and
+      `_finding_sequence` use. The keep-set is that interface, its parent chain
+      (`dg_entity.parent`: the origin, then `app:target`) and the `src` of every
+      returned (overlay-filtered) flow whose `dst` is that interface, intersected with
+      the run's entities (so a flow source with no box, such as the finding's tool flow
+      in a run with no `run.start` and no exchange, never raises). No actor-id list
+      (`{APP, TOOL, BROWSER}` removed) and no read of the capped `attrs.finding`.
+    - new `finding_diagram_states(conn, finding_ids)`: one read-only query (`finding`
+      LEFT JOIN `trace_event` on `run_id` and `key = 'finding:' || id`, over the ids
+      as `json_each(?)`; a correlated EXISTS for a traced run; `json_extract` of the
+      event's `test` and `origin`) giving each finding's `run_id`, `available` and
+      `reason` (`None`, `no-trace`, `not-recorded`, `incomplete`).
+    - new `MAX_LINK_ID` (2^53-1), `finding_deep_link(run, finding)` (the one builder:
+      `/diagrams?run=<R>&finding=<F>`, checked `int`s only), `parse_deep_link(items)`
+      (the one parser: both parameters required, each once, `^[1-9][0-9]{0,15}$` and
+      ≤ 2^53-1) and `DeepLinkError` (names the parameter, never the value).
+  - `fuzzlab/web/diagram_routes.py::diagrams_page`: parses the query with
+    `parse_deep_link`; a refused link is a 400 with a fixed `text/plain` body naming the
+    parameter (PA-0518(2)); a well-formed link that does not hold (no such finding, a
+    finding of another run, not available) applies nothing and renders a fixed notice
+    (holding only the two parsed integers); a valid one passes `link = {run, finding,
+    scope: "finding:<F>"}` to the template. No `scopes()` call per page load.
+  - `templates/sections/diagrams.html`: `data-link-run`, `data-link-finding`,
+    `data-link-scope` on `#diagrams-root` for a valid link only; `#dg-link-notice`
+    (`role="status"`) for the server's notice.
+  - `static/js/diagrams.js`: reads the `data-link-*` attributes once (never
+    `location.search`; no second validator). `state.keepRun` keeps the linked run
+    selected through reloads, adding an option for it when `_runs`' 200-row list leaves
+    it out (`loadRuns` used to switch to `runs[0]`), until the operator chooses another
+    run; `state.pin` holds the scope and the finding filter (the first `refresh` sends
+    the pinned finding, `fillScopes` selects both) until the operator chooses another
+    run, scope or finding. The overlay is ticked; unticking it, or the origin or
+    evidence filter, keeps the pin.
+  - `web/findingsview.py::list_findings`: each row gains `diagram: {href, reason}`
+    (one `finding_diagram_states` query over the listed ids; `finding_deep_link`).
+    `static/js/findings.js`: a row action, a "Diagram" link (`safeHref`, an
+    `aria-label` naming the finding and run) or the reason as fixed text, both by
+    `textContent`.
+  - `static/js/datatable.js`: one comment reworded ("never innerHTML" → "never parsed
+    HTML"); the banned-sink guard scans comments, and it now covers the Findings page.
+  - Divergences from the agreed draft, reflected here: `finding_deep_link` formats the
+    two checked integers directly instead of `urlencode` (measured: 15.5 ms → 1.8 ms per
+    5000 links; integers need no encoding); the run is kept separately from the
+    scope/finding pin (`keepRun`), so choosing another scope or finding on a linked
+    run beyond the 200-run list does not switch runs.
+- Reason: the Findings page had no way into a finding's diagram evidence (DG-FINDLINK).
+  Measurement before design found BUG-0519: the finding filter re-derived "what F
+  cites" from a capped attribute and an actor list, and disagreed with `finding_links`
+  (the spider's flows since 9b17d0d; every finding past the 40th on an interface since
+  ede72b9).
+- Impact (other components / project): UI only. Consumers, searched in `fuzzlab/` and
+  `tests/` (PA-0152): `/api/findings` is read only by `findings.js` (additive key);
+  `dataflow(finding=)` is passed `finding` only by `diagram_routes.diagram_dataflow` --
+  the CLI, `export_json`, `export/flow.mmd` and every other caller pass none and are
+  unchanged. With a finding, the view now keeps the spider's flows and findings past the
+  40th, and no longer draws `TOOL`/`BROWSER` boxes without a flow. No schema, store
+  contract, CLI or traffic change; every new path is a read-only GET. New shared
+  primitive (a finding's diagram availability and its deep link; SHARED_PRIMITIVES row
+  supplied to the orchestrator).
+- Risk: medium (URL-controlled input into a page that renders target-derived text).
+  Mitigations: two integer parameters only; one parser with one bound; a fixed 400 body;
+  only server-derived integers reach the template (autoescaped); text-only rendering
+  under the banned-sink guard on both pages; a link only where both views draw
+  something, by the views' own relations; the linked run kept and never replaced by
+  `runs[0]`; a foreign link applied nowhere, with a notice. Accepted residual risks:
+  (1) a Findings tab left open across a project switch can open a link that the new
+  store happens to satisfy (same run and finding ids); the link carries no project
+  identity and none is exposed. (2) A dropped recorder batch holding a `finding` event
+  leaves that finding `not-recorded` for good (the run is already `partial`). (3) Cost,
+  below: `/api/findings` grows by about 45-85 ms on 5000 findings.
+- Review: the pre-change gate (docs/components/README.md) ran two rounds; round 1 both
+  reviewers disagreed (the attribute cap, the link's breadth, cost unmeasured, the pin's
+  release untested, a routes import); round 2 agreed 3/3 with four nits, folded in (the
+  keep-set intersected with the run's entities and a no-`run.start` fixture, the
+  overlay behaviour stated, test (g)'s browser XSS check labelled a smoke check).
+- Deliverables:
+  - [x] `report/diagram.py`: the BUG-0519 filter, `finding_diagram_states`,
+    `MAX_LINK_ID`, `finding_deep_link`, `parse_deep_link`, `DeepLinkError` — done
+  - [x] `web/diagram_routes.py` validation; `diagrams.html` attributes and notice;
+    `diagrams.js` keep/pin/release — done
+  - [x] `findingsview.list_findings` `diagram`; `findings.js` row action;
+    `datatable.js` comment — done
+  - [x] tests, each proven to fail with its part reverted (Effectiveness):
+    (a) `tests/test_diagram_e2e.py::test_the_finding_filter_draws_exactly_the_flows_finding_links_names`,
+    (b) `::test_a_finding_past_the_attribute_cap_keeps_its_interface_and_flows`,
+    (c) `tests/test_web_findings.py::test_each_finding_row_says_whether_its_diagram_can_be_opened`,
+    (d) `::test_the_findings_page_scripts_never_parse_html_strings`,
+    (e) `tests/test_web_diagrams.py::test_a_deep_link_is_validated_and_never_reflected`,
+    (f) `::test_the_deep_link_builder_and_parser_agree`,
+    (g) `::test_a_finding_link_opens_exactly_its_run_sequence_and_data_flow` (real
+    Chromium, locator waits only), (h)
+    `tests/test_web_pages_browser.py::test_findings_rows_say_whether_their_diagram_opens`;
+    helper `tests/_finding_runs.py` (the real pipeline against the loopback app of
+    `test_diagram_e2e`, traced or with `trace_events=False`) — done
+  - [x] FR-UI-513 added; FR-UI-510 and FR-UI-13 edited in place; BUG-0519 — done
+  - [x] text for CHANGELOG, ERROR_LOG, PA-0519, SHARED_PRIMITIVES, `docs/DIAGRAMS.md`
+    supplied to the orchestrator, who holds those files — done
+  - [ ] `scripts/verify_change.py --base 56ede12` with `FUZZLAB_REQUIRE_BROWSER=1` —
+    see Effectiveness
+- Effectiveness (assessed 2026-10-19):
+  - Each new test fails with its own part reverted (scripted revert, then restore):
+    - (a) the old filter: `AssertionError: assert 'actor:spider' in set()`;
+    - (b) the old filter: the 41st finding keeps no interface (`{'app:target', ...
+      'origin:http://127.0.0.1:9007'} <= {...}` fails);
+    - (c) `findingsview.py` at 56ede12: `KeyError: 'diagram'`;
+    - (d) `datatable.js` at 56ede12: `assert ['datatable.js: innerHTML'] == []`;
+    - (e) `diagram_routes.py` at 56ede12: the first refused case returns the page
+      (200), not the fixed 400 body;
+    - (f) the builder's range check removed: `DID NOT RAISE <class 'ValueError'>`
+      (and `parse_deep_link` does not exist on 56ede12);
+    - (g) `findings.js` at 56ede12: step 1 (no "No diagram" text, no link);
+      `diagrams.js` at 56ede12: step 2 (the finding's sequence never shows: run A is
+      not listed, so `runs[0]` is drawn); `keepRun` disabled: step 2 likewise;
+      the pin not released on a run change: step 4 (`GET /late-b` never shows: run
+      B's data flow stays filtered to the linked finding);
+    - (h) `findings.js` at 56ede12: the row action never renders.
+  - Cost, measured on a scratch store of 5000 findings (9 traced runs of 500 and 1
+    untraced run of 500; 18,468 trace events), 21 requests each, alternating builds:
+    `/api/findings` median 110.5-117.0 ms before (56ede12) and 158.1-199.7 ms after
+    (3 rounds); `list_findings` 10.6 → 42.7 ms (`finding_diagram_states` 23.5 ms, the
+    links 1.8 ms), and FastAPI's encoding of the added field about 21 ms (a flat field
+    measured 15 ms; not worth a contract change). The draft's +21 ms estimate counted
+    the query alone.
+  - Harness: pending (filled by the verification commit).
+
 ### CC-UI-0062 — Diagram views honest; origin list, application evidence, scope validation (BUG-0515, BUG-0518) (2026-10-19)
 - Change:
   - `report/diagram.py`:

@@ -16,6 +16,7 @@ import json
 from typing import Any
 
 from fuzzlab.core.store import Store
+from fuzzlab.report import diagram
 
 # Advisory only (not part of the store contract): a coarse, best-effort severity
 # band per vuln_class family, checked as a substring match (vuln_class spellings
@@ -80,10 +81,18 @@ def list_findings(store: Store, *, limit: int = 5000) -> list[dict[str, Any]]:
     rows = store.conn.execute(
         f"SELECT {', '.join(_FINDING_COLS)} FROM finding ORDER BY id DESC LIMIT ?",
         (limit,)).fetchall()
+    states = diagram.finding_diagram_states(store.conn, [r["id"] for r in rows])
     out = []
     for r in rows:
         d = dict(r)
         d["severity"] = derive_severity(d.get("vuln_class"))
+        # FR-UI-513: the link to the finding's own sequence and data flow, offered only
+        # when both views draw something; else why not (never a link to an empty view)
+        st = states[d["id"]]
+        d["diagram"] = {
+            "href": diagram.finding_deep_link(d["run_id"], d["id"])
+            if st["available"] else None,
+            "reason": st["reason"]}
         out.append(d)
     return out
 

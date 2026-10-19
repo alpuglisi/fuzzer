@@ -362,3 +362,119 @@ def test_a_capture_gives_origins_auth_contexts_workflows_and_external_refs(tmp_p
             assert secret not in blob
         mm = diagram.mermaid_sequence(seq)
         assert "<img" not in mm and "#60;img" in mm
+
+
+# --- the finding filter follows the finding's own relation (BUG-0519, FR-UI-510) -------
+CAP_O = "http://127.0.0.1:9007"
+
+
+def _findings_on_one_interface(store, n, *, run_start=True, exchanges=True):
+    """``n`` findings on one interface (an id-shaped segment groups them), reached by the
+    spider (``by: "crawler"``) and by the browser; each written the way the oracle and
+    the pipeline write them, through the one trace writer."""
+    run_id = store.start_run("auto", "h")
+    rec = trace.TraceRecorder(store, run_id)
+    if run_start:
+        rec.emit("run.start", {"origins": [CAP_O]}, key="run.start")
+    rec.emit("observe.page", {"src": "spider", "by": "crawler", "ref": "row 1",
+                              "method": "GET", "url": CAP_O + "/item/1", "origin": CAP_O,
+                              "status": 200})
+    rec.emit("observe.exchange", {"src": "capture", "ref": "record 0", "method": "GET",
+                                  "url": CAP_O + "/item/2", "origin": CAP_O,
+                                  "status": 200})
+    fids = []
+    for i in range(n):
+        url = f"{CAP_O}/item/{i + 1}"
+        fid = store.conn.execute(
+            "INSERT INTO finding (run_id, vuln_class, label, confidence, evidence, url, "
+            "method, param) VALUES (?,?,?,?,?,?,?,?)",
+            (run_id, "sqli", 1, "error-signature", "{}", url, "GET", "q")).lastrowid
+        store.conn.commit()
+        fids.append(fid)
+        test = f"t{i + 1}"
+        rec.emit("test.start", {"test": test, "url": url, "origin": CAP_O, "method": "GET",
+                                "param": "q", "location": "query", "category": "sqli"},
+                 key=f"test.start:{test}", scope=f"test:{test}")
+        keys = []
+        if exchanges:
+            keys.append(rec.emit("exchange", {"test": test, "strategy": "s",
+                                              "role": "mutation", "method": "GET",
+                                              "url": url, "origin": CAP_O, "param": "q",
+                                              "outcome": "response", "status": 500},
+                                 scope=f"test:{test}"))
+        rec.emit("finding", {"finding_id": fid, "test": test, "strategy": "s",
+                             "mechanism": "error-signature", "vuln_class": "sqli",
+                             "url": url, "method": "GET", "param": "q",
+                             "location": "query", "origin": CAP_O, "exchanges": keys},
+                 key=f"finding:{fid}", scope=f"test:{test}")
+    rec.emit("run.end", {"status": "complete"}, key="run.end")
+    rec.close()
+    return run_id, fids
+
+
+def _assert_draws_exactly_its_flows(conn, run_id, fid):
+    """The oracle: the flows `finding_links` names (those whose source the run has a box
+    for), all of them with the overlay and their app-view part without it; the boxes are
+    exactly the interface, its origin, the application and the drawn flows' sources."""
+    links = diagram.finding_links(conn, run_id, fid)
+    entities = {r["eid"]: r["parent"] for r in conn.execute(
+        "SELECT eid, parent FROM dg_entity WHERE run_id=?", (run_id,))}
+    src = {r["fid"]: r["src"] for r in conn.execute(
+        "SELECT fid, src FROM dg_flow WHERE run_id=?", (run_id,))}
+    drawable = {f for f in links["flows"] if src[f] in entities}
+    iface = links["interface"]
+    for overlay, want in ((True, drawable),
+                          (False, {f for f in drawable if f.startswith("flow:app:")})):
+        model = diagram.dataflow(conn, run_id, overlay=overlay, finding=fid)
+        drawn = {f["id"] for f in model["flows"]}
+        assert drawn == want, (fid, overlay, drawn, want)
+        nodes = {n["id"] for n in model["nodes"]}
+        sources = {f["src"] for f in model["flows"]}
+        assert nodes == {iface, entities[iface], trace.APP} | sources, (fid, nodes)
+
+
+def test_the_finding_filter_draws_exactly_the_flows_finding_links_names(run, tmp_path):
+    """BUG-0519: the filter is the finding's own relation (its event names its
+    interface), never a capped attribute or a list of actor ids. On the real pipeline's
+    run (the spider's flow) and on 45 findings sharing one interface (past the 40-value
+    attribute cap), every finding draws exactly the flows `finding_links` names, and
+    only their app-view part without the overlay."""
+    conn = run["store"].conn
+    fids = [r[0] for r in conn.execute("SELECT id FROM finding WHERE run_id=?",
+                                       (run["run"],))]
+    assert fids
+    for fid in fids:
+        srcs = {f["src"] for f in diagram.dataflow(conn, run["run"], finding=fid)["flows"]}
+        assert trace.SPIDER in srcs                        # the crawler's own loads
+        _assert_draws_exactly_its_flows(conn, run["run"], fid)
+    with Store(tmp_path / "cap.db") as store:
+        run_id, fids = _findings_on_one_interface(store, 45)
+        for fid in fids:
+            _assert_draws_exactly_its_flows(store.conn, run_id, fid)
+
+
+def test_a_finding_past_the_attribute_cap_keeps_its_interface_and_flows(tmp_path):
+    """PA-0516(1): cross the cap. The 41st and the last of 45 findings on one interface
+    keep the interface, its origin and the spider's, the browser's and the tool's flows.
+    A run with no ``run.start`` and no exchange (the reducer gives the finding's tool
+    flow no tool box) draws what has a box and never fails."""
+    iface = f"iface:{CAP_O}|GET|/item/{{id}}"
+    with Store(tmp_path / "cap.db") as store:
+        run_id, fids = _findings_on_one_interface(store, 45)
+        attrs = json.loads(store.conn.execute(
+            "SELECT attrs FROM dg_entity WHERE run_id=? AND eid=?",
+            (run_id, iface)).fetchone()["attrs"])
+        assert len(attrs["finding"]) == trace.MAX_ATTR_VALUES and attrs["finding_more"]
+        for fid in (fids[40], fids[-1]):
+            model = diagram.dataflow(store.conn, run_id, overlay=True, finding=fid)
+            assert {iface, f"origin:{CAP_O}", trace.APP} <= {n["id"] for n in
+                                                             model["nodes"]}
+            assert {f["src"] for f in model["flows"]} == {trace.SPIDER, trace.BROWSER,
+                                                          trace.TOOL}
+        bare, (fid,) = _findings_on_one_interface(store, 1, run_start=False,
+                                                  exchanges=False)
+        assert store.conn.execute("SELECT COUNT(*) n FROM dg_entity WHERE run_id=? AND "
+                                  "eid=?", (bare, trace.TOOL)).fetchone()["n"] == 0
+        model = diagram.dataflow(store.conn, bare, overlay=True, finding=fid)
+        assert {f["src"] for f in model["flows"]} == {trace.SPIDER, trace.BROWSER}
+        _assert_draws_exactly_its_flows(store.conn, bare, fid)

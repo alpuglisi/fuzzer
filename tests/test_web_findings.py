@@ -276,6 +276,52 @@ def test_build_finding_raw_request_post_body_with_no_payload():
     assert host == "127.0.0.1" and port == 8443 and tls is True
 
 
+def test_each_finding_row_says_whether_its_diagram_can_be_opened(tmp_path):
+    """FR-UI-513: a row links to its finding's own sequence and data flow only when both
+    views draw something (the real pipeline's traced run), and otherwise says why: a run
+    without a trace (``--no-trace``), a finding whose event was not recorded, an event
+    naming no test or no origin."""
+    from fuzzlab.report import diagram
+    from tests._finding_runs import pipeline_runs, recorded_finding
+    path = tmp_path / "f.db"
+    (traced, untraced) = pipeline_runs(path, tmp_path, traced=(True, False))
+    with Store(path) as store:
+        missing = recorded_finding(store, event=False)
+        no_test = recorded_finding(store, test=None)
+        no_origin = recorded_finding(store, origin=None)
+    rows = {f["id"]: f for f in _client(path).get("/api/findings").json()["findings"]}
+    assert len(rows) == 5
+    run, fid = traced
+    assert rows[fid]["diagram"] == {"href": f"/diagrams?run={run}&finding={fid}",
+                                    "reason": None}
+    expect = {untraced: "no-trace", missing: "not-recorded", no_test: "incomplete",
+              no_origin: "incomplete"}
+    for (_run, f), reason in expect.items():
+        assert rows[f]["diagram"] == {"href": None, "reason": reason}, f
+    # what "available" promises: both views draw something; the others draw nothing
+    with Store(path) as store:
+        seq = diagram.sequence(store.conn, run, f"finding:{fid}")
+        assert "error" not in seq and seq["steps"]
+        assert diagram.dataflow(store.conn, run, overlay=True, finding=fid)["flows"]
+        for (r, f) in expect:
+            assert "error" in diagram.sequence(store.conn, r, f"finding:{f}") or not \
+                diagram.dataflow(store.conn, r, overlay=True, finding=f)["flows"]
+
+
+def test_the_findings_page_scripts_never_parse_html_strings():
+    """The text-only claim for the Findings page (its new diagram link and every script it
+    loads), with the guard the site tree and diagrams pages use (proven there on
+    synthetic offenders, PA-0034(2))."""
+    from pathlib import Path
+
+    from tests.test_web_sitetree_browser import _offenders, _page_scripts
+    web = Path(__file__).resolve().parents[1] / "fuzzlab" / "web"
+    template = (web / "templates" / "sections" / "findings.html").read_text()
+    names = _page_scripts(template, lambda n: (web / "static" / "js" / n).read_text())
+    assert {"findings.js", "datatable.js"} <= names
+    assert _offenders(names, lambda n: (web / "static" / "js" / n).read_text()) == []
+
+
 def test_build_finding_raw_request_falls_back_to_default_host():
     raw, host, port, tls = build_finding_raw_request("/x", "GET", "", "", "")
     assert host == "127.0.0.1" and port == 80 and tls is False

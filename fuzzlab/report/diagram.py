@@ -108,8 +108,10 @@ def status(conn, run_id: int) -> dict:
 def dataflow(conn, run_id: int, *, overlay: bool = False, origin: str | None = None,
              knowledge: str | None = None, finding: int | None = None) -> dict:
     """The data-flow model (module docstring). Filters: ``origin`` (canonical),
-    ``knowledge`` (observed / inferred / unknown), ``finding`` (only the interfaces and
-    flows that finding cites); ``overlay`` adds the testing view's flows."""
+    ``knowledge`` (observed / inferred / unknown), ``finding`` (the interface the
+    finding's own event names, its origin and the application, and every flow into it
+    with that flow's source: the flows `finding_links` lists); ``overlay`` adds the
+    testing view's flows."""
     counts = _evidence_counts(conn, run_id)
     entities = {}
     for r in conn.execute("SELECT * FROM dg_entity WHERE run_id=? ORDER BY eid",
@@ -143,10 +145,19 @@ def dataflow(conn, run_id: int, *, overlay: bool = False, origin: str | None = N
         keep = {e for e in keep if entities[e]["knowledge"] == knowledge
                 or entities[e]["kind"] in ("application", "origin")}
     if finding is not None:
-        cited = {e for e, n in entities.items()
-                 if str(finding) in [str(x) for x in n["attrs"].get("finding", [])]}
-        parents = {entities[e]["parent"] for e in cited}
-        keep &= cited | parents | {trace.APP, trace.TOOL, trace.BROWSER}
+        # the finding's own relation (its event names its interface), as `finding_links`
+        # and the finding's sequence read it -- never the capped ``attrs.finding`` and
+        # never a list of actor ids (BUG-0519): the interface, its parent chain, and the
+        # source of every flow into it. Intersected with ``keep``, so only the run's own
+        # entities are drawn.
+        links = finding_links(conn, run_id, finding)
+        iface = links["interface"] if links else None
+        chain: set[str] = set()
+        e = iface
+        while e in entities and e not in chain:
+            chain.add(e)
+            e = entities[e]["parent"]
+        keep &= chain | {f["src"] for f in flows if f["dst"] == iface}
     nodes = [entities[e] for e in sorted(keep)]
     flows = [f for f in flows if f["src"] in keep and f["dst"] in keep]
     boundaries = [{
@@ -243,6 +254,80 @@ def finding_links(conn, run_id: int, finding_id: int) -> dict | None:
             "mechanism": b.get("mechanism"), "vuln_class": b.get("vuln_class"),
             "exchanges": b.get("exchanges") or [], "interface": iface, "flows": flows,
             "sequence_scope": f"finding:{finding_id}"}
+
+
+# --- a finding's diagrams: can they be opened, and the link to them (FR-UI-513) ----------
+#: The largest run or finding id a diagram link carries: the largest integer a browser's
+#: script holds exactly (2^53-1), one bound for the builder, the parser and the page.
+MAX_LINK_ID = 2 ** 53 - 1
+_LINK_ID = re.compile(r"[1-9][0-9]{0,15}")
+_DIAGRAM_STATES = """
+SELECT f.id, f.run_id,
+       EXISTS (SELECT 1 FROM trace_event t WHERE t.run_id = f.run_id) AS run_traced,
+       e.id IS NOT NULL AS has_event,
+       COALESCE(json_extract(e.body, '$.test'), '') <> '' AS has_test,
+       COALESCE(json_extract(e.body, '$.origin'), '') <> '' AS has_origin
+FROM finding f
+LEFT JOIN trace_event e ON e.run_id = f.run_id AND e.key = 'finding:' || f.id
+WHERE f.id IN (SELECT value FROM json_each(?))"""
+
+
+def finding_diagram_states(conn, finding_ids) -> dict[int, dict]:
+    """Whether each finding's sequence and data flow can be opened, by the relations those
+    views read: the finding's run, the run's trace, and the finding's own event
+    (``finding:<id>``) with its test (the sequence) and its origin (the interface).
+
+    Returns ``{finding_id: {"run_id", "available", "reason"}}`` for the ids that exist;
+    ``reason`` is None when available, else ``no-trace`` (the run has no trace events:
+    recorded before FR-CORE-505, or with ``--no-trace``), ``not-recorded`` (no event for
+    the finding: its batch was dropped) or ``incomplete`` (the event names no test or no
+    origin). One read-only query."""
+    ids = [int(i) for i in finding_ids]
+    if not ids:
+        return {}
+    out = {}
+    for r in conn.execute(_DIAGRAM_STATES, (json.dumps(ids),)):
+        reason = (None if r["has_event"] and r["has_test"] and r["has_origin"] else
+                  "no-trace" if not r["run_traced"] else
+                  "not-recorded" if not r["has_event"] else "incomplete")
+        out[r["id"]] = {"run_id": r["run_id"], "available": reason is None,
+                        "reason": reason}
+    return out
+
+
+def finding_deep_link(run_id: int, finding_id: int) -> str:
+    """The Diagrams page's link to one finding's sequence and data flow (FR-UI-513). The
+    one builder; `parse_deep_link` is the one parser. Both values are checked ``int``s in
+    range, so their decimal form needs no encoding."""
+    for value in (run_id, finding_id):
+        if type(value) is not int or not 1 <= value <= MAX_LINK_ID:
+            raise ValueError("a diagram link carries ids from 1 to 2^53-1")
+    return f"/diagrams?run={run_id}&finding={finding_id}"
+
+
+class DeepLinkError(ValueError):
+    """A malformed diagram link; ``param`` names the parameter (never its value)."""
+
+    def __init__(self, param: str) -> None:
+        super().__init__(f"bad diagram link: {param}")
+        self.param = param
+
+
+def parse_deep_link(items) -> tuple[int, int] | None:
+    """The Diagrams page's query (``(key, value)`` pairs) as ``(run, finding)``, or None
+    when it carries neither. Both are required, each exactly once, each a decimal integer
+    from 1 to `MAX_LINK_ID` with no sign, space or leading zero; anything else raises
+    `DeepLinkError`. Other keys are not read."""
+    items = list(items)
+    runs = [v for k, v in items if k == "run"]
+    finds = [v for k, v in items if k == "finding"]
+    if not runs and not finds:
+        return None
+    for name, values in (("run", runs), ("finding", finds)):
+        if (len(values) != 1 or not _LINK_ID.fullmatch(values[0])
+                or int(values[0]) > MAX_LINK_ID):
+            raise DeepLinkError(name)
+    return int(runs[0]), int(finds[0])
 
 
 # --- sequences ------------------------------------------------------------------------------

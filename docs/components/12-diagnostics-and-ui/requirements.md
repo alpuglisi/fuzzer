@@ -326,6 +326,8 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
     a best-effort **reconstruction** from the finding's own `url`/`method`/
     `param`, explicitly labeled as such (never presented as a byte-exact
     replay).
+  - *(CC-UI-0063)* Each list row links to its finding's own sequence and data flow
+    in the Diagrams page, or says why there is none (FR-UI-513).
   - The list and detail views, and the shared `js/datatable.js` component they
     use (below), are strictly **read-only** over `finding`/`attempt`; the
     only write path this section owns is `saved_views` (view *definitions*,
@@ -664,7 +666,12 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
   read-only `/api/diagram/*` routes (`web/diagram_routes.py`):
   - filters: the run, the origin, the evidence level (observed / inferred / unknown),
     a finding, and the testing overlay; the sequence scope (a test, a captured
-    workflow, the uncorrelated capture, the spider's trace, a finding).
+    workflow, the uncorrelated capture, the spider's trace, a finding). The finding
+    filter draws the interface the finding's own trace event names (the relation
+    `finding_links` and the finding's sequence use, never a capped attribute), that
+    interface's origin and the application, and every flow into it with that flow's
+    source -- no actor without a flow (BUG-0519, CC-UI-0063). The page accepts a
+    validated deep link to one finding (FR-UI-513).
   - the data flow as an SVG (actors | the application with its origins and
     interfaces | the tool), origins collapsible (all open under 30 interfaces), flows
     into a collapsed origin merged with summed counts; an interface table with its
@@ -710,6 +717,40 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
     the scope's note says; flows with no time are last, and a note counts them. No
     causality between flows is implied.
   The other scopes are unchanged. The page lists and draws it like any other scope.
+- **FR-UI-513** *(added CC-UI-0063)* **A finding opens its diagrams.**
+  - **The Findings page.** Each row on `/findings` either links to that finding's own
+    sequence and filtered data flow, or says why it cannot.
+    - The link is `/diagrams?run=<R>&finding=<F>`, built by
+      `report.diagram.finding_deep_link` from the finding's `run_id` and `id`.
+    - It is offered only when `report.diagram.finding_diagram_states` says the
+      diagram is available: R has trace events, R holds the event `finding:<F>`, and
+      that event names a `test` and an `origin` (the relations the sequence and the
+      data-flow filter read).
+    - Otherwise the row shows the fixed text for the reason (`no-trace`,
+      `not-recorded`, `incomplete`) and no link.
+  - **The Diagrams page.** `/diagrams` accepts the deep link `run=<R>&finding=<F>`,
+    parsed only by `report.diagram.parse_deep_link` and validated in the view.
+    - Both are required; each appears once and is a decimal integer from 1 to
+      2^53-1 (`MAX_LINK_ID`), with no sign, space or leading zero.
+    - Anything else is refused with 400: a missing parameter, a repeat, or a
+      malformed or out-of-range value. The 400 body is fixed text naming the
+      parameter, never its value.
+    - A well-formed link that does not hold (no such finding, a finding of another
+      run, or one whose diagram is not available) is not applied. The page shows a
+      fixed notice and never substitutes another run or finding.
+    - A valid link opens exactly run R, selects the sequence scope `finding:<F>` and
+      the finding filter F, and ticks the testing overlay (a finding's own flow is
+      the tool's). The server derives the scope.
+    - The run stays selected through the reloads the store's writes cause, even when
+      the run list (the 200 newest) leaves it out, until the operator chooses
+      another run. The scope and the finding filter stay until the operator chooses
+      another run, scope or finding. Unticking the overlay, or changing the origin or
+      evidence filter, keeps them.
+    - The page script reads only the server-validated `data-link-*` attributes,
+      never the URL itself.
+  - **Rendering.** Text only (`textContent` / `createElementNS`). The banned-sink
+    guard (`tests/test_web_sitetree_browser.py::_page_scripts` / `_offenders`) covers
+    the scripts of both `/diagrams` and `/findings`.
 ## 4. Non-functional requirements
 - **NFR-UI-localhost** The web app binds to loopback only, is never exposed, and is
   served separately from the vulnerable target (different origin/port; never in the

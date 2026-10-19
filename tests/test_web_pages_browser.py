@@ -347,6 +347,22 @@ def test_persisted_theme_is_applied_on_load(site, tab):
 
 # --- (f) /: severity bar segments are drawn, proportional --------------------
 
+def test_findings_rows_say_whether_their_diagram_opens(site, tab):
+    """FR-UI-513's row action, rendered: the seeded run has no trace, so every row's
+    action cell says so and offers no link into the Diagrams page."""
+    page = tab.open("/findings", "#findings-table .dt-actions .no-diagram")
+    n = sum(site["severity"].values())
+    cells = page.locator("#findings-table tbody td.dt-actions")
+    assert cells.count() == n
+    for i in range(n):
+        cell = cells.nth(i)
+        assert cell.locator('a[href^="/diagrams"]').count() == 0
+        assert (cell.locator(".no-diagram").inner_text()
+                == f"No diagram: run #{site['run_id']} has no trace (recorded before "
+                   "diagrams, or with --no-trace)")
+    assert tab.problems() == []
+
+
 def test_overview_severity_bar_is_proportional(site, tab):
     page = tab.open("/", ".sev-bar")
     widths = {sev: page.locator(f".sev-bar .sev-seg.sev-{sev}").bounding_box()["width"]

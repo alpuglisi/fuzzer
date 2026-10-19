@@ -3,7 +3,7 @@
 // one fetched snapshot (D4/R-03 — no virtualization, a few thousand rows is
 // the ceiling this needs). `severity` is a UI-only derived band the server
 // computes (`fuzzlab.web.findingsview.derive_severity`) — never invented here.
-import { createDataTable, rankSort, SEVERITY_RANK } from "/static/js/datatable.js";
+import { createDataTable, rankSort, safeHref, SEVERITY_RANK } from "/static/js/datatable.js";
 
 const TABLE_KEY = "finding";
 
@@ -35,6 +35,34 @@ function severityBadge(sev) {
   const span = document.createElement("span");
   span.className = `badge sev-${sev || "info"}`;
   span.textContent = sev || "info";
+  return span;
+}
+
+// Why a finding has no diagram link (`report.diagram.finding_diagram_states`).
+const NO_DIAGRAM = {
+  "no-trace": (f) => `No diagram: run #${f.run_id} has no trace (recorded before `
+    + "diagrams, or with --no-trace)",
+  "not-recorded": () => "No diagram: this finding's trace event was not recorded",
+  "incomplete": () => "No diagram: its trace names no test or no interface",
+};
+
+// FR-UI-513: the finding's own sequence and data flow, as a deep link into Diagrams --
+// offered only when the server says both views draw something; else the reason, as text.
+function diagramCell(f) {
+  const d = f.diagram || {};
+  const href = safeHref(d.href);
+  if (href) {
+    const a = document.createElement("a");
+    a.href = href;
+    a.className = "dg-link";
+    a.textContent = "Diagram";
+    a.setAttribute("aria-label",
+      `Open the sequence and data flow of finding #${f.id} (run #${f.run_id})`);
+    return a;
+  }
+  const span = document.createElement("span");
+  span.className = "muted no-diagram";
+  span.textContent = (NO_DIAGRAM[d.reason] || NO_DIAGRAM["not-recorded"])(f);
   return span;
 }
 
@@ -90,7 +118,7 @@ function initFindings() {
     data: [],
     rowHref: (f) => `/findings/${f.id}`,
     onRowClick: (f) => { window.location.href = `/findings/${f.id}`; },
-    rowActions: [{
+    rowActions: [{ render: diagramCell }, {
       label: "Repeater",
       ariaLabel: (f) => `Send finding #${f.id} to Repeater`,
       onClick: (f) => {

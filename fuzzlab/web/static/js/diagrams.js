@@ -65,7 +65,18 @@ function initDiagrams() {
   const findingSel = $("dg-finding"), overlayBox = $("dg-overlay"), scopeSel = $("dg-scope");
   const pollMs = Math.max(500, parseInt(root.dataset.pollMs || "3000", 10) || 3000);
   const state = { run: null, expanded: new Set(), expandedInit: false, version: undefined,
-                  evRef: null, evNext: null, selected: null, gen: 0 };
+                  evRef: null, evNext: null, selected: null, gen: 0,
+                  keepRun: null, pin: null };
+  // A finding's deep link (FR-UI-513), validated by the server (`parse_deep_link`), which
+  // renders these attributes only for a link that holds; the URL itself is never read.
+  // The run is kept until the operator chooses another run, even when the run list (the
+  // 200 newest) leaves it out; the scope and the finding until the operator chooses
+  // another run, scope or finding.
+  if (root.dataset.linkRun) {
+    state.run = state.keepRun = parseInt(root.dataset.linkRun, 10);
+    state.pin = { scope: root.dataset.linkScope, finding: root.dataset.linkFinding };
+    overlayBox.checked = true;               // a finding's own flow is the tool's
+  }
 
   // --- evidence --------------------------------------------------------------------
   async function showEvidence(ref, label, append = false) {
@@ -397,7 +408,7 @@ function initDiagrams() {
     }
     exportLinks();
   }
-  scopeSel.addEventListener("change", loadSeq);
+  scopeSel.addEventListener("change", () => { state.pin = null; loadSeq(); });
 
   // --- status, filters, exports ------------------------------------------------------
   function exportLinks() {
@@ -433,7 +444,9 @@ function initDiagrams() {
     if (overlayBox.checked) params.set("overlay", "true");
     if (originSel.value) params.set("origin", originSel.value);
     if (knowSel.value) params.set("knowledge", knowSel.value);
-    if (findingSel.value) params.set("finding", findingSel.value);
+    // the pinned finding: its option is not listed before the first scopes arrive
+    const finding = state.pin ? state.pin.finding : findingSel.value;
+    if (finding) params.set("finding", finding);
     try {
       const [st, model, scopes] = await Promise.all([
         api(`/api/diagram/${state.run}/status`),
@@ -470,15 +483,26 @@ function initDiagrams() {
     const fkeep = findingSel.value;
     findingSel.replaceChildren(el("option", { value: "", text: "All" }),
       ...findings.map((s) => el("option", { value: s.scope.split(":")[1], text: s.label })));
+    if (state.pin) {
+      findingSel.value = state.pin.finding;
+      scopeSel.value = state.pin.scope;
+      return;
+    }
     findingSel.value = fkeep;
     if (keep && scopes.some((s) => s.scope === keep)) scopeSel.value = keep;
     else if (!keep && scopes.length) scopeSel.value = scopes[0].scope;
   }
 
   for (const c of [originSel, knowSel, findingSel, overlayBox]) {
-    c.addEventListener("change", () => { refresh(); exportLinks(); });
+    c.addEventListener("change", () => {
+      if (c === findingSel) state.pin = null;  // the overlay or a filter keeps the pin
+      refresh();
+      exportLinks();
+    });
   }
   runSel.addEventListener("change", () => {
+    state.pin = null;
+    state.keepRun = null;
     state.run = runSel.value === "" ? null : parseInt(runSel.value, 10);
     state.expanded.clear();
     state.expandedInit = false;
@@ -489,12 +513,16 @@ function initDiagrams() {
     const doc = await api("/api/diagram/runs");
     runSel.replaceChildren(...doc.runs.map((r) => el("option", { value: r.id,
       text: `#${r.id} ${r.tool || ""} ${r.started_at || ""} (${r.events} events, ${r.state})` })));
-    if (!doc.runs.length) {
+    const kept = state.keepRun !== null && state.keepRun === state.run;
+    if (kept && !doc.runs.some((r) => r.id === state.run)) {
+      runSel.append(el("option", { value: state.run, text: `#${state.run} (linked)` }));
+    }
+    if (!doc.runs.length && !kept) {
       $("dg-status-text").textContent = "No run has a trace yet. Run `fuzzlab auto` "
         + "(the trace is on by default); this page fills in while it runs.";
       return;
     }
-    if (state.run === null || !doc.runs.some((r) => r.id === state.run)) {
+    if (!kept && (state.run === null || !doc.runs.some((r) => r.id === state.run))) {
       state.run = doc.runs[0].id;
     }
     runSel.value = String(state.run);

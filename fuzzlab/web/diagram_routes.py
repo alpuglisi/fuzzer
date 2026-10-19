@@ -6,7 +6,8 @@ the store); nothing here sends a request to a target. The page polls the store's
 version fingerprint (`sitetree.store_version`, ``/api/sitetree/version``) and refreshes
 while a scan writes.
 
-- ``GET /diagrams`` -- the page.
+- ``GET /diagrams[?run=&finding=]`` -- the page; with a finding's deep link
+  (FR-UI-513), validated here: malformed is a 400, a link that does not hold is a notice.
 - ``GET /api/diagram/runs`` -- runs with trace events, and their completeness.
 - ``GET /api/diagram/{run}/status`` -- completeness, dropped events, lag, gaps.
 - ``GET /api/diagram/{run}/dataflow?overlay=&origin=&knowledge=&finding=``
@@ -26,6 +27,12 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fuzzlab.report import diagram
 
 _KNOWLEDGE = ("observed", "inferred", "unknown")
+#: Why a finding's diagram link was not applied (`report.diagram.finding_diagram_states`).
+_NOTICES = {
+    "no-trace": "its run has no trace (recorded before diagrams, or with --no-trace)",
+    "not-recorded": "its trace event was not recorded",
+    "incomplete": "its trace names no test or no interface",
+}
 
 
 def _runs(conn) -> list[dict]:
@@ -43,8 +50,35 @@ def register(app: FastAPI, *, templates, shell_context: Callable[[], dict],
 
     @app.get("/diagrams", response_class=HTMLResponse)
     def diagrams_page(request: Request):
+        # a finding's deep link (FR-UI-513): validated here, the one parser; a malformed
+        # value is a 400 naming the parameter, never echoing it (PA-0518(2))
+        try:
+            pair = diagram.parse_deep_link(request.query_params.multi_items())
+        except diagram.DeepLinkError as exc:
+            return Response(
+                f"bad diagram link: {exc.param} must be given once, as a whole number "
+                f"from 1 to {diagram.MAX_LINK_ID}\n",
+                status_code=400, media_type="text/plain; charset=utf-8")
+        link = notice = None
+        if pair is not None:
+            run_id, finding_id = pair
+            state = with_store(lambda store: diagram.finding_diagram_states(
+                store.conn, [finding_id]), {}).get(finding_id)
+            if state is None:
+                notice = "no such finding in the open project"
+            elif state["run_id"] != run_id:
+                notice = f"finding #{finding_id} belongs to another run"
+            elif not state["available"]:
+                notice = _NOTICES[state["reason"]]
+            else:
+                link = {"run": run_id, "finding": finding_id,
+                        "scope": f"finding:{finding_id}"}
+            if notice:
+                notice = (f"The link to run #{run_id}, finding #{finding_id} was not "
+                          f"applied: {notice}.")
         return templates.TemplateResponse(
-            request, "sections/diagrams.html", {**shell_context(), "poll_ms": poll_ms})
+            request, "sections/diagrams.html",
+            {**shell_context(), "poll_ms": poll_ms, "link": link, "link_notice": notice})
 
     @app.get("/api/diagram/runs")
     def diagram_runs():

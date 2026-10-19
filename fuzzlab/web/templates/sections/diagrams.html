@@ -6,8 +6,13 @@
 <!-- Diagrams (FR-UI-510): the run's data flow and its sequences, both drawn from the one
      persisted trace model (report.diagram). Filled by diagrams.js from the read-only
      /api/diagram/* routes, as text only (never parsed HTML). -->
-<section class="dg" aria-labelledby="dg-h1" id="diagrams-root" data-poll-ms="{{ poll_ms }}">
+<section class="dg" aria-labelledby="dg-h1" id="diagrams-root" data-poll-ms="{{ poll_ms }}"
+  {%- if link %} data-link-run="{{ link.run }}" data-link-finding="{{ link.finding }}"
+  data-link-scope="{{ link.scope }}"{% endif %}>
   <h1 id="dg-h1" class="visually-hidden">Diagrams</h1>
+  {#- a finding's deep link (FR-UI-513): validated by the server; a link that does not
+      hold is named here, as fixed text, and nothing from it is applied #}
+  {% if link_notice %}<p class="card muted" id="dg-link-notice" role="status">{{ link_notice }}</p>{% endif %}
 
   <form class="card dg-toolbar" id="dg-filters" aria-label="Choose what the diagrams show">
     <label class="dg-field">Run <select id="dg-run" name="run"></select></label>

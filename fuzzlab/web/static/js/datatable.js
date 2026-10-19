@@ -6,7 +6,7 @@
 // with a single active aria-sort; the primary column's link is a real <a
 // href> (a JS-added click handler on the row is an enhancement on top, never
 // the only way to open a row); every cell value goes through textContent —
-// never innerHTML — because callers render untrusted, target-derived fields
+// never parsed HTML — because callers render untrusted, target-derived fields
 // (urls, params, payloads). Standalone ES module: no build step, imported
 // directly by section scripts. Reused as-is by U1 (recent runs) and U5 (store
 // explorer), *minus* the facet sidebar those sections don't need.
