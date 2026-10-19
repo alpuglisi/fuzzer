@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-19 — browser navigation (a failed load's late error page overtook the next load; BUG-0522, a recurrence of BUG-0136's X1)
+- **Symptom:** after a load failed with an empty error answer, the next navigation was overtaken by Chromium's late error page: the crawler and the auditor fell back to plain requests (10-20/20 lost), disco lost harvest loads and restores (11-20/20), and the spider lost seeds (8-15/20).
+- **Root cause:** a failed navigation raised before the browser committed the error page its failure starts, and X1's cleanup then navigated over it.
+- **Remediation:** SP-01 (`navguard.navigate`/`reload`) waits for the failure's own error page before raising, and `end_failed_load` owns the cleanup (CC-CRAWL-0049, CC-AUD-0053, CC-SESS-0027, CC-FUZZ-0104); PA-0522.
+- **Status:** Fixed
+
 ## 2026-10-19 — oracle (an unplaceable stored-XSS store was a negative; BUG-0523, a recurrence of BUG-0115)
 - **Symptom:** a store point in a header or path gave the stored case `oracle_status` `checked` and `oracle_rejected` 1, and the trace disagreed with itself (`test.strategy` said not_confirmed, the visits said unplaceable). A browser-only candidate whose browser could not start was `checked` too.
 - **Root cause:** the M6 executor returned its placement refusal as an observation, and the oracle counted any mechanism's placement as a check of the candidate.

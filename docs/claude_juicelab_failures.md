@@ -974,3 +974,15 @@ Juice Shop lab is complete.
 - **Evidence:** the lane's transcript, 2026-10-19T20:03:42Z, `kill 29632 26897 4640 … # Stop my overlapping harness runs`; my harness log `scratchpad/vup.log` ends "interrupted (signal 15)" at 20:03:43, NOT PUSHED.
 - **Impact:** one verification of the DG-UNPLACEABLE merge lost and re-run; no wrong result was recorded or pushed.
 - **Status:** the lane was told to signal only PIDs it recorded at start and to run one test process at a time behind `--wait-other`; every later dispatch states both.
+
+### F-094 — X1's cleanup was proven against one failure, and the fix's first draft repeated the class
+- **What:** the X1 cleanup (BUG-0136 review) was proven only against a refused load; after an empty error answer, Chromium's late error page overtook the next navigation (BUG-0522). The r1 draft of the fix judged "the error page has come" by the page's current URL, leaving consecutive failures unprotected (gate round 1, both reviewers).
+- **Evidence:** DG-NAVBLANK's tables and `scratchpad/navblank/batch_sa.log`: C0 lost 10-20/20 loads per order; C5 (r1) still lost 7-18/20 after two or three failures in a row.
+- **Impact:** rendered links, fetch endpoints, disco states and spider seeds lost after error answers since X1.
+- **Status:** fixed (CC-CRAWL-0049, merged with a green harness).
+
+### F-095 — The DG-NAVBLANK lane ran three ad-hoc pytest runs during other harness runs
+- **What:** besides the overlapping harness runs behind F-093, the lane ran three ad-hoc pytest runs (its new tests, the M6 wait counter, the mutants) while my harness and the DG-UNPLACEABLE lane's were running: the same one-pytest breach as F-092, by a lane dispatched before F-092's practice was adopted.
+- **Evidence:** the lane's DG-NAVBLANK report (2026-10-19), "Overlapping runs, and why".
+- **Impact:** extra load on concurrent harness runs (both stayed green); no result lost besides F-093's.
+- **Status:** open as a practice, as F-092 and F-093.

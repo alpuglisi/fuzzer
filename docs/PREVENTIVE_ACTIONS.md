@@ -2665,3 +2665,27 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
      it a negative, and a strategy without an arm decides no such candidate. (from
      BUG-0523)
   - Enforced by: tests/test_unplaceable_confirmation.py::test_no_executor_returns_an_observation_for_a_refusal, tests/test_unplaceable_confirmation.py::test_run_auto_records_an_unplaceable_store_as_inconclusive_never_a_negative, tests/test_unplaceable_confirmation.py::test_a_stored_candidate_is_decided_only_by_the_mechanism_that_plants_it, tests/test_unplaceable_confirmation.py::test_decided_by_reaches_only_the_deciding_category, tests/test_unplaceable_confirmation.py::test_a_strategy_without_an_arm_decides_only_a_candidate_with_no_decider
+- **PA-0522** — Strengthens `PA-0136(3)` and `PA-0138(3)`, after BUG-0522: a failed load's
+  error page arrives late (Chromium commits it after `goto` has raised) and overtook the
+  next navigation of every guarded browser. X1's cleanup had been proven against a refused
+  load only, and the fix's first draft judged "the error page has come" by the page's
+  current URL, so it missed consecutive failures.
+  1. **A failed navigation is over only when the browser has finished what the failure
+     starts**, judged by events seen since the navigation started, never by current
+     state: SP-01 waits, bounded, with every expiry counted and logged, for the error page
+     a network error starts and, when the navigation was overtaken by such a page, the
+     overtaken navigation's late commit.
+  2. **How a failed load ends its document is decided once** (`navguard.end_failed_load`,
+     SP-01): no `about:blank` is navigated by hand in an `except` or `finally`, and any
+     other `about:blank` navigation outside navguard is allow-listed by module and
+     function, with its reason.
+  3. **A cleanup that navigates is measured against every way the step before it can
+     fail**, several in a row and mixed orders included; a suppressed navigation error is
+     not "done" (a navigation reported as interrupted can still commit).
+  4. **Classification reads only what the browser wrote** (the leading code, or the
+     end-anchored error-page URL), never target-controlled text (PA-0022).
+  - The guard's limits: it sees only a literal `"about:blank"` passed positionally or as
+    `url=` to `navigate`/`goto`; not another spelling, a navigation by script
+    (`page.evaluate`), `set_content`, or a new function given an allow-listed name in an
+    allow-listed module. (from BUG-0522)
+  - Enforced by: tests/test_shared_primitives.py::test_every_about_blank_navigation_is_a_reasoned_exception, tests/test_shared_primitives.py::test_the_about_blank_guard_catches_synthetic_offenders, tests/test_navigation_aborts.py::test_a_failed_navigation_returns_after_its_own_error_page, tests/test_navigation_aborts.py::test_only_the_leading_code_decides_a_wait_for_an_error_page

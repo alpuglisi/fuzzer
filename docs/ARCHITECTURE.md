@@ -1233,6 +1233,11 @@ tracked in the requirements files, not here.
     driver fetches; and `browser_launch_args` (no proxy, resolver rules per
     `host:port`, background networking off) for Chromium's own traffic. API-request clients are scope-checked
     and never redirect. An AST guard covers every launch, guard and API-request site.
+    A guarded navigation that fails with a network error raises only after the
+    browser's own error page has committed (at most 3 s, judged by commits seen since
+    the navigation started, expiries counted), and a failed load ends its page's
+    previous document through `navguard.end_failed_load` (SP-01, BUG-0522): the error
+    page, or `about:blank`.
     A loopback crawl is scoped to its exact origin. Every probe sender refuses one unless it was explicitly
     enumerated (ground truth / `--url`); an AST guard enforces this. Authenticated
     senders probe the session's auth endpoints anonymously;
