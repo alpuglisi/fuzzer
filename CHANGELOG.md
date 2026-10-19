@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-19 (several accounts per lab; cross-account access control)
+- **What:** a lab can declare more accounts, each created, verified and stored by its bootstrap (gossip-world has a peer); `fuzzlab auto --peer-identity` replays the run's own account's id-keyed GET requests as the peer and unauthenticated, and flags the owner's data reaching either (CC-LAB-0310, CC-FUZZ-0093).
+- **Why:** the owner approved multiple accounts; the only access-control check could not log in as two users.
+
 ## 2026-10-19 (NoSQL injection; secDevLabs Mongection)
 - **What:** the fuzzer tests NoSQL operator injection on JSON leaves (`{"$ne": ...}` vs `{"$in": []}` against a literal baseline, replicated rounds), and ground-truth points can carry the JSON body their endpoint takes; secDevLabs' Mongection is a lab, its two login fields confirmed and its two register fields not (CC-FUZZ-0092, CC-LAB-0309).
 - **Why:** the owner asked for NoSQL injection (2026-10-19); Mongection's only flaw was otherwise unscoreable.

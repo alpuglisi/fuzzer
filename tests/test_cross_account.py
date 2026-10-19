@@ -1,0 +1,101 @@
+"""Cross-account access control (FR-FUZZ-55): `CrossAccountReplayStrategy` replays the
+run's own account's request as a peer account and unauthenticated; `--peer-identity`
+is checked before the store opens. Fake senders stand for one app seen by each user."""
+
+from __future__ import annotations
+
+import pytest
+
+from fuzzlab.oracle.probe import Candidate, Probe
+from fuzzlab.oracle.strategies import CrossAccountReplayStrategy, PeerAccounts
+
+RECORDS = {"r-alice-1": "alice", "r-bob-1": "bob"}
+
+
+class _App:
+    """``GET /record?record_id=V`` as seen by ``user`` (None: no session). ``mode``:
+    ``broken`` (anyone logged in reads any record), ``open`` (no session needed),
+    ``ok`` (owner only), ``banner`` (every page names alice, whatever V)."""
+
+    def __init__(self, mode, user):
+        self.mode, self.user, self.sent = mode, user, []
+
+    def send(self, url, param, value, timing=False, method="GET", location="query",
+             content_type=None, entries=None, prg=False):
+        if entries is not None:
+            value = dict(entries).get(param, value)
+        self.sent.append(value)
+        owner = RECORDS.get(value)
+        if self.mode == "banner":
+            return Probe(200, "site by alice. nothing here", 0.0)
+        if self.user is None and self.mode != "open":
+            return Probe(302, "", 0.0)
+        if owner is None:
+            return Probe(404, "not found", 0.0)
+        if self.mode == "ok" and owner != self.user:
+            return Probe(403, "forbidden", 0.0)
+        return Probe(200, f"record of {owner}: secret", 0.0)
+
+
+def _cand(method="GET", location="query", entries=(("record_id", "r-alice-1"),)):
+    return Candidate(url="http://127.0.0.1:9/record", param="record_id", method=method,
+                     location=location, category="access-control", base_entries=entries)
+
+
+def _run(mode, anon_mode=None, peer=True):
+    accounts = PeerAccounts(sender=_App(mode, "bob"), owner="alice", peer_name="bob",
+                            anonymous=_App(anon_mode or mode, None)) if peer else None
+    return CrossAccountReplayStrategy(accounts).confirm(_cand(), _App(mode, "alice")), \
+        accounts
+
+
+def test_another_account_reading_the_owners_record_is_confirmed():
+    v, accounts = _run("broken")
+    assert v is not None and v.confirmed and v.vuln_class == "access_control"
+    assert v.evidence["who"] == "peer" and "secret" not in str(v.evidence)
+    assert accounts.sender.sent == ["r-alice-1", "r-alice-1"]     # A's own value, twice
+
+
+def test_an_unauthenticated_read_is_confirmed_when_the_peer_is_refused():
+    accounts = PeerAccounts(sender=_App("ok", "bob"), owner="alice", peer_name="bob",
+                            anonymous=_App("open", None))
+    v = CrossAccountReplayStrategy(accounts).confirm(_cand(), _App("ok", "alice"))
+    assert v is not None and v.evidence["who"] == "anonymous"
+
+
+@pytest.mark.parametrize("mode", ["ok", "banner"])
+def test_no_verdict_for_an_owner_check_or_a_page_that_always_names_the_owner(mode):
+    v, _accounts = _run(mode)
+    assert v is None
+
+
+def test_no_peer_no_post_no_value_no_probe():
+    app = _App("broken", "alice")
+    assert CrossAccountReplayStrategy(None).confirm(_cand(), app) is None
+    accounts = PeerAccounts(sender=_App("broken", "bob"), owner="alice", peer_name="bob")
+    s = CrossAccountReplayStrategy(accounts)
+    assert s.confirm(_cand(method="POST"), app) is None
+    assert s.confirm(_cand(entries=None), app) is None
+    assert app.sent == []
+
+
+def test_peer_identity_is_refused_before_the_store_opens(tmp_path, capsys, monkeypatch):
+    from fuzzlab.harness import auto_cli
+    base = ["--base-url", "http://127.0.0.1:9/", "--store", str(tmp_path / "s.db"),
+            "--categories", "access-control", "--authorized"]
+    with pytest.raises(SystemExit):
+        auto_cli.main(base + ["--peer-identity", "b"])
+    assert "needs --identity" in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        auto_cli.main(base + ["--identity", "a", "--peer-identity", "a"])
+    assert "another account" in capsys.readouterr().err
+
+    class Store:
+        def get(self, host, ident):
+            return None
+    monkeypatch.setattr("fuzzlab.core.credentials.CredentialStore.open",
+                        classmethod(lambda cls, cfg: Store()))
+    with pytest.raises(SystemExit):
+        auto_cli.main(base + ["--identity", "a", "--peer-identity", "b"])
+    assert "no stored credential for identity 'a'" in capsys.readouterr().err
+    assert not (tmp_path / "s.db").exists()

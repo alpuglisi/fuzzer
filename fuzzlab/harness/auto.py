@@ -555,7 +555,7 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
              pages_html: dict[str, str] | None = None, browser=None, oob=None,
              coverage=None, dbfault=None,
              scheduler=None, plugins=None, confirm_budget: int | None = None,
-             prioritizer=None, header_names=None) -> PipelineResult:
+             prioritizer=None, header_names=None, peer=None) -> PipelineResult:
     """Resolve the plan (D14/D15) and run the Phase 2 pipeline.
 
     ``plugins`` (a `PluginManager`) is recorded on the run, may contribute the budget
@@ -624,7 +624,7 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
                           budget=counting, browser=browser, oob=oob,
                           coverage=coverage, dbfault=dbfault, scheduler=scheduler,
                           plugins=plugins, confirm_budget=confirm_budget,
-                          prioritizer=prioritizer)
+                          prioritizer=prioritizer, peer=peer)
     result.metrics["points_source"] = source
     result.metrics["header_points"] = sum(1 for p in points if p.location == "header"
                                           and p.origin == "crawl")

@@ -48,6 +48,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Comma-separated categories (manual, or D15 fail-safe)")
     p.add_argument("--identity", default=None,
                    help="Authenticated run as this identity (else anonymous)")
+    p.add_argument("--peer-identity", default=None, metavar="IDENTITY",
+                   help="A second account (with --identity): each id-shaped GET point's "
+                        "request is replayed as this account and unauthenticated, and "
+                        "the run's own account's data reaching either is broken access "
+                        "control (FR-FUZZ-55). Both accounts' usernames must be stored.")
     from fuzzlab.session.manager import AUTH_ORIGIN_HELP
     p.add_argument("--auth-origin", action="append", default=[], metavar="ORIGIN",
                    help=AUTH_ORIGIN_HELP)
@@ -210,6 +215,7 @@ def main(argv: list[str]) -> int:
         p.error(str(exc))
     _precheck_environment(p, args)
     _precheck_header_budget(p, args)
+    _precheck_peer(p, args)
     args.auth_origin = _auth_origins(p, args.auth_origin, args.base_url)
 
     with Store(args.store) as store:
@@ -270,6 +276,36 @@ def _auth_origins(p, values, target_url) -> list[str]:
         p.error(str(exc))
 
 
+def _precheck_peer(p, args) -> None:
+    """``--peer-identity``: needs ``--identity``, another account, and both accounts'
+    usernames in the credential store (they mark whose data a response holds; FR-FUZZ-55).
+    Refused before the store is opened. Sets ``args.peer_names``."""
+    args.peer_names = None
+    peer = getattr(args, "peer_identity", None)
+    if not peer:
+        return
+    if not args.identity:
+        p.error("--peer-identity needs --identity (the run's own account)")
+    if peer == args.identity:
+        p.error("--peer-identity must name another account than --identity")
+    from urllib.parse import urlsplit
+
+    from fuzzlab.core.config import load_config
+    from fuzzlab.core.credentials import CredentialStore
+    host = urlsplit(args.base_url).hostname or ""
+    store = CredentialStore.open(load_config())
+    names = []
+    for ident in (args.identity, peer):
+        cred = store.get(host, ident)
+        if cred is None or not cred.username:
+            p.error(f"no stored credential for identity {ident!r} on {host} (its username "
+                    f"marks whose data a response holds)")
+        names.append(cred.username)
+    if names[0] == names[1] or names[0] in names[1] or names[1] in names[0]:
+        p.error("the two accounts' usernames must differ and not contain each other")
+    args.peer_names = tuple(names)
+
+
 def _precheck_environment(p, args) -> None:
     """Refuse, before the store is opened, a flag whose environment is missing."""
     import importlib.util
@@ -297,6 +333,14 @@ def _run(p, args, store, run_id: int, plugins, selected, ground_truth) -> int:
     extra = {"auth_origins": args.auth_origin} if getattr(args, "auth_origin", None) \
         else {}
     sender = make_probe_sender(args.base_url, args.identity, **extra)
+    peer = None
+    if getattr(args, "peer_names", None):
+        from fuzzlab.oracle.strategies import PeerAccounts
+        from fuzzlab.tools.probesender import RequestsProbeSender
+        peer = PeerAccounts(sender=make_probe_sender(args.base_url, args.peer_identity,
+                                                     **extra),
+                            owner=args.peer_names[0], peer_name=args.peer_names[1],
+                            anonymous=RequestsProbeSender())
     browser = None
     if args.browser:
         from fuzzlab.tools.browserexec import PlaywrightBrowserExecutor
@@ -330,7 +374,7 @@ def _run(p, args, store, run_id: int, plugins, selected, ground_truth) -> int:
                           browser=browser, oob=oob, coverage=coverage, dbfault=dbfault,
                           scheduler=scheduler, plugins=plugins,
                           confirm_budget=args.confirm_budget,
-                          header_names=args.header_names)
+                          header_names=args.header_names, peer=peer)
     except RunModeError as exc:
         p.error(str(exc))            # D15 fail-safe: loud, non-zero exit
     finally:

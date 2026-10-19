@@ -1531,6 +1531,16 @@ rewards) derives from it.
   point with its body carries the probe. A ground-truth point may carry `json_body`
   (the body its endpoint takes; `param` one of its leaves): `auto` then audits it as a
   JSON-leaf point with those siblings.
+- **FR-FUZZ-55 (cross-account access control, `CC-FUZZ-0093`, 2026-10-19)**
+  `fuzzlab auto --identity A --peer-identity B` (both accounts stored; checked before
+  the store opens: another account, both usernames present, neither contains the other)
+  adds `CrossAccountReplayStrategy` (`access_control`, `cross-account-replay`, before
+  the single-session `AccessControlIdorStrategy`): for a GET query point with the value
+  the crawl saw A use, A's response must be *A's view* (200, A's username, not B's) and
+  the same request with another value must not be; B's replay, then the
+  unauthenticated control's, getting A's view twice confirms (evidence: who and the
+  statuses, no data). Without `--peer-identity` it no-ops. Known false positive: a
+  shared resource that names its owner. Scoped by `R-ACCESS-CONTROL`.
 
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed

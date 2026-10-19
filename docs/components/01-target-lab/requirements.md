@@ -6371,6 +6371,12 @@ lane) can submit a payload as
   targets (D10); bWAPP's page names carry class words, so NFR-LAB-no-leak does not hold
   for them and a model trained on runs against them would learn from the URL (recorded as
   not enforced under NFR-ML-no-leak; the training question is the operator's).
+- **FR-LAB-307** *(several accounts per lab; `CC-LAB-0310`, 2026-10-19).* A lab's
+  `LabMeta.extra_identities` names more accounts (`(identity, default username)`);
+  `bootstrap` resolves, creates (through the lab's own bootstrap, each on a fresh
+  client, so no cookie is shared) and stores each under its own identity, reporting
+  them as `BootstrapResult.peers`. `secdevlabs-gossip-world` has a second account,
+  `sdl-gossip-peer` (`fuzzlab_peer`), for `fuzzlab auto --peer-identity` (FR-FUZZ-55).
 - **FR-LAB-306** *(secDevLabs apps, one external lab each; `CC-LAB-0303`, 2026-10-18).*
   `fuzzlab/lab_fixtures/external.py` checks globocom/secDevLabs out at commit `10be438`
   once (`secdevlabs_checkout`, gitignored, HEAD verified by the shared

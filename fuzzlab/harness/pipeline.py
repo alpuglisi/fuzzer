@@ -126,7 +126,7 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
                  pages_html: dict[str, str] | None = None, budget=None,
                  browser=None, oob=None, coverage=None, dbfault=None,
                  scheduler=None, plugins=None, confirm_budget: int | None = None,
-                 prioritizer=None) -> PipelineResult:
+                 prioritizer=None, peer=None) -> PipelineResult:
     """``budget`` counts requests (``used()``); ``confirm_budget`` caps how many distinct
     candidates are sent to the oracle, in ``prioritizer(store, run_id, ids)`` order (an
     object with ``.order`` or ``None`` = no usable model → confirm everything)."""
@@ -172,7 +172,7 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
     # Confirm each candidate with the oracle (sole finding-writer).
     oracle = Oracle(store=store, run_id=run_id, browser=browser, oob=oob,
                     coverage=coverage, dbfault=dbfault, scheduler=scheduler,
-                    plugins=plugins)
+                    plugins=plugins, peer=peer)
     rows = store.conn.execute(
         "SELECT id, evidence FROM candidate WHERE run_id=? ORDER BY id", (run_id,)).fetchall()
     keyed: dict[tuple, list[tuple[int, dict]]] = {}      # confirmable key -> its rows

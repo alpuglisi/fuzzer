@@ -3,6 +3,21 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0310 — Several accounts per lab (FR-LAB-307) (2026-10-19)
+- Change (`fuzzlab/lab_fixtures/external.py`): `LabMeta.extra_identities`,
+  `LabMeta.accounts()`, `BootstrapResult.peers`; `bootstrap` loops over the accounts
+  (each on a fresh `_LabClient`); the `bootstrap` command prints each.
+  `secdevlabs-gossip-world` gains `sdl-gossip-peer`.
+- Reason: the owner approved multiple accounts (2026-10-19), for cross-account access
+  checks (CC-FUZZ-0093).
+- Impact: labs without extra accounts bootstrap exactly as before.
+- Risk: low.
+- Deliverables:
+  - [x] code; `tests/test_external_labs_static.py::test_a_lab_with_extra_accounts_
+    bootstraps_and_stores_each_on_its_own_session` — done; run live on gossip-world:
+    the peer generated, registered, verified and stored (`sdl-gossip-peer`) — done
+  - [x] FR-LAB-307, CHANGELOG — done
+
 ### CC-LAB-0309 — secDevLabs Mongection (NoSQL injection) as an external lab (2026-10-19)
 - Change: `fuzzlab/lab_fixtures/external.py` (Node 20 / MongoDB 4.4 pins, the app,
   `npm_install`: `npm ci --ignore-scripts` on the host, run by `fetch_secdevlabs_app`

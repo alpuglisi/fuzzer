@@ -1639,6 +1639,73 @@ class NoSqlOperatorStrategy(ConfirmationStrategy):
                         "len": {"base": len(b0.text or ""), "always": len(d1.text or "")}})
 
 
+@dataclass(frozen=True)
+class PeerAccounts:
+    """A second account for cross-account access checks (FR-FUZZ-55): its sender
+    (``sender``), the run's own account's username (``owner``) and the peer's
+    (``peer_name``) -- the markers that tell whose data a response holds -- and an
+    unauthenticated sender (``anonymous``) as the control."""
+    sender: Sender
+    owner: str
+    peer_name: str
+    anonymous: Sender | None = None
+
+
+class CrossAccountReplayStrategy(ConfirmationStrategy):
+    """Broken object-level authorization, checked with two real accounts (FR-FUZZ-55;
+    after Autorize): the run's own account (A) requests its object with the value the
+    crawl saw A use; the same request is replayed as the peer account (B) and
+    unauthenticated.
+
+    A response is *A's view* when it answers 200, names A's username and not B's.
+    Confirms only when: A's own request is A's view; the same request with another
+    value is not (the data is keyed by this value, not a page that always shows A);
+    and B -- or the unauthenticated control -- gets A's view twice. Evidence names who
+    got it and the statuses, never the data.
+
+    Runs only when a peer account is given (`fuzzlab auto --peer-identity`); without
+    it, no-ops. Known false positive, not swept under the rug: a resource that is meant
+    to be shared and shows its owner's name to others (a public post and its author)
+    looks the same; the finding names the URL for a person to judge. Scoped by
+    `R-ACCESS-CONTROL` to GET query parameters with id-shaped names."""
+    vuln_class = "access_control"
+    mechanism = "cross-account-replay"
+    category = "access-control"
+
+    def __init__(self, peer: PeerAccounts | None = None):
+        self._peer = peer
+
+    def confirm(self, candidate, sender):
+        peer = self._peer
+        if peer is None or not peer.owner or candidate.method != "GET" \
+                or candidate.location != "query":
+            return None
+        value = dict(candidate.base_entries or ()).get(candidate.param)
+        if not value:
+            return None                          # no value the crawl saw A use
+        from fuzzlab.oracle.oracle import _FormBoundSender
+
+        def view_of_owner(p: Probe) -> bool:
+            text = p.text or ""
+            return p.status == 200 and peer.owner in text and \
+                not (peer.peer_name and peer.peer_name in text)
+
+        if not view_of_owner(self._send(sender, candidate, value)):
+            return None                          # not A's own private view
+        if view_of_owner(self._send(sender, candidate, "zqac" + _token())):
+            return None                          # A's name whatever the value: no object
+        for who, other in (("peer", peer.sender), ("anonymous", peer.anonymous)):
+            if other is None:
+                continue
+            bound = _FormBoundSender(other, candidate)
+            got = [self._send(bound, candidate, value) for _ in range(2)]
+            if all(view_of_owner(g) for g in got):
+                return Verdict(True, self.vuln_class, self.mechanism,
+                               {"who": who, "param": candidate.param,
+                                "status": [g.status for g in got]})
+        return None
+
+
 class InsecureDeserializationTypeConfusionStrategy(ConfirmationStrategy):
     """Confirms unrestricted polymorphic-type deserialization (CWE-502) by a
     two-probe differential over Jackson's `WRAPPER_ARRAY` type-id format
@@ -2676,7 +2743,8 @@ class HttpHeaderInjectionCrlfStrategy(ConfirmationStrategy):
 def default_strategies(browser: BrowserExecutor | None = None,
                        oob: OobListener | None = None,
                        coverage: CoverageSource | None = None,
-                       dbfault: DbFaultSource | None = None) -> list[ConfirmationStrategy]:
+                       dbfault: DbFaultSource | None = None,
+                       peer: PeerAccounts | None = None) -> list[ConfirmationStrategy]:
     """Cheapest/strongest first, per category. `applies()` scopes each to its category.
 
     The M6 browser strategies are included with the injected ``browser`` (or without,
@@ -2697,7 +2765,7 @@ def default_strategies(browser: BrowserExecutor | None = None,
             PathTraversalStrategy(), CommandInjectionStrategy(),
             CommandInjectionOobStrategy(oob), RegexDosStrategy(),
             SsrfInBandMarkerStrategy(oob), SsrfOobStrategy(oob),
-            AccessControlIdorStrategy(),
+            CrossAccountReplayStrategy(peer), AccessControlIdorStrategy(),
             InsecureDeserializationTypeConfusionStrategy(),
             XxeInBandMarkerStrategy(oob), XxeOobStrategy(oob),
             JwtAlgNoneConfusionStrategy(),

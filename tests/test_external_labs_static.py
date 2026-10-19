@@ -1328,3 +1328,44 @@ def test_the_gossip_world_bootstrap_reads_the_csrf_token_and_verifies_by_differe
     assert ext.bootstrap_secdevlabs_gossip_world(Client(), cred, deadline=1) == \
         ["login verified"]                           # second time: nothing to create
 
+
+def test_a_lab_with_extra_accounts_bootstraps_and_stores_each_on_its_own_session():
+    """FR-LAB-307: every account of `LabMeta.accounts()` is resolved, created by the
+    lab's own bootstrap on a fresh client (no cookie shared) and stored under its own
+    identity; the result lists the extra ones as peers."""
+    from types import SimpleNamespace as NS
+    stored, sessions = {}, []
+
+    class Store:
+        def get(self, host, identity):
+            return None
+
+        def set(self, host, identity, username, password):
+            stored[identity] = (username, password)
+
+    class Session:
+        def __init__(self):
+            sessions.append(self)
+
+    seen = []
+
+    def fake_bootstrap(client, cred, deadline):
+        seen.append((cred.username, client.session))
+        return ["ok"]
+    meta = ext.LAB_META["secdevlabs-gossip-world"]
+    assert [a.identity for a in meta.accounts()] == ["sdl-gossip-user", "sdl-gossip-peer"]
+    orig = ext._BOOTSTRAPS["secdevlabs-gossip-world"]
+    ext._BOOTSTRAPS["secdevlabs-gossip-world"] = fake_bootstrap
+    try:
+        res = ext.bootstrap("secdevlabs-gossip-world", keyring_store=Store(),
+                            opened_store=Store(), prompt=None,
+                            session_factory=lambda: NS(trust_env=True, proxies=None))
+    finally:
+        ext._BOOTSTRAPS["secdevlabs-gossip-world"] = orig
+    assert res.identity == "sdl-gossip-user" and [p.identity for p in res.peers] == \
+        ["sdl-gossip-peer"]
+    assert set(stored) == {"sdl-gossip-user", "sdl-gossip-peer"}
+    assert [u for u, _s in seen] == ["fuzzlab_user", "fuzzlab_peer"]
+    assert seen[0][1] is not seen[1][1]                    # one session per account
+    assert stored["sdl-gossip-user"][1] != stored["sdl-gossip-peer"][1]
+

@@ -38,7 +38,7 @@ import secrets
 import sys
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 from urllib.parse import urljoin, urlsplit
@@ -210,6 +210,18 @@ class LabMeta:
     default_username: str
     #: A password may be generated when none is supplied (the account is ours to create).
     may_generate_password: bool
+    #: More accounts the lab needs, ``(identity, default username)`` each, created and
+    #: verified by the lab's own bootstrap like the first and stored under their own
+    #: identity: a second user for a cross-account access check (FR-LAB-307).
+    extra_identities: tuple[tuple[str, str], ...] = ()
+
+    def accounts(self) -> list["LabMeta"]:
+        """This lab's metadata once per account (the first, then each extra one)."""
+        if self.identity is None:
+            return []
+        return [self] + [replace(self, identity=ident, default_username=user,
+                                 extra_identities=())
+                         for ident, user in self.extra_identities]
 
 
 LAB_META: dict[str, LabMeta] = {
@@ -233,7 +245,8 @@ LAB_META: dict[str, LabMeta] = {
                                  10001, "/", "/", None, "", False),
     "secdevlabs-gossip-world": LabMeta("secdevlabs-gossip-world", "app", "SDL_GOSSIP_PORT",
                                        3072, 10007, "/", "/login", "sdl-gossip-user",
-                                       "fuzzlab_user", True),
+                                       "fuzzlab_user", True,
+                                       (("sdl-gossip-peer", "fuzzlab_peer"),)),
 }
 
 
@@ -1000,6 +1013,8 @@ class BootstrapResult:
     credential_source: str
     stored: bool
     notes: list[str]
+    #: The lab's extra accounts (`LabMeta.extra_identities`), one result each.
+    peers: list["BootstrapResult"] = field(default_factory=list)
 
 
 def _bwapp_install(client: _LabClient, *, deadline: float, clock: Callable[[], float],
@@ -1195,14 +1210,22 @@ def bootstrap(name: str, *, environ: Mapping[str, str] | None = None,
             keyring_store = CredentialStore(allow_env=False)
         if opened_store is None:
             opened_store = CredentialStore.open(load_config())
-    cred = resolve_credential(meta, host=host, keyring_store=keyring_store,
-                              opened_store=opened_store, prompt=prompt, generate=generate)
-    notes = _BOOTSTRAPS[name](client, cred, deadline=deadline)
-    stored = False
-    if cred.source != "keyring":
-        keyring_store.set(host, meta.identity, cred.username, cred.password)
-        stored = True
-    return BootstrapResult(name, meta.identity, cred.source, stored, notes)
+    results = []
+    for account in meta.accounts():
+        # each account on a fresh client: its cookies never meet another account's
+        client = _LabClient(origin, session_factory=session_factory) if results else client
+        cred = resolve_credential(account, host=host, keyring_store=keyring_store,
+                                  opened_store=opened_store, prompt=prompt,
+                                  generate=generate)
+        notes = _BOOTSTRAPS[name](client, cred, deadline=deadline)
+        stored = False
+        if cred.source != "keyring":
+            keyring_store.set(host, account.identity, cred.username, cred.password)
+            stored = True
+        results.append(BootstrapResult(name, account.identity, cred.source, stored, notes))
+    first, *peers = results
+    first.peers = peers
+    return first
 
 
 # --- CLI ----------------------------------------------------------------------------------
@@ -1281,9 +1304,10 @@ def main(argv: list[str] | None = None) -> int:
             if res.identity is None:
                 print(f"{res.lab}: " + "; ".join(res.notes))
                 return 0
-            print(f"{res.lab}: identity {res.identity!r} ready "
-                  f"({res.credential_source}{', stored' if res.stored else ''}); "
-                  + "; ".join(res.notes))
+            for one in [res, *res.peers]:
+                print(f"{one.lab}: identity {one.identity!r} ready "
+                      f"({one.credential_source}{', stored' if one.stored else ''}); "
+                      + "; ".join(one.notes))
             return 0
     except ExternalLabError as exc:
         print(f"error: {exc}", file=sys.stderr)

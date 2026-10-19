@@ -3,6 +3,29 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0093 — Cross-account access control with a peer account (FR-FUZZ-55) (2026-10-19)
+- Change: `fuzzlab/oracle/strategies.py` (`PeerAccounts`, `CrossAccountReplayStrategy`,
+  `default_strategies(peer=)`), `fuzzlab/oracle/oracle.py`, `fuzzlab/harness/
+  pipeline.py`, `fuzzlab/harness/auto.py` (`peer=` threaded like `browser`/`oob`),
+  `fuzzlab/harness/auto_cli.py` (`--peer-identity`, `_precheck_peer`),
+  `fuzzlab/cli_taxonomy.py`.
+- Reason: the owner approved multiple accounts (2026-10-19); the only access-control
+  strategy could not log in as two users (its own docstring said so).
+- Impact: only with `--peer-identity`: up to 6 more GET requests per id-shaped query
+  point (2 as A, 2 as B, 2 unauthenticated); without it nothing changes.
+- Risk: low; GET only, read-only. False-positive class documented (a shared resource
+  naming its owner).
+- Deliverables:
+  - [x] code; `tests/test_cross_account.py` (another account reading the owner's
+    record confirmed, the peer's sends carrying A's own value; an unauthenticated read
+    confirmed when the peer is refused; no verdict for an owner check or a page that
+    always names the owner; no-ops; `--peer-identity` refusals before the store
+    opens) — done
+  - [x] FR-FUZZ-55, CHANGELOG — done
+- Not yet: path-segment parameters (secDevLabs ecommerce-api keys tickets by
+  `/ticket/:id`) and per-account values in a ground truth (its ids exist only after
+  registration); no live lab exercises it yet.
+
 ### CC-FUZZ-0092 — NoSQL operator injection: class, rule, strategy; JSON-body ground-truth points (FR-FUZZ-54) (2026-10-19)
 - Change: `fuzzlab/oracle/strategies.py` (`NoSqlOperatorStrategy`, in
   `default_strategies()`, `_CATEGORY_TO_CLASS`), `fuzzlab/core/jsonbody.py`
