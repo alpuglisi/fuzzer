@@ -57,7 +57,8 @@ Every producer records what it actually saw or did as one `trace_event` row:
 - discovery import: one event per spider row and per capture record, plus explorer
   actions and refused external hosts;
 - the pipeline: every send, each test's start and end, each strategy run's outcome,
-  and each finding;
+  and each finding; the browser (M6) confirmation's steps per visit (`browser.step`) and
+  each out-of-band (M8) wait's result (`oob.wait`), FR-FUZZ-62;
 - the intercepting proxy: one event per recorded in-scope flow, written as soon as the
   flow is stored, and the run's end when the proxy stops (`proxy/history.py`,
   FR-PROXY-13).
@@ -125,7 +126,7 @@ Each interface counts six states separately, each in its own unit:
   intercepting proxy);
 - *scheduled*: tests on it;
 - *executed*: those tests' own sends, answered or not (a follow-up, a restore or a retry
-  is part of a send, not one);
+  is part of a send, not one), and an M6 visit's store and observe loads;
 - *evaluated*: strategy runs that reached a verdict;
 - *finding*: findings.
 
@@ -182,10 +183,34 @@ it went out as: the run's account, and for the cross-account check the peer acco
 
 A run that stopped, or a batch that could not be written, shows as **partial**.
 
+## Browser and out-of-band confirmations
+
+An M6 visit is drawn under "Browser driven by the tool (M6)":
+
+- the store and the observe navigation, each with its status, a lost arrow, or "not
+  sent: the tool refused to place it";
+- the first refused request: "refused by the guard, never sent";
+- "load fired" or "load did not fire (superseded …)";
+- "payload executed: the sentinel fired (+N ms after load)", or "at about load time" when
+  the two events are under 100 ms apart;
+- "N page request(s) answered, N failed, N refused";
+- the result: executed, "the sentinel did not fire within N ms", "not observed: …" or
+  "not placed: …".
+
+An out-of-band wait is drawn as "callback received from <address>" or "no callback
+within N s". A step that did not happen is never drawn as a reply or as executed. Stamps
+are when Python received the driver's event, not the browser's clock. Per visit, what the
+server received is the API stores + answered + failed + the redirect hops the guard
+fetched itself (the documented gap), checked against the server's own count through
+`run_auto` (PA-0520).
+
 ## Known limits
 
-- The browser-only (M6) and out-of-band (M8) confirmations record their HTTP sends;
-  the browser's own steps inside them are not traced.
+- The M6 browser's page requests are counted per visit, not drawn one by one; the
+  browser guard's own redirect-hop fetches are not counted (the server gets one request
+  more per hop); in-scope WebSockets, popups and Chromium's background traffic are not
+  traced. An M8 callback after its window, and the in-band marker checks' callbacks, are
+  not traced.
 - Each try is recorded by the sender where it happens (FR-FUZZ-61). The authenticated
   sender never re-sends, and records a failed try only when it reached the network; an
   error after the response arrived (the store write or the session's `observe`) is not

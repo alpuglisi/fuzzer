@@ -2598,6 +2598,22 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
      keep-sets included, not only drawn output. (from BUG-0519)
   - Enforced by: tests/test_diagram_e2e.py::test_the_finding_filter_draws_exactly_the_flows_finding_links_names, tests/test_diagram_e2e.py::test_a_finding_past_the_attribute_cap_keeps_its_interface_and_flows, tests/test_web_diagrams.py::test_the_page_never_counts_a_capped_attribute
 
+- **PA-0520** — Strengthens `PA-0513`, after BUG-0520: the M6 browser's store and page
+  requests reach the target through the Playwright driver and Chromium, never a sender,
+  while the diagrams said M6 recorded its sends. PA-0513's sweep and count covered sender
+  objects only, and nothing tied the count to the run's sending keywords.
+  1. **A send is anything that makes the target receive a request on the tool's behalf**
+     (a probe sender, the browser's route fetches, its API request context, Chromium
+     itself). An "every send" claim is swept and counted by what the target receives, not
+     by which objects send.
+  2. **The independent count runs every sending keyword of the run's entry point
+     (`run_auto`)**, and a guard classifies every parameter, checks each wrapped one is
+     wrapped on every branch, and fails on an unclassified new keyword.
+  3. **A step seen in a callback is recorded from the producer's own context**, with the
+     callback's stamp; never emitted from a callback whose execution context is not
+     established. (from BUG-0520)
+  - Enforced by: tests/test_confirm_trace.py::test_every_send_of_a_run_is_counted_by_the_server, tests/test_confirm_trace.py::test_the_count_test_covers_every_sending_keyword_of_run_auto, tests/test_confirm_trace.py::test_the_keyword_guard_catches_a_synthetic_new_keyword, tests/test_confirm_trace.py::test_an_m6_visit_records_each_step_where_it_happens
+
 - **PA-0521** — Strengthens `PA-0514(2)`, after BUG-0521: the trace's URL redactor judged a
   path segment whole, so a canary token followed by `)` or a backtick in a payload's
   preview was kept.

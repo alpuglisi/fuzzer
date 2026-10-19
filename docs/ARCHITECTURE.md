@@ -1160,7 +1160,8 @@ tracked in the requirements files, not here.
 - **Trace (the diagrams' evidence model)** `[built]` (`core/trace.py`, SP-48/49,
   FR-CORE-505): append-only, versioned, per-run-keyed `trace_event` rows recorded at the
   real execution points -- discovery import (`tools/observe.py`, FR-AUD-28), every probe
-  send of every sender a run hands a strategy (`harness/tracing.py`), each try, each
+  send of every sender a run hands a strategy (`harness/tracing.py`), the M6 executor's
+  visit steps and the M8 wait (FR-FUZZ-62, CC-FUZZ-0102), each try, each
   test, strategy outcome and finding (FR-FUZZ-60/61), the intercepting proxy's flows
   (FR-PROXY-13) -- and the diagram model derived from them (`dg_entity`, `dg_flow`,
   `dg_evidence`) by an idempotent reducer, independent of order and batching (tested on

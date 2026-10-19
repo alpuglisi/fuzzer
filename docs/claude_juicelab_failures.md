@@ -933,3 +933,9 @@ Juice Shop lab is complete.
 - **Impact:** the data flow showed no external references for captures whose browser guard did the refusing, while the docs implied it did.
 - **Status:** open: fixed with DG-LIVEDISCO (CC-AUD-0054), under the review gate.
 
+### F-087 — Status update for F-081 (BUG-0520)
+- **What:** the false claim that M6 records its sends (F-081) is fixed: M6 and M8 record each step they perform, counted against the server's own log through `run_auto`.
+- **Evidence:** CC-FUZZ-0102 / CC-CORE-0065 / CC-UI-0064 (gate 3/3), merged; the lane's harness on f8713d8: 121 files, 3668 passed, 0 failed.
+- **Impact:** none further.
+- **Status:** fixed.
+

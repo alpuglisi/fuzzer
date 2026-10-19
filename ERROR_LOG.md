@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-19 — diagrams (M6's sends were never traced; BUG-0520, a recurrence of BUG-0513)
+- **Symptom:** in a loopback run with a browser, the target received 8 requests for two M6 tests and the trace held none of them; the status and DIAGRAMS.md said M6 records its sends.
+- **Root cause:** "every send" was instrumented and counted at sender objects only (PA-0513's scope); M6 sends through the Playwright driver and Chromium.
+- **Remediation:** CC-FUZZ-0102, CC-CORE-0065, CC-UI-0064 (FR-FUZZ-62); PA-0520; `run_auto`'s count now runs every sending keyword.
+- **Status:** Fixed
+
 ## 2026-10-19 — diagrams (the finding filter lost the spider's flows and findings past the 40th; BUG-0519)
 - **Symptom:** `dataflow(finding=F)` showed F's interface with no spider flow into it, and for the 41st and later finding on one interface no interface and no flow, while `finding_links(F)` listed them; the interface's ⚑ count stopped at 40.
 - **Root cause:** the filter re-derived F's relation from the capped `attrs.finding` (40 values) and a fixed actor list `{APP, TOOL, BROWSER}` that BUG-0515's `actor:spider` split did not update, instead of F's own trace event (BUG-0519).
