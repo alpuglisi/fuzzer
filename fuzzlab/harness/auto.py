@@ -111,7 +111,8 @@ def points_from_ground_truth(ground_truth, base_url: str, browser_available: boo
                                 for p, v in jsonbody.leaves(gp.json_body) or ())
                 body_content_type = None
             for sink_context in sorted(sink_contexts, key=lambda s: s or ""):
-                points.append(InjectionPoint(url=base + path, param=gp.param,
+                points.append(InjectionPoint(url=(gp.origin or base) + path,
+                                             param=gp.param,
                                              method=gp.method.upper(), location=location,
                                              body_content_type=body_content_type,
                                              base_entries=entries,
@@ -121,7 +122,7 @@ def points_from_ground_truth(ground_truth, base_url: str, browser_available: boo
             # BUG-0115 sweep: no ground-truth DOM point has another location today
             # (pinned by tests/test_forms_phase2.py); the rewrite is left as is
             loc = gp.location if gp.location in ("query", "fragment") else "query"
-            points.append(InjectionPoint(url=base + path, param=gp.param,
+            points.append(InjectionPoint(url=(gp.origin or base) + path, param=gp.param,
                                          method="GET", location=loc,
                                          origin="ground-truth"))
         else:
@@ -134,11 +135,15 @@ def points_from_ground_truth(ground_truth, base_url: str, browser_available: boo
         if case.vuln_class != "xss-stored" or not case.source_url:
             continue
         opath = case.url if case.url.startswith("/") else "/" + case.url
-        spath = case.source_url if case.source_url.startswith("/") else "/" + case.source_url
+        # FR-LAB-308: a store endpoint on another origin of the lab is an absolute URL
+        # (loopback, checked at load)
+        store_url = case.source_url if "://" in case.source_url else \
+            base + (case.source_url if case.source_url.startswith("/")
+                    else "/" + case.source_url)
         if browser_available:
             points.append(InjectionPoint(
-                url=base + opath, param=case.param, method=case.method,
-                location=case.location, store_url=base + spath, store_param=case.param,
+                url=(case.origin or base) + opath, param=case.param, method=case.method,
+                location=case.location, store_url=store_url, store_param=case.param,
                 origin="ground-truth"))
         else:
             skipped.append((opath, case.method, case.param,

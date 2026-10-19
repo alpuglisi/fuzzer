@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-19 (labs with two origins; secDevLabs Comment Killer)
+- **What:** answer keys can place a case or point on another loopback origin of the lab (refused if off-machine, or if a path appears on two origins); labs may publish fixed ports their code dictates; Comment Killer (page + API on localhost:10017, stored XSS through eval) is a lab (CC-LAB-0311, FR-LAB-308).
+- **Why:** the owner approved multi-origin labs; Comment Killer had been withdrawn for exactly this.
+
 ## 2026-10-19 (several accounts per lab; cross-account access control)
 - **What:** a lab can declare more accounts, each created, verified and stored by its bootstrap (gossip-world has a peer); `fuzzlab auto --peer-identity` replays the run's own account's id-keyed GET requests as the peer and unauthenticated, and flags the owner's data reaching either (CC-LAB-0310, CC-FUZZ-0093).
 - **Why:** the owner approved multiple accounts; the only access-control check could not log in as two users.

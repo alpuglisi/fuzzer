@@ -1,0 +1,57 @@
+# secDevLabs "Comment Killer" (globocom, BSD-3-Clause; external lab fixture, CC-LAB-0311).
+# Lab-only. A React page (react-scripts dev server) over a Go (echo) comments API. The
+# page passes every comment through `Comment.Parse`, which evals the text between its
+# first 8 characters and its last `<`: `<script>alert(1)</script>` runs for every
+# visitor (OWASP 2021 A3, stored XSS through eval). Comments live in the API's memory.
+#
+# Two origins (FR-LAB-308): the page on the configurable port, and the API on
+# 127.0.0.1:10017, fixed because the page's bundle calls http://localhost:10017.
+#
+# Built by ./Dockerfile (the page) and ./api/Dockerfile from the app at the pinned
+# secDevLabs commit, which `labctl.sh up secdevlabs-comment-killer` copies into the
+# gitignored .cache/app with its npm packages installed on the host by `npm ci` (each
+# checked against the lockfile's integrity hash) and its Go modules verified against
+# go.sum and vendored; both images build offline.
+#
+# Safety: both are published on LOOPBACK ONLY (127.0.0.1); capabilities dropped.
+#
+# Run through lab/labctl.sh:  ./labctl.sh up secdevlabs-comment-killer
+name: fuzzlab-secdevlabs-comment-killer
+
+x-podman:
+  in_pod: false
+
+services:
+  app:
+    build:
+      context: .
+    networks: [ck-net]
+    ports:
+      # Loopback only. Never bind 0.0.0.0.
+      - "127.0.0.1:${SDL_CK_PORT:-3074}:3000"
+    environment:
+      CI: "true"
+      BROWSER: none
+    restart: unless-stopped
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    mem_limit: 1536m
+
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    networks: [ck-net]
+    ports:
+      # Loopback only, and this exact port: the page's bundle hard-codes it.
+      - "127.0.0.1:10017:10017"
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 128
+    mem_limit: 256m
+
+networks:
+  ck-net: {}

@@ -43,7 +43,8 @@ GT_DIRS = {"bwapp": LAB / "ground-truth-bwapp", "juice-shop": LAB / "ground-trut
            "secdevlabs-sstype": LAB / "ground-truth-secdevlabs-sstype",
            "secdevlabs-vinijr-blog": LAB / "ground-truth-secdevlabs-vinijr-blog",
            "secdevlabs-amarelo-designs": LAB / "ground-truth-secdevlabs-amarelo-designs",
-           "secdevlabs-mongection": LAB / "ground-truth-secdevlabs-mongection"}
+           "secdevlabs-mongection": LAB / "ground-truth-secdevlabs-mongection",
+           "secdevlabs-comment-killer": LAB / "ground-truth-secdevlabs-comment-killer"}
 #: Labs scored by URL coverage, not an injection answer key: the lab serves its own
 #: expected set (the Crawl Maze: /fetch-expected-results, CC-LAB-0302).
 COVERAGE_LABS = {"security-crawl-maze"}
@@ -503,8 +504,10 @@ def test_the_registry_is_the_directory_layout():
         doc = yaml.safe_load(compose.read_text("utf-8"))
         ports = [p for s in doc["services"].values() for p in s.get("ports", [])]
         meta = ext.LAB_META[name]
-        assert ports == [f"127.0.0.1:${{{meta.port_env}:-{meta.default_port}}}:"
-                         f"{meta.container_port}"]
+        # the configurable port, plus any the app's own code fixes (FR-LAB-308)
+        assert sorted(ports) == sorted(
+            [f"127.0.0.1:${{{meta.port_env}:-{meta.default_port}}}:{meta.container_port}"]
+            + [f"127.0.0.1:{h}:{c}" for h, c in meta.fixed_ports])
 
 
 def test_the_bwapp_db_has_no_network_and_its_socket_volume_is_tmpfs():
@@ -1204,8 +1207,12 @@ def test_every_secdevlabs_app_is_a_registered_lab_with_its_own_dir():
 
 
 def test_the_secdevlabs_builds_use_only_pinned_bases_and_the_cached_app():
-    for lab in ext.SECDEVLABS_APPS:
-        text = (EXTERNAL / lab / "Dockerfile").read_text("utf-8")
+    dockerfiles = [(lab, f) for lab in ext.SECDEVLABS_APPS
+                   for f in sorted((EXTERNAL / lab).rglob("Dockerfile"))
+                   if ".cache" not in f.parts]
+    assert {lab for lab, _ in dockerfiles} == set(ext.SECDEVLABS_APPS)
+    for lab, path in dockerfiles:
+        text = path.read_text("utf-8")
         froms = [ln.split()[1] for ln in text.splitlines() if ln.startswith("FROM ")]
         assert froms and all("@sha256:" in f for f in froms), lab
         assert all(ln.split()[1].startswith((".cache/app/", ".cache/dists"))

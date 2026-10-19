@@ -1,0 +1,6 @@
+# fuzzlab expected results (Benchmark-style) for secDevLabs Comment Killer at 10be4384 (external
+# lab fixture lab/external/secdevlabs-comment-killer), CC-LAB-0311. Derived from labels.json; the
+# loader cross-checks the two. Single-location cases.
+case_id,url,method,param,location,category,expected_vulnerable,primary_endpoint,primary_role,related_endpoints,flow_variant
+SDLCK-0001,/comments,POST,comment,body,xss-stored,true,/comments,sink,,direct
+SDLCK-0002,/,GET,q,query,xss-reflected,false,/,sink,,direct

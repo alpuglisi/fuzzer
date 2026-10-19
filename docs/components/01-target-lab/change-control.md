@@ -3,6 +3,29 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0311 — Labs with two origins; secDevLabs Comment Killer (FR-LAB-308) (2026-10-19)
+- Change: `fuzzlab/labels/schemas/{labels,injection-points}.schema.json` and
+  `fuzzlab/labels/contract.py` (`origin` on cases and points; `_check_origins`:
+  loopback only, an absolute `source_url` loopback too, no path on two origins);
+  `fuzzlab/harness/auto.py` (a point's URL from its origin; an absolute `source_url`
+  as the store URL); `fuzzlab/lab_fixtures/external.py` (`LabMeta.fixed_ports`,
+  `SECDEVLABS_NODE13_IMAGE`, the comment-killer app); `lab/external/
+  secdevlabs-comment-killer/` (page `Dockerfile`, `api/Dockerfile`); `lab/
+  ground-truth-secdevlabs-comment-killer/`; the static tests (registry admits fixed
+  ports; every Dockerfile of a secDevLabs lab checked).
+- Reason: the owner approved multi-origin labs (2026-10-19); comment-killer was built
+  and withdrawn for this (CC-LAB-0306's record).
+- Impact: answer keys without `origin` are unchanged; scoring is unchanged (paths).
+- Risk: low; an origin off the machine is refused at load.
+- Deliverables:
+  - [x] code; `tests/test_multi_origin.py` (a point probed at its origin; off-machine
+    origin, off-machine store URL, a URL in place of an origin and a path on two
+    origins refused) — done
+  - [x] the lab rebuilt from the fixture (page + API up; the stored comment's `eval`
+    confirmed earlier in Chromium, CC-LAB-0306) — done
+  - [x] FR-LAB-308, CHANGELOG — done
+- Not built: streaming (PUT; see FR-LAB-306).
+
 ### CC-LAB-0310 — Several accounts per lab (FR-LAB-307) (2026-10-19)
 - Change (`fuzzlab/lab_fixtures/external.py`): `LabMeta.extra_identities`,
   `LabMeta.accounts()`, `BootstrapResult.peers`; `bootstrap` loops over the accounts

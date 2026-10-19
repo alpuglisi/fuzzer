@@ -76,13 +76,16 @@ SECDEVLABS_PHP_IMAGE = ("mirror.gcr.io/library/php:8.3-apache@sha256:"
 #: 4.4 (Mongoose 5's driver era), from Google's Docker Hub mirror.
 SECDEVLABS_NODE20_IMAGE = ("mirror.gcr.io/library/node:20-alpine@sha256:"
                            "fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293")
+SECDEVLABS_NODE13_IMAGE = ("docker.io/library/node:13.12.0-alpine@sha256:"
+                           "cc85e728fab3827ada20a181ba280cae1f8b625f256e2c86b9094d9bfe834766")
 SECDEVLABS_MONGO_IMAGE = ("mirror.gcr.io/library/mongo:4.4@sha256:"
                           "4be76f674fc4b27859816811b8baa3c51830eb1dbf4ca81a51e26b79edd662ef")
 PINNED_IMAGES = frozenset({BUSYBOX_IMAGE, PHP_IMAGE, MYSQL_IMAGE, JUICE_SHOP_IMAGE,
                            CRAWL_MAZE_PYTHON_IMAGE, SECDEVLABS_GOLANG_IMAGE,
                            SECDEVLABS_MARIADB_IMAGE, SECDEVLABS_PYTHON38_IMAGE,
                            SECDEVLABS_PYTHON312_IMAGE, SECDEVLABS_PHP_IMAGE,
-                           SECDEVLABS_NODE20_IMAGE, SECDEVLABS_MONGO_IMAGE})
+                           SECDEVLABS_NODE20_IMAGE, SECDEVLABS_MONGO_IMAGE,
+                           SECDEVLABS_NODE13_IMAGE})
 
 BWAPP_ZIP_URL = "https://sourceforge.net/projects/bwapp/files/bWAPP/bWAPP_latest.zip/download"
 BWAPP_ZIP_NAME = "bWAPP_latest.zip"
@@ -132,6 +135,7 @@ SECDEVLABS_APPS = {
     "secdevlabs-vinijr-blog": "owasp-top10-2021-apps/a5/vinijr-blog",
     "secdevlabs-amarelo-designs": "owasp-top10-2021-apps/a8/amarelo-designs",
     "secdevlabs-mongection": "owasp-top10-2021-apps/a3/mongection",
+    "secdevlabs-comment-killer": "owasp-top10-2021-apps/a3/comment-killer",
 }
 #: lab name -> the Python distributions its image installs offline (`fetch_pypi_dists`):
 #: the app's own requirements.txt pins, each file's sha256 as PyPI publishes it.
@@ -214,6 +218,10 @@ class LabMeta:
     #: verified by the lab's own bootstrap like the first and stored under their own
     #: identity: a second user for a cross-account access check (FR-LAB-307).
     extra_identities: tuple[tuple[str, str], ...] = ()
+    #: More published ports, ``(host port, container port)``, fixed because the app's own
+    #: code names them (a page that calls its API at ``http://localhost:10017``): its
+    #: second origin, still loopback only (FR-LAB-308).
+    fixed_ports: tuple[tuple[int, int], ...] = ()
 
     def accounts(self) -> list["LabMeta"]:
         """This lab's metadata once per account (the first, then each extra one)."""
@@ -234,6 +242,10 @@ LAB_META: dict[str, LabMeta] = {
                                    8080, "/", "/", None, "", False),
     "secdevlabs-copy-n-paste": LabMeta("secdevlabs-copy-n-paste", "api", "SDL_CNP_PORT",
                                        3071, 10001, "/", "/healthcheck", None, "", False),
+    # its bundle calls the API at a hard-coded http://localhost:10017: a fixed second port
+    "secdevlabs-comment-killer": LabMeta("secdevlabs-comment-killer", "app", "SDL_CK_PORT",
+                                         3074, 3000, "/", "/", None, "", False,
+                                         fixed_ports=((10017, 10017),)),
     "secdevlabs-mongection": LabMeta("secdevlabs-mongection", "server", "SDL_MONGECTION_PORT",
                                      3077, 10001, "/", "/", None, "", False),
     "secdevlabs-amarelo-designs": LabMeta("secdevlabs-amarelo-designs", "app",

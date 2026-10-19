@@ -20,6 +20,11 @@
       "additionalProperties": false,
       "properties": {
         "url": { "type": "string" },
+        "origin": {
+          "type": "string",
+          "pattern": "^https?://[^/?#]+$",
+          "description": "another origin of the lab this point lives on (a loopback origin the app itself hard-codes, e.g. its API's); url stays a path. Default: the lab's base (FR-LAB-308)."
+        },
         "method": { "enum": ["GET", "POST"] },
         "param": { "type": "string" },
         "location": { "enum": ["query", "body", "fragment", "header", "path", "cookie"] },

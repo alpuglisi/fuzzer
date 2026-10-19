@@ -6371,6 +6371,17 @@ lane) can submit a payload as
   targets (D10); bWAPP's page names carry class words, so NFR-LAB-no-leak does not hold
   for them and a model trained on runs against them would learn from the URL (recorded as
   not enforced under NFR-ML-no-leak; the training question is the operator's).
+- **FR-LAB-308** *(labs with two origins; `CC-LAB-0311`, 2026-10-19).* A ground-truth
+  case or point may name `origin`, another origin of its lab (an app whose page calls
+  its API at a hard-coded `http://localhost:<port>`); `url` stays a path, and a stored
+  case's `source_url` may be an absolute URL. `contract.load` refuses an origin (or an
+  absolute `source_url`) that is not loopback, and a path used on two origins of one
+  ground truth (scoring matches findings by path). `auto` probes such a point at its
+  origin. `LabMeta.fixed_ports` lists the extra published ports the app's own code
+  fixes (loopback only); the registry test admits exactly the configurable port plus
+  those. Built: `secdevlabs-comment-killer` (page on `SDL_CK_PORT`, 3074; API on
+  127.0.0.1:10017): stored XSS through `eval` in `/comments`' `comment` on the API's
+  origin (positive, checked live in Chromium), `/`'s `q` (negative).
 - **FR-LAB-307** *(several accounts per lab; `CC-LAB-0310`, 2026-10-19).* A lab's
   `LabMeta.extra_identities` names more accounts (`(identity, default username)`);
   `bootstrap` resolves, creates (through the lab's own bootstrap, each on a fresh
@@ -6422,13 +6433,11 @@ lane) can submit a payload as
   `/login`'s `email` and `password` (positives), `/register`'s `email` and `name`
   (negatives).
   **Not built, and why** (2026-10-18):
-  - `comment-killer` (React dev server + Go API): built and its stored XSS through
-    `eval` confirmed in a browser, then withdrawn. Its bundle calls the API at a
-    hard-coded `http://localhost:10017`, so the lab needs a second, fixed published port,
-    and the sink sits on that second origin, which the ground-truth contract (points
-    keyed by a path on one base) cannot express.
-  - `streaming` (Spring Boot + Angular + MariaDB): the same blocker as comment-killer --
-    its page calls the backend at a hard-coded `http://localhost:8080`.
+  - `streaming` (Spring Boot + Angular + MariaDB): its second origin is expressible now
+    (FR-LAB-308; the backend builds offline from a host-resolved Maven repository and
+    the repo's prebuilt bundle matches its source), but its chat messages are added with
+    `PUT /live/{id}/messages`, and a ground truth admits GET and POST only (`auto`
+    audits nothing else).
   - The other categories (screened 2026-10-18): `tictactoe`, `ecommerce-api` and
     `snake-pro` hard-code `localhost:<their upstream port>` in their pages; the A1/A7
     apps (access control, authentication) need several identities per lab; A4

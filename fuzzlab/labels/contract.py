@@ -85,6 +85,10 @@ class Case:
     # `fuzzlab.labgen.fingerprint_gate`, consumes as a record's `stack`), not
     # part of `key`/matching.
     stack: str | None = None
+    #: Another origin of the lab this case lives on (FR-LAB-308); None: the lab's base.
+    #: Not part of `key`: scoring matches paths, and `load` refuses a path that two
+    #: origins of one ground truth share.
+    origin: str | None = None
 
     @property
     def key(self) -> tuple[str, str, str, str]:
@@ -104,6 +108,8 @@ class InjectionPoint:
     #: (`core.jsonbody.display_name`): the point is then a JSON-leaf point whose probes
     #: carry the other leaves too (FR-FUZZ-54). None for any other point.
     json_body: dict | None = None
+    #: Another origin of the lab this point lives on (FR-LAB-308); None: the lab's base.
+    origin: str | None = None
 
     @property
     def key(self) -> tuple[str, str, str]:
@@ -142,7 +148,7 @@ def load_labels(ground_truth_dir: str | Path) -> list[Case]:
             primary_role=c.get("primary_role"),
             related_endpoints=tuple(c.get("related_endpoints", ())),
             flow_variant=c.get("flow_variant", "direct"),
-            stack=c.get("stack"),
+            stack=c.get("stack"), origin=c.get("origin"),
         )
         for c in data["cases"]
     ]
@@ -160,7 +166,7 @@ def load_injection_points(ground_truth_dir: str | Path) -> list[InjectionPoint]:
         InjectionPoint(
             url=p["url"], method=p["method"], param=p["param"], location=p["location"],
             rendering=p.get("rendering"), client_only=bool(p.get("client_only", False)),
-            json_body=p.get("json_body"),
+            json_body=p.get("json_body"), origin=p.get("origin"),
         )
         for p in data["points"]
     ]
@@ -214,4 +220,31 @@ def load(ground_truth_dir: str | Path) -> GroundTruth:
                 f"verdict mismatch for {case_id}: labels={verdict} csv={expected[case_id]}"
             )
 
+    _check_origins(cases, points)
     return GroundTruth(target=labels_data["target"], cases=cases, points=points)
+
+
+def _check_origins(cases, points) -> None:
+    """FR-LAB-308: another origin is a loopback origin (a ground truth never directs
+    traffic off the machine), a stored case's absolute ``source_url`` is one too, and no
+    path is used on two origins (scoring matches findings by path)."""
+    from urllib.parse import urlsplit
+
+    from fuzzlab.core.net import is_loopback_host
+
+    def loopback(url: str, what: str) -> None:
+        host = urlsplit(url).hostname or ""
+        if not is_loopback_host(host):
+            raise ContractError(f"{what} {url!r} is not a loopback origin")
+    seen: dict[str, str | None] = {}
+    for item in [*cases, *points]:
+        if item.origin is not None:
+            loopback(item.origin, "origin")
+        path = item.url if item.url.startswith("/") else "/" + item.url
+        if path in seen and seen[path] != item.origin:
+            raise ContractError(f"path {path} is used on two origins ({seen[path]!r}, "
+                                f"{item.origin!r}): scoring matches by path")
+        seen[path] = item.origin
+    for case in cases:
+        if case.source_url and "://" in case.source_url:
+            loopback(case.source_url, "source_url")
