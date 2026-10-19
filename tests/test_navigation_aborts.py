@@ -655,3 +655,352 @@ def test_a_navigation_started_at_teardown_is_refused_never_sent(monkeypatch):
     finally:
         a.close()
     assert "/logout.php" not in a.requests
+
+
+# --- BUG-0522: a failed navigation settles on its own error page before it raises -------
+#: Each scenario repeats this many times: on the old code most single repetitions already
+#: fail (DG-NAVBLANK Table 1), so five make a pass by chance negligible.
+_REPS = 5
+#: Orders of failed loads before the next one: "404" is an empty-bodied 404 (Chromium
+#: commits its own error page), "ref" a redirect every guard refuses (ERR_ABORTED).
+_ORDERS = {"404": ["404"], "404x2": ["404", "404"], "404x3": ["404", "404", "404"],
+           "refused-404": ["ref", "404"], "404-refused": ["404", "ref"]}
+
+
+class _ErrorSite:
+    """``/missing<..>``: 404 with an empty body; ``/go<..>``: 302 to ``/logout.php``
+    (refused); ``/x<..>``: JSON; ``/``: a 50 ms POST ticker; any other path: a page whose
+    script fetches ``/x<path>``. POST bodies are kept in ``bodies``."""
+
+    def __init__(self):
+        require_loopback("127.0.0.1")              # PA-0130
+        self.bodies: list[str] = []
+        site = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def _send(self, status, body=b"", ctype="text/html", headers=()):
+                self.send_response(status)
+                if body:
+                    self.send_header("Content-Type", ctype)
+                for k, v in headers:
+                    self.send_header(k, v)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                try:
+                    self.wfile.write(body)
+                except OSError:
+                    pass
+
+            def do_GET(self):  # noqa: N802 - http.server API
+                path = self.path.split("?", 1)[0]
+                if path.startswith("/missing"):
+                    return self._send(404)
+                if path.startswith("/go"):
+                    return self._send(302, headers=[("Location", "/logout.php")])
+                if path.startswith("/x"):
+                    return self._send(200, b"{}", "application/json")
+                if path == "/":
+                    return self._send(200, f"<html><body>A{_TICKER}</body></html>".encode())
+                return self._send(200, f"<html><body><a href='/y'>y</a>ok<script>"
+                                       f"fetch('/x{path}')</script></body></html>".encode())
+
+            def do_POST(self):  # noqa: N802 - http.server API
+                n = int(self.headers.get("Content-Length") or 0)
+                site.bodies.append(self.rfile.read(n).decode())
+                return self._send(200, b"{}", "application/json")
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.base = f"http://127.0.0.1:{self.server.server_address[1]}/"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def step(self, kind, i, j):
+        return f"{self.base}missing{i}_{j}" if kind == "404" else f"{self.base}go{i}_{j}"
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+
+@pytest.fixture
+def error_site():
+    s = _ErrorSite()
+    yield s
+    s.close()
+
+
+def _fetched(xhr, path) -> bool:
+    return any(u.endswith(f"/x/{path}") for u in xhr)
+
+
+def _spider_on(site, tmp_path, monkeypatch):
+    from tests._browser import skip_or_fail
+
+    from fuzzlab.tools import spider as sp
+    _chromium_or_skip(monkeypatch)
+    s = sp.LocalSpider(site.base, db_name=str(tmp_path / "s.db"), engine="playwright",
+                       reveal=False, timeout_ms=10000)
+    try:
+        s._start_browser()
+    except Exception as exc:  # noqa: BLE001 - a launch failure is no verdict
+        s.storage.close()
+        skip_or_fail(f"chromium could not launch: {exc}")
+    return s
+
+
+@pytest.mark.parametrize("order", sorted(_ORDERS))
+def test_the_spiders_load_after_failed_loads_is_rendered(order, error_site, tmp_path,
+                                                         monkeypatch):
+    """BUG-0522: after failed loads (in each order), the next URL is rendered by the
+    browser -- its script ran, its fetch is listed -- never the static fallback. Before:
+    Chromium's late error page (or X1's late about:blank) overtook the next load (C0:
+    17-18/20 lost; the r1 draft, which judged the error page by the current URL: 11-16/20
+    after two or three 404s in a row). ``404-refused`` is not a pinning test (it passes
+    on the old code too: the refused load absorbs the late navigation); it covers the
+    mixed path."""
+    s = _spider_on(error_site, tmp_path, monkeypatch)
+    fallbacks = []
+    real = s._fetch_static
+    s._fetch_static = lambda url: (fallbacks.append(url), real(url))[1]
+    try:
+        for i in range(_REPS):
+            for j, kind in enumerate(_ORDERS[order]):
+                s._fetch_rendered(error_site.step(kind, i, j))
+            fallbacks.clear()
+            xhr = s._fetch_rendered(f"{error_site.base}ok{i}")[5]
+            assert fallbacks == [], f"rep {i}: the next load fell back to a request"
+            assert _fetched(xhr, f"ok{i}"), (i, xhr)
+    finally:
+        s._stop_browser()
+        s.storage.close()
+
+
+@pytest.mark.parametrize("order", sorted(_ORDERS))
+def test_the_auditors_load_after_failed_loads_is_rendered(order, error_site,
+                                                          monkeypatch):
+    """BUG-0522's twin in `ContentFetcher.fetch` (one page for the whole audit).
+    ``404-refused`` is not a pinning test (see the spider's)."""
+    from fuzzlab.tools.fetcher import ContentFetcher
+    _chromium_or_skip(monkeypatch)
+    from tests._browser import skip_or_fail
+    with ContentFetcher(engine="playwright", timeout_ms=10000) as f:
+        fallbacks = []
+        real = f._static_fetch
+        f._static_fetch = lambda url: (fallbacks.append(url), real(url))[1]
+        try:
+            f.fetch(error_site.base + "warmup")
+        except Exception as exc:  # noqa: BLE001 - a launch failure is no verdict
+            skip_or_fail(f"chromium could not launch: {exc}")
+        for i in range(_REPS):
+            for j, kind in enumerate(_ORDERS[order]):
+                f.fetch(error_site.step(kind, i, j))
+            fallbacks.clear()
+            xhr = f.fetch(f"{error_site.base}ok{i}")[3]
+            assert fallbacks == [], f"rep {i}: the next load fell back to a request"
+            assert _fetched(xhr, f"ok{i}"), (i, xhr)
+
+
+def _guarded_page(pw, base):
+    from fuzzlab.tools import navguard
+    browser = pw.chromium.launch(**navguard.chromium_launch_kwargs(
+        navguard.browser_launch_args([base])))
+    ctx = browser.new_context()
+    navguard.guard_page(ctx, in_scope=lambda u: u.startswith(base))
+    return browser, ctx, ctx.new_page()
+
+
+@pytest.mark.parametrize("failures", [1, 2, 3])
+def test_a_failed_navigation_returns_after_its_own_error_page(failures, error_site,
+                                                               monkeypatch):
+    """SP-01's oracle (BUG-0522): each failed navigation to an empty error answer raises
+    only after the main frame committed ITS OWN error page -- a commit a listener
+    registered before that navigation saw -- and the cleanup then leaves that page
+    (``"error-page"``, the page on ``chrome-error:``). A wait that took the page's current
+    URL for the error page returns before the second failure's commit: no fresh commit
+    is seen (failures 2 and 3 fail against that mutant, by assertion)."""
+    from playwright.sync_api import Error, sync_playwright
+
+    from fuzzlab.tools import navguard
+    _chromium_or_skip(monkeypatch)
+    with sync_playwright() as pw:
+        browser, ctx, page = _guarded_page(pw, error_site.base)
+        try:
+            navguard.navigate(page, error_site.base + "start", timeout_ms=10000)
+            for k in range(failures):
+                seen: list[str] = []
+                page.on("framenavigated", lambda fr, seen=seen: seen.append(fr.url)
+                        if fr == page.main_frame else None)
+                with pytest.raises(Error) as raised:
+                    navguard.navigate(page, f"{error_site.base}missing{k}",
+                                      timeout_ms=10000)
+                fresh = [u for u in seen if u.startswith("chrome-error:")]
+                assert fresh, f"failure {k + 1}: raised before its own error page"
+                assert navguard.end_failed_load(page, raised.value,
+                                                timeout_ms=10000) == "error-page"
+                assert page.url.startswith("chrome-error:")
+            navguard.navigate(page, error_site.base + "after", timeout_ms=10000,
+                              wait_until="load")
+            assert page.url == error_site.base + "after"
+        finally:
+            navguard.release(ctx)
+            browser.close()
+
+
+def test_a_navigation_overtaken_by_an_error_page_waits_for_it(error_site, monkeypatch):
+    """"Interrupted by another navigation to chrome-error://": a raw failed ``goto`` (its
+    error page still coming), then a guarded navigation the late error page overtakes.
+    The overtaken navigation still lands (measured 30/30): the guarded one raises after
+    that, the cleanup ends whatever shows, and the next navigation lands. The one
+    overtaken load itself is lost (it raised)."""
+    from playwright.sync_api import Error, sync_playwright
+
+    from fuzzlab.tools import navguard
+    _chromium_or_skip(monkeypatch)
+    with sync_playwright() as pw:
+        browser, ctx, page = _guarded_page(pw, error_site.base)
+        try:
+            navguard.navigate(page, error_site.base + "start", timeout_ms=10000)
+            overtaken = 0
+            for k in range(_REPS):
+                with pytest.raises(Error):
+                    page.goto(f"{error_site.base}missing{k}", wait_until="commit")
+                try:
+                    navguard.navigate(page, f"{error_site.base}ok{k}", timeout_ms=10000)
+                except Error as exc:
+                    overtaken += 1
+                    assert "chrome-error:" in str(exc).splitlines()[0]
+                    label = navguard.end_failed_load(page, exc, timeout_ms=10000)
+                    assert (label == "blank" and page.url == "about:blank") or \
+                        (label == "error-page" and page.url.startswith("chrome-error:")), \
+                        (label, page.url)
+                navguard.navigate(page, f"{error_site.base}next{k}", timeout_ms=10000,
+                                  wait_until="load")
+                assert page.url == f"{error_site.base}next{k}"
+            assert overtaken, "not vacuous: an error page overtook a navigation"
+        finally:
+            navguard.release(ctx)
+            browser.close()
+
+
+@pytest.mark.parametrize("message,expected", [
+    ("Page.goto: net::ERR_HTTP_RESPONSE_CODE_FAILURE at http://h/a", "error-page"),
+    ("Page.goto: net::ERR_CONNECTION_REFUSED at http://h/a", "error-page"),
+    ("Page.reload: net::ERR_EMPTY_RESPONSE at http://h/a", "error-page"),
+    ('Page.goto: Navigation to "http://h/a" is interrupted by another navigation to '
+     '"chrome-error://chromewebdata/"', "overtaken"),
+    ("Page.goto: net::ERR_ABORTED at http://h/a", None),
+    # target-controlled text never decides (PA-0022): only the leading code does
+    ("Page.goto: net::ERR_ABORTED at http://h/x/net::ERR_FAILED", None),
+    ("Page.goto: net::ERR_ABORTED at http://h/x net::ERR_FAILED at y", None),
+    ('Page.goto: Navigation to "http://h/chrome-error://x" is interrupted by another '
+     'navigation to "about:blank"', None),
+    ("Page.goto: Download is starting", None),
+    ("Page.goto: Timeout 1500ms exceeded.", None),
+])
+def test_only_the_leading_code_decides_a_wait_for_an_error_page(message, expected):
+    from fuzzlab.tools import navguard
+    exc = Exception(message + "\nCall log:\n  - navigating to \"x\", waiting until")
+    assert navguard._settles_on_error_page(exc) == expected
+
+
+def test_a_refused_load_naming_a_network_error_in_its_url_is_not_waited_for(
+        error_site, monkeypatch):
+    """A refused load (ERR_ABORTED: the previous document is alive) of a URL that
+    contains ``net::ERR_FAILED``: no wait for an error page (the counter is unchanged)
+    and the cleanup leaves for about:blank at once. A classifier that read the whole
+    message waited out its budget here (the r1 draft: 1 s a load)."""
+    from playwright.sync_api import Error, sync_playwright
+
+    from fuzzlab.tools import navguard
+    _chromium_or_skip(monkeypatch)
+    with sync_playwright() as pw:
+        browser, ctx, page = _guarded_page(pw, error_site.base)
+        try:
+            navguard.navigate(page, error_site.base + "start", timeout_ms=10000)
+            before = navguard.error_page_waits()["waited"]
+            with pytest.raises(Error) as raised:
+                navguard.navigate(page, error_site.base + "go/net::ERR_FAILED",
+                                  timeout_ms=10000)
+            assert str(raised.value).startswith("Page.goto: net::ERR_ABORTED at ")
+            assert navguard.error_page_waits()["waited"] == before
+            assert navguard.end_failed_load(page, raised.value,
+                                            timeout_ms=10000) == "blank"
+            assert page.url == "about:blank"
+        finally:
+            navguard.release(ctx)
+            browser.close()
+
+
+def test_an_error_page_ends_the_previous_document(error_site, tmp_path, monkeypatch):
+    """X1 on the path BUG-0522 adds: when the failure settled on the browser's own error
+    page, nothing more is navigated -- and the previous document (A, a 50 ms POST
+    ticker) has ended all the same: no tick was sent after the static fallback started
+    (judged by the send time each tick carries, PA-0511)."""
+    s = _spider_on(error_site, tmp_path, monkeypatch)
+    marks = {}
+    real = s._fetch_static
+
+    def fetch_static(url):
+        marks[url] = (s._page.url, s._page.evaluate("Date.now()"))
+        time.sleep(0.4)                           # time for a live document's ticker
+        return real(url)
+    s._fetch_static = fetch_static
+    try:
+        s._fetch_rendered(error_site.base)
+        time.sleep(0.3)                            # A ticks
+        s._fetch_rendered(error_site.base + "missing0")
+    finally:
+        s._stop_browser()
+        s.storage.close()
+    shown, ended = marks[error_site.base + "missing0"]
+    assert shown.startswith("chrome-error:"), shown       # the error page, not blank
+    assert _ticks_sent_after(error_site.bodies, ended) == []
+
+
+def test_a_query_load_after_a_failed_load_is_rendered(error_site, tmp_path, monkeypatch):
+    """The spider's window paths after a failed load (BUG-0522): the pre-seed
+    about:blank (`_visit`) right after a failed load, then the seed's own load (no
+    fallback) -- rendered; a seed whose own load gets an empty error answer -- its
+    window's exit (`_leave`) does not raise and the next load is rendered. Before:
+    15/20 seeds lost, `_leave` raised 8-20/20."""
+    from fuzzlab.tools import spa
+    s = _spider_on(error_site, tmp_path, monkeypatch)
+    raised = []
+    real_leave = s._leave
+
+    def leave(*a, **k):
+        try:
+            return real_leave(*a, **k)
+        except Exception:
+            raised.append(1)
+            raise
+    s._leave = leave
+    ok = {}
+    real_fr = s._fetch_rendered
+
+    def fetch_rendered(url, fallback=True):
+        try:
+            r = real_fr(url, fallback=fallback)
+        except Exception:
+            ok[url] = False
+            raise
+        ok[url] = bool(s._rendered_ok)
+        return r
+    s._fetch_rendered = fetch_rendered
+    queue: list = []
+    try:
+        for i in range(_REPS):
+            s._fetch_rendered(f"{error_site.base}missing{i}")
+            # "route", not "seed": the destructive rule refuses a "seed" path
+            route = f"{error_site.base}route{i}?q=x"
+            s._visit(route, 1, spa.SEED_SOURCE, queue)
+            assert ok.get(route), f"rep {i}: the query load after a failed load failed"
+            s._visit(f"{error_site.base}missing-route{i}?q=x", 1, spa.SEED_SOURCE, queue)
+            assert raised == [], f"rep {i}: the window's exit raised"
+            s._fetch_rendered(f"{error_site.base}after{i}")
+            assert ok.get(f"{error_site.base}after{i}"), i
+    finally:
+        s._stop_browser()
+        s.storage.close()

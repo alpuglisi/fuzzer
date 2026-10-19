@@ -1,5 +1,4 @@
 import argparse
-import contextlib
 import logging
 import re
 import sqlite3
@@ -463,11 +462,11 @@ class ContentFetcher:
                 # BUG-0136 review (X1's twin, CC-AUD-0042): a failed load ends the
                 # previous document. A refused navigation is aborted with ERR_ABORTED,
                 # which leaves the page shown before it alive; its fetches would
-                # otherwise be listed under the URLs fetched next
-                with contextlib.suppress(PlaywrightError):
-                    from fuzzlab.tools import navguard
-                    navguard.navigate(self._page, "about:blank",
-                                      timeout_ms=self.timeout_ms, wait_until="load")
+                # otherwise be listed under the URLs fetched next. The one way (SP-01,
+                # BUG-0522): the browser's own error page when the failure settled on
+                # one, else about:blank
+                from fuzzlab.tools import navguard
+                navguard.end_failed_load(self._page, e, timeout_ms=self.timeout_ms)
                 # Chromium refuses to render some responses (downloads,
                 # application/octet-stream). Those URLs are still audit targets,
                 # so fall back to a plain request rather than losing the page.

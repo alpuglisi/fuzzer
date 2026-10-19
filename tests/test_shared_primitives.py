@@ -239,3 +239,100 @@ def test_a_guarded_page_is_closed_only_through_close_pages():
                     "    page.close()\n    self._page.close()\n    popup.close()\n"
                     "    storage.close()\n    browser.close()\n")
     assert sorted(page_close_sites(bad)) == [3, 4, 5, 6]
+
+
+# ------------------------------------------- SP-01: a failed load's cleanup (BUG-0522)
+#: ``about:blank`` navigations outside navguard that are not a failed load's cleanup,
+#: by (module, enclosing function), each with its reason. A failed load's cleanup is
+#: `navguard.end_failed_load` (SP-01, PA-0522).
+BLANK_ALLOWED = {
+    ("fuzzlab/tools/spider.py", "_restore"):
+        "a reload that did not complete (no exception, no error page): its stopped "
+        "document is left (BUG-0138 review B-N1)",
+    ("fuzzlab/tools/spider.py", "_leave"):
+        "a seed or probe window's exit: the load's timers die inside the window",
+    ("fuzzlab/tools/spider.py", "_visit"):
+        "a seed or probe load starts from a fresh document (M7), outside its window",
+    ("fuzzlab/disco/explore.py", "restore"):
+        "a restore starts from a fresh document (hash routes, measured on Juice Shop)",
+}
+
+
+def blank_sites(tree: ast.Module) -> list[tuple[int, str | None, str]]:
+    """Every ``navigate``/``goto`` of a literal ``about:blank`` (positional or ``url=``):
+    ``(line, enclosing function, "except" | "finally" | "body")``."""
+    parents = {ch: node for node in ast.walk(tree) for ch in ast.iter_child_nodes(node)}
+    out = []
+    for n in ast.walk(tree):
+        if not isinstance(n, ast.Call):
+            continue
+        if getattr(n.func, "attr", getattr(n.func, "id", None)) not in ("navigate", "goto"):
+            continue
+        values = [a.value for a in n.args if isinstance(a, ast.Constant)]
+        values += [k.value.value for k in n.keywords
+                   if k.arg == "url" and isinstance(k.value, ast.Constant)]
+        if "about:blank" not in values:
+            continue
+        where, fn, child, p = "body", None, n, parents.get(n)
+        while p is not None:
+            if where == "body" and isinstance(p, ast.ExceptHandler):
+                where = "except"
+            if where == "body" and isinstance(p, ast.Try) and child in p.finalbody:
+                where = "finally"
+            if isinstance(p, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                fn = p.name
+                break
+            child, p = p, parents.get(p)
+        out.append((n.lineno, fn, where))
+    return out
+
+
+def blank_offenders(trees: dict[str, ast.Module]) -> tuple[list[str], set]:
+    """``(offenders, (module, function) pairs found)``: an about:blank navigation
+    outside navguard that is not allow-listed, or sits in an ``except``/``finally``."""
+    found, offenders = set(), []
+    for rel, tree in trees.items():
+        if rel == "fuzzlab/tools/navguard.py":
+            continue
+        for line, fn, where in blank_sites(tree):
+            found.add((rel, fn))
+            if where != "body" or (rel, fn) not in BLANK_ALLOWED:
+                offenders.append(f"{rel}:{line} {fn} ({where})")
+    return offenders, found
+
+
+def test_every_about_blank_navigation_is_a_reasoned_exception():
+    """SP-01 (BUG-0522, PA-0522): a failed load's cleanup goes through
+    `navguard.end_failed_load`; any other about:blank navigation outside navguard is
+    allow-listed, with its reason, by module and function -- and never in an ``except``
+    or ``finally`` (a cleanup by hand). No stale allow-list entry."""
+    offenders, found = blank_offenders(_package_trees())
+    assert offenders == []
+    assert set(BLANK_ALLOWED) <= found, set(BLANK_ALLOWED) - found
+
+
+def test_the_about_blank_guard_catches_synthetic_offenders():
+    by_hand = ("def f(page):\n    try:\n        go(page)\n    except Exception:\n"
+               "        navguard.navigate(page, 'about:blank', timeout_ms=1)\n")
+    keyword = ("def g(page):\n    try:\n        go(page)\n    finally:\n"
+               "        navguard.navigate(page, url='about:blank', timeout_ms=1)\n")
+    unlisted = "def h(page):\n    page.goto('about:blank')\n"
+    # an allow-listed function whose about:blank sits in an `except`: still an offender
+    listed_in_except = ("def _leave(page):\n    try:\n        go(page)\n"
+                        "    except Exception:\n"
+                        "        navguard.navigate(page, 'about:blank', timeout_ms=1)\n")
+    owner = ("def k(page):\n    try:\n        go(page)\n    except Exception as e:\n"
+             "        navguard.end_failed_load(page, e, timeout_ms=1)\n")
+    assert blank_sites(ast.parse(by_hand)) == [(5, "f", "except")]
+    assert blank_sites(ast.parse(keyword)) == [(5, "g", "finally")]
+    assert blank_sites(ast.parse(unlisted)) == [(2, "h", "body")]
+    assert blank_sites(ast.parse(owner)) == []
+    offenders, _found = blank_offenders({
+        "fuzzlab/tools/x.py": ast.parse(by_hand), "fuzzlab/tools/y.py": ast.parse(keyword),
+        "fuzzlab/tools/z.py": ast.parse(unlisted),
+        "fuzzlab/tools/spider.py": ast.parse(listed_in_except),
+        "fuzzlab/tools/w.py": ast.parse(owner)})
+    assert offenders == ["fuzzlab/tools/x.py:5 f (except)",
+                         "fuzzlab/tools/y.py:5 g (finally)",
+                         "fuzzlab/tools/z.py:2 h (body)",
+                         "fuzzlab/tools/spider.py:5 _leave (except)"]

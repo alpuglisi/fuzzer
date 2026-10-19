@@ -1036,11 +1036,12 @@ class LocalSpider:
                     f"the reveal window could not close {page_url} cleanly "
                     f"({str(exc).splitlines()[0][:80]}); leaving the page"))
                 # every page the window opened is closed, and the route's page left,
-                # before the window is lifted: their timers die with them (review A-S1)
+                # before the window is lifted: their timers die with them (review A-S1);
+                # left the one way a failed load is (SP-01, BUG-0522): an error a
+                # navigation raised may have settled on the browser's error page, any
+                # other (a key press, the session check) leaves for about:blank
                 self._close_window_pages(win, page)
-                with contextlib.suppress(PlaywrightError):
-                    navguard.navigate(page, "about:blank", timeout_ms=self.timeout_ms,
-                                      wait_until="load")
+                navguard.end_failed_load(page, exc, timeout_ms=self.timeout_ms)
                 if query:
                     # Y3 (review B3-S3): the session re-check runs on this path too
                     self._recheck_query_session(win)
@@ -1459,10 +1460,9 @@ class LocalSpider:
             # BUG-0136 review (X1): a failed load ends the previous document. A refused
             # navigation is aborted with ERR_ABORTED, which leaves the page shown before
             # it alive; its timers and fetches would otherwise run on and be sent and
-            # captured under the URLs crawled next
-            with contextlib.suppress(PlaywrightError):
-                navguard.navigate(self._page, "about:blank", timeout_ms=self.timeout_ms,
-                                  wait_until="load")
+            # captured under the URLs crawled next. The one way (SP-01, BUG-0522): the
+            # browser's own error page when the failure settled on one, else about:blank
+            navguard.end_failed_load(self._page, e, timeout_ms=self.timeout_ms)
             if self._navigation_withheld(url):
                 # this navigation's own target or its redirect landing is on another
                 # origin than the session's (R1, T1): nothing is extracted, and no
@@ -1487,8 +1487,9 @@ class LocalSpider:
         stays (ERR_ABORTED, BUG-0136), and is extracted. An out-of-scope committed URL
         is BUG-0123's scope abort, already counted under its own reason
         (`skipped_out_of_scope`), never FR-SESS-20's (review round 3, V2). After a
-        failed `goto` the page has already been sent to ``about:blank`` (BUG-0136
-        review, X1), so there only the withheld targets decide."""
+        failed `goto` the page shows ``about:blank`` or the browser's own error page
+        (`navguard.end_failed_load`: BUG-0136 review X1, BUG-0522), neither of them
+        "another origin", so there only the withheld targets decide."""
         if self._cookie_scope is None:
             return False
         if url_key(url) in self._withheld_targets:

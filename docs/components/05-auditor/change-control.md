@@ -3,6 +3,29 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0053 — The auditor ends a failed load through SP-01's owner (BUG-0522) (2026-10-19)
+- Placement: pre-assigned before CC-AUD-0054 and CC-AUD-0055 were written (PA-0031), so it lands above those higher-numbered entries.
+- Change: `fuzzlab/tools/fetcher.py` `ContentFetcher.fetch`'s `except` calls
+  `navguard.end_failed_load(self._page, e, timeout_ms=self.timeout_ms)` instead of a
+  suppressed `about:blank`; the now unused `contextlib` import is removed. Its
+  `navguard.navigate` settles a failure before raising (CC-CRAWL-0049).
+- Reason: BUG-0522. The auditor's next fetch after a failed load fell back to a plain
+  request, losing the rendered DOM and the XHR list:
+  - 10–16/20 after one empty 404;
+  - 13–20/20 after two or three in a row;
+  - 10–19/20 after a refused load then a 404.
+
+  These are C0 ranges over the a8b81df batch and two passes on bf1356a.
+- Impact: the URL after an empty error answer is audited from the rendered DOM again.
+  Nothing else changes. The FR-AUD X1 paragraph and its "Enforced by" lines are edited
+  in place.
+- Risk: low; as CC-CRAWL-0049 (a)–(f).
+- Deliverables:
+  - [x] code — done
+  - [x] `tests/test_navigation_aborts.py::test_the_auditors_load_after_failed_loads_is_rendered[order]`;
+    `test_the_auditors_failed_load_ends_the_previous_document` kept green — done
+  - [x] FR-AUD text — done
+- Effectiveness: pending.
 ### CC-AUD-0055 — A point's deciding mechanism reaches only its own category's evidence (FR-AUD-30, BUG-0523) (2026-10-19)
 - Change:
   - `fuzzlab/audit/engine.py`: `InjectionPoint.decided_by: tuple[str, str] | None`
