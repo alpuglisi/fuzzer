@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-19 (Juice Shop measured with every tool)
+- **What:** ground-truth `auto` tp=5 fp=0; spider-fed tp=5 fp=0; disco-fed tp=4 fp=1 (a duplicate route); crawled path discovery reached a real server-side JavaScript sink and crashed the app (CC-LAB-0317, ERROR_LOG).
+- **Why:** the owner asked to run the tools on the Juice Shop lab.
+
 ## 2026-10-19 (crawled URLs keep their origin)
 - **What:** the importers store a crawled URL on another origin than the run's as an absolute URL (a path on the run's own origin, as before); `auto` probes it at that origin, loopback only (CC-CORE-0061, CC-AUD-0048, CC-FUZZ-0098).
 - **Why:** the owner asked for it; a page's API on another port was probed at the page's origin (streaming's `/live/username/{username}`).

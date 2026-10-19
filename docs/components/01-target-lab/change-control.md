@@ -3,6 +3,33 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0317 — Juice Shop measured with every tool at 2edf1b6 (2026-10-19)
+- Change: none to code; a measurement record (the owner asked to run the tools on the
+  Juice Shop lab).
+- Results (scored against `lab/ground-truth-juice-shop`, 15 positives, 3 negatives):
+  - `auto --points ground-truth --identity juice-user --browser --oob`: tp=5 fp=0
+    fn=10 tn=3, 150 requests, 57 s. Every miss is a documented `[reach: none]` case,
+    or JUICE-0008 ("not asserted": the page CSP blocks inline script).
+  - spider (`crawl --engine playwright --identity juice-user --max-depth 3 --workers
+    4`, 34 min, 155 pages, **0 captured requests**) then `auto --points crawl`: tp=5
+    fp=0 fn=10 tn=3, 351 requests. Gains JUICE-0001 (`/redirect?to=`, unreachable from
+    ground-truth points); loses JUICE-0003 (the login's JSON body was never captured).
+    Path templates: `/api/{api}`, `/rest/{rest}`, `/rest/admin/{admin}`, `/ftp/{ftp}`
+    -- all sibling routes or file names (`legal.md`: `.md` is not in
+    `FILE_EXTENSIONS`), FR-AUD-26's stated variation residual, now measured.
+  - disco (`capture --workers 4 --deadline 600`, anonymous, 6 min, 8533 exchanges,
+    stopped by `max_harvest`) then `auto --points crawl`: tp=4 fp=1 fn=11 tn=3, 575
+    requests. Finds JUICE-0001/0002/0003/0004; the fp is `/sitemap.xml#/search`
+    DOM XSS, JUICE-0004 again under another document path (the SPA answers any path).
+    Path templates include two true ones (`/rest/products/{id}/reviews`,
+    `/api/Products/{id}`); probing the first crashed Juice Shop (ERROR_LOG
+    2026-10-19: server-side JavaScript in `$where`).
+- Open (not built): a server-side JavaScript / `$where` injection strategy; tighter
+  variation templating; the spider's missing request capture on Juice Shop; scoring
+  a route reached under a second document path.
+- Deliverables:
+  - [x] runs, this record, ERROR_LOG — done
+
 ### CC-LAB-0316 — ecommerce-api publishes its hard-coded API port; scored with real sessions (2026-10-19)
 - Change: `fuzzlab/lab_fixtures/external.py` (`LAB_META` ecommerce-api
   `fixed_ports=((10005, 10005),)`); `lab/external/secdevlabs-ecommerce-api/

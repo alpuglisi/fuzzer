@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-19 — lab (Juice Shop exited during a crawl-sourced `auto` run; a probe reached its server-side JavaScript)
+- **Symptom:** `fuzzlab auto --disco-run` on Juice Shop: five path-point checks inconclusive ("no response: ConnectionResetError / RemoteDisconnected"); the container had exited (code 1, not OOM) at 07:38, with no restart policy.
+- **Root cause:** the app's own flaw, newly reached: FR-AUD-26 discovered `/rest/products/{id}/reviews` from the crawl, and Juice Shop evaluates that id inside a `$where` JavaScript expression (`this.product == <id>`); a boolean SQLi probe's token became an undefined identifier (`ReferenceError: fz23e3b3 is not defined`), uncaught, so Node exited. fuzzlab handled the lost responses as designed (inconclusive, never negative).
+- **Remediation:** `./labctl.sh up juice-shop --authorized` (the lab restarted and re-verified). Open, not done: no strategy confirms server-side JavaScript / `$where` injection, and a target that dies mid-run is only visible as inconclusive rows; the fixture has no restart policy.
+- **Status:** Environment (lab restarted); the detection gap is open
+
 ## 2026-10-19 — importer (three new base_url functions unregistered, again; Docker daemon down a fourth time)
 - **Symptom:** (1) the related suites on the uncommitted origin change: `test_every_base_url_function_is_registered` listed `store_adapter._main_origin`, `import_spider`, `import_disco`; (2) `labctl.sh up secdevlabs-streaming`: "Cannot connect to the Docker daemon".
 - **Root cause:** (1) giving a function a `base_url` without its sub-path test, the omission recorded hours earlier as F-070 (F-071); (2) the container restarted; nothing starts `dockerd`.
