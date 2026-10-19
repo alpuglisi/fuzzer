@@ -915,3 +915,9 @@ Juice Shop lab is complete.
 - **Impact:** none landed; one review round spent.
 - **Status:** fixed in revision 2 (`oob.py` unchanged; one helper in `strategies.py`; a test running those doubles through it).
 
+### F-084 — My finding filter found a finding's interface through a capped attribute
+- **What:** in ede72b9 I wrote `report.diagram.dataflow(finding=)` to find the finding's interface through `dg_entity.attrs.finding`, a set capped at 40 values, while `finding_links` and the finding sequence follow the finding's own event. A finding past the 40th on one interface filtered to nothing. This is the other half of BUG-0519 (F-080 is the actor-list half).
+- **Evidence:** DG-FINDLINK's gate reviewers (2026-10-19), 45 findings on one interface: findings 41-45 drew 0 flows while `finding_links` listed 2.
+- **Impact:** on a busy interface the newest findings' data flow was empty.
+- **Status:** open: fixed by CC-UI-0063 (gate passed 3/3; implementation in progress). This entry also updates F-080's status to the same.
+
