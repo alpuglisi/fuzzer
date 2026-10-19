@@ -3,6 +3,20 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0316 — ecommerce-api publishes its hard-coded API port; scored with real sessions (2026-10-19)
+- Change: `fuzzlab/lab_fixtures/external.py` (`LAB_META` ecommerce-api
+  `fixed_ports=((10005, 10005),)`); `lab/external/secdevlabs-ecommerce-api/
+  compose.yaml` (127.0.0.1:10005 → the same container port).
+- Reason: the page's script logs in and reads tickets at `//localhost:10005`; with
+  FR-SESS-21 (CC-SESS-0026) the session manager follows that JSON login, which needs
+  the origin reachable (and authorised with `--auth-origin`).
+- Effectiveness (live, 2026-10-19): `fuzzlab auto --points ground-truth --identity
+  sdl-ecommerce-user --peer-identity sdl-ecommerce-peer --auth-origin
+  http://localhost:10005 --score`: tp=1 fp=0 fn=0 tn=1, evidence `who: peer`.
+- Risk: low; loopback only.
+- Deliverables:
+  - [x] fixture and compose; lab rebuilt and re-bootstrapped; FR-LAB-309 — done
+
 ### CC-LAB-0315 — secDevLabs ecommerce-api: per-account values and a path-segment IDOR (FR-LAB-309) (2026-10-19)
 - Change: `fuzzlab/lab_fixtures/external.py` (`SECDEVLABS_APPS` and `LAB_META` entry
   with a peer account; `bootstrap_secdevlabs_ecommerce_api`,

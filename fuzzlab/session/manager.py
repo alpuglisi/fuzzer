@@ -23,6 +23,7 @@ never a silent unauthenticated run.
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import threading
 from dataclasses import dataclass, field
@@ -781,6 +782,9 @@ class SessionManager:
             raise SessionAuthError(
                 f"refusing to log {identity}@{host} in: the login page {login_page_url} "
                 f"was reached by a downgrade from https to http")
+        if form.json_url is not None:          # the page's script sends it as JSON
+            return self._json_login(fetcher, host, identity, base_url, cred, form,
+                                    login_page_url, floor_https, seen)
         if form.submitter_overrides:
             # A browser would send the form where/how its submit button says, which
             # this login does not emulate: refuse rather than send it elsewhere.
@@ -838,6 +842,76 @@ class SessionManager:
             token = base64.b64encode(f"{cred.username}:{cred.password}".encode()).decode()
             state.headers["Authorization"] = f"Basic {token}"
 
+        # Record auth endpoints so fuzzing excludes them (T1.8).
+        return self._established(fetcher, host, identity, base_url, state, seen,
+                                 (form.action_url, login_page_url, state.logout_url))
+
+    # -- JSON login from the page's own script (FR-SESS-21) ---------------------------
+    def _json_login(self, fetcher: Fetcher, host: str, identity: str, base_url: str,
+                    cred, form, login_page_url: str, floor_https: bool,
+                    seen: set[str]) -> SessionState:
+        """A login form the page's script sends as JSON (`detect.json_login_target`):
+        the form's entries, credentials in place, POSTed as a JSON object to that URL,
+        which must pass `_credential_destination_ok` like a form's action.
+
+        A cookie is not proof (BUG-0008): the same body with a wrong password goes
+        first, on a fetcher of its own. The login holds only when the real one answers
+        2xx with a credential the wrong one did not get: a cookie it set that the wrong
+        attempt did not set, or a token in its JSON answer that the wrong answer lacks.
+        Every failure is loud (FR-SESS-6). The password is never logged."""
+        url = form.json_url
+        if not self._credential_destination_ok(url, base_url, floor_https=floor_https):
+            origin = canonical_origin(url)
+            raise SessionAuthError(
+                f"refusing to send {identity}@{host} credentials to {origin}: the page's "
+                f"script logs in there, which is not the login page's origin, an in-scope "
+                f"host, or an authorised auth origin; {auth_origin_advice(origin)}")
+        headers = {"Content-Type": "application/json", "Accept": "application/json"}
+
+        def body(password: str) -> bytes:
+            return json.dumps(dict(form.fill(cred.username, password))).encode()
+        control = self._fetch_factory()
+        wrong = self._post_credentials(control, url, body(cred.password + WRONG_SUFFIX),
+                                       base_url, floor_https=floor_https, seen=seen,
+                                       headers=headers)
+        wrong_cookies = set(control.cookies())
+        before = fetcher.cookies()
+        resp = self._post_credentials(fetcher, url, body(cred.password), base_url,
+                                      floor_https=floor_https, seen=seen, headers=headers)
+        if not 200 <= resp.status < 300:
+            raise SessionAuthError(f"login for {identity}@{host} was rejected: the JSON "
+                                   f"login answered {resp.status}")
+        after = fetcher.cookies()
+        fresh = {n for n, v in after.items() if before.get(n) != v and n not in wrong_cookies}
+        token = _json_token(resp.text)
+        if token is not None and token == _json_token(wrong.text):
+            token = None                       # a wrong password gets it too: not proof
+        if fresh:
+            detected = detect.DetectedCredential(kind="cookie", cookies=dict(after))
+        elif token is not None:
+            detected = detect.DetectedCredential(
+                kind="bearer", cookies=dict(after),
+                headers={"Authorization": f"Bearer {token}"},
+                token_exp=detect.decode_jwt_exp(token))
+        else:
+            raise SessionAuthError(
+                f"login for {identity}@{host} answered {resp.status} but gave no credential "
+                f"that a wrong password does not also get (wrong password: {wrong.status}); "
+                f"success could not be confirmed")
+        state = SessionState(host=host, identity=identity, kind=detected.kind,
+                             cookies=dict(detected.cookies), headers=dict(detected.headers),
+                             token_exp=detected.token_exp, login_url=url,
+                             logout_url=urljoin(base_url, "logout"),
+                             secure_only=floor_https,
+                             origins=self._origins_of(base_url, login_page_url, url))
+        return self._established(fetcher, host, identity, base_url, state, seen,
+                                 (url, login_page_url, state.logout_url))
+
+    def _established(self, fetcher: Fetcher, host: str, identity: str, base_url: str,
+                     state: SessionState, seen: set[str] | None,
+                     auth_endpoints: tuple) -> SessionState:
+        """The common end of an HTTP login: the follow-up probe, then the session is
+        valid, its auth endpoints recorded and its non-secret state persisted."""
         if not self._verify_authenticated(fetcher, base_url, state, seen=seen):
             raise SessionAuthError(
                 f"login for {identity}@{host} did not result in an authenticated "
@@ -845,8 +919,7 @@ class SessionManager:
             )
         state.valid = True
         self._warn_other_origins(identity, host, seen, state.origins)      # O12
-        # Record auth endpoints so fuzzing excludes them (T1.8).
-        self._record_auth_endpoints(form.action_url, login_page_url, state.logout_url)
+        self._record_auth_endpoints(*auth_endpoints)
         self._persist(state)   # NON-SECRET metadata only (T1.7)
         if self._log:
             self._log.info("authenticated", extra=state.redacted())
@@ -1115,14 +1188,15 @@ class SessionManager:
 
     def _post_credentials(self, fetcher: Fetcher, url: str, data,
                           base_url: str, *, floor_https: bool = False,
-                          seen: set[str] | None = None) -> FetchResponse:
+                          seen: set[str] | None = None,
+                          headers: dict[str, str] | None = None) -> FetchResponse:
         """POST the credentials without letting the HTTP client follow redirects: a 307 /
         308 re-sends the body (the credentials) to wherever ``Location`` says. A 301 /
         302 / 303 becomes a body-less GET, followed only to an allowed origin over an
         allowed transport (the same deny-first predicate), walked by hand like discovery:
         every later hop is checked before it is fetched, destructive URLs included
         (BUG-0123). A refused hop leaves the POST's own response to be judged."""
-        resp = _post_no_redirects(fetcher, url, data)
+        resp = _post_no_redirects(fetcher, url, data, headers)
         if seen is not None and canonical_origin(url) is not None:
             seen.add(canonical_origin(url))
         location = {k.lower(): v for k, v in resp.headers.items()}.get("location")
@@ -1307,18 +1381,32 @@ def _get_no_redirects(fetcher, url: str,
     return fetcher.get(url, headers=headers), False
 
 
-def _post_no_redirects(fetcher, url: str, data) -> FetchResponse:
+def _post_no_redirects(fetcher, url: str, data, headers=None) -> FetchResponse:
     """``fetcher.post`` with redirects off. A fetcher without the keyword (an old test
-    double, which never follows redirects anyway) is called without it."""
+    double, which never follows redirects anyway) is called without it. ``headers`` (a
+    JSON login's content type, FR-SESS-21) are passed only when given."""
     import inspect
     try:
         params = inspect.signature(fetcher.post).parameters
     except (TypeError, ValueError):
         params = {}
+    extra = {"headers": headers} if headers else {}
     if "allow_redirects" in params or any(
             p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
-        return fetcher.post(url, data=data, allow_redirects=False)
-    return fetcher.post(url, data=data)
+        return fetcher.post(url, data=data, allow_redirects=False, **extra)
+    return fetcher.post(url, data=data, **extra)
+
+
+#: Appended to the password for a JSON login's wrong-password control (FR-SESS-21).
+WRONG_SUFFIX = "-fuzzlab-wrong"
+
+
+def _json_token(text: str) -> str | None:
+    """A token in a JSON answer (`detect.find_token_in_json`), or None."""
+    try:
+        return detect.find_token_in_json(json.loads(text or ""))
+    except (ValueError, TypeError):
+        return None
 
 
 def _directory(url: str) -> str:

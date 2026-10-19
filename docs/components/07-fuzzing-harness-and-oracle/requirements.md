@@ -1580,8 +1580,8 @@ rewards) derives from it.
   (FR-LAB-309) the run uses; every probe is sent without a session, and
   `CrossAccountReplayStrategy` makes only its unauthenticated replay (its evidence says
   `anonymous`). For an app whose login fuzzlab cannot perform and whose objects need
-  none (secDevLabs ecommerce-api: a JavaScript login to a hard-coded origin). Without
-  it, a login that fails stops the run.
+  none. Without it, a login that fails stops the run. (secDevLabs ecommerce-api, which
+  first needed it, logs in since FR-SESS-21.)
 
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed

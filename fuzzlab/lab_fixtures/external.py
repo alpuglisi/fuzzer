@@ -263,11 +263,13 @@ LAB_META: dict[str, LabMeta] = {
                                          3074, 3000, "/", "/", None, "", False,
                                          fixed_ports=((10017, 10017),)),
     # two accounts: `/ticket/:id` hands any caller the ticket of the account whose
-    # userID is in the path (FR-LAB-309)
+    # userID is in the path (FR-LAB-309); its page logs in at a hard-coded
+    # //localhost:10005: a fixed second port (FR-SESS-21)
     "secdevlabs-ecommerce-api": LabMeta("secdevlabs-ecommerce-api", "api",
                                         "SDL_ECOMMERCE_PORT", 3079, 10005, "/",
                                         "/healthcheck", "sdl-ecommerce-user", "fuzzlab_user",
-                                        True, (("sdl-ecommerce-peer", "fuzzlab_peer"),)),
+                                        True, (("sdl-ecommerce-peer", "fuzzlab_peer"),),
+                                        fixed_ports=((10005, 10005),)),
     # its bundle calls the backend at a hard-coded http://localhost:8080
     "secdevlabs-streaming": LabMeta("secdevlabs-streaming", "frontend", "SDL_STREAMING_PORT",
                                     3078, 80, "/", "/", None, "", False,

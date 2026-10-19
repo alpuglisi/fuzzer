@@ -3,6 +3,36 @@
 Component code: **SESS**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SESS-0026 — JSON login from the page's own script (FR-SESS-21) (2026-10-19)
+- Change: `fuzzlab/session/detect.py` (`LoginForm.json_url`; `json_login_target`:
+  the one login URL an inline JSON-building script POSTs; read only for a form with no
+  `action`); `fuzzlab/session/manager.py` (`_json_login`: the wrong-password control
+  on its own fetcher, then the real login, the credential the control did not get;
+  `_established`, the common end of an HTTP login, now shared with the form path;
+  `_post_credentials` / `_post_no_redirects` pass headers; `WRONG_SUFFIX`,
+  `_json_token`).
+- Reason: the owner asked for JSON API login support (2026-10-19). Measured on
+  secdevlabs-ecommerce-api: its login form has no action; its inline script posts the
+  form's fields as JSON to `//localhost:10005/login?format=json`; the session manager
+  posted the form to `/` and got 405, and a failed login stops a run.
+- Impact: a form with an `action`, or a page whose script gives no single JSON login
+  URL, is logged in as before. On ecommerce-api the login now holds (with
+  `--auth-origin http://localhost:10005`) and `auto` runs with real sessions.
+- Risk: medium-low. Credentials go only where `_credential_destination_ok` allows,
+  checked before either POST; one failed login attempt per login (stated).
+- Deliverables:
+  - [x] code; `tests/test_json_login.py` (XHR, fetch and client-library calls found;
+    a protocol-relative URL; no guess for a native form, a script without JSON, a
+    run-time URL, a non-login URL, two login URLs, another script's JSON, a linked
+    script; the login posts the form's object after the control; a token answer is a
+    bearer session; an ambient cookie and a rejected login fail loudly; another origin
+    needs `--auth-origin` and nothing is sent before) — done
+  - [x] FR-SESS-21, SHARED_PRIMITIVES (SP-44), ARCHITECTURE, CHANGELOG — done
+- Effectiveness: live, `fuzzlab session print --auth-origin http://localhost:10005` on
+  ecommerce-api returns the `sessionIDa5` session; without the flag the login refuses,
+  naming the origin. `fuzzlab auto` with both accounts logged in: tp=1 fp=0 fn=0
+  tn=1, the finding now from the peer replay (`who: peer`) (CC-LAB-0316).
+
 ### CC-SESS-0025 — Browser login's settle never waits for a long-lived request (SP-40) (2026-10-18)
 - Change (`fuzzlab/session/browserlogin.py`): its `_Inflight` counter is replaced by
   `netquiet.Inflight` (CC-CRAWL-0041): `_settle` and the login-request wait stop

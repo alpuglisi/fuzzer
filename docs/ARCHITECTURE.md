@@ -1345,6 +1345,9 @@ tracked in the requirements files, not here.
   re-auth macro with single-flight lock; a **per-host credential vault** via the
   `core/` credential store (OS keyring + encrypted-file headless fallback, D12).
   Detection-only: no hand-written per-host profiles; unparseable logins fail loud.
+  A login form with no `action` that the page's inline script POSTs as JSON is logged in
+  by POSTing that JSON object, confirmed against a wrong-password control (FR-SESS-21,
+  CC-SESS-0026, `detect.json_login_target`, SP-44).
   A **browser login fallback for single-page apps** (`session/browserlogin.py`,
   FR-SESS-19, CC-SESS-0021): with no server-rendered form and no Basic challenge, the
   login form is found and clicked in its own scoped Chromium on a worker thread (login

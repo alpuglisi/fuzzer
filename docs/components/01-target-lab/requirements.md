@@ -6384,10 +6384,13 @@ lane) can submit a payload as
   bootstrap, each `user_id` stored. Ground truth: `/ticket/{id}`'s path `id` with
   `account_value: user_id` (broken object-level authorization, positive: anyone gets
   the ticket of the userID in the path, checked live), its `format` query (negative).
-  Scored live with `fuzzlab auto --identity sdl-ecommerce-user --peer-identity
-  sdl-ecommerce-peer --no-login --score`: tp=1 fp=0 fn=0 tn=1. The page's own login
-  calls `//localhost:10005`, so the page works only at that origin, and fuzzlab's
-  session manager cannot log in (FR-FUZZ-58).
+  The page's own script calls `//localhost:10005`, so 127.0.0.1:10005 is published
+  too (`fixed_ports`, CC-LAB-0316); the session manager logs both accounts in through
+  that JSON login (FR-SESS-21) with `--auth-origin http://localhost:10005`. Scored
+  live with `fuzzlab auto --identity sdl-ecommerce-user --peer-identity
+  sdl-ecommerce-peer --auth-origin http://localhost:10005 --score`: tp=1 fp=0 fn=0
+  tn=1, from the peer's replay; with `--no-login` (FR-FUZZ-58) the same, from the
+  unauthenticated replay.
 - **FR-LAB-308** *(labs with two origins; `CC-LAB-0311`, 2026-10-19).* A ground-truth
   case or point may name `origin`, another origin of its lab (an app whose page calls
   its API at a hard-coded `http://localhost:<port>`); `url` stays a path, and a stored

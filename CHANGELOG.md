@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-19 (JSON API login)
+- **What:** the session manager logs in through a login form that the page's own script sends as JSON (the one login URL an inline JSON-building script POSTs), confirmed against a wrong-password control; ecommerce-api now runs with real sessions (CC-SESS-0026, CC-LAB-0316, FR-SESS-21).
+- **Why:** the owner asked for JSON API login support; the session manager posted such forms natively (405) and the run stopped.
+
 ## 2026-10-19 (path-segment parameters, per-account values; secDevLabs ecommerce-api)
 - **What:** answer keys can name a path segment (`/ticket/{id}`) and a per-account value (`account_value: user_id`, stored by the lab's bootstrap with the account's credential); `auto --no-login` uses accounts for their values and names without logging in; secDevLabs ecommerce-api is a lab, scored live tp=1 fp=0 fn=0 tn=1 (CC-FUZZ-0096, CC-CORE-0059, CC-AUD-0046, CC-LAB-0315).
 - **Why:** the owner asked for both for ecommerce-api, whose ticket endpoint takes a userID that exists only after registration, in the path, behind a login fuzzlab cannot perform.

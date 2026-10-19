@@ -128,6 +128,34 @@ data. Shared by all tools; a hard dependency for external validation (D10).
   - **No destructive hop** *(CC-SESS-0015, BUG-0111).* Discovery and the post-login
     probe never fetch a URL `core.urls.destructive_reason` flags (a redirect to
     `logout`, `reset`, ...), other than the operator's own base URL.
+- **FR-SESS-21 (JSON login from the page's own script, CC-SESS-0026)**
+  - **When.** Detection only (D13): the login form `detect.find_login_form` found has no
+    `action` attribute, and one inline `<script>` of the page that builds a JSON body
+    (`JSON.stringify` or `application/json` in that script) makes exactly one POST to a
+    URL literal whose last path segment is a login word (`_LOGIN_SEGMENTS`): an
+    `XMLHttpRequest.open('POST', …)`, a `fetch(…, {method: 'POST'})`, or a client
+    library's `.post(…)` (`detect.json_login_target`, SP-44). A URL built at run time,
+    a linked script, or two candidate URLs: no JSON login; the form is submitted as
+    before. A protocol-relative URL resolves against the page.
+  - **How.** The form's entries (`LoginForm.fill`: credentials in place) as one JSON
+    object, POSTed with `Content-Type: application/json` and redirects walked by hand
+    (`_post_credentials`). The URL must pass `_credential_destination_ok` like a form
+    action: a login API on another origin needs `--auth-origin` (the refusal names it,
+    and nothing is sent).
+  - **Success (FR-SESS-5's differential, BUG-0008).** The same body with a wrong
+    password (`WRONG_SUFFIX` appended) goes first, on a fetcher of its own. The login
+    holds only when the real one answers 2xx **and** carries a credential the wrong one
+    did not: a cookie its answer set that the wrong attempt's did not set (the session
+    then sends the jar's cookies), or a token in its JSON answer (`find_token_in_json`)
+    that the wrong answer lacks (a bearer). A non-2xx answer is a rejected login; a 2xx
+    with no such credential fails loudly ("no credential that a wrong password does not
+    also get"). Then the common follow-up probe (`_verify_authenticated`), auth-endpoint
+    recording and persistence (`_established`, shared with the form login). The login
+    URL is an auth endpoint (FR-SESS-7).
+  - **Residuals (stated).** Each login costs one failed attempt (an app that locks an
+    account after a few failures sees one per login and re-login). A script that builds
+    the body from anything but the form's controls (renamed keys, nesting, an extra
+    field) is not reproduced; neither is a linked script's login.
 - **FR-SESS-20 (origin-scoped sessions, CC-SESS-0023, BUG-0134; design Revision 2,
   O1-O13; review rounds 1-2, R1-R9, T1-T6)**
   - **Origins (O1).** `SessionState.origins` is a set of canonical origins

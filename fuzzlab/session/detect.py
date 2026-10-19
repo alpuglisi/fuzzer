@@ -54,6 +54,10 @@ class LoginForm:
     #: ``formaction``/``formmethod``/``formenctype`` on the submitter. Not applied:
     #: the session manager refuses a form that carries any (BUG-0110).
     submitter_overrides: tuple[str, ...] = ()
+    #: Where the page's own script sends this form as JSON (`json_login_target`,
+    #: FR-SESS-21): a form with no ``action`` whose page script POSTs one login URL with
+    #: a JSON body. None: the form is submitted as a browser would natively.
+    json_url: str | None = None
 
     def fill(self, username: str, password: str) -> FormEntries:
         """The entry list with the credentials put in place of the username and
@@ -126,9 +130,47 @@ def find_login_form(html: str, page_url: str) -> LoginForm | None:
         action = form.get("action")
         action_url = urljoin(page_url, action) if action else page_url
         method = (form.get("method") or "GET").upper()
+        json_url = None if action is not None else json_login_target(soup, page_url)
         return LoginForm(action_url, method, fields, username_field, password_field,
-                         submitter_overrides(form))
+                         submitter_overrides(form), json_url=json_url)
     return None
+
+
+#: A script's request to a URL literal with a write method (FR-SESS-21): an
+#: ``XMLHttpRequest`` ``open``, a ``fetch`` with a ``method``, or a client library's
+#: ``post``. A URL built at run time (a template with ``${``) is not read.
+_SCRIPT_POSTS = (
+    re.compile(r"""\.open\(\s*(['"])POST\1\s*,\s*(['"`])(?P<url>[^'"`$\s]+)\2""", re.I),
+    re.compile(r"""\bfetch\(\s*(['"`])(?P<url>[^'"`$\s]+)\1\s*,\s*\{[^{}]{0,400}?"""
+               r"""\bmethod\s*:\s*(['"])POST\3""", re.I),
+    re.compile(r"""\b(?:axios|\$|\$http|http|this\.http|api|client)\.post\(\s*(['"`])"""
+               r"""(?P<url>[^'"`$\s]+)\1"""),
+)
+#: The script builds a JSON body.
+_SCRIPT_JSON = re.compile(r"JSON\.stringify|application/json", re.I)
+
+
+def json_login_target(soup, page_url: str) -> str | None:
+    """Where a page's own inline script POSTs its login form as JSON (FR-SESS-21): the
+    one URL literal, among the script's write requests, whose last path segment is a
+    login word (`_LOGIN_SEGMENTS`), in a script that builds a JSON body (the evidence
+    is read per ``<script>``: another script's JSON says nothing of this one). Resolved
+    against the page (a protocol-relative ``//host/login`` included). None when there
+    is no such request, or more than one (the login is then not guessed)."""
+    found = set()
+    for script in soup.find_all("script"):
+        if script.get("src"):
+            continue
+        text = script.string or script.get_text() or ""
+        if not _SCRIPT_JSON.search(text):
+            continue
+        for rx in _SCRIPT_POSTS:
+            for m in rx.finditer(text):
+                url = urljoin(page_url, m.group("url"))
+                segment = urlsplit(url).path.rstrip("/").rsplit("/", 1)[-1].lower()
+                if segment.rsplit(".", 1)[0] in _LOGIN_SEGMENTS:
+                    found.add(url)
+    return found.pop() if len(found) == 1 else None
 
 
 # --- session credential from a login response --------------------------------

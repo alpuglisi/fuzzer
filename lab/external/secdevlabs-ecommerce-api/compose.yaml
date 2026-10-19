@@ -3,6 +3,9 @@
 # authorization (OWASP 2021 A1): `GET /ticket/:id` answers the ticket of the account
 # whose userID is in the path, to anyone; each account learns its own userID at login.
 #
+# Two addresses, one API: the configurable port, and 127.0.0.1:10005, fixed because the
+# page's own script calls //localhost:10005 (its JSON login included, FR-SESS-21).
+#
 # Built by ./Dockerfile from the app at the pinned secDevLabs commit, which
 # `labctl.sh up secdevlabs-ecommerce-api` copies into the gitignored .cache/app with its
 # Go modules verified against go.sum and vendored; the image builds offline. The
@@ -26,6 +29,9 @@ services:
     ports:
       # Loopback only. Never bind 0.0.0.0.
       - "127.0.0.1:${SDL_ECOMMERCE_PORT:-3079}:10005"
+      # Loopback only, and this exact port: the page's script logs in and reads
+      # tickets at a hard-coded //localhost:10005 (the same container port).
+      - "127.0.0.1:10005:10005"
     environment:
       API_PORT: "10005"
       MONGO_HOST: mongodb
