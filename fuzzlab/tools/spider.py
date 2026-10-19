@@ -3170,5 +3170,6 @@ if __name__ == "__main__":
         from fuzzlab.tools import store_adapter
         with Store(args.store) as store:
             run_id = store.start_run("crawler", load_config().hash())
-            counts = store_adapter.import_spider(args.db, store, run_id)
+            counts = store_adapter.import_spider(args.db, store, run_id,
+                                                 base_url=args.start)
         get_logger("crawler").info("consolidated into store", extra=counts)

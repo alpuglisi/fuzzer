@@ -305,6 +305,17 @@ budget where a vulnerability is plausible.
     user field (`username`, `login`) of a JSON login is pinned, so it is not fuzzed;
     an identifier-like value blanked by the crawler before import reads as an empty
     example; other query parameters of an SPA route are not sent with a fragment probe.
+- **FR-AUD-27** *(a crawled URL keeps its origin; `CC-AUD-0048`, 2026-10-19).*
+  `import_spider` and `import_disco` take the run's `base_url` (`fuzzlab auto`,
+  `greybox-run` and the crawler pass theirs); its origin, else the first crawled URL's,
+  is the run's **main origin**. Every page, endpoint and path-template row is stored
+  with `core.urls.store_url` (FR-CORE-504): a path on the main origin, as before; an
+  absolute URL on another origin. So a page's API on another port keeps it, and one
+  path on two origins is two endpoints (the `UNIQUE(run_id, url, method)` keys
+  differ). Existing stores read unchanged (their rows are paths).
+  - **Stated gaps:** the web site tree places only rows that start with `/`, so a row on
+    another origin shows as unplaced; `import_audit` keeps paths (the auditor's own
+    findings).
 - **FR-AUD-26** *(path parameters from crawls; `CC-AUD-0047`, 2026-10-19).*
   `import_spider` and `import_disco` each pass the run's answered URLs (status below
   400 or unknown; a spider's write seeds excluded; a disco run's API GETs included,
@@ -313,9 +324,9 @@ budget where a vulnerability is plausible.
   with one `path` parameter, its example the crawled value, blanked when it looks like
   an identifier (PA-0100). `R-SQLI-PARAM` now includes `path`; `R-ACCESS-CONTROL-PATH`
   (FR-AUD-25) and the location-agnostic rules apply as to any point.
-  - **Stated gaps:** a template on another origin than the run's base is stored as a
-    path, so it is probed at the base's origin (as every crawl point is: the importer
-    keeps paths only); variation can template sibling pages (`/docs/intro`,
+  - **Stated gaps:** ~~a template on another origin than the run's base is stored as a
+    path, so it is probed at the base's origin~~ *(fixed by FR-AUD-27: it keeps its
+    origin)*; variation can template sibling pages (`/docs/intro`,
     `/docs/setup` -> `/docs/{docs}`), which costs probes, not safety (the destructive
     and transaction checks judge the template); path parameters of POST requests are
     not discovered.

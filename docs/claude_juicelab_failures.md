@@ -831,3 +831,9 @@ Juice Shop lab is complete.
 - **Evidence:** `verify_change` on 6038c46 (ERROR_LOG 2026-10-19).
 - **Impact:** none outside the sandbox; caught before push.
 - **Status:** fixed (registered; a sub-path JSON-login test).
+
+### F-071 — I repeated F-070 within hours
+- **What:** the origin change gave `import_spider`, `import_disco` and a new `_main_origin` a `base_url` without their PA-0034 sub-path tests, the same omission as F-070. I had run a wide test selection but not thought of the registry guard when adding the parameter.
+- **Evidence:** that selection's one failure (ERROR_LOG 2026-10-19).
+- **Impact:** none outside the sandbox; caught before commit.
+- **Status:** fixed. Working rule for myself: a new or widened `base_url` parameter means running `tests/test_base_url_subpath_registry.py` before anything else.

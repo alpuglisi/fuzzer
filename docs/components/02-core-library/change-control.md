@@ -3,6 +3,18 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0061 — `store_url` / `stored_absolute` / `is_loopback_origin` (FR-CORE-504) (2026-10-19)
+- Change: `fuzzlab/core/urls.py` gains the three functions.
+- Reason: the owner asked that crawled URLs keep their origin on import (2026-10-19);
+  measured: secdevlabs-streaming's API template `/live/username/{username}` (on
+  localhost:8080) was probed at the page's origin (127.0.0.1:3078).
+- Impact: new functions (CC-AUD-0048, CC-FUZZ-0098 use them).
+- Risk: low.
+- Deliverables:
+  - [x] code; `tests/test_import_origin.py::test_store_url_keeps_another_origin_and_reads_back`
+    — done
+  - [x] FR-CORE-504, SP-46 — done
+
 ### CC-CORE-0060 — `core.pathtemplate`: path templates from crawled URLs (FR-CORE-503) (2026-10-19)
 - Change: new `fuzzlab/core/pathtemplate.py` (`path_templates`, `id_shaped`,
   `PathTemplate`, `ASSET_EXTENSIONS`, `FILE_EXTENSIONS`).

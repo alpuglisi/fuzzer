@@ -609,6 +609,15 @@ plugin registry. It is the layer that makes the store the integration bus.
   gives none; a file name (`FILE_EXTENSIONS`) or a placeholder is never a value. A URL
   with two parameters gives two templates, the other segment concrete (SP-45). Pure.
 
+- **FR-CORE-504** *(a crawled URL's stored form; `CC-CORE-0061`, 2026-10-19).*
+  `core.urls.store_url(url, main_origin, route=False)` is how an importer stores a
+  crawled URL: its path (`to_route_path` with `route`) when it is on `main_origin` or
+  either origin is unknown, else its canonical origin plus that path.
+  `stored_absolute(stored, base_origin)` reads one back: a stored `http(s)://` URL as it
+  is, else the path under `base_origin` (a path always starts with `/`, so one holding
+  `://` stays a path). `is_loopback_origin` holds for 127.0.0.0/8, `localhost` and `::1`
+  (SP-46).
+
 - **FR-CORE-500** *(one reader for a run's target; one method key; `CC-CORE-0500`,
   2026-10-15).*
   - `fuzzlab/core/runtarget.py` is the one reader of the `target` table (PA-0063(1)): a

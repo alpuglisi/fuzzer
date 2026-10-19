@@ -346,10 +346,12 @@ def _precheck_environment(p, args) -> None:
 
 def _run(p, args, store, run_id: int, plugins, selected, ground_truth) -> int:
     writes = getattr(args, "fuzz_json_writes", False)
-    counts = import_spider(args.spider_db, store, run_id, fuzz_json_writes=writes) if \
+    counts = import_spider(args.spider_db, store, run_id, fuzz_json_writes=writes,
+                           base_url=args.base_url) if \
         os.path.exists(args.spider_db) else {}
     for run in getattr(args, "disco_run", None) or []:
-        for key, n in import_disco(run, store, run_id, fuzz_json_writes=writes).items():
+        for key, n in import_disco(run, store, run_id, fuzz_json_writes=writes,
+                                   base_url=args.base_url).items():
             counts[key] = counts.get(key, 0) + n
     # --auth-origin (FR-SESS-20, R5): passed only when given
     extra = {"auth_origins": args.auth_origin} if getattr(args, "auth_origin", None) \

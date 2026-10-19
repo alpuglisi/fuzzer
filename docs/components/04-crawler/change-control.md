@@ -3,6 +3,15 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0043 — The crawler's store import names the crawl's start as the main origin (2026-10-19)
+- Change: `fuzzlab/tools/spider.py` (`--store`: `import_spider(..., base_url=args.start)`).
+- Reason: FR-AUD-27 (CC-AUD-0048): rows on another origin than the run's main one keep
+  it; the crawl's start URL is that origin.
+- Impact: none for a single-origin crawl.
+- Risk: low.
+- Deliverables:
+  - [x] call; covered by `tests/test_import_origin.py` (the importer) — done
+
 ### CC-CRAWL-0042 — `fuzzlab disco ede`: excessive data exposure by response mutation (FR-CRAWL-25) (2026-10-18)
 - Change: `fuzzlab/disco/ede.py` (new), `fuzzlab/disco/cli.py` (`ede`),
   `fuzzlab/cli_taxonomy.py`. A route over the guard serves a disco run's recorded JSON

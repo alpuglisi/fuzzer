@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-19 (crawled URLs keep their origin)
+- **What:** the importers store a crawled URL on another origin than the run's as an absolute URL (a path on the run's own origin, as before); `auto` probes it at that origin, loopback only (CC-CORE-0061, CC-AUD-0048, CC-FUZZ-0098).
+- **Why:** the owner asked for it; a page's API on another port was probed at the page's origin (streaming's `/live/username/{username}`).
+
 ## 2026-10-19 (path parameters from crawls)
 - **What:** a crawl's or disco run's URLs now yield path parameters (`/product/{id}` from id-shaped segments, `/live/username/{username}` from variation across URLs), stored as `path` points and probed by `auto`; SQL injection now covers path segments (CC-CORE-0060, CC-AUD-0047, CC-FUZZ-0097).
 - **Why:** the owner asked for path parameter discovery from crawls; before, only an answer key could name one.

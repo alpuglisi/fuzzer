@@ -230,6 +230,26 @@ def _password_fields(raw) -> tuple[str, ...] | None:
     return tuple(value)
 
 
+def _crawl_url(stored: str, origin: str) -> tuple[str, str | None]:
+    """``(url, refusal)`` of a stored page or endpoint (FR-AUD-27): the URL it names
+    (`core.urls.stored_absolute`: a path under the run's origin, an absolute URL as
+    stored), and why it is never probed: another origin that is not loopback (D11)."""
+    from fuzzlab.core.urls import canonical_origin, is_loopback_origin, stored_absolute
+    url = stored_absolute(stored, origin)
+    other = canonical_origin(url)
+    if other != canonical_origin(origin) and not is_loopback_origin(other):
+        return url, "another origin, not loopback (D11)"
+    return url, None
+
+
+def _stored_key(stored: str) -> str:
+    """A stored URL as reported (a skip row): a path with its leading ``/``, an absolute
+    URL as stored."""
+    if stored.startswith(("http://", "https://", "/")):
+        return stored
+    return "/" + stored
+
+
 def _login_form_paths(store, run_id: int, base_url: str) -> dict[str, frozenset | None]:
     """``{url_key: password-control names}`` of every path with an in-app login form in
     this run (None: a malformed row — the path is isolated and all its points dropped)."""
@@ -242,8 +262,7 @@ def _login_form_paths(store, run_id: int, base_url: str) -> dict[str, frozenset 
     for r in store.conn.execute(
             "SELECT e.url AS path, f.password_fields AS pw FROM form f "
             "JOIN endpoint e ON e.id = f.endpoint_id WHERE f.run_id = ?", (run_id,)):
-        path = r["path"] if r["path"].startswith("/") else "/" + r["path"]
-        key = url_key(origin + path)
+        key = url_key(_crawl_url(r["path"], origin)[0])
         names = _password_fields(r["pw"])
         if names is None:
             out[key] = None
@@ -339,13 +358,18 @@ def injection_points_from_store(store, run_id: int, base_url: str,
     points: list[InjectionPoint] = []
     seen: set[tuple[str, str, str]] = set()
     for r in rows:
-        path = r["path"] if r["path"].startswith("/") else "/" + r["path"]
+        path = _stored_key(r["path"])
         method = r["method"] or "GET"
         key = (path, method, r["name"])
         if key in seen:
             continue
         seen.add(key)
-        reason = _crawl_url_refusal(base + path)
+        url, elsewhere = _crawl_url(path, base)      # its own origin kept (FR-AUD-27)
+        if elsewhere is not None:
+            if skipped is not None:
+                skipped.append((path, method, r["name"], elsewhere))
+            continue
+        reason = _crawl_url_refusal(url)
         if reason is not None:
             if skipped is not None:
                 skipped.append((path, method, r["name"], f"destructive URL ({reason!r})"))
@@ -364,7 +388,7 @@ def injection_points_from_store(store, run_id: int, base_url: str,
             if skipped is not None:
                 skipped.append((path, method, r["name"], "credential parameter"))
             continue
-        key = url_key(base + path)
+        key = url_key(url)
         if key in login_paths:
             names = login_paths[key]
             why = ("malformed form row (password_fields)" if names is None else
@@ -395,7 +419,7 @@ def injection_points_from_store(store, run_id: int, base_url: str,
         shapes = _shapes(example)
         if example in (None, "") or is_filler(example):
             shapes = frozenset(shapes_by_name.get(r["name"], ()))
-        points.append(InjectionPoint(url=base + path, param=r["name"],
+        points.append(InjectionPoint(url=url, param=r["name"],
                                      method=method, location=location,
                                      base_entries=entries, origin="crawl",
                                      value_shapes=shapes,
@@ -451,18 +475,19 @@ def header_points_from_store(store, run_id: int, base_url: str, names,
     points: list[InjectionPoint] = []
     seen: set[str] = set()
     for r in rows:
-        path = r["url"] if r["url"].startswith("/") else "/" + r["url"]
+        path = _stored_key(r["url"])
         if path in seen or not _header_page(r["status"]):
             continue
         seen.add(path)
-        reason = destructive_reason(origin + path)
+        page_url, elsewhere = _crawl_url(path, origin)      # FR-AUD-27
+        reason = elsewhere or (None if destructive_reason(page_url) is None else
+                               f"destructive URL ({destructive_reason(page_url)!r})")
         if reason is not None:
             if skipped is not None:
-                skipped.extend((path, "GET", name, f"destructive URL ({reason!r})")
-                               for name in names)
+                skipped.extend((path, "GET", name, reason) for name in names)
             continue
         query = first_link_set(store.conn, run_id, path)
-        url = origin + path
+        url = page_url
         if query:
             url += "?" + urlencode([(n, _send_value(v)) for n, v in query])
         points.extend(InjectionPoint(url=url, param=name, method="GET", location="header",

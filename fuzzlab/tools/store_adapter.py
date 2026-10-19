@@ -26,7 +26,7 @@ from urllib.parse import parse_qsl, unquote, unquote_plus, urlparse
 
 from fuzzlab.core.forms import LINK_SET_ENCTYPE
 from fuzzlab.core.store import Store
-from fuzzlab.core.urls import to_path
+from fuzzlab.core.urls import canonical_origin, store_url, to_path
 
 
 def _upsert_endpoint(store: Store, run_id: int, url_path: str, method: str,
@@ -93,13 +93,18 @@ def entries_refusal(entries, *, credential_names: bool = False) -> str | None:
 
 
 def import_spider(spider_db: str | Path, store: Store, run_id: int, *,
-                  fuzz_json_writes: bool = False) -> dict[str, int]:
+                  fuzz_json_writes: bool = False,
+                  base_url: str | None = None) -> dict[str, int]:
     """Import discovered pages -> page/endpoint/parameter rows, crawled forms, each
     query-bearing URL's query as a link set (forms phase 2), each SPA hash route's query
     as ``fragment`` parameters, and the app's own captured requests (forms phase 3,
     FR-AUD-22; PUT/PATCH only with ``fuzz_json_writes``). A SPA query seed that blocked
     a write (``source = 'spa-query-writes'``, FR-CRAWL-17) is a page only: no endpoint,
-    parameter or link set comes from it (counted ``write_seed_skipped``)."""
+    parameter or link set comes from it (counted ``write_seed_skipped``).
+
+    A URL keeps its origin when it is not the run's main one (``base_url``'s, else the
+    first crawled URL's): stored as an absolute URL, never as a bare path that would be
+    re-rooted at the base (`core.urls.store_url`, FR-AUD-27)."""
     src = sqlite3.connect(str(spider_db))
     src.row_factory = sqlite3.Row
     counts = {"page": 0, "endpoint": 0, "parameter": 0}
@@ -112,28 +117,38 @@ def import_spider(spider_db: str | Path, store: Store, run_id: int, *,
         ).fetchall()
     except sqlite3.Error:
         rows = []
+    main = _main_origin(base_url, (r["url"] for r in rows))
     path_urls = []
     for row in rows:
         source = row["source"] if "source" in row.keys() else "link"
         _import_page_url(store, run_id, row["url"], row["status_code"], source, counts,
-                         seen_pages, link_sets)
+                         seen_pages, link_sets, main)
         if source != _write_seed_source() and _answered(row["status_code"]):
             path_urls.append(row["url"])
-    _import_path_templates(store, run_id, path_urls, "link", counts)
-    _import_forms(src, store, run_id, counts)
-    _import_requests(src, store, run_id, counts, fuzz_json_writes=fuzz_json_writes)
+    _import_path_templates(store, run_id, path_urls, "link", counts, main)
+    _import_forms(src, store, run_id, counts, main)
+    _import_requests(src, store, run_id, counts, fuzz_json_writes=fuzz_json_writes,
+                     main=main)
     _import_link_sets(store, run_id, link_sets, counts)   # after forms: forms win
     store.conn.commit()
     src.close()
     return counts
 
 
+def _main_origin(base_url: str | None, urls) -> str | None:
+    """The run's main origin: ``base_url``'s, else the first crawled URL's that has one."""
+    if base_url:
+        return canonical_origin(base_url)
+    return next((o for o in map(canonical_origin, urls) if o is not None), None)
+
+
 def _import_page_url(store: Store, run_id: int, raw: str, status, source: str,
-                     counts: dict, seen_pages: set, link_sets: list) -> None:
+                     counts: dict, seen_pages: set, link_sets: list,
+                     main: str | None = None) -> None:
     """One visited URL -> its page row, its query as ``query`` parameters and a link set,
     its SPA hash route's query as ``fragment`` parameters (`import_spider`,
-    `import_disco`)."""
-    path = to_path(raw)
+    `import_disco`). Stored as `store_url` gives it (another origin kept)."""
+    path = store_url(raw, main)
     if (path, "GET") not in seen_pages:
         store.conn.execute(
             "INSERT OR IGNORE INTO page (run_id, url, method, status, source) "
@@ -161,7 +176,7 @@ def _import_page_url(store: Store, run_id: int, raw: str, status, source: str,
                 )
                 counts["parameter"] += 1
         link_sets.append((endpoint_id, query_pairs(urlparse(raw).query)))
-    _import_route_query(store, run_id, raw, source, counts)
+    _import_route_query(store, run_id, raw, source, counts, main)
 
 
 def _answered(status) -> bool:
@@ -174,7 +189,7 @@ def _answered(status) -> bool:
 
 
 def _import_path_templates(store: Store, run_id: int, urls, source: str,
-                           counts: dict) -> None:
+                           counts: dict, main: str | None = None) -> None:
     """The run's URLs -> ``path`` parameters (FR-AUD-26): each `core.pathtemplate`
     template is an endpoint (its path with one ``{param}`` segment, GET) with one
     ``path`` parameter whose example is the crawled value, blanked when it looks like
@@ -182,7 +197,8 @@ def _import_path_templates(store: Store, run_id: int, urls, source: str,
     from fuzzlab.core.pathtemplate import path_templates
     from fuzzlab.core.redaction import looks_like_identifier
     for t in path_templates(urls):
-        endpoint_id = _upsert_endpoint(store, run_id, t.path, "GET", source)
+        stored = t.path if main is None or t.origin == main else t.origin + t.path
+        endpoint_id = _upsert_endpoint(store, run_id, stored, "GET", source)
         if _get_parameter(store, run_id, endpoint_id, t.param) is not None:
             continue
         counts["endpoint"] += 1
@@ -201,7 +217,8 @@ _PAGE_MEDIA = ("text/html", "application/xhtml+xml")
 
 
 def import_disco(run_dir: str | Path, store: Store, run_id: int, *,
-                 fuzz_json_writes: bool = False) -> dict[str, int]:
+                 fuzz_json_writes: bool = False,
+                 base_url: str | None = None) -> dict[str, int]:
     """Import a ``fuzzlab disco capture`` run directory (D70, FR-AUD-23) as
     `import_spider` imports a crawl, so `fuzzlab auto` confirms what disco found:
 
@@ -225,6 +242,8 @@ def import_disco(run_dir: str | Path, store: Store, run_id: int, *,
     seen_pages: set[tuple[str, str]] = set()
     link_sets: list[tuple[int, list[tuple[str, str, str]]]] = []
     page_urls, visible = _disco_actions(run_dir / "actions.jsonl", counts)
+    main = _main_origin(base_url, [r.url for r in read.records if r.kind == "http"]
+                        + page_urls)
     path_urls = []
     for rec in read.records:
         if rec.kind != "http" or rec.status is None:
@@ -235,7 +254,7 @@ def import_disco(run_dir: str | Path, store: Store, run_id: int, *,
             media = (rec.res_ctype or "").split(";", 1)[0].strip().lower()
             if urlparse(rec.url).query or media in _PAGE_MEDIA:
                 _import_page_url(store, run_id, rec.url, rec.status, DISCO_SOURCE,
-                                 counts, seen_pages, link_sets)
+                                 counts, seen_pages, link_sets, main)
             continue
         counts["request"] += 1
         body = rec.req_body
@@ -253,11 +272,12 @@ def import_disco(run_dir: str | Path, store: Store, run_id: int, *,
             counts["request_refused"] += 1
             continue
         _store_request(store, run_id, counts, kind, rec.method.upper(), rec.url, leaves,
-                       visible=visible.get(rec.action_id or "", frozenset()))
+                       visible=visible.get(rec.action_id or "", frozenset()), main=main)
     for url in page_urls:
         _import_page_url(store, run_id, url, None, DISCO_SOURCE, counts, seen_pages,
-                         link_sets)
-    _import_path_templates(store, run_id, path_urls + page_urls, DISCO_SOURCE, counts)
+                         link_sets, main)
+    _import_path_templates(store, run_id, path_urls + page_urls, DISCO_SOURCE, counts,
+                           main)
     _import_link_sets(store, run_id, link_sets, counts)
     store.conn.commit()
     return counts
@@ -543,7 +563,8 @@ def form_skip_reason(form: dict) -> str | None:
     return entries_refusal(form["entries"])
 
 
-def _import_forms(src, store: Store, run_id: int, counts: dict) -> None:
+def _import_forms(src, store: Store, run_id: int, counts: dict,
+                  main: str | None = None) -> None:
     """Crawled forms -> endpoint, `form` row (its default entry list) and one parameter
     per fuzzable field (FR-FUZZ-42). GET forms drop the action's query (a browser
     replaces it); POST forms keep it on the endpoint URL (reviewer A4)."""
@@ -585,7 +606,7 @@ def _import_forms(src, store: Store, run_id: int, counts: dict) -> None:
             seen_selectors.add(same)
         kinds = dict(form["controls"])
         form["entries"] = _filled(form["entries"], kinds)
-        path = to_path(form["action_url"])
+        path = store_url(form["action_url"], main)
         query = urlparse(form["action_url"]).query
         url = path + ("?" + query if query and form["method"] == "POST" else "")
         endpoint_id = _upsert_endpoint(store, run_id, url, form["method"], "form")
@@ -616,17 +637,19 @@ def _import_forms(src, store: Store, run_id: int, counts: dict) -> None:
             counts["parameter"] += 1
 
 
-def _import_route_query(store: Store, run_id: int, raw: str, source, counts: dict) -> None:
+def _import_route_query(store: Store, run_id: int, raw: str, source, counts: dict,
+                        main: str | None = None) -> None:
     """A crawled SPA hash route's query (``/#/search?q=x``) -> ``fragment`` parameters
     on the route's endpoint (``/#/search``, `core.urls.to_route_path`). The app reads it
     in the browser, so it is a DOM point (confirmed only with a browser, M6), never a
     ``query`` one: the server never sees it (forms phase 3, FR-AUD-22)."""
-    from fuzzlab.core.urls import spa_route, to_route_path
+    from fuzzlab.core.urls import spa_route
     route = spa_route(raw)
     if route is None or not route[1]:
         return
     counts.setdefault("fragment_parameter", 0)
-    endpoint_id = _upsert_endpoint(store, run_id, to_route_path(raw), "GET", source)
+    endpoint_id = _upsert_endpoint(store, run_id, store_url(raw, main, route=True), "GET",
+                                   source)
     counts["endpoint"] += 1
     for name, value in parse_qsl(route[1], keep_blank_values=True):
         if _get_parameter(store, run_id, endpoint_id, name) is None:
@@ -733,7 +756,7 @@ def body_refusal(url: str, leaves) -> str | None:
 
 
 def _import_requests(src, store: Store, run_id: int, counts: dict, *,
-                     fuzz_json_writes: bool = False) -> None:
+                     fuzz_json_writes: bool = False, main: str | None = None) -> None:
     """The app's own captured requests (spider table ``discovered_requests``, lane I's
     contract) -> endpoint, `form` row and parameters (forms phase 3, FR-AUD-22).
 
@@ -759,7 +782,7 @@ def _import_requests(src, store: Store, run_id: int, counts: dict, *,
             counts["request_refused"] += 1
             continue
         _store_request(store, run_id, counts, kind, row["method"].upper(), row["url"],
-                       leaves)
+                       leaves, main=main)
 
 
 def captured_request(row: dict, *, fuzz_json_writes: bool = False):
@@ -788,7 +811,7 @@ def captured_request(row: dict, *, fuzz_json_writes: bool = False):
 
 
 def _store_request(store, run_id, counts, kind, method, url, leaves, *,
-                   visible: frozenset = frozenset()) -> None:
+                   visible: frozenset = frozenset(), main: str | None = None) -> None:
     """Write one accepted captured request (`_import_requests`): every value passes
     `redact_leaf` before it is stored (PA-0100). ``visible`` names the controls a user
     could see in the form that sent it (a disco form step): an object selector among
@@ -810,7 +833,7 @@ def _store_request(store, run_id, counts, kind, method, url, leaves, *,
         if name not in passwords and not pinned and jsonbody.is_point_value(value):
             points.append((name, value))
     parts = urlparse(url)
-    endpoint_url = to_path(url) + ("?" + parts.query if parts.query else "")
+    endpoint_url = store_url(url, main) + ("?" + parts.query if parts.query else "")
     endpoint_id = _upsert_endpoint(store, run_id, endpoint_url, method, "request")
     enctype = jsonbody.ENCTYPE if kind == "json" else FORM_URLENCODED
     cur = store.conn.execute(

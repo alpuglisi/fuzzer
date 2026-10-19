@@ -1584,6 +1584,13 @@ rewards) derives from it.
   `anonymous`). For an app whose login fuzzlab cannot perform and whose objects need
   none. Without it, a login that fails stops the run. (secDevLabs ecommerce-api, which
   first needed it, logs in since FR-SESS-21.)
+- **FR-FUZZ-59 (crawl points at their own origin, `CC-FUZZ-0098`, 2026-10-19)**
+  `injection_points_from_store`, the login-form isolation keys and the header points
+  read each stored page or endpoint with `core.urls.stored_absolute` (FR-AUD-27): a
+  path under the run's origin, an absolute row at its own origin. A row on another
+  origin that is not loopback (`is_loopback_origin`) is never probed: skipped with
+  "another origin, not loopback (D11)". The run's session goes only to its own origins
+  (FR-SESS-20), so such probes go without it unless `--auth-origin` names the origin.
 
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed

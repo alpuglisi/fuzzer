@@ -3,6 +3,19 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0098 — `auto` probes a crawled row at its own origin, loopback only (FR-FUZZ-59) (2026-10-19)
+- Change: `fuzzlab/harness/auto.py` (`_crawl_url`, `_stored_key`;
+  `injection_points_from_store`, `_login_form_paths` and `header_points_from_store`
+  resolve stored rows with `stored_absolute` instead of `base + path`).
+- Reason: FR-AUD-27 (CC-AUD-0048).
+- Impact: a row on another origin is probed there; one on another origin that is not
+  loopback is skipped and reported (D11). Rows on the main origin: unchanged.
+- Risk: low.
+- Deliverables:
+  - [x] code; `tests/test_import_origin.py` (points at each origin; an off-machine
+    origin skipped) — done
+  - [x] FR-FUZZ-59 — done
+
 ### CC-FUZZ-0097 — Crawl-sourced path points carry their crawled value (FR-FUZZ-57) (2026-10-19)
 - Change: `fuzzlab/harness/auto.py` (`injection_points_from_store`: a `path`
   parameter's example becomes its `base_entries`, as a query link's value does).

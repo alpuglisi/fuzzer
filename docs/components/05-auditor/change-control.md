@@ -3,6 +3,27 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0048 — Crawled URLs keep their origin on import (FR-AUD-27) (2026-10-19)
+- Change: `fuzzlab/tools/store_adapter.py` (`import_spider` / `import_disco` take
+  `base_url`; `_main_origin`; every writer -- `_import_page_url`, `_import_route_query`,
+  `_import_path_templates`, `_import_forms`, `_store_request` via `_import_requests` --
+  stores through `store_url`); callers pass their base (`harness/auto_cli.py`,
+  `greybox/greybox_cli.py`, `tools/spider.py`).
+- Reason: the owner asked that crawled URLs keep their origin (2026-10-19).
+- Impact: rows on the main origin are unchanged; rows on another origin are absolute.
+  Readers that turn a row into a URL resolve it (CC-FUZZ-0098); the site tree shows
+  such rows as unplaced (stated).
+- Risk: medium-low: a store-contract widening (ARCHITECTURE updated); no migration.
+- Deliverables:
+  - [x] code; `tests/test_import_origin.py` (a path on two origins is two endpoints,
+    each probed at its origin; the first crawled URL as main origin; a disco run's API
+    keeps its origin; a base under a sub-path keeps its paths, PA-0034) — done
+  - [x] FR-AUD-27, FR-AUD-26's gap, ARCHITECTURE, SP-46, CHANGELOG — done
+- Effectiveness (live, 2026-10-19): the streaming disco capture through `fuzzlab auto
+  --disco-run`: `/live/username/{username}` stored as `http://127.0.0.1:8080/...` and
+  probed at the API (316 username queries in its log); 0 findings (JPA,
+  parameterized). Before: the same probes went to the page's nginx.
+
 ### CC-AUD-0047 — Crawled URLs give path parameters; `R-SQLI-PARAM` on path points (FR-AUD-26) (2026-10-19)
 - Change: `fuzzlab/tools/store_adapter.py` (`_import_path_templates`, `_answered`;
   `import_spider` and `import_disco` collect their answered GET URLs and call it once);

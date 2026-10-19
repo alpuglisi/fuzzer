@@ -210,6 +210,7 @@ def _reason_constant_names(entry: XFail, reason: str) -> bool:
 
 
 _ME = "tests/test_base_url_subpath_registry.py"
+_IMPORT_ORIGIN = "tests/test_import_origin.py::test_a_base_under_a_subpath_keeps_its_paths"
 _SUB = "tests/test_subpath_apps.py"
 _SUB_LOGIN = f"{_SUB}::test_a_login_that_lands_on_a_page_with_its_own_password_form_succeeds"
 _SPA_SUBPATH = "tests/test_session_browser_login.py::test_a_spa_under_a_sub_path_logs_in"
@@ -277,6 +278,9 @@ REGISTRY = {
         Covered(f"{_SUB}::test_a_basic_session_never_reads_an_app_page_redirect_as_logout"),
     "fuzzlab.session.manager:SessionManager._verify_authenticated": Covered(_SUB_LOGIN),
     "fuzzlab.session.manager:SessionManager._established": Covered(_SUB_LOGIN),
+    "fuzzlab.tools.store_adapter:_main_origin": Covered(_IMPORT_ORIGIN),
+    "fuzzlab.tools.store_adapter:import_spider": Covered(_IMPORT_ORIGIN),
+    "fuzzlab.tools.store_adapter:import_disco": Covered(_IMPORT_ORIGIN),
     "fuzzlab.session.manager:SessionManager._json_login": Covered(
         "tests/test_json_login.py::test_a_json_login_under_a_subpath_keeps_the_path"),
     "fuzzlab.tools.authhttp:_build": Covered(_AUTHHTTP),

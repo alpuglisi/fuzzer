@@ -146,7 +146,8 @@ def main(argv: list[str]) -> int:
             counts = {}
             if source != "ground-truth":
                 if os.path.exists(args.spider_db):
-                    counts = import_spider(args.spider_db, store, run_id)
+                    counts = import_spider(args.spider_db, store, run_id,
+                                           base_url=args.base_url)
                 skipped = []
                 points = gbrun.points_from_store(store, run_id, args.base_url,
                                                  skipped=skipped)

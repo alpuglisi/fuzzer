@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-19 — importer (three new base_url functions unregistered, again; Docker daemon down a fourth time)
+- **Symptom:** (1) the related suites on the uncommitted origin change: `test_every_base_url_function_is_registered` listed `store_adapter._main_origin`, `import_spider`, `import_disco`; (2) `labctl.sh up secdevlabs-streaming`: "Cannot connect to the Docker daemon".
+- **Root cause:** (1) giving a function a `base_url` without its sub-path test, the omission recorded hours earlier as F-070 (F-071); (2) the container restarted; nothing starts `dockerd`.
+- **Remediation:** (1) `tests/test_import_origin.py::test_a_base_under_a_subpath_keeps_its_paths`, the three registered; caught before commit; (2) stale pid removed, `dockerd` started (setup script, outside the repo, still the lasting fix).
+- **Status:** Fixed (before commit) / Environment
+
 ## 2026-10-19 — session manager (two new base_url functions unregistered; caught by the PA-0034 guard)
 - **Symptom:** `verify_change --base 926efe7` on 6038c46: 3057 passed, 1 failed — `test_base_url_subpath_registry.py::test_every_base_url_function_is_registered` listed `SessionManager._json_login` and `_established`.
 - **Root cause:** the JSON login (CC-SESS-0026) added two functions taking a `base_url` without registering each with a sub-path test (F-070).

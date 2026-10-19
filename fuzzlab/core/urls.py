@@ -238,6 +238,39 @@ def in_origin_scope(url: str, origins: frozenset[str]) -> bool:
     return origin is not None and origin in origins
 
 
+def store_url(url: str, main_origin: str | None, *, route: bool = False) -> str:
+    """How an importer stores a crawled URL (FR-CORE-504): its path (`to_route_path`
+    with ``route``) when it is on the run's main origin, or when either origin is
+    unknown; otherwise its canonical origin followed by that path, so a page's API on
+    another origin keeps it. ``main_origin`` is a `canonical_origin`."""
+    path = to_route_path(url) if route else to_path(url)
+    origin = canonical_origin(url)
+    if main_origin is None or origin is None or origin == main_origin:
+        return path
+    return origin + path
+
+
+def stored_absolute(stored: str, base_origin: str) -> str:
+    """The URL a stored page or endpoint names (FR-CORE-504): an absolute stored URL as
+    it is, a path under ``base_origin`` (the run's origin, never its path: BUG-0113). A
+    stored path always starts with ``/``, so a path holding ``://`` stays a path."""
+    if stored.startswith(("http://", "https://")):
+        return stored
+    return base_origin + (stored if stored.startswith("/") else "/" + stored)
+
+
+def is_loopback_origin(origin: str | None) -> bool:
+    """True for an origin on this machine (127.0.0.0/8, ``localhost``, ``::1``): where a
+    lab may live (D11)."""
+    host = urlsplit(origin or "").hostname
+    if host is None:
+        return False
+    try:
+        return ipaddress.ip_address(_canonical_host(host)).is_loopback
+    except ValueError:
+        return False
+
+
 class PathPlacementError(ValueError):
     """A ``path`` point's value cannot be placed in its URL."""
 
