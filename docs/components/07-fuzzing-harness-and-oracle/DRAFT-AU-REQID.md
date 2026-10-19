@@ -80,6 +80,11 @@ occurrence is the addressed one.
 | `id=&x=1` / id | `id=M&x=1` | `id=&x=1&id=M` | `id=M&x=1` (holds) |
 | `a%5B%5D=1&a%5B%5D=2` / `a[]` | `a%5B%5D=M&a%5B%5D=2` | `…&a%5B%5D=M` appended | `a%5B%5D=M` |
 
+- **The seam with an identity** was measured through a real `HttpClient` and its real
+  `requests` transport, with a session addon that applies nothing. A real
+  `SessionManager` needs keyring credentials. Every session route of `SeamProbeSender`
+  (main, isolated copy, anonymous) builds its URL in the same `_send_on`, so the
+  measured URL is the one each route sends.
 - **Bound path** (`_FormBoundSender` → `FormEntries.replace`, `core/forms.py:92`): the
   entries `id=1&tag=a&tag=b`, point `tag`, put `id=1&tag=M&tag=M` on the wire. Every
   occurrence was replaced.
@@ -179,8 +184,8 @@ what a server reads apart: a duplicate, a lost sibling, `flag` vs `flag=`, `+` v
 There is one owner, a new module `fuzzlab/core/reqctx.py` (CORE): `request_context`,
 `context_id`, `confirmation_key`, `CONTEXT_VERSION = 1`, `SEED_CATEGORIES`.
 
-`request_context(point, identity)` is total and deterministic. It returns a canonical
-JSON-able dict with these fields:
+`request_context(point)` is total and deterministic; the identity comes from the point's
+`identity_scope` (§3.2). It returns a canonical JSON-able dict with these fields:
 
 | Field | Value | Why it is in |
 |---|---|---|
@@ -196,7 +201,7 @@ JSON-able dict with these fields:
 | `setup` | ordered list of setup requests, each in the same shape (a stored case's store step: method, origin, path, query, location, target, content type, body) | stored XSS planted through `/sign-a` vs `/sign-b` |
 | `identity` | the run's identity label (`"anonymous"` or the `--identity` name), set by `run_auto` | the session the request carries. Within a run it is constant; across runs it separates labels (§3.5) |
 
-**Excluded, with the reason.** A guard enforces the list (§9, `test_every_candidate_field_*`).
+**Excluded, with the reason.** A guard enforces the list (§7, `test_every_candidate_field_*`).
 
 | Field | Why it is not in the identity |
 |---|---|
@@ -254,7 +259,7 @@ so nothing new is exposed. The target's value appears only as its digest.
 - `import_disco`: a form-encoded body is parsed to ordered pairs (`query_pairs`), not
   `dict(parse_qsl(...))` (`:274`), so a repeated name is kept in order.
   `_captured_leaves` accepts a pair list for a form body. (The spider's own captured form
-  bodies are already a `dict` at the crawler's write, in `core/redaction.py`: §6, AU-REDACT.)
+  bodies are already a `dict` at the crawler's write, in `core/redaction.py`: §5.1, AU-REDACT.)
 
 **The point builder** (`harness/auto.py`): `seen` is removed. Rows are unique per
 context, and two rows of one (path, method, name) are two points (the audit's case).
