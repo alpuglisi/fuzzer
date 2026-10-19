@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-19 (two omissions fixed before push)
+- **What:** Comment Killer's API store point is labelled `server-json` (CC-LAB-0313); the web launcher classifies `auto --peer-identity` (CC-UI-0057).
+- **Why:** `verify_change` on the unpushed secDevLabs commits failed the guards that pin each.
+
 ## 2026-10-19 (the no-response guard covers the new strategies)
 - **What:** the PA-0153 guard now builds JSON-leaf and valued-query points and gives the strategies a dead peer account, so the NoSQL and cross-account strategies are proven to turn a lost response into "no verdict" (CC-FUZZ-0094); the build host's missing gitleaks and scikit-learn are recorded in ERROR_LOG.
 - **Why:** `verify_change` on the NoSQL commit failed that guard (no shape reached the new strategy) and nine labgen gates (tools missing from a fresh container).

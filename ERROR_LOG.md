@@ -18,6 +18,20 @@ Format per entry:
 
 ---
 
+## 2026-10-19 — answer key / web launcher (two omissions in the unpushed secDevLabs commits; caught by existing guards)
+- **Symptom:** `verify_change --base 259c190` on e587d8e: 3751 passed, 2 failed.
+  `test_no_ground_truth_dom_point_has_another_location` flagged Comment Killer's
+  `POST /comments` body point marked `rendering: "js"`, and
+  `test_every_str_option_of_every_spec_is_classified` flagged `("auto", "peer_identity")`.
+- **Root cause:** (1) I labelled the store endpoint with where its payload runs, not how
+  it answers (F-068). With a browser, `auto` would have relocated it to a GET query
+  probe. (2) The new `--peer-identity` option was not added to the launcher's
+  exhaustive option table.
+- **Remediation:** the point is `server-json` (CC-LAB-0313); the option is classified
+  (CC-UI-0057). Both guards already existed (BUG-0115's sweep and the BUG-0146 table
+  check) and stopped the push, so no new preventive action is needed.
+- **Status:** Fixed (before push)
+
 ## 2026-10-19 — Cloud container: nine `lab-generate --check` tests failed because gitleaks and scikit-learn were missing (environment; recurrence of the 2026-10-15 entry)
 - **Symptom:** `verify_change --base 259c190` on bed382f failed nine labgen
   `test_cli_check_passes_end_to_end*` tests: `secret scanner: 'gitleaks' executable

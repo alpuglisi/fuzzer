@@ -3,6 +3,17 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0057 — `auto --peer-identity` classified for project launches (2026-10-19)
+- Change: `fuzzlab/web/projects.py` `OPTION_CLASS` gains `("auto", "peer_identity")`:
+  not a path, like `identity`.
+- Reason: `verify_change` on e587d8e failed `tests/test_web_projects.py::
+  test_every_str_option_of_every_spec_is_classified` after FR-FUZZ-55 added the option
+  (CC-FUZZ-0093). The exhaustive table caught it, as designed.
+- Impact: the web launcher passes the peer identity through unchanged.
+- Risk: low.
+- Deliverables:
+  - [x] table entry; CHANGELOG — done
+
 ### CC-UI-0056 — "Inconclusive" names a probe that got no response (BUG-0147) (2026-10-15)
 - Change: `fuzzlab/web/templates/run.html` and `fuzzlab/web/results.py`
   (`inconclusive_by`'s docstring and the coverage comment) define "inconclusive" as "a

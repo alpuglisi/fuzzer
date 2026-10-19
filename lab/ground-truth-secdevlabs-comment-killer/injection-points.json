@@ -8,7 +8,7 @@
    "method": "POST",
    "param": "comment",
    "location": "body",
-   "rendering": "js",
+   "rendering": "server-json",
    "json_body": {
     "comment": "hello"
    }

@@ -813,3 +813,9 @@ Juice Shop lab is complete.
 - **Impact:** about 15 minutes; no wrong conclusion was recorded.
 - **Status:** recorded. An experiment that patches a function keeps a reference to the real one before patching.
 
+
+### F-068 — I labelled a JSON store endpoint `rendering: js` and left a new CLI option unclassified
+- **What:** in 6ff04cf, Comment Killer's `POST /comments` point (on the API origin) said `rendering: "js"`, which is where the stored payload runs, not how the endpoint answers. With a browser, `auto` would have probed it as a GET query on the API. In 10fc6ca, `--peer-identity` was added without its row in the web launcher's option table. I verified only the first of the five commits before stacking the other four on it.
+- **Evidence:** `verify_change` on e587d8e: the two guard failures (ERROR_LOG 2026-10-19).
+- **Impact:** none outside the sandbox; nothing was pushed. Another 15-minute verify cycle.
+- **Status:** fixed (CC-LAB-0313, CC-UI-0057).

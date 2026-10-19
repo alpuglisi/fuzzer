@@ -3,6 +3,21 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0313 — Comment Killer's store point is `server-json` (2026-10-19)
+- Change: `lab/ground-truth-secdevlabs-comment-killer/injection-points.json`: the API's
+  `POST /comments` point (a JSON leaf) is `rendering: "server-json"`, not `"js"`.
+- Reason: `verify_change` on e587d8e failed `tests/test_forms_phase2.py::
+  test_no_ground_truth_dom_point_has_another_location`. A point's `rendering` says how
+  its endpoint answers, and the API answers JSON. The JavaScript sink belongs to the
+  case (SDLCK-0001 keeps `rendering: "js"`), as with copy-n-paste's `/register`. With a
+  browser, `auto` would have rewritten the `js` body point into a GET query probe on the
+  API (the BUG-0115 relocation this guard pins).
+- Impact: `auto` now probes the store endpoint as a JSON leaf over HTTP. Its stored XSS
+  stays a case without `source_url`, like the other JSON store endpoints' cases.
+- Risk: low; one label, caught before push.
+- Deliverables:
+  - [x] label; CHANGELOG; ERROR_LOG — done
+
 ### CC-LAB-0312 — secDevLabs answer keys checked against upstream's own fixes (2026-10-19)
 - Change: every `lab/ground-truth-secdevlabs-*/labels.json` case that an upstream
   "mitigation solution 🔒" pull request fixes now cites it in `[prov: ...]`;
