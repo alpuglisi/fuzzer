@@ -336,6 +336,11 @@ JWT = ("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0."
     (f"http://h/cb#code=Zq8vLm3NpR7sTw2X", "Zq8vLm3NpR7sTw2X"),
     (f"http://h/reset/{JWT}", JWT),                               # a token in the path
     ("/r?token=plain", "plain"),                                  # relative
+    # a URL embedded in a payload: the token ends where the text does (BUG-0521)
+    ("$(curl http://127.0.0.1:8123/cb/0123456789abcdef0123456789abcdef)",
+     "0123456789abcdef0123456789abcdef"),
+    ("`curl http://127.0.0.1:8123/cb/0123456789abcdef0123456789abcdef`",
+     "0123456789abcdef0123456789abcdef"),
 ])
 def test_safe_ref_withholds_every_token_shape(url, secret):
     """BUG-0514: what `safe_ref` returns never holds the secret, and a path token is
@@ -343,6 +348,16 @@ def test_safe_ref_withholds_every_token_shape(url, secret):
     assert secret not in trace.safe_ref(url)
     path, _grouped = trace.interface_path(trace.safe_ref(url))
     assert secret not in path and ";" not in path
+
+
+def test_a_payload_preview_never_keeps_its_canary_token():
+    """BUG-0521: an out-of-band payload's preview keeps no canary token, whatever
+    character follows it."""
+    tok = "0123456789abcdef0123456789abcdef"
+    for template in ("$(curl {u})", "`curl {u}`", ";curl {u}", "|wget -q {u}&"):
+        value = template.format(u=f"http://127.0.0.1:8123/cb/{tok}")
+        body = trace.scrub_event({"value_preview": trace.value_preview("cmd", value)})
+        assert tok[:16] not in body["value_preview"]
 
 
 def test_scrub_event_passes_relative_urls_under_url_keys():

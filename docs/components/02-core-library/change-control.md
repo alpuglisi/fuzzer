@@ -3,6 +3,23 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0066 — `safe_ref` blanks a token inside a path segment (BUG-0521) (2026-10-19)
+- Change (`fuzzlab/core/trace.py::_blank_identifiers`): besides a whole identifier-like
+  segment, an identifier-like run (`_TOKEN_RUN`, `[A-Za-z0-9_-+=]{8,}`) inside a segment is
+  replaced by `REDACTED_SEGMENT`.
+- Reason: an out-of-band payload's canary token, followed by `)` or a backtick, survived
+  in `value_preview` (BUG-0521; found by DG-M6M8's gate reviewer 1).
+- Impact: a segment holding a token among other characters shows `{redacted}` in place of
+  the token. Ordinary paths (words, file names, short ids) are unchanged (checked).
+- Risk: low.
+- Review: a fix of a redaction gap found by a gate review; the number CC-CORE-0065 stays
+  reserved for DG-M6M8.
+- Deliverables:
+  - [x] code; `tests/test_trace_model.py` (two shapes, four payload templates; fail on the
+    old code) — done
+  - [x] FR-CORE-505 in place; BUG-0521; PA-0521; ERROR_LOG; CHANGELOG — done
+- Effectiveness: verified offline.
+
 ### CC-CORE-0064 — Trace review fixes: redaction, honest model, order independence, live counters (BUG-0514, BUG-0515, BUG-0516) (2026-10-19)
 - Change (`fuzzlab/core/trace.py`):
   - `safe_ref`: `redact_url_identifiers`, then `redaction.redact_for_record` (userinfo,

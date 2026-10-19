@@ -903,3 +903,9 @@ Juice Shop lab is complete.
 - **Impact:** pushed docs and the status line overstated the evidence; M6 tests and findings show no target traffic, and *executed* undercounts them.
 - **Status:** open: CC-FUZZ-0102 (DG-M6M8) is under the review gate.
 
+### F-082 — My BUG-0514 redaction fix missed a token inside a segment
+- **What:** the token-shape list I tested for BUG-0514 held standalone URLs only; the tool's own out-of-band payloads embed a URL followed by `)` or a backtick, and my segment-level check kept their canary token.
+- **Evidence:** BUG-0521, measured on 9b17d0d: `$(curl …/cb/<tok>)` and `` `curl …/cb/<tok>` `` previews kept the token.
+- **Impact:** pushed traces and exports of command-injection probes carried the canary token.
+- **Status:** fixed (CC-CORE-0066, PA-0521).
+

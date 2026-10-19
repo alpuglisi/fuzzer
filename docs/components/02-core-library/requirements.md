@@ -667,7 +667,8 @@ plugin registry. It is the layer that makes the store the integration bus.
     SPA route's too), userinfo, sensitive `;name=value` parameters and a query-shaped
     fragment's sensitive values replaced by the record boundary
     (`redaction.redact_for_record`), other identifier-like matrix and fragment values
-    blanked, and an identifier-like path segment (a JWT, a reset token, a UUID)
+    blanked, and an identifier-like path segment (a JWT, a reset token, a UUID), or an
+    identifier-like run inside a segment (a URL embedded in a payload, BUG-0521),
     replaced by `{redacted}`.
   - **The writer:** `TraceRecorder(store, run_id, max_buffer=512, flush_seconds=0.25)`,
     one per producer, used only on the thread that owns its `Store` (a `Store` is one

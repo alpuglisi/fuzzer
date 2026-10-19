@@ -2581,3 +2581,11 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
   2. **A route's parameter that the view parses is validated in the view and refused
      with 400.** (from BUG-0518)
   - Enforced by: tests/test_web_diagrams.py::test_the_page_renders_labels_as_text_navigates_evidence_and_updates_live, tests/test_web_diagrams.py::test_exports_download_and_bad_requests_are_refused
+
+- **PA-0521** — Strengthens `PA-0514(2)`, after BUG-0521: the trace's URL redactor judged a
+  path segment whole, so a canary token followed by `)` or a backtick in a payload's
+  preview was kept.
+  1. **The token-shape list includes each shape embedded in text**, followed by the
+     punctuation the tool's own payloads use; a redactor that judges whole segments also
+     judges the identifier runs inside them. (from BUG-0521)
+  - Enforced by: tests/test_trace_model.py::test_a_payload_preview_never_keeps_its_canary_token, tests/test_trace_model.py::test_safe_ref_withholds_every_token_shape

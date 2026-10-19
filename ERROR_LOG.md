@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-19 — diagrams (an out-of-band canary token kept in a payload preview; BUG-0521)
+- **Symptom:** a command-injection payload's preview (`$(curl …/cb/<tok>)`) kept its canary token in the trace and exports.
+- **Root cause:** `safe_ref` judged a path segment whole; the payload's `)` made the segment non-identifier-shaped (BUG-0521).
+- **Remediation:** identifier runs inside a segment are blanked too (CC-CORE-0066, PA-0521).
+- **Status:** Fixed
+
 ## 2026-10-19 — diagrams (the after-the-fact review found seven defects; BUG-0512..0518)
 - **Symptom:** the two-reviewer gate, run late over the diagrams series (F-076), found: explorer actions filed under another workflow than their requests (BUG-0512); peer and unauthenticated replays untraced (BUG-0513); userinfo, `;jsessionid=`, `#access_token=` and path tokens kept in trace bodies and exports (BUG-0514); failed loads drawn as replies, blocked requests and spider loads drawn as browser traffic, groupings as observed, other sends counted as executed (BUG-0515); order-dependent kind and capped attributes, counters only at close (BUG-0516); the injection location overwritten by a redirect (BUG-0517); a stale origin filter, no application evidence, a 500 on a bad scope (BUG-0518).
 - **Root cause:** per bug report; common to all, the entries were never reviewed before implementation and the tests checked expected shapes, not producers' truth or negative cases.

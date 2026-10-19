@@ -35,6 +35,7 @@ import contextvars
 import functools
 import hashlib
 import json
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -69,6 +70,8 @@ SPIDER = "actor:spider"
 TOOL = "actor:tool"
 #: An identifier-like path segment `safe_ref` withheld; grouped as ``{id}``.
 REDACTED_SEGMENT = "{redacted}"
+#: A run of identifier characters inside a path segment (`safe_ref`, BUG-0521).
+_TOKEN_RUN = re.compile(r"[A-Za-z0-9_\-+=]{8,}")
 #: An entity kind's rank: the strongest kind any event gives an entity is kept, so the
 #: kind does not depend on event order (an interface also loaded as a page).
 _KIND_RANK = {"page": 0, "interface": 1}
@@ -210,6 +213,12 @@ def _blank_identifiers(url: str) -> str:
         name, semi, params = seg.partition(";")
         if name and looks_like_identifier(unquote(name)):
             name = REDACTED_SEGMENT
+        elif name:
+            # a token inside a segment, as in a URL embedded in text: ``cb/<tok>)``,
+            # ``cb/<tok>`'' (BUG-0521)
+            name = _TOKEN_RUN.sub(
+                lambda m: REDACTED_SEGMENT if looks_like_identifier(m.group(0))
+                else m.group(0), name)
         if semi:
             params = ";".join(
                 f"{k}=" if eq and looks_like_identifier(unquote(v)) else part
