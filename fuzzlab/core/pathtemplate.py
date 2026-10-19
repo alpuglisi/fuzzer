@@ -5,12 +5,18 @@ point is a template with one placeholder segment (``/ticket/{id}``, FR-FUZZ-57).
 module turns a run's URLs into such templates, from two kinds of evidence:
 
 * **shape** -- a segment that looks like an object id (all digits, a UUID, a hex string
-  of at least 8 characters with a digit and a letter, or `looks_like_identifier`) is a
+  of at least 8 characters with a digit and a letter, or `looks_like_identifier`), or
+  that holds what JavaScript writes for a missing value (`JS_PLACEHOLDERS`:
+  ``/rest/track-order/undefined`` is a URL the app built from an empty variable), is a
   parameter even when seen once; it is named ``id``;
 * **variation** -- among URLs of one origin with the same number of segments that agree
   on every segment but one, a position (never the first) holding at least two distinct
-  values is a parameter; it is named after the fixed segment before it
-  (``/live/username/{username}``).
+  values *the app's code does not name* is a parameter; it is named after the fixed
+  segment before it (``/live/username/{username}``). A value the app's own scripts hold
+  as a path segment (`code_segments`: ``'/api/Cards'``, ``'/application-version'``) is
+  a route's name, not data: ``/api/Cards`` and ``/api/Challenges`` are two routes, not
+  one route with a parameter (BUG-0507, measured on Juice Shop; a username or a slug is
+  data and is never in the code).
 
 A static asset (its last segment has an `ASSET_EXTENSIONS` extension) never yields a
 template, and a segment naming a file (`FILE_EXTENSIONS`: ``index.php``) is never a
@@ -36,7 +42,20 @@ ASSET_EXTENSIONS = frozenset({
     "zip", "gz", "txt", "xml", "json", "wasm"})
 #: ... and of server pages: a segment ending in one names a file, not a value.
 FILE_EXTENSIONS = ASSET_EXTENSIONS | frozenset({
-    "php", "html", "htm", "asp", "aspx", "jsp", "cgi", "do", "action", "pl", "py", "rb"})
+    "php", "html", "htm", "asp", "aspx", "jsp", "cgi", "do", "action", "pl", "py", "rb",
+    # documents, data, configuration, backups and archives (BUG-0507: a directory
+    # listing's ``legal.md`` / ``incident-support.kdbx`` are files, not values)
+    "md", "markdown", "rst", "csv", "tsv", "yml", "yaml", "toml", "ini", "cfg", "conf",
+    "log", "bak", "old", "orig", "swp", "tmp", "sql", "db", "sqlite", "kdbx", "pyc",
+    "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "rtf", "tar", "tgz", "bz2", "7z",
+    "rar", "jar", "war", "exe", "dll", "so", "sh", "bat", "ps1", "env", "pem", "key",
+    "crt"})
+#: What JavaScript writes into a URL for a missing value: a segment holding one was
+#: built from a variable, so it is a parameter whatever else the crawl saw.
+JS_PLACEHOLDERS = frozenset({"undefined", "null", "NaN", "Infinity", "[object Object]"})
+#: At most this many code segments are kept per script read (`code_segments`).
+MAX_CODE_SEGMENTS = 5000
+_CODE_SEGMENT = re.compile(r"(?<=/)[A-Za-z0-9._~@-]{1,64}(?=[/'\"`?#])")
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
 _HEX = re.compile(r"^(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{8,}$", re.I)
 _DIGITS = re.compile(r"^\d{1,20}$")
@@ -58,6 +77,38 @@ def id_shaped(segment: str) -> bool:
     characters, or an identifier-like token (`looks_like_identifier`)."""
     return bool(_DIGITS.match(segment) or _UUID.match(segment) or _HEX.match(segment)
                 or looks_like_identifier(segment))
+
+
+def code_segments(text: str) -> set[str]:
+    """The path segments an app's script holds in its own text: each run of URL
+    characters right after a ``/`` and ending at a ``/``, a quote, ``?`` or ``#``
+    (``'/api/Cards'`` -> ``api``, ``Cards``), at most `MAX_CODE_SEGMENTS`; one linear
+    regex scan, no backtracking. An identifier-like segment (`looks_like_identifier`, a
+    key in a URL) is never kept: only names are evidence, and nothing secret is
+    stored."""
+    out: set[str] = set()
+    for m in _CODE_SEGMENT.finditer(text):
+        seg = m.group(0)
+        if seg not in out and not looks_like_identifier(seg):
+            out.add(seg)
+            if len(out) >= MAX_CODE_SEGMENTS:
+                break
+    return out
+
+
+def varying_is_parameter(values, *, code=frozenset(), data=None,
+                         min_distinct: int = 2) -> bool:
+    """The one decision whether a URL position whose ``values`` vary (all else equal)
+    is a parameter, not sibling routes (SP-45; BUG-0501, BUG-0507): at least
+    ``min_distinct`` of its values are not segments the app's code names (``code``,
+    `code_segments`), and when response data is known (``data``: string values seen in
+    captured responses) every such value is data. Both kinds of evidence say the value
+    came from data, not from the route table. `path_templates` (both importers) and
+    `disco.synth.template_paths` decide through it."""
+    free = set(values) - set(code)
+    if data is not None and not free <= set(data):
+        return False
+    return len(free) >= min_distinct
 
 
 def _segments(url: str):
@@ -92,27 +143,32 @@ def _usable(segment: str) -> bool:
     return not ("." in segment and segment.rsplit(".", 1)[1].lower() in FILE_EXTENSIONS)
 
 
-def path_templates(urls) -> list[PathTemplate]:
+def path_templates(urls, code=frozenset()) -> list[PathTemplate]:
     """The path templates a run's URLs show (module docstring), in first-seen order,
-    one per (origin, template path)."""
+    one per (origin, template position): the same segment found by shape and by
+    variation is one parameter, named by the first evidence (shape: ``id``). ``code``
+    is the segments the app's scripts hold (`code_segments`, recorded by the crawl);
+    without it, every value counts."""
     from urllib.parse import quote
     parsed = []
     for url in dict.fromkeys(urls):
         got = _segments(url)
         if got is not None:
             parsed.append(got)
-    found: dict[tuple[str, str], PathTemplate] = {}
+    found: dict[tuple, PathTemplate] = {}
 
     def add(origin: str, segs: list[str], i: int, shaped: bool) -> None:
+        key = (origin, tuple(None if j == i else s for j, s in enumerate(segs)))
+        if key in found:
+            return
         path = "/" + "/".join(path_placeholder(_name_for(segs, i, shaped)) if j == i
                               else quote(s, safe="@:!$&'()*+,;=-._~")
                               for j, s in enumerate(segs))
-        found.setdefault((origin, path), PathTemplate(origin, path,
-                                                      _name_for(segs, i, shaped), segs[i]))
+        found[key] = PathTemplate(origin, path, _name_for(segs, i, shaped), segs[i])
 
     for origin, segs in parsed:                                 # shape
         for i, seg in enumerate(segs):
-            if _usable(seg) and id_shaped(seg):
+            if seg in JS_PLACEHOLDERS or (_usable(seg) and id_shaped(seg)):
                 add(origin, segs, i, True)
     groups: dict[tuple, list[list[str]]] = {}                   # variation
     for origin, segs in parsed:
@@ -121,8 +177,11 @@ def path_templates(urls) -> list[PathTemplate]:
             groups.setdefault(key, []).append(segs)
     for (origin, _n, i, _rest), members in groups.items():
         values = {m[i] for m in members}
-        if len(values) < 2 or not all(_usable(v) for v in values):
+        if not all(_usable(v) for v in values):
+            continue
+        if not varying_is_parameter(values, code=code):
             continue
         for m in members:
-            add(origin, m, i, id_shaped(m[i]))
+            if m[i] not in code:                          # an example is data
+                add(origin, m, i, id_shaped(m[i]))
     return list(found.values())

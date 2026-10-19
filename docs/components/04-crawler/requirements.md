@@ -839,6 +839,19 @@ fuzzer.
   Otherwise it is explored: a history-mode route renders its own view from the same
   shell. **Known gap:** the spider's FR-CRAWL-17 probe loads (marker reflection of
   unpaired query names) have no disco counterpart.
+- **FR-CRAWL-28 (the path segments an app's scripts hold, CC-CRAWL-0046, BUG-0507)**
+  Both crawlers keep `core.pathtemplate.code_segments` of each script body they read
+  in full, at most 20,000 per crawl, names only (identifier-like segments are never
+  kept):
+  - the spider, in a `script_segments (segment TEXT PRIMARY KEY)` table filled when it
+    scans a script (`StorageManager.record_script_segments`; counted
+    `script_segments`);
+  - disco, in `script_segments.json` beside `actions.jsonl` (sorted), from the bodies
+    `_gather` reads. The capture truncates a body, and these reads do not.
+
+  They are the importers' evidence that a varying URL segment is a route's name
+  (FR-AUD-26). `disco.synth.template_paths` decides slugs through the same
+  `varying_is_parameter` (with its data evidence).
 
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default

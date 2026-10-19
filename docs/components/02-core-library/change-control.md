@@ -3,6 +3,27 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0062 — Path variation decided on code and data evidence; JS placeholders; files (BUG-0507) (2026-10-19)
+- Change (`fuzzlab/core/pathtemplate.py`): `varying_is_parameter` (the one variation
+  decision, SP-45), `code_segments` (+ `MAX_CODE_SEGMENTS`), `JS_PLACEHOLDERS` as shape
+  evidence, `path_templates(urls, code=...)` (data values only as examples; one
+  template per origin and position), `FILE_EXTENSIONS` widened to documents, data,
+  configuration, backups and archives.
+- Reason: the owner asked for the path variation rules to be fixed after the discovery
+  gaps; BUG-0507 (measured on Juice Shop: sibling API routes and an FTP listing's files
+  became parameters; `undefined`/`NaN` segments were missed).
+- Impact: fewer, truer path templates where the crawl recorded code segments; without
+  them only the placeholder, file and one-per-position changes apply.
+- Risk: low; pure. A data value the code happens to name no longer counts toward
+  variation (two other data values still make the parameter).
+- Deliverables:
+  - [x] code; `tests/test_path_discovery.py` (the Juice and streaming shapes with their
+    code segments, too few values, files, one parameter per position, `code_segments`,
+    the one-decision guard and its offender, both kinds of evidence, both importers) —
+    done
+  - [x] BUG-0507, PA-0507, SP-45, FR-CORE-503, ERROR_LOG, F-074, CHANGELOG — done
+- Effectiveness: pending (Juice Shop re-crawled with both tools and scored; streaming re-imported).
+
 ### CC-CORE-0061 — `store_url` / `stored_absolute` / `is_loopback_origin` (FR-CORE-504) (2026-10-19)
 - Change: `fuzzlab/core/urls.py` gains the three functions.
 - Reason: the owner asked that crawled URLs keep their origin on import (2026-10-19);

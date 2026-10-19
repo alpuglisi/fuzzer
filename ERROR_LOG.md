@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-19 — core / importers (path variation took sibling routes and files for parameters)
+- **Symptom:** every crawl-fed `auto` run on Juice Shop imported and probed `/api/{api}`, `/rest/{rest}`, `/rest/admin/{admin}`, `/ftp/{ftp}` (and from disco `/rest/web3/{web3}`); `/rest/basket/NaN` was not a parameter.
+- **Root cause:** `core.pathtemplate`'s variation rule took any two varying values for a parameter: a second implementation of the decision `disco.synth` had fixed for the same Juice Shop shape the day before (BUG-0501), measured only on an app without sibling routes (BUG-0507).
+- **Remediation:** one decision (`varying_is_parameter`) with code evidence (the segments the app's scripts hold, recorded by both crawlers) and synth's data evidence; JS placeholders as shape; documents and archives as files; one template per position (CC-CORE-0062, CC-CRAWL-0046, CC-AUD-0049, PA-0507).
+- **Status:** Fixed
+
 ## 2026-10-19 — lab (Juice Shop exited a third time during a disco-fed `auto` run; cause now verified)
 - **Symptom:** the scored disco-fed run stopped with "Connection refused" on `/rest/web3/1` (rc=1); the container was `Exited (1)`.
 - **Root cause:** verified from the exited container's log this time: `ReferenceError: fz1626ec is not defined` in `$where` (`return this.product == fz1626ec`, `routes/showProductReviews.js`), uncaught -- a probe of the crawled `/rest/products/{id}/reviews` template, the app's own flaw (the entry two below). fuzzlab stopping is by design: an unreachable target fails loudly rather than turning every later candidate inconclusive (BUG-0147, `probesender._unobserved`).

@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-19 (path variation decided on evidence)
+- **What:** a varying URL segment is a parameter only when the app's code does not name its values (both crawlers record the path segments their scripts hold) -- one decision shared with disco's synthesizer; `undefined`/`NaN` segments are parameters; documents and archives are files (CC-CORE-0062, CC-CRAWL-0046, CC-AUD-0049, BUG-0507).
+- **Why:** the owner asked for the path variation rules to be fixed: on Juice Shop sibling API routes and FTP files became parameters, the defect BUG-0501 had fixed in synth.
+
 ## 2026-10-19 (discovery gaps behind the Juice Shop misses remediated)
 - **What:** disco reads the routes the app's scripts declare (the spider's scanner, SP-47) and no longer explores a document served under another path as a second app (CC-CRAWL-0044, BUG-0505); the spider dry-submits SPA forms -- clicked inside the write-blocking window, the write recorded and aborted, client state rolled back -- and records every write a reveal window blocks (CC-CRAWL-0045, BUG-0506).
 - **Why:** the owner asked for the algorithmic gaps behind disco's misses and the spider's missed login SQL injection to be remediated, not worked around.

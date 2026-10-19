@@ -3,6 +3,18 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0049 — The importers pass the crawl's code segments to path templating (FR-AUD-26, BUG-0507) (2026-10-19)
+- Change (`fuzzlab/tools/store_adapter.py`): `import_spider` reads `script_segments`
+  (absent: none), `import_disco` reads `script_segments.json` (`_disco_code_segments`;
+  absent or malformed: none); `_import_path_templates(..., code=)`.
+- Reason: BUG-0507.
+- Impact: an older crawl imports as before; a new one drops variation templates whose
+  values the app's code names.
+- Risk: low.
+- Deliverables:
+  - [x] code; `tests/test_path_discovery.py::test_both_importers_read_the_crawls_code_segments` — done
+  - [x] FR-AUD-26 (its stated gap narrowed) — done
+
 ### CC-AUD-0048 — Crawled URLs keep their origin on import (FR-AUD-27) (2026-10-19)
 - Change: `fuzzlab/tools/store_adapter.py` (`import_spider` / `import_disco` take
   `base_url`; `_main_origin`; every writer -- `_import_page_url`, `_import_route_query`,

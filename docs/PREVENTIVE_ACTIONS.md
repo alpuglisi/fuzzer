@@ -2470,3 +2470,17 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
      app's own code changed during it is rolled back before the crawl goes on, and a
      session-bearing context is checked after it (fail closed). (from BUG-0506)
   - Enforced by: tests/test_spa_capture.py::test_dry_submission_records_each_forms_write_and_sends_nothing, tests/test_spa_capture.py::test_dry_submission_keeps_an_authenticated_crawls_session, tests/test_forms_phase4.py::test_a_write_the_reveal_window_blocks_is_recorded_never_sent
+
+- **PA-0507** — Strengthens `PA-0501(1)` and `PA-0505(2)`, after BUG-0507: the path
+  variation rule took Juice Shop's sibling API routes and a directory's files for
+  parameters -- the defect `disco.synth` had fixed a day earlier (BUG-0501) -- because
+  it was written as a second implementation of that decision and measured only on an
+  app without sibling routes.
+  1. **A rule that classifies names the evidence that separates its confusable
+     alternative** (route or value, file or value), and is measured on an application
+     where that alternative occurs before it ships.
+  2. **Before a mechanism is registered as a new shared primitive, the codebase is
+     searched for an existing implementation of the same decision** (docstrings, bug
+     records); one found becomes the owner, or both decide through one owner, in the
+     same change. (from BUG-0507)
+  - Enforced by: tests/test_path_discovery.py::test_routes_the_code_names_are_not_values_and_placeholders_are_parameters, tests/test_path_discovery.py::test_the_streaming_values_are_data_its_code_never_names, tests/test_path_discovery.py::test_every_path_templating_rule_decides_variation_through_the_one_owner

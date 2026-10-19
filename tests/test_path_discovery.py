@@ -67,6 +67,73 @@ def test_variation_needs_one_origin_and_is_named_after_the_segment_before():
         ("http://h:80", "/docs/{docs}", "docs", "intro")]
 
 
+# --- BUG-0507: the evidence the variation rule lacked (measured on Juice Shop) ---------
+#: URLs a Juice Shop crawl requested (2026-10-19): sibling API routes, a directory
+#: listing's files, and two URLs the app built from an empty variable.
+JUICE = ["http://127.0.0.1:3000/api/Cards", "http://127.0.0.1:3000/api/Challenges",
+         "http://127.0.0.1:3000/rest/admin/application-version",
+         "http://127.0.0.1:3000/rest/admin/application-configuration",
+         "http://127.0.0.1:3000/rest/languages", "http://127.0.0.1:3000/rest/memories",
+         "http://127.0.0.1:3000/ftp/legal.md", "http://127.0.0.1:3000/ftp/acquisitions.md",
+         "http://127.0.0.1:3000/ftp/incident-support.kdbx",
+         "http://127.0.0.1:3000/rest/track-order/undefined",
+         "http://127.0.0.1:3000/rest/basket/NaN"]
+#: ... and the segments its scripts hold (`code_segments` of its bundle: these names
+#: are hard-coded there, e.g. ``this.host + '/application-version'``).
+JUICE_CODE = frozenset({"api", "Cards", "Challenges", "rest", "admin",
+                        "application-version", "application-configuration",
+                        "languages", "memories", "track-order", "basket", "ftp"})
+
+
+def test_routes_the_code_names_are_not_values_and_placeholders_are_parameters():
+    got = _t(JUICE)
+    # without the code's evidence the sibling routes look like one parameter (the defect)
+    assert ("http://127.0.0.1:3000", "/api/{api}", "api", "Cards") in got
+    assert [(t.path, t.example) for t in path_templates(JUICE, code=JUICE_CODE)] == [
+        ("/rest/track-order/{id}", "undefined"), ("/rest/basket/{id}", "NaN")]
+
+
+def test_the_streaming_values_are_data_its_code_never_names():
+    """The other measured lab: its scripts hold ``live``, ``username`` and ``play``
+    (its fixed segments), never a username; its templates stay."""
+    urls = ["http://localhost:8080/live/username/matthewpets",
+            "http://localhost:8080/live/username/mr.robot",
+            "http://127.0.0.1:3078/play/@matthewpets", "http://127.0.0.1:3078/play/@mr.robot"]
+    code = frozenset({"live", "username", "play", "assets", "images"})
+    assert [t.path for t in path_templates(urls, code=code)] == \
+        ["/live/username/{username}", "/play/{play}"]
+
+
+def test_a_value_the_code_names_leaves_too_few_values():
+    urls = ["http://h/u/admin", "http://h/u/alice"]
+    assert _t(urls) and path_templates(urls, code=frozenset({"admin"})) == []
+    urls.append("http://h/u/bob")
+    assert [t.example for t in path_templates(urls, code=frozenset({"admin"}))] == ["alice"]
+
+
+@pytest.mark.parametrize("name", ["legal.md", "notes.yml", "db.kdbx", "dump.sql",
+                                  "site.tar", "app.jar"])
+def test_a_document_or_archive_name_is_a_file_not_a_value(name):
+    assert _t(["http://h/ftp/" + name, "http://h/ftp/other"]) == []
+
+
+def test_shape_and_variation_on_one_segment_are_one_parameter():
+    """Disco saw ``/rest/track-order/undefined`` and ``/rest/track-order/fuzzlab``
+    (its route seed): one parameter, named by its shape."""
+    assert _t(["http://h/rest/track-order/undefined", "http://h/rest/track-order/fuzzlab"]) \
+        == [("http://h:80", "/rest/track-order/{id}", "id", "undefined")]
+
+
+def test_code_segments_are_names_never_keys():
+    from fuzzlab.core.pathtemplate import MAX_CODE_SEGMENTS, code_segments
+    text = ('a="/api/Cards";b=h+"/application-version";c=`/rest/${x}/b?`;'
+            'd="/keys/9f8e7d6c5b4a39281706f5e4d3c2b1a0/";e="no slash";f=1/2')
+    assert code_segments(text) == {"api", "Cards", "application-version", "rest", "b",
+                                   "keys"}
+    many = "".join(f'"/s{i}"' for i in range(MAX_CODE_SEGMENTS + 10))
+    assert len(code_segments(many)) == MAX_CODE_SEGMENTS
+
+
 # --- the importers -------------------------------------------------------------------
 def _spider(tmp_path, rows):
     db = tmp_path / "spider.db"
@@ -152,3 +219,69 @@ def test_auto_confirms_sql_injection_in_a_crawled_path_segment(tmp_path):
     finally:
         server.shutdown()
     assert ("/product/{id}", "id", "sqli") in findings, (findings, result)
+
+
+def test_both_importers_read_the_crawls_code_segments(tmp_path):
+    """FR-CRAWL-28: the spider's ``script_segments`` table and a disco run's
+    ``script_segments.json`` reach the variation rule; an older crawl without them
+    imports as before."""
+    rows = [(u, 200, "xhr") for u in JUICE]
+    db = _spider(tmp_path, rows)
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE script_segments (segment TEXT PRIMARY KEY)")
+    con.executemany("INSERT INTO script_segments VALUES (?)", [(s,) for s in JUICE_CODE])
+    con.commit()
+    con.close()
+    with Store(tmp_path / "s.db") as store:
+        run = store.start_run("crawl", "h")
+        store_adapter.import_spider(db, store, run)
+        assert [p for p, _n, _e in _path_params(store, run)] == \
+            ["/rest/basket/{id}", "/rest/track-order/{id}"]
+    from tests.test_disco_import import _rec, _run_dir
+    (tmp_path / "d").mkdir()
+    run_dir = _run_dir(tmp_path / "d", [_rec("GET", "/api/Cards"),
+                                        _rec("GET", "/api/Challenges")])
+    with Store(tmp_path / "d.db") as store:
+        run = store.start_run("crawl", "h")
+        store_adapter.import_disco(run_dir, store, run)
+        assert _path_params(store, run) != []                  # no evidence: as before
+    (run_dir / "script_segments.json").write_text('["api", "Cards", "Challenges"]')
+    with Store(tmp_path / "e.db") as store:
+        run = store.start_run("crawl", "h")
+        store_adapter.import_disco(run_dir, store, run)
+        assert _path_params(store, run) == []
+
+
+# --- SP-45: one variation decision -----------------------------------------------------
+def _calls(tree, name) -> int:
+    import ast
+    return sum(1 for n in ast.walk(tree) if isinstance(n, ast.Call)
+               and getattr(n.func, "attr", getattr(n.func, "id", None)) == name)
+
+
+def test_every_path_templating_rule_decides_variation_through_the_one_owner():
+    """BUG-0507: `core.pathtemplate` was written as a second variation rule beside
+    `disco.synth.template_paths` (BUG-0501's fix) and repeated the defect BUG-0501 had
+    fixed. Both decide through `varying_is_parameter`."""
+    import ast
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1] / "fuzzlab"
+    for rel, fn in (("core/pathtemplate.py", "path_templates"),
+                    ("disco/synth.py", "template_paths")):
+        tree = ast.parse((root / rel).read_text())
+        (func,) = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)
+                   and n.name == fn]
+        assert _calls(func, "varying_is_parameter") >= 1, rel
+
+
+def test_the_variation_guard_flags_a_rule_of_its_own():
+    import ast
+    assert _calls(ast.parse("if len(values) >= 2: k = 'slug'"), "varying_is_parameter") == 0
+
+
+def test_the_one_decision_takes_both_kinds_of_evidence():
+    from fuzzlab.core.pathtemplate import varying_is_parameter as v
+    assert v({"alice", "bob"}) and not v({"Cards", "Challenges"}, code={"Cards",
+                                                                      "Challenges"})
+    assert not v({"alice", "bob"}, data={"alice"})                # bob never seen as data
+    assert v({"alice", "bob", "carol"}, data={"alice", "bob", "carol"}, min_distinct=3)

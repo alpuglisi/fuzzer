@@ -125,7 +125,11 @@ def import_spider(spider_db: str | Path, store: Store, run_id: int, *,
                          seen_pages, link_sets, main)
         if source != _write_seed_source() and _answered(row["status_code"]):
             path_urls.append(row["url"])
-    _import_path_templates(store, run_id, path_urls, "link", counts, main)
+    try:                              # FR-CRAWL-28; absent in older spider DBs
+        code = frozenset(r[0] for r in src.execute("SELECT segment FROM script_segments"))
+    except sqlite3.Error:
+        code = frozenset()
+    _import_path_templates(store, run_id, path_urls, "link", counts, main, code=code)
     _import_forms(src, store, run_id, counts, main)
     _import_requests(src, store, run_id, counts, fuzz_json_writes=fuzz_json_writes,
                      main=main)
@@ -189,14 +193,17 @@ def _answered(status) -> bool:
 
 
 def _import_path_templates(store: Store, run_id: int, urls, source: str,
-                           counts: dict, main: str | None = None) -> None:
+                           counts: dict, main: str | None = None, *,
+                           code=frozenset()) -> None:
     """The run's URLs -> ``path`` parameters (FR-AUD-26): each `core.pathtemplate`
     template is an endpoint (its path with one ``{param}`` segment, GET) with one
     ``path`` parameter whose example is the crawled value, blanked when it looks like
-    an identifier (PA-0100). Both importers call it once, after their URLs."""
+    an identifier (PA-0100). ``code`` is the path segments the app's scripts hold, as
+    the crawl recorded them (FR-CRAWL-28): a value among them names a route, not data.
+    Both importers call it once, after their URLs."""
     from fuzzlab.core.pathtemplate import path_templates
     from fuzzlab.core.redaction import looks_like_identifier
-    for t in path_templates(urls):
+    for t in path_templates(urls, code=code):
         stored = t.path if main is None or t.origin == main else t.origin + t.path
         endpoint_id = _upsert_endpoint(store, run_id, stored, "GET", source)
         if _get_parameter(store, run_id, endpoint_id, t.param) is not None:
@@ -277,10 +284,22 @@ def import_disco(run_dir: str | Path, store: Store, run_id: int, *,
         _import_page_url(store, run_id, url, None, DISCO_SOURCE, counts, seen_pages,
                          link_sets, main)
     _import_path_templates(store, run_id, path_urls + page_urls, DISCO_SOURCE, counts,
-                           main)
+                           main, code=_disco_code_segments(run_dir))
     _import_link_sets(store, run_id, link_sets, counts)
     store.conn.commit()
     return counts
+
+
+def _disco_code_segments(run_dir: Path) -> frozenset[str]:
+    """A disco run's ``script_segments.json`` (FR-CRAWL-28): the path segments its
+    app's scripts hold; nothing for an older run or a malformed file."""
+    try:
+        doc = json.loads((run_dir / "script_segments.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return frozenset()
+    if not isinstance(doc, list):
+        return frozenset()
+    return frozenset(s for s in doc if isinstance(s, str))
 
 
 def _disco_actions(path: Path, counts: dict) -> tuple[list[str], dict[str, frozenset]]:

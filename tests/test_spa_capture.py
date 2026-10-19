@@ -768,3 +768,14 @@ def test_no_dry_submit_records_no_dry_write(lab, tmp_path):
     sp, db = _crawl(spa_lab, tmp_path, dry_submit=False)
     assert _dry(db) == {} and sp.spa_counts["forms_dry_submitted"] == 0
     assert not any("dry-submitted" in ln for ln in sp.spa_summary())
+
+
+def test_the_crawl_records_the_path_segments_its_scripts_hold(lab, tmp_path):
+    """FR-CRAWL-28 (BUG-0507): the names the app's code holds are the variation rule's
+    evidence that a segment is a route; an identifier-like segment is never stored."""
+    spa_lab, _other = lab
+    sp, db = _crawl(spa_lab, tmp_path)
+    segments = {s for (s,) in db_rows(db, "SELECT segment FROM script_segments")}
+    assert {"rest", "marker", "user", "login"} <= segments, sorted(segments)
+    assert IDENT not in segments
+    assert sp.spa_counts["script_segments"] == len(segments)

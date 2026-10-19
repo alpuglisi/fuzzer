@@ -119,6 +119,14 @@ def test_a_route_only_the_script_declares_is_loaded_with_its_query(discovered, t
     assert ("/#/track", "id", "fragment") in points, points
 
 
+def test_the_run_records_the_path_segments_its_scripts_hold(discovered):
+    """FR-CRAWL-28 (BUG-0507): ``script_segments.json`` holds the names the app's code
+    hard-codes in its paths, the importer's evidence that a segment is a route."""
+    doc = json.loads((discovered["out"] / "script_segments.json").read_text())
+    assert {"api", "projects", "tasks", "track", "search"} <= set(doc), doc
+    assert doc == sorted(doc)
+
+
 def test_a_catch_all_document_is_an_alias_never_a_second_app(discovered):
     """BUG-0505: ``/sitemap.xml`` (a known file) answers with the app's shell; the
     hash-routed app it renders is the start path's, so nothing is explored under it --

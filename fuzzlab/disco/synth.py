@@ -48,6 +48,7 @@ from dataclasses import dataclass, field
 from statistics import median
 from urllib.parse import parse_qsl, urlsplit
 
+from fuzzlab.core.pathtemplate import varying_is_parameter
 from fuzzlab.core.redaction import PLACEHOLDER, is_sensitive_name, looks_like_identifier
 from fuzzlab.core.urls import canonical_origin
 from fuzzlab.disco.capture import CaptureRecord
@@ -147,7 +148,8 @@ def template_paths(paths: list[tuple[str, str]], data_values: frozenset[str] = f
             if k[i] is None and i > 0:
                 shape = tuple("{}" if (j == i or k[j]) else s for j, s in enumerate(segs))
                 values = groups[(origin, len(segs), i, shape)]
-                if len(values) >= SLUG_MIN_DISTINCT and values <= data_values:
+                if varying_is_parameter(values, data=data_values,
+                                        min_distinct=SLUG_MIN_DISTINCT):
                     k[i] = "slug"
     out = {}
     for key, segs in split.items():

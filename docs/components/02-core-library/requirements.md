@@ -608,6 +608,20 @@ plugin registry. It is the layer that makes the store the integration bus.
   segment before it. A URL whose last segment is a static asset (`ASSET_EXTENSIONS`)
   gives none; a file name (`FILE_EXTENSIONS`) or a placeholder is never a value. A URL
   with two parameters gives two templates, the other segment concrete (SP-45). Pure.
+  *Amended `CC-CORE-0062` (BUG-0507):* `path_templates(urls, code=...)`:
+  - a segment in `JS_PLACEHOLDERS` (`undefined`, `null`, `NaN`, `Infinity`,
+    `[object Object]`) is shape evidence, named `id`;
+  - a varying position is a parameter only through `varying_is_parameter(values,
+    code=, data=None, min_distinct=2)`, the one decision `disco.synth` also uses: at
+    least `min_distinct` values not among `code` (the segments the app's scripts hold,
+    `code_segments`), and, with response `data`, every such value seen as data;
+  - only a data value is a variation template's example;
+  - one template per (origin, position), the first evidence naming it;
+  - `FILE_EXTENSIONS` covers documents, data, configuration, backups and archives.
+
+  `code_segments(text)` is each run of URL characters after a `/` ending at `/`, a
+  quote, `?` or `#`, identifier-like ones dropped, at most `MAX_CODE_SEGMENTS`
+  (5000), in one linear scan.
 
 - **FR-CORE-504** *(a crawled URL's stored form; `CC-CORE-0061`, 2026-10-19).*
   `core.urls.store_url(url, main_origin, route=False)` is how an importer stores a

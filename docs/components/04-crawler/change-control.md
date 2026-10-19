@@ -3,6 +3,25 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0046 — Both crawlers record the path segments the app's scripts hold; synth decides slugs through the one rule (FR-CRAWL-28, BUG-0507) (2026-10-19)
+- Change: `fuzzlab/tools/spider.py` (`script_segments` table,
+  `StorageManager.record_script_segments`, `MAX_SCRIPT_SEGMENTS`, the `script_segments`
+  counter, filled at each script scan); `fuzzlab/disco/explore.py`
+  (`_note_code_segments` from each JavaScript body `_gather` reads,
+  `script_segments.json` written when the run ends); `fuzzlab/disco/synth.py`
+  (`template_paths` decides through `core.pathtemplate.varying_is_parameter`, same data
+  evidence and `SLUG_MIN_DISTINCT`).
+- Reason: BUG-0507: the importers' variation rule needs the code's names as evidence,
+  and only a crawl reads whole scripts (the capture truncates bodies); synth's own copy
+  of the decision is the one BUG-0501 fixed.
+- Impact: a new spider DB table and a new run file; synth's output unchanged.
+- Risk: low. Names only; identifier-like segments never stored; capped.
+- Deliverables:
+  - [x] code; `tests/test_spa_capture.py` (the table filled, no identifier),
+    `tests/test_disco_e2e.py` (the file written), `tests/test_disco_synth.py` unchanged
+    and passing — done
+  - [x] FR-CRAWL-28, ARCHITECTURE, CHANGELOG — done
+
 ### CC-CRAWL-0045 — The spider dry-submits SPA forms and records every write a window blocks (FR-CRAWL-26, BUG-0506) (2026-10-19)
 - Change (`fuzzlab/tools/spider.py`, `fuzzlab/cli_taxonomy.py`):
   - `dry_submit=True` / `--no-dry-submit`: `_dry_submit_spa_forms`, `_dry_click`,

@@ -62,6 +62,10 @@ def _locked(method):
     return call
 
 
+#: FR-CRAWL-28: at most this many script path segments are kept per crawl.
+MAX_SCRIPT_SEGMENTS = 20000
+
+
 class StorageManager:
     """Handles all database interactions to keep the crawler modular.
 
@@ -150,6 +154,11 @@ class StorageManager:
                 UNIQUE (route, signature)
             )
         ''')
+        # The path segments the app's scripts hold (`core.pathtemplate.code_segments`,
+        # FR-CRAWL-28): evidence that a varying URL segment is a route's name, not a
+        # value. Names only; an identifier-like segment is never kept.
+        self.cursor.execute(
+            "CREATE TABLE IF NOT EXISTS script_segments (segment TEXT PRIMARY KEY)")
         # Add columns that older result databases won't have.
         for col, decl in (("title", "TEXT"), ("content", "TEXT"),
                           ("rendered", "INTEGER DEFAULT 0"), ("source", "TEXT DEFAULT 'link'")):
@@ -172,6 +181,7 @@ class StorageManager:
         self.cursor.execute('DELETE FROM discovered_requests')
         self.cursor.execute('DELETE FROM crawl_stats')
         self.cursor.execute('DELETE FROM revealed_forms')
+        self.cursor.execute('DELETE FROM script_segments')
         self.conn.commit()
         self._keys = set()
 
@@ -218,6 +228,19 @@ class StorageManager:
             return None
         except sqlite3.IntegrityError:
             return "duplicate"
+
+    @_locked
+    def record_script_segments(self, segments):
+        """File the path segments a script holds (FR-CRAWL-28), at most
+        `MAX_SCRIPT_SEGMENTS` per crawl; returns how many were new."""
+        have = self.cursor.execute("SELECT COUNT(*) FROM script_segments").fetchone()[0]
+        room = max(0, MAX_SCRIPT_SEGMENTS - have)
+        before = self.conn.total_changes
+        self.cursor.executemany(
+            "INSERT OR IGNORE INTO script_segments (segment) VALUES (?)",
+            [(seg,) for seg in sorted(segments)[:room]])
+        self.conn.commit()
+        return self.conn.total_changes - before
 
     @_locked
     def record_revealed_form(self, page_url, route, signature, submitted=False):
@@ -626,6 +649,7 @@ class LocalSpider:
             "requests_not_recorded", "deletes_blocked", "forms_submitted",
             # FR-CRAWL-26 (dry submission): clicks made, writes recorded
             "forms_dry_submitted", "requests_captured_dry", "requests_captured_blocked",
+            "script_segments",                    # FR-CRAWL-28: names the code holds
             "forms_refused", "forms_not_submittable", "forms_not_found_anonymous",
             "submissions_over_cap", "clicks_dispatched", "forms_label_changed",
             # forms phase 4 (FR-CRAWL-15/16; persisted in crawl_stats, PA-0110)
@@ -1247,14 +1271,18 @@ class LocalSpider:
             self.spa_counts["scripts_too_large"] += 1
             return
         body = response.body()
+        text = body.decode("utf-8", "replace")
         # one scan of the body for routes and query parameters (FR-CRAWL-17, Q1)
-        found = spa.scan_script(body.decode("utf-8", "replace")) \
-            if len(body) <= spa.MAX_SCRIPT_BYTES else None
+        found = spa.scan_script(text) if len(body) <= spa.MAX_SCRIPT_BYTES else None
         if found is None:
             self.spa_counts["scripts_too_large"] += 1
             return
         routes, query = found
         self.spa_counts["scripts_scanned"] += 1
+        # FR-CRAWL-28: the path segments the code names (`core.pathtemplate`)
+        from fuzzlab.core.pathtemplate import code_segments
+        self.spa_counts["script_segments"] += \
+            self.storage.record_script_segments(code_segments(text))
         self._pending_routes.extend(routes)
         if self._query_on:
             self._note_query_scan(query)

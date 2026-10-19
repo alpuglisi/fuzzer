@@ -854,3 +854,9 @@ Juice Shop lab is complete.
 - **Evidence:** review of the uncommitted diff (2026-10-19). The crawl was stopped. The fixture's profile form, which clears its cookie in the handler, fails the session test with the rollback removed (`spa_submit_stopped` set).
 - **Impact:** none committed. One measurement crawl was discarded.
 - **Status:** fixed before commit (`FR-CRAWL-26`; the content-and-render alias rule; a password form in a fresh context and a client-state rollback). Each rule has a test proven to fail on the defective version.
+
+### F-074 — I rebuilt a decision this project had already fixed, and repeated its defect
+- **What:** I wrote `core.pathtemplate`'s variation rule (CC-CORE-0060) without searching for an existing path-templating rule. `disco.synth.template_paths` had been fixed a day earlier (BUG-0501) for exactly the shape my rule then got wrong on Juice Shop: API resource names taken for one parameter. I measured my rule on one lab (streaming), which has no sibling routes, and registered it as a new shared primitive (SP-45).
+- **Evidence:** BUG-0507; `synth.template_paths`'s docstring cites BUG-0501 and Juice Shop's `/api/Users/`, `/api/Products/`.
+- **Impact:** every crawl-fed run on Juice Shop since CC-CORE-0060 probed four or five false path endpoints.
+- **Status:** fixed (one decision, `varying_is_parameter`, SP-45; PA-0507(2) requires the search).

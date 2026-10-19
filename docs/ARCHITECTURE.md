@@ -1428,6 +1428,10 @@ tracked in the requirements files, not here.
   - Imports nothing from `tools/spider.py`, `tools/spa.py`, `tools/formnav.py`
     except the SP-47 scanner names, by name (D70 amended;
     `tests/test_disco_isolation.py`).
+  - Both crawlers record the path segments the app's scripts hold (FR-CRAWL-28: the
+    spider's `script_segments` table, disco's `script_segments.json`); the importers'
+    path templating and `synth`'s slugs decide variation through one rule
+    (`core.pathtemplate.varying_is_parameter`, SP-45, BUG-0507).
 - **The legacy spider (`tools/spider.py`) is deprecated (FR-CRAWL-21).** It runs
   unchanged. `fuzzlab auto` reads a disco run as crawl points since CC-FUZZ-0090
   (`--disco-run`, `store_adapter.import_disco`, FR-AUD-23) as well as a spider DB; its

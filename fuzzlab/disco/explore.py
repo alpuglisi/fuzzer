@@ -309,6 +309,8 @@ class ExploreOptions:
 
 
 #: The most workers a run may ask for (each is a browser).
+#: FR-CRAWL-28: at most this many script path segments are kept per run.
+MAX_SCRIPT_SEGMENTS = 20000
 MAX_WORKERS = 8
 
 
@@ -383,6 +385,9 @@ class _Shared:
         #: sha256 of each HTML document body loaded -> the path it was first loaded at:
         #: the same body under another path is an alias, never a new state (BUG-0505)
         self.documents: dict[str, str] = {}
+        #: the path segments the app's scripts hold (`core.pathtemplate.code_segments`,
+        #: FR-CRAWL-28), written to ``script_segments.json`` beside the action log
+        self.code_segments: set[str] = set()
 
 
 def refusal(el: dict, deny: tuple[str, ...]) -> str | None:
@@ -594,6 +599,7 @@ class Explorer:
                     found += response_urls(resp.url, media, text, {})
                     if "javascript" in media:          # its declared routes (FR-CRAWL-12)
                         routes += self._script_routes(text, page)
+                        self._note_code_segments(text)
             except (_pw_error(), UnicodeDecodeError):  # a body the driver let go
                 continue
         with shared.lock:
@@ -956,6 +962,7 @@ class Explorer:
                 t.start()
             for t in threads:
                 t.join()
+        self._write_code_segments()
         if shared.failure is not None:
             raise shared.failure
         return self.report
@@ -1150,6 +1157,24 @@ class Explorer:
         rebased = urlunsplit(urlsplit(page.url)._replace(path=first))
         with self._shared.lock:
             return state_fingerprint(rebased, got[1]) in self._shared.known
+
+    def _note_code_segments(self, text: str) -> None:
+        """FR-CRAWL-28: the path segments a script body holds, kept for the importer's
+        variation rule (at most `MAX_SCRIPT_SEGMENTS` per run)."""
+        from fuzzlab.core.pathtemplate import code_segments
+        found = code_segments(text)
+        with self._shared.lock:
+            room = MAX_SCRIPT_SEGMENTS - len(self._shared.code_segments)
+            self._shared.code_segments.update(sorted(found - self._shared.code_segments)
+                                              [:max(0, room)])
+
+    def _write_code_segments(self) -> None:
+        """``script_segments.json`` beside the action log: the run's code segments,
+        sorted (`store_adapter.import_disco` reads it)."""
+        if self.actions_log is None:
+            return
+        path = Path(self.actions_log).with_name("script_segments.json")
+        path.write_text(json.dumps(sorted(self._shared.code_segments)), encoding="utf-8")
 
     def _script_routes(self, text: str, page) -> list[str]:
         """The routes and route-query seeds an app script declares (the spider's own

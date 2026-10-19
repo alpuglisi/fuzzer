@@ -326,10 +326,14 @@ budget where a vulnerability is plausible.
   (FR-AUD-25) and the location-agnostic rules apply as to any point.
   - **Stated gaps:** ~~a template on another origin than the run's base is stored as a
     path, so it is probed at the base's origin~~ *(fixed by FR-AUD-27: it keeps its
-    origin)*; variation can template sibling pages (`/docs/intro`,
-    `/docs/setup` -> `/docs/{docs}`), which costs probes, not safety (the destructive
-    and transaction checks judge the template); path parameters of POST requests are
-    not discovered.
+    origin)*; ~~variation can template sibling pages (`/docs/intro`,
+    `/docs/setup` -> `/docs/{docs}`), which costs probes, not safety~~ *(narrowed by
+    CC-AUD-0049, BUG-0507: a value the app's scripts name is a route, not a value;
+    with no recorded code segments, an older crawl, it still can)*; path parameters
+    of POST requests are not discovered.
+  - *CC-AUD-0049:* each importer passes the crawl's code segments to
+    `_import_path_templates` (`code=`): the spider DB's `script_segments` table, a disco
+    run's `script_segments.json` (FR-CRAWL-28). Neither present: no code evidence.
 - **FR-AUD-25** *(an id-shaped path segment; `CC-AUD-0046`, 2026-10-19, FR-FUZZ-57).*
   `R-ACCESS-CONTROL-PATH` fires on a GET `path` point whose name is `id`, `uuid` or
   `guid`, ends in `_id`/`-id` (or `_uuid`/`-guid`…), or is camelCase `…Id`/`…Uuid`
