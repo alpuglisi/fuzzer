@@ -97,8 +97,13 @@ Newest first.
     - P2 `test_the_count_test_covers_every_sending_keyword_of_run_auto`
     - P3 `test_the_keyword_guard_catches_a_synthetic_new_keyword`
   - [x] FR-FUZZ-62 added; FR-FUZZ-60 edited; BUG-0520 report — done
-  - [ ] Rebase onto DG-FINDLINK's merge; `scripts/verify_change.py --base <main>` —
-    todo (after DG-FINDLINK)
+  - [x] Rebased onto DG-FINDLINK's merge (`a8b81df`). `FUZZLAB_REQUIRE_BROWSER=1
+    scripts/verify_change.py --base a8b81df` on `f8713d8` — done:
+    - 121 test files, all in one parallel pass, 0 serial;
+    - 3668 passed, 0 failed, 0 errors, 14 xfailed;
+    - 5 skipped: `test_packaging`'s wheel build (bdist_wheel is unavailable on this
+      host) and 4 live external-lab tests (`FUZZLAB_LIVE_EXTERNAL_LABS` is not set);
+    - no browser test skipped.
   - [ ] CHANGELOG, ERROR_LOG, PA-0520, SHARED_PRIMITIVES, DIAGRAMS.md, ARCHITECTURE
     (the orchestrator's files; the text is handed over) — todo
 - Effectiveness (assessed 2026-10-19, before the rebase):
