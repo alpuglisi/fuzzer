@@ -231,3 +231,19 @@ def test_the_writer_guard_catches_a_synthetic_offender():
                     "y.py": 'c.execute("DELETE FROM trace_event WHERE run_id=?")',
                     "z.py": 'c.execute("SELECT * FROM dg_flow")'}) == \
         ["x.py: dg_flow", "y.py: trace_event"]
+
+
+def test_a_unit_of_work_closing_is_written_at_once(tmp_path):
+    """Measured on Juice Shop: events buffered before a quiet phase (a browser
+    confirmation sends nothing through the sender) waited 38.7 s for the next event.
+    A test's or strategy's end flushes, whatever the clock says."""
+    clock = [0.0]
+    with Store(tmp_path / "s.db") as store:
+        run = store.start_run("auto", "h")
+        rec = trace.TraceRecorder(store, run, flush_seconds=3600, clock=lambda: clock[0])
+        rec.emit("exchange", {"origin": O, "url": O + "/a", "method": "GET"}, key="x1")
+        assert store.conn.execute("SELECT COUNT(*) FROM trace_event").fetchone()[0] == 0
+        clock[0] = 40.0                                     # a quiet phase
+        rec.emit("test.strategy", {"test": "t1", "outcome": "not_confirmed"}, key="s1")
+        assert store.conn.execute("SELECT COUNT(*) FROM trace_event").fetchone()[0] == 2
+        rec.close()

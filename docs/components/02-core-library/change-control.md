@@ -13,7 +13,10 @@ Newest first.
     when the source records none (`NOW` is the default);
   - `reduce`: idempotent and order-independent; `rebuild`;
   - `interface_id` / `interface_path`: id-shaped segments grouped, memoized per
-    segment.
+    segment;
+  - `FLUSH_KINDS`: a run's, test's or strategy's boundary and a finding are written at
+    once. Measured on Juice Shop without it: a 38.7 s update lag after a quiet phase,
+    such as a browser confirmation that sends nothing through the sender.
 
   Tests: `tests/_downgrade.py` undoes migration 24.
 - Reason: the owner asked for data-flow and sequence diagrams backed by one persisted

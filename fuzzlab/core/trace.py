@@ -49,6 +49,10 @@ MAX_ATTR_VALUES = 40
 #: The recorder's buffer bound (events) and its time bound (seconds).
 MAX_BUFFER = 512
 FLUSH_SECONDS = 0.25
+#: Kinds that close a unit of work: written at once, so the diagrams never wait for the
+#: next event after a quiet phase (a browser confirmation, a long timing check).
+FLUSH_KINDS = frozenset({"run.start", "run.end", "test.start", "test.strategy",
+                         "test.end", "finding"})
 #: `TraceRecorder.emit`'s default ``t``: the event is happening now.
 NOW = object()
 #: Characters of a probe value kept as a preview (escaped by every renderer).
@@ -503,7 +507,7 @@ class TraceRecorder:
         if len(self._buffer) >= self.max_buffer:
             self.stats["forced_flushes"] += 1
             self.flush()
-        elif now - self._oldest >= self.flush_seconds:
+        elif kind in FLUSH_KINDS or now - self._oldest >= self.flush_seconds:
             self.flush()
         return key
 
