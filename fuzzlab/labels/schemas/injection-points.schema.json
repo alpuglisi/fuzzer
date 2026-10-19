@@ -24,6 +24,10 @@
         "param": { "type": "string" },
         "location": { "enum": ["query", "body", "fragment", "header", "path", "cookie"] },
         "rendering": { "enum": ["server", "js", "server-json"] },
+        "json_body": {
+          "type": "object",
+          "description": "a JSON body the app sends to this endpoint; param names one of its leaves (core.jsonbody naming). The point is then fuzzed as a JSON leaf with the other leaves sent too (FR-FUZZ-54)."
+        },
         "client_only": {
           "type": "boolean",
           "description": "true when the param is used only client-side (no server reflection); a server-side crawler cannot see it."

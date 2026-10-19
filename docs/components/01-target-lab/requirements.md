@@ -6408,10 +6408,14 @@ lane) can submit a payload as
   pins `python:3.12-slim` and Flask 3.1.0 with its dependencies (PyPI digests). Ground
   truth: insecure deserialization of the `sessionId` cookie on `/user` (positive);
   the same cookie on `/` and `/admin`'s `username` (negatives).
+  `secdevlabs-mongection` (A3, Express + MongoDB, CC-LAB-0309) on 127.0.0.1:3077
+  (`SDL_MONGECTION_PORT`): npm packages installed on the host by `npm ci` (lockfile
+  integrity), Node 20 and MongoDB 4.4 pinned (upstream pins neither), the app run with
+  `--unhandled-rejections=warn` (its failed-login path answers twice, which Node 15+
+  turns into a crash). Ground truth with `json_body` points: NoSQL injection in
+  `/login`'s `email` and `password` (positives), `/register`'s `email` and `name`
+  (negatives).
   **Not built, and why** (2026-10-18):
-  - `mongection` (Node + MongoDB): its one flaw is NoSQL operator injection
-    (`{"$ne": null}` in `/login`'s `email`/`password`), not a scoreable class here
-    (no strategy, no label class); its echoes are regex-checked emails, so nothing else.
   - `comment-killer` (React dev server + Go API): built and its stored XSS through
     `eval` confirmed in a browser, then withdrawn. Its bundle calls the API at a
     hard-coded `http://localhost:10017`, so the lab needs a second, fixed published port,

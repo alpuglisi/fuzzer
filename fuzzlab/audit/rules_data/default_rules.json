@@ -9,6 +9,13 @@
       "reference": "sql-injection"
     },
     {
+      "id": "R-NOSQLI-JSON",
+      "category": "nosql-injection",
+      "transaction_type": "NoSQL Injection",
+      "when": { "location_in": ["json"] },
+      "reference": "nosql-injection"
+    },
+    {
       "id": "R-XSS-REFLECT",
       "category": "xss",
       "transaction_type": "Reflected Input",

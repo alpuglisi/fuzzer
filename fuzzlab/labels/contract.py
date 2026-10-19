@@ -100,6 +100,10 @@ class InjectionPoint:
     location: str
     rendering: str | None = None
     client_only: bool = False
+    #: A JSON body the app sends to this endpoint, ``param`` naming one of its leaves
+    #: (`core.jsonbody.display_name`): the point is then a JSON-leaf point whose probes
+    #: carry the other leaves too (FR-FUZZ-54). None for any other point.
+    json_body: dict | None = None
 
     @property
     def key(self) -> tuple[str, str, str]:
@@ -152,13 +156,23 @@ def load_injection_points(ground_truth_dir: str | Path) -> list[InjectionPoint]:
     path = Path(ground_truth_dir) / "injection-points.json"
     data = json.loads(path.read_text("utf-8"))
     _validate(data, "injection-points.schema.json")
-    return [
+    points = [
         InjectionPoint(
             url=p["url"], method=p["method"], param=p["param"], location=p["location"],
             rendering=p.get("rendering"), client_only=bool(p.get("client_only", False)),
+            json_body=p.get("json_body"),
         )
         for p in data["points"]
     ]
+    from fuzzlab.core import jsonbody
+    for pt in points:
+        if pt.json_body is None:
+            continue
+        leaves = jsonbody.leaves(pt.json_body)
+        if leaves is None or pt.param not in {jsonbody.display_name(p) for p, _v in leaves}:
+            raise ContractError(f"{path}: point {pt.method} {pt.url} {pt.param!r}: its "
+                                f"json_body has no such leaf (or is not a JSON object)")
+    return points
 
 
 def _load_expected_csv(ground_truth_dir: str | Path) -> dict[str, bool]:

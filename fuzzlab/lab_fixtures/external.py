@@ -72,10 +72,17 @@ SECDEVLABS_PYTHON312_IMAGE = ("docker.io/library/python:3.12-slim@sha256:"
 #: Docker Hub mirror (as bWAPP's PHP_IMAGE; Docker Hub rate-limits this host).
 SECDEVLABS_PHP_IMAGE = ("mirror.gcr.io/library/php:8.3-apache@sha256:"
                         "f8506a19d79cad7fcf0c8049f1ed2208824961018fdc10bd80f324094dcd36bd")
+#: mongection's upstream bases are `node` and `mongo` (unpinned): Node 20 and MongoDB
+#: 4.4 (Mongoose 5's driver era), from Google's Docker Hub mirror.
+SECDEVLABS_NODE20_IMAGE = ("mirror.gcr.io/library/node:20-alpine@sha256:"
+                           "fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293")
+SECDEVLABS_MONGO_IMAGE = ("mirror.gcr.io/library/mongo:4.4@sha256:"
+                          "4be76f674fc4b27859816811b8baa3c51830eb1dbf4ca81a51e26b79edd662ef")
 PINNED_IMAGES = frozenset({BUSYBOX_IMAGE, PHP_IMAGE, MYSQL_IMAGE, JUICE_SHOP_IMAGE,
                            CRAWL_MAZE_PYTHON_IMAGE, SECDEVLABS_GOLANG_IMAGE,
                            SECDEVLABS_MARIADB_IMAGE, SECDEVLABS_PYTHON38_IMAGE,
-                           SECDEVLABS_PYTHON312_IMAGE, SECDEVLABS_PHP_IMAGE})
+                           SECDEVLABS_PYTHON312_IMAGE, SECDEVLABS_PHP_IMAGE,
+                           SECDEVLABS_NODE20_IMAGE, SECDEVLABS_MONGO_IMAGE})
 
 BWAPP_ZIP_URL = "https://sourceforge.net/projects/bwapp/files/bWAPP/bWAPP_latest.zip/download"
 BWAPP_ZIP_NAME = "bWAPP_latest.zip"
@@ -124,6 +131,7 @@ SECDEVLABS_APPS = {
     "secdevlabs-sstype": "owasp-top10-2021-apps/a3/sstype",
     "secdevlabs-vinijr-blog": "owasp-top10-2021-apps/a5/vinijr-blog",
     "secdevlabs-amarelo-designs": "owasp-top10-2021-apps/a8/amarelo-designs",
+    "secdevlabs-mongection": "owasp-top10-2021-apps/a3/mongection",
 }
 #: lab name -> the Python distributions its image installs offline (`fetch_pypi_dists`):
 #: the app's own requirements.txt pins, each file's sha256 as PyPI publishes it.
@@ -214,6 +222,8 @@ LAB_META: dict[str, LabMeta] = {
                                    8080, "/", "/", None, "", False),
     "secdevlabs-copy-n-paste": LabMeta("secdevlabs-copy-n-paste", "api", "SDL_CNP_PORT",
                                        3071, 10001, "/", "/healthcheck", None, "", False),
+    "secdevlabs-mongection": LabMeta("secdevlabs-mongection", "server", "SDL_MONGECTION_PORT",
+                                     3077, 10001, "/", "/", None, "", False),
     "secdevlabs-amarelo-designs": LabMeta("secdevlabs-amarelo-designs", "app",
                                           "SDL_AMARELO_PORT", 3076, 5000, "/", "/", None,
                                           "", False),
@@ -465,6 +475,24 @@ def go_vendor(moddir: Path, *, timeout: float = 900.0) -> None:
             raise ExternalLabError("go mod verify did not verify every module")
 
 
+def npm_install(pkgdir: Path, *, timeout: float = 900.0) -> None:
+    """Install a Node package's locked dependencies with the host's npm (``npm ci``:
+    exactly the lockfile, each package checked against its ``integrity`` hash; no
+    install scripts), so its image needs no registry. Raises when npm is missing or
+    the install fails (an integrity mismatch fails it)."""
+    import shutil
+
+    from fuzzlab.procutil import run_bounded
+    npm = shutil.which("npm")
+    if npm is None:
+        raise ExternalLabError("npm is not installed on this host: needed to install the "
+                               "app's locked packages (checked against its lockfile)")
+    res = run_bounded([npm, "ci", "--ignore-scripts", "--no-audit", "--no-fund"],
+                      timeout=timeout, cwd=str(pkgdir))
+    if res.returncode != 0 or not (pkgdir / "node_modules").is_dir():
+        raise ExternalLabError(f"npm ci failed: {(res.stderr or res.stdout or '').strip()[-200:]}")
+
+
 def fetch_secdevlabs_app(lab: str, *, root: Path = EXTERNAL_DIR, repo: str = SECDEVLABS_REPO,
                          commit: str = SECDEVLABS_COMMIT, timeout: float = 900.0) -> Path:
     """The app of secDevLabs lab ``lab``, copied from the pinned checkout into
@@ -481,6 +509,9 @@ def fetch_secdevlabs_app(lab: str, *, root: Path = EXTERNAL_DIR, repo: str = SEC
     shutil.copytree(src / SECDEVLABS_APPS[lab], dest, symlinks=True)
     for gomod in sorted(dest.rglob("go.mod")):
         go_vendor(gomod.parent, timeout=timeout)
+    for lock in sorted(dest.rglob("package-lock.json")):
+        if "node_modules" not in lock.parts:
+            npm_install(lock.parent, timeout=timeout)
     if lab in SECDEVLABS_PYPI:
         fetch_pypi_dists(SECDEVLABS_PYPI[lab], root / lab / ".cache" / "dists",
                          timeout=timeout)

@@ -3,6 +3,24 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0309 — secDevLabs Mongection (NoSQL injection) as an external lab (2026-10-19)
+- Change: `fuzzlab/lab_fixtures/external.py` (Node 20 / MongoDB 4.4 pins, the app,
+  `npm_install`: `npm ci --ignore-scripts` on the host, run by `fetch_secdevlabs_app`
+  for every lockfile, `LAB_META`); `lab/external/secdevlabs-mongection/`;
+  `lab/ground-truth-secdevlabs-mongection/` (the first `json_body` points, FR-FUZZ-54);
+  `.gitignore`; the static tests' GT list; FR-LAB-306.
+- Reason: the owner approved NoSQL injection (2026-10-19), which makes this app's flaw
+  scoreable.
+- Impact: a new loopback lab (127.0.0.1:3077); the database is unpublished, internal,
+  on tmpfs, initialised by upstream's script mounted read-only.
+- Risk: low. `NODE_OPTIONS=--unhandled-rejections=warn` restores the app-era behaviour
+  (its `/login` answers a failed login twice; Node 15+ exits on that rejection).
+- Deliverables:
+  - [x] fixture, ground truth (2 positives, 2 negatives, checked live: `{"$ne": null}`
+    in both login fields lists every account; a known email with `{"$ne": "x"}` as the
+    password logs in; an object email is refused by the regex) — done
+  - [x] FR-LAB-306, CHANGELOG — done
+
 ### CC-LAB-0308 — secDevLabs Amarelo Designs (insecure deserialization) as an external lab (2026-10-18)
 - Change: `fuzzlab/lab_fixtures/external.py` (app, PyPI pins for Flask 3.1.0 and its
   six dependencies, `LAB_META`); `lab/external/secdevlabs-amarelo-designs/`;

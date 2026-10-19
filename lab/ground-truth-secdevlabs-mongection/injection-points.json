@@ -1,0 +1,52 @@
+{
+ "version": 1,
+ "target": "secdevlabs_mongection_10be4384",
+ "points": [
+  {
+   "url": "/login",
+   "method": "POST",
+   "param": "email",
+   "location": "body",
+   "rendering": "server",
+   "json_body": {
+    "email": "user@lab.test",
+    "password": "password"
+   }
+  },
+  {
+   "url": "/login",
+   "method": "POST",
+   "param": "password",
+   "location": "body",
+   "rendering": "server",
+   "json_body": {
+    "email": "user@lab.test",
+    "password": "password"
+   }
+  },
+  {
+   "url": "/register",
+   "method": "POST",
+   "param": "email",
+   "location": "body",
+   "rendering": "server",
+   "json_body": {
+    "name": "User",
+    "email": "user@lab.test",
+    "password": "password"
+   }
+  },
+  {
+   "url": "/register",
+   "method": "POST",
+   "param": "name",
+   "location": "body",
+   "rendering": "server",
+   "json_body": {
+    "name": "User",
+    "email": "user@lab.test",
+    "password": "password"
+   }
+  }
+ ]
+}

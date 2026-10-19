@@ -3,6 +3,32 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0092 — NoSQL operator injection: class, rule, strategy; JSON-body ground-truth points (FR-FUZZ-54) (2026-10-19)
+- Change: `fuzzlab/oracle/strategies.py` (`NoSqlOperatorStrategy`, in
+  `default_strategies()`, `_CATEGORY_TO_CLASS`), `fuzzlab/core/jsonbody.py`
+  (`body_with`: typed leaf values, a leaf the body lacks refused), `fuzzlab/core/
+  runmode.py` (`nosqli` -> `nosql-injection`), `fuzzlab/audit/rules_data/
+  default_rules.json` (`R-NOSQLI-JSON`), `fuzzlab/labels/schemas/` (`nosqli`, `nosql`,
+  a point's optional `json_body`), `fuzzlab/labels/contract.py` (`json_body` loaded and
+  checked), `fuzzlab/harness/auto.py` (a `json_body` point becomes a JSON-leaf point).
+- Reason: the owner asked for NoSQL injection (2026-10-19); no strategy tested it, and
+  a JSON leaf could only carry a string.
+- Impact: JSON-leaf points get one more confirmation (up to 21 requests per leaf, read
+  only). Ground-truth points without `json_body` are unchanged.
+- Risk: low-medium. The always-true operator on an endpoint that *updates* by a query
+  filter would match every document, the same exposure as SQL injection's boolean
+  probe (lab-only posture; documented in the strategy).
+- Deliverables:
+  - [x] code; `tests/test_nosqli.py` (typed bodies; confirmed on either leaf of a
+    Mongo-like login; no verdict where objects are stringified, rejected, or answers
+    are random; only string JSON leaves probed; `json_body` loading and refusal; auto's
+    JSON-leaf point; the class is ruled and scoreable) — done
+  - [x] FR-FUZZ-54, CHANGELOG — done
+- Effectiveness (secdevlabs-mongection, CC-LAB-0309, the strategy run on each of its
+  four ground-truth points through the real sender): `/login` `email` and `password`
+  confirmed; `/register` `email` and `name` not; no account created by the probes.
+  The fixture's SQL login (copy-n-paste `/login` `user`): no verdict.
+
 ### CC-FUZZ-0091 — The M6 executor's teardown keeps refused navigations refused (BUG-0504) (2026-10-18)
 - Change: none in `fuzzlab/tools/browserexec.py`; its `finally` calls `navguard.release`,
   whose behaviour changed (CC-CRAWL-0040): pages frozen and drained through the guard,

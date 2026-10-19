@@ -1,0 +1,58 @@
+{
+ "version": 1,
+ "target": "secdevlabs_mongection_10be4384",
+ "cases": [
+  {
+   "case_id": "SDLMG-0001",
+   "url": "/login",
+   "method": "POST",
+   "param": "email",
+   "location": "body",
+   "vuln_class": "nosqli",
+   "sink_context": "nosql",
+   "expected_vulnerable": true,
+   "rendering": "server",
+   "stack": "node_express_mongoose_secdevlabs",
+   "notes": "[reach: crawl,gt] [prov: secDevLabs a3/mongection README] src/db.js: User.find({$and: [{email}, {password}]}) with the JSON body's values as sent; {\"$ne\": null} in both logs in and lists every user's email (checked live at bring-up). The login page posts this JSON body."
+  },
+  {
+   "case_id": "SDLMG-0002",
+   "url": "/login",
+   "method": "POST",
+   "param": "password",
+   "location": "body",
+   "vuln_class": "nosqli",
+   "sink_context": "nosql",
+   "expected_vulnerable": true,
+   "rendering": "server",
+   "stack": "node_express_mongoose_secdevlabs",
+   "notes": "[reach: crawl,gt] [prov: secDevLabs a3/mongection README] the same query: a known email with password {\"$ne\": \"x\"} logs in (checked live at bring-up)."
+  },
+  {
+   "case_id": "SDLMG-0003",
+   "url": "/register",
+   "method": "POST",
+   "param": "email",
+   "location": "body",
+   "vuln_class": "nosqli",
+   "sink_context": "nosql",
+   "expected_vulnerable": false,
+   "rendering": "server",
+   "stack": "node_express_mongoose_secdevlabs",
+   "notes": "[reach: crawl,gt] [prov: secDevLabs a3/mongection README] an email is regex-tested before findOne: an object fails ('Bad Email') and never reaches the query (checked live at bring-up)."
+  },
+  {
+   "case_id": "SDLMG-0004",
+   "url": "/register",
+   "method": "POST",
+   "param": "name",
+   "location": "body",
+   "vuln_class": "nosqli",
+   "sink_context": "nosql",
+   "expected_vulnerable": false,
+   "rendering": "server",
+   "stack": "node_express_mongoose_secdevlabs",
+   "notes": "[reach: crawl,gt] [prov: secDevLabs a3/mongection README] `name` is only stored, never queried."
+  }
+ ]
+}

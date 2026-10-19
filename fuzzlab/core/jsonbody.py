@@ -332,3 +332,32 @@ def body_for(param: str, value: str, entries=None) -> bytes:
     body = build(replace_leaf(base, param, str(value)))
     return json.dumps(body, ensure_ascii=False, separators=(",", ":"),
                       allow_nan=False).encode("utf-8")
+
+
+def body_with(entries, values) -> bytes:
+    """The body ``entries`` describe with each leaf ``values`` names set to its value
+    **as a typed JSON value** -- a string, a number, or an object such as a query
+    operator (``{"$ne": …}``, the NoSQL operator probe, FR-FUZZ-54) -- where
+    :func:`body_for` always sends a string. A name the entries lack is refused, never
+    added (PA-0115); so is a value JSON cannot carry. Raises `JsonPlacementError`."""
+    base = normalize_entries(entries)
+    have = {p for p, _v in base}
+    paths = {}
+    for name in values:
+        path = parse_name(name)
+        if path is None or path not in have:
+            raise JsonPlacementError(f"the body has no leaf {name!r}")
+        paths[name] = path
+    body = build(base)
+    for name, value in values.items():
+        node = body
+        *parents, last = paths[name]
+        for seg in parents:
+            node = node[seg]
+        node[last] = value
+    try:
+        return json.dumps(body, ensure_ascii=False, separators=(",", ":"),
+                          allow_nan=False).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise JsonPlacementError(f"a value JSON cannot carry: {exc}") from None
+

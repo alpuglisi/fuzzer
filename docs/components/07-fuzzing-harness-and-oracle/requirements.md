@@ -1519,6 +1519,18 @@ rewards) derives from it.
   the summary. A directory with no `capture.jsonl` is a usage error before the store
   is opened. `--fuzz-json-writes` applies to it as to a spider DB. Header points
   (`--header-points`) still count the spider DB's pages only.
+- **FR-FUZZ-54 (NoSQL operator injection, `CC-FUZZ-0092`, 2026-10-19)** A class
+  `nosqli` (category `nosql-injection`, sink context `nosql`; rule `R-NOSQLI-JSON`,
+  JSON-leaf points) confirmed by `NoSqlOperatorStrategy` (`operator-differential`): the
+  point's whole JSON body (`core.jsonbody.body_with`, typed values) with every string
+  leaf a fresh literal (B), the target leaf `{"$in": []}` (V, matches nothing) or
+  `{"$ne": <random>}` (D, matches anything), the other string leaves `{"$ne": ...}` in V
+  and D so the target leaf alone decides; confirmed when V answers like B and D does
+  not, over the shared engine's replicated, randomly ordered rounds. A server that
+  rejects or stringifies objects answers V and D alike: no verdict. Only a JSON-leaf
+  point with its body carries the probe. A ground-truth point may carry `json_body`
+  (the body its endpoint takes; `param` one of its leaves): `auto` then audits it as a
+  JSON-leaf point with those siblings.
 
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed

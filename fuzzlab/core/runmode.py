@@ -56,6 +56,7 @@ MANUAL = "manual"
 # LABGEN-GO-0017/0018 twins.
 _VULN_TO_CATEGORY = {
     "sqli": "sql-injection",
+    "nosqli": "nosql-injection",
     "xss-reflected": "xss",
     "xss-stored": "xss",
     "xss-dom": "xss",

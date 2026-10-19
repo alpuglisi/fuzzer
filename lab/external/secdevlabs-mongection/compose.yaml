@@ -1,0 +1,60 @@
+# secDevLabs "Mongection" (globocom, BSD-3-Clause; external lab fixture, CC-LAB-0309).
+# Lab-only. An Express app over MongoDB whose /login passes the JSON body's `email` and
+# `password` straight into a Mongoose find(): an object such as {"$ne": null} is a query
+# operator (OWASP 2021 A3, NoSQL injection) and logs in as every user.
+#
+# Built by ./Dockerfile from the app at the pinned secDevLabs commit, which
+# `labctl.sh up secdevlabs-mongection` copies into the gitignored .cache/app with its npm
+# packages installed on the host by `npm ci` (each checked against the lockfile's
+# integrity hash); the image copies them and fetches nothing. The database runs the
+# pinned MongoDB image with upstream's init script mounted read-only. Upstream pins
+# neither base: the fixture pins Node 20 and MongoDB 4.4.
+#
+# Safety: the app is published on LOOPBACK ONLY (127.0.0.1); the database is never
+# published and sits on an internal network. Capabilities dropped.
+#
+# Run through lab/labctl.sh:  ./labctl.sh up secdevlabs-mongection
+name: fuzzlab-secdevlabs-mongection
+
+x-podman:
+  in_pod: false
+
+services:
+  server:
+    build:
+      context: .
+    networks: [mongection-front, mongection-db]
+    ports:
+      # Loopback only. Never bind 0.0.0.0.
+      - "127.0.0.1:${SDL_MONGECTION_PORT:-3077}:10001"
+    environment:
+      DBUSER: mongection
+      DBPASS: mongection
+      # /login answers a failed login twice ("Cannot set headers after they are sent",
+      # thrown in an async handler). Node 15+ exits on that unhandled rejection; the
+      # Node of the app's era (13/14) only warned, so every failed login killed it.
+      NODE_OPTIONS: --unhandled-rejections=warn
+    depends_on: [mongo]
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 128
+    mem_limit: 256m
+
+  mongo:
+    image: mirror.gcr.io/library/mongo:4.4@sha256:4be76f674fc4b27859816811b8baa3c51830eb1dbf4ca81a51e26b79edd662ef
+    networks: [mongection-db]
+    volumes:
+      - ./.cache/app/deployments/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+    tmpfs: [/data/db, /data/configdb]
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID, DAC_OVERRIDE]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    mem_limit: 512m
+
+networks:
+  mongection-front: {}
+  mongection-db:
+    internal: true

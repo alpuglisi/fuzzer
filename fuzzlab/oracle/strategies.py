@@ -1558,6 +1558,87 @@ class AccessControlIdorStrategy(ConfirmationStrategy):
                        {"probe_a": a.text[:120], "probe_b": b.text[:120]})
 
 
+class NoSqlOperatorStrategy(ConfirmationStrategy):
+    """NoSQL operator injection (FR-FUZZ-54): a JSON leaf that reaches a document
+    query unchanged (MongoDB / Mongoose ``find({email: <leaf>})``) takes a JSON
+    **object** as a query operator. The probe sends the point's whole JSON body (its
+    leaves as the app sent them, `core.jsonbody.body_with`) with:
+
+    * **B** -- every string leaf a fresh random literal (matches nothing);
+    * **V** -- the target leaf ``{"$in": []}`` (an operator that matches nothing);
+    * **D** -- the target leaf ``{"$ne": <random>}`` (an operator that matches
+      anything);
+
+    with every *other* string leaf ``{"$ne": <random>}`` in V and D, so the target
+    leaf alone decides whether a document matches (a login checks email **and**
+    password). Confirms only when V looks like B (an operator that matches nothing is
+    treated as a value that matches nothing) and D does not, in the same replicated,
+    randomly ordered rounds as the shared differential engine (``ENGINE_ROUNDS``; its
+    bound holds for the same reason), each D like the first. A server that rejects
+    or stringifies any object answers V and D alike (``[object Object]`` matches
+    nothing): no verdict.
+
+    Only a JSON-leaf point with its captured body (``location == "json"``) carries
+    this probe: a form field cannot hold an object. Both operators only read; a point
+    that writes with a query (an update by filter) is as exposed as it is to SQL
+    injection's boolean probe, under the same lab-only posture."""
+    vuln_class = "nosqli"
+    mechanism = "operator-differential"
+    category = "nosql-injection"
+
+    def confirm(self, candidate, sender):
+        from fuzzlab.core import jsonbody
+        if candidate.location != jsonbody.LOCATION or not candidate.base_entries:
+            return None
+        try:
+            base = jsonbody.normalize_entries(candidate.base_entries)
+        except jsonbody.JsonPlacementError:
+            return None
+        strings = [jsonbody.display_name(p) for p, v in base if isinstance(v, str)]
+        if candidate.param not in strings:
+            return None                       # only a string leaf becomes an operator
+        rng = _engine_rng()
+        sent: list[str] = []
+
+        def body(slot: str) -> str:
+            tok = "zqns" + _token()
+            sent.append(tok)
+            if slot == "B":
+                values = {n: f"{tok}{i}" for i, n in enumerate(strings)}
+                sent.extend(values.values())
+            else:
+                values = {n: {"$ne": tok} for n in strings}
+                values[candidate.param] = {"$in": []} if slot == "V" else {"$ne": tok}
+            return jsonbody.body_with(base, values).decode("utf-8")
+
+        def send(slot: str) -> Probe:
+            return sender.send(candidate.url, candidate.param, body(slot),
+                               method=candidate.method, location="body",
+                               content_type=jsonbody.ENCTYPE)
+
+        def same(a: Probe, b: Probe) -> bool:
+            forms = sorted({f for t in sent for f in _reflection_forms(t)}, key=len,
+                           reverse=True)
+            return a.status == b.status and \
+                _strip_forms(a.text or "", forms) == _strip_forms(b.text or "", forms)
+
+        b0 = send("B")
+        got = {slot: send(slot) for slot in rng.choice(_SCREEN_ORDERS)}
+        if not same(got["V"], b0) or same(got["D"], b0):
+            return None
+        d1 = got["D"]
+        for _ in range(ENGINE_ROUNDS):
+            got = {slot: send(slot) for slot in rng.choice(_ROUND_ORDERS)}
+            if (not same(got["V"], b0) or not same(got["B"], b0)
+                    or same(got["D"], b0) or not same(got["D"], d1)):
+                return None
+        return Verdict(True, self.vuln_class, self.mechanism,
+                       {"rounds": 1 + ENGINE_ROUNDS, "always": '{"$ne": …}',
+                        "never": '{"$in": []}',
+                        "status": {"base": b0.status, "always": d1.status},
+                        "len": {"base": len(b0.text or ""), "always": len(d1.text or "")}})
+
+
 class InsecureDeserializationTypeConfusionStrategy(ConfirmationStrategy):
     """Confirms unrestricted polymorphic-type deserialization (CWE-502) by a
     two-probe differential over Jackson's `WRAPPER_ARRAY` type-id format
@@ -2608,7 +2689,7 @@ def default_strategies(browser: BrowserExecutor | None = None,
     others.
     """
     return [SqliErrorStrategy(), SqliBooleanStrategy(), SqliEvaluationMarkerStrategy(),
-            SqliTimingStrategy(),
+            SqliTimingStrategy(), NoSqlOperatorStrategy(),
             ReflectedXssStrategy(), DomXssStrategy(browser), StoredXssStrategy(browser),
             OpenRedirectStrategy(), SstiStrategy(), GoTemplateSstiStrategy(),
             SpelInjectionStrategy(),
@@ -2636,6 +2717,7 @@ def default_strategies(browser: BrowserExecutor | None = None,
 # stored + DOM). A category absent here has no confirmer yet.
 _CATEGORY_TO_CLASS = {
     "sql-injection": "sqli",
+    "nosql-injection": "nosqli",
     "xss": "xss-reflected",
     "open-redirect": "open_redirect",
     "server-side-template-injection": "ssti",

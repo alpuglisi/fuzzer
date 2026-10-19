@@ -101,10 +101,20 @@ def points_from_ground_truth(ground_truth, base_url: str, browser_available: boo
             )
             sink_contexts = sink_contexts_by_point.get(
                 (path, gp.method.upper(), gp.param), {None})
+            # FR-FUZZ-54: a point with the JSON body its endpoint takes is a JSON-leaf
+            # point, its probes carrying the other leaves, as a crawled JSON request is
+            location, entries = gp.location, None
+            if gp.json_body is not None and gp.location == "body":
+                from fuzzlab.core import jsonbody
+                location = jsonbody.LOCATION
+                entries = tuple((p, _send_value(v))
+                                for p, v in jsonbody.leaves(gp.json_body) or ())
+                body_content_type = None
             for sink_context in sorted(sink_contexts, key=lambda s: s or ""):
                 points.append(InjectionPoint(url=base + path, param=gp.param,
-                                             method=gp.method.upper(), location=gp.location,
+                                             method=gp.method.upper(), location=location,
                                              body_content_type=body_content_type,
+                                             base_entries=entries,
                                              sink_context=sink_context,
                                              origin="ground-truth"))
         elif is_dom and browser_available:

@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-19 (NoSQL injection; secDevLabs Mongection)
+- **What:** the fuzzer tests NoSQL operator injection on JSON leaves (`{"$ne": ...}` vs `{"$in": []}` against a literal baseline, replicated rounds), and ground-truth points can carry the JSON body their endpoint takes; secDevLabs' Mongection is a lab, its two login fields confirmed and its two register fields not (CC-FUZZ-0092, CC-LAB-0309).
+- **Why:** the owner asked for NoSQL injection (2026-10-19); Mongection's only flaw was otherwise unscoreable.
+
 ## 2026-10-18 (secDevLabs: Amarelo Designs)
 - **What:** secDevLabs' Amarelo Designs (Flask; `/user` unpickles its session cookie) is a lab with a live-checked ground truth (CC-LAB-0308).
 - **Why:** the owner's next lab; the first insecure-deserialization case among the secDevLabs apps.
