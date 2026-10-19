@@ -18,6 +18,18 @@ Format per entry:
 
 ---
 
+## 2026-10-19 — diagrams (hosts the browser guard refused were never traced; BUG-0524, a recurrence of BUG-0513/BUG-0520)
+- **Symptom:** in 7 loopback captures the browser guard refused the out-of-scope origin 22-41 times (`explore.json`) and the capture proxy 0 times; the trace and the data flow showed no external host.
+- **Root cause:** `observe_disco` took refused hosts from the capture proxy's stats only; the guard refuses first and records its count in `explore.json`.
+- **Remediation:** CC-AUD-0054 (`<tag>:guard:<host>` events, FR-AUD-28/29); PA-0524.
+- **Status:** Fixed
+
+## 2026-10-19 — disco (a capture accepted a directory holding an earlier run's files; BUG-0525, a recurrence of BUG-0450)
+- **Symptom:** `disco capture --out DIR` with a stale `actions.jsonl` (or stats, `explore.json`, `script_segments.json`) ran (`--dry-run` returned 0); the explorer appends to the log, and the import read the old lines as this run's.
+- **Root cause:** PA-0450's check was applied to `capture.jsonl` only, not to the set of files the consumers read.
+- **Remediation:** CC-CRAWL-0050 (`disco.cli.RUN_FILES`, refused before `--dry-run`); PA-0525.
+- **Status:** Fixed
+
 ## 2026-10-19 — tests (browser-step timing tests bounded the driver start; BUG-0526)
 - **Symptom:** `test_a_login_page_that_navigates_away_fails_loudly_and_fast` took 9.7 s (bound 8 s) in a docs-only harness run with three lanes' harness runs on the host; it passed 3/3 alone.
 - **Root cause:** the test timed the whole login, which includes the Playwright driver's start (0.5 s idle, 4.5-7 s under load, measured); the navigation it guards took at most 0.94 s (BUG-0526). Three more tests shared the shape.

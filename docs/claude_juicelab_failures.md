@@ -951,3 +951,9 @@ Juice Shop lab is complete.
 - **Impact:** a commit was pushed without a green harness, against CLAUDE.md. The failure turned out to be a test defect (BUG-0526), now fixed.
 - **Status:** fixed in practice: every later harness run is checked for its own exit code before any push.
 
+### F-090 — Status update for F-086 (BUG-0524)
+- **What:** hosts the browser guard refused are now traced under their own keys, from `explore.json`, beside the capture proxy's refusals.
+- **Evidence:** CC-AUD-0054 merged with `tests/test_disco_livetrace.py::test_both_refusal_layers_are_traced_under_their_own_keys`; the lane's harness on a14334d: 73 files, 2654 passed, 0 failed.
+- **Impact:** none further.
+- **Status:** fixed.
+

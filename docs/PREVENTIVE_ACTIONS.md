@@ -2622,6 +2622,26 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
      judges the identifier runs inside them. (from BUG-0521)
   - Enforced by: tests/test_trace_model.py::test_a_payload_preview_never_keeps_its_canary_token, tests/test_trace_model.py::test_safe_ref_withholds_every_token_shape
 
+- **PA-0524** — Strengthens `PA-0513` and `PA-0520` from sends to every kind of evidence,
+  after BUG-0524: refused hosts were read from the capture proxy only, while the browser
+  guard, an earlier layer, refused every out-of-scope request first. PA-0513/0520 count
+  sends by what the target receives; a refusal never reaches the target.
+  1. **An observation claim ("every refused host", "every request the browser made")
+     names each layer that can produce the observation, and its consumer reads all of
+     them.**
+  2. **It is tested against an independent count from each layer on a real run where an
+     earlier layer acts first.** (from BUG-0524)
+  - Enforced by: tests/test_disco_livetrace.py::test_a_real_capture_is_in_the_store_while_it_runs_and_unchanged, tests/test_disco_livetrace.py::test_both_refusal_layers_are_traced_under_their_own_keys
+
+- **PA-0525** — Strengthens `PA-0450(1)` and `(3)`, after BUG-0525: `disco capture`
+  refused an `--out` holding `capture.jsonl` only; the explorer appends to `actions.jsonl`
+  and the importer reads four more files as the run's.
+  1. **A producer whose output is several files a consumer reads as one run refuses an
+     output location holding any of them, before any side effect** (a dry run included).
+  2. **The list is one constant, and a test fails when a consumer reads a run file not in
+     it.** (from BUG-0525)
+  - Enforced by: tests/test_disco_cli.py::test_capture_refuses_a_directory_holding_any_file_the_trace_reads, tests/test_disco_cli.py::test_every_file_the_import_and_the_trace_read_is_refused_when_stale
+
 - **PA-0526** — Strengthens `PA-0135(1)`, after BUG-0526: four tests bounded a whole
   browser-driven run (6.5-9.5 s) to show a step was not waited out; under the harness's
   load the Playwright driver's start alone took 4.5-7 s. PA-0135's guard caught ratios

@@ -1163,7 +1163,8 @@ tracked in the requirements files, not here.
   send of every sender a run hands a strategy (`harness/tracing.py`), the M6 executor's
   visit steps and the M8 wait (FR-FUZZ-62, CC-FUZZ-0102), each try, each
   test, strategy outcome and finding (FR-FUZZ-60/61), the intercepting proxy's flows
-  (FR-PROXY-13) -- and the diagram model derived from them (`dg_entity`, `dg_flow`,
+  (FR-PROXY-13), a disco capture, live (`disco/livetrace.py`, FR-CRAWL-30) -- and the
+  diagram model derived from them (`dg_entity`, `dg_flow`,
   `dg_evidence`) by an idempotent reducer, independent of order and batching (tested on
   permutations, BUG-0516), rebuildable by replay. One writer per producer on its own
   store connection: a bounded buffer, batched transactions, a scrub at the write
@@ -1417,6 +1418,11 @@ tracked in the requirements files, not here.
 - **Behavioural discovery (D70, CC-CRAWL-0031, FR-CRAWL-18..21) -- `fuzzlab/disco/`,
   `fuzzlab disco capture|synth`.** Protocol-level, stack-independent discovery: what
   the application sends is recorded, not what its HTML says.
+  - `livetrace.py` (FR-CRAWL-30, CC-CRAWL-0050): with `--store`/`--record`, one thread of
+    the capture command tails the run directory into a `disco` store run through
+    `observe`'s disco builders (SP-53) and the run's one recorder, and imports the
+    directory at the end; `capture.py`'s `CaptureTail`/`JsonlTail` is the one
+    incremental reader (SP-35).
   - `recorder.py` + `mitm.py` + `proxyproc.py`: mitmdump (this interpreter, a
     procutil-owned child on a free loopback port) with the recorder addon: the scope
     firewall (each request and each CONNECT tunnel), the `x-disco-action` tag read and

@@ -18,7 +18,16 @@ The trace is on by default; `--no-trace` turns it off.
 fuzzlab auto --base-url http://127.0.0.1:3000 --spider-db crawl.db --points crawl --authorized
 fuzzlab auto --base-url http://127.0.0.1:3000 --disco-run out/ --points crawl --authorized
 fuzzlab proxy --record --authorized     # browser traffic through the proxy, live
+fuzzlab disco capture --start http://127.0.0.1:3000 --out run/ --record --authorized   # the capture, live
 ```
+
+With `--store`/`--record`, a capture is its own run (`disco`): each exchange and explorer
+action is in the store about 0.3 s (p95) after it is captured, and the page shows it at its
+next poll when that store is the one the web has open. When the capture ends, its
+directory is imported into the run (refused hosts with their final counts, old-log
+actions, anything the live passes could not write), then the run's end is recorded.
+Importing the directory into that run again adds nothing; `fuzzlab auto --disco-run`
+imports it into its own run.
 
 The web proxy records the same way when it has a store.
 
@@ -59,6 +68,7 @@ Every producer records what it actually saw or did as one `trace_event` row:
 - the pipeline: every send, each test's start and end, each strategy run's outcome,
   and each finding; the browser (M6) confirmation's steps per visit (`browser.step`) and
   each out-of-band (M8) wait's result (`oob.wait`), FR-FUZZ-62;
+- the disco capture itself, live, when given a store (FR-CRAWL-30);
 - the intercepting proxy: one event per recorded in-scope flow, written as soon as the
   flow is stored, and the run's end when the proxy stops (`proxy/history.py`,
   FR-PROXY-13).
@@ -230,9 +240,14 @@ fetched itself (the documented gap), checked against the server's own count thro
   command-line switch for it yet.
 - A sequence for one proxied flow's key (`proxy:flow:<n>`) is not offered; the `proxy`
   scope shows every flow.
-- External hosts come from the capture proxy's refusal counts. The browser's own
-  background traffic, such as autofill services, is included and labelled as possibly
-  the browser's.
+- External hosts come from both layers that refuse: the capture proxy and the browser
+  guard (`explore.json`), counted by hostname; a host refused by both shows both counts.
+  A capture that crashed has no `explore.json`, so its guard refusals are missing. The
+  browser's own background traffic, such as autofill services, is included and labelled
+  as possibly the browser's.
+- A live disco run that was killed (SIGTERM/SIGKILL) has no end recorded and reads
+  partial; a batch the store refused stays counted as dropped even after the final
+  import wrote it.
 
 ## Measured cost
 
