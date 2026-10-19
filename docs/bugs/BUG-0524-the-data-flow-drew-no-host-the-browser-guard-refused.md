@@ -71,27 +71,31 @@ CC-AUD-0054:
     Chromium through mitmdump, each `…:guard:<host>` count equal to `explore.json`'s.
 
 ## Recurrence review
-I checked `docs/bugs/` (BUG-0510, BUG-0512, BUG-0513 and BUG-0515, the diagrams series)
-and `docs/PREVENTIVE_ACTIONS.md` (PA-0510, PA-0512, PA-0513, PA-0515, PA-0123).
-
-- **BUG-0513 / PA-0513 is the same root cause one class over.** "Every send" was
-  instrumented at one sender, and the peer and unauthenticated senders were never
-  traced.
-- **BUG-0510 / PA-0510(1)** ("evidence of an action is recorded where the action
-  happens") is related.
+I checked `docs/bugs/` (BUG-0510, BUG-0512, BUG-0513, BUG-0515 and BUG-0520, the
+diagrams series) and `docs/PREVENTIVE_ACTIONS.md` (PA-0510, PA-0512, PA-0513, PA-0515,
+PA-0520, PA-0123). This is a recurrence of one root cause: an "every X" evidence claim
+satisfied at one of the places X happens.
+- **BUG-0513 / PA-0513:** "every send" was instrumented at the run's own sender only;
+  the peer and unauthenticated senders were never traced.
+- **BUG-0520 / PA-0520:** "every send" was counted at sender objects; M6's browser
+  sends went through Playwright and Chromium. PA-0520 strengthened PA-0513, so that a
+  send is counted by what the target receives.
+- **BUG-0510 / PA-0510(1):** "evidence of an action is recorded where the action
+  happens" is related.
 
 ## Prior-preventive-action failure analysis
-- **PA-0513 was too narrow.** It names an "every X instrumentation claim" and was read
-  as being about sends: its enforcement is a cross-account send test. CC-AUD-0050's
+- **PA-0513 and PA-0520 were too narrow in their unit.** Both are written for *sends*:
+  their enforcement counts what the target receives. A refusal is an observation the
+  target never receives, so neither rule, nor its guards, reached it. CC-AUD-0050's
   claim, "each host the capture proxy refused", was phrased to match its one source, so
   it never read as an "every X" claim at all. The diagrams' own claim ("external hosts
   the browser asked for", DIAGRAMS.md) was the every-X claim, and nothing tied it to the
   producer.
 - **PA-0510(1) was followed for the proxy's layer.** It does not say what to do when the
-  same action has more than one place it can happen.
+  same action has more than one place it can happen (here three ordered scope layers).
 
 ## Preventive action
-**PA-0524** strengthens PA-0513 from sends to every kind of evidence:
+**PA-0524** strengthens PA-0513 and PA-0520 from sends to every kind of evidence:
 1. An observation claim ("every refused host", "every request the browser made") names
    each layer that can produce the observation, and its consumer reads all of them.
 2. It is tested against an independent count from each layer, on a real run where an

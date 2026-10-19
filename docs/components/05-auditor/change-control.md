@@ -46,7 +46,8 @@ Newest first.
         T1's absolute and equality checks over `DiscoActionLines` — done
   - [x] FR-AUD-28 amended in place; FR-AUD-29; BUG-0524 — done
   - [ ] PA-0524 and ERROR_LOG (orchestrator-owned files; text given) — todo (orchestrator)
-- Effectiveness (assessed 2026-10-19, before the harness run):
+- Effectiveness (assessed 2026-10-19):
+  - **Harness:** `scripts/verify_change.py --base 685259e` on a14334d (detached worktree, `FUZZLAB_REQUIRE_BROWSER/LINT/NETNS=1`): 73 files, one parallel pass, **2654 passed, 0 failed, 0 errors, 1 skipped** (`tests/test_packaging.py::test_the_wheel_ships_every_tracked_file`: bdist_wheel unavailable here, an environment skip), 10 xfailed (existing pins), rc 0, 708 s.
   - **On the old `observe.py`:** the BUG-0524 test fails with
     "KeyError: 'disco:8053220071:guard:cdn.example'".
   - **Real capture:** `…:guard:127.0.0.1` carries `explore.json`'s count.

@@ -109,7 +109,8 @@ Newest first.
   - [ ] CHANGELOG, ERROR_LOG, PA-0525, SHARED_PRIMITIVES, DIAGRAMS.md, ARCHITECTURE.md:
         the text was given to the orchestrator, who owns those files — todo
         (orchestrator)
-- Effectiveness (assessed 2026-10-19, before the harness run):
+- Effectiveness (assessed 2026-10-19):
+  - **Harness:** `scripts/verify_change.py --base 685259e` on a14334d (detached worktree, `FUZZLAB_REQUIRE_BROWSER/LINT/NETNS=1`): 73 files, one parallel pass, **2654 passed, 0 failed, 0 errors, 1 skipped** (`tests/test_packaging.py::test_the_wheel_ships_every_tracked_file`: bdist_wheel unavailable here, an environment skip), 10 xfailed (existing pins), rc 0, 708 s.
   - **Measured on the implementation** (the e2e fixture, 1 worker, 2 runs):
     - capture counters identical to the 5 earlier runs (104 records, 104 app hits, 11
       states, 26 actions, 5 submissions / 3 sent, 0 unrestorable);
