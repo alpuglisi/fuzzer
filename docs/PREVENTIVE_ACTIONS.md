@@ -2621,3 +2621,14 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
      punctuation the tool's own payloads use; a redactor that judges whole segments also
      judges the identifier runs inside them. (from BUG-0521)
   - Enforced by: tests/test_trace_model.py::test_a_payload_preview_never_keeps_its_canary_token, tests/test_trace_model.py::test_safe_ref_withholds_every_token_shape
+
+- **PA-0526** — Strengthens `PA-0135(1)`, after BUG-0526: four tests bounded a whole
+  browser-driven run (6.5-9.5 s) to show a step was not waited out; under the harness's
+  load the Playwright driver's start alone took 4.5-7 s. PA-0135's guard caught ratios
+  only.
+  1. **A test that bounds how long a step takes times that step at its own call** (a
+     wrapper on the step), never a span that also holds a process, driver or browser
+     start; such a span keeps only a smoke bound of 30 s or more.
+  2. **The step oracle is proven against the exact original defect** it guards
+     (PA-0034(2)), not a look-alike. (from BUG-0526)
+  - Enforced by: tests/test_no_startup_timing.py::test_no_test_bounds_a_span_that_holds_a_browser_start, tests/test_no_startup_timing.py::test_the_guard_catches_bug_0526_and_allows_a_step_or_a_smoke_bound

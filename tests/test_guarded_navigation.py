@@ -186,8 +186,19 @@ def test_the_auditor_reads_the_page_without_waiting_it_out(monkeypatch):
     """CC-AUD-0043: the auditor's rendered fetch returns well under its timeout, from
     the one request the browser made, with the page's HTML (its fields and links)."""
     from tests._browser import skip_or_fail
+    from fuzzlab.tools import navguard
     from fuzzlab.tools.fetcher import ContentFetcher
     _chromium_or_skip(monkeypatch)
+    durations: dict[str, list[float]] = {}
+    real = navguard.navigate
+
+    def navigate(page, url, *a, **kw):          # each guarded navigation (BUG-0526)
+        started = time.monotonic()
+        try:
+            return real(page, url, *a, **kw)
+        finally:
+            durations.setdefault(url, []).append(time.monotonic() - started)
+    monkeypatch.setattr(navguard, "navigate", navigate)
     a = _Site()
     a.pages["/"] = _PAGE
     try:
@@ -200,7 +211,9 @@ def test_the_auditor_reads_the_page_without_waiting_it_out(monkeypatch):
             took = time.monotonic() - started
     finally:
         a.close()
-    assert took < FAST + 1.5, f"{took:.1f}s"                  # the launch included
+    slowest = max(t for ts in durations.values() for t in ts)
+    assert slowest < FAST, f"{slowest:.1f}s: the page's load was waited out"
+    assert took < 60.0, f"{took:.1f}s"                      # a smoke alarm only
     assert status == 200 and "A-OWN-CONTENT" in html and "/next" in html
     assert a.requests.count("/") == 1 and "/logout" not in a.requests
 
@@ -208,13 +221,29 @@ def test_the_auditor_reads_the_page_without_waiting_it_out(monkeypatch):
 # --- the browser login --------------------------------------------------------------
 def test_a_login_page_that_navigates_away_fails_loudly_and_fast(monkeypatch):
     """CC-SESS-0024: the login page's head script navigates to the refused /logout:
-    the login fails loudly (no form), well under its 10 s timeout, and nothing is
-    posted."""
+    the login fails loudly (no form), each of its navigations well under its 10 s
+    timeout, and nothing is posted.
+
+    BUG-0526: the oracle is each navigation's own duration (`navguard.navigate`, where
+    a waited-out load would show), never the whole run's wall time, which also holds
+    the Playwright driver's start (0.5 s idle, 4.5-7 s under 24 CPU-bound processes).
+    The whole run keeps only a generous smoke bound (PA-0135(1))."""
     from tests._spa_fixture import chromium_or_skip
     from tests._spa_login_fixture import LoginSpa
     from tests.test_session_browser_login import _login, _manager, _password
     from fuzzlab.session.manager import SessionAuthError
+    from fuzzlab.tools import navguard
     chromium_or_skip(monkeypatch)
+    durations: dict[str, list[float]] = {}
+    real = navguard.navigate
+
+    def navigate(page, url, *a, **kw):
+        started = time.monotonic()
+        try:
+            return real(page, url, *a, **kw)
+        finally:
+            durations.setdefault(url, []).append(time.monotonic() - started)
+    monkeypatch.setattr(navguard, "navigate", navigate)
     lab = LoginSpa(_password(), head_nav="/logout")
     try:
         started = time.monotonic()
@@ -223,7 +252,10 @@ def test_a_login_page_that_navigates_away_fails_loudly_and_fast(monkeypatch):
         took = time.monotonic() - started
     finally:
         lab.close()
-    assert took < 8.0, f"{took:.1f}s: the login page's load was waited out"
+    assert durations, "the login navigated nowhere"
+    slowest = max(t for ts in durations.values() for t in ts)
+    assert slowest < FAST, f"{slowest:.1f}s: a login navigation's load was waited out"
+    assert took < 60.0, f"{took:.1f}s"                      # a smoke alarm only
     assert lab.seen("POST") == [] and lab.seen("GET", "/logout") == []
 
 

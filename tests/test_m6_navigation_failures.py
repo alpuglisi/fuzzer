@@ -49,16 +49,27 @@ def test_a_before_load_navigation_is_no_verdict_well_under_the_timeout(monkeypat
     """The load a refused navigation superseded is not waited out (it was the full
     8 s, then a raise): the run ends after the bounded load wait and the sentinel wait,
     with no verdict -- not a negative, not a Playwright error."""
+    from fuzzlab.tools import navguard
     _chromium_or_skip(monkeypatch)
+    # BUG-0526 (PA-0526): the oracle is the navigation's own wait, where a waited-out
+    # load shows; never the run's wall time, which holds the driver start and launch
+    navs: list[float] = []
+    real = navguard.navigate
+
+    def navigate(page, url, *a, **kw):
+        started = time.monotonic()
+        try:
+            return real(page, url, *a, **kw)
+        finally:
+            navs.append(time.monotonic() - started)
+    monkeypatch.setattr(navguard, "navigate", navigate)
     site = _site()
     try:
-        started = time.monotonic()
         with pytest.raises(NotObserved) as err:
             _m6_run(site, "/inline", settle_ms=500)
-        took = time.monotonic() - started
     finally:
         site.close()
-    assert took < 6.5, f"{took:.1f}s: the superseded load was waited out"
+    assert navs and max(navs) < 3.5, f"{max(navs):.1f}s: the superseded load was waited out"
     assert "did not finish loading" in str(err.value)
     assert "/logout.php" not in site.requests
 

@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-19 — tests (browser-step timing tests bounded the driver start; BUG-0526)
+- **Symptom:** `test_a_login_page_that_navigates_away_fails_loudly_and_fast` took 9.7 s (bound 8 s) in a docs-only harness run with three lanes' harness runs on the host; it passed 3/3 alone.
+- **Root cause:** the test timed the whole login, which includes the Playwright driver's start (0.5 s idle, 4.5-7 s under load, measured); the navigation it guards took at most 0.94 s (BUG-0526). Three more tests shared the shape.
+- **Remediation:** each test times the step it guards; an AST guard forbids small bounds around a run's start (PA-0526).
+- **Status:** Fixed
+
 ## 2026-10-19 — diagrams (M6's sends were never traced; BUG-0520, a recurrence of BUG-0513)
 - **Symptom:** in a loopback run with a browser, the target received 8 requests for two M6 tests and the trace held none of them; the status and DIAGRAMS.md said M6 records its sends.
 - **Root cause:** "every send" was instrumented and counted at sender objects only (PA-0513's scope); M6 sends through the Playwright driver and Chromium.

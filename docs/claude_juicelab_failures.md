@@ -945,3 +945,9 @@ Juice Shop lab is complete.
 - **Impact:** scored negatives and ML negatives on cases the tool never tested.
 - **Status:** open: CC-FUZZ-0103 / CC-AUD-0055 (option C) under the review gate.
 
+### F-089 — I pushed a commit whose verification harness had failed
+- **What:** I ran the harness and the push as `verify_change.py … | tail -2 && git push …`. The `&&` tested `tail`'s exit status, not the harness's, so 85c9bcb (a failure-record entry, docs only) was pushed although the harness reported 1 failure (BUG-0526).
+- **Evidence:** the harness output `TOTAL 58 file(s): 2437 passed, 1 failed`, then the push of 85c9bcb in the same command (2026-10-19).
+- **Impact:** a commit was pushed without a green harness, against CLAUDE.md. The failure turned out to be a test defect (BUG-0526), now fixed.
+- **Status:** fixed in practice: every later harness run is checked for its own exit code before any push.
+
