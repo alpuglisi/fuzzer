@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-19 — session manager (two new base_url functions unregistered; caught by the PA-0034 guard)
+- **Symptom:** `verify_change --base 926efe7` on 6038c46: 3057 passed, 1 failed — `test_base_url_subpath_registry.py::test_every_base_url_function_is_registered` listed `SessionManager._json_login` and `_established`.
+- **Root cause:** the JSON login (CC-SESS-0026) added two functions taking a `base_url` without registering each with a sub-path test (F-070).
+- **Remediation:** `_established` points at the form login's sub-path test (it is that path's end); `_json_login` gets `tests/test_json_login.py::test_a_json_login_under_a_subpath_keeps_the_path` (a script URL resolves under `/shop/`, the logout URL keeps it). The existing guard did its job, so no new preventive action.
+- **Status:** Fixed (before push)
+
 ## 2026-10-19 — Docker daemon down a third time (environment; recurrence)
 - **Symptom:** `labctl.sh up secdevlabs-ecommerce-api`: "Cannot connect to the Docker daemon".
 - **Root cause:** the container restarted again; nothing starts `dockerd` (the two entries below).

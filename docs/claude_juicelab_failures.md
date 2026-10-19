@@ -825,3 +825,9 @@ Juice Shop lab is complete.
 - **Evidence:** `fuzzlab/tools/store_adapter.py` `REQUEST_METHODS`/`WRITE_METHODS`, `auto_cli --fuzz-json-writes`; my message of 2026-10-19.
 - **Impact:** the owner decided on PUT/PATCH with an overstated gap; the decision stands (the answer-key and store-step gaps were real), but the framing was wrong.
 - **Status:** corrected in the reply and in FR-LAB-306 (CC-FUZZ-0095).
+
+### F-070 — I added two `base_url` functions without their sub-path tests
+- **What:** CC-SESS-0026's `_json_login` and `_established` take a `base_url`; PA-0034 requires each to be registered with a test proving an app under a sub-path keeps it. I did not, and did not run that whole-package guard before committing.
+- **Evidence:** `verify_change` on 6038c46 (ERROR_LOG 2026-10-19).
+- **Impact:** none outside the sandbox; caught before push.
+- **Status:** fixed (registered; a sub-path JSON-login test).

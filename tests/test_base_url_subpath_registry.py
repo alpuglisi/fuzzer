@@ -276,6 +276,9 @@ REGISTRY = {
     "fuzzlab.session.manager:SessionManager._basic_login":
         Covered(f"{_SUB}::test_a_basic_session_never_reads_an_app_page_redirect_as_logout"),
     "fuzzlab.session.manager:SessionManager._verify_authenticated": Covered(_SUB_LOGIN),
+    "fuzzlab.session.manager:SessionManager._established": Covered(_SUB_LOGIN),
+    "fuzzlab.session.manager:SessionManager._json_login": Covered(
+        "tests/test_json_login.py::test_a_json_login_under_a_subpath_keeps_the_path"),
     "fuzzlab.tools.authhttp:_build": Covered(_AUTHHTTP),
     "fuzzlab.tools.authhttp:_build_parts": Covered(_AUTHHTTP),
     "fuzzlab.tools.authhttp:make_authenticated_client": Covered(_AUTHHTTP),

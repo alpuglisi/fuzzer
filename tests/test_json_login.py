@@ -147,3 +147,13 @@ def test_a_json_login_on_another_origin_needs_it_authorised():
     assert site.posts == []                                      # nothing was sent
     state = _manager(site, ["http://localhost:10005"]).ensure("127.0.0.1", "user", BASE)
     assert state.valid and "http://127.0.0.1:10005" in state.origins
+
+
+def test_a_json_login_under_a_subpath_keeps_the_path():
+    """PA-0034: an app under ``/shop/``: a relative script URL resolves under it, and the
+    session's logout URL keeps it."""
+    site = _Site("cookie", page=_page("login"))
+    state = _manager(site).ensure("127.0.0.1", "user", "http://127.0.0.1:3079/shop/")
+    assert [u for u, _h, _b in site.posts] == ["http://127.0.0.1:3079/shop/login"] * 2
+    assert state.login_url == "http://127.0.0.1:3079/shop/login"
+    assert state.logout_url == "http://127.0.0.1:3079/shop/logout"
