@@ -49,6 +49,18 @@ class Probe:
     #: Times the sender re-sent this probe (or its follow-up) after no response
     #: (BUG-0147): requests of the run too.
     resent: int = 0
+    #: Each try of this request the sender actually made, in order, recorded where the
+    #: try happens (FR-FUZZ-61): `attempt_record` dicts, the last one the outcome this
+    #: probe reports. Empty: the sender does not record its tries (a test double).
+    #: Trace evidence only; no verdict reads it. A follow-up's tries are on its own
+    #: record (`prg_sent`), never here.
+    attempts: list[dict] = field(default_factory=list, repr=False)
+    #: The PRG follow-up the sender actually sent for this probe, observed or not
+    #: (FR-FUZZ-61, BUG-0510): ``{"url", "outcome", "status", "elapsed_ms", "error",
+    #: "attempts"}``, or None when none was sent. ``followed`` is the observation, which
+    #: is None for a follow-up answered by another redirect, timed out or unobserved;
+    #: this is the send. Trace evidence only; no verdict reads it.
+    prg_sent: dict | None = field(default=None, repr=False)
 
     @property
     def prg_sends(self) -> int:
@@ -125,11 +137,54 @@ class ProbeUnobserved(RuntimeError):
     sender maps to "not observed" (PA-0137(1), PA-0106); the message names the error
     class only, never the payload or URL. The oracle makes it no verdict from that
     mechanism, never a negative and never the end of the run. ``resent``: the requests
-    the sender re-sent before giving up, which the run's counters still count."""
+    the sender re-sent before giving up, which the run's counters still count.
+    ``attempts``: each try the sender actually made (`Probe.attempts`, FR-FUZZ-61);
+    empty when no try of this probe went out (its session's login got no response) or
+    the sender does not record them."""
 
-    def __init__(self, message: str = "", resent: int = 0):
+    def __init__(self, message: str = "", resent: int = 0,
+                 attempts: list[dict] | None = None):
         super().__init__(message)
         self.resent = resent
+        self.attempts: list[dict] = list(attempts or [])
+
+
+#: Outcomes of one try (FR-FUZZ-61): a complete response; a timeout; no complete
+#: response (`ProbeUnobserved`'s class: reset, aborted, cut off); the connection itself
+#: failed (refused, DNS, TLS, proxy).
+ATTEMPT_OUTCOMES = ("response", "timeout", "unobserved", "error")
+#: The attribute a sender sets on an exception it re-raises unchanged (a timeout or a
+#: refused connection) to carry the tries made before it (`note_attempts`).
+ATTEMPTS_ATTR = "fuzzlab_attempts"
+
+
+def attempt_record(n: int, outcome: str, *, status: int | None = None,
+                   elapsed: float = 0.0, error: str | None = None) -> dict:
+    """One try a sender made (FR-FUZZ-61): its 1-based number, `ATTEMPT_OUTCOMES`
+    value, status (a response only), measured time (``elapsed`` in seconds) and the
+    error's class name. Never a URL, header or body."""
+    if outcome not in ATTEMPT_OUTCOMES:
+        raise ValueError(f"not an attempt outcome: {outcome!r}")
+    return {"n": n, "outcome": outcome, "status": status,
+            "elapsed_ms": round(elapsed * 1000, 1), "error": error}
+
+
+def note_attempts(exc: BaseException, attempts: list[dict]) -> None:
+    """Carry ``attempts`` on an exception a sender re-raises unchanged; an exception
+    that refuses attributes simply carries none."""
+    try:
+        setattr(exc, ATTEMPTS_ATTR, list(attempts))
+    except (AttributeError, TypeError):
+        pass
+
+
+def attempts_of(outcome) -> list[dict]:
+    """The tries a sender recorded on a `Probe`, a `ProbeUnobserved` or an exception it
+    re-raised (`note_attempts`); empty when it recorded none."""
+    found = getattr(outcome, "attempts", None) \
+        if isinstance(outcome, (Probe, ProbeUnobserved)) \
+        else getattr(outcome, ATTEMPTS_ATTR, None)
+    return [a for a in found if isinstance(a, dict)] if isinstance(found, list) else []
 
 
 class Sender:

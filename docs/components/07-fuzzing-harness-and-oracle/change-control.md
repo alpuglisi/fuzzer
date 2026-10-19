@@ -3,6 +3,96 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0100 — Each HTTP try is its own evidence; a PRG follow-up is recorded whether or not it was observed (FR-FUZZ-61, BUG-0510) (2026-10-19)
+- Change:
+  - `fuzzlab/oracle/probe.py`:
+    - `Probe.attempts` and `ProbeUnobserved.attempts` (default empty): each try the
+      sender made, as `attempt_record` dicts `{n, outcome, status, elapsed_ms,
+      error}` (`ATTEMPT_OUTCOMES`: response, timeout, unobserved, error). No URL,
+      header or body.
+    - `Probe.prg_sent` (default None): the PRG follow-up that was sent, observed or not.
+    - `note_attempts` / `attempts_of` carry the tries on an exception the sender
+      re-raises unchanged (a timeout or refused connection), as `fuzzlab_attempts`.
+  - `fuzzlab/tools/probesender.py`:
+    - `RequestsProbeSender._request` appends one record per try in its existing
+      `for attempt in (1, 2)` loop, the failed try before a re-send included. A
+      request `requests` refuses to build (an invalid header value) is no try.
+    - Each sender's `_follow` sets `prg_sent`.
+    - `SeamProbeSender._dispatch` records its one try per dispatch. An error is a try
+      only when it came out of `HttpClient.send`'s transport step (`_do`) in this call
+      (`_reached_transport`: the exception's traceback, anchored to the calling frame).
+      An error in the session's `prepare` (a login on the way) is no try.
+    - Helpers: `_failed_try`, `_transport_code`, `_follow_up_record`.
+  - `fuzzlab/harness/tracing.py`:
+    - An exchange with more than one try first writes each earlier try as an
+      `exchange` event: role `retry`, `parent` = that exchange's pre-assigned key,
+      `attempt`, its own outcome, status, time and error.
+    - The exchange keeps its final outcome and gains `attempts` (the count). Its
+      `resent` becomes `attempts - 1`.
+    - The follow-up comes from `prg_sent`, falling back to `followed`.
+    - Retry keys join the strategy scope's `collected()` keys.
+  - `tests/test_trace_attempts.py` (new).
+- Reason:
+  - The owner's diagrams lane (DG-ATTEMPTS): a re-send after a reset (BUG-0147) was
+    only counted on its exchange, a known limit in `docs/DIAGRAMS.md`.
+  - BUG-0510, found while building it: a sent follow-up that was no observation was
+    never recorded, and `resent` counted the follow-up's re-sends.
+- Mechanism used, per sender:
+  - `RequestsProbeSender`: its own try loop. The retry logic is not restructured: the
+    same tries, conditions and exceptions.
+  - `SeamProbeSender`: it never re-sends (one fresh connection per request, BUG-0147),
+    so its record is at most one try per dispatch, read at the dispatch.
+  - No sender's tries are reconstructed from counts.
+- Impact (other components / project):
+  - What is sent, how often, the run's `requests` (`_CountingSender`), `Probe.resent`,
+    `followed`, `prg`, `prg_sends` and every verdict: unchanged. Tests compare the
+    server's own count and the verdicts with the trace on and off.
+  - The trace gains `retry` events and follow-ups that were no observation, and an
+    exchange's `resent` changes meaning: its own re-sends only.
+  - Consumers, found by searching `resent`, `role`, `parent` and `kind='exchange'`
+    across `fuzzlab/`:
+    - `report.diagram`: the `exchange:<key>` scope selects children by `parent`, so a
+      probe's retries appear. A follow-up's retries are grandchildren, so they appear
+      in the test scope and the follow-up's own scope. `interface_coverage` counts
+      `executed` for `outcome = response` only; a retry is never one.
+    - `core.trace.reduce`: a retry is one more evidence row on the TOOL → interface
+      flow (role `retry`).
+    - `web/diagram_routes`: reads `report.diagram` only.
+    - No reader of the exchange's `resent`.
+  - Not edited (other owners): `core.trace.ROLES` lacks `retry`; nothing validates
+    against it. `report.diagram`'s `status()["unsupported"]` and `docs/DIAGRAMS.md`'s
+    "Known limits" still name the re-send limit. The text to change is handed to the
+    orchestrator.
+- Risk: low.
+  - The seam's transport check reads a traceback. If `HttpClient.send` loses its
+    `_do` step, the seam stops recording failed tries; it never invents one.
+    `test_the_seams_reset_in_its_transport_is_an_unobserved_attempt` fails in that
+    case.
+  - A shared exception instance raised again keeps old frames. The check accepts only a
+    transport frame called from this dispatch, covered by
+    `test_a_login_on_the_seams_way_that_got_no_response_is_no_attempt`.
+  - Accepted residual: an error raised after the transport returned (the store write or
+    the session's `observe`) is not recorded as a try.
+- Deliverables:
+  - [x] code (`probe.py`, `probesender.py`, `tracing.py`) — done
+  - [x] `tests/test_trace_attempts.py`, 20 tests. Loopback raw-socket servers: a reset
+    then a response, a reset every time, a POST sent once, a refused connection, a
+    request never sent, a follow-up's retry, follow-ups that were no observation. The
+    seam on a real `HttpClient` with a fake transport: response, reset, timeout, a
+    login reset on the way, a follow-up with no response, the isolated-copy fallback.
+    `run_auto` end to end with a recorder: events = server count = run `requests`;
+    counts and verdicts the same with the trace off — done
+  - [x] FR-FUZZ-61; FR-FUZZ-60 edited in place (re-sends are recorded) — done
+  - [x] BUG-0510 — done
+  - [ ] CHANGELOG, ERROR_LOG, PA-0510, `docs/DIAGRAMS.md`, `docs/SHARED_PRIMITIVES.md`,
+    `report.diagram` status text, `core.trace.ROLES`: owned by other lanes or the
+    orchestrator; text handed over — todo (orchestrator)
+  - [ ] pre-change review gate (two reviewer agents): this lane has no agent tool;
+    the orchestrator's independent verification stands in for it — todo (orchestrator)
+- Effectiveness: pending. Offline, `test_run_auto_records_every_try_and_changes_no_count_or_verdict`
+  shows one event per real try through `run_auto`. Assess on a lab run that meets a
+  reset.
+
 ### CC-FUZZ-0099 — The pipeline records its sends, tests, strategy outcomes and findings (FR-FUZZ-60) (2026-10-19)
 - Change:
   - new `fuzzlab/harness/tracing.py` (`TracingSender`, directly around the real

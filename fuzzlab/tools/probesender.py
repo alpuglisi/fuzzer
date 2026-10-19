@@ -7,8 +7,11 @@ and standalone (plain requests). Built by `make_probe_sender`.
 
 from __future__ import annotations
 
+import functools
+import sys
 import threading
 import time
+import types
 
 from fuzzlab.core.http import check_send_header
 from fuzzlab.core.jsonbody import ENCTYPE as JSON_ENCTYPE
@@ -19,7 +22,8 @@ from fuzzlab.core.urls import (DestructiveUrlRefused, PathPlacementError, canoni
                                transaction_reason, url_key)
 from fuzzlab.oracle.probe import (PRG_ANY_METHOD, PRG_GET_ONLY, PRG_OBSERVED,
                                   PRG_UNOBSERVED, REDIRECT_STATUSES, HeaderPointsStopped,
-                                  Probe, ProbeUnobserved, UnplaceableLocation)
+                                  Probe, ProbeUnobserved, UnplaceableLocation,
+                                  attempt_record, note_attempts)
 from fuzzlab.tools.authhttp import with_query, with_query_param
 
 #: A path-segment point's location (FR-FUZZ-57): ``param`` names the URL template's
@@ -225,6 +229,62 @@ def _unobserved(exc: BaseException) -> ProbeUnobserved | None:
         type(root).__module__ == "http.client" else \
         f"{type(root).__module__}.{type(root).__name__}"
     return ProbeUnobserved(f"no response: {type(exc).__name__} ({cause})")
+
+
+# -- each try as evidence (FR-FUZZ-61) ------------------------------------------------
+def _failed_try(exc: BaseException) -> str | None:
+    """A try that failed with ``exc``: its `ATTEMPT_OUTCOMES` value, or None when the
+    request never left the client (``requests`` refused to build it: an invalid URL
+    or header value)."""
+    import requests
+    if _is_timeout(exc):
+        return "timeout"
+    if _unobserved(exc) is not None:
+        return "unobserved"
+    if isinstance(exc, requests.ConnectionError):   # refused, DNS, TLS, proxy
+        return "error"
+    return None
+
+
+@functools.cache
+def _transport_code() -> types.CodeType | None:
+    """The code of `core.http.HttpClient.send`'s transport step (``_do``): the one
+    place the seam's request goes to the network."""
+    from fuzzlab.core.http import HttpClient
+    return next((c for c in HttpClient.send.__code__.co_consts
+                 if isinstance(c, types.CodeType) and c.co_name == "_do"), None)
+
+
+def _reached_transport(exc: BaseException, caller) -> bool:
+    """Did ``exc`` come out of the seam's transport step, in the send ``caller`` (the
+    sender's own frame) made? `HttpClient.send` also runs the session's ``prepare`` -- a
+    login on the probe's way, with its own fetcher -- before it; an error there means
+    the probe itself never went out. Read from the exception's own traceback, so
+    nothing about the send changes. A transport frame counts only when it was called
+    from ``caller``: an exception instance raised again keeps the frames of its earlier
+    raise."""
+    code = _transport_code()
+    tb = exc.__traceback__
+    while tb is not None and code is not None:
+        frame = tb.tb_frame
+        if frame.f_code is code:
+            back = frame.f_back
+            for _hop in range(4):           # _do <- HttpClient.send <- caller
+                if back is None:
+                    break
+                if back is caller:
+                    return True
+                back = back.f_back
+        tb = tb.tb_next
+    return False
+
+
+def _follow_up_record(target: str, outcome: str, attempts, *, status: int | None = None,
+                      elapsed: float = 0.0, error: str | None = None) -> dict:
+    """`Probe.prg_sent`: the PRG follow-up a sender sent, observed or not (BUG-0510)."""
+    return {"url": target, "outcome": outcome, "status": status,
+            "elapsed_ms": round(elapsed * 1000, 1), "error": error,
+            "attempts": list(attempts)}
 
 
 class SeamProbeSender(_ExplicitAllowance):
@@ -699,9 +759,16 @@ class SeamProbeSender(_ExplicitAllowance):
                 if followed is None:
                     probe.prg = _skipped("isolated session lost")
                     return
-        except ProbeUnobserved:                # the follow-up got no response (BUG-0147)
+        except ProbeUnobserved as exc:         # the follow-up got no response (BUG-0147)
             probe.prg = PRG_UNOBSERVED
+            if exc.attempts:                   # it went out (not a login on its way)
+                probe.prg_sent = _follow_up_record(
+                    target, "unobserved", exc.attempts,
+                    error=type(exc.__cause__ or exc).__name__)
             return
+        probe.prg_sent = _follow_up_record(target, "response", followed.attempts,
+                                           status=followed.status,
+                                           elapsed=followed.elapsed)
         probe.followed, probe.prg = _observation(followed, target)
 
     def _send_on(self, client, identity, url, param, value, timing, method, location,
@@ -759,17 +826,29 @@ class SeamProbeSender(_ExplicitAllowance):
     def _dispatch(self, client, identity, req, location, param, url) -> Probe:
         """Send ``req`` for the probe of ``(location, param, url)``: the header
         breaker's bookkeeping attributes what it observes to that probe (a PRG
-        follow-up is part of its probe, FR-FUZZ-49)."""
+        follow-up is part of its probe, FR-FUZZ-49).
+
+        The seam makes one try per dispatch (it never re-sends: each request has a
+        fresh connection, BUG-0147). That try is recorded (FR-FUZZ-61) when it reached
+        the transport: an error in the session's ``prepare`` (a login on the way) is no
+        try of this request."""
         main = identity != "anonymous" and identity == self._identity
         if main and location == "header":
             self._copies_at_header = self._copy_logins()
         self._current = (location, param, url) if main else None
+        start = time.perf_counter()
         try:
             r = client.send(req)
         except Exception as exc:
+            reached = _reached_transport(exc, sys._getframe())
+            outcome = _failed_try(exc) if reached else None
+            tries = [attempt_record(1, outcome, elapsed=time.perf_counter() - start,
+                                    error=type(exc).__name__)] if outcome else []
             unobserved = _unobserved(exc)       # a timeout still raises, as before
             if unobserved is None:
+                note_attempts(exc, tries)
                 raise
+            unobserved.attempts = tries
             raise unobserved from exc           # no response: no verdict, the run goes on
         finally:
             self._current = None
@@ -777,7 +856,9 @@ class SeamProbeSender(_ExplicitAllowance):
                 self._last_main_was_header = (param, url) if location == "header" else None
         return Probe(status=r.status, text=r.body.decode("utf-8", "replace"),
                      elapsed=r.elapsed_ms / 1000.0, headers=dict(r.headers),
-                     session=self._session_note(req))
+                     session=self._session_note(req),
+                     attempts=[attempt_record(1, "response", status=r.status,
+                                              elapsed=r.elapsed_ms / 1000.0)])
 
     @staticmethod
     def _session_note(req) -> str | None:
@@ -893,25 +974,44 @@ class RequestsProbeSender(_ExplicitAllowance):
     RETRY_ON_RESET = frozenset({"GET", "HEAD", "OPTIONS"})
 
     def _request(self, method: str, url: str, kwargs: dict) -> Probe:
+        """Each try is recorded where it happens (FR-FUZZ-61): ``tries`` gains one
+        `attempt_record` per request that went out, the failing one before a re-send
+        included, and travels on the outcome (`Probe.attempts`,
+        `ProbeUnobserved.attempts`, or `note_attempts` on an error re-raised
+        unchanged)."""
         import requests
+        tries: list[dict] = []
         for attempt in (1, 2):
             start = time.perf_counter()
             try:
                 r = self._session.request(method, url, **kwargs)
-                return Probe(status=r.status_code, text=r.text,
-                             elapsed=time.perf_counter() - start, headers=dict(r.headers),
-                             resent=attempt - 1)
+                text = r.text
+                elapsed = time.perf_counter() - start
+                tries.append(attempt_record(attempt, "response", status=r.status_code,
+                                            elapsed=elapsed))
+                return Probe(status=r.status_code, text=text, elapsed=elapsed,
+                             headers=dict(r.headers), resent=attempt - 1, attempts=tries)
             except Exception as exc:
+                spent = time.perf_counter() - start
                 if _is_timeout(exc):        # the body's read included (BUG-0147)
+                    tries.append(attempt_record(attempt, "timeout", elapsed=spent,
+                                                error=type(exc).__name__))
                     return Probe(status=0, text="", elapsed=float(self._timeout),
-                                 resent=attempt - 1)
+                                 resent=attempt - 1, attempts=tries)
                 unobserved = _unobserved(exc)
                 if unobserved is None:
+                    if isinstance(exc, requests.ConnectionError):   # refused, DNS, ...
+                        tries.append(attempt_record(attempt, "error", elapsed=spent,
+                                                    error=type(exc).__name__))
+                    note_attempts(exc, tries)
                     raise
+                tries.append(attempt_record(attempt, "unobserved", elapsed=spent,
+                                            error=type(exc).__name__))
                 if attempt == 1 and method.upper() in self.RETRY_ON_RESET and \
                         isinstance(exc, requests.ConnectionError):
                     continue
                 unobserved.resent = attempt - 1
+                unobserved.attempts = tries
                 raise unobserved from exc   # no response: no verdict, the run goes on
         raise AssertionError("unreachable")
 
@@ -932,8 +1032,13 @@ class RequestsProbeSender(_ExplicitAllowance):
                                                      "allow_redirects": False})
         except ProbeUnobserved as exc:         # the follow-up got no response (BUG-0147)
             probe.prg, probe.resent = PRG_UNOBSERVED, probe.resent + exc.resent
+            probe.prg_sent = _follow_up_record(target, "unobserved", exc.attempts,
+                                               error=type(exc.__cause__ or exc).__name__)
             return
         probe.resent += followed.resent
+        probe.prg_sent = _follow_up_record(
+            target, "timeout" if followed.status == 0 else "response", followed.attempts,
+            status=followed.status or None, elapsed=followed.elapsed)
         if followed.status == 0:               # timed out: no observation
             probe.prg = PRG_UNOBSERVED
             return

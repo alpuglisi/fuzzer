@@ -1603,9 +1603,10 @@ rewards) derives from it.
     value's digest and length and a 64-character preview (none for a sensitive
     parameter), and the outcome -- `response` with status, time and redirect target;
     `timeout`; `unobserved` (no response, BUG-0147); `not_sent` (refused before
-    sending); `error` with its class. A PRG follow-up is its own exchange (`follow-up`,
-    `parent` = the probe). A sender's re-send is counted (`resent`), not recorded as an
-    attempt.
+    sending); `error` with its class. A PRG follow-up the sender sent is its own
+    exchange (`follow-up`, `parent` = the probe), observed or not (BUG-0510). Each
+    earlier try of an exchange is its own `retry` event (FR-FUZZ-61); before
+    CC-FUZZ-0100 a re-send was only counted (`resent`).
   - Each confirmation key is a test (`t1`, `t2`, ... in the pipeline's order):
     `test.start` (the point, category, rule, candidate ids) and `test.end` (`confirmed`,
     `inconclusive`, `not_confirmed`, `stopped`, or `error` when it raised).
@@ -1618,7 +1619,37 @@ rewards) derives from it.
     fingerprint send, a differential's B0/B, a timing check's samples), `control` (a
     differential's V, the SQL error check's controls), `mutation` (a differential's D,
     timing delays, the SQL error check's payloads), `restore` (a PRG restore),
-    `follow-up`; every other send is `probe`.
+    `follow-up`, `retry` (FR-FUZZ-61); every other send is `probe`.
+
+- **FR-FUZZ-61 (each HTTP try is its own evidence, `CC-FUZZ-0100`, 2026-10-19)**
+  - **Recorded where the try happens.** A probe sender records every try it actually
+    made, at its try loop, as `oracle.probe.attempt_record` dicts: `n` (1-based),
+    `outcome` (`response`, `timeout`, `unobserved`, `error`), `status` (a response
+    only), `elapsed_ms` and `error` (an exception class name). There is never a URL,
+    header or body.
+  - **Where the tries travel.** On the outcome: `Probe.attempts`,
+    `ProbeUnobserved.attempts`, or `note_attempts` on an exception re-raised unchanged
+    (`attempts_of` reads them).
+  - **What counts as a try.** A try that failed before the request left the client is
+    none: an invalid header value, or for the seam an error in the session's `prepare`
+    (a login on the way).
+  - **Per sender.**
+    - `RequestsProbeSender`: both tries of a GET/HEAD/OPTIONS re-sent after a reset,
+      and the final one.
+    - `SeamProbeSender`: never re-sends, so at most one try per dispatch.
+    - A sender that records none (a test double) leaves the list empty.
+  - **The follow-up that was sent.** `Probe.prg_sent` is the PRG follow-up the sender
+    sent, observed or not: `url`, `outcome`, `status`, `elapsed_ms`, `error` and its
+    own `attempts`.
+  - **What the trace writes.** `TracingSender` writes each earlier try of an exchange
+    (the probe or its follow-up) as an `exchange` event with role `retry`. Its
+    `parent` is that exchange's key, and it has `attempt` and its own outcome, status
+    and time. It is written before the exchange, in the same scope, and joins the
+    strategy run's cited exchanges.
+  - **The exchange itself** keeps its final outcome, and gains `attempts` (the count)
+    and `resent` = `attempts - 1`.
+  - **Unchanged:** what is sent and how often, `Probe.resent`, `followed`, `prg`, the
+    run's `requests` and every verdict.
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
   finding must reproduce.
