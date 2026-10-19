@@ -3,6 +3,30 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0066 — A run that does not decide its candidate is drawn as such and not counted as evaluated (FR-UI-510/511, BUG-0523) (2026-10-19)
+- Change (`fuzzlab/report/diagram.py`):
+  - `_test_sequence` draws a `test.strategy` with `decides: false` as "<arm>: <outcome>
+    (does not decide this candidate)".
+  - `interface_coverage` no longer counts a `decides: false` `not_confirmed` toward
+    *evaluated*, because that run reached no verdict on the test's candidate.
+- Choice (round-2 item 3): `decides` is recorded **true on a confirmation** (a
+  confirmation counts whoever made it), so neither the note nor the count needs a
+  separate condition for `confirmed`. An older event without `decides` reads as
+  deciding: no note, counted as before.
+- Reason: BUG-0523 (CC-FUZZ-0103). Without this, a stored case left inconclusive showed
+  "evaluated 1" from the reflected run that does not decide it.
+- Impact: the sequence and the coverage count only. Export shapes are unchanged.
+- Risk: low.
+- Review: covered by the CC-FUZZ-0103 gate (round-2 items 2 and 3).
+- Deliverables (all done):
+  - [x] the code
+  - [x] `tests/test_diagram_e2e.py::test_a_non_deciding_strategy_is_drawn_as_not_deciding`
+  - [x] `tests/test_trace_model.py::test_a_run_that_does_not_decide_its_candidate_is_not_evaluated`
+  - [x] FR-UI-510's coverage text and FR-UI-511, edited in place
+- Effectiveness (assessed 2026-10-19): both tests fail on `bf1356a` and with their part
+  reverted. Without the note: `assert 'xss-reflecte...not_confirmed' == …`. With
+  *evaluated* counting every run: the stored interface shows 1.
+
 ### CC-UI-0064 — Sequences draw the confirmation steps; *executed* counts M6 loads; the status names the remaining limits (FR-UI-511, FR-FUZZ-62) (2026-10-19)
 - Change: `fuzzlab/report/diagram.py`:
   - `_test_sequence` draws `browser.step` (`_browser_step`) and `oob.wait`

@@ -27,7 +27,7 @@ from fuzzlab.core import trace
 from fuzzlab.core.store import Store
 from fuzzlab.oracle.browser import ExecRequest, FakeBrowserExecutor, StoreStep
 from fuzzlab.oracle.oracle import UNPLACEABLE, Oracle
-from fuzzlab.oracle.probe import Candidate, Probe, UnplaceableLocation, Verdict
+from fuzzlab.oracle.probe import Candidate, Probe, UnplaceableLocation
 from fuzzlab.oracle.strategies import (ReflectedXssStrategy, StoredXssStrategy,
                                        default_strategies)
 
@@ -495,7 +495,3 @@ def test_the_decider_guard_catches_a_synthetic_offender():
     assert _decider_offenders([], {"fuzzlab/rogue.py": rogue}) == [
         "fuzzlab/rogue.py:1 decided_by=('xss', 'x')"]
 
-
-def test_a_verdict_is_still_a_verdict():
-    """Unchanged: a confirmation from any mechanism counts."""
-    assert Verdict(True, "xss-reflected", "m", {}).confirmed

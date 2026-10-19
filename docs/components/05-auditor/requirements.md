@@ -363,6 +363,16 @@ budget where a vulnerability is plausible.
   inside their line), and each complete line is decoded alone, never a partial read.
   A line that is not UTF-8 or not JSON is skipped and still numbered. For one run
   directory both paths give identical `(key, kind, scope, t, body)` and the same model.
+- **FR-AUD-30** *(a point's deciding mechanism, scoped to its category; `CC-AUD-0055`,
+  2026-10-19, BUG-0523).* An `InjectionPoint` may name the one mechanism that decides
+  it: `decided_by`, a `(category, arm)` pair, written by the point builder, never by
+  the auditor (`harness.auto.STORED_DECIDER` on a stored case's observe point,
+  `DOM_DECIDER` on a ground-truth DOM point; `harness.auto.DECIDERS`). `evaluate`
+  copies the arm into a fired rule's evidence as `decided_by` **only when the rule's
+  category is the pair's category**, as `redirect_seed` reaches open-redirect
+  evidence only (FR-AUD-21): a SQLi, command-injection or SSTI candidate on the same
+  point carries none. The key reaches `plugins.on_candidate` with the evidence. A row
+  without it (every older run) is confirmed as before (FR-FUZZ-47).
 - **FR-AUD-26** *(path parameters from crawls; `CC-AUD-0047`, 2026-10-19).*
   `import_spider` and `import_disco` each pass the run's answered URLs (status below
   400 or unknown; a spider's write seeds excluded; a disco run's API GETs included,

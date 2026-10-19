@@ -679,7 +679,9 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
     and captured count observations (captured: browser traffic that was answered, from
     disco's capture or the intercepting proxy), scheduled counts tests, executed counts
     a test's own sends answered or not (never a follow-up, restore or retry), evaluated
-    counts strategy runs that reached a verdict, finding counts findings (BUG-0515); a sequence as an SVG (lost responses as a cross, collapsed
+    counts strategy runs that reached a verdict on the test's candidate (a run whose
+    `test.strategy` says `decides: false` and `not_confirmed` reached none, CC-UI-0066,
+    BUG-0523), finding counts findings (BUG-0515); a sequence as an SVG (lost responses as a cross, collapsed
     repeats, notes for evaluations and findings).
   - every box (the application's too), flow and step opens its supporting events
     (paged); a request refused or blocked before sending is drawn as never sent; the
@@ -711,6 +713,10 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
       a flow into the finding's interface (FR-UI-513's relation-based keep-set).
     - `status()["unsupported"]` names the limits FR-FUZZ-62 leaves.
     - Only the existing step types are used.
+  - **A run that does not decide its candidate** *(CC-UI-0066, BUG-0523)*: a
+    `test.strategy` with `decides: false` is drawn "<arm>: <outcome> (does not decide
+    this candidate)"; a confirmation is recorded deciding, and an older event without
+    `decides` reads as deciding, so neither carries the note.
 - **FR-UI-512** *(added CC-UI-0059)* **The proxy sequence scope.** `report.diagram.scopes`
   lists `proxy` ("proxied traffic (intercepting proxy): <n>") when the run has events
   with scope `proxy` (FR-PROXY-13), and `sequence(conn, run, "proxy")` draws them:
