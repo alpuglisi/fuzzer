@@ -968,3 +968,9 @@ Juice Shop lab is complete.
 - **Evidence:** the lane's DG-UNPLACEABLE implementation report (2026-10-19), "One pytest at a time".
 - **Impact:** a spurious red signal, and load on the concurrent harness run (that run was still green: 75 files, 0 failed). The implementation's own runs checked for other pytest processes and used `--wait-other`.
 - **Status:** open as a practice: every dispatch that runs tests now names `--wait-other` and the one-pytest rule.
+
+### F-093 — A lane killed the orchestrator's verification harness
+- **What:** the DG-NAVBLANK lane (an agent under my orchestration) ran overlapping harness runs of its own, then stopped them with `kill <pids>` chosen by `pgrep -fa "verify_change.py --base bf1356a|…"`. My verify_change run on 806791a had the same `--base`, so it matched, and was killed one second after it started ("interrupted (signal 15)"). My dispatches never forbade signalling processes the lane did not start, nor running more than one harness of its own.
+- **Evidence:** the lane's transcript, 2026-10-19T20:03:42Z, `kill 29632 26897 4640 … # Stop my overlapping harness runs`; my harness log `scratchpad/vup.log` ends "interrupted (signal 15)" at 20:03:43, NOT PUSHED.
+- **Impact:** one verification of the DG-UNPLACEABLE merge lost and re-run; no wrong result was recorded or pushed.
+- **Status:** the lane was told to signal only PIDs it recorded at start and to run one test process at a time behind `--wait-other`; every later dispatch states both.
