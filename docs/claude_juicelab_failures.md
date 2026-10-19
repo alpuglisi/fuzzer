@@ -897,3 +897,9 @@ Juice Shop lab is complete.
 - **Impact:** a finding's data flow showed its interface without the flows that reached it; not pushed yet (9b17d0d awaits its harness run).
 - **Status:** open: fix proposed in CC-UI-0063 (DG-FINDLINK), under review.
 
+### F-081 — I wrote that the browser confirmation records its HTTP sends; it records none
+- **What:** `docs/DIAGRAMS.md` ("Known limits") and `report.diagram.status()`'s unsupported list, both mine (CC-UI-0058), say the M6 browser confirmation "records its HTTP sends". Its store request and page loads go through the Playwright driver, never `TracingSender`, so none is traced. My own test comment (`test_a_unit_of_work_closing_is_written_at_once`) already said M6 "sends nothing through the sender". I did not count M6's requests against the target's log (the check PA-0513 now requires).
+- **Evidence:** DG-M6M8 phase 1 (2026-10-19): a loopback `run_pipeline` with a browser: the target received 8 requests for two M6 tests, the trace held 0 M6 exchanges, and the `/dom` finding cites none (BUG-0520).
+- **Impact:** pushed docs and the status line overstated the evidence; M6 tests and findings show no target traffic, and *executed* undercounts them.
+- **Status:** open: CC-FUZZ-0102 (DG-M6M8) is under the review gate.
+
