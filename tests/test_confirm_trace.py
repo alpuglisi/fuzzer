@@ -1001,6 +1001,16 @@ def _is_wrap(node, arg) -> bool:
         "TracingSender" and bool(node.args) and ast.unparse(node.args[0]) == arg
 
 
+def _only_wrapped(expr, arg) -> bool:
+    """Every value ``expr`` can take is ``None`` or ``TracingSender(<arg>, …)``: the
+    branches of a conditional are each checked, so ``x or TracingSender(x)`` fails."""
+    if isinstance(expr, ast.IfExp):
+        return _only_wrapped(expr.body, arg) and _only_wrapped(expr.orelse, arg)
+    if isinstance(expr, ast.Constant) and expr.value is None:
+        return True
+    return _is_wrap(expr, arg)
+
+
 def _send_path_offenders(auto_src: str, test_src: str) -> list[str]:
     """P2's checks (module docstring); [] when every sending keyword of `run_auto` is
     classified, wrapped as classified, and passed by P1's count run."""
@@ -1024,12 +1034,11 @@ def _send_path_offenders(auto_src: str, test_src: str) -> list[str]:
                    "branch")
     peer = [n for n in ast.walk(branch) if isinstance(n, ast.Assign)
             and ast.unparse(n.targets[0]) == "peer"]
-    wrapped = {ast.unparse(c.args[0]) for n in peer for c in ast.walk(n.value)
-               if isinstance(c, ast.Call) and c.args
-               and _is_wrap(c, ast.unparse(c.args[0]))}
-    for attr in ("peer.sender", "peer.anonymous"):
-        if attr not in wrapped:
-            out.append(f"peer: {attr} is not wrapped in TracingSender")
+    given = {k.arg: k.value for n in peer for c in ast.walk(n.value)
+             if isinstance(c, ast.Call) for k in c.keywords}
+    for attr in ("sender", "anonymous"):
+        if attr not in given or not _only_wrapped(given[attr], f"peer.{attr}"):
+            out.append(f"peer: peer.{attr} is not wrapped in TracingSender")
     parents = {c: p for p in ast.walk(fn) for c in ast.iter_child_nodes(p)}
     for node in ast.walk(fn):
         if isinstance(node, ast.Name) and node.id == "sender" and \
@@ -1086,6 +1095,14 @@ def test_the_keyword_guard_catches_a_synthetic_new_keyword():
     unwrapped = auto_src.replace(rebind, "pass")
     assert "sender: no recorder branch rebinds it to TracingSender(sender)" in \
         _send_path_offenders(unwrapped, test_src)
+    peer = ("sender=None if peer.sender is None else TracingSender(\n"
+            "                    peer.sender,")
+    assert peer in auto_src
+    leaky = auto_src.replace(peer, "sender=None if peer.sender is None else (\n"
+                                   "                    peer.sender) or TracingSender(\n"
+                                   "                    peer.sender,")
+    assert _send_path_offenders(leaky, test_src) == \
+        ["peer: peer.sender is not wrapped in TracingSender"]
     passing = "browser=executor, oob=listener,"
     assert passing in test_src
     omitted = test_src.replace(passing, "browser=executor,")
