@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-19 — fuzzing harness (trace: unobserved follow-ups missing, BUG-0510)
+- **Symptom:** a PRG follow-up that got another redirect, a timeout or no response was sent but had no `exchange` event; an exchange's `resent` counted its follow-up's re-sends.
+- **Root cause:** `TracingSender` worked out "a follow-up was sent" from `Probe.followed`, which is the observation, and copied the run counter `Probe.resent`.
+- **Remediation:** the senders record `Probe.prg_sent` and each try (`attempts`); the exchange's `resent` is its own (CC-FUZZ-0100, PA-0510).
+- **Status:** Fixed
+
 ## 2026-10-19 — tests (the failed-load tests read the server's log order as send order)
 - **Symptom:** `test_the_auditors_failed_load_ends_the_previous_document` failed in the diagrams verification run (three other harness runs on the host); it passed 3 of 3 alone.
 - **Root cause:** the tests asserted no tick in the server log after the fallback's request. Under CPU load, ticks the browser sent 0.9–2.2 s before the page ended were handled after that request (measured with the browser clock in each tick): delayed delivery, not a live document (BUG-0511).

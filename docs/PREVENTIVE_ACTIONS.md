@@ -2485,6 +2485,21 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
      same change. (from BUG-0507)
   - Enforced by: tests/test_path_discovery.py::test_routes_the_code_names_are_not_values_and_placeholders_are_parameters, tests/test_path_discovery.py::test_the_streaming_values_are_data_its_code_never_names, tests/test_path_discovery.py::test_every_path_templating_rule_decides_variation_through_the_one_owner
 
+- **PA-0510** — Strengthens `PA-0078` (no count reconstructed from parameters that also
+  encode something else) from displayed counts to every evidence record, after
+  BUG-0510: the trace took a PRG follow-up's observation for its send, and a run
+  counter for an exchange's re-sends. Related: `PA-0083(1)`.
+  1. **Evidence of an action is recorded where the action happens, by the code that
+     performs it.** It is never reconstructed from a field that summarises the action's
+     result for another consumer (an observation, a verdict input, a run counter). If
+     the code performing the action keeps no such record, add one there; do not infer
+     it.
+  2. **An evidence producer is tested against an independent count of the actions**:
+     the requests a loopback server received equal the recorded tries, end to end
+     through the real pipeline, with a case for each way an action can miss its usual
+     result (a re-send, a redirect that is no observation, no response). (from BUG-0510)
+  - Enforced by: tests/test_trace_attempts.py::test_run_auto_records_every_try_and_changes_no_count_or_verdict, tests/test_trace_attempts.py::test_a_follow_up_that_was_no_observation_is_still_recorded, tests/test_trace_attempts.py::test_a_follow_ups_retry_is_parented_to_the_follow_up
+
 - **PA-0511** — Strengthens `PA-0150`, after BUG-0511: two failed-load tests asserted
   that the server logged no tick after the fallback's request. Under load, ticks sent
   seconds before the mark arrived after it, and the auditor's test failed on correct

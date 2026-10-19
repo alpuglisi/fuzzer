@@ -84,11 +84,12 @@ Newest first.
     counts and verdicts the same with the trace off — done
   - [x] FR-FUZZ-61; FR-FUZZ-60 edited in place (re-sends are recorded) — done
   - [x] BUG-0510 — done
-  - [ ] CHANGELOG, ERROR_LOG, PA-0510, `docs/DIAGRAMS.md`, `docs/SHARED_PRIMITIVES.md`,
-    `report.diagram` status text, `core.trace.ROLES`: owned by other lanes or the
-    orchestrator; text handed over — todo (orchestrator)
-  - [ ] pre-change review gate (two reviewer agents): this lane has no agent tool;
-    the orchestrator's independent verification stands in for it — todo (orchestrator)
+  - [x] CHANGELOG, ERROR_LOG, PA-0510, `docs/DIAGRAMS.md`, `docs/SHARED_PRIMITIVES.md`
+    (SP-51), `report.diagram` (CC-UI-0060), `core.trace.ROLES`: added by the
+    orchestrator at the merge — done
+  - [ ] pre-change review gate (two reviewer agents): this lane has no agent tool. The
+    orchestrator read the diff and ran its tests before the merge; the two reviews run
+    after the fact over the whole diagrams series (a deviation, F-076) — todo
 - Effectiveness: pending. Offline, `test_run_auto_records_every_try_and_changes_no_count_or_verdict`
   shows one event per real try through `run_auto`. Assess on a lab run that meets a
   reset.

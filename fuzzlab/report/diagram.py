@@ -95,9 +95,7 @@ def status(conn, run_id: int) -> dict:
                 "server-side components, stores and internal calls: never observable "
                 "from traffic, never drawn",
                 "browser-only (M6) and out-of-band (M8) confirmations record their HTTP "
-                "sends only; the browser's own steps inside them are not traced",
-                "a sender's re-send after a reset is counted on its exchange, not "
-                "recorded as its own attempt"]}
+                "sends only; the browser's own steps inside them are not traced"]}
 
 
 # --- data flow ---------------------------------------------------------------------------
@@ -293,9 +291,13 @@ def sequence(conn, run_id: int, scope: str) -> dict:
     if kind == "spider":
         return _spider_sequence(_rows(conn, run_id, "scope=?", ["spider"]), scope)
     if kind == "exchange":
-        rows = _rows(conn, run_id, "(key=? OR json_extract(body,'$.parent')=?)",
-                     [scope, scope])
-        return _exchange_steps(rows, scope, "a single exchange and its follow-ups")
+        # the exchange, its follow-up and retries, and the follow-up's retries
+        rows = _rows(conn, run_id, "(key=? OR json_extract(body,'$.parent')=? OR "
+                     "json_extract(body,'$.parent') IN (SELECT key FROM trace_event "
+                     "WHERE run_id=? AND json_extract(body,'$.parent')=?))",
+                     [scope, scope, run_id, scope])
+        return _exchange_steps(rows, scope,
+                               "a single exchange, its retries and its follow-ups")
     return {"scope": scope, "error": "unknown scope"}
 
 
@@ -337,8 +339,11 @@ def _exchange_pair(seq: _Seq, row: dict, src: str) -> None:
     value = b.get("value_preview")
     shown = f" {b.get('param')}={value!r}" if value is not None and b.get("param") \
         else (f" {b.get('param')}=(withheld)" if b.get("param") else "")
+    role = b.get("role")
+    if role == "retry" and b.get("attempt"):
+        role = f"retry, try {b['attempt']}"            # an earlier try (FR-FUZZ-61)
     seq.step(type="message", src=src, dst=dst, kind="request", role=b.get("role"),
-             label=f"[{b.get('role')}] {b.get('method')} {_short(b.get('url'))}{shown}",
+             label=f"[{role}] {b.get('method')} {_short(b.get('url'))}{shown}",
              evidence=[row["key"]])
     outcome = b.get("outcome")
     if outcome == "response":

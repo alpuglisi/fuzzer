@@ -867,3 +867,15 @@ Juice Shop lab is complete.
 - **Impact:** one verification run of the diagrams change red; no product defect.
 - **Status:** fixed (send-time oracle, a proof on the defect, and an AST guard; PA-0511).
 
+### F-076 — I skipped the pre-change review gate for the diagrams change
+- **What:** `docs/components/README.md` requires each change-control entry for component code to be reviewed by two independent agents, and agreed, before implementation. I implemented CC-CORE-0063, CC-FUZZ-0099, CC-AUD-0050 and CC-UI-0058 without it, and none of those entries says so. A lane then reported it could not run the gate for CC-FUZZ-0100; that is how I noticed.
+- **Evidence:** the four entries have no review line; CC-FUZZ-0100's deliverables list the gate as todo.
+- **Impact:** the diagrams series was built on entries no second reader checked. Two defects in it (BUG-0510, and the 38.7 s update lag fixed by `FLUSH_KINDS`) are of the kind a review of the entry could have caught.
+- **Status:** open: the two reviews run after the fact over the whole merged series, as CC-FUZZ's earlier precedent (bd36ff2), and their findings are fixed or answered.
+
+### F-077 — I recorded a follow-up from its observation, not from its send
+- **What:** in `TracingSender` (CC-FUZZ-0099) I emitted a PRG follow-up only when `Probe.followed` was set, which is the oracle's observation. Follow-ups that got a second redirect, timed out or got no response went out but were not traced. I also copied the run counter `Probe.resent` as an exchange's own re-sends. My trace test checked shapes, never the server's count.
+- **Evidence:** BUG-0510. On ede72b9 a 303 → 302 follow-up: the server saw 2 requests, the trace had 1 exchange.
+- **Impact:** the diagrams and coverage missed sends the tool made; `resent` overstated.
+- **Status:** fixed (CC-FUZZ-0100, PA-0510).
+

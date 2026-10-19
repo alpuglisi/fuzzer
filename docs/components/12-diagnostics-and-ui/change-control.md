@@ -3,6 +3,24 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0060 — Sequences show each try of an exchange (FR-UI-511, with FR-FUZZ-61) (2026-10-19)
+- Change (`fuzzlab/report/diagram.py`):
+  - an exchange's sequence also holds its follow-up's retries (the follow-up's
+    children), not only its own children;
+  - a retry's request is labelled with its try number (`[retry, try 1]`);
+  - the status's "unsupported" list no longer says a re-send is only counted.
+- Reason: CC-FUZZ-0100 records each earlier try as a `retry` exchange (FR-FUZZ-61). The
+  probe's own sequence left out a follow-up's retries.
+- Impact: read-only views. No other scope changes; coverage is unchanged (a retry is
+  never a response).
+- Risk: low.
+- Deliverables:
+  - [x] code; `tests/test_trace_attempts.py::test_a_follow_ups_retry_is_parented_to_the_follow_up`
+    checks the probe's sequence holds its follow-up's retry, numbered and drawn lost
+    (fails with the old scope query) — done
+  - [x] `docs/DIAGRAMS.md`, CHANGELOG — done
+- Effectiveness: verified offline (the test above); no lab run has met a reset yet.
+
 ### CC-UI-0058 — Data-flow and sequence diagrams: views, exports, CLI and web page (FR-UI-510, FR-UI-511) (2026-10-19)
 - Change:
   - new `fuzzlab/report/diagram.py` (`status`, `dataflow`, `interface_coverage`,

@@ -74,7 +74,8 @@ _EXCHANGES: contextvars.ContextVar[list | None] = contextvars.ContextVar(
     "fl_trace_exchanges", default=None)
 
 #: Roles a send can carry. ``probe`` is a send whose code did not say what it is.
-ROLES = ("baseline", "mutation", "control", "follow-up", "restore", "probe")
+ROLES = ("baseline", "mutation", "control", "follow-up", "restore", "retry",
+         "probe")
 
 
 @contextlib.contextmanager

@@ -101,7 +101,10 @@ where the code knows which it is:
 - a differential's base value, benign variant and payload;
 - a timing check's baseline samples and its delays;
 - the SQL error check's payloads and controls;
-- a PRG restore.
+- a PRG restore;
+- a sender's earlier try of an exchange (`retry`, a re-send after a reset): its own
+  exchange, with `parent` the exchange it retried and `attempt` its number. The
+  exchange carries `attempts`, its count of tries (FR-FUZZ-61).
 
 Every other send is `probe`: its strategy does not say.
 
@@ -109,7 +112,9 @@ Every other send is `probe`: its strategy does not say.
 
 - A missing response is drawn as a lost arrow (Mermaid `-x`), labelled `timeout`,
   `unobserved` (connection reset or cut off), `not_sent` (refused before sending) or
-  `error`.
+  `error`. A retry's missing response is drawn lost too.
+- A PRG follow-up is recorded whenever it was sent: answered by another redirect,
+  timed out or unobserved included (BUG-0510).
 - A request the browser made inside the tool's write-blocking window (FR-CRAWL-26) is
   marked *blocked, never sent*.
 - A finding is a tool record (an evaluator note), never a target response.
@@ -139,8 +144,10 @@ A run that stopped, or a batch that could not be written, shows as **partial**.
 
 - The browser-only (M6) and out-of-band (M8) confirmations record their HTTP sends;
   the browser's own steps inside them are not traced.
-- A sender's re-send after a reset is counted on its exchange, not recorded as its
-  own attempt: the senders do not expose each try.
+- Each try is recorded by the sender where it happens (FR-FUZZ-61). The authenticated
+  sender never re-sends, and records a failed try only when it reached the network; an
+  error after the response arrived (the store write or the session's `observe`) is not
+  recorded as a try.
 - The spider records no timestamps and no initiator for a page. Its events have no
   first or last seen time, and its sequence is in crawl order.
 - WebSocket messages appear only from a disco capture. The pipeline sends none.

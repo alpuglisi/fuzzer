@@ -285,7 +285,7 @@ def test_one_attempt_adds_a_count_and_no_retry_event(serve, recorded):
 
 
 def test_a_follow_ups_retry_is_parented_to_the_follow_up(serve, recorded):
-    _store, _run, events = recorded
+    store, run_id, events = recorded
     server = serve(_prg(_reset_first))
     probe = TracingSender(RequestsProbeSender(timeout=5.0)).send(
         server.url + "/f", "q", "x", method="POST", location="body", prg=True)
@@ -303,6 +303,12 @@ def test_a_follow_ups_retry_is_parented_to_the_follow_up(serve, recorded):
     # each exchange's own re-sends; the run counter (`Probe.resent`) keeps both
     assert probe.resent == 1 and main["resent"] == 0 and follow["resent"] == 1
     assert len(server.requests) == 3 == len(rows)
+    # the probe's own sequence holds its follow-up's retry, numbered, drawn lost
+    doc = diagram.sequence(store.conn, run_id, mkey)
+    assert [s["evidence"] for s in doc["steps"] if s["type"] != "note"] == [
+        [mkey], [mkey], [_rk], [_rk], [fkey], [fkey]]
+    assert doc["steps"][2]["label"].startswith("[retry, try 1] GET ")
+    assert doc["steps"][3]["type"] == "lost"
 
 
 @pytest.mark.parametrize("plan, outcome, status, tries", [
