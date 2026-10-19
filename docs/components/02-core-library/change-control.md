@@ -22,7 +22,20 @@ Newest first.
     the one-decision guard and its offender, both kinds of evidence, both importers) —
     done
   - [x] BUG-0507, PA-0507, SP-45, FR-CORE-503, ERROR_LOG, F-074, CHANGELOG — done
-- Effectiveness: pending (Juice Shop re-crawled with both tools and scored; streaming re-imported).
+- Effectiveness (Juice Shop v20.3.0, 2026-10-19, both tools re-crawled on this code;
+  code segments recorded: disco 529, spider 535):
+  - disco-fed path parameters: `/rest/products/{id}/reviews`, `/api/Products/{id}`,
+    `/rest/track-order/{id}`, `/snippets/{id}`, `/snippets/fixes/{id}`. `/api/{api}`,
+    `/rest/{rest}`, `/rest/admin/{admin}`, `/rest/web3/{web3}` and the duplicate
+    `{track_order}` are gone (8 templates before, 5 after).
+  - spider-fed: `/rest/basket/{id}` and `/rest/track-order/{id}` only (5 before, 2
+    after).
+  - Scores unchanged: disco-fed tp=5 fp=0, spider-fed tp=6 fp=0, with 31 / 17
+    parameters fewer probed.
+
+  Streaming was not re-crawled (its backend was restarting). Its live bundle's segments
+  were checked instead: `live`, `username`, `play` present, `matthewpets`, `mr.robot`
+  absent, so its templates stay (the test pins this).
 
 ### CC-CORE-0061 — `store_url` / `stored_absolute` / `is_loopback_origin` (FR-CORE-504) (2026-10-19)
 - Change: `fuzzlab/core/urls.py` gains the three functions.
