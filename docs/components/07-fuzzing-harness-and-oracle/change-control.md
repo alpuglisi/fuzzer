@@ -6,7 +6,7 @@ Newest first.
 ### CC-FUZZ-0104 — M6's navigations settle a failure before they raise (BUG-0522) (2026-10-19)
 - Placement: written above CC-FUZZ-0103 (DG-UNPLACEABLE, merging first) as pre-assigned.
 - Change: none in `fuzzlab/tools/browserexec.py` or the oracle. The executor's
-  `navigate` calls (lines 537 and 561 on main) go through SP-01, which now waits for
+  `navigate` calls (lines 539 and 563 at 806791a) go through SP-01, which now waits for
   the error page an empty error answer starts before it raises (CC-CRAWL-0049).
 - Reason: BUG-0522 (S-d of DG-NAVBLANK's gate).
 - Impact:
@@ -29,6 +29,156 @@ Newest first.
 - Deliverables:
   - [x] no code; the classification check above — done
 - Effectiveness: pending.
+### CC-FUZZ-0103 — A placement the browser mechanism refuses, or a candidate only it can decide, is never a negative (BUG-0523) (2026-10-19)
+- Change:
+  1. **The executor raises its refusals** (`fuzzlab/tools/browserexec.py`).
+     - `PlaywrightBrowserExecutor.run`'s two refusals before any browser starts now
+       `raise UnplaceableLocation(<reason>)`, where they used to
+       `return ExecObservation(False, detail=…)`:
+       - the observe location (defensive: neither M6 strategy reaches it);
+       - `_store_plan`: a store in a header, cookie, path or fragment; POST, PUT or
+         PATCH to `query`; GET or DELETE to `body`/`json`; any `JsonPlacementError`.
+     - The CC-FUZZ-0102 visit trace is unchanged. The step is noted `not_sent` and the
+       visit ends `unplaceable` at the refusal.
+  2. **The point's deciding mechanism, from its producer** (`harness/auto.py`).
+     - `STORED_DECIDER` and `DOM_DECIDER` are `(category, arm)` pairs taken from
+       `StoredXssStrategy` and `DomXssStrategy`'s own attributes; `DECIDERS` lists them.
+     - `points_from_ground_truth` passes them as `InjectionPoint.decided_by`: on a
+       stored case's observe point, and on a ground-truth DOM point.
+     - The auditor scopes it to its category (CC-AUD-0055, FR-AUD-30).
+  3. **One predicate** (`oracle/oracle.py::_decides(strategy, candidate)`).
+     - It is `candidate.decided_by is None or getattr(strategy, "arm", None) ==
+       candidate.decided_by`. A strategy with no `arm` (a duck-typed plugin confirmer,
+       joined untyped in `Oracle.__init__`) decides no candidate that names a
+       mechanism. There is no overridable method (PA-0003).
+     - `_confirm_outcome` uses it:
+       - **Placement:** only a deciding strategy marks the candidate placed, on both
+         the verdict and the `ProbeUnobserved` paths.
+       - **A missing decider:** when `decided_by` is set and no applicable strategy has
+         that arm, the result is inconclusive `UNPLACEABLE`, reason "deciding
+         mechanism <arm> did not run".
+       - **Reason precedence:** the decider's own `UnplaceableLocation` first, then the
+         missing decider, then the first other refusal.
+     - A confirmation from any strategy still counts.
+     - **Stated, conservative:** a non-deciding mechanism's `inconclusive` verdict, or
+       its `ProbeUnobserved`, still makes the candidate inconclusive when the decider
+       placed and did not confirm. The reported mechanism is that non-deciding one: its
+       own verdict's mechanism, or `unobserved` with `evidence.mechanism` = its arm.
+       When the decider did not place, `unplaceable` is reported instead.
+  4. **All rows agree, or none** (`harness/pipeline.py::_confirm`).
+     - The candidate's `decided_by` is the one value every row of its confirmation key
+       carries, or `None` when they disagree. This holds on the budgeted and the
+       unbudgeted path. It is never composed (PA-0512).
+     - **Stated gap:** a stored case whose observe point is also an ordinary point
+       keeps today's behaviour, so a reflected not_confirmed there is still a negative.
+  5. **The trace** (`_trace_strategy`). `test.strategy` gains `decides`, recorded true
+     on a confirmation (a confirmation counts whoever made it).
+  6. **The diagram** (CC-UI-0066).
+  7. **`oracle/probe.py`:** `Candidate.decided_by`. **`oracle/strategies.py`:** the
+     comment "Other mechanisms still decide the candidate" is corrected.
+  8. **Tests that pinned the defect's contract** (a refusal returned as
+     `not executed`) now expect the raise:
+     - `tests/test_forms_phase2.py::test_the_browser_executor_refuses_an_unplaceable_location`;
+     - `tests/test_put_patch.py::test_the_executor_refuses_an_unplaceable_store_request_before_any_browser`
+       (3 cases);
+     - `tests/test_json_points.py::test_the_m6_executor_refuses_a_json_point_before_any_browser`;
+     - `tests/test_sender_conformance.py::test_the_executor_places_a_fragment_point_inside_the_hash_route`;
+     - `tests/test_confirm_trace.py::test_a_placement_refusal_ends_unplaceable_at_the_refusal`.
+
+     `tests/test_browser_scope.py`'s docstring is corrected.
+- Reason: BUG-0523 (DG-M6M8's Q1).
+- Measured before design (gate rounds 1–2; the lane's scratchpad). Loopback `run_auto`
+  with all 20 rule categories. On `685259e` the following were all `checked`:
+  - the xss candidate of a stored case whose store point was in a header or a path;
+  - a stored case's xss candidate when the browser could not start;
+  - a ground-truth DOM point's xss candidate when the browser could not start.
+
+  With this change each is `inconclusive`, with its decider's reason. SQLi and SSTI
+  candidates on the same points stay `checked`.
+- Impact:
+  - FUZZ, AUD (CC-AUD-0055) and UI (CC-UI-0066).
+  - Store as contract: candidate evidence gains `decided_by` (FR-AUD-30). It also
+    reaches `plugins.on_candidate` and the web evidence views. Older rows behave as
+    before.
+  - Results:
+    - browser-only xss candidates whose decider could not place, gave no verdict or
+      did not run become `inconclusive` instead of negatives;
+    - `oracle_rejected` and the ML negatives drop by those keys;
+    - findings and other categories are unchanged.
+- Risk: medium, because it changes verdicts by design. Each risk has its test below.
+- Review: the pre-change gate.
+  - Round 1: both reviewers disagreed.
+  - Round 2: the owner approved the revised route with the round-2 fixes: the
+    predicate (no `arm`, no decision), *evaluated*, the note, the stated override, and
+    the per-test reverts. No third round, by the owner's decision.
+- Deliverables (all done, in `fb5bb8e` and this commit):
+  - [x] the code
+  - [x] `tests/test_unplaceable_confirmation.py` (new). The mechanism each test uses:
+    - `test_the_executor_raises_every_placement_it_refuses`: the real executor, 12
+      cases; a fake driver that fails if started.
+    - `test_an_unplaceable_store_is_no_verdict_from_the_stored_strategy`: the real
+      executor, counted; one refusal, not six.
+    - `test_a_stored_candidate_is_decided_only_by_the_mechanism_that_plants_it`: the
+      real `Oracle` with the default strategies.
+    - `test_a_deciding_mechanism_that_did_not_run_leaves_the_candidate_unplaceable`.
+    - `test_the_deciders_refusal_reason_wins_under_a_scheduler`: a real
+      `ThompsonBandit` whose priors (seeded rng) put greybox first.
+    - `test_a_strategy_without_an_arm_decides_only_a_candidate_with_no_decider`: the
+      real plugin path, `PluginManager(plugins=[…]).oracles()` joined at
+      `Oracle.__init__`.
+    - `test_a_key_shared_with_an_ordinary_point_keeps_every_mechanism_deciding`:
+      `run_pipeline` over inserted candidate rows; both orders, with and without a
+      `Prioritized` budget.
+    - `test_run_auto_records_an_unplaceable_store_as_inconclusive_never_a_negative`.
+    - `test_decided_by_reaches_only_the_deciding_category`.
+    - `test_a_browser_that_cannot_start_never_makes_a_browser_only_candidate_a_negative`.
+
+      These three run `run_auto` over every rule category against a loopback app.
+    - The PA-0523 guards, each proven on a synthetic offender:
+      - `test_no_executor_returns_an_observation_for_a_refusal`, with an exact
+        allowlist (`PlaywrightBrowserExecutor._in_browser`'s
+        `ExecObservation(executed=False, detail='')`, and `FakeBrowserExecutor.run`'s);
+      - `test_every_decided_by_names_a_default_arm_of_its_category`.
+  - [x] FR-FUZZ-47, FR-FUZZ-56 and FR-FUZZ-60 edited in place; FR-AUD-30;
+    FR-UI-510/511 (CC-UI-0066)
+  - [x] the BUG-0523 report
+  - [ ] PA-0523, SP-54, CHANGELOG, ERROR_LOG, ARCHITECTURE, DIAGRAMS.md: at merge, by
+    the orchestrator (texts handed over)
+- Effectiveness (assessed 2026-10-19):
+  - **On `bf1356a`**, the code before this change: 38 of the new and updated tests
+    fail.
+  - **Each part reverted alone** (the lane's `prove_103.py`) fails its tests:
+    - (1) the two `return ExecObservation(False, …)` lines restored: the 12
+      executor cases, the stored-strategy test, the executor guard, and all 5 pinning
+      tests (7 failures);
+    - (2) the auditor's category check removed: `test_decided_by_reaches_only…`
+      (`('inconclusive', …)` for sql-injection);
+    - (2) no `DOM_DECIDER`: the dead-DOM case (`('checked', None)`);
+    - (2) a decider spelled as a literal: the decider guard;
+    - (3) a no-arm strategy deciding: the plugin test;
+    - (3) placement from any strategy: tests 3 and 4 (`('checked', …)`);
+    - (3) no missing-decider rule: test 7;
+    - (3) the first refusal's reason: test 8;
+    - (4) the first row deciding: test 5, in the 2 stored-first cases;
+    - (6) the two CC-UI-0066 reverts: the two UI tests.
+  - **Pinning tests, before and after:**
+    - the old versions pass on `bf1356a` (7 passed);
+    - the old versions fail on the new code: 7 failed, each with
+      `UnplaceableLocation: unplaceable location 'header'`, `… store request DELETE
+      'body'`, `… PUT 'query'`, `… store leaf: the body has no leaf 'content'`, or
+      `… location 'json'`;
+    - the updated versions fail against revert (1).
+  - **Lab ground truths** (22 directories): no stored case has an unplaceable store,
+    so a run with a browser changes no lab case. When the browser cannot start, the 3
+    stored cases and 5 DOM points are `inconclusive` instead of `checked`.
+  - **Harness:** `FUZZLAB_REQUIRE_BROWSER=1 scripts/verify_change.py --base bf1356a
+    --wait-other 5400` on `9817abc`:
+    - 139 test files, all in one parallel pass, 0 serial;
+    - 3869 passed, 0 failed, 0 errors, 14 xfailed;
+    - 5 skipped: `test_packaging`'s wheel build (bdist_wheel is unavailable on this
+      host) and 4 live external-lab tests (`FUZZLAB_LIVE_EXTERNAL_LABS` is not set);
+    - no browser test skipped.
+  - The on-host scored check is still pending (PA-0042/0047).
 
 ### CC-FUZZ-0102 — The browser (M6) and out-of-band (M8) confirmations record each step they perform (FR-FUZZ-62, BUG-0520) (2026-10-19)
 - Change:

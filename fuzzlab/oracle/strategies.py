@@ -2492,7 +2492,8 @@ class _BrowserXssStrategy(ConfirmationStrategy):
         if self._executor is None:
             # no browser: this mechanism observed nothing, at any location, so it gives
             # no verdict -- never a negative (CC-FUZZ-0070; reviewer A: not only for a
-            # fragment point). Other mechanisms still decide the candidate.
+            # fragment point). The oracle decides which mechanisms count (`decided_by`,
+            # FR-AUD-30): a browser-only candidate is left inconclusive.
             raise UnplaceableLocation("no browser attached: browser XSS not observed"
                                       if candidate.location != "fragment" else
                                       "a fragment point is placed by the browser only")

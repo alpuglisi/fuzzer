@@ -1157,7 +1157,9 @@ rewards) derives from it.
     list, a path through another leaf) is refused with `UnplaceableLocation` before any
     send. **greybox** (`RequestsCorrelatingSender`) and the **M6 executor** do not place
     `json`: greybox raises `UnplaceableLocation` and `greybox-run` never receives JSON
-    points (reported); the executor gives no verdict before starting a browser.
+    points (reported); the executor gives no verdict before starting a browser: it
+    raises `UnplaceableLocation` for every placement it refuses, never returns an
+    observation (BUG-0523, `CC-FUZZ-0103`).
   - **Siblings.** `oracle._FormBoundSender` binds a `json` candidate's other leaves to
     every probe of it. They were stored through `redact_leaf` and pass `_send_value`
     (`neutral_value`) in the point builder: a url leaf goes as `http://127.0.0.1/`, a
@@ -1166,7 +1168,18 @@ rewards) derives from it.
   - **Oracle.** Strategies are location-agnostic through `_send`; the SQLi engines get
     a JSON point like a body point (its string families included). A mechanism that
     raises `UnplaceableLocation` gives no verdict; a candidate no mechanism could place
-    is `inconclusive` (`unplaceable`), never a negative. No strategy catches
+    is `inconclusive` (`unplaceable`), never a negative. **A candidate that names its
+    deciding mechanism** (`decided_by`, an arm: FR-AUD-30, for a stored case's
+    observe point and a ground-truth DOM point; kept only when every row of its
+    confirmation key names the same one) is placed only by that mechanism
+    (`oracle._decides`: no candidate naming one is decided by a strategy without
+    an `arm`); another mechanism's confirmation still confirms it, but its
+    not_confirmed is no negative. It is `inconclusive` (`unplaceable`) when its
+    deciding mechanism refused, gave no verdict, or did not run (reason "deciding
+    mechanism <arm> did not run"); the reason is the decider's own first. A
+    non-deciding mechanism's `inconclusive` verdict or `ProbeUnobserved` still makes
+    the candidate inconclusive when the decider placed and did not confirm
+    (conservative; that mechanism is named). No strategy catches
     `ValueError` or broader around a send (an AST guard), so a refusal is never read as
     "not vulnerable".
   - **Reporting `inconclusive`** — "could not be decided: a cost cap stopped a started
@@ -1560,7 +1573,9 @@ rewards) derives from it.
     no such point, the store request stays a form POST. The M6 executor plants with
     `context.request.fetch` at that method (a JSON body built by `jsonbody.body_for`),
     scope-checked and never redirected; it refuses before any browser starts a store
-    method outside POST/PUT/PATCH, a non-GET query store, or a JSON leaf the body lacks.
+    method outside POST/PUT/PATCH, a non-GET query store, a store in a header, cookie,
+    path or fragment, or a JSON leaf the body lacks -- raised as no verdict
+    (`UnplaceableLocation`, BUG-0523), so the stored case is `inconclusive`.
     Checked on a real browser: a chat that accepts only a JSON PUT is confirmed, and the
     old form POST to it gives no verdict.
 - **FR-FUZZ-57 (path-segment parameters, `CC-FUZZ-0096`, 2026-10-19)** A ground-truth
@@ -1617,7 +1632,9 @@ rewards) derives from it.
     `inconclusive`, `not_confirmed`, `stopped`, or `error` when it raised).
   - Each strategy run in `Oracle._confirm_outcome` is a `strategy_scope`: its sends are
     collected, and `test.strategy` records its outcome (`confirmed`, `not_confirmed`,
-    `inconclusive`, `unobserved`, `unplaceable`) with exactly those exchange keys.
+    `inconclusive`, `unobserved`, `unplaceable`) with exactly those exchange keys, and
+    `decides` (BUG-0523): whether the run decides its candidate (`oracle._decides`,
+    FR-FUZZ-47); true on a confirmation, which counts whoever made it.
   - `finding` (written by `_write_finding`, keyed `finding:<id>`) cites its test, its
     strategy and exactly the exchanges of that strategy run, and (FR-FUZZ-62) its
     browser and out-of-band steps (`steps`), as `test.strategy` does.

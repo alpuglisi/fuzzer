@@ -61,7 +61,7 @@ Newest first.
     | disco `explore` 811/812, 1005, 1083 | covered |
     | disco `ede._load` | a failure ends `_page`; the next page gets a new context |
     | `session.browserlogin` 530/537 | covered (CC-SESS-0027) |
-    | `tools.browserexec` 537/561 on main | covered (CC-FUZZ-0104) |
+    | `tools.browserexec` 539/563 (at 806791a) | covered (CC-FUZZ-0104) |
 
   - **Cost.** An abort (ERR_ABORTED), a download or a timeout raises at once, as before.
     In the overtaken case `navigate` still raises, so that one load is lost (a static

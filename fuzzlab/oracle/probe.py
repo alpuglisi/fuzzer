@@ -105,6 +105,9 @@ class Candidate:
     # An open-redirect candidate's crawled URL seed (FR-AUD-21, BUG-0124): read only by
     # `OpenRedirectStrategy`'s second probe.
     redirect_seed: str | None = None
+    # The one mechanism (an arm) that decides this candidate (FR-AUD-30, BUG-0523): from
+    # the evidence when every row of its confirmation key names it. None: any decides.
+    decided_by: str | None = None
 
 
 @dataclass

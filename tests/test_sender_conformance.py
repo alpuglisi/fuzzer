@@ -514,9 +514,10 @@ def test_the_executor_places_a_fragment_point_inside_the_hash_route(monkeypatch)
         assert gotos == [want] and want.count("#") == 1
     for location in ("json", "body", "header"):              # refused before any browser
         gotos.clear()
-        obs = PlaywrightBrowserExecutor().run(ExecRequest(
-            url="http://h/#/search", param="q", value="zqmark", location=location), "t")
-        assert not obs.executed and gotos == []
+        with pytest.raises(UnplaceableLocation, match=f"unplaceable location '{location}'"):
+            PlaywrightBrowserExecutor().run(ExecRequest(       # no verdict, raised (BUG-0523)
+                url="http://h/#/search", param="q", value="zqmark", location=location), "t")
+        assert gotos == []
 
 
 @pytest.mark.xfail(strict=True, reason="BUG-0115 instance 4, pinned not fixed: the probe "

@@ -4,7 +4,7 @@ Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
 ### CC-AUD-0053 — The auditor ends a failed load through SP-01's owner (BUG-0522) (2026-10-19)
-- Placement: pre-assigned before CC-AUD-0054 was written (PA-0031), so it lands above that higher-numbered entry.
+- Placement: pre-assigned before CC-AUD-0054 and CC-AUD-0055 were written (PA-0031), so it lands above those higher-numbered entries.
 - Change: `fuzzlab/tools/fetcher.py` `ContentFetcher.fetch`'s `except` calls
   `navguard.end_failed_load(self._page, e, timeout_ms=self.timeout_ms)` instead of a
   suppressed `about:blank`; the now unused `contextlib` import is removed. Its
@@ -26,6 +26,29 @@ Newest first.
     `test_the_auditors_failed_load_ends_the_previous_document` kept green — done
   - [x] FR-AUD text — done
 - Effectiveness: pending.
+### CC-AUD-0055 — A point's deciding mechanism reaches only its own category's evidence (FR-AUD-30, BUG-0523) (2026-10-19)
+- Change:
+  - `fuzzlab/audit/engine.py`: `InjectionPoint.decided_by: tuple[str, str] | None`
+    (`(category, arm)`, default `None`).
+  - `evaluate` writes `evidence["decided_by"] = arm` only for a fired rule whose
+    category is the pair's category, beside `redirect_seed`'s open-redirect-only copy
+    (FR-AUD-21).
+- Reason: BUG-0523. Without the scope, a SQLi, command-injection or SSTI candidate on a
+  stored case's page carried the restriction, and none of its own strategies decided
+  it. Measured in gate round 1: sql-injection `checked` → `inconclusive`.
+- Impact:
+  - The candidate evidence gains `decided_by` on the deciding category's rows only. It
+    reaches `plugins.on_candidate` and the web evidence views.
+  - Older rows behave as before.
+- Risk: low. One optional field and one scoped copy.
+- Review: covered by the CC-FUZZ-0103 gate.
+- Deliverables (all done):
+  - [x] the code
+  - [x] `tests/test_unplaceable_confirmation.py::test_decided_by_reaches_only_the_deciding_category`
+  - [x] FR-AUD-30
+- Effectiveness (assessed 2026-10-19): with the category check removed, the test fails
+  for both a stored case (header store) and a DOM point: the sql-injection candidate
+  becomes `inconclusive`.
 
 ### CC-AUD-0054 — One set of disco event builders for the import and the live trace; the hosts the browser guard refused are traced (FR-AUD-29, BUG-0524) (2026-10-19)
 - Change (`fuzzlab/tools/observe.py`):

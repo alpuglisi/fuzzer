@@ -416,18 +416,20 @@ class PlaywrightBrowserExecutor:
         entered = False
         try:
             # refuse, never relocate (BUG-0115, PA-0115): checked before any browser
-            # starts
+            # starts. A refusal is the oracle's no-verdict signal, raised -- never a
+            # returned observation, which its reader takes as "observed, not executed"
+            # (BUG-0523, PA-0523)
             if request.param is not None and request.location not in ("query", "fragment"):
                 detail = f"unplaceable location {request.location!r}"
                 if visit is not None:
                     visit.refused_placement("navigate", request, detail)
-                return ExecObservation(False, detail=detail)
+                raise UnplaceableLocation(detail)
             if request.store is not None:
                 refusal, _body = _store_plan(request.store)
                 if refusal is not None:
                     if visit is not None:
                         visit.refused_placement("store", request, refusal)
-                    return ExecObservation(False, detail=refusal)
+                    raise UnplaceableLocation(refusal)
             from playwright.sync_api import Error as PlaywrightError
             from playwright.sync_api import sync_playwright
 

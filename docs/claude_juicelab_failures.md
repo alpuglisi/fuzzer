@@ -957,3 +957,14 @@ Juice Shop lab is complete.
 - **Impact:** none further.
 - **Status:** fixed.
 
+### F-091 — Status update for F-088 (BUG-0523)
+- **What:** the browser executor raises its placement refusals, and a stored or DOM candidate is decided only by the browser mechanism (`decided_by`, category-scoped), so it ends inconclusive instead of a negative.
+- **Evidence:** CC-FUZZ-0103 / CC-AUD-0055 / CC-UI-0066 merged after the gate (round-2 blocker on a no-arm plugin fixed by the owner's choice); the lane's harness on 9817abc: 139 files, 3869 passed, 0 failed; 38 new and updated tests fail on bf1356a's code.
+- **Impact:** none further; a scored run on the on-host lab is still pending (PA-0042/0047).
+- **Status:** fixed.
+
+### F-092 — A lane ran an ad-hoc parallel pytest while another pytest was running
+- **What:** during the DG-UNPLACEABLE design phase, the lane (an agent under my orchestration) ran an ad-hoc `pytest -n 3` that overlapped my `verify_change` run and the DG-NAVBLANK lane's pytest, against the one-pytest-at-a-time rule (BUG-0143). Its run showed timing and ML failures that passed serially. My dispatch did not restate the rule for ad-hoc runs.
+- **Evidence:** the lane's DG-UNPLACEABLE implementation report (2026-10-19), "One pytest at a time".
+- **Impact:** a spurious red signal, and load on the concurrent harness run (that run was still green: 75 files, 0 failed). The implementation's own runs checked for other pytest processes and used `--wait-other`.
+- **Status:** open as a practice: every dispatch that runs tests now names `--wait-other` and the one-pytest rule.

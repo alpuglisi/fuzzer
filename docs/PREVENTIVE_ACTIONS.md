@@ -2652,3 +2652,16 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
   2. **The step oracle is proven against the exact original defect** it guards
      (PA-0034(2)), not a look-alike. (from BUG-0526)
   - Enforced by: tests/test_no_startup_timing.py::test_no_test_bounds_a_span_that_holds_a_browser_start, tests/test_no_startup_timing.py::test_the_guard_catches_bug_0526_and_allows_a_step_or_a_smoke_bound
+- **PA-0523** — Strengthens `PA-0115(1)` and `PA-0137(1)`, after BUG-0523: the browser
+  executor returned its placement refusal as "not executed", which its only reader took as
+  an observation, and the oracle let a mechanism that does not address a candidate make it
+  a negative. PA-0115(1) allowed "raises or gives no verdict" and was checked at the
+  producer; PA-0126(3)/PA-0137(1) mapped the browser's failures, not its refusals, and
+  never checked the candidate's final status.
+  1. **A refusal is raised, never returned as an observation;** "no verdict" is checked at
+     the consumer, by the candidate's final status, not at the producer.
+  2. **A candidate built for one mechanism is decided only by it, within its own
+     category** (FR-AUD-30): another mechanism's placement may confirm it but never makes
+     it a negative, and a strategy without an arm decides no such candidate. (from
+     BUG-0523)
+  - Enforced by: tests/test_unplaceable_confirmation.py::test_no_executor_returns_an_observation_for_a_refusal, tests/test_unplaceable_confirmation.py::test_run_auto_records_an_unplaceable_store_as_inconclusive_never_a_negative, tests/test_unplaceable_confirmation.py::test_a_stored_candidate_is_decided_only_by_the_mechanism_that_plants_it, tests/test_unplaceable_confirmation.py::test_decided_by_reaches_only_the_deciding_category, tests/test_unplaceable_confirmation.py::test_a_strategy_without_an_arm_decides_only_a_candidate_with_no_decider

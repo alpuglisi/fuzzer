@@ -1265,14 +1265,17 @@ def test_dom_xss_never_relocates_a_body_or_header_payload():
 
 
 def test_the_browser_executor_refuses_an_unplaceable_location():
-    """Checked before any browser starts, so it runs without Playwright."""
+    """Checked before any browser starts, so it runs without Playwright. A refusal is
+    no verdict, raised -- never a returned "not executed" (BUG-0523)."""
     from fuzzlab.oracle.browser import ExecRequest, StoreStep
+    from fuzzlab.oracle.probe import UnplaceableLocation
     from fuzzlab.tools.browserexec import PlaywrightBrowserExecutor
     ex = PlaywrightBrowserExecutor()
-    assert not ex.run(ExecRequest(url="http://h/a", param="p", value="v",
-                                  location="header"), "t").executed
-    assert not ex.run(ExecRequest(url="http://h/a", store=StoreStep(
-        url="http://h/s", param="p", value="v", location="header")), "t").executed
+    with pytest.raises(UnplaceableLocation, match="unplaceable location 'header'"):
+        ex.run(ExecRequest(url="http://h/a", param="p", value="v", location="header"), "t")
+    with pytest.raises(UnplaceableLocation, match="unplaceable store request POST 'header'"):
+        ex.run(ExecRequest(url="http://h/a", store=StoreStep(
+            url="http://h/s", param="p", value="v", location="header")), "t")
 
 
 def test_no_ground_truth_dom_point_has_another_location():
