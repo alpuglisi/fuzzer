@@ -18,7 +18,8 @@ tested, never as "secure".
 
 **Sequences** (`sequence`): a test (its exchanges, strategy outcomes and finding), a
 captured workflow (an explorer action and the exchanges tagged with it, through the
-capture proxy), the spider's trace (crawl order), one exchange, or a finding. Steps are
+capture proxy), the spider's trace (crawl order), the traffic through the intercepting
+proxy (``proxy``, FR-UI-512), one exchange, or a finding. Steps are
 ordered by the producer's sequence, and correlated by explicit ids (test, strategy
 scope, action id, parent exchange), never by time windows; a step with no response is
 drawn lost, never as a reply; repeated exchanges of one role are collapsed with their
@@ -249,7 +250,8 @@ def scopes(conn, run_id: int) -> list[dict]:
         out.append({"scope": r["scope"], "kind": "workflow",
                     "label": f"{r['scope'][9:]} ({r['n']} event(s))"})
     for scope, label in (("capture", "capture records with no action (uncorrelated)"),
-                         ("spider", "spider exploration (crawl order)")):
+                         ("spider", "spider exploration (crawl order)"),
+                         ("proxy", "proxied traffic (intercepting proxy)")):
         n = conn.execute("SELECT COUNT(*) n FROM trace_event WHERE run_id=? AND scope=?",
                          (run_id, scope)).fetchone()["n"]
         if n:
@@ -290,6 +292,8 @@ def sequence(conn, run_id: int, scope: str) -> dict:
                                  scope, correlated=False)
     if kind == "spider":
         return _spider_sequence(_rows(conn, run_id, "scope=?", ["spider"]), scope)
+    if kind == "proxy":
+        return _proxy_sequence(_rows(conn, run_id, "scope=?", ["proxy"]), scope)
     if kind == "exchange":
         # the exchange, its follow-up and retries, and the follow-up's retries
         rows = _rows(conn, run_id, "(key=? OR json_extract(body,'$.parent')=? OR "
@@ -510,6 +514,65 @@ def _spider_sequence(rows, scope) -> dict:
         if b.get("status") is not None:
             seq.step(type="message", src=dst, dst=spider, kind="response",
                      label=str(b.get("status")), evidence=[row["key"]])
+    return seq.out()
+
+
+def _proxy_sequence(rows, scope) -> dict:
+    """Traffic through the intercepting proxy (FR-UI-512): per recorded flow, the
+    browser's request, the proxy's forward (or the operator's drop), the origin's reply
+    or a lost arrow, and the proxy's reply to the browser. The interception decisions
+    shown are only those the proxy recorded (``intercept``)."""
+    seq = _Seq(scope, "order: the time the intercepting proxy received each request, "
+                      "then the recorder's sequence; each flow is one exchange, and no "
+                      "causality between flows is implied")
+    browser = seq.party("browser", "Browser / client", "actor")
+    proxy = seq.party("proxy", "Intercepting proxy (tool)", "tool")
+    rows = sorted((r for r in rows if r["kind"] == "observe.exchange"),
+                  key=lambda r: (r["t"] is None, r["t"] or 0, r["seq"]))
+    untimed = sum(1 for r in rows if r["t"] is None)
+    if untimed:
+        seq.notes.append(f"{untimed} flow(s) with no recorded time are shown last, in "
+                         f"the recorder's sequence")
+    for row in rows:
+        b, ev = row["body"], [row["key"]]
+        intercept = str(b.get("intercept") or "")
+        label = f"{b.get('method')} {_short(b.get('url'))}"
+        if b.get("profile"):
+            label += f" [{b['profile']}]"
+        seq.step(type="message", src=browser, dst=proxy, kind="request", label=label,
+                 evidence=ev)
+        if "request dropped" in intercept or intercept.strip() == "dropped":
+            seq.step(type="note", over=[proxy], kind="intercept",
+                     label="dropped by the operator: never forwarded", evidence=ev)
+            continue
+        dst = _origin_party(seq, b.get("origin"))
+        edited = "request edited" in intercept or intercept.strip() == "edited"
+        seq.step(type="message", src=proxy, dst=dst, kind="forward",
+                 label="forwarded" + (" (edited by the operator)" if edited else ""),
+                 evidence=ev)
+        if b.get("status") is None and not str(b.get("outcome") or "").startswith(
+                "response"):
+            seq.step(type="lost", src=dst, dst=proxy, kind="no-response",
+                     label=f"no response ({b.get('error') or 'connection closed'})",
+                     evidence=ev)
+            continue
+        shown = str(b["status"]) if b.get("status") is not None else "no status line"
+        extra = f" → {_short(b.get('location'))}" if b.get("location") else ""
+        resp_edited = "response edited" in intercept
+        # the proxy records the response it sent on: after an edit, not the origin's
+        seq.step(type="message", src=dst, dst=proxy, kind="response",
+                 label="response (the origin's original is not recorded)" if resp_edited
+                 else f"{shown}{extra}", evidence=ev)
+        if "response dropped" in intercept:
+            seq.step(type="note", over=[proxy], kind="intercept",
+                     label="response dropped by the operator: not sent to the browser",
+                     evidence=ev)
+            continue
+        if resp_edited:
+            seq.step(type="note", over=[proxy], kind="intercept",
+                     label="response edited by the operator", evidence=ev)
+        seq.step(type="message", src=proxy, dst=browser, kind="response",
+                 label=f"{shown}{extra}" if resp_edited else shown, evidence=ev)
     return seq.out()
 
 

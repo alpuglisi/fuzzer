@@ -1,6 +1,6 @@
 # Intercepting Proxy — Requirement Specification
 
-Component code: **PROXY** · Status: `[built — offline stack + live upstream SocketSender, CONNECT/TLS termination, the fuzzlab proxy CLI, and the live h2c H2Transport; HTTPS interception + h2c send verified on-host]` (Phase 6 + Phase 9) · Last updated: 2026-09-21 · see CC-PROXY-0010, CC-PROXY-0011
+Component code: **PROXY** · Status: `[built — offline stack + live upstream SocketSender, CONNECT/TLS termination, the fuzzlab proxy CLI, and the live h2c H2Transport; HTTPS interception + h2c send verified on-host]` (Phase 6 + Phase 9) · Last updated: 2026-10-19 · see CC-PROXY-0010, CC-PROXY-0011, CC-PROXY-0025
 
 Related: `ARCHITECTURE.md` #11; `DECISIONS_AND_ROADMAP.md` (D3, D4, D5);
 `./change-control.md`.
@@ -102,6 +102,37 @@ that shares the store, never a mandatory pipeline (D5).
   - **Off the event loop:** the engine runs the (stateless) sender with
     `asyncio.to_thread`, with at most min(32, CPUs + 4) concurrent upstream calls.
     History is recorded on the loop thread.
+- **FR-PROXY-13 (proxied traffic in the trace, CC-PROXY-0025)** Every in-scope flow
+  the proxy engine records is also one `observe.exchange` trace event (FR-CORE-505),
+  so the Diagrams page shows proxied traffic while it happens (the `proxy` sequence,
+  FR-UI-512).
+  - **Where:** `HistoryWriter` owns a `core.trace.TraceRecorder`, on the writer's thread
+    and store connection, under its lock, with the writer's `run_id`. After a flush has
+    committed its flows, it emits their events and flushes them: they are visible as
+    soon as the flow is (`batch_size=1` in `fuzzlab proxy` and the web proxy).
+  - **The event:** `src` "proxy", `ref` "flow id <n>", method, URL (`trace.safe_ref` of
+    the redacted URL), origin (`core.urls.canonical_origin`), status (None when no
+    response came), `error` (the upstream failure's class), `outcome`, the redacted
+    `Location`, the identity as `profile`, the request content type, `params` (query
+    and form / JSON field *names* and locations, from `tools.observe`; never a value;
+    a chunked or compressed body is not parsed), `via` (the protocol), and `intercept`
+    when the operator held a message ("request edited" / "request forwarded",
+    "response edited" / "response forwarded"). `t` is when the proxy received the
+    request; key `proxy:flow:<flow id>`; scope `proxy`. `history.flow_event` is pure, so
+    re-processing a flow is a duplicate.
+  - **A failed upstream** (the sender raised) is recorded as a flow with no response and
+    its error class, and the connection still answers 502 (FR-PROXY-5).
+  - **A flush inside a transaction the writer does not own** emits nothing then. A later
+    flush or `close` emits the events once the transaction is gone and the flow is
+    still stored (compared by id, method, URL, status and identity). A rolled-back flow
+    gets no event.
+  - **Not traced:** out-of-scope flows (not recorded); messages the operator dropped
+    (no flow is recorded for them); repeater sends (`FlowRecord.source="repeater"`: the
+    operator's replays, not browser traffic); a writer with no `run_id` (a stored flow
+    always has one: `flow.run_id` is NOT NULL); `HistoryWriter(trace=False)`.
+  - **Failures** never fail the history: a trace event that cannot be built or written
+    is counted `dropped`, logged, and the counters are written (`run_metrics`
+    `trace_*`); `HistoryWriter.close()` writes them at the end (`fuzzlab proxy` calls it).
 - **FR-PROXY-400** *(`--record`; `CC-PROXY-0400`, 2026-10-15).* Flow recording stays
   opt-in.
   - `--record` records into the resolved store (FR-CORE-400).
@@ -115,7 +146,7 @@ that shares the store, never a mandatory pipeline (D5).
 - **NFR-PROXY-byte-exact** The raw path preserves bytes exactly (no reserializing).
 - **NFR-PROXY-safe** Scope-enforced and lab-only; the local CA never leaves the
   host; credentials/tokens redacted on write.
-  - Enforced by: `proxy.scope`, `core.net.require_loopback`, `proxy.ca`, `proxy.history` redaction — `tests/test_proxy_server.py::test_engine_bypasses_out_of_scope_untouched`, `tests/test_proxy_rules_and_scope.py::test_scope_matches_authorities`, `tests/test_loopback_listeners.py::test_every_listener_in_fuzzlab_is_gated`, `tests/test_loopback_listeners.py::test_the_proxy_server_itself_refuses_a_non_loopback_bind`, `tests/test_proxy_ca_hardening.py::test_the_real_ca_key_is_0600_from_creation`, `tests/test_proxy_ca_hardening.py::test_the_path_backstop_holds_if_validation_were_bypassed`, `tests/test_proxy_redaction.py::test_no_secret_reaches_any_persisted_copy`, `tests/test_proxy_history.py::test_secrets_redacted_on_write`
+  - Enforced by: `proxy.scope`, `core.net.require_loopback`, `proxy.ca`, `proxy.history` redaction — `tests/test_proxy_server.py::test_engine_bypasses_out_of_scope_untouched`, `tests/test_proxy_rules_and_scope.py::test_scope_matches_authorities`, `tests/test_loopback_listeners.py::test_every_listener_in_fuzzlab_is_gated`, `tests/test_loopback_listeners.py::test_the_proxy_server_itself_refuses_a_non_loopback_bind`, `tests/test_proxy_ca_hardening.py::test_the_real_ca_key_is_0600_from_creation`, `tests/test_proxy_ca_hardening.py::test_the_path_backstop_holds_if_validation_were_bypassed`, `tests/test_proxy_redaction.py::test_no_secret_reaches_any_persisted_copy`, `tests/test_proxy_history.py::test_secrets_redacted_on_write`, `tests/test_proxy_trace.py::test_no_secret_reaches_the_trace_the_model_or_the_exports`, `tests/test_proxy_trace.py::test_an_out_of_scope_host_produces_no_event`
   - Not yet enforced: `Repeater.send` has no scope check; out-of-scope traffic is forwarded to any upstream (scope governs interception and recording only). (BUG-0111 sweep.)
 - **NFR-PROXY-nonblocking** History writes are batched and must not stall the data
   path.
@@ -133,7 +164,8 @@ that shares the store, never a mandatory pipeline (D5).
 
 ## 5. Interfaces and data contracts
 Writes `flow` rows (+ raw bytes) to the store, read by the anomaly detector, UI,
-and analysis. Uses the session manager as an addon. Shares `core/` config, budget,
+and analysis. Writes one `trace_event` (`observe.exchange`, scope `proxy`) per traced
+flow through `core.trace.TraceRecorder` (FR-PROXY-13), read by `report.diagram`. Uses the session manager as an addon. Shares `core/` config, budget,
 and logging. *(Note, U3/CC-PROXY-0018, 2026-09-22: the web UI's Proxy section was
 re-laid on a shared message-editor component and resizable panes — see
 `docs/components/12-diagnostics-and-ui/requirements.md`'s FR-UI-9 — purely a

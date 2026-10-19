@@ -147,7 +147,7 @@ def main(argv: list[str]) -> int:
         pass
     finally:
         if history is not None:
-            history.flush()
+            history.close()               # flush, and record the trace counters
         if store is not None:
             store.close()
     return 0

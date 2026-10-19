@@ -8,17 +8,37 @@ the single-commit-per-flush shape are built and tested here.
 
 Persisted bytes are **redacted** first (NFR-PROXY-safe) — the wire path stays
 byte-exact, but history never stores credentials/tokens in cleartext.
+
+**The trace (FR-PROXY-13).** Every in-scope flow the proxy engine records is also one
+``observe.exchange`` event (`core.trace`; scope ``proxy``; key ``proxy:flow:<flow id>``),
+written live by a `TraceRecorder` the writer owns. The recorder runs on the writer's
+thread and store connection, under the writer's lock, with the writer's ``run_id``,
+right after the flush that wrote the flows has committed. An event body is built from
+the prepared (redacted) values only: method, URL (`trace.safe_ref`), origin, status or
+the upstream error, the redacted ``Location``, the identity name, the parameter *names*.
+Never a header, body or query value. A flush inside a transaction the writer does not
+own emits nothing then: a later flush or `close` emits it once the transaction is gone
+and the flow is still stored (the owner may have rolled it back). Not traced: repeater
+sends (``source="repeater"``: the operator's replays, not browser traffic), out-of-scope
+flows, messages the operator dropped (the proxy records no flow for them), and a writer
+with no ``run_id``.
 """
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import threading
 from dataclasses import dataclass, field
 
 from fuzzlab.core.redaction import OMIT_FAILED
 from fuzzlab.core.store import Store
+from fuzzlab.proxy.message import RawMessage
 from fuzzlab.proxy.redact import redact, redact_body_for, redact_url
+
+#: The trace scope and event-key prefix of proxied flows (FR-PROXY-13).
+TRACE_SCOPE = "proxy"
+TRACE_KEY = "proxy:flow:"
 
 
 @dataclass
@@ -35,19 +55,34 @@ class FlowRecord:
     req_body: bytes | None = None
     resp_body: bytes | None = None
     protocol: str = "http/1.1"          # 'http/1.1' | 'h2' | 'ws' (Phase 9)
+    #: when the proxy received the request (epoch seconds); None when the producer did
+    #: not record it (the trace keeps None, never "now")
+    t: float | None = None
+    #: the upstream failure's class when no response came back (not a stored column)
+    error: str | None = None
+    #: the operator's interception decisions when a message was held, e.g. "request
+    #: edited; response forwarded"; None when nothing was held (not a stored column)
+    intercept: str | None = None
+    #: "proxy" (traffic through the engine) or "repeater" (an operator's replay)
+    source: str = "proxy"
 
 
 @dataclass
 class HistoryWriter:
     store: Store
-    run_id: int
+    run_id: int | None
     batch_size: int = 50
     redact_secrets: bool = True
+    #: also record each in-scope engine flow as a trace event (FR-PROXY-13)
+    trace: bool = True
     _buf: list[FlowRecord] = field(default_factory=list, init=False)
     #: records whose redaction failed: stored with omitted bodies (BUG-0106)
     errors: list[str] = field(default_factory=list, init=False)
     _lock: threading.RLock = field(default_factory=threading.RLock, init=False,
                                    repr=False)
+    _recorder: object = field(default=None, init=False, repr=False)
+    #: written flows whose events wait for a transaction the writer does not own
+    _unsent: list = field(default_factory=list, init=False, repr=False)
 
     # --- ingest --------------------------------------------------------------
     def record(self, rec: FlowRecord) -> None:
@@ -103,7 +138,8 @@ class HistoryWriter:
         them inside ``SAVEPOINT history_flush``: any error rolls back to it and
         re-raises with the buffer intact, so a retry never duplicates a flow. It commits
         only when no transaction was open before it (the shared connection's owner
-        commits its own); only the records it wrote leave the buffer."""
+        commits its own); only the records it wrote leave the buffer. Then the written
+        flows' trace events are emitted (`_trace`)."""
         with self._lock:
             if not self._buf:
                 return 0
@@ -111,10 +147,13 @@ class HistoryWriter:
             prepared = [p for p in (self._prepare_contained(r) for r in batch) if p]
             conn = self.store.conn
             owned = not conn.in_transaction
+            written = []
             conn.execute("SAVEPOINT history_flush")
             try:
                 for rec, url, req_raw, resp_raw, req_body, resp_body in prepared:
-                    self._insert(conn, rec, url, req_raw, resp_raw, req_body, resp_body)
+                    flow_id = self._insert(conn, rec, url, req_raw, resp_raw, req_body,
+                                           resp_body)
+                    written.append((flow_id, rec, url, req_raw, resp_raw, owned))
             except BaseException:
                 conn.execute("ROLLBACK TO history_flush")
                 conn.execute("RELEASE history_flush")
@@ -123,9 +162,10 @@ class HistoryWriter:
             if owned:
                 conn.commit()
             del self._buf[:len(batch)]
+            self._trace(written)
             return len(prepared)
 
-    def _insert(self, conn, rec, url, req_raw, resp_raw, req_body, resp_body) -> None:
+    def _insert(self, conn, rec, url, req_raw, resp_raw, req_body, resp_body) -> int:
         req_raw_sha = self._put_body(req_raw)
         resp_raw_sha = self._put_body(resp_raw)
         req_body_sha = self._put_body(req_body)
@@ -145,6 +185,43 @@ class HistoryWriter:
             (url, rec.method, rec.host, _head_text(req_raw), _head_text(resp_raw),
              flow_id),
         )
+        return flow_id
+
+    # --- the trace (FR-PROXY-13) ----------------------------------------------
+    def _trace(self, written: list) -> None:
+        """Emit and flush the events of flows already written (the module docstring).
+        Called under the writer's lock, on its thread. Never raises: a failure is
+        counted as dropped and logged, and the flow history is unaffected."""
+        if not self.trace or self.run_id is None:
+            return
+        self._unsent.extend(w for w in written
+                            if w[1].source == "proxy" and w[1].in_scope)
+        conn = self.store.conn
+        if not self._unsent or conn.in_transaction:
+            return                        # its owner may still roll the flows back
+        batch, self._unsent = self._unsent, []
+        try:
+            from fuzzlab.core.trace import TraceRecorder
+            if self._recorder is None:
+                self._recorder = TraceRecorder(self.store, self.run_id)
+            recorder = self._recorder
+            dropped = recorder.stats["dropped"]
+            for flow_id, rec, url, req_raw, resp_raw, owned in batch:
+                if not owned and not _still_stored(conn, self.run_id, flow_id, rec,
+                                                   url):
+                    continue              # rolled back by the transaction's owner
+                try:
+                    key, body, t = flow_event(flow_id, rec, url, req_raw, resp_raw)
+                except Exception as exc:  # noqa: BLE001 - counted and logged
+                    recorder.stats["dropped"] += 1
+                    _log_trace_failure(exc)
+                    continue
+                recorder.emit("observe.exchange", body, key=key, scope=TRACE_SCOPE, t=t)
+            recorder.flush()              # live: this flush's events are visible now
+            if recorder.stats["dropped"] != dropped:
+                recorder.close()          # record the counters: the view says partial
+        except Exception as exc:  # noqa: BLE001 - the proxy's history must not fail
+            _log_trace_failure(exc)
 
     # --- search --------------------------------------------------------------
     def search(self, query: str, raw_query: bool = False) -> list[dict]:
@@ -178,13 +255,74 @@ class HistoryWriter:
         return self.store.get_body(row["sha"])
 
     def close(self) -> None:
+        """Flush; emit the events still waiting for a transaction the writer did not
+        own (when it is gone); record the trace counters (``run_metrics`` ``trace_*``)."""
         self.flush()
+        with self._lock:
+            self._trace([])
+            if self._recorder is not None:
+                with contextlib.suppress(Exception):
+                    self._recorder.close()
 
     def __enter__(self) -> "HistoryWriter":
         return self
 
     def __exit__(self, *exc: object) -> None:
         self.close()
+
+
+def flow_event(flow_id: int, rec: FlowRecord, url: str, req_raw: bytes,
+               resp_raw: bytes) -> tuple[str, dict, float | None]:
+    """``(key, body, t)`` of one written flow's ``observe.exchange`` event, built from
+    its prepared (redacted) values (FR-PROXY-13). Pure: the same flow always gives the
+    same event, so re-processing it is a duplicate the recorder ignores."""
+    from fuzzlab.core import trace
+    from fuzzlab.core.urls import canonical_origin
+    from fuzzlab.tools.observe import _body_params, _query_params
+    ref = trace.safe_ref(url)
+    req = RawMessage.from_bytes(req_raw or b"")
+    ctype = (req.get("Content-Type") or b"").decode("latin-1", "replace")
+    params = _query_params(ref)
+    # names only; a chunked or compressed body is not parsed (its bytes are not text)
+    if req.body and req.get("Transfer-Encoding") is None \
+            and req.get("Content-Encoding") is None:
+        params += _body_params(ctype, req.body.decode("utf-8", "replace"))
+    location = None
+    if resp_raw:
+        loc = RawMessage.from_bytes(resp_raw).get("Location")
+        if loc:
+            location = trace.safe_ref(loc.decode("latin-1", "replace")) or None
+    if rec.status is not None:
+        outcome = "response"
+    elif resp_raw:
+        outcome = "response without a status line"
+    else:
+        outcome = f"no response ({rec.error or 'connection closed'})"
+    body = {"src": "proxy", "ref": f"flow id {flow_id}",
+            "method": (rec.method or "GET").upper(), "url": ref,
+            "origin": canonical_origin(url), "status": rec.status, "error": rec.error,
+            "outcome": outcome, "location": location, "profile": rec.identity,
+            "ctype": ctype.split(";", 1)[0].strip() or None, "params": params,
+            "via": rec.protocol}
+    if rec.intercept:
+        body["intercept"] = rec.intercept
+    return f"{TRACE_KEY}{flow_id}", body, rec.t
+
+
+def _still_stored(conn, run_id: int, flow_id: int, rec: FlowRecord, url: str) -> bool:
+    """Whether a flow written inside another owner's transaction survived it. The row is
+    compared, not only its id: after a rollback, SQLite may give the id to a later flow."""
+    row = conn.execute("SELECT method, url, status, identity FROM flow WHERE id=? AND "
+                       "run_id=?", (flow_id, run_id)).fetchone()
+    return row is not None and (row["method"], row["url"], row["status"],
+                                row["identity"]) == (rec.method, url, rec.status,
+                                                     rec.identity)
+
+
+def _log_trace_failure(exc: BaseException) -> None:
+    from fuzzlab.core.obs import get_logger
+    get_logger("trace").warning("proxy trace event not written",
+                                extra={"error": type(exc).__name__})
 
 
 def _head_text(raw: bytes) -> str:

@@ -21,6 +21,33 @@ Newest first.
   - [x] `docs/DIAGRAMS.md`, CHANGELOG — done
 - Effectiveness: verified offline (the test above); no lab run has met a reset yet.
 
+### CC-UI-0059 — The `proxy` sequence scope: traffic through the intercepting proxy (FR-UI-512) (2026-10-19)
+- Change: `fuzzlab/report/diagram.py` only. `scopes()` lists `proxy` ("proxied traffic
+  (intercepting proxy): <n>") when the run has events with scope `proxy`;
+  `sequence(conn, run, "proxy")` draws them with the new `_proxy_sequence`. The
+  participants are Browser / client (actor), Intercepting proxy (tool) and the origins
+  (target). Per flow it draws the request, "forwarded" (edited noted), then the
+  origin's status and the reply to the browser, or a lost arrow with the error and no
+  reply. A drop recorded in `intercept` gives a note and no forward. The order is the
+  time received, then the sequence, as the note says. It reuses `_Seq`,
+  `_origin_party`, `_short` and `_rows`.
+- Reason: as CC-PROXY-0025 (FR-PROXY-13): proxied traffic in the Diagrams page.
+- Impact: the page's scope list gains `[proxy]` for proxy runs; the web routes, the CLI
+  (`--format scopes|mermaid-seq --scope proxy`) and the exports pass any scope through,
+  so nothing else changed. The other scopes behave as before. Not changed (outside
+  this lane): `interface_coverage` counts a proxied flow as *discovered* only;
+  *captured* still counts `src == "capture"` alone.
+- Risk: low; read-only, the labels go through `mermaid_text` (SP-50) and the page's
+  text-only rendering.
+- Deliverables:
+  - [x] code; tests in `tests/test_proxy_trace.py` (the sequence from real proxied
+    traffic, a lost arrow with no reply, edit and drop notes, no secret in the
+    sequence or its Mermaid) — done
+  - [x] FR-UI-512 — done
+- Effectiveness (assessed 2026-10-19): the scope listing, the lost arrow, a reply
+  after it, and the edit and drop notes were each mutated and each caught (see
+  CC-PROXY-0025).
+
 ### CC-UI-0058 — Data-flow and sequence diagrams: views, exports, CLI and web page (FR-UI-510, FR-UI-511) (2026-10-19)
 - Change:
   - new `fuzzlab/report/diagram.py` (`status`, `dataflow`, `interface_coverage`,

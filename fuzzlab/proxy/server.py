@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import ssl
+import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
@@ -106,32 +107,51 @@ class ProxyEngine:
             # blocking socket I/O never runs on the event loop (BUG-0101)
             return await asyncio.to_thread(self.sender, host, port, use_tls, raw)
 
+        started = time.time()                    # the flow's own time (FR-PROXY-13)
+        decisions: list[str] = []                # the operator's, when a message was held
         if self.matchreplace is not None:
             msg = self.matchreplace.apply(msg)
         if self.interceptor is not None:
+            held = bool(self.interceptor.enabled)
             decided = await self.interceptor.handle(msg, "request", host)
             if decided is None:
                 return None                                  # dropped by the user
+            if held:
+                decisions.append("request edited" if decided.raw != msg.raw
+                                 else "request forwarded")
             msg = decided
 
-        resp = await asyncio.to_thread(self.sender, host, port, use_tls,
-                                       msg.raw)                       # byte-exact forward
+        try:
+            resp = await asyncio.to_thread(self.sender, host, port, use_tls,
+                                           msg.raw)                   # byte-exact forward
+        except Exception as exc:
+            # an in-scope flow whose upstream failed is recorded with no response and
+            # its error class (FR-PROXY-13); the connection still answers 502
+            if self.history is not None:
+                self._record(msg, b"", host, port, use_tls, t=started,
+                             error=type(exc).__name__, decisions=decisions)
+            raise
         # Optional response interception (Burp-style "intercept responses"): only when
         # the interceptor opts in, so the default path stays byte-exact (the wrap+`.raw`
         # round-trips the exact bytes). A dropped response sends nothing to the client.
         if self.interceptor is not None and getattr(self.interceptor,
                                                     "intercept_responses", False):
+            held = bool(self.interceptor.enabled)
             decided = await self.interceptor.handle(
                 RawMessage.from_bytes(resp), "response", host)
             if decided is None:
                 return None
+            if held:
+                decisions.append("response edited" if decided.raw != resp
+                                 else "response forwarded")
             resp = decided.raw
         if self.history is not None:
-            self._record(msg, resp, host, port, use_tls)
+            self._record(msg, resp, host, port, use_tls, t=started, decisions=decisions)
         return resp
 
     def _record(self, msg: RawMessage, resp: bytes, host: str, port: int,
-                use_tls: bool) -> None:
+                use_tls: bool, *, t: float | None = None, error: str | None = None,
+                decisions: list[str] | None = None) -> None:
         scheme = "https" if use_tls else "http"
         status = None
         if resp:
@@ -143,7 +163,8 @@ class ProxyEngine:
             url=f"{scheme}://{_authority(host, port)}"
                 f"{msg.target.decode('latin-1', 'replace')}",
             host=_authority(host, port), status=status, identity=self.identity,
-            in_scope=True, raw_request=msg.raw, raw_response=resp,
+            in_scope=True, raw_request=msg.raw, raw_response=resp, t=t, error=error,
+            intercept="; ".join(decisions) if decisions else None,
         ))
 
 

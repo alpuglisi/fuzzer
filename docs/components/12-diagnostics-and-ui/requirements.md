@@ -684,6 +684,24 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
   status|scopes [--scope] [--overlay] [--out] [--rebuild]`, read-only but for
   `--rebuild`. Downloads: `/api/diagram/{run}/export.json`, `export/flow.mmd`,
   `export/sequence.mmd?scope=`.
+- **FR-UI-512** *(added CC-UI-0059)* **The proxy sequence scope.** `report.diagram.scopes`
+  lists `proxy` ("proxied traffic (intercepting proxy): <n>") when the run has events
+  with scope `proxy` (FR-PROXY-13), and `sequence(conn, run, "proxy")` draws them:
+  - participants: "Browser / client" (actor), "Intercepting proxy (tool)" (tool), and
+    each origin (target);
+  - per flow: Browser→Proxy request (method, path, identity); Proxy→Origin "forwarded"
+    ("(edited by the operator)" when `intercept` says the request was edited); then
+    Origin→Proxy with the status (and the redirect target) and Proxy→Browser with the
+    status, or a lost arrow "no response (<error>)" when no response came, with no
+    reply to the browser;
+  - an `intercept` saying the request was dropped: a note "dropped by the operator:
+    never forwarded" and no forward; the response dropped: a note and no reply to the
+    browser; the response edited: a note, and the origin's reply is labelled as not
+    recorded (the proxy records what it sent on);
+  - order: the time the proxy received each request, then the recorder's sequence, as
+    the scope's note says; flows with no time are last, and a note counts them. No
+    causality between flows is implied.
+  The other scopes are unchanged. The page lists and draws it like any other scope.
 ## 4. Non-functional requirements
 - **NFR-UI-localhost** The web app binds to loopback only, is never exposed, and is
   served separately from the vulnerable target (different origin/port; never in the

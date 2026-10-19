@@ -3,6 +3,69 @@
 Component code: **PROXY**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PROXY-0025 — The proxy's recorded flows are trace events, live (FR-PROXY-13) (2026-10-19)
+- Change:
+  - **`proxy/history.py`:** `HistoryWriter` owns a `core.trace.TraceRecorder` (created
+    on first use, on the writer's thread and store connection, under its lock, with the
+    writer's `run_id`). After each flush has committed, `_trace` emits one
+    `observe.exchange` event per written in-scope engine flow (scope `proxy`, key
+    `proxy:flow:<flow id>`) and flushes it. New pure `flow_event` builds the body from
+    the prepared (redacted) values; parameter names come from `tools.observe`
+    (`_query_params`, `_body_params`, imported, not copied). A flush inside a
+    transaction the writer does not own emits later, only for a flow still stored
+    (`_still_stored`). `_insert` returns the flow id. `close()` emits what waited and
+    writes the `trace_*` counters. `FlowRecord` gains `t`, `error`, `intercept` and
+    `source` (none of them a stored column); `HistoryWriter` gains `trace=True`, and
+    its `run_id` may be None (nothing traced).
+  - **`proxy/server.py`:** `ProxyEngine.handle_request` stamps `t` when an in-scope
+    request arrives; records the operator's held-message decisions (`request edited` /
+    `request forwarded`, `response edited` / `response forwarded`); and records a flow
+    whose upstream failed (no response, its error class) before re-raising, so the
+    connection still answers 502.
+  - **`proxy/repeater.py`:** repeater flows carry `source="repeater"` (not traced).
+  - **`proxy/cli.py`:** `fuzzlab proxy` ends with `history.close()` (was `flush()`), so
+    the counters are written.
+- Reason: the intercepting proxy's history was missing from the trace, so the Diagrams
+  page could not show user/browser traffic through the proxy (FR-CORE-505 gap).
+- Impact (other components / project): new `trace_event` / `dg_*` rows for proxy runs
+  (the trace's one writer, SP-48; no new writer of those tables). Consumers, found by
+  searching `HistoryWriter(` and `FlowRecord(` across `fuzzlab/`: `proxy/cli.py`,
+  `proxy/server.py`, `proxy/repeater.py`, `web/proxycontrol.py` (two constructions;
+  unchanged, works as is: its `stop()` calls `flush()`, so its `trace_*` counters are
+  written only after a dropped event, not at stop; the fix is `close()` there, outside
+  this lane's files). `report.diagram` reads the events (CC-UI-0059). History gains a
+  row for an in-scope flow whose upstream failed (status NULL); it used to be absent.
+- Risk: low to medium. A trace failure is contained (counted `dropped`, logged) and
+  never fails the history; the recorder commits only when no transaction is open.
+  Cost, measured (400 flows, `batch_size=1`, two runs): median 0.30–0.38 ms per flow
+  without the trace, 1.38–1.46 ms with it (p95 1.3–2.5 ms vs 5.8–13.4 ms), on the
+  loop thread, like the history write itself (FR-PROXY-12). Accepted for hand-driven
+  traffic; `HistoryWriter(trace=False)` turns it off.
+- Deliverables:
+  - [x] code — done
+  - [x] tests: new `tests/test_proxy_trace.py` (11): the real `AsyncProxyServer` +
+    `SocketSender` + `HistoryWriter(batch_size=1)` against a loopback upstream; one
+    event per flow, live, stable keys; no Cookie / Authorization / password / token /
+    JSON-key / Location secret in events, model or exports; out-of-scope and repeater
+    flows give none; a failed upstream is a lost arrow; a re-flush, a failed flush and
+    its retry, and re-processing add nothing; an owner's rollback traces nothing;
+    intercept decisions recorded and drawn — done
+  - [x] FR-PROXY-13; NFR-PROXY-safe's Enforced-by line; §5 interfaces — done
+  - [ ] CHANGELOG, `docs/DIAGRAMS.md`, ARCHITECTURE — the orchestrator's (text in the
+    lane report)
+- Effectiveness (assessed 2026-10-19): 15 mutation runs against
+  `tests/test_proxy_trace.py`; 13 were caught:
+  - no in-scope / source filter; no rollback check; tracing inside an owner's
+    transaction; no `t`; no failed-upstream record; `flush` raising after the trace
+    call; no `proxy` scope listing;
+  - a lost arrow drawn as a reply; a reply to the browser after a lost arrow; the
+    Cookie header of the unredacted request in the body; query values as params; no
+    edit note; no drop note.
+  - two were not caught; both were mis-aimed first tries of mutations listed above. One
+    changed the identical line in the capture sequence, not the proxy's. The other read
+    the Cookie header from the prepared request, which is already redacted. Re-aimed
+    at the proxy's own line and at the unredacted request, both are caught.
+
 ### CC-PROXY-0024 — The proxy's hand-written 501 says `Connection: close` (BUG-0147 sweep) (2026-10-15)
 - Change: `fuzzlab/proxy/server.py`: the 501 sent for a CONNECT with no CA, after which
   the connection is closed, carries `Connection: close` (the 502 already did).

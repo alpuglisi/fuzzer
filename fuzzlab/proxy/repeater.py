@@ -92,6 +92,7 @@ class Repeater:
                     f"{msg.target.decode('latin-1', 'replace')}",
                 host=f"{tab.host}:{tab.port}",
                 raw_request=req, raw_response=resp,
+                source="repeater",        # an operator replay: not traced (FR-PROXY-13)
             ))
         return resp
 
