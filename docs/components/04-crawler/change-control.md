@@ -34,7 +34,16 @@ Newest first.
     blocked POST recorded); each proven to fail with the rollback or the fresh-context
     rule removed — done
   - [x] BUG-0506, PA-0506, ERROR_LOG, F-073, FR-CRAWL-26, ARCHITECTURE, CHANGELOG — done
-- Effectiveness: pending (the Juice Shop crawl and its scored `auto` run are measuring it).
+- Effectiveness (Juice Shop v20.3.0, 2026-10-19; authenticated crawl, depth 3, 4
+  workers, 38m42s): 6 forms dry-submitted, 2 writes recorded (`POST /rest/user/login`
+  JSON `{"email", "password"}` -- the password blanked -- and `POST /rest/chat`), 9
+  refused by the gate, 3 not submittable; no session loss. Counters reconciled with the
+  DB (2 `dry-submit` rows = `requests_captured_dry`). The reveal window blocked 3,266
+  writes and recorded none: none had a recordable body outside the transport rule (the
+  log names no URL, so this is not verified per request; socket.io polling is the
+  likely source). Spider-fed `auto`: **tp=6 fp=0 fn=9** (CC-LAB-0317: tp=5 fp=0); the
+  new finding is `/rest/user/login` `email` (sqli). `/rest/chat` was refused at import
+  (the captured-request gates).
 
 ### CC-CRAWL-0044 — Disco's harvest reads script routes and skips alias documents (FR-CRAWL-27, BUG-0505) (2026-10-19)
 - Change (`fuzzlab/disco/explore.py`, `fuzzlab/disco/cli.py`):

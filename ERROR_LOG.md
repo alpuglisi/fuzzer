@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-19 — lab (Juice Shop exited a third time during a disco-fed `auto` run; cause now verified)
+- **Symptom:** the scored disco-fed run stopped with "Connection refused" on `/rest/web3/1` (rc=1); the container was `Exited (1)`.
+- **Root cause:** verified from the exited container's log this time: `ReferenceError: fz1626ec is not defined` in `$where` (`return this.product == fz1626ec`, `routes/showProductReviews.js`), uncaught -- a probe of the crawled `/rest/products/{id}/reviews` template, the app's own flaw (the entry two below). fuzzlab stopping is by design: an unreachable target fails loudly rather than turning every later candidate inconclusive (BUG-0147, `probesender._unobserved`).
+- **Remediation:** `./labctl.sh up juice-shop --authorized` and the run repeated. The detection gap (server-side JavaScript / `$where`) and the missing restart policy stay open.
+- **Status:** Environment
+
 ## 2026-10-19 — crawler (the spider never saw an SPA form's request with submission off; Juice Shop's login SQL injection was never probed)
 - **Symptom:** spider-fed `auto` on Juice Shop (CC-LAB-0317): no `/rest/user/login` row in the spider DB, so `email` (sqli, the answer key's first entry) was found from the ground truth only.
 - **Root cause:** a form's request shape was learnt only by sending it (`--submit-spa-forms`, off by default because it changes lab state); the reveal window blocked writes and discarded their shape (BUG-0506).
