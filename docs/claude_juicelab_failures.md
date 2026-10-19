@@ -891,3 +891,9 @@ Juice Shop lab is complete.
 - **Impact:** the pushed diagrams overstated their evidence and could expose tokens in exports until the fix.
 - **Status:** fixed (CC-CORE-0064, CC-FUZZ-0101, CC-AUD-0052, CC-CRAWL-0048, CC-UI-0062, CC-PROXY-0027; PA-0512..0518).
 
+### F-080 — My BUG-0515 fix split the spider into its own actor without sweeping the finding filter
+- **What:** in 9b17d0d I moved the spider's page loads to a new `actor:spider` and added it to the boundaries, but `report.diagram.dataflow(finding=)` keeps a hard-coded `{APP, TOOL, BROWSER}`, so a finding's filtered data flow lost the spider's flows into its interface (BUG-0519). I swept the boundary lists, not every list of actor ids.
+- **Evidence:** measured by DG-FINDLINK in phase 1 (2026-10-19): `finding_links` names the spider flow; the filtered data flow omits it.
+- **Impact:** a finding's data flow showed its interface without the flows that reached it; not pushed yet (9b17d0d awaits its harness run).
+- **Status:** open: fix proposed in CC-UI-0063 (DG-FINDLINK), under review.
+
