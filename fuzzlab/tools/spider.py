@@ -89,7 +89,9 @@ class StorageManager:
                 title TEXT,
                 content TEXT,
                 rendered INTEGER DEFAULT 0,
-                source TEXT DEFAULT 'link'
+                source TEXT DEFAULT 'link',
+                found_from TEXT,
+                seen_at REAL
             )
         ''')
         # Every form the crawler saw (forms phase 1): entries are stored with sensitive
@@ -129,7 +131,8 @@ class StorageManager:
                 content_type TEXT,
                 body_json TEXT,
                 source TEXT,
-                signature TEXT UNIQUE
+                signature TEXT UNIQUE,
+                seen_at REAL
             )
         ''')
         # What the crawl's SPA features did (FR-CRAWL-12/13): `LocalSpider.spa_counts`
@@ -159,11 +162,21 @@ class StorageManager:
         # value. Names only; an identifier-like segment is never kept.
         self.cursor.execute(
             "CREATE TABLE IF NOT EXISTS script_segments (segment TEXT PRIMARY KEY)")
-        # Add columns that older result databases won't have.
-        for col, decl in (("title", "TEXT"), ("content", "TEXT"),
-                          ("rendered", "INTEGER DEFAULT 0"), ("source", "TEXT DEFAULT 'link'")):
+        # Add columns that older result databases won't have. FR-CRAWL-29: a page's
+        # ``found_from`` (the queued URL whose load queued it; NULL for the start URL
+        # and the origin's well-known files) and ``seen_at`` (wall time, seconds, when
+        # its load began), a captured request's ``seen_at`` (when it was captured); an
+        # older row keeps NULL there: unknown, never guessed.
+        for table, col, decl in (
+                ("discovered_pages", "title", "TEXT"),
+                ("discovered_pages", "content", "TEXT"),
+                ("discovered_pages", "rendered", "INTEGER DEFAULT 0"),
+                ("discovered_pages", "source", "TEXT DEFAULT 'link'"),
+                ("discovered_pages", "found_from", "TEXT"),
+                ("discovered_pages", "seen_at", "REAL"),
+                ("discovered_requests", "seen_at", "REAL")):
             try:
-                self.cursor.execute(f"ALTER TABLE discovered_pages ADD COLUMN {col} {decl}")
+                self.cursor.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
             except sqlite3.OperationalError:
                 pass  # column already exists
         self.conn.commit()
@@ -196,14 +209,16 @@ class StorageManager:
         self.conn.commit()
 
     @_locked
-    def record_request(self, page_url, method, url, content_type, body, source):
+    def record_request(self, page_url, method, url, content_type, body, source,
+                       seen_at=None):
         """Store one request the page made (FR-CRAWL-13), redacted here, at the write
         site, by the one boundary (PA-0100): both URLs by
         `core.redaction.redact_url_identifiers`, the body by
         `core.redaction.redact_captured_body` (64 KiB, depth 8, fail closed). Only the
         media type of the request's own Content-Type is kept; no other header and no
-        cookie is ever taken. Returns None when stored, else why not (``duplicate`` for
-        a signature already stored)."""
+        cookie is ever taken. ``seen_at``: when it was captured (wall time, seconds;
+        FR-CRAWL-29), now when not given. Returns None when stored, else why not
+        (``duplicate`` for a signature already stored)."""
         import json
 
         from fuzzlab.core.redaction import redact_captured_body, redact_url_identifiers
@@ -220,10 +235,12 @@ class StorageManager:
         try:
             self.cursor.execute('''
                 INSERT INTO discovered_requests
-                    (page_url, method, url, content_type, body_json, source, signature)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (page_url, method, url, content_type, body_json, source, signature,
+                     seen_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ''', (spa.scrub_markers(redact_url_identifiers(page_url)), method, safe_url, media,
-                  json.dumps(doc, ensure_ascii=False), source, sig))
+                  json.dumps(doc, ensure_ascii=False), source, sig,
+                  time.time() if seen_at is None else float(seen_at)))
             self.conn.commit()
             return None
         except sqlite3.IntegrityError:
@@ -309,20 +326,28 @@ class StorageManager:
 
     @_locked
     def mark_visited(self, url, status_code, depth, title=None, content=None,
-                     rendered=0, source='link'):
+                     rendered=0, source='link', found_from=None, seen_at=None):
         """Records a URL (and any parsed content). Returns False if already present
         (by visit key: an alias spelling of a stored page is present). A probe marker
-        (FR-CRAWL-17) in the URL, title or text is replaced (`spa.scrub_markers`): an app
-        may replay one it persisted, and no row ever carries one (review A-S4)."""
-        url, title, content = (spa.scrub_markers(v) for v in (url, title, content))
+        (FR-CRAWL-17) in the URL, title, text or ``found_from`` is replaced
+        (`spa.scrub_markers`): an app may replay one it persisted, and no row ever
+        carries one (review A-S4). FR-CRAWL-29: ``found_from`` is the queued URL whose
+        load queued this one (None: the start URL or a well-known file), passed as the
+        caller stores ``url`` (the same redaction); ``seen_at`` when its load began
+        (wall time, seconds), now when not given."""
+        url, title, content, found_from = (spa.scrub_markers(v) for v in
+                                           (url, title, content, found_from))
+        seen_at = time.time() if seen_at is None else float(seen_at)
         key = spa.visit_key(url)
         if key in self._keys:
             return False
         try:
             self.cursor.execute('''
-                INSERT INTO discovered_pages (url, status_code, depth, title, content, rendered, source)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (url, status_code, depth, title, content, int(rendered), source))
+                INSERT INTO discovered_pages (url, status_code, depth, title, content, rendered,
+                                              source, found_from, seen_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (url, status_code, depth, title, content, int(rendered), source,
+                  found_from, seen_at))
             self.conn.commit()
             self._keys.add(key)
             return True
@@ -456,6 +481,15 @@ def _shared_field(name):
 
 #: The most crawl workers a crawl may ask for (each is a browser).
 MAX_WORKERS = 8
+
+
+def _entries(items, found_from):
+    """Crawl queue entries ``(url, depth, source, found_from)`` (FR-CRAWL-29): the
+    ``(url, depth, source)`` triples a producer returns (`_after_fetch`, `_plan_probes`,
+    `_take_query_navs`, ...), each carrying ``found_from`` -- the queued URL whose load
+    produced them, or None for what the crawl queues itself (the start URL, the
+    origin's well-known files, a probe, which records nothing). Order is kept."""
+    return [(url, depth, source, found_from) for url, depth, source in items]
 
 
 class _CrawlQueue(list):
@@ -1243,7 +1277,7 @@ class LocalSpider:
         content_type = (request.headers or {}).get("content-type", "")
         why = self.storage.record_request(self._capture_page or self._current_url, method,
                                           request.url, content_type, body,
-                                          self._capture_source)
+                                          self._capture_source, seen_at=time.time())
         if why is None:
             self.spa_counts["requests_captured"] += 1
         elif why != "duplicate":
@@ -1577,9 +1611,11 @@ class LocalSpider:
         return status, ct, title, text, links, list(dict.fromkeys(self._xhr_urls))
 
     # ----- landing URLs, forms, selector navigation (forms phase 1) -----
-    def _after_fetch(self, url, status, depth, title, content):
+    def _after_fetch(self, url, status, depth, title, content, seen_at=None):
         """Record where a redirect landed and every form on the page; enumerate allowed
-        selector forms. Returns more ``(url, depth, source)`` to queue."""
+        selector forms. Returns more ``(url, depth, source)`` to queue. A landing's row
+        is found from ``url``, the load that redirected, seen when it began
+        (``seen_at``, FR-CRAWL-29)."""
         from fuzzlab.core.redaction import redact_url
         more = []
         final = self._last_final_url
@@ -1591,7 +1627,8 @@ class LocalSpider:
                 and self._in_scope(landing) and not self._destructive(landing)):
             # the landing URL keeps its query (xss_eval.php?date=Date()), redacted
             self.storage.mark_visited(redact_url(landing), status, depth,
-                                      title, content, source='redirect')
+                                      title, content, source='redirect',
+                                      found_from=redact_url(url), seen_at=seen_at)
         if self._spa_on and self.engine == "playwright":
             more += self._queue_routes(final or url, depth)
             if (self._submit_routes is not None and self._last_html is not None
@@ -2135,7 +2172,7 @@ class LocalSpider:
             return
         content_type = (request.headers or {}).get("content-type", "")
         why = self.storage.record_request(page_url, request.method, request.url,
-                                          content_type, body, source)
+                                          content_type, body, source, seen_at=time.time())
         if why is None:
             self.spa_counts["requests_captured_dry" if source == "dry-submit"
                             else "requests_captured_blocked"] += 1
@@ -2969,7 +3006,7 @@ class LocalSpider:
                     return None
                 i = 0
                 while i < len(queue):
-                    url, depth, source = queue[i]
+                    url, depth, source, found_from = queue[i]
                     if source in query_sources and not first:
                         i += 1
                         continue
@@ -2979,12 +3016,12 @@ class LocalSpider:
                             continue
                         self._claimed.add(url)
                     self._sh["busy"] += 1
-                    return url, depth, source
+                    return url, depth, source, found_from
                 if self._sh["busy"] == 0:
                     if first and self._query_on:
                         more = self._plan_probes()  # FR-CRAWL-17 (Q5): all idle now
                         if more:
-                            list.extend(queue, more)
+                            list.extend(queue, _entries(more, None))
                             continue
                     self._lock.notify_all()
                     return None
@@ -3000,12 +3037,12 @@ class LocalSpider:
                 if item is None:
                     return
                 try:
-                    url, depth, source = item
+                    url, depth, source, found_from = item
                     if source in (spa.SEED_SOURCE, spa.PROBE_SOURCE):
                         with self._interact:          # a write window: one at a time
-                            self._visit(url, depth, source, queue)
+                            self._visit(url, depth, source, queue, found_from)
                     else:
-                        self._visit(url, depth, source, queue)
+                        self._visit(url, depth, source, queue, found_from)
                 finally:
                     with self._lock:
                         self._sh["busy"] -= 1
@@ -3043,11 +3080,17 @@ class LocalSpider:
         if errors:
             raise errors[0]
 
-    def _visit(self, current_url, depth, source, queue):
+    def _visit(self, current_url, depth, source, queue, found_from=None):
         """One queued URL: its load (in a window for a seed or probe), its record,
         what it queues. The body of the crawl loop, shared by the one-worker loop
-        and every worker (`crawl`); ``queue`` takes ``append`` / ``extend``."""
+        and every worker (`crawl`); ``queue`` takes ``append`` / ``extend``.
+
+        FR-CRAWL-29: ``found_from`` (the queue entry's) is stored on this page's row,
+        with ``seen_at``, when its load began; everything this visit queues carries
+        this queued URL as its own ``found_from`` (`_entries`)."""
         probe = None
+        queued = current_url            # a probe's load URL carries markers: not this
+        seen_at = time.time()
         if source in (spa.SEED_SOURCE, spa.PROBE_SOURCE) and self.spa_query_stopped:
             self._refuse_query("session lost")     # S10: no more query loads
             return
@@ -3110,6 +3153,7 @@ class LocalSpider:
                 # the seed's text filler (a redirect-ish name's ``/`` is not)
                 win["taint"] = frozenset(probe["markers"]) if probe is not None \
                     else frozenset({spa.query_filler()})
+            seen_at = time.time()          # FR-CRAWL-29: this URL's own load begins
             if probe is not None:
                 # rendered only: a probe never falls back to a static request
                 self._xhr_urls = []
@@ -3124,7 +3168,7 @@ class LocalSpider:
                 # FR-CRAWL-17 (A-M3, B3): a probe load records nothing -- no page,
                 # no link, no XHR URL, no form -- only what it kept is seeded
                 self.spa_counts["spa_query_probe_loads"] += 1
-                queue.extend(self._finish_probe(probe, depth))
+                queue.extend(_entries(self._finish_probe(probe, depth), queued))
                 return
 
             content = (text or "")[:8000]
@@ -3135,6 +3179,7 @@ class LocalSpider:
                 # point) until its window closes cleanly with no write
                 source=(spa.WRITE_SEED_SOURCE if source == spa.SEED_SOURCE
                         else source),
+                found_from=found_from, seen_at=seen_at,
             )
             visited = True
             self._count_crawled()
@@ -3149,8 +3194,9 @@ class LocalSpider:
                     and self._last_html is not None:
                 self.spa_counts["routes_visited"] += 1     # rendered (PA-0110)
             with self._interact:            # reveals, submissions, selector forms
-                more = self._after_fetch(current_url, status, depth, title, content)
-            queue.extend(more)
+                more = self._after_fetch(current_url, status, depth, title, content,
+                                         seen_at=seen_at)
+            queue.extend(_entries(more, queued))
             logging.info(
                 f"[{status}] depth {depth}: {current_url}"
                 + (f" — {len(raw_links)} link(s)" if raw_links else "")
@@ -3165,7 +3211,7 @@ class LocalSpider:
                     if (self._in_scope(absolute_link)
                             and not self._destructive(absolute_link)
                             and not self.storage.is_visited(absolute_link)):
-                        queue.append((absolute_link, depth + 1, 'link'))
+                        queue.append((absolute_link, depth + 1, 'link', queued))
                 # XHR/fetch targets are queued whatever the page's own
                 # content type, so JSON APIs behind rendered pages land
                 # in the map and get audited like any other URL.
@@ -3178,7 +3224,7 @@ class LocalSpider:
                     if absolute_link and (self._in_scope(absolute_link)
                             and not self._destructive(absolute_link)
                             and not self.storage.is_visited(absolute_link)):
-                        queue.append((absolute_link, depth + 1, 'xhr'))
+                        queue.append((absolute_link, depth + 1, 'xhr', queued))
 
         except SessionWithheld:
             # landed on another origin than the session's (FR-SESS-20, R1):
@@ -3188,7 +3234,7 @@ class LocalSpider:
                 self.storage.mark_visited(
                     current_url, 0, depth,
                     source=(spa.WRITE_SEED_SOURCE if source == spa.SEED_SOURCE
-                            else source))
+                            else source), found_from=found_from, seen_at=seen_at)
             visited = False
         except Exception as e:
             # M5: a probe's URL (and the error quoting it) carries its
@@ -3198,14 +3244,14 @@ class LocalSpider:
                 self.storage.mark_visited(
                     current_url, 0, depth,
                     source=(spa.WRITE_SEED_SOURCE if source == spa.SEED_SOURCE
-                            else source))
+                            else source), found_from=found_from, seen_at=seen_at)
             visited = False
         finally:
             try:
                 window.close()
             finally:
                 self._probe = None
-            queue.extend(self._take_query_navs(depth))
+            queue.extend(_entries(self._take_query_navs(depth), queued))
             if win is not None:
                 self._after_query_window(win, current_url, visited)
             elif source == spa.SEED_SOURCE and not bare_refused:
@@ -3214,11 +3260,13 @@ class LocalSpider:
                 self.spa_counts["spa_query_write_seeds"] += 1
 
     def crawl(self):
-        queue = [(self._crawl_url(self.start_url), 0, 'link')]
+        # queue entries: (url, depth, source, found_from) -- FR-CRAWL-29, `_entries`;
+        # what the crawl queues itself has no found_from
+        queue = [(self._crawl_url(self.start_url), 0, 'link', None)]
         # the origin's well-known files (robots.txt, sitemap.xml), parsed for the URLs
         # they name (CC-CRAWL-0038)
         from fuzzlab.core.linkextract import KNOWN_FILES
-        queue += [(self._crawl_url(urljoin(self.start_url, path)), 1, 'link')
+        queue += [(self._crawl_url(urljoin(self.start_url, path)), 1, 'link', None)
                   for path in KNOWN_FILES]
         logging.info(f"Starting crawl at {self.start_url} (max_depth={self.max_depth})")
 
@@ -3232,11 +3280,11 @@ class LocalSpider:
             while self.workers == 1 and (queue or self._query_on):
                 if not queue:
                     # FR-CRAWL-17 (Q5): the bare routes are visited; probe them
-                    queue.extend(self._plan_probes())
+                    queue.extend(_entries(self._plan_probes(), None))
                     if not queue:
                         break
-                current_url, depth, source = queue.pop(0)
-                self._visit(current_url, depth, source, queue)
+                current_url, depth, source, found_from = queue.pop(0)
+                self._visit(current_url, depth, source, queue, found_from)
 
         except KeyboardInterrupt:
             logging.info("Crawl interrupted by user.")

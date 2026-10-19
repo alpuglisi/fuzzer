@@ -12,8 +12,12 @@ Keys are stable per source (``<source tag>:<table>:<row>``, the tag a digest of 
 source file's resolved path), so importing the same crawl into the same run twice adds
 nothing. Without an active recorder (`trace.active`) nothing is done.
 
-Stated gaps: the spider records no timestamps (its events have ``t`` None: first/last
-seen unknown) and no initiator for a page, only for a captured request (``page_url``).
+When the spider DB records it (FR-CRAWL-29), a page's event carries the time its load
+began (``seen_at``) as ``t`` and the page whose load queued it (``found_from``, path only)
+as ``referer``; a captured request's event carries the time it was captured. A DB from
+before FR-CRAWL-29 leaves both unknown: ``t`` None (first/last seen unknown), no
+``referer``; a page the crawl queued itself (the start URL, a well-known file) has no
+``referer``. Never guessed (from row order, depth or another row's time).
 """
 
 from __future__ import annotations
@@ -65,6 +69,20 @@ def _path(url: str | None) -> str | None:
     return (parts.path or "/") + (f"#{parts.fragment}" if parts.fragment else "")
 
 
+def _column(row, name):
+    """``row[name]``, or None when the DB predates the column (FR-CRAWL-29)."""
+    return row[name] if name in row.keys() else None
+
+
+def _seen(row):
+    """The row's ``seen_at`` as an event time, None when unknown."""
+    t = _column(row, "seen_at")
+    try:
+        return None if t is None else float(t)
+    except (TypeError, ValueError):
+        return None
+
+
 def observe_spider(spider_db) -> int:
     """Events for a spider DB's pages and captured requests; returns how many."""
     if trace.active() is None:
@@ -88,8 +106,9 @@ def observe_spider(spider_db) -> int:
                 "src": "spider", "ref": f"discovered_pages row {row['rid']}",
                 "method": "GET", "url": trace.safe_ref(url), "origin": origin,
                 "status": row["status_code"], "via": via, "params": _query_params(url),
+                "referer": _path(_column(row, "found_from")),
                 "order": row["rid"]}, key=f"{tag}:page:{row['rid']}", scope="spider",
-                t=None)
+                t=_seen(row))
             n += 1
         try:
             reqs = src.execute("SELECT * FROM discovered_requests ORDER BY id").fetchall()
@@ -107,7 +126,7 @@ def observe_spider(spider_db) -> int:
                              "server") if source in NOT_SENT_SOURCES else "sent",
                 "params": _query_params(url) + _body_params(row["content_type"],
                                                             row["body_json"])},
-                key=f"{tag}:request:{row['id']}", scope="spider", t=None)
+                key=f"{tag}:request:{row['id']}", scope="spider", t=_seen(row))
             n += 1
     finally:
         src.close()

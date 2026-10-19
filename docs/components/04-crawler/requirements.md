@@ -852,6 +852,25 @@ fuzzer.
   They are the importers' evidence that a varying URL segment is a route's name
   (FR-AUD-26). `disco.synth.template_paths` decides slugs through the same
   `varying_is_parameter` (with its data evidence).
+- **FR-CRAWL-29 (which page queued a page, and when, CC-CRAWL-0047)**
+  The spider records, at its execution points:
+  - **`discovered_pages.found_from`**: the queued URL whose load queued this page --
+    through a link or any URL its response named, a script's fetch/XHR, a selector
+    form, a SPA route or seed, a reveal, a navigation a window aborted, or (for a
+    `redirect` row) the load that redirected to it. It travels in the queue entry
+    `(url, depth, source, found_from)`, so with several workers it is the entry the
+    URL was claimed from (the first queued). NULL for what the crawl queues itself: the
+    start URL and the origin's well-known files. Links found in a load that redirected
+    are attributed to the queued URL (whose row holds it), not to the landing.
+    Stored as that write site stores the page's URL: as queued (probe markers
+    scrubbed), and `redact_url` at the redirect landing.
+  - **`discovered_pages.seen_at`**: wall time (seconds since the epoch) when the page's
+    own load began; a redirect landing has its load's time. Never earlier than its
+    `found_from` page's.
+  - **`discovered_requests.seen_at`**: when the request was captured.
+
+  An older spider DB is upgraded in place; its rows keep NULL (unknown). Crawl order
+  and the requests sent are unchanged.
 
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default
@@ -995,7 +1014,8 @@ pipeline.
 Spider DB (the spider's own schema, `StorageManager`; no store migration):
 `discovered_pages` (`source` is `link`, `xhr`, `redirect`, `form`, since FR-CRAWL-12
 `spa-route`, since FR-CRAWL-16 `reveal`, or since FR-CRAWL-17 `spa-query` (a query
-seed); a SPA route page's `url` keeps its `#/…` fragment, a seed's with its query),
+seed); a SPA route page's `url` keeps its `#/…` fragment, a seed's with its query;
+since FR-CRAWL-29 `found_from TEXT` and `seen_at REAL`, NULL when unknown),
 `discovered_forms`, `selector_verdicts`, `crawl_stats (name TEXT PRIMARY KEY,
 value INTEGER)` (the last crawl's SPA, reveal and, since FR-CRAWL-17, `spa_query_*`
 counts -- refusals by reason as `spa_query_refused[<reason>]` -- `submit_stopped` and
@@ -1006,7 +1026,8 @@ and, since FR-CRAWL-13,
 **`discovered_requests`** — the contract
 the importer reads (lane J, forms phase 3):
 `(id, page_url, method, url, content_type, body_json TEXT, source TEXT ('passive' |
-'submit'), signature TEXT UNIQUE)`. `body_json` is the redacted body as JSON text (a
+'submit'), signature TEXT UNIQUE, seen_at REAL)` (`seen_at` since FR-CRAWL-29: when it
+was captured; NULL in an older DB). `body_json` is the redacted body as JSON text (a
 JSON body's parsed value; a form-encoded body as an object of name → value, last wins);
 `url` and `page_url` are redacted (`core.redaction.redact_url_identifiers`);
 `content_type` is the media type only; `signature` = JSON `[method,

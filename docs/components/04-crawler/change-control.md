@@ -3,6 +3,71 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0047 — The spider records which page queued each page, and when it saw pages and captured requests (FR-CRAWL-29) (2026-10-19)
+- Change (`fuzzlab/tools/spider.py`):
+  - Spider DB: `discovered_pages` gains `found_from TEXT` and `seen_at REAL`,
+    `discovered_requests` gains `seen_at REAL`, in `CREATE TABLE` and through the
+    existing "columns older result databases won't have" `ALTER` loop (now
+    `(table, column, declaration)`), so an older DB is upgraded in place and its rows
+    keep NULL (unknown).
+  - Crawl queue entries are `(url, depth, source, found_from)`. `_entries(items,
+    found_from)` wraps the `(url, depth, source)` triples the producers still return
+    (`_after_fetch`, `_finish_probe`, `_take_query_navs`, `_plan_probes`) at each
+    queue insertion; `_visit`'s link and XHR appends carry it directly. Everything a
+    visit queues carries that visit's **queued URL** (`queued`, taken before a probe's
+    marker URL replaces it); what the crawl queues itself (the start URL, the
+    well-known files, probes) carries None. `_take`, `_work` and the one-worker loop in
+    `crawl` unpack the four fields and pass `found_from` to `_visit(..., found_from)`.
+    Crawl order is unchanged: the same entries in the same positions; `_take` still
+    claims the first entry for a URL.
+  - `StorageManager.mark_visited(..., found_from=None, seen_at=None)` stores both
+    (`found_from` through `spa.scrub_markers`, like the URL; `seen_at` now when not
+    given); `_visit` passes the entry's `found_from` and `seen_at` (wall time taken
+    just before the URL's own fetch -- after a seed's bare-route pre-load -- or at the
+    start of the visit for a row stored after an earlier failure) at its three write
+    sites; `_after_fetch(..., seen_at=None)` stores a redirect landing with
+    `found_from = redact_url(url)` (the load that redirected, redacted as that site
+    redacts the landing) and the load's `seen_at`.
+  - `StorageManager.record_request(..., seen_at=None)` stores when the request was
+    captured; `_observe` and `_record_dry` pass `time.time()` at capture.
+- Reason: the diagrams (FR-CORE-505, FR-AUD-28) said "the spider records no
+  timestamps, and a page's initiator is not recorded": the spider's events had no
+  time and a page no initiator. Both are known at the execution point -- the queue
+  entry is made while the parent's load is processed -- and were dropped.
+- Impact: Spider DB contract (§5) gains three nullable columns. Consumers, found by
+  searching `discovered_pages` / `discovered_requests` across `fuzzlab/` and
+  `scripts/` (PA-0152): `tools/store_adapter.py` (`import_spider` reads named
+  columns; the captured-request import reads `SELECT *` into `captured_request(dict(row))`,
+  which reads named keys), `tools/observe.py` (`SELECT *`, now reads the new columns:
+  CC-AUD-0051), `harness/auto.py` (named columns), `tools/fetcher.py` (named columns),
+  `scripts/crawl_maze_score.py` (`url` only), `scripts/measure_diagrams.py` (builds its
+  own old-schema DB). None breaks on an extra column. The contract test
+  `tests/test_spa_capture.py::test_the_discovered_requests_table_is_exactly_the_contract`
+  pins the exact column list and must gain `seen_at` (outside this lane's files: see
+  Deliverables). No traffic change: the same requests in the same order.
+- Risk: low. A missed queue insertion would fail on unpacking (four fields) rather than
+  silently store a wrong parent; every insertion is covered by the new tests on both
+  engines. Thread safety unchanged: `found_from` travels in the entry,
+  `_CrawlQueue` holds its lock, the storage methods hold theirs. A page whose URL
+  carries a sensitive query keeps it in `found_from` exactly as its own row keeps it in
+  `url` (the trace redacts it, `trace.safe_ref`); a landing's `found_from` is redacted.
+- Deliverables:
+  - [x] code; `tests/test_spider_trace.py` (new): a static (1 and 3 workers) and a real
+    Chromium (1 and 2 workers) crawl of a loopback site -- every row's `found_from` is
+    the page that linked, fetched or redirected to it, the start URL and well-known
+    files NULL, a redirect landing's redacted; `seen_at` inside the crawl's wall
+    window, never before the parent's, non-decreasing with one worker; a captured
+    request timed after its page began; an old DB upgraded with its rows NULL. Proven
+    to fail with the link parent dropped (5 tests fail) — done
+  - [x] FR-CRAWL-29, §5 contract — done
+  - [ ] `tests/test_spa_capture.py::test_the_discovered_requests_table_is_exactly_the_contract`:
+    add `"seen_at"` to the expected columns — todo (orchestrator; file outside this
+    lane)
+  - [ ] CHANGELOG, ARCHITECTURE, DIAGRAMS.md, `report/diagram.py` spider note — todo
+    (orchestrator; files outside this lane)
+- Effectiveness (pending): to be assessed on a real crawl's diagram (initiators and
+  first/last seen present on spider flows).
+
 ### CC-CRAWL-0046 — Both crawlers record the path segments the app's scripts hold; synth decides slugs through the one rule (FR-CRAWL-28, BUG-0507) (2026-10-19)
 - Change: `fuzzlab/tools/spider.py` (`script_segments` table,
   `StorageManager.record_script_segments`, `MAX_SCRIPT_SEGMENTS`, the `script_segments`

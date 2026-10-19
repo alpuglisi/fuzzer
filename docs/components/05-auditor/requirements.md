@@ -316,13 +316,19 @@ budget where a vulnerability is plausible.
   - **Stated gaps:** the web site tree places only rows that start with `/`, so a row on
     another origin shows as unplaced; `import_audit` keeps paths (the auditor's own
     findings).
-- **FR-AUD-28** *(discovery observations as trace events; `CC-AUD-0050`, 2026-10-19).*
+- **FR-AUD-28** *(discovery observations as trace events; `CC-AUD-0050`, 2026-10-19;
+  spider time and initiator `CC-AUD-0051`).*
   `import_spider` and `import_disco` first record what the crawl observed
   (`tools.observe`, with the active `core.trace` recorder; none, nothing):
-  - each spider page (`observe.page`, or `observe.exchange` for an `xhr` row) and each
-    captured request (`observe.exchange`, its `page_url` as the initiator, a
-    `dry-submit` / `reveal-blocked` row marked "blocked by the tool's write window:
-    never reached the server"). No time: the spider records none.
+  - each spider page (`observe.page`, or `observe.exchange` for an `xhr` row; its
+    `found_from` page as the initiator, `referer`, path only) and each captured request
+    (`observe.exchange`, its `page_url` as the initiator, a `dry-submit` /
+    `reveal-blocked` row marked "blocked by the tool's write window: never reached the
+    server"). Their time is the row's `seen_at` (FR-CRAWL-29: when the page's load
+    began, when the request was captured). A spider DB from before FR-CRAWL-29 leaves
+    both unknown (no time, no initiator); a page the crawl queued itself (the start
+    URL, a well-known file) has no initiator. Neither is ever guessed from row order or
+    another row's time.
   - each disco capture record (`observe.exchange`, scope its action id or `capture`):
     method, URL, status or "no response (error)", a redirect's `Location`, the
     WebSocket direction, the `Referer` path, the auth profile name, the time.

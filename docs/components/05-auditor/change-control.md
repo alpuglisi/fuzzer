@@ -3,6 +3,28 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0051 — Spider events carry the page's time and initiator when the DB has them (FR-AUD-28) (2026-10-19)
+- Change (`fuzzlab/tools/observe.py`): `observe_spider` sets an event's `t` from the
+  row's `seen_at` (`_seen`; None when the column is absent or NULL) and a page event's
+  `referer` from `found_from` through `_path` (`trace.safe_ref`, path and fragment
+  only); `_column` reads a column an older DB may lack. Event keys, kinds, scope and
+  the other body fields are unchanged.
+- Reason: CC-CRAWL-0047 (FR-CRAWL-29) records both; the data flow's `initiator`
+  attribute and first/last seen, and the spider sequence's "from <page>", read them.
+- Impact: `core.trace` reduction unchanged (it already maps `referer` to the flow's
+  `initiator` and `t` to first/last seen). `report/diagram.py`'s spider sequence
+  already prints `referer`; its basis note ("the spider records no timestamps, and a
+  page's initiator is not recorded") is now wrong for a new DB and is the
+  orchestrator's to reword (another lane owns the file). An old DB imports as before.
+- Risk: low. A malformed `seen_at` gives `t` None, never an error.
+- Deliverables:
+  - [x] code; `tests/test_spider_trace.py::test_the_trace_carries_the_time_and_the_referer_path`
+    (a real crawl imported under a recorder: `t` = `seen_at`, referer = the parent's
+    path, the secret in a parent's query absent, the flow's `initiator`, the spider
+    sequence label), `::test_an_old_spider_db_imports_with_time_and_referer_unknown` — done
+  - [x] FR-AUD-28 amended — done
+- Effectiveness (pending).
+
 ### CC-AUD-0050 — Discovery observations as trace events (FR-AUD-28) (2026-10-19)
 - Change: new `fuzzlab/tools/observe.py` (`observe_spider`, `observe_disco`), called
   first by `import_spider` and `import_disco`.
