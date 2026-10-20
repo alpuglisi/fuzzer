@@ -1517,6 +1517,10 @@ rewards) derives from it.
   executes a contract (`fuzzlab.disco.runner.Runner`):
   - per case, in order: setup steps in order (a failing step is an `error`, not a
     finding), variables extracted by JSONPath, then the request;
+  - a case's query values are placed by SP-42's standalone rule
+    (`core.urls.place_query_param`, FR-FUZZ-64): a name the endpoint's own query has is
+    set in place, a new one appended, encoded as before (CC-FUZZ-0105, BUG-0531's
+    sweep);
   - every send is gated at the send: scope on the final URL; `check_send_url` (SP-09);
     no redirect followed; the body read up to `max_body_bytes` within `timeout_ms`;
     sends spaced to `rps`. A case marked destructive is `skipped` unless
@@ -1883,8 +1887,10 @@ rewards) derives from it.
       matches its URL's own raw occurrence and is appended as `%EF%BF%BD` (AU-REQID8);
     - the M6 trace records no siblings; a form-body store request sends none;
     - query builders in other items' code, each pinned by a strict xfail naming its
-      owner: `disco/runner.py` (AU-OUTCOME), `tools/spa.query_url` (CRAWL),
-      `store_adapter.import_disco` (AU-REQID8), `labgen/oracle_wrapper` (LAB);
+      owner: `tools/spa.query_url` (CRAWL), `store_adapter.import_disco` (AU-REQID8),
+      `labgen/oracle_wrapper` (LAB). (`disco/runner.py`'s was fixed by AU-OUTCOME,
+      CC-FUZZ-0105: `Runner.prepare` places each case query value through
+      `place_query_param`.)
     - a **path** point's PRG follow-up re-requests the placed path (AU-PRGPATH, pinned).
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed

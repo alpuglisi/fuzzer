@@ -171,7 +171,15 @@ Newest first.
     probe's `credentialed=identity != "anonymous" and self._session_note(req) is None`.
     Merged over AU-REQID14 part 1 (CC-FUZZ-0106, merged first): textual only; the
     `_request` call now receives the placed `wire` URL, unchanged by these lines.
-    The merge also resolved `tools/blind_sqli_fuzzer.py`
+  - **The runner's query placement** (BUG-0531's PA-0002 sweep, handed to this item
+    when AU-REQID14 merged first): `Runner.prepare` placed a case's query values by
+    appending `&name=value` (an endpoint path with `?op=list&q=1` gave
+    `op=list&q=1&q=zqmark`); it now sets each through `core.urls.place_query_param`
+    (SP-42): a name the endpoint's own query has is set in place, a new one appended,
+    encoded as before. `tests/test_query_placement.py::test_the_contract_runner_places_a_query_value_in_place`
+    is no longer a strict xfail (it passes, with a new-name row), and the guard's
+    `Runner.prepare` allow-list entry is removed. FR-FUZZ-64's list of known instances
+    is updated. The merge also resolved `tools/blind_sqli_fuzzer.py`
     (`RequestsSender.get` keeps AU-REQID14's `place_query_param` URL and returns this
     item's `Answer`), and two fakes in `tests/test_oracle_comparable_controls.py` read the
     value from the placed URL.
@@ -214,6 +222,7 @@ Newest first.
   - [x] FR-FUZZ-52 in place, FR-FUZZ-63, FR-FUZZ-45/50 notes; BUG-0528, BUG-0529 — done
   - [ ] PA-0528, PA-0529, SP-56, CHANGELOG, ERROR_LOG, ARCHITECTURE — todo (the
     coordinator, at merge)
+  - [x] the runner's query placement (handed over by AU-REQID14) — done
   - [ ] `scripts/verify_change.py` on the committed tree — the first run on 15bef4d
     (`--base 8100959`, 152 files) found the wrapper-order pin (fixed in c5a4f75); the
     final run is on the merged tree with `--base 8117855` (its counts go in the lane's

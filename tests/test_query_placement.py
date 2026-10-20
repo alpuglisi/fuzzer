@@ -563,14 +563,18 @@ def test_a_dom_query_point_is_loaded_with_its_siblings(echo, monkeypatch):
 
 
 # --- known instances in other items' code (PA-0054(3), PA-0115(3)): pinned, offline -----
-@_pin("AU-OUTCOME", "the contract runner appends a query pair (disco/runner.py:262)")
 def test_the_contract_runner_places_a_query_value_in_place():
+    """Was pinned for AU-OUTCOME (the runner appended ``&q=``); fixed there through the
+    standalone rule (`core.urls.place_query_param`, CC-FUZZ-0105). A new name is still
+    appended, encoded as before."""
     from tests.test_disco_contract import contract_doc, runner
     doc = contract_doc()
     doc["endpoints"].append({"id": "ep_q", "method": "GET",
                              "path": "/api/search?op=list&q=1", "auth": "none"})
     r, _session = runner(doc)
     assert urlsplit(r.prepare("ep_q", query={"q": MARK}).url).query == f"op=list&q={MARK}"
+    assert urlsplit(r.prepare("ep_q", query={"q": "a b", "n": "&"}).url).query == \
+        "op=list&q=a+b&n=%26"
 
 
 @_pin("CRAWL (to register)", "the SPA query-seed builder appends unencoded pairs "
@@ -837,9 +841,6 @@ ALLOWED: dict[tuple[str, str, str], tuple[int, str]] = {
         (2, "a route key of parameter names, never sent"),
     ("fuzzlab/disco/fingerprint.py", "normalise_route", 'S5 "&".join'):
         (2, "a route key of parameter names, never sent"),
-    ("fuzzlab/disco/runner.py", "Runner.prepare", "S4 string built onto a query"):
-        (1, "hand-off to AU-OUTCOME (their file): the contract runner appends; pinned by "
-            "test_the_contract_runner_places_a_query_value_in_place"),
     ("fuzzlab/disco/synth.py", "parse_body", "S3 dict(parse_qsl/parse_qs)"):
         (1, "defect 9's item: a schema from captured bodies, never sent"),
     ("fuzzlab/harness/auto.py", "header_point_estimate", "S4 string built onto a query"):

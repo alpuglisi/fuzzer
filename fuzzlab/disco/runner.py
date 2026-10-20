@@ -58,12 +58,12 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
-from urllib.parse import quote, urlencode, urljoin, urlsplit
+from urllib.parse import quote, urljoin, urlsplit
 
 from fuzzlab.core.http import DEFAULT_BROWSER_HEADERS
 from fuzzlab.core.redaction import redact_body, redact_url
 from fuzzlab.core.urls import (DestructiveUrlRefused, check_send_url, in_origin_scope,
-                               origin_scope, url_key)
+                               origin_scope, place_query_param, url_key)
 from fuzzlab.disco.capture import redact_headers
 from fuzzlab.disco.contract import VAR, Contract
 
@@ -330,8 +330,11 @@ class Runner:
         # an endpoint path is absolute from its origin (it is the captured path), so a
         # base URL's own sub-path is never prefixed again (the PA-0300 class)
         url = urljoin(ep.get("origin") or self.c.base_url, path)
-        if query:
-            url += ("&" if "?" in url else "?") + urlencode({k: str(v) for k, v in query.items()})
+        for k, v in (query or {}).items():
+            # SP-42 (FR-FUZZ-64, BUG-0531's sweep): a name the endpoint's own query already
+            # has is set in place (its first occurrence), never appended as a second one;
+            # a new name is appended, encoded as before
+            url = place_query_param(url, str(k), str(v))
         hdrs = dict(ep.get("headers") or {}) or dict(DEFAULT_BROWSER_HEADERS)
         data: bytes | None = None
         if raw_body is not None:
