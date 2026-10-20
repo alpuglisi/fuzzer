@@ -220,13 +220,14 @@ Newest first.
   - [x] the five `tools/probesender.py` changes — done
   - [x] the M9 discovery table and send guard (proven on synthetic offenders) — done
   - [x] FR-FUZZ-52 in place, FR-FUZZ-63, FR-FUZZ-45/50 notes; BUG-0528, BUG-0529 — done
-  - [ ] PA-0528, PA-0529, SP-56, CHANGELOG, ERROR_LOG, ARCHITECTURE — todo (the
-    coordinator, at merge)
+  - [x] PA-0528, PA-0529, SP-56, CHANGELOG, ERROR_LOG, ARCHITECTURE — done by the
+    coordinator at merge (8158188)
   - [x] the runner's query placement (handed over by AU-REQID14) — done
-  - [ ] `scripts/verify_change.py` on the committed tree — the first run on 15bef4d
+  - [x] `scripts/verify_change.py` on the committed tree — the first run on 15bef4d
     (`--base 8100959`, 152 files) found the wrapper-order pin (fixed in c5a4f75); the
-    final run is on the merged tree with `--base 8117855` (its counts go in the lane's
-    report and the CHANGELOG line)
+    lane's final run on 6f566c1 (`--base 8117855`): 162 files, 4698 passed, 0 failed,
+    0 errors, 5 skipped, 24 xfailed; the coordinator's run on the merged tree with the
+    shared docs (`--base 6551fbc`) gates the push
 - Effectiveness (assessed <date> or pending): pending.
 
 ### CC-FUZZ-0104 — M6's navigations settle a failure before they raise (BUG-0522) (2026-10-19)
