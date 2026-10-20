@@ -211,7 +211,9 @@ def run_fuzzing_cycle(sender, url, param, baseline, payloads, args):
                 answer = sender.get(url, param, payload, args.timeout)
             except requests.RequestException as exc:
                 print(f"[-] Request error on {payload[:24]!r}: {exc}")
-                latency = None
+                # the payload's samples are incomplete: no row, never a median of the
+                # repeats before it (BUG-0536; an incomplete body is one of these)
+                latencies = []
                 break
             # FR-FUZZ-63: only the application's answer is a timing observation; a 504
             # stays one (a gateway, or the client's timeout, waited on the query)
@@ -346,8 +348,11 @@ def main(argv=None):
         sender = SeamSender(client, args.identity, explicit=_explicit_url(args.url))
     else:
         # Realistic browser UA, same rationale/constant as the crawler (BUG-0059).
+        from fuzzlab.core import bodyread
         from fuzzlab.core.http import DEFAULT_BROWSER_HEADERS
-        _session = requests.Session()
+        # bodies read bounded (SP-60, BUG-0536): an incomplete one is a
+        # `RequestException` (`BodyIncomplete`), never a size in the dataset
+        _session = bodyread.bound(requests.Session())
         _session.headers.update(DEFAULT_BROWSER_HEADERS)
         sender = RequestsSender(_session, explicit=_explicit_url(args.url))
 

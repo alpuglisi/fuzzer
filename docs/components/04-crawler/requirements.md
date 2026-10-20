@@ -632,7 +632,18 @@ fuzzer.
     `core.redaction` (`redact_url`, `redact_body` failing closed, every sensitively named
     header's value replaced); identifier values are kept; a body is cut at 200 000
     characters only after redaction, and marked truncated. `read_capture` types every
-    line and quarantines (counts) a malformed one.
+    line and quarantines (counts) a malformed one. The line cap (`MAX_LINE_BYTES`) holds
+    while a line is read (`JsonlTail`, CC-CRAWL-0054, BUG-0536).
+    - Once the held part of a line passes the cap, the line is quarantined once
+      (`OVERLONG` in its place) and its bytes dropped. The rest of it is discarded,
+      across reads, up to its newline.
+    - At most the cap plus one file read is held, and the work is linear (`copied`).
+    - The explorer's action log reads through the same tail and numbers such a line as
+      one malformed line.
+    - Enforced by `tests/test_bounded_reads.py`
+      (`test_an_unterminated_line_over_the_cap_is_quarantined_once_and_never_held`,
+      `test_reading_a_long_line_in_small_pieces_copies_each_byte_a_bounded_number_of_times`,
+      `test_the_copy_oracle_flags_a_quadratic_tail`).
   - **The action tag** is added by the browser route's header hook and stripped by the
     proxy before forwarding (`--keep-tag` forwards it), so the target never sees it.
   - **One capture per run** (PA-0450): a run directory that already holds a capture is
@@ -888,7 +899,8 @@ fuzzer.
     one `TraceRecorder` (SP-48). It reads the files the capture writes
     (`capture.jsonl` through SP-35's `CaptureTail`, `actions.jsonl` through
     `observe.DiscoActionLines`) every 0.25 s; a line is read only once its newline has
-    arrived. mitmdump and the explorer are not changed.
+    arrived, and a line over `MAX_LINE_BYTES` is quarantined while it is read, never
+    held (FR-CRAWL-18, BUG-0536). mitmdump and the explorer are not changed.
   - **At the end** (after the capture proxy stopped and `explore.json` was written) the
     same thread imports the directory into the run (`observe_disco`), adding what the
     live passes did not write: a batch the store refused, the last unterminated line,

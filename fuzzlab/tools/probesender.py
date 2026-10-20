@@ -218,14 +218,21 @@ def _is_connect_timeout(exc: BaseException) -> bool:
 
 def _unobserved(exc: BaseException) -> ProbeUnobserved | None:
     """``ProbeUnobserved`` when a sent probe got no complete response (BUG-0147): the
-    connection was reset or aborted, or the body was cut off or undecodable. Else
-    None, and the caller re-raises the original:
+    connection was reset or aborted, or the body was cut off or undecodable, or the
+    bounded reader stopped it (`core.bodyread.BodyIncomplete`: over a ceiling, past its
+    deadline, an unbounded coding; SP-60, BUG-0536 -- never re-sent, and never latency
+    evidence: a body that kept arriving proves no delay). Else None, and the caller
+    re-raises the original:
     - a timeout is not one (each sender has its own rule for it, `_is_timeout`);
     - a target that cannot be reached at all (refused, DNS, TLS, proxy) is not one: it
       fails loudly, so a dead target never turns every candidate inconclusive.
     The message names the error classes only, never the payload or URL."""
     import requests
     from urllib3.exceptions import NewConnectionError, ProxyError, SSLError
+
+    from fuzzlab.core.bodyread import BodyIncomplete
+    if isinstance(exc, BodyIncomplete):
+        return ProbeUnobserved(f"no complete response: incomplete body ({exc.reason})")
     if not isinstance(exc, (requests.ConnectionError, requests.exceptions.ChunkedEncodingError,
                             requests.exceptions.ContentDecodingError)) or _is_timeout(exc):
         return None
@@ -909,8 +916,11 @@ class RequestsProbeSender(_ExplicitAllowance):
         self._isolated_keys: frozenset[str] = frozenset()
         self._isolated_sends = 0
         if session is None:
+            from fuzzlab.core import bodyread
             from fuzzlab.core.http import DEFAULT_BROWSER_HEADERS
-            session = requests.Session()
+            # every body read bounded (SP-60, BUG-0536): an incomplete one raises
+            # `BodyIncomplete`, which `_unobserved` makes "not observed"
+            session = bodyread.bound(requests.Session())
             session.headers.update(DEFAULT_BROWSER_HEADERS)
         self._session = session
         self._timeout = timeout

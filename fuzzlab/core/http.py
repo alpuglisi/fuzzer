@@ -144,11 +144,16 @@ def _requests_transport(method: str, url: str, headers: Mapping[str, str],
                         body: bytes | None, timeout: float):
     import requests  # imported lazily so core has no hard runtime import cost
 
-    resp = requests.request(
-        method, url, headers=dict(headers), data=body, timeout=timeout,
-        allow_redirects=False,
-    )
-    return resp.status_code, dict(resp.headers), resp.content
+    from fuzzlab.core import bodyread
+    # The body is read bounded (SP-60, BUG-0536): wire and decoded ceilings and a
+    # wall-clock deadline; an incomplete one raises `bodyread.BodyIncomplete`, never
+    # comes back short. A fresh session per send, as `requests.request` made.
+    with bodyread.bound(requests.Session()) as session:
+        resp = session.request(
+            method, url, headers=dict(headers), data=body, timeout=timeout,
+            allow_redirects=False,
+        )
+        return resp.status_code, dict(resp.headers), resp.content
 
 
 def _content_type(headers) -> str:

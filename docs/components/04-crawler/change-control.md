@@ -3,6 +3,85 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0054 — The JSONL tail caps a line while reading it; the contract runner reads bounded and matches contract patterns in a killable worker (BUG-0536) (2026-10-20)
+- Placement: pre-assigned to AU-BOUNDED (audit defects 23 and 27, with the disco and
+  spider half of 21); the core reader is CC-CORE-0072, the senders CC-FUZZ-0109.
+- Change:
+  - **`disco/capture.py::JsonlTail` (defect 23).**
+    - The cap is enforced while reading. When the held part of the current line
+      would pass `MAX_LINE_BYTES` (newline included, as before), the module's
+      `OVERLONG` marker (an empty `bytes` subclass instance, compared by identity) is
+      yielded once in the line's place, the held bytes are dropped, and the rest of the
+      line is discarded up to its newline, across `lines()` calls.
+    - The held part is one `bytearray`, extended per read and copied out once; slices
+      come from a `memoryview`. `copied` counts every byte copied (PA-0135(2)).
+    - `CaptureTail.read` counts `OVERLONG` as quarantined. `read_capture` goes through
+      it, as before.
+    - `tools/observe.DiscoActionLines` (unchanged) numbers `OVERLONG` as one malformed
+      line (`_action_doc` reads it as None), so the action log is capped by the same
+      rule.
+    - The boundary is unchanged: a final unterminated line of exactly the cap is read.
+  - **`disco/runner.py` (defect 27, and BUG-0528 residual R6).**
+    - `Runner.send` reads the streamed answer through `core.bodyread.read_body`:
+      `max_body_bytes` is both the wire and the decoded ceiling, and `timeout_ms` is
+      checked at every receive (the runner's own clock). `deadline` sets
+      `timed_out`/`deadline`, a ceiling sets `truncated`, and an unbounded coding sets
+      `cut`.
+    - `search_bounded(patterns, texts)` runs a case's `body_matches` on its answer and
+      its baseline in one worker, `python -I -S -c` through `procutil.run_bounded`,
+      killed with its tree after `MATCH_SECONDS` (5 s). Its answer is shape-checked.
+      `judge` uses it, and patterns that could not be evaluated make the case an
+      `error` "body_matches not evaluated within 5 s (inconclusive)" unless other
+      evidence matched.
+    - `LEAK_PATTERNS` (reviewed constants) still match in-process.
+  - **`tools/spider.py` (defect 21's sweep).** The crawl session, a worker clone's
+    session and the isolated form-submission session (`iso`, which read whole a body
+    it never used) are `bodyread.bound(requests.Session())`.
+  - *(Review round 1.)*
+    - The runner's session is `bodyread.watched`, and `Runner.send` runs inside a
+      `bodyread.watch` of `timeout_ms`: the watchdog cuts a dripped status line or
+      header too, and that is a `deadline` timeout.
+    - Its requests advertise only codings the reader can bound (`bodyread.advertise`,
+      applied to a copy of the case's headers).
+    - The in-process matcher guard also flags `re.compile` of a non-literal (so
+      `re.compile(rx).search(...)` and a kept compiled pattern) and `re` aliases. It is
+      proven on synthetic offenders.
+    - The optional persistent matcher worker was not built: the per-case worker start
+      (about 140 ms) is residual R6.
+- Impact (other components / project):
+  - The live trace (FR-CRAWL-30) and the import read the same capped tail, so live and
+    imported results stay equal (`tests/test_disco_livetrace.py`, with its over-cap
+    record).
+  - AUD's `DiscoActionLines` is capped without a change to its file.
+  - FUZZ's FR-FUZZ-52 runner gains a liveness bound and a bounded matcher
+    (requirements edited in place).
+  - A case with `body_matches` costs one worker start per judged case (measured about
+    140 ms on this host).
+  - A cut exchange's evidence now records `body_bytes` 0: the bytes read before the cut
+    are not kept (residual R5).
+- Risk (low): the tail's output is unchanged except for an over-cap line, which was
+  already quarantined once it ended.
+  - The worker adds a process per judged case with patterns, and it is bounded.
+  - A worker that cannot start makes the case an `error`, never a pass.
+  - `disco/formfill.py::_fits` still runs a page's own `pattern` with `re.fullmatch`
+    (residual R3, a strict xfail; flagged to the owner).
+- Deliverables:
+  - [x] `JsonlTail`, `CaptureTail`, `Runner.send`, `search_bounded`, `Runner.judge`, the
+    spider's three sessions — done
+  - [x] `tests/test_bounded_reads.py`:
+    - the tail: an over-cap unterminated line, the boundary, the action log, memory
+      (traced peak), the copy count, and the copy oracle proven on the pre-fix
+      algorithm;
+    - the runner: a dripped body, a catastrophic pattern under a 60 s smoke alarm,
+      matching pins through the worker, the in-process matcher guard, the worker's
+      shape check;
+    - residual R3 as a strict xfail.
+
+    — done
+  - [x] FR-CRAWL-18's reader bullet and FR-CRAWL-30 edited in place; FR-FUZZ-52 (FUZZ's
+    requirements) edited in place — done
+- Effectiveness (assessed <date> or pending): pending.
+
 ### CC-CRAWL-0053 — The SPA seed builder places its route query through the one owner (BUG-0531 sweep, SP-42) (2026-10-20)
 - Placement: assigned by the coordinator to AU-REQID14's part 2; CC-CRAWL-0051/0052 are
   other lanes'. The PA-0002 sweep of BUG-0531 found `spa.query_url` in its class.

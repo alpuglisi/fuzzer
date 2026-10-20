@@ -13,8 +13,10 @@ of ``pass`` / ``finding`` / ``error`` / ``skipped``, with what matched and why.
   contract marks ``safety.destructive`` is ``skipped`` unless the operator passed
   ``allow_destructive``, which is then the explicit allowance for that case's own URL;
 - redirects are never followed (PA-0046): the oracle judges what the server said;
-- each response is read up to ``limits.max_body_bytes`` and within ``limits.timeout_ms``
-  (PA-0102(1)); sends are spaced to ``limits.rps``.
+- each response is read up to ``limits.max_body_bytes`` (on the wire and decoded) and
+  within ``limits.timeout_ms``, checked at every receive, by the one bounded reader
+  (`core.bodyread.read_body`, SP-60, BUG-0536; PA-0102(1)); sends are spaced to
+  ``limits.rps``.
 
 **A send that gets no complete response is no verdict** (PA-0153, BUG-0528): no
 response, a body cut off or over ``max_body_bytes``, or a ``timeout_ms`` that passed
@@ -45,7 +47,10 @@ belongs to), and are never written: evidence goes through `core.redaction`.
 a 5xx, and a response matching `LEAK_PATTERNS` (a stack trace, a database error) that the
 same endpoint's baseline did not already show (the PA-0117 noise guard: the first
 complete application answer below 400 that passed is its baseline). An answer outside the
-case's ``expect_status_class`` is matched as ``expect_status_class``.
+case's ``expect_status_class`` is matched as ``expect_status_class``. A case's
+``body_matches`` patterns (contract-supplied) run in a worker process killed after
+`MATCH_SECONDS` (`search_bounded`, BUG-0536): patterns that could not be evaluated make
+the case an ``error`` unless other evidence matched -- never a no-match.
 """
 
 from __future__ import annotations
@@ -83,6 +88,43 @@ _LEAK = [re.compile(p) for p in LEAK_PATTERNS]
 #: How much of a body the patterns are matched on.
 MATCH_BYTES = 256 * 1024
 _ASSERT = re.compile(r"^\s*(\$[^\s<>=!]*)\s*(==|!=|>=|<=|>|<)\s*(.+?)\s*$")
+#: Seconds one case's ``body_matches`` patterns may take, together, on its answer and its
+#: baseline (BUG-0536). A backtracking pattern's CPU is unbounded on target text and a
+#: thread cannot stop it, so they run in a worker process killed at this limit.
+MATCH_SECONDS = 5.0
+_MATCH_WORKER = ("import json, re, sys\n"
+                 "d = json.load(sys.stdin)\n"
+                 "json.dump([[re.search(p, t) is not None for t in d['texts']]\n"
+                 "           for p in d['patterns']], sys.stdout)\n")
+
+
+def search_bounded(patterns: list[str], texts: list[str]) -> list[list[bool]] | None:
+    """Whether each pattern matches (``re.search``) each text: one row per pattern, one
+    boolean per text. Computed in a worker process (`procutil.run_bounded`: its own
+    session, killed with its tree at the limit) given `MATCH_SECONDS`; None when it did
+    not answer in time, could not start, or answered anything but that shape -- never a
+    match and never a miss."""
+    if not patterns:
+        return []
+    import subprocess
+    import sys
+
+    from fuzzlab import procutil
+    payload = json.dumps({"patterns": list(patterns), "texts": list(texts)})
+    try:
+        done = procutil.run_bounded([sys.executable, "-I", "-S", "-c", _MATCH_WORKER],
+                                    timeout=MATCH_SECONDS, input=payload)
+    except (subprocess.TimeoutExpired, procutil.ProcUtilError, OSError):
+        return None
+    try:
+        rows = json.loads(done.stdout) if done.returncode == 0 else None
+    except (TypeError, ValueError):
+        return None
+    if not (isinstance(rows, list) and len(rows) == len(patterns) and all(
+            isinstance(row, list) and len(row) == len(texts)
+            and all(isinstance(v, bool) for v in row) for row in rows)):
+        return None
+    return rows
 
 
 class TargetUnreachable(RuntimeError):
@@ -267,7 +309,9 @@ class Runner:
     @staticmethod
     def _session():
         import requests
-        s = requests.Session()
+
+        from fuzzlab.core import bodyread
+        s = bodyread.watched(requests.Session())     # the watchdog's connections (SP-60)
         s.trust_env = False            # the contract's scope decides; no ambient proxy
         return s
 
@@ -373,6 +417,7 @@ class Runner:
             raise PermissionError(f"refusing an out-of-scope send to "
                                   f"{urlsplit(req.url).hostname!r}")
         check_send_url(req.url, explicit, req.method)
+        from fuzzlab.core import bodyread
         from fuzzlab.tools.probesender import _is_connect_timeout, _is_timeout, _unobserved
         import requests
         limits = self.c.limits
@@ -380,26 +425,32 @@ class Runner:
         ex = Exchange(req.url, req.method)
         start = self.clock()
         deadline = start + limits["timeout_ms"] / 1000
-        resp, chunks = None, []
+        resp = None
+        # the one bounded reader (SP-60, BUG-0536): max_body_bytes on the wire and
+        # decoded, timeout_ms checked at every receive, and the watchdog cutting a
+        # socket still in use at timeout_ms (a dripped status line or header included)
+        cut = bodyread.watch(time.monotonic() + limits["timeout_ms"] / 1000)
         try:
-            resp = self.session.request(req.method, req.url, headers=req.headers,
-                                        data=req.body, allow_redirects=False,
-                                        timeout=limits["timeout_ms"] / 1000, stream=True)
-            ex.status, ex.headers = resp.status_code, dict(resp.headers)
-            size = 0
-            for chunk in resp.iter_content(65536):
-                chunks.append(chunk)
-                size += len(chunk)
-                if size >= limits["max_body_bytes"]:
-                    ex.truncated = True
-                    break
-                if self.clock() > deadline:
-                    ex.timed_out, ex.timeout_kind = True, "deadline"
-                    break
-            if not (ex.truncated or ex.timed_out) and self.clock() > deadline:
-                ex.timed_out, ex.timeout_kind = True, "deadline"   # a drip (measured)
+            with cut as watched:
+                resp = self.session.request(
+                    req.method, req.url, headers=bodyread.advertise(dict(req.headers)),
+                    data=req.body, allow_redirects=False,
+                    timeout=limits["timeout_ms"] / 1000, stream=True)
+                ex.status, ex.headers = resp.status_code, dict(resp.headers)
+                cap = limits["max_body_bytes"]
+                body = bodyread.read_body(resp, deadline=deadline, clock=self.clock,
+                                          limits=bodyread.Limits(wire=cap, decoded=cap))
+            ex.body = body.data
+            if body.reason == "deadline":
+                ex.timed_out, ex.timeout_kind = True, "deadline"
+            elif body.reason in ("wire", "decoded"):
+                ex.truncated = True
+            elif body.reason is not None:                 # a coding it cannot bound
+                ex.error = ex.cut = f"no complete response: incomplete body ({body.reason})"
         except requests.RequestException as exc:
-            if _is_timeout(exc):
+            if watched.fired:                             # the watchdog cut it
+                ex.timed_out, ex.error, ex.timeout_kind = True, "timeout", "deadline"
+            elif _is_timeout(exc):
                 ex.timed_out, ex.error = True, "timeout"
                 ex.timeout_kind = "connect" if _is_connect_timeout(exc) else "read"
             else:
@@ -413,7 +464,6 @@ class Runner:
         finally:
             if resp is not None:                          # every exit (BUG-0528)
                 resp.close()
-        ex.body = b"".join(chunks)[:limits["max_body_bytes"]]
         ex.latency_ms = int((self.clock() - start) * 1000)
         return ex
 
@@ -582,6 +632,11 @@ class Runner:
         text = ex.body[:MATCH_BYTES].decode("utf-8", "replace")
         base = self._baseline(case["endpoint"])
         base_text = base.body[:MATCH_BYTES].decode("utf-8", "replace") if base else ""
+        # the case's patterns, matched on its answer and its baseline in one bounded
+        # worker (BUG-0536): None when they could not be evaluated in time
+        patterns = [rx for rule in rules for rx in rule.get("body_matches") or []]
+        hits = search_bounded(patterns, [text, base_text]) if patterns else []
+        pattern_at = 0
         status_class = f"{ex.status // 100}xx"
         if status_class == "5xx":
             matched.append("status_class:5xx")
@@ -597,10 +652,14 @@ class Runner:
                 matched.append(f"status_class:{status_class}")
             if "status_in" in rule and ex.status in rule["status_in"]:
                 matched.append("status_in")
-            for rx in rule.get("body_matches") or []:
-                if re.search(rx, text) and not (base_text and re.search(rx, base_text)):
-                    matched.append("body_matches")
-                    break
+            body_hit = False
+            for _rx in rule.get("body_matches") or []:
+                if hits is not None and hits[pattern_at][0] \
+                        and not (base_text and hits[pattern_at][1]):
+                    body_hit = True
+                pattern_at += 1
+            if body_hit:
+                matched.append("body_matches")
             if "latency_ms_gt" in rule and (ex.latency_ms or 0) > rule["latency_ms_gt"]:
                 matched.append("latency_ms_gt")
             if rule.get("response_schema_drift") and self._drift(case["endpoint"], ex):
@@ -616,6 +675,10 @@ class Runner:
             # evidence already observed stands (PA-0137(1)); the unobserved checks are
             # recorded beside it
             return Judgement("finding", matched, None, unobserved, cls)
+        if hits is None:                    # never a no-match (BUG-0536)
+            return Judgement("error", [], f"body_matches not evaluated within "
+                                          f"{MATCH_SECONDS:g} s (inconclusive)",
+                             unobserved, cls)
         if unobserved:
             first = unobserved[0]
             return Judgement("error", [], f"state check {first['check']} not observed: "
