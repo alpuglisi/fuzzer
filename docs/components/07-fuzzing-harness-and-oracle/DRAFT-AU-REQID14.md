@@ -319,7 +319,7 @@ repeated name follows **two rules**:
 - the PRG rows;
 - the hard payload.
 
-**M6 against HTTP.** New `test_the_browser_and_the_bound_http_sender_place_a_duplicate_name_alike`
+**M6 against HTTP (part 2, after AU-OUTCOME).** New `test_the_browser_and_the_bound_http_sender_place_a_duplicate_name_alike`
 sends a bound point with a repeated name through M6 (`ExecRequest.entries`) and through
 `_FormBoundSender` over `RequestsProbeSender`. Both go through `bind_query`, and the two
 wires must be equal under `canonical_pairs`.
@@ -485,52 +485,72 @@ PA-0054(3), PA-0115(3)).** Each fails today for its stated reason (measured with
 | `test_a_bound_duplicate_name_changes_one_occurrence_only` | AU-REQID8 | the binder sends `tag=zqmark&tag=zqmark` |
 | `test_a_dom_query_point_is_loaded_with_its_siblings` | this item's part 2 (after AU-OUTCOME) | `/p?q=<payload>` alone, no `op` |
 
-## 5. Tests, each with the revert it must fail against (PA-0034(2))
+## 5. Tests: mechanism, and the revert each must fail against (PA-0034(2))
 
-**Measurement tests (committed).** Each pinned test becomes positive at implementation, and
-its strict xfail is removed in the same change (MULTI_AGENT §6), except where AU-REQID8 is
-named.
+**Mechanisms.**
+- **Echo (end to end).** `tests/test_query_placement.py::_Echo` is a loopback HTTP server
+  the test starts (`require_loopback`); it records each request's raw target. The HTTP
+  senders are the real ones over a real `requests.Session` or a real `HttpClient`
+  transport; their query is compared **byte for byte** with `_prepared(want)` (requests'
+  own `prepare` of the contract's query). With `redirect` set it answers
+  `302 Location: <x>` for a request carrying the mark (the PRG rows).
+- **Real Chromium.** M6 runs `PlaywrightBrowserExecutor` in Chromium 141.0.7390.37
+  against the echo server; `FUZZLAB_REQUIRE_BROWSER=1` makes a missing browser fail, not
+  skip. Its query is compared under `canonical_pairs` (the measured relation).
+- **Pure functions.** The owner's unit tests, the relation's tests, the wrong-fix proof
+  (a synthetic decode-all-reencode function through the cases).
+- **Offline fakes.** `tests/test_sender_conformance.py::_Wire` records, for a
+  requests-style send, `requests.Request(method, url, params=…).prepare().url`, and for
+  the seam transport the URL it is handed; offline, no socket.
+- **AST.** The guard parses every module of `fuzzlab/`.
+- **Offline pins.** The known instances in other items' code are called directly
+  (`Runner.prepare`, `spa.query_url`, `store_adapter.query_pairs`/`import_disco`,
+  `oracle_wrapper._mark_query_param`), as strict xfails naming the owner.
 
-| Test | Today | Must fail against |
-|---|---|---|
-| `test_every_sender_replaces_the_addressed_occurrence_in_place[sender-case]` | 45 pinned, 3 hold | a sender's `params=` append, its `dict` rebuild, or a decode-and-re-encode owner |
-| `test_the_anonymous_and_authenticated_senders_send_the_same_query` (bytes) | pinned | either family's old branch |
-| `test_a_hard_payload_on_a_query_less_url_is_quote_plus_encoded[sender]` ×6, `test_the_browser_sends_a_hard_payload_on_a_query_less_url_as_quote_plus` | hold | an encoder change (`quote` for `quote_plus`, another `safe`) |
-| `test_the_cases_catch_the_decode_all_reencode_fix` | holds | weaker cases, which would let that wrong fix pass |
-| `test_a_bound_duplicate_name_changes_one_occurrence_only` | **pinned for AU-REQID8** (stays failing after this item) | — |
-| `test_a_fragment_only_location_is_followed_without_the_payload[anonymous-standalone, anonymous-bound, seam-standalone, seam-bound]` | anonymous-bound pinned, 3 hold | reassigning `url` to the placed URL before `_follow` |
-| `test_an_empty_location_is_not_followed[anonymous, seam]` | hold | following a redirect with no `Location` |
-| `test_the_browser_executor_replaces_the_addressed_occurrence_in_place[case]` ×8 | pinned | `browserexec._with_query` appending |
-| `test_the_browser_get_store_step_replaces_the_addressed_occurrence_in_place` | pinned | the GET store step left on `_with_query` |
-| `test_a_dom_query_point_is_loaded_with_its_siblings` (positive at implementation) | pinned | `DomXssStrategy` not passing `entries`, or the executor ignoring them |
-| `test_platform_clients_rewrite_only_escapes_they_disagree_on` | holds | a client upgrade that changes §1.2 (a platform pin) |
-| `test_the_equivalence_still_tells_apart_what_a_server_reads_apart` | holds | a relation that decodes `%2B`, `%3B`, `%2F` or `%20`, or maps `%E9` to U+FFFD |
-| `test_control_a_query_less_url_gets_the_pair` | holds | a sender that stops appending to a query-less URL |
+**Tests and their mechanism.**
 
-**New at implementation:**
-
-| Test | Must fail against |
+| Test | Mechanism |
 |---|---|
-| `test_query_placement::test_the_owner_places_the_first_occurrence_and_keeps_raw_text`: every part shape of §1.2; an empty query has zero parts; `?` or `#` alone is dropped; `;` stays data | `urlparse`; a decode-and-re-encode owner; dropping empty parts |
-| `…::test_name_matching_never_merges_an_invalid_escape_with_its_replacement` (`n%E9` vs `n%EF%BF%BD`) | `errors="replace"` matching |
-| `…::test_bind_query_follows_the_binders_rule_and_adds_nothing_to_bound_entries` | a re-bind that appends a duplicate, or replaces one occurrence only |
-| `…::test_the_browser_and_the_bound_http_sender_place_a_duplicate_name_alike` (Chromium) | an executor not using `bind_query` for `entries` |
-| `…::test_every_query_builder_goes_through_the_one_owner`, `…::test_the_query_builder_guard_catches_synthetic_offenders` (21 + 5 near-misses), `…::test_the_query_builder_allow_list_has_no_stale_entry` | a new builder of any shape S1–S7; a guard that misses a shape or flags a near-miss; a stale entry |
-| `tests/test_sender_conformance.py::test_every_sender_places_a_query_occurrence_in_place`, `…::test_the_occurrence_check_catches_an_appending_and_a_collapsing_sender` | any sender's old branch; `_Wire` reverted to a `dict` (the offenders would pass) |
-| `tests/test_json_points.py::test_the_executor_places_a_fragment_inside_the_hash_route`, extended with `#/s?q=old&page=2` → `#/s?q=M&page=2` | `_with_fragment` appending a second `q` |
+| `test_platform_clients_rewrite_only_escapes_they_disagree_on` | echo + real requests + real Chromium (18 queries) |
+| `test_the_equivalence_still_tells_apart_what_a_server_reads_apart` | pure |
+| `test_the_owner_places_the_first_occurrence_and_keeps_raw_text` ×15, `test_the_owner_encodes_a_payload_as_quote_plus`, `test_name_matching_never_merges_an_invalid_escape_with_its_replacement`, `test_bind_query_follows_the_binders_rule_and_adds_nothing_to_bound_entries` | pure (the owner) |
+| `test_every_sender_replaces_the_addressed_occurrence_in_place` (6 senders × 8 cases) | echo, bytes |
+| `test_control_a_query_less_url_gets_the_pair`, `test_a_hard_payload_on_a_query_less_url_is_quote_plus_encoded` ×6 | echo, bytes |
+| `test_the_cases_catch_the_decode_all_reencode_fix` | echo + a synthetic wrong owner |
+| `test_the_anonymous_and_authenticated_senders_send_the_same_query` | echo, bytes |
+| `test_a_bound_entry_list_is_sent_by_the_binders_rule` ×2 | echo, through `_FormBoundSender` |
+| `test_a_fragment_only_location_is_followed_without_the_payload` ×4, `test_an_empty_location_is_not_followed` ×2 | echo in redirect mode |
+| `test_the_browser_executor_replaces_the_addressed_occurrence_in_place` ×8, `test_the_browser_sends_a_hard_payload_on_a_query_less_url_as_quote_plus`, `test_the_browser_get_store_step_replaces_the_addressed_occurrence_in_place` | echo + real Chromium |
+| `test_every_query_builder_goes_through_the_one_owner`, `test_the_query_builder_allow_list_has_no_stale_entry`, `test_the_query_builder_guard_catches_synthetic_offenders` | AST |
+| `tests/test_sender_conformance.py::test_every_sender_places_a_query_occurrence_in_place` ×5 (both probe senders, greybox, both blind-sqli) | offline `_Wire`, bytes; cases: the name repeated, a missing `=` + empty part + `%20`, and unbound entries with a repeated name |
+| `tests/test_sender_conformance.py::test_the_occurrence_check_catches_an_appending_and_a_collapsing_sender` | offline, synthetic offenders |
+| `tests/test_json_points.py::test_the_executor_places_a_fragment_inside_the_hash_route` (extended: `#/s?q=old&page=2` → `#/s?q=M&page=2`) | fake Playwright + `_with_fragment` |
+| Updated old pins: `tests/test_greybox_live.py::test_requests_correlating_sender_sets_header`, `tests/test_fuzzer_seam.py::test_place_query_param`, `…::test_requests_sender_unchanged_standalone_behavior`, `tests/test_probesender.py::test_requests_probe_sender_never_follows_redirects` | fake session: the URL carries the pair, `params` is None |
+| Pins (strict xfail; §4.2 table) | echo / real Chromium / offline, as listed there |
 
-**Existing tests that pin the old behaviour** (M7; before and after, PA-0073(3)):
+**Per-revert proof** (`scratchpad/aureqid/revert_proof.py`, results in
+`revert_proof.json` and `revert_proof_bind.json`). Each set put the `8100959` version of
+the named files, or a named mutation, into the tree of `ed16e6c`, ran the listed test files
+in one pytest (`-n 4`, `FUZZLAB_REQUIRE_BROWSER=1`), and restored the files from HEAD
+(`git status` clean after):
 
-| Test | Before | After |
-|---|---|---|
-| `tests/test_greybox_live.py:397` | `captured["params"] == {"id": "1"}` (the `params=` call shape) | the URL `http://h/x.php?id=1`, and `params` is None |
-| `tests/test_json_points.py:744-754` | imports `_with_fragment` and asserts three URLs | `_with_fragment` stays as a thin wrapper; the three asserted URLs are unchanged (route `%20`, `#!/s?page=2&q=v`, and a non-route `#q=v+w`) |
-| `tests/test_fuzzer_seam.py::test_with_query_param` | tests the removed function | tests `place_query_param`. The seam-sender half (`?a=b` kept, quote-plus payload) is unchanged |
-| `tests/test_fuzzer_seam.py::test_requests_sender_unchanged_standalone_behavior` | the call `("http://localhost/p.php", {"id": "1"}, 15, False)` | `("http://localhost/p.php?id=1", None, 15, False)` |
-| `tests/test_sender_conformance.py::_Wire` | a `dict` | the prepared URL (F1). `test_the_placement_check_catches_a_relocating_sender` is re-checked on it |
+| Revert / mutation | Fails |
+|---|---|
+| `probesender.py` + `authhttp.py` → 8100959 (28 failed) | the 8 cases × `probe-anonymous`; 7 cases × `probe-seam` and × `probe-seam-identity` (the seam's blank case held on the base too); anonymous-vs-seam bytes; the bound anonymous fragment-only PRG row; the guard; conformance rows `RequestsProbeSender` and `SeamProbeSender`; `test_requests_probe_sender_never_follows_redirects` |
+| `greybox/run.py` → 8100959 (11) | the 8 cases × `greybox`; the guard; conformance `greybox`; `test_requests_correlating_sender_sets_header` |
+| `blind_sqli_fuzzer.py` + `authhttp.py` → 8100959 (19) | 8 cases × `blind-sqli-anonymous` and 7 × `blind-sqli-seam`; the guard; conformance rows `blind-sqli-anonymous` and `blind-sqli-seam`; `test_requests_sender_unchanged_standalone_behavior` |
+| `browserexec.py` → 8100959 (11) | the 8 browser cases; the GET store step; the guard; `test_the_executor_places_a_fragment_inside_the_hash_route` |
+| `harness/auto.py` → 8100959 (1) | the guard only: the change is byte-identical (`with_query` is `urlencode`), so only the builder shape can tell |
+| `RequestsProbeSender` follows `wire` instead of `url` (2) | `test_a_fragment_only_location_is_followed_without_the_payload[standalone-anonymous, bound-anonymous]` |
+| owner: `QueryEntries.parse` drops empty parts (13) | the owner's empty-parts case; `empty-parts` × 6 senders and in Chromium; all 5 conformance rows |
+| owner: names matched with `errors="replace"` (1) | `test_name_matching_never_merges_an_invalid_escape_with_its_replacement` |
+| owner: standalone replaces every occurrence (21) | the owner's two repeated-name cases; `dup-sibling` and `encoded-name` × 6 senders and in Chromium; all 5 conformance rows |
+| owner: `quote` instead of `quote_plus` (8) | `test_the_owner_encodes_a_payload_as_quote_plus`; the hard payload × 6 senders and in Chromium |
+| owner: `bind_query` replaces the first occurrence only (4) | `test_bind_query_follows_the_binders_rule_and_adds_nothing_to_bound_entries`; conformance rows `RequestsProbeSender`, `SeamProbeSender`, `greybox` (the bound case's unbound repeated name) |
 
-`test_forms_phase2._App` and `test_json_points._JsonWire` check no placement, so they stay
-as they are (AU-REQID8).
+The guard's own proof is `test_the_query_builder_guard_catches_synthetic_offenders`
+(50 offenders flagged, 10 near-misses not), and `test_the_occurrence_check_catches_an_appending_and_a_collapsing_sender`
+is the conformance check's.
 
 ## 6. Requirement text (written in place at implementation)
 
@@ -690,3 +710,18 @@ its own item, AU-PRGPATH) are resolved. None open.
 | **ARCHITECTURE** | The line is drafted (§7) |
 | **Labgen** | The strict xfail is removed. It is now a LAB hand-off with measured evidence (§4.2) |
 | **M6 trace** | Stated as residual 3 |
+
+## 13. Revision 3: the blocking fixes, the adopted items, and part 1 implemented
+
+| Item | Change |
+|---|---|
+| **B1** (the guard missed 16 likely shapes) | Two rules added: a local name assigned from a quoter, from `.query` or from `"&".join` is query material (S4); a `[?&]name=` constant in a string build is flagged (S4b; a bare constant is not a builder: measured, the only ones are `tools/build_sql_db.py`'s 16 descriptive strings). `"params"` as a dict key is flagged when the dict reaches `**` of a send, directly or through a local, and so are `dict(params=…)`, `kw.update(params=…)`/`({"params": …})`, `kw.setdefault("params", …)` and a positional params (`requests.get(url, p)`, `s.request(m, u, p)`, `requests.Request(…, p)`). S6 also flags `._replace(fragment=…)` and `SplitResult`/`ParseResult(...)`. One synthetic offender per new shape: 50 offenders in all, 10 near-misses. The reviewer's sites are allow-listed with reasons (`store_adapter.py:634`, `strategies.py:784`, `diagram.py:318`, `app.py:635`, `app.py:1126`, `project.py:117`, `store.py:33`), plus `spa.visit_key`'s S6; `fingerprint.py:83` is covered and `browserexec.py:45` is fixed (§4.2). §4 is the guard's output, compared exactly (57 on the base; 12 fixed; 45 allowed under 43 keys), and PA-0531(1) now states what the guard flags and its limits (§10) |
+| **B2** (prose deferrals) | Each known unfixed instance is an offline strict xfail naming its owner, failing today for its stated reason (§4.2 table): `disco/runner.py:262` (AU-OUTCOME), `tools/spa.py` `query_url` (CRAWL, **to be registered by the coordinator**), residual 2 `query_pairs` (AU-REQID8), `store_adapter.py:274` (AU-REQID8), labgen's re-encoding of untouched pairs only (LAB) |
+| **ADOPT: exact counts** | `test_every_query_builder_goes_through_the_one_owner` (no finding above its count) and `test_the_query_builder_allow_list_has_no_stale_entry` (every count found exactly) |
+| **ADOPT: S6** | `._replace(fragment=…)` and the `SplitResult`/`ParseResult` constructors (offenders `_replace fragment`, `SplitResult`, `ParseResult`) |
+| **ADOPT: M6 GET store step** | Always `place_query_param`: `StoreStep` has no entries (§3.3, residual 5, FR-FUZZ-64) |
+| **ADOPT: non-UTF-8 names** | Residual 3, measured: the store decodes with `errors="replace"`, so the stored name never matches the URL's raw occurrence |
+| **ADOPT: 179/8 vs 178/7** | The exact `points_from_ground_truth` call is in §1.3; 178/7 is the same call without `account_values` |
+| **ADOPT: AU-PRGPATH** | Not fixed here. `test_a_path_points_prg_follow_up_never_carries_the_payload` is a strict xfail naming AU-PRGPATH over `#top` and a relative `edit`, for both probe senders |
+| **Implemented now** | `core/urls.py`; every sender's placement; the guard; the tests; CC-FUZZ-0106 (part 1), CC-CORE-0068, FR-FUZZ-64, FR-CORE-501, BUG-0531 |
+| **Held (Q3)** | `ExecRequest.entries`, `DomXssStrategy._observe`, the executor's `bind_query` with entries, the M6-vs-bound-HTTP row, and unpinning `test_a_dom_query_point_is_loaded_with_its_siblings`, after AU-OUTCOME merges |

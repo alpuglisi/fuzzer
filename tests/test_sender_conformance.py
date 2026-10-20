@@ -607,7 +607,9 @@ def test_every_sender_that_declares_prg_makes_the_follow_up(key):
 OCCURRENCE_CASES = (
     ("http://h/a.php?id=1&b=2&id=3", None, "id=zqmark&b=2&id=3"),
     ("http://h/a.php?b=2&flag&&c=x%20y", None, "b=2&flag&&c=x%20y&id=zqmark"),
-    ("http://h/a.php", (("id", "1"), ("b", "2")), "id=zqmark&b=2"),
+    # unbound entries with a repeated name: the sender's own `bind_query` applies the
+    # binder's rule (every occurrence), not only the oracle's `_FormBoundSender`
+    ("http://h/a.php", (("id", "1"), ("b", "2"), ("id", "3")), "id=zqmark&b=2&id=zqmark"),
 )
 
 
@@ -680,9 +682,11 @@ def test_the_occurrence_check_catches_an_appending_and_a_collapsing_sender():
         parts = urlsplit(url)
         query = dict(parse_qsl(parts.query)) | {"id": "zqmark"}
         wire.request("GET", parts._replace(query=urlencode(query)).geturl())
+    bound = "http://h/a.php (('id', '1'), ('b', '2'), ('id', '3'))"
     assert occurrence_problems(appending) == [
-        "http://h/a.php?id=1&b=2&id=3 None: sent 'id=1&b=2&id=3&id=zqmark'"]
+        "http://h/a.php?id=1&b=2&id=3 None: sent 'id=1&b=2&id=3&id=zqmark'",
+        f"{bound}: sent 'id=zqmark&b=2'"]
     assert occurrence_problems(collapsing) == [
         "http://h/a.php?id=1&b=2&id=3 None: sent 'id=zqmark&b=2'",
         "http://h/a.php?b=2&flag&&c=x%20y None: sent 'b=2&c=x+y&id=zqmark'",
-        "http://h/a.php (('id', '1'), ('b', '2')): sent 'id=zqmark'"]
+        f"{bound}: sent 'id=zqmark'"]
