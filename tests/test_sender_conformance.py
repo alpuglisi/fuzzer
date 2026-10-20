@@ -259,27 +259,37 @@ class _Wire:
 
     def request(self, method, url, **kw):
         from urllib.parse import parse_qsl, urlsplit
+
+        import requests
         query = dict(parse_qsl(urlsplit(url).query, keep_blank_values=True))
         params = kw.get("params")
         query.update(dict(params) if isinstance(params, (dict, list)) else {})
         data = kw.get("data")
         body = dict(data) if isinstance(data, (dict, list)) else {}
         headers = dict(kw.get("headers") or {})
+        # "wire": the URL requests itself would send, `params=` merged by its own prepare
+        # (BUG-0531: the occurrence check reads these bytes, not a dict of the query)
+        wire = requests.Request(method, url, params=params).prepare().url
         self.sent.append({"query": query, "body": body, "headers": headers,
-                          "json": self._json(headers, data), "path": urlsplit(url).path})
+                          "json": self._json(headers, data), "path": urlsplit(url).path,
+                          "wire": wire})
 
         class R:
             status_code, text, headers = 200, "ok", {}
         return R()
 
-    # core seam transport (SeamProbeSender)
+    # requests-style ``get`` (blind_sqli_fuzzer.RequestsSender)
+    def get(self, url, params=None, **kw):
+        return self.request("GET", url, params=params, **kw)
+
+    # core seam transport (SeamProbeSender, blind_sqli_fuzzer.SeamSender)
     def transport(self, method, url, headers, body, timeout):
         from urllib.parse import parse_qsl, urlsplit
         json_body = self._json(headers, body)
         self.sent.append({"query": dict(parse_qsl(urlsplit(url).query)),
                           "body": {} if json_body else dict(parse_qsl((body or b"").decode())),
                           "headers": dict(headers), "json": json_body,
-                          "path": urlsplit(url).path})
+                          "path": urlsplit(url).path, "wire": url})
         return 200, {}, b"ok"
 
 
@@ -586,3 +596,97 @@ def test_every_sender_that_declares_prg_makes_the_follow_up(key):
     PLACEMENT_FACTORIES[key](wire).send("http://h/a.php", "p", "zqmark", method="POST",
                                         location="body")
     assert len(wire.sent) == 1                        # not asked: never follows
+
+
+# --- query occurrence (FR-FUZZ-64, BUG-0531): the exact occurrence, in place ------------
+#: (url, bound entries, the raw query that must reach the wire). A standalone point
+#: addresses the first occurrence of its name in place and keeps every other raw part; a
+#: point bound to an entry list follows the binder's rule (`FormEntries.replace`). On
+#: 8100959 the requests family appended a second occurrence and the seam family
+#: collapsed the query through a dict (BUG-0531).
+OCCURRENCE_CASES = (
+    ("http://h/a.php?id=1&b=2&id=3", None, "id=zqmark&b=2&id=3"),
+    ("http://h/a.php?b=2&flag&&c=x%20y", None, "b=2&flag&&c=x%20y&id=zqmark"),
+    # unbound entries with a repeated name: the sender's own `bind_query` applies the
+    # binder's rule (every occurrence), not only the oracle's `_FormBoundSender`
+    ("http://h/a.php", (("id", "1"), ("b", "2"), ("id", "3")), "id=zqmark&b=2&id=zqmark"),
+)
+
+
+def occurrence_problems(send, bound=True) -> list[str]:
+    """Send ``id=zqmark`` at each case; the wire's raw query must equal the contract's.
+    ``bound=False`` for a sender that takes no entry list."""
+    from urllib.parse import urlsplit
+    out = []
+    for url, entries, want in OCCURRENCE_CASES:
+        if entries is not None and not bound:
+            continue
+        wire = _Wire()
+        send(wire, url, entries)
+        got = urlsplit(wire.sent[-1]["wire"]).query
+        if got != want:
+            out.append(f"{url} {entries}: sent {got!r}")
+    return out
+
+
+def _greybox_send(wire, url, entries):
+    from fuzzlab.greybox.run import RequestsCorrelatingSender
+    RequestsCorrelatingSender(session=wire, id_factory=lambda: "c").send_correlated(
+        url, "id", "zqmark", entries=entries)
+
+
+def _blind_requests_send(wire, url, entries):
+    from fuzzlab.tools.blind_sqli_fuzzer import RequestsSender
+    RequestsSender(wire).get(url, "id", "zqmark", 5)
+
+
+def _blind_seam_send(wire, url, entries):
+    from fuzzlab.core.budget import RequestBudget
+    from fuzzlab.core.http import HttpClient
+    from fuzzlab.tools.blind_sqli_fuzzer import SeamSender
+    client = HttpClient(RequestBudget(10), ["h"], transport=wire.transport)
+    SeamSender(client, "anonymous").get(url, "id", "zqmark", 5)
+
+
+#: Every query sender outside the oracle seam (which `PLACEMENT_FACTORIES` lists), with
+#: whether it takes a bound entry list.
+OTHER_QUERY_SENDERS = {
+    "greybox": (_greybox_send, True),
+    "blind-sqli-anonymous": (_blind_requests_send, False),
+    "blind-sqli-seam": (_blind_seam_send, False),
+}
+
+
+@pytest.mark.parametrize("key", [".".join(k) for k in sorted(PLACEMENT_FACTORIES)]
+                         + sorted(OTHER_QUERY_SENDERS))
+def test_every_sender_places_a_query_occurrence_in_place(key):
+    if key in OTHER_QUERY_SENDERS:
+        send, bound = OTHER_QUERY_SENDERS[key]
+    else:
+        factory = PLACEMENT_FACTORIES[tuple(key.rsplit(".", 1))]
+
+        def send(wire, url, entries):
+            factory(wire).send(url, "id", "zqmark", entries=entries)
+        bound = True
+    assert occurrence_problems(send, bound) == []
+
+
+def test_the_occurrence_check_catches_an_appending_and_a_collapsing_sender():
+    """The two shapes BUG-0531 found on 8100959, as synthetic senders."""
+    from urllib.parse import parse_qsl, urlencode, urlsplit
+
+    def appending(wire, url, entries):               # requests' params= appends
+        wire.request("GET", url, params=dict(entries or ()) | {"id": "zqmark"})
+
+    def collapsing(wire, url, entries):              # a dict(parse_qsl(...)) rebuild
+        parts = urlsplit(url)
+        query = dict(parse_qsl(parts.query)) | {"id": "zqmark"}
+        wire.request("GET", parts._replace(query=urlencode(query)).geturl())
+    bound = "http://h/a.php (('id', '1'), ('b', '2'), ('id', '3'))"
+    assert occurrence_problems(appending) == [
+        "http://h/a.php?id=1&b=2&id=3 None: sent 'id=1&b=2&id=3&id=zqmark'",
+        f"{bound}: sent 'id=zqmark&b=2'"]
+    assert occurrence_problems(collapsing) == [
+        "http://h/a.php?id=1&b=2&id=3 None: sent 'id=zqmark&b=2'",
+        "http://h/a.php?b=2&flag&&c=x%20y None: sent 'b=2&c=x+y&id=zqmark'",
+        f"{bound}: sent 'id=zqmark'"]

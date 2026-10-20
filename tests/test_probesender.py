@@ -46,7 +46,10 @@ def test_requests_probe_sender_never_follows_redirects():
     # `Location` header (e.g. OpenRedirectStrategy) needs the redirect response
     # itself, and a redirect target can be attacker-controlled/unreachable.
     assert session.calls[0]["allow_redirects"] is False
-    assert session.calls[0]["params"] == {"id": "1'"} and session.calls[0]["data"] is None
+    # BUG-0531: the value is placed in the URL by `place_query_param` (SP-42), never
+    # handed to requests' `params=`, which appends a second occurrence.
+    assert session.calls[0]["url"] == "http://localhost/x?id=1%27"
+    assert session.calls[0]["params"] is None and session.calls[0]["data"] is None
 
 
 def test_requests_probe_sender_post_body():

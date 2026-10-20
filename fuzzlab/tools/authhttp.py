@@ -6,27 +6,14 @@ credentials). Standalone (no identity) tools keep using plain requests; this is
 only for the authenticated path.
 
 Module-level imports stay light (stdlib only); the heavy wiring is inside
-``make_authenticated_client`` so importing ``with_query_param`` costs nothing.
+``make_authenticated_client``. Placing a value in a query is not done here: every
+sender uses ``core.urls`` (``place_query_param``, ``bind_query``, ``with_query``; SP-42,
+FR-FUZZ-64, BUG-0531).
 """
 
 from __future__ import annotations
 
-from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
-
-
-def with_query_param(url: str, name: str, value) -> str:
-    """Return ``url`` with query parameter ``name`` set to ``value``."""
-    parts = urlparse(url)
-    query = dict(parse_qsl(parts.query, keep_blank_values=True))
-    query[name] = str(value)
-    return urlunparse(parts._replace(query=urlencode(query)))
-
-
-def with_query(url: str, entries) -> str:
-    """``url`` with its query string replaced by ``entries`` (a form's full entry list,
-    in order, duplicates kept), as a browser submits a GET form."""
-    parts = urlparse(url)
-    return urlunparse(parts._replace(query=urlencode(list(entries))))
+from urllib.parse import urlparse
 
 
 def scope_hosts_for(target_url: str) -> list[str]:

@@ -15,37 +15,20 @@ import re
 import time
 import uuid
 from contextlib import suppress
-from urllib.parse import urlencode, urlsplit, urlunsplit
-
 from fuzzlab.core import trace
+from fuzzlab.core.urls import place_query_param    # the one query placement (SP-42)
 from fuzzlab.oracle.browser import SENTINEL, ExecObservation, ExecRequest, NotObserved
 from fuzzlab.oracle.probe import UnplaceableLocation
 
 
-def _with_query(url: str, param: str, value: str) -> str:
-    parts = urlsplit(url)
-    query = urlencode({param: value}) if not parts.query else \
-        parts.query + "&" + urlencode({param: value})
-    return urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
-
-
 def _with_fragment(url: str, param: str, value: str) -> str:
-    """``url`` with ``param=value`` in its fragment. A single-page app's hash route
-    (``/#/search``, `core.urls.spa_route`) keeps its route: the pair goes into the
-    route's own query (``/#/search?q=<value>``, forms phase 3), percent-encoded (a
-    space is ``%20``: the app's router reads it, not a form decoder), never after a
-    second ``#``. Any other fragment is replaced by the pair, as before."""
-    from urllib.parse import quote
-
-    from fuzzlab.core.urls import spa_route
-    parts = urlsplit(url)
-    pair = urlencode({param: value}, quote_via=quote)
-    if spa_route(url) is not None:
-        route, sep, query = parts.fragment.partition("?")
-        fragment = route + "?" + (query + "&" if sep and query else "") + pair
-    else:
-        fragment = urlencode({param: value})
-    return urlunsplit((parts.scheme, parts.netloc, parts.path, parts.query, fragment))
+    """``url`` with ``param=value`` in its fragment, through the one owner
+    (`core.urls.place_route_query_param`, SP-42): a single-page app's hash route
+    (``/#/search``) keeps its route and the pair goes into the route's own query, its
+    first occurrence of ``param`` replaced in place (``%20`` for a space: the app's router
+    reads it); any other fragment is replaced by the pair, as before."""
+    from fuzzlab.core.urls import place_route_query_param
+    return place_route_query_param(url, param, value)
 
 
 #: What a failure text may not keep: a quoted string, or a ``scheme://`` token.
@@ -536,7 +519,9 @@ class PlaywrightBrowserExecutor:
                     else:
                         # the commit, then a bounded load, as the observe navigation
                         # (BUG-0137 review A-N3; the one helper since BUG-0138)
-                        resp = navigate(page, _with_query(s.url, s.param, s.value),
+                        # a `StoreStep` has no sibling entries: the standalone rule
+                        # (FR-FUZZ-64, SP-42)
+                        resp = navigate(page, place_query_param(s.url, s.param, s.value),
                                         timeout_ms=self._timeout, wait_until="load",
                                         wait_ms=load_ms).response
                 except BaseException as exc:
@@ -549,7 +534,8 @@ class PlaywrightBrowserExecutor:
             target = request.url
             if request.param is not None and request.value is not None:
                 target = (_with_fragment if request.location == "fragment"
-                          else _with_query)(request.url, request.param, request.value)
+                          else place_query_param)(request.url, request.param,
+                                                  request.value)
             # when the observe navigation's `load` fires (BUG-0137 review Z3)
             load_at: list = [None]
             page.once("load", (lambda *_: load_at.__setitem__(0, time.monotonic()))

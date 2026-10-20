@@ -297,6 +297,98 @@ def place_path_param(url: str, param: str, value: str) -> str:
     return urlunsplit(parts._replace(path="/".join(segments)))
 
 
+# --- query placement (SP-42 extended, FR-CORE-501; CC-CORE-0068, BUG-0531) -----------
+def encode_query_value(text) -> str:
+    """The one encoder of a query name or value a sender writes: `quote_plus` with
+    ``safe=""``, what `urlencode` writes. A query-less URL therefore gets exactly the
+    bytes it got before this owner existed (FR-FUZZ-64)."""
+    from urllib.parse import quote_plus
+    return quote_plus(str(text), safe="")
+
+
+class QueryEntries:
+    """A URL query as the ordered list of its raw ``&``-parts (FR-CORE-501).
+
+    Split on ``&`` only: both measured clients keep ``;`` as data. Every part keeps its
+    text exactly: its order, a repeated name, an empty part (``&&``, a trailing ``&``)
+    and a missing ``=`` (``flag``). An empty query has no parts. A part's name is decoded
+    as a server reads it (form decoding) for matching only, with an invalid escape kept
+    as a surrogate, so ``n%E9`` never matches ``n%EF%BF%BD`` (``n\\ufffd``)."""
+
+    __slots__ = ("parts",)
+
+    def __init__(self, parts=()):
+        self.parts: tuple[str, ...] = tuple(parts)
+
+    @classmethod
+    def parse(cls, raw_query: str | None) -> "QueryEntries":
+        return cls(raw_query.split("&") if raw_query else ())
+
+    @staticmethod
+    def name_of(part: str) -> str:
+        return unquote_plus(part.partition("=")[0], errors="surrogateescape")
+
+    def replace_first(self, name: str, value, encode=encode_query_value) -> "QueryEntries":
+        """The first part named ``name`` with ``value`` (``encode``-d) in place, its raw
+        name kept; one ``name=value`` part appended when there is none."""
+        parts = list(self.parts)
+        for i, part in enumerate(parts):
+            if self.name_of(part) == name:
+                parts[i] = f"{part.partition('=')[0]}={encode(value)}"
+                return QueryEntries(parts)
+        parts.append(f"{encode(name)}={encode(value)}")
+        return QueryEntries(parts)
+
+    def to_query(self) -> str:
+        return "&".join(self.parts)
+
+
+def place_query_param(url: str, name: str, value) -> str:
+    """The standalone rule (FR-FUZZ-64): ``url`` with ``value`` in the first part of its
+    own query named ``name``, in place, appended once when there is none. Every other
+    part, and the rest of the URL, keeps its text (`urlsplit`; an empty ``?`` or ``#`` is
+    dropped). The one placement of a value into a URL's own query (SP-42)."""
+    parts = urlsplit(url or "")
+    query = QueryEntries.parse(parts.query).replace_first(name, value).to_query()
+    return urlunsplit(parts._replace(query=query))
+
+
+def with_query(url: str, entries) -> str:
+    """``url`` with its query replaced by ``entries`` (an ordered list of decoded
+    ``(name, value)`` pairs, duplicates kept), urlencoded as a browser serialises a form
+    (PA-0111). Moved here from ``tools/authhttp`` unchanged in its bytes."""
+    from urllib.parse import urlencode
+    parts = urlsplit(url or "")
+    return urlunsplit(parts._replace(query=urlencode(list(entries))))
+
+
+def bind_query(url: str, entries, name: str, value) -> str:
+    """The bound rule (FR-FUZZ-64): ``url`` with its query set to ``entries`` bound by the
+    oracle binder's rule (`core.forms.FormEntries.replace`: every entry called ``name``
+    set to ``value``, appended when there is none). Entries the binder has already bound
+    come back unchanged. The one bind-then-place of the HTTP senders' bound query branch
+    and of the M6 executor; AU-REQID8 changes the rule here, for both."""
+    from fuzzlab.core.forms import FormEntries
+    bound = FormEntries(tuple(e) for e in entries).replace(name, value)
+    return with_query(url, bound)
+
+
+def place_route_query_param(url: str, name: str, value) -> str:
+    """A fragment point's URL (the M6 browser): inside a single-page app's hash route
+    (``/#/search?q=``, `spa_route`), the standalone rule over the route's own query,
+    names and values encoded as its router reads them (``quote``: a space is ``%20``);
+    any other fragment is replaced by the pair, form-encoded, as before."""
+    from urllib.parse import quote
+    parts = urlsplit(url or "")
+    if spa_route(url) is None:
+        fragment = f"{encode_query_value(name)}={encode_query_value(value)}"
+    else:
+        route, _sep, query = parts.fragment.partition("?")
+        fragment = route + "?" + QueryEntries.parse(query).replace_first(
+            name, value, encode=lambda t: quote(str(t), safe="")).to_query()
+    return urlunsplit(parts._replace(fragment=fragment))
+
+
 def url_key(url: str) -> str:
     """``canonical_origin`` plus path: how an explicit allowance names a URL."""
     return f"{canonical_origin(url) or ''}{urlsplit(url or '').path or '/'}"

@@ -2,16 +2,20 @@
 
 from fuzzlab.core.budget import RequestBudget
 from fuzzlab.core.http import HttpClient
+from fuzzlab.core.urls import place_query_param
 from fuzzlab.session.manager import SessionManager
-from fuzzlab.tools.authhttp import with_query_param
 from fuzzlab.tools.blind_sqli_fuzzer import RequestsSender, SeamSender
 from tests.test_session_manager import CookieLoginFetcher, _factory, _store
 
 
-def test_with_query_param():
-    assert with_query_param("http://h/p.php", "id", "1") == "http://h/p.php?id=1"
-    out = with_query_param("http://h/p.php?a=b", "id", "1' OR 1=1")
-    assert "a=b" in out and "id=1%27+OR+1%3D1" in out
+def test_place_query_param():
+    # The fuzzer's query placement is the one owner (SP-42, FR-FUZZ-64, BUG-0531):
+    # an absent name is appended, a present one is replaced in place, the rest kept.
+    assert place_query_param("http://h/p.php", "id", "1") == "http://h/p.php?id=1"
+    out = place_query_param("http://h/p.php?a=b", "id", "1' OR 1=1")
+    assert out == "http://h/p.php?a=b&id=1%27+OR+1%3D1"
+    out = place_query_param("http://h/p.php?id=7&a=b", "id", "1' OR 1=1")
+    assert out == "http://h/p.php?id=1%27+OR+1%3D1&a=b"
 
 
 class FakeSession:
@@ -35,7 +39,9 @@ def test_requests_sender_unchanged_standalone_behavior():
     # BUG-0044/PA-0046: never silently follow a redirect -- a followed hop
     # would add an unrelated round trip into this timing-sensitive
     # measurement.
-    assert sess.calls == [("http://localhost/p.php", {"id": "1"}, 15, False)]
+    # BUG-0531: the value is placed in the URL by `place_query_param`, never handed to
+    # requests' `params=` (which appends a second occurrence).
+    assert sess.calls == [("http://localhost/p.php?id=1", None, 15, False)]
 
 
 def test_seam_sender_authenticates_and_measures():
