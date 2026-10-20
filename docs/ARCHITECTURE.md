@@ -1193,6 +1193,13 @@ tracked in the requirements files, not here.
   (`oracle/probe.py::require_observed` / `require_comparable`), the blind-SQLi builder and
   the live WAF filter; a status guard keeps every other status classification on a
   reviewed allowance list.
+- **One bounded reader of a target's body** `[built]` (CC-CORE-0072, FR-CORE-536, SP-60, BUG-0536): `core/bodyread.py::read_body` reads a streamed `requests` response one receive at a time.
+  - It applies a wire ceiling (16 MiB) and a decoded ceiling (32 MiB), decoding gzip / deflate / Brotli incrementally under the ceiling, and a wall-clock deadline checked at every receive.
+  - One process-wide watchdog thread (`watch`) shuts down the socket of any watched exchange still in use at its deadline (a dripped status line, header or chunk line; a send with no timeout).
+  - Bounded sends advertise only the codings the reader can decode (`advertise`).
+  - It returns a typed `Body`. `bound(session)` mounts `BoundedAdapter`, which raises `BodyIncomplete` (a `requests.RequestException`) for an incomplete body, with the response closed.
+  - Every `requests` session fuzzlab makes for a target is bounded where it is made (an AST guard): the core seam's transport, `navguard.get_checked`, the probe senders, greybox, blind-SQLi and the spider. The contract runner's session is `watched` and calls `read_body` with its own limits. SP-34 makes the marker "not observed"; greybox makes it a typed `UnobservedProbe`.
+  - Stated limits: the connect is bounded by its own timeout only. The session manager's login fetcher is pinned for its owner.
 - **Process trees** `[built]` (CC-CORE-0048, FR-CORE-38, BUG-0125): `fuzzlab/procutil.py`,
   a stdlib-only leaf (the one module `fuzzlab.labgen` may import beyond itself and the
   label contract). Every long-lived child the toolkit or its tests start -- the five

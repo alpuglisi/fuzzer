@@ -1082,3 +1082,33 @@ Juice Shop lab is complete.
 - **Evidence:** the AU-BOUNDED review (2026-10-20, ~23:00Z): `_screening(sqli, <incomplete probe>, <400-char baseline>) == 0.5` on a loopback gzip bomb; `urllib3/util/request.py` ACCEPT_ENCODING vs `bodyread._decoder`.
 - **Impact:** none merged; one revision round on the lane.
 - **Status:** sent back for revision with both as required fixes and tests that drive the run loop and the sent header.
+
+### F-112 — I ran the audit through design gates and left two of three slots off the metric, so nothing closed for 19 hours
+- **What:** I dispatched defect 6 as "measure and draft only" and sent it, and the site-tree bug, through up to four two-reviewer design rounds before any code (13 hours for defect 6); from 10:50Z to 21:34Z one slot held an audit defect and the other two held a non-metric bug and process or paused work, while 20 defects were never dispatched; after the owner's switch I kept the per-item harness cost (lane, revision and merge runs, proof matrices) and merged the suite-wide site-tree change first locally, which would have made every later push wait on a 29-minute full run.
+- **Evidence:** the session's dispatch log (06:14Z to 23:30Z); the scratchpad's `verify_change` directories (host busy ~19% from 05:00Z to 21:30Z); `verify_change.py --base 01192c3 --list-only` on the local merge (408 files, "tests/conftest.py changed"); BUG-0541.
+- **Impact:** 19 hours without a closed defect against the owner's explicit pace; three owner messages asking why.
+- **Status:** corrective action in force (PA-0541): implement first, a fixed lane test budget, per-lane pushes with the suite-wide merge last, batched lanes.
+
+### F-113 — The AU-BOUNDED lane started its 131-file harness without running the tests its revision touched
+- **What:** the review-round revision changed `bodyread.bound` and the spider's sessions, then launched `verify_change.py` without first running the spider and forms tests those sessions serve; four failed (`isinstance() arg 2 must be a type`: a test's stand-in session), costing a 16-minute run on the shared lock and a second one.
+- **Evidence:** `scratchpad/au-bounded/vc_209355c/parallel.log` (4 failed: `test_forms_phase1.py` x3, `test_forms_phase2.py` x1); the fix a88b8db.
+- **Impact:** about 16 minutes of the serialised test host while two other lanes queued.
+- **Status:** fixed in a88b8db; PA-0541(2): targeted files first, then one harness run.
+
+### F-114 — BUG-0101's sweep cleared every requests sender as time-bounded because it passed a timeout
+- **What:** the PA-0002 sweep I wrote for BUG-0101 (2026-10-13) cleared "greybox, probe and tool senders: `requests` with timeouts, outside asyncio" as meeting PA-0102(1)'s "overall deadline". A `requests` timeout bounds each receive, not the total: a body dripped under it, or a 40 KiB gzip body decoding to 40 MiB, came back as a normal body from every one of them (audit defect 21). BUG-0528 (2026-10-20) then deferred the runner's drip, its residual R6, to "defect 21's read-deadline owner", which did not exist.
+- **Evidence:** `docs/bugs/BUG-0101-unbounded-upstream-read.md` (sweep), `docs/bugs/BUG-0528-...md` (R6), `tests/test_bounded_reads.py` failing at 4ee8007 ("a normal body of 120 bytes" from all five readers), BUG-0536.
+- **Impact:** for a week every `requests` reader of a target could be held for as long as the target kept sending, or made to allocate without bound, while the sweep record said otherwise.
+- **Status:** fixed by AU-BOUNDED (SP-60, PA-0536(2): a time-bound verdict cites a test against a dripping peer, never the presence of a timeout).
+
+### F-115 — The AU-SESS403 implementation left a D′ hole on the peer's sends and a health GET per distinct path behind a WAF
+- **What:** (1) DRAFT §3.15 and FR-FUZZ-65 claimed every strategy run goes through layer 1 (`_ObservedOnly`), but `CrossAccountReplayStrategy` sends through the peer's own sender and `_compared` called only `require_comparable`: a peer probe sent on a session known lost (D's window) still produced a negative or a confirmed cross-account finding. (2) A policy-block 403 cost one health check (up to 6 GETs) per distinct path or header value, because the LIVE cache is keyed by (generation, origin+path) and a foreign header bypasses it: behind a WAF that 403s every probe, 20 path payloads made 20 health GETs, unbudgeted and untraced.
+- **Evidence:** the AU-SESS403 reviews of f1d31dd (2026-10-20, ~23:25Z): `scratchpad/rev_a_peer.py` (`Verdict(confirmed=True, mechanism='cross-account-replay', who='peer')` from a `session_lost` probe); `scratchpad/rb_measure/path403.py` (20 path / 20 header payloads → 20 / 20 health GETs).
+- **Impact:** none merged; one revision round.
+- **Status:** sent back with both as required fixes (`require_observed` in `_compared`; a LIVE verdict covers a policy-block signal of its generation within the TTL, a dict lookup, older generations pruned), each with a test that fails on f1d31dd.
+
+### F-116 — The AU-SITETREE implementation broke its own "seen only after success" rule on one fetch, and named a test as enforcement that passes on the bug
+- **What:** (1) `sitetree.js` `loadNode` checked only the summary's status, not the selected node's Contents fetch: on a failed Contents fetch `showNode` drew an empty table and returned success, so the poll marked the version seen and never retried; `expand()` likewise marked a group current after its `refreshGroup` failed. (2) K4 (`test_a_projects_listing_never_drops_the_store_watchs_locks`), named as enforcement for PA-0534 and PA-0535, passes its own assertions on the pre-fix `project.py`: after the WAL is deleted under the watch, the watch reopens with a new epoch and `cur != prev` still holds; only the conftest audit hook failed it. Both passed the lane's 33-mutant revert proof, which mutated neither the Contents path nor K4's premise.
+- **Evidence:** the AU-SITETREE reviews of 01192c3..eb95cd4 (2026-10-20, ~23:40Z): Chromium probe `scratchpad/rev-sitetree-b-probe/probe3.py` (refreshes +1, 0 of 3 rows, no retry over five polls); `scratchpad/reva/m4` (pre-fix: `prev is None`, epoch changes, assertions pass).
+- **Impact:** none merged to the remote; one revision round.
+- **Status:** sent back with both as required fixes (a non-200 Contents fetch is a failure, an injected-500 browser test; K4 asserts the side files, `prev`, and an unchanged epoch, proven on the pre-fix code with the hook disarmed).

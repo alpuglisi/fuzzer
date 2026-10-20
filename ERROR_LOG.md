@@ -18,6 +18,33 @@ Format per entry:
 
 ---
 
+## 2026-10-20 — orchestration (the audit stalled 19 hours; BUG-0541)
+- **Symptom:** no audit defect closed from 05:00Z to past 23:54Z while three lanes and reviewers were busy; the owner asked three times why.
+- **Root cause:** each defect ran through a design-first, multi-gate pipeline (a measured draft and up to four two-reviewer rounds before code, then three or more harness runs and proof matrices), only one audit item was in work from 10:50Z to 21:34Z, and runs and merges were not planned around the one host-wide pytest lock (BUG-0532).
+- **Remediation:** implement first with one implementation review; a fixed lane test budget (targeted files, one proof on the pre-fix code, one delta harness); merges pushed per lane as they go green, a suite-wide change last; batched lanes and at most one non-metric slot (BUG-0541, PA-0541; F-112, F-113).
+- **Status:** Fixed (process; measured at the next checkpoints)
+
+## 2026-10-20 — core / crawl / fuzz (reads of untrusted input bounded only after the work; BUG-0536)
+- **Symptom:** the external audit's defects 21, 23 and 27, reproduced at 4ee8007 with loopback peers.
+  - A body dripped a byte every 50 ms under a 0.25 s read timeout came back after 6 s as a normal body from every `requests` reader: the core seam, the static fetch, both probe senders and greybox.
+  - A 40 KiB gzip body was decoded whole, to 40 MiB.
+  - `JsonlTail` held an unterminated over-cap line (a 33.5 MB peak for 16 MiB under a 64 KiB cap) and quarantined nothing.
+  - `(a+)+$` on `a` x 36 + `!` ran in the contract runner's thread until a 60 s alarm.
+- **Root cause:** the bounds sat on finished artefacts: `resp.content` / `r.text` after a whole read, the line cap at the parser, pattern compilation as validation. A `requests` timeout was taken for a deadline (BUG-0101's sweep cleared the senders on it). There was no owner for reading a target's body, and PA-0102 was enforced only on the proxy.
+- **Remediation:**
+  - `core/bodyread.py` (SP-60):
+    - wire and decoded ceilings with incremental bounded decoding;
+    - a deadline at every receive, and one watchdog thread that shuts the socket at the deadline (a dripped status line, header or chunk line);
+    - only boundable codings advertised;
+    - a typed `BodyIncomplete`;
+    - `bound(session)` on every target session (an AST guard).
+  - SP-34 maps the marker to `ProbeUnobserved`; greybox to a typed `UnobservedProbe` that is never scored, recorded or adopted as a baseline.
+  - `JsonlTail` caps while reading, linearly.
+  - `body_matches` run in a `procutil.run_bounded` worker with a 5 s limit.
+  - Residuals pinned by strict xfails: the session manager's login fetcher (AU-SESS403's file), `formfill._fits`.
+  - BUG-0536, PA-0536.
+- **Status:** Fixed (residuals R1-R7 stated in BUG-0536).
+
 ## 2026-10-20 — test tooling (the harness starved behind the pytest lock; BUG-0537)
 - **Symptom:** a docs-only `verify_change.py` run waited 30 minutes without starting while agent lanes ran and queued pytest sessions.
 - **Root cause:** the harness kept its "zero other pytest processes" precondition after BUG-0532 made every session queue on the host pytest lock; with continuous queueing that condition never holds.
