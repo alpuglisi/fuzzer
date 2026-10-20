@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-20 — test tooling (ad-hoc pytest runs overlapped other runs; BUG-0532)
+- **Symptom:** agent lanes' ad-hoc `pytest` runs started while another pytest or a `verify_change.py` run was running, seven times in two days (F-092, F-093, F-095, F-097, F-098, F-102, F-104). One harness run was killed, and the extra load produced timing and ML failures that passed serially.
+- **Root cause:** only `verify_change.py` enforced one pytest at a time, through its own lock and a one-sided wait for other pytest processes. Every other pytest relied on prose and on each agent's own check-then-start.
+- **Remediation:** a host-wide pytest lock that every session of the test tree takes in the root conftest (`tests/_pytest_lock.py`). It waits naming the holder, refuses on timeout, skips xdist workers and verified nested sessions, and has no off switch. `verify_change.py`'s child lock wait follows `--wait-other`. BUG-0532, PA-0532.
+- **Status:** Fixed
+
 ## 2026-10-20 — oracle and consumers (a non-comparable control was evidence; BUG-0529, recurrence of BUG-0117's class)
 - **Symptom:** a quote's SQL error with `429 rate limited` on the benign control confirmed SQLi; 401/403/502/504/timeout/login-redirect controls confirmed path traversal, CRLF, the boolean and NoSQL differentials and ReDoS; an unobserved PRG follow-up, a throttled peer replay or probe was a negative; the live WAF filter recorded a 429 as a bypass; the blind-SQLi builder averaged non-application samples; the runner judged a 429 by its status class.
 - **Root cause:** no shared classification of whether an HTTP answer is the application's own, and the facts it needs (credential carried, credential submission, login redirect) never reached the consumers.
@@ -34,7 +40,7 @@ Format per entry:
 - **Symptom:** for `?id=1&tag=a&tag=b`, point `id`, the anonymous senders sent `id=1&tag=a&tag=b&id=M` (a first-value server read `1`), the authenticated seam sent `id=M&tag=b` (and turned `%20` into `+`, dropped empty parts, turned `%E9` into `%EF%BF%BD`), M6 appended, and a bound query point's PRG follow-up re-sent the payload; on 8100959, 45 of 48 sender × case rows and all 8 M6 rows failed.
 - **Root cause:** no owner for query placement (each sender built it: `params=`, a `dict(parse_qsl)` rebuild, string appends), and the conformance check read the query as a `dict` on a query-less URL, so it could not see an occurrence.
 - **Remediation:** `core.urls.place_query_param` / `bind_query` / `place_route_query_param` (SP-42 extended) used by every sender; an AST guard over every builder shape; the conformance check reads the prepared URL byte for byte (CC-CORE-0068, CC-FUZZ-0106 part 1); PA-0531. The M6 DOM point's siblings follow in CC-FUZZ-0106 part 2.
-- **Status:** Fixed (part 2 pending AU-OUTCOME)
+- **Status:** Fixed (part 2, the M6 link set and `spa.query_url`, landed with CC-FUZZ-0106 part 2 and CC-CRAWL-0053)
 
 ## 2026-10-19 — browser navigation (a failed load's late error page overtook the next load; BUG-0522, a recurrence of BUG-0136's X1)
 - **Symptom:** after a load failed with an empty error answer, the next navigation was overtaken by Chromium's late error page: the crawler and the auditor fell back to plain requests (10-20/20 lost), disco lost harvest loads and restores (11-20/20), and the spider lost seeds (8-15/20).

@@ -1034,3 +1034,15 @@ Juice Shop lab is complete.
 - **Evidence:** AU-REDACT round-2 reviews (2026-10-20), `scratchpad/review-a/cost.py`, `scratchpad/review-b/members.py`.
 - **Impact:** none landed (caught at the design gate); a synchronous redactor on the proxy's event loop would have stalled it for seconds per hostile body.
 - **Status:** revision 3 charges every step and span to one budget and states a bound it measured (1 s per call, worst crafted body 0.69 s), under re-review.
+
+### F-104 — The AU-REDACT lane chained its idle check and a pytest in one command
+- **What:** during revision 4 the lane ran a 0.3 s pytest (3 cases) in the same shell command as its idle check, so the check's output could not stop it, while another lane's `verify_change` was running: the one-pytest rule broken again (F-092, F-095, F-097, F-098, F-102).
+- **Evidence:** the AU-REDACT revision-4 report (2026-10-20), draft §9.
+- **Impact:** a 0.3 s overlap; no result affected.
+- **Status:** the host-wide pytest lock (AU-TESTLOCK, BUG-0532) is built and merging now; it refuses such a run instead of relying on the check.
+
+### F-105 — Status update for F-092, F-095, F-097, F-098, F-102 and F-104 (BUG-0532)
+- **What:** every pytest session of the test tree now takes one host-wide lock in the root conftest (`tests/_pytest_lock.py`). A second session waits, naming the holder, then refuses with a usage error. xdist workers and nested sessions with the holder's verified token skip it, and there is no off switch. The one-pytest rule no longer depends on a lane's own `ps` check or wait loop. F-093's kill chosen by pattern is a different failure mode; the lock does not prevent it.
+- **Evidence:** AU-TESTLOCK 129ac1c, 60deb4c, 1bf1286; BUG-0532. Measured: the two-session wait, the timeout refusal, three forged tokens refused, xdist with one acquisition and three workers skipping, and `verify_change`'s child waiting on a held lock. The lane's harness on 60deb4c: 405 files, 8132 passed, 0 failed, 42 skipped, 38 xfailed.
+- **Impact:** none further. Lanes on worktrees without the change still need the old rule until they rebase.
+- **Status:** fixed for overlapping runs. F-093's kill by pattern stays open as a practice.
