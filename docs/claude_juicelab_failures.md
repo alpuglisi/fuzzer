@@ -1028,3 +1028,9 @@ Juice Shop lab is complete.
 - **Evidence:** the lane's AU-OUTCOME implementation report (2026-10-20); `scratchpad/v14/parallel.log`.
 - **Impact:** the other run finished green (4121 passed, 5 skipped, 25 xfailed); the lane stopped its own run; no result affected.
 - **Status:** open until the owner-approved host-wide pytest lock lands; the lane's waits now refuse to start unless the host is idle.
+
+### F-103 — AU-REDACT revision 2 overstated its cost bound by about 100×
+- **What:** revision 2's residual R9 said a redaction call stays "under 0.4 s"; the reviewers measured 7.4–30.5 s on crafted 8 MiB bodies (and 150 s for a planned multi-member gzip loop), because the scan budget counted characters, not Python steps or C-level spans, and the `type=` loop had no hit cap. The draft's own M5 table already showed 1439 ms, contradicting R9.
+- **Evidence:** AU-REDACT round-2 reviews (2026-10-20), `scratchpad/review-a/cost.py`, `scratchpad/review-b/members.py`.
+- **Impact:** none landed (caught at the design gate); a synchronous redactor on the proxy's event loop would have stalled it for seconds per hostile body.
+- **Status:** revision 3 charges every step and span to one budget and states a bound it measured (1 s per call, worst crafted body 0.69 s), under re-review.
