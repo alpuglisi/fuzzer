@@ -752,6 +752,10 @@ def test_the_executor_places_a_fragment_inside_the_hash_route(monkeypatch):
     assert gotos == ["http://h:3000/#/search?q=%3Cx%20y%3E"]
     assert _with_fragment("http://h/#!/s?page=2", "q", "v") == "http://h/#!/s?page=2&q=v"
     assert _with_fragment("http://h/p.php#top", "q", "v w") == "http://h/p.php#q=v+w"
+    # BUG-0531/FR-FUZZ-64: a route query that already carries the name is placed in
+    # place (first occurrence), its siblings kept, never appended as a second ``q``.
+    assert _with_fragment("http://h/#/s?q=old&page=2", "q", "M") == \
+        "http://h/#/s?q=M&page=2"
 
 
 def _fake_playwright(monkeypatch) -> list:

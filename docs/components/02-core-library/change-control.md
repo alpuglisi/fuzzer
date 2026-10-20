@@ -39,6 +39,45 @@ Newest first.
   - [ ] SP-56 row, ARCHITECTURE note — todo (the coordinator, at merge)
 - Effectiveness (assessed <date> or pending): pending.
 
+### CC-CORE-0068 — One query placement: `QueryEntries`, `place_query_param`, `bind_query` (SP-42, FR-CORE-501, BUG-0531) (2026-10-20)
+- Placement: pre-assigned to AU-REQID14; CC-CORE-0066 and CC-CORE-0067 are other lanes'.
+- Change: `fuzzlab/core/urls.py` gains, beside `place_path_param` (SP-42):
+  - `encode_query_value(text)`: the one encoder, `quote_plus(str(text), safe="")` (what
+    `urlencode` does today, so a query-less URL's bytes are unchanged);
+  - `QueryEntries`: a query's ordered raw parts, split on `&` only from `urlsplit`'s
+    query (`;` stays data), an empty query having zero parts, empty parts kept, `=`
+    presence kept; a part's name is decoded with `unquote_plus(…,
+    errors="surrogateescape")` for matching only, so `n%E9` and `n%EF%BF%BD` are never
+    one name; `replace_first(name, value)` puts the encoded value into the first part so
+    named (its raw name text kept) or appends one encoded pair; `to_query()`;
+  - `place_query_param(url, name, value)`: the standalone rule (the URL's own query, the
+    first occurrence in place, the rest of the URL verbatim; an empty `?`/`#` is dropped,
+    as `urlunsplit` does);
+  - `with_query(url, entries)`: moved from `tools/authhttp.py`, same bytes (the query is
+    `urlencode(list(entries))`);
+  - `bind_query(url, entries, name, value)`: the bound rule,
+    `with_query(url, FormEntries(entries).replace(name, value))`, idempotent on entries
+    the oracle's binder has already bound;
+  - `place_route_query_param(url, name, value)`: the standalone rule inside an SPA hash
+    route's query (`%20` encoding, `quote`), a non-route fragment replaced by the pair
+    (`#q=v+w`), as before.
+  No schema change; `core/forms.py` unchanged. (~90 LOC.)
+- Reason: BUG-0531 (audit defect 14): no owner for query placement, so every sender built
+  it its own way.
+- Impact (other components / project): FUZZ (every sender and the M6 executor place
+  through it, CC-FUZZ-0106). FR-CORE-501 amended in place. The SP-42 row in
+  `docs/SHARED_PRIMITIVES.md` and the `docs/ARCHITECTURE.md` line are written by the
+  coordinator at merge (shared docs).
+- Risk: low-medium: a new primitive on every probe's query. Mitigation: unit tests over
+  every part shape the clients were measured to keep (`;`, `+`/`%20`, empty parts, a
+  missing `=`, encoded names, non-UTF-8 escapes), byte-for-byte sender conformance, and
+  the AST guard that keeps query building in this one module.
+- Deliverables:
+  - [x] the owner and its unit tests (`tests/test_query_placement.py`) — done
+  - [x] FR-CORE-501 amended in place — done
+  - [ ] SP-42 row, ARCHITECTURE line — coordinator, at merge
+- Effectiveness (assessed after landing): pending.
+
 ### CC-CORE-0065 — Trace steps a strategy run cites, and the M6 browser in the testing overlay (FR-CORE-505, FR-FUZZ-62) (2026-10-19)
 - Change: `fuzzlab/core/trace.py`:
   - `strategy_scope` also resets a new `_STEPS` contextvar.

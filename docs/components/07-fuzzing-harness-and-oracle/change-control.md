@@ -3,6 +3,88 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0106 — Every sender places a query value through one owner (BUG-0531) (2026-10-20)
+- Placement: pre-assigned to AU-REQID14 (audit defect 14); CC-FUZZ-0105 is another
+  lane's. Design record: `DRAFT-AU-REQID14.md` (revision 3).
+- Change (part 1, implemented):
+  - **Both probe senders** (`fuzzlab/tools/probesender.py`). A standalone query value is
+    placed by `core.urls.place_query_param` (the first occurrence of the name, in place;
+    every other raw part kept); a query point bound to entries by `core.urls.bind_query`
+    (the binder's rule, `FormEntries.replace`). `SeamProbeSender._send_on` (every
+    session route) no longer calls `authhttp.with_query_param`/`with_query`;
+    `RequestsProbeSender.send` no longer sets `params=`. The final `else` still places
+    `fragment` and unknown locations as a query (BUG-0115 instance 4, its strict xfail
+    unchanged).
+  - **PRG** (FR-FUZZ-49): `RequestsProbeSender.send` sends to a separate `wire`; `url`
+    stays the probe's own URL, which `_follow` resolves the redirect against. The path
+    branch still reassigns `url` (AU-PRGPATH, pinned, not fixed here).
+  - **greybox** (`fuzzlab/greybox/run.py::RequestsCorrelatingSender.send_correlated`):
+    `place_query_param` / `bind_query`, never `params=` (which appended to a URL's own
+    query).
+  - **blind-sqli** (`fuzzlab/tools/blind_sqli_fuzzer.py`): `RequestsSender.get` and
+    `SeamSender.get` place through `place_query_param`.
+  - **M6** (`fuzzlab/tools/browserexec.py`): the observe navigation and the GET store
+    step use `place_query_param` (a `StoreStep` has no entries, so the store step is
+    always standalone); `_with_query` is removed; `_with_fragment` is a thin wrapper over
+    `core.urls.place_route_query_param` (kept: `tests/test_json_points.py` imports it).
+  - **`harness/auto.header_points_from_store`** builds its query through
+    `core.urls.with_query` (same bytes as `"?" + urlencode(...)`).
+  - **`tools/authhttp.py`**: `with_query_param` and `with_query` removed (`with_query` moved
+    to the owner, CC-CORE-0068).
+  - Unchanged: `oracle/oracle.py` (`_FormBoundSender`, the binder), `harness/pipeline.py`
+    (`_baseline`), form bodies, the `Sender` protocol, `Candidate`, the store.
+- Change (part 2, held until AU-OUTCOME merges; `oracle/strategies.py` is its file):
+  `ExecRequest.entries` (`oracle/browser.py`), filled by `DomXssStrategy._observe` for a
+  query point and placed by the executor through `bind_query`; the M6-against-bound-HTTP
+  conformance row. Until then `test_a_dom_query_point_is_loaded_with_its_siblings` is a
+  strict xfail naming this part.
+- Reason: BUG-0531 (audit defect 14). FR-FUZZ-64.
+- Impact (other components / project):
+  - CORE: the owner (CC-CORE-0068, SP-42 extended; FR-CORE-501 amended).
+  - **The wire changes** for any probed URL that already carries a query (standalone: the
+    first occurrence in place, where the requests family appended and the seam family
+    collapsed), for a hash route that already has the name, and for the GET store step.
+    A query-less URL gets the same bytes as before (`id=` + `quote_plus(v, safe="")`,
+    tested for all 6 HTTP senders and Chromium).
+  - **Scored ground truth: no change on the wire.** 0 of 157 injection-point rows carry a
+    query; `points_from_ground_truth(gt, "http://127.0.0.1:8080",
+    browser_available=True, writes=True, account_values={"user_id": "7"})` builds 179
+    points, 8 bound (7 JSON leaves, 1 path account value), none at query or fragment;
+    5 DOM points, none bound. (Without `account_values` it is 178 and 7: the path
+    account-value point is the difference.)
+  - Callers found by search (PA-0152): `with_query_param` (probesender,
+    blind_sqli_fuzzer, `tests/test_fuzzer_seam.py`), `with_query` (probesender,
+    harness/auto via `urlencode`), `_with_query`/`_with_fragment` (browserexec,
+    `tests/test_json_points.py`). Old pins updated: `tests/test_greybox_live.py`
+    (`params` → the URL), `tests/test_fuzzer_seam.py` (two tests),
+    `tests/test_probesender.py::test_requests_probe_sender_never_follows_redirects`
+    (`params` → the URL), `tests/test_sender_conformance.py::_Wire` (records the prepared
+    URL).
+  - Overlap: `tools/probesender.py` with AU-OUTCOME (its edits at the base's lines
+    206-207, 857-861, 993 and 1000; this change's hunks are at 20-27, 792-794, 822,
+    939-946 and 964-965, clear of them). `disco/runner.py`, `oracle/strategies.py` and
+    `core/redaction.py` are only allow-listed by the guard, not edited; a change there
+    that moves a listed builder makes `test_the_query_builder_allow_list_has_no_stale_entry`
+    fail by design.
+- Risk: medium. The wire changes for every URL that already carries a query (intended,
+  measured on fixtures and in real Chromium). Mitigation: byte-for-byte conformance for
+  every sender, the platform pin on both clients' own rewriting, the AST guard. Accepted
+  residuals (FR-FUZZ-64's stated gaps): a standalone URL with a repeated name probes its
+  first occurrence only, until AU-REQID8; a stored link set's siblings are re-encoded from
+  their stored values; a non-UTF-8 query name stored through `unquote_plus`'s
+  `errors="replace"` never matches its URL's own raw occurrence (measured:
+  `?n%E9=1&a=2` placed at the stored name `n�` appends `n%EF%BF%BD=M`), AU-REQID8's
+  importer; the M6 trace records no siblings. A live before/after on a development lab
+  needs the owner's authorisation (D11).
+- Deliverables:
+  - [x] senders, M6 executor, header points through the owner; PRG keeps the probe URL — done
+  - [x] conformance on the prepared URL; every sender's occurrence check and its synthetic offenders — done
+  - [x] the AST guard (S1–S7), its exact allow-list (45 findings, 43 keys), 50 offenders, 10 near-misses — done
+  - [x] strict xfails for known unfixed instances naming their owners (AU-OUTCOME, CRAWL, AU-REQID8 ×3, LAB, AU-PRGPATH ×4, this entry's part 2) — done
+  - [ ] part 2: `ExecRequest.entries`, `DomXssStrategy`, the M6-vs-bound-HTTP row (after AU-OUTCOME merges) — held
+  - [ ] ERROR_LOG, CHANGELOG, PA-0531, SP-42 row, ARCHITECTURE line, failure record — coordinator, at merge
+- Effectiveness (assessed after landing): pending.
+
 ### CC-FUZZ-0105 — Complete, evaluated, application answers only: the contract runner and the oracle (FR-FUZZ-52, FR-FUZZ-63, BUG-0528, BUG-0529) (2026-10-20)
 - Review gate: drafted as `DRAFT-AU-OUTCOME.md` (this folder; three review rounds, the
   owner's decisions on B1/B2 and the ADOPT list folded in). Audit defects 15, 16, 17.
@@ -87,6 +169,12 @@ Newest first.
     beside `_is_timeout`; the timeout probe's `timeout=` and `credentialed=False`; the
     response probe's `credentialed=False` (`RequestsProbeSender`); the seam response
     probe's `credentialed=identity != "anonymous" and self._session_note(req) is None`.
+    Merged over AU-REQID14 part 1 (CC-FUZZ-0106, merged first): textual only; the
+    `_request` call now receives the placed `wire` URL, unchanged by these lines.
+    The merge also resolved `tools/blind_sqli_fuzzer.py`
+    (`RequestsSender.get` keeps AU-REQID14's `place_query_param` URL and returns this
+    item's `Answer`), and two fakes in `tests/test_oracle_comparable_controls.py` read the
+    value from the placed URL.
   - Tests: `tests/test_disco_runner_outcomes.py` (58), `tests/test_oracle_comparable_controls.py`
     (117, with the M9 discovery table and send guard); expectation changes in
     `tests/test_oracle_sqli_string.py` (the "429" row became
@@ -126,8 +214,10 @@ Newest first.
   - [x] FR-FUZZ-52 in place, FR-FUZZ-63, FR-FUZZ-45/50 notes; BUG-0528, BUG-0529 — done
   - [ ] PA-0528, PA-0529, SP-56, CHANGELOG, ERROR_LOG, ARCHITECTURE — todo (the
     coordinator, at merge)
-  - [ ] `scripts/verify_change.py --base 8100959` on the committed tree — in progress
-    at this commit (its counts go in the lane's report and the CHANGELOG line)
+  - [ ] `scripts/verify_change.py` on the committed tree — the first run on 15bef4d
+    (`--base 8100959`, 152 files) found the wrapper-order pin (fixed in c5a4f75); the
+    final run is on the merged tree with `--base 8117855` (its counts go in the lane's
+    report and the CHANGELOG line)
 - Effectiveness (assessed <date> or pending): pending.
 
 ### CC-FUZZ-0104 — M6's navigations settle a failure before they raise (BUG-0522) (2026-10-19)

@@ -2689,3 +2689,38 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
     (`page.evaluate`), `set_content`, or a new function given an allow-listed name in an
     allow-listed module. (from BUG-0522)
   - Enforced by: tests/test_shared_primitives.py::test_every_about_blank_navigation_is_a_reasoned_exception, tests/test_shared_primitives.py::test_the_about_blank_guard_catches_synthetic_offenders, tests/test_navigation_aborts.py::test_a_failed_navigation_returns_after_its_own_error_page, tests/test_navigation_aborts.py::test_only_the_leading_code_decides_a_wait_for_an_error_page
+- **PA-0531** — Strengthens `PA-0115(2)`/`(3)` and `PA-0111`, after BUG-0531: each sender
+  placed a query value its own way (an appended second pair; a `dict` rebuild that lost
+  duplicates and rewrote siblings), and PA-0115's conformance check read the query as a
+  `dict` on a query-less URL, so it could not see an occurrence.
+  1. **A value placed in a URL's query goes through the one owner** (`core.urls`, SP-42):
+     `place_query_param` for a standalone URL, `bind_query` for bound entries,
+     `place_route_query_param` for an SPA hash route. An AST guard over `fuzzlab/` (the
+     owner excluded) flags: `params` reaching a send (a keyword; a positional; a
+     `"params"` key or `dict(params=…)` passed as `**`, directly or through a local;
+     `.update`/`.setdefault` adding it to such a local); a subscript store into
+     `"params"`; `dict(parse_qsl/parse_qs)` and `parse_qs`; a string build (`+`, `%`,
+     `+=`, f-string, `.format`) holding a `?`/`&` constant and query material (a quoter,
+     `.query`, `"&".join`, or a local name the same scope assigned from one), or holding
+     a `[?&]name=` constant; `"&".join`/`"?".join`; `._replace(query=…|fragment=…)`;
+     `SplitResult`/`ParseResult(...)`; a tuple `urlunsplit`/`urlunparse` rebuilding the
+     query or fragment. Every finding outside the owner is on an allow-list with its
+     count and its reason, compared exactly (a new builder and a stale entry both fail).
+     The guard is proven on 50 synthetic offenders and 10 near-misses.
+  2. **A placement check observes the raw request through the real client's own URL
+     preparation, never a parsed `dict`,** on a probe URL that already carries the name,
+     a missing `=`, an empty part and a raw escape. Senders that share a client are
+     compared byte for byte, and the check is shown to fail on an appending and on a
+     collapsing sender.
+  3. **Senders on different clients (Chromium against `requests`) are compared under a
+     relation measured on the real clients,** pinned by a real-browser test that fails
+     when a client's rewriting changes, and proven not vacuous on pairs a server reads
+     apart.
+  4. **A known unfixed instance in another item's code is pinned in the same change by an
+     offline strict xfail naming its owner** (`PA-0054(3)`), never a prose deferral.
+  - The guard's limits: it does not see query material reaching a build through a
+    parameter, an attribute or another function's name; a separator held in a variable,
+    or a `"".join([...])` build; a `params` dict reaching `**` through an attribute or
+    another function; session-level `Session.params`; or a new function given an
+    allow-listed name in an allow-listed module. (from BUG-0531)
+  - Enforced by: tests/test_query_placement.py::test_every_query_builder_goes_through_the_one_owner, tests/test_query_placement.py::test_the_query_builder_allow_list_has_no_stale_entry, tests/test_query_placement.py::test_the_query_builder_guard_catches_synthetic_offenders, tests/test_sender_conformance.py::test_every_sender_places_a_query_occurrence_in_place, tests/test_sender_conformance.py::test_the_occurrence_check_catches_an_appending_and_a_collapsing_sender, tests/test_query_placement.py::test_platform_clients_rewrite_only_escapes_they_disagree_on, tests/test_query_placement.py::test_the_equivalence_still_tells_apart_what_a_server_reads_apart

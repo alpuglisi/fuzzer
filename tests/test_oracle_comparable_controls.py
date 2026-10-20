@@ -195,13 +195,21 @@ def test_a_json_points_password_leaf_makes_its_refusal_the_endpoints_answer():
 
 # --- the per-probe credential (M2; the approved `tools/probesender.py` lines) ------------
 
+def _query_value(url, kw, name) -> str:
+    """The value a `requests` call sent for ``name``: placed in the URL (SP-42,
+    FR-FUZZ-64), or in ``params``."""
+    from urllib.parse import parse_qs, urlsplit
+    placed = parse_qs(urlsplit(url).query).get(name)
+    return str(placed[0] if placed else (kw.get("params") or {}).get(name, ""))
+
+
 class _Refusing:
     """A `requests` session for the real `RequestsProbeSender`: the benign control
     answers 401, a quote answers with a SQL error."""
     cookies = None
 
     def request(self, method, url, **kw):
-        if str((kw.get("params") or {}).get("q", "")).startswith(("fz", "1fz")):
+        if _query_value(url, kw, "q").startswith(("fz", "1fz")):
             return types.SimpleNamespace(status_code=401, text="Unauthorized", headers={})
         return types.SimpleNamespace(status_code=500, text=SQL_ERROR, headers={})
 
@@ -524,7 +532,7 @@ class _Timeouts:
         self.exc = exc
 
     def request(self, method, url, **kw):
-        if (kw.get("params") or {}).get("pattern") == RegexDosStrategy.benign_probe:
+        if _query_value(url, kw, "pattern") == RegexDosStrategy.benign_probe:
             return types.SimpleNamespace(status_code=200, text="results", headers={})
         raise self.exc
 
