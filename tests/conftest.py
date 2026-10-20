@@ -5,13 +5,26 @@ test started through ``fuzzlab.procutil`` and left running (see ``tests/_leak_gu
 
 FR-CORE-400: no test reads or writes a default store outside ``tmp_path`` (see
 ``tests/_store_guard.py``).
+
+BUG-0532: one pytest session at a time on this host; the session's controller takes the
+host pytest lock before anything else (see ``tests/_pytest_lock.py``).
 """
 
 import pytest
 
+from tests import _pytest_lock
 from tests._leak_guard import pytest_sessionfinish, pytest_terminal_summary  # noqa: F401
-from tests._store_guard import (default_store_untouched, isolate_store_env,  # noqa: F401
-                                pytest_configure)
+from tests._pytest_lock import pytest_unconfigure  # noqa: F401
+from tests._store_guard import default_store_untouched, isolate_store_env  # noqa: F401
+from tests._store_guard import pytest_configure as _clear_store_env
+
+
+def pytest_configure(config):
+    """First the host pytest lock (BUG-0532: waits, or refuses, while another session
+    runs; xdist workers and nested sessions skip it), then the store variables are
+    cleared for the whole session (FR-CORE-400)."""
+    _pytest_lock.pytest_configure(config)
+    _clear_store_env(config)
 
 
 # --- no test creates the default store in the working directory (BUG-0452) ----------------

@@ -32,6 +32,10 @@ What it does (see ``docs/MULTI_AGENT_ORCHESTRATION.md`` section 2 and ``CLAUDE.m
 4. Runs the passes one pytest process at a time, with ``FUZZLAB_REQUIRE_BROWSER``,
    ``FUZZLAB_REQUIRE_LINT`` and ``FUZZLAB_REQUIRE_NETNS`` set, after waiting for any
    other pytest on the host to finish (concurrent load has produced false failures).
+   Each pass's pytest controller also takes the host pytest lock that every session of
+   the test tree takes (``tests/_pytest_lock.py``, BUG-0532; its xdist workers do not),
+   waiting for it as long as ``--wait-other``. This script never holds that lock itself,
+   so it cannot deadlock against its child.
 5. Prints the file count and passed / failed / skipped / xfailed per pass and in total;
    exits non-zero on any failure.
 6. Never kills by name or pattern: it records the pid of every pytest it starts (each
@@ -105,6 +109,8 @@ REQUIRE_FLAGS = {
     "FUZZLAB_REQUIRE_LINT": "1",
     "FUZZLAB_REQUIRE_NETNS": "1",
 }
+#: How long a child pytest waits for the host pytest lock (tests/_pytest_lock.py).
+PYTEST_LOCK_WAIT = "FUZZLAB_PYTEST_LOCK_WAIT"
 GUARD_MARKER = "package_guard"
 CONFTEST_NAMES = ("conftest.py",)
 
@@ -725,6 +731,20 @@ def pytest_cmd(files: list[str], junit: Path, *, parallel: bool, workers: int) -
     return cmd + files
 
 
+def pytest_env(wait_other: float) -> dict[str, str]:
+    """The environment of every pytest this run starts: the require-flags, and the host
+    pytest lock's wait set to this run's ``--wait-other`` unless the caller set it
+    (BUG-0532: the child's controller takes that lock, and another session can take it
+    between the quiet-host check and the child's start)."""
+    env = dict(os.environ, **REQUIRE_FLAGS)
+    env.setdefault("PYTHONDONTWRITEBYTECODE", "1")
+    env.setdefault(PYTEST_LOCK_WAIT, f"{wait_other:g}")
+    chrome = chromium_executable()
+    if chrome and "PLAYWRIGHT_CHROMIUM_EXECUTABLE" not in env:
+        env["PLAYWRIGHT_CHROMIUM_EXECUTABLE"] = chrome
+    return env
+
+
 def acquire_host_lock(wait: float):
     lock_path = Path(tempfile.gettempdir()) / "fuzzlab-verify-change.lock"
     fh = open(lock_path, "w")
@@ -774,7 +794,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--keep-worktree", action="store_true", help="leave the detached worktree in place")
     ap.add_argument("--allow-concurrent", action="store_true",
                     help="skip the host lock and the wait for other pytest processes (only for "
-                         "this script's own tests; never for a verification you report)")
+                         "this script's own tests; never for a verification you report). A child "
+                         "pytest of this repository's test tree still takes the host pytest lock")
     args = ap.parse_args(argv)
 
     if not args.full and not args.base:
@@ -862,11 +883,7 @@ def main(argv: list[str] | None = None) -> int:
                 print("refusing: other pytest processes are still running (one pytest at a time)")
                 return 3
 
-        env = dict(os.environ, **REQUIRE_FLAGS)
-        env.setdefault("PYTHONDONTWRITEBYTECODE", "1")
-        chrome = chromium_executable()
-        if chrome and "PLAYWRIGHT_CHROMIUM_EXECUTABLE" not in env:
-            env["PLAYWRIGHT_CHROMIUM_EXECUTABLE"] = chrome
+        env = pytest_env(args.wait_other)
         use_xdist = have_xdist()
         if parallel and not use_xdist:
             print("note: pytest-xdist is not installed; the parallel pass runs without -n")
