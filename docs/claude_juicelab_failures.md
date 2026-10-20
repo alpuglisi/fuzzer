@@ -1046,3 +1046,15 @@ Juice Shop lab is complete.
 - **Evidence:** AU-TESTLOCK 129ac1c, 60deb4c, 1bf1286; BUG-0532. Measured: the two-session wait, the timeout refusal, three forged tokens refused, xdist with one acquisition and three workers skipping, and `verify_change`'s child waiting on a held lock. The lane's harness on 60deb4c: 405 files, 8132 passed, 0 failed, 42 skipped, 38 xfailed.
 - **Impact:** none further. Lanes on worktrees without the change still need the old rule until they rebase.
 - **Status:** fixed for overlapping runs. F-093's kill by pattern stays open as a practice.
+
+### F-106 — A held SQLite watcher was designed and approved on single-process measurements
+- **What:** the AU-SITETREE draft proposed, and I approved (Q1), holding one `query_only` connection per watched store in the web server. Every measurement behind it ran the writer as a thread in the same process. Both gate reviewers then measured, with a writer in another process, that a plain `open()`/`close()` of the store in the web process (`core/project.py:132,663`, reached from the Projects page) releases the process's fcntl locks: the watcher missed every later commit (300/300, 200/200), web reads returned wrong counts or "database disk image is malformed", one run left a malformed file, and a fresh process saw 0 of 50 committed rows. The same raw reads may already endanger `fuzzlab web --with-proxy` today (unmeasured until the lane's revision 2).
+- **Evidence:** the AU-SITETREE round-1 reviews (2026-10-20), `scratchpad/reviewA_sitetree/x_lockdrop_*.out`, `scratchpad/review-b-au-sitetree/x2.out`.
+- **Impact:** none landed (caught at the design gate); the approval would have shipped a store-corrupting design.
+- **Status:** revision 2 removes every raw open of a store from the web process behind a guard, measures across processes, and records the pre-existing hazard as BUG-0535.
+
+### F-107 — The AU-SESS403 lane wrote a stray output into the main working tree
+- **What:** during revision 3 a backgrounded subshell ran in the default directory instead of the lane's worktree, wrote `measure_r3_base.out` into `/home/user/fuzzer` (97 bytes: "can't open file '/home/user/fuzzer/smoke_proto.py'"), and left it untracked there; the stop hook flagged it.
+- **Evidence:** the file and the lane's revision-3 report (2026-10-20), which traced it to its own command.
+- **Impact:** none beyond the stray file (deleted, not committed); the measurement was re-run from the worktree with identical results.
+- **Status:** the lane runs every command with an explicit `cd` or absolute paths into its worktree. Not enforced mechanically: a dispatch rule, like the one-pytest rule before BUG-0532.
