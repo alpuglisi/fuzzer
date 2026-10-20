@@ -604,8 +604,12 @@ plugin registry. It is the layer that makes the store the integration bus.
   - `with_query(url, entries)` sets the query to the urlencoded entries;
     `bind_query(url, entries, name, value)` is `with_query(url,
     FormEntries(entries).replace(name, value))` (every occurrence: the binder's rule).
-  - `place_route_query_param(url, name, value)` places inside an SPA hash route's query
-    (`%20`); a non-route fragment is replaced by the pair.
+  - `place_route_query_pairs(url, pairs, encode=encode_route_value)` places each pair,
+    in order, by the same first-occurrence rule into the URL's route query: the
+    fragment's own query when the URL has a fragment (hash mode), else its own query
+    (history mode); `encode_route_value` is `quote` with `safe=""` (a space is `%20`).
+    `place_route_query_param(url, name, value)` places one pair inside an SPA hash
+    route's query through it; a non-route fragment is replaced by the pair.
   - These are the one placement (SP-42). Outside this module a query is built only at a
     site on an exact, reasoned allow-list; a known defect among those sites is pinned by
     a strict xfail naming its owner

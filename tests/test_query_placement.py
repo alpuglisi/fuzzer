@@ -534,8 +534,9 @@ def test_the_browser_sends_a_hard_payload_on_a_query_less_url_as_quote_plus(echo
 
 def test_the_browser_get_store_step_replaces_the_addressed_occurrence_in_place(
         echo, monkeypatch):
-    """The stored-XSS plant through a GET: a `StoreStep` has no entries, so the store
-    URL's own query takes the standalone rule."""
+    """The stored-XSS plant through a GET: a `StoreStep` carries no query siblings (its
+    `entries` are a JSON store body's leaves), so the store URL's own query takes the
+    standalone rule."""
     from fuzzlab.oracle.browser import ExecRequest, StoreStep
     _executor(monkeypatch).run(ExecRequest(url=f"{echo.base}/o", store=StoreStep(
         url=f"{echo.base}/p?id=1&tag=a&tag=b", param="id", value=MARK, method="GET",
@@ -543,12 +544,11 @@ def test_the_browser_get_store_step_replaces_the_addressed_occurrence_in_place(
     assert canonical_pairs(echo.query()) == canonical_pairs(f"id={MARK}&tag=a&tag=b")
 
 
-@_pin("CC-FUZZ-0106's Q3 part (held until AU-OUTCOME merges)",
-      "DomXssStrategy hands the M6 executor no entries")
 def test_a_dom_query_point_is_loaded_with_its_siblings(echo, monkeypatch):
     """A crawled DOM query point with a link set (``op=search&q=1``): the browser loads
     it with its siblings, bound by the binder's rule, as the HTTP senders send it. On
-    8100959 every load is ``/p?q=<payload>`` alone."""
+    8100959 every load was ``/p?q=<payload>`` alone (pinned until CC-FUZZ-0106 part 2:
+    `ExecRequest.entries`)."""
     from fuzzlab.oracle.probe import Candidate
     from fuzzlab.oracle.strategies import DomXssStrategy
     url = f"{echo.base}/p"
@@ -560,6 +560,59 @@ def test_a_dom_query_point_is_loaded_with_its_siblings(echo, monkeypatch):
         pairs = canonical_pairs(urlsplit(target).query)
         assert [n for n, _eq, _v in pairs] == [b"op", b"q"], target
         assert pairs[0][2] == b"search" and pairs[1][2] != b"1", target
+
+
+class _Recording:
+    """An executor that records each `ExecRequest` and observes nothing (offline)."""
+
+    def __init__(self):
+        from fuzzlab.oracle.browser import ExecObservation
+        self.requests, self._obs = [], ExecObservation(False)
+
+    def run(self, request, token):
+        self.requests.append(request)
+        return self._obs
+
+
+@pytest.mark.parametrize("location,entries,want", [
+    ("query", (("op", "search"), ("q", "1")), (("op", "search"), ("q", "1"))),
+    ("query", None, None),
+    ("query", (), None),                       # no link set: the binder binds nothing
+    ("fragment", (("op", "search"),), None),   # a fragment is placed in the route
+])
+def test_dom_xss_hands_the_executor_a_query_points_link_set(location, entries, want):
+    """`DomXssStrategy._observe` passes a query point's ``base_entries`` (the link set the
+    oracle binds for the HTTP senders when it is non-empty) as `ExecRequest.entries`, and
+    nothing for a fragment point or a point without one."""
+    from fuzzlab.oracle.probe import Candidate
+    from fuzzlab.oracle.strategies import DomXssStrategy
+    executor = _Recording()
+    candidate = Candidate(url="http://127.0.0.1:9/p", param="q", method="GET",
+                          location=location, category="xss", base_entries=entries)
+    DomXssStrategy(executor).confirm(candidate, None)
+    assert executor.requests and {r.entries for r in executor.requests} == {want}
+
+
+def test_the_browser_and_the_bound_http_sender_place_a_duplicate_name_alike(echo,
+                                                                            monkeypatch):
+    """One bound point with a repeated name (``tag=a&tag=b``, point ``tag``), sent by the
+    oracle's binder over `RequestsProbeSender` and loaded by the M6 executor with the same
+    entries: both go through `core.urls.bind_query`, so the two wires are equal under the
+    measured relation (FR-FUZZ-64; the binder's every-occurrence rule until AU-REQID8)."""
+    from fuzzlab.oracle.browser import ExecRequest
+    from fuzzlab.oracle.oracle import _FormBoundSender
+    from fuzzlab.oracle.probe import Candidate
+    from fuzzlab.tools.probesender import RequestsProbeSender
+    url = f"{echo.base}/p"
+    entries = (("id", "1"), ("tag", "a"), ("tag", "b"))
+    candidate = Candidate(url=url, param="tag", base_entries=entries)
+    _FormBoundSender(RequestsProbeSender(timeout=5), candidate).send(url, "tag", MARK)
+    http = echo.query()
+    echo.targets.clear()
+    _executor(monkeypatch).run(ExecRequest(url=url, param="tag", value=MARK,
+                                           location="query", entries=entries), "tok")
+    assert canonical_pairs(echo.query()) == canonical_pairs(http) == \
+        canonical_pairs(f"id=1&tag={MARK}&tag={MARK}")
 
 
 # --- known instances in other items' code (PA-0054(3), PA-0115(3)): pinned, offline -----
@@ -577,12 +630,51 @@ def test_the_contract_runner_places_a_query_value_in_place():
         "op=list&q=a+b&n=%26"
 
 
-@_pin("CRAWL (to register)", "the SPA query-seed builder appends unencoded pairs "
-      "(tools/spa.py query_url)")
-def test_the_spa_seed_builder_places_its_route_query_in_place():
+@pytest.mark.parametrize("route_url,pairs,want", [
+    # hash mode: the route's own query; a name already there is replaced in place
+    ("http://h/#/s?q=1&p=2", [("q", "x y")], "http://h/#/s?q=x%20y&p=2"),
+    ("http://h/#/s", [("q", "fuzzlab"), ("p", "fzqaa")], "http://h/#/s?q=fuzzlab&p=fzqaa"),
+    ("http://h/#!/s?page=2", [("q", "v")], "http://h/#!/s?page=2&q=v"),
+    # history mode: the URL's own query; a space is %20 there too (never +)
+    ("http://h/s?q=1&p=2", [("q", "v")], "http://h/s?q=v&p=2"),
+    ("http://h/s?q=1", [("q", "x y")], "http://h/s?q=x%20y"),
+    ("http://h/app/search", [("q", "fuzzlab")], "http://h/app/search?q=fuzzlab"),
+    # a redirect-type name's same-origin path stays `/` in both modes (CC-CRAWL-0053,
+    # FR-CRAWL-17: `%2F` would rest on an unmeasured router decoding)
+    ("http://h/#/login?redirectUrl=/x", [("redirectUrl", "/"), ("q", "fuzzlab")],
+     "http://h/#/login?redirectUrl=/&q=fuzzlab"),
+    ("http://h/login?next=/x", [("next", "/")], "http://h/login?next=/"),
+])
+def test_the_spa_seed_builder_places_its_route_query_in_place(route_url, pairs, want):
+    """Was pinned for CRAWL (the seed builder appended a second, unencoded pair); fixed
+    through the one owner (`core.urls.place_route_query_pairs`, CC-CRAWL-0053)."""
     from fuzzlab.tools.spa import query_url
-    assert query_url("http://h/#/s?q=1&p=2", [("q", "x y")]) == "http://h/#/s?q=x%20y&p=2"
-    assert query_url("http://h/s?q=1&p=2", [("q", "v")]) == "http://h/s?q=v&p=2"
+    assert query_url(route_url, pairs) == want
+
+
+@pytest.mark.parametrize("route_url,names,want", [
+    ("http://h/#/login?redirectUrl=/x", ["redirectUrl", "q"],
+     "http://h/#/login?redirectUrl=/&q=fuzzlab"),
+    ("http://h/login?next=/x&q=1", ["next", "q"], "http://h/login?next=/&q=fuzzlab"),
+])
+def test_a_seeds_redirect_type_value_stays_a_same_origin_path_in_both_modes(route_url,
+                                                                            names, want):
+    """`spa.seed_url` gives a redirect-type name ``/`` (never ``%2F``) in hash and in
+    history mode, in place of the value the route already had (CC-CRAWL-0053)."""
+    from fuzzlab.tools.spa import seed_url
+    assert seed_url(route_url, names) == want
+
+
+@pytest.mark.parametrize("url,pairs,want", [
+    ("http://h/#/r?a=1&&b=x+y&a=2", [("a", "<v w>")], "http://h/#/r?a=%3Cv%20w%3E&&b=x+y&a=2"),
+    ("http://h/r?a=1&flag", [("b", "/")], "http://h/r?a=1&flag&b=%2F"),
+    ("http://h/r#/x", [("a", "1"), ("a", "2")], "http://h/r#/x?a=2"),
+])
+def test_the_route_query_owner_places_each_pair_by_the_standalone_rule(url, pairs, want):
+    """`core.urls.place_route_query_pairs`: each pair in order, the first occurrence in
+    place, every other part's text kept; the default encoder is `encode_route_value`."""
+    from fuzzlab.core.urls import place_route_query_pairs
+    assert place_route_query_pairs(url, pairs) == want
 
 
 @_pin("AU-REQID8", "store_adapter.query_pairs drops empty parts and a missing '='")
@@ -892,9 +984,6 @@ ALLOWED: dict[tuple[str, str, str], tuple[int, str]] = {
     ("fuzzlab/tools/spa.py", "visit_key", "S6 _replace(query/fragment=)"):
         (1, "the crawler's dedup key drops the fragment of an origin-less URL; never "
             "sent"),
-    ("fuzzlab/tools/spa.py", "query_url", 'S5 "&".join'):
-        (1, "CRAWL hand-off: the SPA query-seed builder appends unencoded pairs; pinned by "
-            "test_the_spa_seed_builder_places_its_route_query_in_place"),
     ("fuzzlab/tools/spider.py", "LocalSpider._isolated_submit",
      "S4 string built onto a query"):
         (1, "a GET form submission replaces the action's query by its entries, as a "

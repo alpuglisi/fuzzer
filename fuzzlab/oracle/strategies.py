@@ -2637,9 +2637,15 @@ class DomXssStrategy(_BrowserXssStrategy):
         if candidate.location not in self._PLACEABLE:     # refuse, never relocate
             raise UnplaceableLocation(f"DOM XSS places query or fragment points only, "
                                       f"not {candidate.location!r}")
+        # a query point's link set is loaded with it, bound as the HTTP senders bind it
+        # (FR-FUZZ-64); the browser load is an observation, not a comparison control
+        # (`_compared` is not involved)
+        entries = candidate.base_entries if candidate.location == "query" else None
         return self._executor.run(
             ExecRequest(url=candidate.url, param=candidate.param, value=payload,
-                        location=candidate.location), token)
+                        location=candidate.location,
+                        entries=tuple(tuple(e) for e in entries) if entries else None),
+            token)
 
 
 class StoredXssStrategy(_BrowserXssStrategy):

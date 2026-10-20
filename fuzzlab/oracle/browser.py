@@ -53,6 +53,11 @@ class ExecRequest:
     value: str | None = None
     location: str = "query"                 # query | fragment
     store: StoreStep | None = None
+    #: a query point's bound sibling entries (a crawled link set's, ``[(name, value)]``):
+    #: the observe load's query is these, bound by the binder's rule
+    #: (`core.urls.bind_query`, FR-FUZZ-64), as the HTTP senders send them. None: the
+    #: URL's own query, the standalone rule (`place_query_param`)
+    entries: tuple | None = None
 
 
 @dataclass

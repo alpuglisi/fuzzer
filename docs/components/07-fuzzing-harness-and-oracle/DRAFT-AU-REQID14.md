@@ -1,10 +1,10 @@
 # DRAFT AU-REQID14: every sender places a query value through one owner
 
 - Item: `AU-REQID14`, audit defect 14 only. Owner-supplied audit at 6552276, F-096.
-- Status: **revision 3, part 1 implemented** (CC-FUZZ-0106 part 1, CC-CORE-0068): the
-  owner, every sender's placement, the guard and the tests. Part 2 (Q3:
-  `ExecRequest.entries`, `DomXssStrategy`, the M6-vs-bound-HTTP row) is held until
-  AU-OUTCOME merges. §12 maps revision 2's must-fixes (M1–M7); §13 maps revision 3's
+- Status: **implemented, parts 1 and 2.** Part 1 (CC-FUZZ-0106 part 1, CC-CORE-0068):
+  the owner, every sender's placement, the guard and the tests; merged (aafa642). Part 2
+  (§14, on eb5eb4f after AU-OUTCOME merged): `ExecRequest.entries`, `DomXssStrategy`,
+  the M6-vs-bound-HTTP row, and `spa.query_url` (CC-CRAWL-0053). §12 maps revision 2's must-fixes (M1–M7); §13 maps revision 3's
   blocking fixes (B1, B2) and adopted items. Where this record and the committed tests
   disagree, the tests are the truth (§4 is the guard's own output).
 - Base: `8100959`. Branch `worktree-agent-aef1371774d69f3f5`.
@@ -402,8 +402,10 @@ that must not match:
 ## 4. The sweep (PA-0002, by mechanism; it is the guard's own output)
 
 The guard run on `8100959` (`scan()` over its `fuzzlab/`) finds **57 builders under 54
-keys**. This item removes **12 under 11 keys** (§4.1). The other **45 under 43 keys** are
-the allow-list (§4.2), which the scan of the implemented tree equals exactly
+keys**. Part 1 removed **12 under 11 keys** (§4.1), leaving 45 under 43. Since then
+AU-OUTCOME fixed `disco/runner.py` `Runner.prepare` (CC-FUZZ-0105) and part 2 fixed
+`tools/spa.py` `query_url` (CC-CRAWL-0053, §14): the allow-list is now **43 under 41
+keys** (§4.2, those two rows struck), which the scan of the implemented tree equals exactly
 (`test_every_query_builder_goes_through_the_one_owner` and
 `test_the_query_builder_allow_list_has_no_stale_entry`).
 
@@ -423,7 +425,7 @@ the allow-list (§4.2), which the scan of the implemented tree equals exactly
 `SeamProbeSender._send_on`'s two branches called the removed helpers and had no shape of
 their own; they now call `place_query_param` and `bind_query`.
 
-### 4.2 Allow-listed (45 under 43 keys, each with its reason; none may go stale)
+### 4.2 Allow-listed (now 43 under 41 keys, each with its reason; none may go stale)
 
 | Module · function | Shape (count) | Reason |
 |---|---|---|
@@ -433,7 +435,7 @@ their own; they now call `place_query_param` and `bind_query`.
 | `core/redaction.py` · `redact_url`, `redact_url_identifiers` | S6 (1 each) | same |
 | `core/trace.py` · `_blank_identifiers` | S5 (1) | trace redaction, never sent |
 | `disco/fingerprint.py` · `normalise_route` | S4 (2), S5 (2) | a route key of parameter names, never sent. Covers `:83` (`route += "?" + "&".join(spa_names)`) |
-| `disco/runner.py` · `Runner.prepare` | S4 (1) | **AU-OUTCOME's file**: the contract runner appends (`:262`). Pinned: `test_the_contract_runner_places_a_query_value_in_place` |
+| ~~`disco/runner.py` · `Runner.prepare`~~ | ~~S4 (1)~~ | fixed by AU-OUTCOME (CC-FUZZ-0105): `place_query_param`; the entry is removed and `test_the_contract_runner_places_a_query_value_in_place` is positive |
 | `disco/synth.py` · `parse_body` | S3 (1) | defect 9's item: a schema from captured bodies, never sent |
 | `harness/auto.py` · `header_point_estimate` | S4 (1) | a SQLite `file:` URI (`?mode=ro`), not HTTP |
 | `lab_fixtures/external.py` · `_bwapp_install`, `_ecommerce_login` | S1 (1 each) | lab provisioning with constant parameters, not probing |
@@ -448,7 +450,7 @@ their own; they now call `place_query_param` and `bind_query`.
 | `proxy/server.py` · `target_from_request` | S4 (1) | the proxy forwards the client's own query verbatim |
 | `report/diagram.py` · `finding_deep_link` | S4b (1, `:318`) | an in-app link (`/diagrams?run=&finding=`, integer ids), not traffic to a target |
 | `tools/spa.py` · `visit_key` | S4 (1), S6 (1) | the crawler's dedup key, never sent (S6: it drops an origin-less URL's fragment) |
-| `tools/spa.py` · `query_url` | S5 (1) | **CRAWL**: the SPA query-seed builder (`:1812-1821`) appends to an existing route query and does not encode its values. Pinned: `test_the_spa_seed_builder_places_its_route_query_in_place` |
+| ~~`tools/spa.py` · `query_url`~~ | ~~S5 (1)~~ | fixed by part 2 (CC-CRAWL-0053): `core.urls.place_route_query_pairs`; the entry is removed and `test_the_spa_seed_builder_places_its_route_query_in_place` is positive |
 | `tools/spider.py` · `LocalSpider._isolated_submit` | S4 (1), S1 (1) | a GET form submission replaces the action's query by its entries, as a browser does (PA-0111) |
 | `tools/store_adapter.py` · `_import_forms` | S4 (1, `:634`) | a stored endpoint key keeps the POST action's query verbatim |
 | `tools/store_adapter.py` · `_store_request` | S4 (1) | a stored endpoint key keeps the request's query verbatim, never sent as built |
@@ -476,14 +478,14 @@ PA-0054(3), PA-0115(3)).** Each fails today for its stated reason (measured with
 
 | Pin | Owner | Fails with |
 |---|---|---|
-| `test_the_contract_runner_places_a_query_value_in_place` | AU-OUTCOME (`disco/runner.py:262`) | `op=list&q=1&q=zqmark`, not `op=list&q=zqmark` |
-| `test_the_spa_seed_builder_places_its_route_query_in_place` | CRAWL, to be registered (`tools/spa.py:1812-1821`) | `#/s?q=1&p=2&q=x y`, not `#/s?q=x%20y&p=2` |
+| `test_the_contract_runner_places_a_query_value_in_place` | AU-OUTCOME (`disco/runner.py:262`) | `op=list&q=1&q=zqmark`, not `op=list&q=zqmark`. **Now positive** (CC-FUZZ-0105) |
+| `test_the_spa_seed_builder_places_its_route_query_in_place` | CRAWL (`tools/spa.py:1812-1821`) | `#/s?q=1&p=2&q=x y`, not `#/s?q=x%20y&p=2`. **Now positive** (CC-CRAWL-0053) |
 | `test_a_stored_link_set_round_trips_its_crawled_query` | AU-REQID8 (residual 2: `query_pairs` drops empty parts and `=` presence) | `flag` comes back as `flag=`, the empty part is gone, `%20` is `+` |
 | `test_a_disco_form_body_keeps_a_repeated_name_in_order` | AU-REQID8 (`store_adapter.py:274`) | `['tag', 'q']`, not `['tag', 'tag', 'q']` |
 | `test_the_labgen_tool_wrapper_keeps_untouched_pairs_as_written` | LAB | `flag` → `flag=`, `%20` → `+` on the untouched pairs only (marking every occurrence is not pinned) |
 | `test_a_path_points_prg_follow_up_never_carries_the_payload[#top/edit × anonymous/seam]` | AU-PRGPATH | the follow-up requests `/p/zqmark/view` (`#top`) and `/p/zqmark/edit` (relative `edit`) |
 | `test_a_bound_duplicate_name_changes_one_occurrence_only` | AU-REQID8 | the binder sends `tag=zqmark&tag=zqmark` |
-| `test_a_dom_query_point_is_loaded_with_its_siblings` | this item's part 2 (after AU-OUTCOME) | `/p?q=<payload>` alone, no `op` |
+| `test_a_dom_query_point_is_loaded_with_its_siblings` | this item's part 2 (after AU-OUTCOME) | `/p?q=<payload>` alone, no `op`. **Now positive** (part 2) |
 
 ## 5. Tests: mechanism, and the revert each must fail against (PA-0034(2))
 
@@ -606,17 +608,17 @@ of `docs/components/02-core-library/change-control.md`.
    as a server reads them). Measured: `place_query_param("…?n%E9=1&a=2", "n�", "M")`
    appends `n%EF%BF%BD=M`; the bound rule sends `n%EF%BF%BD=M&a=2`. AU-REQID8's importer.
 4. **The M6 visit trace records no siblings.** It records the param and value only.
-5. **The M6 GET store step is always standalone**: a `StoreStep` carries no entries, so
-   it uses `place_query_param` on its own URL. A form-body store request sends no
+5. **The M6 GET store step is always standalone**: a `StoreStep` carries no query
+   siblings (its `entries` are a JSON store body's leaves), so it uses
+   `place_query_param` on its own URL. A form-body store request sends no
    siblings. Ground truth enumerates JSON store bodies only.
-6. **Crawled DOM query points load without their siblings until part 2** (pinned:
-   `test_a_dom_query_point_is_loaded_with_its_siblings`). After part 2 the wire changes for
+6. **Crawled DOM query points now load with their siblings** (part 2;
+   `test_a_dom_query_point_is_loaded_with_its_siblings` positive). The wire changes for
    every such point; measured on fixtures and ground truth (0 bound DOM points). A live
    development-lab before/after needs the owner's authorisation (D11).
 7. **Query builders in other items' code**, each pinned by an offline strict xfail naming
-   its owner (§4.2): `disco/runner.py:262` (AU-OUTCOME), `tools/spa.py` `query_url`
-   (CRAWL, to be registered), `store_adapter.py:274` (AU-REQID8), `labgen/oracle_wrapper`
-   (LAB). `core/redaction.py` and `disco/synth` are allow-listed, never sent.
+   its owner (§4.2): `store_adapter.py:274` (AU-REQID8), `labgen/oracle_wrapper` (LAB).
+   (`disco/runner.py:262` was fixed by AU-OUTCOME, `tools/spa.py` `query_url` by part 2.) `core/redaction.py` and `disco/synth` are allow-listed, never sent.
 8. **Greybox and M10.** Greybox points carry no siblings, and M10 cannot place a bound
    candidate (no verdict, never a negative). Both are unchanged.
 9. **A path point's PRG follow-up re-requests the placed path** (AU-PRGPATH; pinned, not

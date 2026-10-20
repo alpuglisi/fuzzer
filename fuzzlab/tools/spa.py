@@ -1809,16 +1809,26 @@ def query_value(name: str, value: str) -> str:
     return "/" if redirect_name(name) else value
 
 
+def seed_value(text) -> str:
+    """A seed's or a probe's name or value as its route query carries it
+    (CC-CRAWL-0053): percent-encoded (`quote`, a space is ``%20``), except ``/``, which
+    stays as written. A redirect-type name's value is the same-origin path ``/``
+    (`query_value`, FR-CRAWL-17), and that is what its safety test pins
+    (``redirectUrl=/``); ``%2F`` would rest on how each router decodes it, which is not
+    measured. Names are identifier-shaped (`query_name_ok`), markers and the filler are
+    letters, so no other byte changes."""
+    from urllib.parse import quote
+    return quote(str(text), safe="/")
+
+
 def query_url(route_url: str, pairs) -> str:
-    """``route_url`` with ``pairs`` (``[(name, value)]``) as its route's query: in a hash
-    route's fragment (``#/r?a=x``), else the URL's own query (history mode)."""
-    query = "&".join(f"{n}={v}" for n, v in pairs)
-    head, sep, frag = route_url.partition("#")
-    if sep:
-        joiner = "&" if "?" in frag else "?"
-        return f"{head}#{frag}{joiner}{query}"
-    joiner = "&" if "?" in head else "?"
-    return f"{head}{joiner}{query}"
+    """``route_url`` with ``pairs`` (``[(name, value)]``) placed in its route's query: in
+    a hash route's fragment (``#/r?a=x``), else the URL's own query (history mode).
+    Through the one owner (`core.urls.place_route_query_pairs`, SP-42; CC-CRAWL-0053,
+    BUG-0531): a name the route query already has is replaced in place, never sent
+    twice, and every value is encoded (`seed_value`)."""
+    from fuzzlab.core.urls import place_route_query_pairs
+    return place_route_query_pairs(route_url, pairs, encode=seed_value)
 
 
 def seed_url(route_url: str, names) -> str:

@@ -373,19 +373,44 @@ def bind_query(url: str, entries, name: str, value) -> str:
     return with_query(url, bound)
 
 
+def encode_route_value(text) -> str:
+    """A name or value in a single-page app's route query, as its router reads it:
+    `quote` with ``safe=""`` (a space is ``%20``, never ``+``)."""
+    from urllib.parse import quote
+    return quote(str(text), safe="")
+
+
+def place_route_query_pairs(url: str, pairs, encode=encode_route_value) -> str:
+    """``url`` with each ``(name, value)`` of ``pairs`` placed, in order, by the standalone
+    rule (`QueryEntries.replace_first`: the first occurrence in place, appended once when
+    absent) into its *route's* query: a URL with a fragment keeps its route and the pairs
+    go into the fragment's own query (``/#/search?q=``, hash mode); a URL without one is
+    history mode and the pairs go into its own query. Every other part keeps its text.
+    ``encode`` encodes the placed names and values (CC-CRAWL-0053: the SPA seed builder
+    passes its own, which keeps ``/``)."""
+    parts = urlsplit(url or "")
+    if parts.fragment:
+        route, _sep, raw = parts.fragment.partition("?")
+    else:
+        route, raw = None, parts.query
+    entries = QueryEntries.parse(raw)
+    for name, value in pairs:
+        entries = entries.replace_first(name, value, encode=encode)
+    query = entries.to_query()
+    if route is None:
+        return urlunsplit(parts._replace(query=query))
+    return urlunsplit(parts._replace(fragment=f"{route}?{query}" if query else route))
+
+
 def place_route_query_param(url: str, name: str, value) -> str:
     """A fragment point's URL (the M6 browser): inside a single-page app's hash route
-    (``/#/search?q=``, `spa_route`), the standalone rule over the route's own query,
-    names and values encoded as its router reads them (``quote``: a space is ``%20``);
-    any other fragment is replaced by the pair, form-encoded, as before."""
-    from urllib.parse import quote
+    (``/#/search?q=``, `spa_route`), the standalone rule over the route's own query
+    (`place_route_query_pairs`, names and values `encode_route_value`-d); any other
+    fragment is replaced by the pair, form-encoded, as before."""
+    if spa_route(url) is not None:
+        return place_route_query_pairs(url, [(name, value)])
     parts = urlsplit(url or "")
-    if spa_route(url) is None:
-        fragment = f"{encode_query_value(name)}={encode_query_value(value)}"
-    else:
-        route, _sep, query = parts.fragment.partition("?")
-        fragment = route + "?" + QueryEntries.parse(query).replace_first(
-            name, value, encode=lambda t: quote(str(t), safe="")).to_query()
+    fragment = f"{encode_query_value(name)}={encode_query_value(value)}"
     return urlunsplit(parts._replace(fragment=fragment))
 
 
