@@ -79,6 +79,10 @@ Newest first.
     and headers (every reader), a dripped chunk-size line and a send with no timeout
     cut by the watchdog; the advertised codings on a simulated zstd/brotlicffi host;
     the consumed-response guard — done
+  - [x] Test-fixture defect, root-caused: the bomb peer built its 40 MiB gzip body on
+    the first request (0.18 s idle, measured). Under the revert run's parallel load,
+    the head came after the probe sender's 0.25 s read timeout and read as a timeout
+    probe ("a normal body of 0 bytes"). The peer now builds it before it listens — done
   - [x] FR-CORE-536 — done
   - [ ] SP-60 row, SP-34 row note, ARCHITECTURE note, PA-0536, CHANGELOG, ERROR_LOG —
     todo (the coordinator, at merge; texts in the lane report)

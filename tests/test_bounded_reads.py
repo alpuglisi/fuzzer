@@ -81,6 +81,11 @@ class _Peer:
 
     def __init__(self, mode: str):
         self.mode = mode
+        if mode == "bomb":
+            # built before the peer listens: built on the first request it took 0.18 s
+            # idle (measured), so under parallel load the answer's head could come past
+            # the readers' 0.25 s read timeout and read as a timeout, not as a bomb
+            _bomb()
         self.requests = 0
         self.sent = 0
         self.accept: list[str] = []
