@@ -14,13 +14,13 @@ under three limits, each checked inside the read loop:
   timeout is per receive, not a total (measured: a body dripped a byte every 50 ms under
   a 1 s timeout took 1.96 s in one ``iter_content`` step; ``read1`` returned each byte).
 
-`read` returns a typed `Body`: ``complete``, or the ``reason`` it is not (`REASONS`). An
+`read_body` returns a typed `Body`: ``complete``, or the ``reason`` it is not (`REASONS`). An
 incomplete body is never a short one: `bound`'s adapter raises `BodyIncomplete` (a
 ``requests.RequestException``, so every transport-failure handler sees it, and SP-34's
 ``probesender._unobserved`` makes it "not observed"); the contract runner reads `Body`
 itself (FR-FUZZ-52).
 
-`bound(session)` applies `read` to every response a ``requests.Session`` gets, with a
+`bound(session)` applies `read_body` to every response a ``requests.Session`` gets, with a
 deadline of `DEADLINE_TIMEOUTS` x the request's read timeout (`DEFAULT_SECONDS` without
 one). Every session fuzzlab makes for a target is bounded where it is made
 (``tests/test_bounded_reads.py`` guard).
@@ -81,7 +81,7 @@ def default_limits() -> Limits:
 
 @dataclass(frozen=True)
 class Body:
-    """What `read` read: ``data`` (at most the decoded ceiling), ``complete``, the
+    """What `read_body` read: ``data`` (at most the decoded ceiling), ``complete``, the
     ``reason`` (a `REASONS` key) when it is not, and the ``wire`` bytes received."""
     data: bytes
     complete: bool
@@ -261,8 +261,8 @@ def _receiver(resp):
     return receive
 
 
-def read(resp, *, deadline: float, limits: Limits | None = None,
-         clock: Callable[[], float] = time.monotonic) -> Body:
+def read_body(resp, *, deadline: float, limits: Limits | None = None,
+              clock: Callable[[], float] = time.monotonic) -> Body:
     """Read ``resp``'s body (a streamed ``requests.Response``) under ``limits`` (default
     `default_limits`) and ``deadline`` (an instant of ``clock``). A complete body also
     becomes ``resp.content``. Raises what the read raises (a cut or reset connection, a
@@ -332,7 +332,7 @@ def deadline_for(timeout) -> float:
 
 
 class BoundedAdapter(HTTPAdapter):
-    """An ``HTTPAdapter`` whose every response body is read by `read` before ``send``
+    """An ``HTTPAdapter`` whose every response body is read by `read_body` before ``send``
     returns: whole, or `BodyIncomplete` (the response closed, its connection dropped)."""
 
     def send(self, request, stream=False, timeout=None, verify=True, cert=None,
@@ -341,7 +341,7 @@ class BoundedAdapter(HTTPAdapter):
         resp = super().send(request, stream=True, timeout=timeout, verify=verify,
                             cert=cert, proxies=proxies)
         try:
-            body = read(resp, deadline=deadline)
+            body = read_body(resp, deadline=deadline)
         except BaseException:
             resp.close()
             raise

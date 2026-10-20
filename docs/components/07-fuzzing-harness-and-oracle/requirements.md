@@ -1413,10 +1413,14 @@ rewards) derives from it.
     `tests/test_sender_conformance.py::test_every_wrapper_forwards_every_protocol_argument`,
     `tests/test_sender_conformance.py::test_every_wrapper_reports_its_inner_senders_prg_capability`,
     `tests/test_sender_conformance.py::test_every_sender_that_declares_prg_makes_the_follow_up`
-- **FR-FUZZ-50** *(a probe with no response; `CC-FUZZ-0088`, 2026-10-15, BUG-0147).* A
-  probe whose connection is reset or aborted, or whose body is cut off or undecodable,
-  is "not observed" (`oracle.probe.ProbeUnobserved`), classified only by
-  `tools/probesender._unobserved`.
+- **FR-FUZZ-50** *(a probe with no response; `CC-FUZZ-0088`, 2026-10-15, BUG-0147;
+  edited in place by `CC-FUZZ-0109`, BUG-0536).* A probe whose connection is reset or
+  aborted, or whose body is cut off or undecodable, or whose body the bounded reader
+  stopped (`core.bodyread.BodyIncomplete`: over a ceiling, past its deadline, a coding
+  it cannot bound; FR-CORE-536), is "not observed" (`oracle.probe.ProbeUnobserved`),
+  classified only by `tools/probesender._unobserved`. Both senders' sessions read
+  bounded, so no `Probe` carries a short body. A stopped body is never re-sent and never
+  a timeout stand-in: a body that kept arriving proves no delay.
   - A refused, DNS, TLS or proxy failure is not: it fails loudly.
   - A timeout keeps its rule: a status-0 probe of the full timeout in
     `RequestsProbeSender`, the body's read included; it raises in `SeamProbeSender`.
@@ -1522,8 +1526,10 @@ rewards) derives from it.
     set in place, a new one appended, encoded as before (CC-FUZZ-0105, BUG-0531's
     sweep);
   - every send is gated at the send: scope on the final URL; `check_send_url` (SP-09);
-    no redirect followed; the body read up to `max_body_bytes` within `timeout_ms`;
-    sends spaced to `rps`. A case marked destructive is `skipped` unless
+    no redirect followed; the body read up to `max_body_bytes` (on the wire and
+    decoded) within `timeout_ms`, checked at every receive, by the one bounded reader
+    (`core.bodyread.read_body`, FR-CORE-536; BUG-0536, which closes BUG-0528's
+    residual R6 for body bytes); sends spaced to `rps`. A case marked destructive is `skipped` unless
     `--allow-destructive` (then its own URL is the explicit allowance); a `reset_hook`
     runs around it only with `--allow-reset-hook`, through `procutil.run_bounded`;
   - credentials go only to the base URL's origin; evidence is redacted
@@ -1560,6 +1566,21 @@ rewards) derives from it.
     errors) that the endpoint's baseline did not show; an answer outside
     `expect_status_class` is matched. **The baseline** is the endpoint's first complete
     application answer below 400 that passed (CC-FUZZ-0105).
+  - **Contract patterns run bounded** *(CC-CRAWL-0054, BUG-0536, audit defect 27).*
+    - A case's `body_matches` are matched on its answer and its baseline in one worker
+      process (`runner.search_bounded`: `python -I -S` through `procutil.run_bounded`),
+      killed with its tree after `MATCH_SECONDS` (5 s).
+    - When they could not be evaluated (the time limit, no worker, an answer of
+      another shape), the case is an `error` "body_matches not evaluated within 5 s
+      (inconclusive)" unless other evidence matched. It is never a no-match.
+    - No contract pattern is matched in the runner's process; the reviewed
+      `LEAK_PATTERNS` are.
+    - Enforced by: `tests/test_bounded_reads.py`
+      (`test_a_catastrophic_pattern_is_an_error_never_a_hang_nor_a_no_match`,
+      `test_body_matches_still_match_and_miss_through_the_worker`,
+      `test_the_matcher_never_runs_a_contract_pattern_in_the_runners_process`,
+      `test_the_worker_payload_is_json_and_its_answer_is_shape_checked`,
+      `test_the_contract_runner_cuts_a_dripped_body_at_its_deadline`).
   - **Setup steps** *(CC-FUZZ-0105)* must be complete application answers below 400 and
     not a redirect to a login page (a failed login), except a step whose path creates
     or resets an account (`account_submission`): its redirect to the login page is its

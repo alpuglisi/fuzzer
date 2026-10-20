@@ -739,6 +739,53 @@ plugin registry. It is the layer that makes the store the integration bus.
   defect 6's item, JWT's rejection control, the blind-SQLi payload's 504).
   - Enforced by: `tests/test_core_comparability.py` (the rule table, totality, the
     import guard and the status guard, each guard proven on a synthetic offender).
+- **FR-CORE-536** *(one bounded reader of a target's HTTP body; `CC-CORE-0072`,
+  2026-10-20, BUG-0536, audit defect 21; SP-57).* `core.bodyread` is the one owner of
+  reading a response body from a target over `requests`.
+  - **Three limits, each checked inside the read loop.** `read_body(resp, *, deadline,
+    limits=None, clock=time.monotonic) -> Body` reads the undecoded stream one receive
+    at a time (urllib3 `read1`).
+    - The wire bytes are capped at `MAX_WIRE_BYTES` (16 MiB): after transfer coding,
+      before content coding.
+    - The decoded bytes are capped at `MAX_DECODED_BYTES` (32 MiB), decoded
+      incrementally with an output ceiling per step.
+    - A wall-clock deadline is checked before every receive and once the body has
+      ended: a late body is incomplete.
+  - **The result is typed.** `Body(data, complete, reason, wire)` has `reason` in
+    `wire` / `decoded` / `deadline` / `encoding`. A complete body becomes
+    `resp.content`. An incomplete body is never handed on as a body.
+  - **Errors.** urllib3's errors are named as `iter_content` names them (a cut is
+    `ChunkedEncodingError`, a read timeout `ConnectionError`), and a failed decode is
+    `ContentDecodingError`. `read_body` never closes the response; its caller closes it on
+    every exit.
+  - **Codings.** It decodes the codings urllib3 decodes: identity, gzip / x-gzip
+    (several members, trailing bytes after a whole member ignored), deflate
+    (zlib-wrapped or raw), and br through a Brotli that bounds its output (1.2 or
+    later). `zstd`, a br body without such a Brotli, and a chain of codings are
+    `encoding`: fail closed. A coding urllib3 does not decode passes through.
+  - **`bound(session)`** mounts `BoundedAdapter` on a `requests.Session`. Every
+    response is read before `send` returns, with a deadline of `DEADLINE_TIMEOUTS` (4)
+    x the request's read timeout (`DEFAULT_SECONDS`, 60, without one).
+    - An incomplete body raises `BodyIncomplete`, a `requests.RequestException` whose
+      message names the reason only, and the response is closed.
+    - Every `requests` session fuzzlab makes for a target is bounded where it is made.
+      The core seam's transport makes one per send.
+    - SP-34 maps the marker to "not observed" (FR-FUZZ-50).
+  - **Stated limit.** Framing lines (the status line, the headers, a chunked body's
+    chunk-size and trailer lines) are read by `http.client` in one call each and are
+    bounded only per receive. A late one still reads as incomplete.
+  - Enforced by: `tests/test_bounded_reads.py`:
+    - `test_a_dripped_body_is_cut_at_its_deadline_and_never_taken_whole` and
+      `test_a_gzip_bomb_stops_at_the_decoded_ceiling_and_is_never_taken_whole`, over
+      every reader;
+    - `test_decoding_never_holds_more_than_the_ceiling`,
+      `test_the_wire_ceiling_cuts_a_body_before_its_deadline`,
+      `test_a_whole_body_reads_as_before_through_every_coding` and
+      `test_an_undecodable_or_unbounded_coding_is_never_a_body`;
+    - `test_every_requests_session_fuzzlab_makes_is_bounded`, the AST guard proven by
+      `test_the_session_guard_catches_synthetic_offenders`;
+    - the framing-line limit, pinned by the strict xfail
+      `test_a_dripped_chunk_size_line_is_cut_at_the_deadline`.
 - **FR-CORE-500** *(one reader for a run's target; one method key; `CC-CORE-0500`,
   2026-10-15).*
   - `fuzzlab/core/runtarget.py` is the one reader of the `target` table (PA-0063(1)): a

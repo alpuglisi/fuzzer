@@ -3,6 +3,49 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0109 — The probe senders and the static fetch read bodies bounded; an incomplete body is "not observed" (BUG-0536) (2026-10-20)
+- Placement: pre-assigned to AU-BOUNDED (audit defect 21); CC-FUZZ-0107 and CC-FUZZ-0108
+  are other lanes'. The reader is CC-CORE-0072.
+- Change:
+  - `tools/probesender.py`:
+    - `RequestsProbeSender`'s own session is `bodyread.bound(requests.Session())`.
+    - SP-34's `_unobserved` maps `core.bodyread.BodyIncomplete` to `ProbeUnobserved`
+      ("no complete response: incomplete body (<reason>)"). It is never re-sent (not a
+      `ConnectionError`), and never a timeout stand-in: a body that kept arriving
+      proves no delay.
+    - The seam sender gets the same mapping through `_dispatch`, since the core
+      transport raises the marker.
+  - `tools/navguard.py::get_checked` bounds the `requests.Session` it is given
+    (`bodyread.bound`, idempotent) before its first hop: the spider's and the auditor's
+    static fetch. An object that is not a `requests.Session` (a test's site) is used as
+    given.
+  - `greybox/run.py::RequestsCorrelatingSender`'s own session is bounded. An incomplete
+    body is its status-0 try (its contract for any `RequestException`).
+  - `tools/blind_sqli_fuzzer.py`'s standalone session is bounded. An incomplete body
+    meets the existing `requests.RequestException` handlers: no baseline sample, no
+    row.
+- Impact (other components / project):
+  - The oracle sees an incomplete body only as `ProbeUnobserved`: no verdict from that
+    mechanism, inconclusive, never a negative (FR-FUZZ-50).
+  - SP-56 is unchanged: a `Probe` is still a whole response or a status-0 stand-in, so
+    the oracle's `complete=True` holds (`oracle/probe.py` is AU-SESS403's and is not
+    touched).
+  - CRAWL's spider and AUD's auditor read their static pages bounded through
+    `get_checked`; AUD's `fetcher.py` itself is unchanged.
+  - The SP-34 table row gains the marker (text for the coordinator).
+- Risk (low): an injected session (a test double or adapter) is used as given, so the
+  bound depends on sessions being made bounded. The AST guard
+  (`test_every_requests_session_fuzzlab_makes_is_bounded`) fails on a new unbounded one;
+  it is proven on synthetic offenders.
+- Deliverables:
+  - [x] the four senders and `get_checked` — done
+  - [x] `tests/test_bounded_reads.py`: a dripped body and a gzip bomb for the core seam,
+    the static fetch, both probe senders and greybox, each with its own marker
+    (`BodyIncomplete`, SP-34's `ProbeUnobserved`, greybox's status-0 try), and the
+    peer's sent count showing the connection dropped — done
+  - [x] FR-FUZZ-50 edited in place — done
+- Effectiveness (assessed <date> or pending): pending.
+
 ### CC-FUZZ-0106 — Every sender places a query value through one owner (BUG-0531) (2026-10-20)
 - Placement: pre-assigned to AU-REQID14 (audit defect 14); CC-FUZZ-0105 is another
   lane's. Design record: `DRAFT-AU-REQID14.md` (revision 3).

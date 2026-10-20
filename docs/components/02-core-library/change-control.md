@@ -3,6 +3,66 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0072 — One bounded reader of a target's HTTP body (SP-57, FR-CORE-536, BUG-0536) (2026-10-20)
+- Placement: pre-assigned to AU-BOUNDED (audit defect 21); CC-CORE-0070 and CC-CORE-0071
+  are other lanes'.
+- Change: new `fuzzlab/core/bodyread.py`; `core/http.py::_requests_transport` reads through
+  it (the change stays inside that function).
+  - `read_body(resp, *, deadline, limits=None, clock=time.monotonic) -> Body`. It reads the
+    undecoded stream one receive at a time (urllib3 `read1`), counts wire bytes
+    (`MAX_WIRE_BYTES` 16 MiB), and decodes with an output ceiling per step
+    (`MAX_DECODED_BYTES` 32 MiB): zlib `max_length` for gzip (several members) and
+    deflate (zlib-wrapped or raw), and Brotli's `output_buffer_limit` from Brotli 1.2.
+    It checks the deadline before every receive and at the end.
+    - It returns `Body(data, complete, reason, wire)`, with `reason` one of `wire`,
+      `decoded`, `deadline` or `encoding`. A complete body becomes `resp.content`.
+    - urllib3's errors are translated as `iter_content` translates them, and a
+      decoding failure is `ContentDecodingError`.
+    - It never closes the response: the caller does.
+    - A response with no raw stream is read through `iter_content`, its chunks counted
+      on the smaller ceiling.
+  - `BoundedAdapter` reads every response with `read_body` before `send` returns, with a
+    deadline of `DEADLINE_TIMEOUTS` (4) x the read timeout (`DEFAULT_SECONDS`, 60, with
+    none). An incomplete body raises `BodyIncomplete` (a `requests.RequestException`;
+    the message names the reason only), with the response closed. `bound(session)`
+    mounts the adapter on http and https; it is idempotent and returns the session.
+  - Codings: `zstd`, a `br` body without a bounded Brotli, and a chain of codings are
+    incomplete (`encoding`). A coding urllib3 has no decoder for is passed through, as
+    urllib3 does.
+  - The transport sends through `bodyread.bound(requests.Session())`, one session per
+    send as `requests.request` made, so an incomplete body raises out of
+    `HttpClient.send`.
+- Impact (other components / project):
+  - Every caller of `HttpClient.send` may now get `BodyIncomplete`:
+    - `SeamProbeSender` maps it to `ProbeUnobserved` through SP-34 (CC-FUZZ-0109);
+    - blind-SQLi's `SeamSender` lets it reach its `requests.RequestException` handlers:
+      no baseline sample and no row;
+    - the auditor's seam fetch lets it reach its "Fetch failed" handler.
+  - FUZZ and CRAWL bound their own sessions with `bound` (CC-FUZZ-0109, CC-CRAWL-0054).
+  - SESS's login fetcher is pinned by a strict xfail (AU-SESS403's file).
+  - New shared primitive SP-57, and an ARCHITECTURE note (the coordinator writes both).
+  - AU-SESS403 adds a `Request` field to the same file; this change touches only
+    `_requests_transport`.
+- Risk (medium): every target read now has ceilings and a deadline. A legitimate body
+  over 16 MiB on the wire or 32 MiB decoded, or one that ends after 4 read timeouts, is
+  now incomplete where it used to be read. That is the intended trade, and the values
+  are module constants.
+  - Framing lines (status, headers, chunk-size and trailer lines) remain bounded only
+    per receive: residual R1, pinned by a strict xfail.
+  - `BoundedAdapter` and `read_body` set `resp._content` / `_content_consumed`, requests'
+    own private fields, the way requests does.
+- Deliverables:
+  - [x] `fuzzlab/core/bodyread.py`, `core/http.py::_requests_transport` — done
+  - [x] `tests/test_bounded_reads.py`: each reader against a dripping and a gzip-bomb
+    loopback peer, the peer's sent count showing the connection dropped; decoding
+    memory (traced peak under a 1 MiB ceiling); the wire ceiling; every coding pinned;
+    an undecodable or unbounded coding never a body; the session guard and its
+    synthetic offenders; R1 and R2 as strict xfails — done
+  - [x] FR-CORE-536 — done
+  - [ ] SP-57 row, SP-34 row note, ARCHITECTURE note, PA-0536, CHANGELOG, ERROR_LOG —
+    todo (the coordinator, at merge; texts in the lane report)
+- Effectiveness (assessed <date> or pending): pending.
+
 ### CC-CORE-0069 — One classification of an HTTP answer (SP-56, FR-CORE-507, BUG-0528, BUG-0529) (2026-10-20)
 - Change: new `fuzzlab/core/comparability.py` (90 lines).
   - `response_class(status, headers=None, *, complete, credentialed,

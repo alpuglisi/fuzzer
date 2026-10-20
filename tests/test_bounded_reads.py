@@ -297,8 +297,39 @@ def test_a_whole_body_reads_as_before_through_every_coding():
         pass
     for coding, body in cases:
         resp = _Canned(body, coding)
-        got = bodyread.read(resp, deadline=time.monotonic() + 30)
+        got = bodyread.read_body(resp, deadline=time.monotonic() + 30)
         assert got.complete and got.data == text and got.wire == len(body), coding
+
+
+def _codings(body: bytes) -> dict[str, bytes]:
+    import zlib
+    raw = zlib.compressobj(6, zlib.DEFLATED, -zlib.MAX_WBITS)
+    out = {"gzip": gzip.compress(body), "deflate": zlib.compress(body),
+           "raw deflate": raw.compress(body) + raw.flush()}
+    try:
+        import brotli
+        out["br"] = brotli.compress(body)
+    except ImportError:            # pragma: no cover
+        pass
+    return out
+
+
+@pytest.mark.parametrize("cut", [0, 1, 4096])
+def test_decoding_stops_exactly_at_the_ceiling_whatever_the_coding(cut):
+    """The drain loop at the boundary: a 1 MiB compressible body, fed in 777-byte
+    receives, is complete with a ceiling of exactly its size and incomplete
+    (``decoded``) one byte -- or a page -- below it, holding exactly the ceiling."""
+    from fuzzlab.core import bodyread
+    body = b"".join(b"%08d fuzzlab " % i for i in range(1 << 20 >> 4))[:1 << 20]
+    for name, wire in _codings(body).items():
+        resp = _Canned(wire, "deflate" if "deflate" in name else name)
+        cap = len(body) - cut
+        got = bodyread.read_body(resp, deadline=time.monotonic() + 60,
+                                 limits=bodyread.Limits(wire=1 << 30, decoded=cap))
+        if cut:
+            assert (got.complete, got.reason, got.data) == (False, "decoded", body[:cap]), name
+        else:
+            assert got.complete and got.data == body, name
 
 
 class _Raw:
@@ -329,11 +360,11 @@ def test_an_undecodable_or_unbounded_coding_is_never_a_body():
     text."""
     from fuzzlab.core import bodyread
     with pytest.raises(requests.exceptions.ContentDecodingError):
-        bodyread.read(_Canned(b"not gzip at all", "gzip"), deadline=time.monotonic() + 9)
+        bodyread.read_body(_Canned(b"not gzip at all", "gzip"), deadline=time.monotonic() + 9)
     for coding in ("zstd", "gzip, br"):
-        got = bodyread.read(_Canned(b"whatever", coding), deadline=time.monotonic() + 9)
+        got = bodyread.read_body(_Canned(b"whatever", coding), deadline=time.monotonic() + 9)
         assert not got.complete and got.reason == "encoding", coding
-    unknown = bodyread.read(_Canned(b"as sent", "compress"), deadline=time.monotonic() + 9)
+    unknown = bodyread.read_body(_Canned(b"as sent", "compress"), deadline=time.monotonic() + 9)
     assert unknown.complete and unknown.data == b"as sent"     # requests' own pass-through
 
 
@@ -374,7 +405,7 @@ _SENDS = {"request", "get", "post", "put", "patch", "delete", "head", "options"}
 #: file -> (requests.Session() / requests.<verb>() calls not bounded at the call, reason).
 #: Exact counts: a new unbounded site fails, and so does a stale entry.
 UNBOUNDED_ALLOWED: dict[str, tuple[int, str]] = {
-    "fuzzlab/disco/runner.py": (1, "streams each answer and reads it through bodyread.read "
+    "fuzzlab/disco/runner.py": (1, "streams each answer and reads it through bodyread.read_body "
                                    "with the contract's own limits (Runner.send)"),
     "fuzzlab/tools/fetcher.py": (1, "its one read is navguard.get_checked, which bounds the "
                                     "session it is given (AUD component: this item has no "
@@ -636,6 +667,16 @@ def test_the_matcher_never_runs_a_contract_pattern_in_the_runners_process():
                                                               "fullmatch", "findall")
              and not (n.args and isinstance(n.args[0], ast.Constant))]
     assert [ast.unparse(c) for c in calls] == [], "a contract pattern matched in-process"
+
+
+@pytest.mark.xfail(strict=True, raises=_SmokeAlarm, reason=(
+    "BUG-0536 sweep, residual R3: disco/formfill.py::_fits runs a page's own `pattern` "
+    "attribute (target-controlled) with re.fullmatch on a generated value, in the "
+    "explorer's thread; bounded only by the value's length. Flagged to the owner"))
+def test_formfill_never_runs_a_pages_pattern_unbounded():
+    from fuzzlab.disco.formfill import _fits
+    with _smoke_alarm(5):
+        assert _fits("a" * 32 + "!", {"pattern": "(a+)+"}) is False
 
 
 def test_the_worker_payload_is_json_and_its_answer_is_shape_checked(monkeypatch):
