@@ -274,7 +274,8 @@ It is recorded at login, by the first rule that holds:
    holds when both observations hold:
    - Discovery reached this login form by following **the base URL's own** redirect
      (`_discover_login_form`'s first candidate, landing on another page). That is the
-     anonymous arm, and it carried PHP's anonymous cookie.
+     anonymous arm: the discovery fetcher's first GET carries no session cookie (the
+     measured app sets its anonymous `SID` only on the login page).
    - The post-login check of the base URL (`_verify_authenticated`) was LIVE. That is
      the credentialed arm.
 
@@ -326,8 +327,11 @@ else check_health:
 
 - `_mark_lost` is the one place that writes `valid = False`. `verify_live` reaches it
   through `check_health`. An AST guard holds this (§6, T19).
-- The facts are computed only when a status could be a signal, that is a 401, a 3xx or a
-  200. Today's 200 HTML parse is unchanged.
+- The request's facts (`login_facts`, `request_entry_names`) are computed only when the
+  answer could be a signal: SP-56 names it an auth failure on the worst-case facts
+  (credentialed, not a submission), or it is a 200 the content rule reads. That
+  pre-check goes through `response_class` too, so no classified status appears as a
+  literal in session code (the SP-56 guard). Today's 200 HTML parse is unchanged.
 
 ### 3.6 The re-login cap
 
