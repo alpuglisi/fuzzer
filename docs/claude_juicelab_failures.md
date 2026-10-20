@@ -998,3 +998,15 @@ Juice Shop lab is complete.
 - **Evidence:** the lane's AU-OUTCOME phase-1 report (2026-10-19), "Rule breach".
 - **Impact:** none measured (no result affected); a fourth occurrence of the class in one day.
 - **Status:** open: a prose rule in the dispatch is not enforcement. Later runs by that lane waited in a loop. A host-level guard (a lock every pytest entry takes, not only `verify_change.py`) is the fix this class needs; proposed to the owner rather than self-opened (PA-0143).
+
+### F-098 — A lane ran an ad-hoc pytest while another lane's pytest was running (AU-REQID14)
+- **What:** implementing AU-REQID14, the lane ran pytest on three doc-guard files (about 8 s) in the same shell command as its `ps` check instead of after it, so it started while another lane's pytest (PIDs 10440/10442) was running: the one-pytest rule (BUG-0143) broken again after F-092, F-095 and F-097.
+- **Evidence:** the AU-REQID14 implementation report (2026-10-20); that command's own `ps` output listed the other run.
+- **Impact:** about 8 s of overlapping load; the lane's harness run on b6dc4e0 ran alone behind `--wait-other`.
+- **Status:** the owner approved a host-wide pytest lock (2026-10-20), queued as a process item; until it lands the rule stays prose.
+
+### F-099 — AU-REQID14 revision 2 overstated its guard's coverage
+- **What:** revision 2 said its prototype guard covered every listed builder shape with zero misses; the reviewer measured 16 likely shapes of a new query builder it did not flag (a local name built from a quoter, a `?id=` literal, `params` through `**`, a positional params) and further real sites in `fuzzlab/`.
+- **Evidence:** the round-3 review (2026-10-20); `scratchpad/rev14/guard_ext.py`.
+- **Impact:** none on code (caught at the design gate); one more revision.
+- **Status:** fixed: the shapes are flagged, proven on 50 offenders and 10 near-misses, and PA-0531(1) states the guard's limits.

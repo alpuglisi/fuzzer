@@ -1321,6 +1321,13 @@ tracked in the requirements files, not here.
       lab's bootstrap stored with its credential (SP-43); `--no-login` uses accounts for
       their values and names only; a crawl gives path points too (FR-AUD-26:
       `core.pathtemplate`, SP-45, by id shape or variation across the run's URLs);
+    - since FR-FUZZ-64 (CC-FUZZ-0106, CC-CORE-0068) every sender places a query value
+      through the same owner (`core.urls.place_query_param` / `bind_query` /
+      `place_route_query_param`, SP-42): both probe senders, greybox, both blind-sqli
+      senders and the M6 executor. A standalone URL gets the first occurrence of the name
+      in place, every other part kept with its raw text; bound entries replace every
+      occurrence (the oracle's binder's rule, until AU-REQID8). An AST guard keeps query
+      building in `core.urls` (`tests/test_query_placement.py`);
   - **Forms phase 3, lane S — single-page apps in the crawler (CC-CRAWL-0016 /
     CC-CRAWL-0017 / CC-CORE-0047, no store migration):**
     - `tools/spa.py`: route declarations read from the page's already-loaded
