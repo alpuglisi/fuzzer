@@ -73,12 +73,19 @@ function initSiteTree() {
     issuesNext: null,
     issuesMore: null,            // the user's "Show more findings" in flight (D6 token)
     generation: 0,               // bumps on every filter change / refresh
+    nodeFailed: false,           // the status line says the selection failed to load
     refreshing: null,            // the refresh in flight (a promise), or null
   };
 
   // page counters for tests (D8): never a sleep
   function bump(name) {
     root.dataset[name] = String((parseInt(root.dataset[name] || "0", 10) || 0) + 1);
+  }
+
+  // The status line is a live region: it is written only when its text changes (a lasting
+  // failure retried at every poll is announced once), and cleared only by a success.
+  function say(text) {
+    if (status.textContent !== text) status.textContent = text;
   }
 
   // --- requests -----------------------------------------------------------------
@@ -112,10 +119,33 @@ function initSiteTree() {
   }
 
   // --- tree items -----------------------------------------------------------------
-  function identity(child) {
+  // A child's identity within its group, never its position (D5/R7): its key, else its
+  // id, else its label (a node too deep to key) -- and unkeyed siblings with one label
+  // are told apart by occurrence (`#2`, `#3`: the one positional tie-break, as
+  // diagrams.js's `stepKey`). `stamp` numbers a list in its group's order; `counts`
+  // carries the occurrences already listed (a later page of the same group).
+  function baseIdentity(child) {
     if (child.key) return child.key;
     if (child.id !== undefined) return `${child.kind}:${child.id}`;
-    return `${child.kind}:label:${child.label}`;     // a node too deep to key
+    return `${child.kind}:label:${child.label}`;
+  }
+  function stamp(children, counts) {
+    for (const child of children) {
+      const base = baseIdentity(child);
+      const n = (counts.get(base) || 0) + 1;
+      counts.set(base, n);
+      child._id = n === 1 ? base : `${base}#${n}`;
+    }
+    return children;
+  }
+  const identity = (child) => child._id || baseIdentity(child);
+  function countsOf(container) {
+    const counts = new Map();
+    for (const li of treeItems(container)) {
+      const base = baseIdentity(li._child || {});
+      counts.set(base, (counts.get(base) || 0) + 1);
+    }
+    return counts;
   }
 
   // the key of the group a container lists: "root" for the tree itself
@@ -208,7 +238,7 @@ function initSiteTree() {
   // are no more -- and, with `reach` (a refresh: the identity of the last item shown),
   // until that item is among them, at most one page further, so an item that sorts
   // earlier never pushes a shown one behind "Show more"
-  async function fetchPages(key, gen, after, want, reach = null) {
+  async function fetchPages(key, gen, after, want, reach = null, counts = new Map()) {
     try {
       const out = [];
       let seen = reach === null;
@@ -222,7 +252,7 @@ function initSiteTree() {
         if (code !== 200 || !body) {
           return { error: (body && body.detail) ? `Could not load: ${body.detail}` : "Could not load this node." };
         }
-        out.push(...body.children);
+        out.push(...stamp(body.children, counts));
         seen = seen || body.children.some((c) => identity(c) === reach);
         next = body.next;
         truncated = truncated || Boolean(body.truncated);
@@ -315,13 +345,13 @@ function initSiteTree() {
                     hadFocus: document.activeElement === btn };   // before disabling blurs it
     container._more = token;
     btn.disabled = true;
-    const got = await fetchPages(key, token.gen, btn._next, PAGE);
+    const got = await fetchPages(key, token.gen, btn._next, PAGE, null, countsOf(container));
     if (container._more !== token) return;                 // a refresh delivered it
     const live = () => container.isConnected && !container.hidden;
     if (!live()) { dropToken(container, token); return; }
     if (got.gone) { container._more = null; dropNode(key); return; }
     if (token.gen === state.generation && !got.stale) {
-      if (got.error) { status.textContent = got.error; dropToken(container, token); return; }
+      if (got.error) { say(got.error); dropToken(container, token); return; }
       const tail = container.querySelector(":scope > li.st-trunc-item, :scope > li.st-more-item");
       const have = new Set(treeItems(container).map((li) => li.dataset.id));
       for (const child of got.children) {
@@ -368,7 +398,7 @@ function initSiteTree() {
       const got = await fetchPages(key, gen, after, PAGE);
       if (got.stale) return false;
       if (got.gone) { dropNode(key); return true; }   // handled: the node is no more
-      if (got.error) { status.textContent = got.error; return false; }
+      if (got.error) { say(got.error); return false; }
       const tail = container.querySelector(":scope > li.st-trunc-item, :scope > li.st-more-item");
       const have = new Set(treeItems(container).map((li) => li.dataset.id));
       for (const child of got.children) {             // never twice
@@ -403,7 +433,7 @@ function initSiteTree() {
     }
     if (got.stale) return false;
     if (got.gone) { dropNode(key); return true; }
-    if (got.error) { status.textContent = got.error; return false; }
+    if (got.error) { say(got.error); return false; }
     const focusKey = focusKeyIn(tree);
     const fallbacks = treeFallbacks();
     const existing = new Map();
@@ -442,6 +472,8 @@ function initSiteTree() {
     const g = groupOf(li);
     const level = parseInt(li.getAttribute("aria-level"), 10) + 1;
     g.hidden = false;
+    const version = String(state.version);
+    let current = true;
     if (!g.dataset.loaded) {
       g.dataset.loaded = "1";
       const filled = () => g.querySelector(":scope > li[role=treeitem]") !== null;
@@ -449,11 +481,13 @@ function initSiteTree() {
       // load of a still-empty group is retried on the next expand or refresh
       if (!filled() && !await loadChildren(g, key, level, state.generation) && !filled()) {
         delete g.dataset.loaded;
+        current = false;
       }
-    } else if (g.dataset.version !== String(state.version)) {
-      await refreshGroup(g, key, level, state.generation);  // changed while collapsed
+    } else if (g.dataset.version !== version) {
+      // changed while collapsed; a failed refresh leaves it stale: the next expand retries
+      current = await refreshGroup(g, key, level, state.generation);
     }
-    g.dataset.version = String(state.version);
+    if (current) g.dataset.version = version;
   }
 
   function collapse(li) {
@@ -547,6 +581,7 @@ function initSiteTree() {
     ]);
     if (gen !== state.generation) return { stale: true };
     if (summary.status !== 200 || !summary.body) return { summary };
+    if (kids.status !== 200 || !kids.body) return { summary: kids, contents: true };
     const findings = [...(summary.body.findings || [])];
     let next = summary.body.next;
     while (next && (findings.length < want
@@ -592,17 +627,30 @@ function initSiteTree() {
     if (got.stale || gen !== state.generation) return false;
     if (key !== state.selected) return true;           // another selection shows itself
     if (!got.findings) {
-      box.hidden = true;
-      none.hidden = false;
-      none.textContent = got.summary.status === 404 ? "This node is no longer in the store." : "Could not load this node.";
-      return got.summary.status === 404;
+      const gone = got.summary.status === 404 && !got.contents;
+      if (gone || !opts.keep) {                        // another node's table never stays
+        box.hidden = true;
+        none.hidden = false;
+        none.textContent = gone ? "This node is no longer in the store." : "Could not load this node.";
+      }
+      if (gone) return true;                           // handled: the node is no more
+      // a failed read (the summary, a page of findings or the Contents) is never drawn as
+      // an empty node: a refresh keeps what is shown, says so, and is not a success, so
+      // the next poll retries it (FR-UI-505)
+      say(got.contents ? "Could not load this node's contents." : "Could not load this node.");
+      state.nodeFailed = true;
+      return false;
+    }
+    if (state.nodeFailed) {
+      state.nodeFailed = false;
+      say("");
     }
     const summary = got.summary.body;
     none.hidden = true;
     box.hidden = false;
     renderNode(summary);
     document.getElementById("st-node-truncated").hidden = !summary.truncated;
-    renderChildren(got.kids.status === 200 && got.kids.body ? got.kids.body : { children: [] });
+    renderChildren(got.kids.body);
     state.issuesNext = got.next;
     if (opts.keep && token && state.issuesMore === token) state.issuesMore = null;  // its page is in
     renderIssues(got.findings, false);
@@ -721,9 +769,9 @@ function initSiteTree() {
     state.expanded = new Set();
     state.issuesMore = null;
     tree.replaceChildren();
-    status.textContent = "";
     const ok = await loadChildren(tree, null, 1, gen);
     if (gen !== state.generation) return;
+    if (ok) say("");
     empty.hidden = !ok || tree.querySelector("li[role=treeitem]") !== null;
     const first = tree.querySelector("li[role=treeitem]");
     if (first) first.tabIndex = 0;
@@ -742,7 +790,6 @@ function initSiteTree() {
     state.generation += 1;
     const gen = state.generation;
     const run = (async () => {
-      status.textContent = "";
       if (!await refreshGroup(tree, null, 1, gen)) return false;
       for (const li of [...tree.querySelectorAll("li[role=treeitem][aria-expanded=true]")]) {
         if (gen !== state.generation) return false;
@@ -771,7 +818,9 @@ function initSiteTree() {
           await showNode(null);
         }
       }
-      return gen === state.generation;
+      if (gen !== state.generation) return false;
+      say("");                                    // cleared only once all of it is shown
+      return true;
     })();
     state.refreshing = run;
     try {

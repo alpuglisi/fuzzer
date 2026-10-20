@@ -81,7 +81,7 @@ function initDiagrams() {
     root.dataset[name] = String((parseInt(root.dataset[name] || "0", 10) || 0) + 1);
   };
   const state = { run: null, expanded: new Set(), expandedInit: false, version: undefined,
-                  evRef: null, evNext: null, selected: null, gen: 0,
+                  evRef: null, evNext: null, selected: null, gen: 0, seqGen: 0,
                   keepRun: null, pin: null };
   // A finding's deep link (FR-UI-513), validated by the server (`parse_deep_link`), which
   // renders these attributes only for a link that holds; the URL itself is never read.
@@ -441,15 +441,19 @@ function initDiagrams() {
   async function loadSeq() {
     const scope = scopeSel.value;
     const host = $("dg-seq");
+    const mine = ++state.seqGen;      // a later load (a scope change, a poll) draws, not this
     if (!scope || state.run === null) {
       rerender(host, () => host.replaceChildren());
       return true;
     }
     let ok = true;
     try {
-      renderSeq(await api(`/api/diagram/${state.run}/sequence?scope=`
-                          + encodeURIComponent(scope)));
+      const seq = await api(`/api/diagram/${state.run}/sequence?scope=`
+                            + encodeURIComponent(scope));
+      if (mine !== state.seqGen) return false;
+      renderSeq(seq);
     } catch (e) {
+      if (mine !== state.seqGen) return false;
       rerender(host, () => host.replaceChildren(el("p", { class: "muted", text: `not loaded: ${e.message}` })));
       ok = false;
     }

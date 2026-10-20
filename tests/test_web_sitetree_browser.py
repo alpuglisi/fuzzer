@@ -323,10 +323,18 @@ def test_show_more_loads_one_page_per_click_and_works_from_the_keyboard(tab):
 
 
 def test_a_double_click_on_show_more_loads_the_page_once(tab):
+    """Every page the two clicks asked for has been handled (`data-loads`) before the
+    items are counted again: synchronised on the page, never a sleep (D8)."""
+    page = tab.page
     group = _wide(tab)
+    asked = []
+    page.on("request", lambda r: "/api/sitetree/children" in r.url and "after=" in r.url
+            and asked.append(r.url))
+    loads = _count(page, "loads")
     group.locator(":scope > li.st-more-item button").dblclick()
     expect(group.locator(":scope > li[role=treeitem]")).to_have_count(250)
-    tab.page.wait_for_timeout(500)
+    assert asked, "no page was asked for: the case proves nothing"
+    assert _until(page, lambda: _count(page, "loads") >= loads + len(asked))
     assert group.locator(":scope > li[role=treeitem]").count() == 250
     assert tab.problems() == []
 
@@ -1041,3 +1049,155 @@ def test_a_refresh_whose_group_fetch_fails_is_retried_at_the_next_poll(tab, site
     finally:
         w.__exit__(None, None, None)
     assert [p for p in tab.problems() if "status of 500" not in p] == []
+
+
+def _node_of(page, li) -> str:
+    return li.get_attribute("data-key")
+
+
+def _failing(page, key: str, times: int | None = 1) -> dict:
+    """Answer ``/api/sitetree/children`` requests for node ``key`` (a first page, no
+    cursor) with an injected 500 -- ``times`` of them, or (``None``) until
+    ``state["release"]`` is set; pass every other request. Returns the state, whose
+    ``failed`` lists the requests answered so."""
+    from urllib.parse import parse_qs, urlparse
+    state = {"failed": [], "release": False}
+
+    def route(r):
+        q = parse_qs(urlparse(r.request.url).query)
+        fail = (len(state["failed"]) < times) if times is not None else not state["release"]
+        if fail and q.get("node") == [key] and "after" not in q:
+            state["failed"].append(r.request.url)
+            r.fulfill(status=500, content_type="application/json",
+                      body='{"detail": "injected"}')
+        else:
+            r.continue_()
+    page.route("**/api/sitetree/children?*", route)
+    return state
+
+
+def test_a_refresh_whose_contents_fetch_fails_keeps_the_table_and_is_retried(tab, site):
+    """FR-UI-505 (review of `eb95cd4`, blocker 1): the selected node's Contents
+    (`/api/sitetree/children` for the node) is part of the refresh. Its fetch fails once
+    (an injected 500; "shop" is collapsed, so no tree group asks for it): the table the
+    user sees stays, the status line says so, and the refresh is no success -- the next
+    poll's refresh shows the write. The status line (a live region) is written once for
+    the lasting failure, not at every retry, and cleared by the success. Before, the
+    empty answer was drawn as a node with no children, the refresh counted as a success
+    and the version was marked seen: no poll ever retried it."""
+    page = tab.page
+    tab.open(ORIGIN, "shop")
+    shop = tab.item("shop").first
+    shop.locator(":scope > .st-row .st-label").click()      # select it (and collapse it)
+    expect(shop).to_have_attribute("aria-expanded", "false")
+    rows = page.locator("#st-children-table tbody tr td:first-child")
+    expect(rows).to_have_count(2)
+    _baseline(page)
+    page.evaluate("""() => { window.__statusWrites = 0;
+      new MutationObserver((ms) => { window.__statusWrites += ms.length; })
+        .observe(document.querySelector("#st-status"),
+                 { childList: true, characterData: true, subtree: true }); }""")
+    contents = _failing(page, _node_of(page, shop), times=None)    # until released
+    r0 = _count(page, "refreshes")
+    w = _Written(site, "/shop/new.php").__enter__()
+    try:
+        expect(page.locator("#st-status")).to_have_text("Could not load this node's contents.")
+        polls = _count(page, "polls")
+        _reach(page, "polls", polls + 3)          # a retry is due at least every 2nd poll
+        assert len(contents["failed"]) >= 2, "the failed refresh was not retried"
+        # a live region: the lasting failure is announced once, not at every retry
+        assert page.evaluate("() => window.__statusWrites") == 1
+        assert rows.all_inner_texts() == ["cart.php", "item.php"]   # the table stays
+        assert _count(page, "refreshes") == r0                      # never a success
+        contents["release"] = True
+        _reach(page, "refreshes", r0 + 1)                           # retried, shown
+        expect(rows).to_have_count(3)
+        assert rows.all_inner_texts() == ["cart.php", "item.php", "new.php"]
+        expect(page.locator("#st-status")).to_have_text("")
+    finally:
+        w.__exit__(None, None, None)
+    assert [p for p in tab.problems() if "status of 500" not in p] == []
+
+
+def test_a_group_whose_refresh_fails_on_expand_is_retried_at_the_next_expand(tab, site):
+    """FR-UI-505 (review of `eb95cd4`): a group that changed while collapsed is
+    refreshed when expanded; that refresh fails once (an injected 500). The group is not
+    marked current, so the next expand refreshes it again and shows the write. Before,
+    `expand` marked it current whatever the refresh returned: it stayed stale until the
+    next write."""
+    page = tab.page
+    tab.open(ORIGIN, "shop")
+    shop = tab.item("shop").first
+    group = shop.locator(":scope > ul[role=group]")
+    expect(group.locator(":scope > li[role=treeitem]")).to_have_count(2)
+    shop.focus()
+    page.keyboard.press("ArrowLeft")                         # collapse; nothing selected
+    expect(shop).to_have_attribute("aria-expanded", "false")
+    _baseline(page)
+    r0 = _count(page, "refreshes")
+    w = _Written(site, "/shop/new.php").__enter__()
+    try:
+        _reach(page, "refreshes", r0 + 1)                    # seen while collapsed
+        group_fetch = _failing(page, _node_of(page, shop), times=1)
+        loads = _count(page, "loads")
+        page.keyboard.press("ArrowRight")                    # expand: its refresh fails
+        _reach(page, "loads", loads + 1)
+        assert group_fetch["failed"], "the group's refresh never failed: the case proves nothing"
+        expect(page.locator("#st-status")).to_have_text("Could not load: injected")
+        expect(group.locator(":scope > li[role=treeitem]")).to_have_count(2)
+        page.keyboard.press("ArrowLeft")
+        page.keyboard.press("ArrowRight")                    # the next expand retries
+        expect(group.locator(":scope > li[role=treeitem]")).to_have_count(3)
+        expect(tab.item("new.php").first).to_be_attached()
+    finally:
+        w.__exit__(None, None, None)
+    assert [p for p in tab.problems() if "status of 500" not in p] == []
+
+
+_DEEP = "deep (too deep to browse here)"
+
+
+def test_unkeyed_siblings_with_one_label_keep_distinct_identities_across_refreshes(tab, site):
+    """D5/R7 (review of `eb95cd4`): two siblings with no key and no id (nodes too deep to
+    key) and one label are told apart by occurrence (`#2`), so a refresh never merges
+    them, never adds a third, and focus on the second stays on it. The root list is
+    answered with the two appended (real nodes this deep need a 4 KiB key). Before,
+    both had one identity: each refresh added a duplicate and the focus keys repeated."""
+    page = tab.page
+
+    def route(r):
+        if "node=" in r.request.url:
+            r.continue_()
+            return
+        resp = r.fetch()
+        body = resp.json()
+        roll = body["children"][0]["rollup"]
+        body["children"] += [{"kind": "dir", "label": _DEEP, "expandable": False,
+                              "rollup": roll} for _ in range(2)]
+        r.fulfill(response=resp, json=body)
+    page.route("**/api/sitetree/children?*", route)
+    deep = page.locator('#st-tree > li[role="treeitem"] > .st-row > .st-label',
+                        has_text=re.compile("^" + re.escape(_DEEP) + "$")).locator("xpath=../..")
+
+    def ids():
+        return deep.evaluate_all("els => els.map(e => e.dataset.id)")
+
+    def unique_keys():
+        keys = page.locator("#sitetree-root [data-focus-key]").evaluate_all(
+            "els => els.map(e => e.dataset.focusKey)")
+        return len(keys) == len(set(keys))
+    _baseline(page)
+    want = [f"dir:label:{_DEEP}", f"dir:label:{_DEEP}#2"]
+    r0 = _count(page, "refreshes")
+    w = _Written(site, "/zz-unkeyed")
+    w.__enter__()
+    try:
+        _reach(page, "refreshes", r0 + 1)
+        assert ids() == want and unique_keys()
+        deep.nth(1).focus()
+    finally:
+        w.__exit__(None, None, None)                         # a second write: a refresh
+    _reach(page, "refreshes", r0 + 2)
+    assert ids() == want and unique_keys()
+    assert _focused_item(page) == [want[1], _DEEP]
+    assert tab.problems() == []

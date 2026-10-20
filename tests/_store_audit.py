@@ -95,13 +95,17 @@ class StoreOpenAudit:
         self.stores: set[str] = set()
         self.found: list[str] = []
 
+    def known(self, path: str) -> bool:
+        """A store this monitor or this process opened through SQLite (two lookups, never
+        a union built per open: the hook runs on every open of the test session)."""
+        return path in self.stores or path in _stores
+
     def store_of(self, path: str) -> str | None:
         """The store ``path`` belongs to (itself, or the main file of a side file)."""
-        known = self.stores | _stores
         for suffix in SIDE:
-            if path.endswith(suffix) and path[: -len(suffix)] in known:
+            if path.endswith(suffix) and self.known(path[: -len(suffix)]):
                 return path[: -len(suffix)]
-        if path in known:
+        if self.known(path):
             return path
         if any(os.path.exists(path + s) for s in ("-wal", "-shm")):
             return path                               # a live WAL store

@@ -971,9 +971,13 @@ def _reap_while_watched() -> None:
 
 def store_version(path) -> str | None:
     """The open store's version (SP-58): an opaque string that changes with every commit
-    to the store by any connection of any process, and with nothing else that leaves its
-    content as it was. ``None``: no store (``path`` is ``None`` or names no file), or no
-    version now (a failed or busy read, a changed identity) -- never the previous one.
+    to the store by any connection of any process. A read, a close, an empty or no-op
+    write and a PASSIVE, FULL or RESTART checkpoint leave it as it was; two things that
+    leave the content as it was change it once each (stated residuals, FR-UI-505): an
+    explicit ``wal_checkpoint(TRUNCATE)`` by another connection (measured: SQLite counts
+    the WAL's reset as a change) and a reopened watch (a new epoch). ``None``: no store
+    (``path`` is ``None`` or names no file), or no version now (a failed or busy read, a
+    changed identity) -- never the previous one.
 
     ``path`` is a path, or a callable returning one (the routes pass ``store_path``): it
     is called under ``_watch_lock``, so a project transition that cleared the open

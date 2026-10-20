@@ -72,6 +72,11 @@ def _serve(path: str, end) -> None:
             elif cmd == "checkpoint":              # args: PASSIVE | FULL | RESTART | TRUNCATE
                 out = tuple(conn.execute(f"PRAGMA wal_checkpoint({args[0]})").fetchone())
             elif cmd == "wal_header":              # the writer's own WAL header (its process)
+                # A raw read of `-wal` in a process holding a connection: against
+                # PA-0535(1)'s letter, reviewed. POSIX drops a process's locks only on the
+                # file whose descriptor closes, and SQLite locks no byte of `-wal` (its WAL
+                # locks are in `-shm`, its file locks on the main file), so this close
+                # drops nothing. Test-only: this process is a writer, never the web process.
                 with open(path + "-wal", "rb") as fh:
                     head = fh.read(32)
                 out = {"checkpoint_seq": int.from_bytes(head[12:16], "big"),

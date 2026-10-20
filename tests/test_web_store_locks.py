@@ -151,18 +151,28 @@ def test_opening_a_project_never_drops_a_held_connections_locks(tmp_path):
 def test_a_projects_listing_never_drops_the_store_watchs_locks(tmp_path):
     """The store version's held watch (CC-UI-0068) is the connection the reviewers saw
     break: after a listing and a short writer it missed every later commit (200 of 200,
-    300 of 300). It must keep seeing each commit of a scan in another process."""
+    300 of 300). Its locks hold across the listing (the side files are still there after
+    another process's close), and the same watch -- never a reopened one, whose new epoch
+    would change the version by itself -- sees each commit of a scan in another process.
+    (Without the first two asserts this passed on the pre-fix `project.py`: the side
+    files went, the identity re-check reopened the watch, and a new epoch made every
+    version differ anyway; the confirming review of `eb95cd4`.)"""
     path, mgr = _project(tmp_path)
-    sitetree.store_version(str(path))
+    assert sitetree.store_version(str(path)) is not None
+    epoch = sitetree._watch.epoch
     _listing(mgr)
     one_commit(path, SHORT)
+    assert _side(path) == {"-wal", "-shm"}, \
+        "another process's close folded and deleted the WAL under the store's watch"
     with Writer(path) as scan:
         scan("open")
         prev = sitetree.store_version(str(path))
+        assert prev is not None, "the watch lost the store after the listing"
         for _ in range(50):
             scan("ins", 1)
             cur = sitetree.store_version(str(path))
             assert cur is not None and cur != prev
+            assert sitetree._watch.epoch == epoch, "the watch was reopened"
             prev = cur
         scan("close")
 
@@ -285,15 +295,39 @@ def _archive_bindings(scope) -> dict[str, str]:
     return out
 
 
-def _shape(call: ast.Call, bound: dict[str, str]) -> str | None:
+#: The library modules whose openers the guard knows: an alias of one, or a name imported
+#: from one, is resolved to it (``import shutil as sh``, ``from os import open as o``).
+_OPENER_MODULES = {"os", "io", "shutil", "filecmp", "tempfile", "zipfile", "tarfile"}
+
+
+def _aliases(tree) -> tuple[dict[str, str], dict[str, tuple[str, str]]]:
+    """``(modules, names)`` a module binds to an opener module: ``import shutil as sh``
+    gives ``{"sh": "shutil"}``; ``from shutil import copyfile`` gives ``{"copyfile":
+    ("shutil", "copyfile")}``. Anywhere in the module (a lazy import included)."""
+    mods: dict[str, str] = {}
+    names: dict[str, tuple[str, str]] = {}
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Import):
+            mods.update({a.asname: a.name for a in n.names
+                         if a.asname and a.name in _OPENER_MODULES})
+        elif isinstance(n, ast.ImportFrom) and not n.level and n.module in _OPENER_MODULES:
+            names.update({a.asname or a.name: (n.module, a.name) for a in n.names})
+    return mods, names
+
+
+def _shape(call: ast.Call, bound: dict[str, str], aliases=({}, {})) -> str | None:
     owner, attr = _callee(call.func)
     if attr is None:
         return None
+    mods, names = aliases
+    if owner is None and attr in names:                 # from os import open as o
+        owner, attr = names[attr]
+    owner = mods.get(owner, owner)                      # import shutil as sh
     if owner is None:                                   # a bare name
         if attr == "open":
             return "open()"
         return f"{attr}()" if attr in _SERVERS or attr in _ARCHIVES else None
-    if owner in ("os", "io") and attr in ("open", "fdopen"):
+    if owner in ("os", "io") and attr in ("open", "fdopen", "FileIO"):
         return f"{owner}.{attr}()"
     if owner == "shutil" and attr in _SHUTIL:
         return f"shutil.{attr}()"
@@ -324,12 +358,13 @@ def raw_opens(src: str) -> Counter:
                 visit(ch, f"{where}.{ch.name}" if where else ch.name, bound)
                 continue
             if isinstance(ch, ast.Call):
-                shape = _shape(ch, bound)
+                shape = _shape(ch, bound, aliases)
                 if shape:
                     found[(where or "<module>", shape)] += 1
             visit(ch, where, bound)
 
     tree = ast.parse(src)
+    aliases = _aliases(tree)
     visit(tree, "", _archive_bindings(tree))
     return found
 
@@ -500,7 +535,9 @@ def _tree(tmp_path, files: dict[str, str]) -> Path:
 
 
 def test_the_store_file_guard_catches_synthetic_offenders(tmp_path):
-    """PA-0034(2): each raw-open shape is found, library openers included; a helper a
+    """PA-0034(2): each raw-open shape is found, library openers included, under an alias
+    or an imported name too (``import shutil as sh``, ``from os import open as o``,
+    ``io.FileIO``); a helper a
     route reaches by a lazy import or a literal `import_module` is in scope whether or
     not it opens SQLite (the confirming review's `core/secretfile.py` case); a module the
     web package never imports is not; an allowed site passes; a new site in an allowed
@@ -543,6 +580,20 @@ def test_the_store_file_guard_catches_synthetic_offenders(tmp_path):
             "    fh.write(b'x')                       # a file object's write, not a name\n"
             "    z2.write(p)                          # not bound to an archive here\n"
             "    os.pidfd_open(1)                     # a process descriptor\n"),
+        "fuzzlab/web/aliased.py": (                # an opener under another name
+            "import io\n"
+            "import shutil as sh\n"
+            "from io import FileIO\n"
+            "from os import open as o\n"
+            "from shutil import copyfile\n"
+            "from fuzzlab.core.helper import check as copy2\n"
+            "def aliased(p):\n"
+            "    sh.copy2(p, p + '.bak')\n"
+            "    copyfile(p, p + '.bak')\n"
+            "    o(p, 0)\n"
+            "    io.FileIO(p).close()\n"
+            "    FileIO(p).close()\n"
+            "    copy2(p)                             # a fuzzlab name, not shutil's\n"),
         "fuzzlab/core/__init__.py": "",
         "fuzzlab/core/helper.py": (                # no SQLite here: still in scope
             "from fuzzlab.core import secret\n"
@@ -579,6 +630,10 @@ def test_the_store_file_guard_catches_synthetic_offenders(tmp_path):
         ("fuzzlab/web/direct.py", "library", ".open()"): 1,          # tarfile.open
         ("fuzzlab/web/direct.py", "library", "TarFile.add()"): 1,
         ("fuzzlab/web/direct.py", "library", "FileResponse()"): 1,
+        ("fuzzlab/web/aliased.py", "aliased", "shutil.copy2()"): 1,
+        ("fuzzlab/web/aliased.py", "aliased", "shutil.copyfile()"): 1,
+        ("fuzzlab/web/aliased.py", "aliased", "os.open()"): 1,
+        ("fuzzlab/web/aliased.py", "aliased", "io.FileIO()"): 2,
         ("fuzzlab/core/secret.py", "write", "os.open()"): 1,       # a helper's helper
         ("fuzzlab/core/later.py", "read", "open()"): 1,            # import_module("...")
     })                                                            # core/unused.py: out

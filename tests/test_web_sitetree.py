@@ -1149,24 +1149,40 @@ _NO_WRITE = {
     "a web reader opens, reads and closes": _web_reader_cycle,
     "the writer process closes with frames in the WAL": lambda path, w: w("close"),
     "a passive checkpoint by the writer process": lambda path, w: w("checkpoint", "PASSIVE"),
+    "a FULL checkpoint by the writer process": lambda path, w: w("checkpoint", "FULL"),
+    "a RESTART checkpoint by the writer process": lambda path, w: w("checkpoint", "RESTART"),
     "an empty write transaction": lambda path, w: w("empty"),
     "an UPDATE that matches no row":
         lambda path, w: w("sql", "UPDATE endpoint SET method=method WHERE 0"),
 }
+#: Leaves the content as it was, yet changes the version once: a stated residual
+#: (FR-UI-505; `store_version`'s docstring). Measured: SQLite counts the WAL's reset by a
+#: TRUNCATE checkpoint as a change (`rev3/m_ckpt.out`). One refresh with no write.
+_STATED_CHANGE = {
+    "a TRUNCATE checkpoint by the writer process (stated residual: changes it once)":
+        lambda path, w: w("checkpoint", "TRUNCATE"),
+}
 
 
-@pytest.mark.parametrize("case", sorted(_NO_WRITE))
+@pytest.mark.parametrize("case", sorted(_NO_WRITE) + sorted(_STATED_CHANGE))
 def test_no_read_close_or_checkpoint_changes_the_version(tmp_path, case):
     """E1 (M1 cases 2 and 3; M2 C1-C5): nothing that leaves the content as it was
-    changes the version."""
+    changes the version -- except the stated residual, an explicit TRUNCATE checkpoint,
+    which changes it exactly once (then it is stable)."""
     from tests._xproc import Writer
     path = _fresh_store(tmp_path)
     with Writer(path) as w:
         w("open")
         w("ins", 5)                                  # frames in the WAL, the writer open
         v = st.store_version(path)
-        _NO_WRITE[case](path, w)
-        assert st.store_version(path) == v
+        if case in _STATED_CHANGE:
+            assert _STATED_CHANGE[case](path, w)[1:] == (0, 0), "the WAL was not reset"
+            after = st.store_version(path)
+            assert after is not None and after != v
+            assert st.store_version(path) == after
+        else:
+            _NO_WRITE[case](path, w)
+            assert st.store_version(path) == v
         if "closes with frames" not in case:
             w("close")
 

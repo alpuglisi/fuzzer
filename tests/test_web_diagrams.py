@@ -460,6 +460,43 @@ def test_a_live_refresh_keeps_focus_on_every_kind_of_control(live, kind, where):
     assert errors == []
 
 
+def test_a_sequence_answer_overtaken_by_a_scope_change_is_never_drawn(live):
+    """Review of `eb95cd4`: a poll's refresh asked for the shown scope's sequence, and the
+    user chose another scope before the answer came. The later choice is drawn and stays;
+    the overtaken answer is dropped (`loadSeq`'s generation). Before, the older scope's
+    sequence was drawn over the one the select shows."""
+    ctx, page, errors = _dg_page(live)
+    try:
+        held = []
+
+        def route(r):
+            if not held and "scope=workflow%3Aact-1" in r.request.url:
+                held.append(r)                               # the refresh's request
+            else:
+                r.continue_()
+        page.route("**/api/diagram/*/sequence?*", route)
+        with page.expect_request(lambda r: "scope=workflow%3Aact-1" in r.url):
+            _dg_write(live)                                  # a poll's refresh asks
+        for _ in range(400):                                 # its route handler runs
+            if held:
+                break
+            page.evaluate("0")
+        assert held, "the refresh's sequence request was not held: the case proves nothing"
+        page.select_option("#dg-scope", "test:t1")           # the user's later choice
+        page.locator('#dg-exports a[data-focus-key="export:seq"][href*="test%3At1"]').wait_for()
+        steps = page.locator("#dg-seq g.dg-step title")
+        drawn = steps.all_text_contents()
+        assert drawn, "the chosen scope drew no step"
+        polls = _dg_count(page, "polls")
+        held[0].continue_()                                  # the overtaken answer arrives
+        _dg_reach(page, "polls", polls + 1)                  # and its poll is over
+        assert page.input_value("#dg-scope") == "test:t1"
+        assert steps.all_text_contents() == drawn
+    finally:
+        ctx.close()
+    assert errors == []
+
+
 def test_every_focusable_control_in_the_diagrams_live_regions_has_a_focus_key(live):
     """FR-UI-514 (D5): every focusable control the refresh re-renders carries a focus key,
     unique in its region; the request, forward and response steps of one capture record

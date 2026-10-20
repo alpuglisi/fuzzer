@@ -40,6 +40,9 @@ LIVE_VIEWS: dict[str, tuple[str, ...] | tuple[str, str]] = {
         "tests/test_web_sitetree_browser.py::test_restore_focus_skips_every_candidate_that_refuses_focus_and_ends_at_the_pane",
         "tests/test_web_sitetree_browser.py::test_a_refresh_that_removes_the_focused_item_never_scrolls_nor_drops_to_the_body",
         "tests/test_web_sitetree_browser.py::test_a_refresh_whose_group_fetch_fails_is_retried_at_the_next_poll",
+        "tests/test_web_sitetree_browser.py::test_a_refresh_whose_contents_fetch_fails_keeps_the_table_and_is_retried",
+        "tests/test_web_sitetree_browser.py::test_a_group_whose_refresh_fails_on_expand_is_retried_at_the_next_expand",
+        "tests/test_web_sitetree_browser.py::test_unkeyed_siblings_with_one_label_keep_distinct_identities_across_refreshes",
         "tests/test_web_sitetree_browser.py::test_the_page_refreshes_when_the_store_changes",
         "tests/test_web_sitetree_browser.py::test_a_refresh_that_overtakes_an_expand_still_fills_the_node",
         "tests/test_web_sitetree_browser.py::test_an_expand_inside_a_refresh_loads_the_node_once",
@@ -49,6 +52,7 @@ LIVE_VIEWS: dict[str, tuple[str, ...] | tuple[str, str]] = {
         "tests/test_web_diagrams.py::test_a_live_refresh_keeps_focus_on_every_kind_of_control",
         "tests/test_web_diagrams.py::test_every_focusable_control_in_the_diagrams_live_regions_has_a_focus_key",
         "tests/test_web_diagrams.py::test_the_page_renders_labels_as_text_navigates_evidence_and_updates_live",
+        "tests/test_web_diagrams.py::test_a_sequence_answer_overtaken_by_a_scope_change_is_never_drawn",
     ),
     "proxy.js": ("exempt", "its 1.2 s poll re-renders the pending-flow rows, which hold no "
                            "focusable control (no tabindex, link or button); the editor "
@@ -153,7 +157,9 @@ _SLEEPS = {"wait_for_timeout", "sleep"}
 
 def sleeping_tests(views: dict, repo: Path = REPO) -> list[str]:
     """Registered real-browser focus tests that synchronise by sleeping (a Playwright
-    `wait_for_timeout`, a `time.sleep`) instead of the page's counters (D8)."""
+    `wait_for_timeout`, a `time.sleep`) instead of the page's counters (D8) -- in the test
+    itself or in a module-level helper it calls by name, transitively. (A method called
+    on an object, e.g. ``tab.item``, is not followed.)"""
     out = []
     for entry in views.values():
         if not entry or entry[0] == "exempt":
@@ -161,12 +167,21 @@ def sleeping_tests(views: dict, repo: Path = REPO) -> list[str]:
         for node in entry:
             rel, _sep, name = node.partition("::")
             tree = ast.parse((repo / rel).read_text("utf-8"))
-            for fn in ast.walk(tree):
-                if isinstance(fn, ast.FunctionDef) and fn.name == name:
-                    for n in ast.walk(fn):
-                        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) \
-                                and n.func.attr in _SLEEPS:
-                            out.append(f"{node}: {n.func.attr}() at line {n.lineno}")
+            funcs = {f.name: f for f in tree.body if isinstance(f, ast.FunctionDef)}
+            todo, seen = [name], set()
+            while todo:
+                fname = todo.pop()
+                if fname in seen or fname not in funcs:
+                    continue
+                seen.add(fname)
+                for n in ast.walk(funcs[fname]):
+                    if not isinstance(n, ast.Call):
+                        continue
+                    if isinstance(n.func, ast.Attribute) and n.func.attr in _SLEEPS:
+                        where = "" if fname == name else f" (in {fname})"
+                        out.append(f"{node}: {n.func.attr}() at line {n.lineno}{where}")
+                    elif isinstance(n.func, ast.Name):
+                        todo.append(n.func.id)
     return sorted(set(out))
 
 
@@ -178,20 +193,26 @@ def test_no_registered_live_view_test_synchronises_by_sleeping():
 
 
 def test_the_sleep_guard_catches_a_synthetic_offender(tmp_path):
-    """PA-0034(2): a `wait_for_timeout` and a `time.sleep` in a registered test are found;
-    a counter wait and an unregistered test's sleep are not."""
+    """PA-0034(2): a `wait_for_timeout` and a `time.sleep` in a registered test are found,
+    and in a helper it calls through another helper; a counter wait and an unregistered
+    test's sleep are not."""
     tests = tmp_path / "tests"
     tests.mkdir()
     (tests / "test_x.py").write_text(
         "import time\n"
         "def test_sleeps(page):\n    page.wait_for_timeout(900)\n    time.sleep(1)\n"
         "def test_counts(page):\n    page.wait_for_function('() => 1')\n"
-        "def test_unregistered(page):\n    page.wait_for_timeout(500)\n")
-    views = {"a.js": ("tests/test_x.py::test_sleeps", "tests/test_x.py::test_counts"),
+        "def test_unregistered(page):\n    page.wait_for_timeout(500)\n"
+        "def _settle(page):\n    page.wait_for_timeout(300)\n"
+        "def _helper(page):\n    return _settle(page)\n"
+        "def test_via_a_helper(page):\n    _helper(page)\n")
+    views = {"a.js": ("tests/test_x.py::test_sleeps", "tests/test_x.py::test_counts",
+                      "tests/test_x.py::test_via_a_helper"),
              "b.js": ("exempt", "a reason long enough to be one")}
     assert sleeping_tests(views, tmp_path) == [
         "tests/test_x.py::test_sleeps: sleep() at line 4",
-        "tests/test_x.py::test_sleeps: wait_for_timeout() at line 3"]
+        "tests/test_x.py::test_sleeps: wait_for_timeout() at line 3",
+        "tests/test_x.py::test_via_a_helper: wait_for_timeout() at line 10 (in _settle)"]
 
 
 #: Browser test files whose locators the descendant-filter guard reads.
