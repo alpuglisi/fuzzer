@@ -685,8 +685,9 @@ are not told again.
 | `mutation/run.py` (only `FilterUnobserved` caught) | propagates, and the run ends | fine |
 | `SeamProbeSender._on_copy` / `_create_copy` | a copy's `IsolatedHealthUnknown` is an `IsolatedLoginFailed`: the copy is released and its path goes anonymous; it **counts toward the failed-logins breaker** | Kept. A copy whose health cannot be known is a failed copy, and after `MAX_FAILED_ISOLATED_LOGINS` the run stops making copies (fail closed). Stated, no FUZZ change. |
 
-A no-resource identity never raises it from the bucket (D). It still raises it from a
-pause only if it has a resource, so in practice only resource-backed identities do.
+A no-resource identity never raises it. `observe` never checks it, so it is never
+paused (`verify_live`'s checks record no pause), and its empty bucket never waits (D).
+Only a resource-backed identity can raise it.
 
 **5.5 `verify_live`'s callers.**
 - `tools/spider.py:2524` (`_live_session_intact`): its fail-closed action is unchanged,
@@ -1186,4 +1187,68 @@ One sentence in the session manager's paragraph. No new component or dependency.
 
 ## 12. Verification of this revision
 
-(Filled from the runs on the committed files below.)
+Every run below is on the committed tree **9609d95** (clean), one pytest at a time
+under the host lock. The logs are in this lane's scratchpad,
+`/tmp/claude-0/-home-user-fuzzer/2f299c5d-40a8-582c-a2d4-d0cdcbec2db1/scratchpad/au-sess403/`,
+and are not committed. `final_r3.sh <worktree> f3e731f` there reproduces all of them in
+order. `au-sess403-prototype/run_reverts.sh <worktree>` reproduces steps 4-5.
+
+1. **The test module on the base, markers on** (`r3_final_base.log`): **17 passed, 53
+   xfailed**.
+2. **The base with `--runxfail`** (`r3_final_base_runxfail.log`): **53 failed, 17
+   passed**. 43 fail on a count or a behaviour and 10 on an absent API, as §1.9 lists.
+3. **The collection check** (`collected_r3.txt`, `unnamed_r3.py`): 70 tests collected,
+   68 named by a revert. The two unnamed are the stated ones: T19's whole-package
+   assertion and F3's pin. No name in `run_reverts.sh` is unknown.
+4. **The 50 reverts** (`reverts_r3_final.log`): **50 OK, 0 MASKED.** Every named test
+   fails on its revert.
+5. **The PA-0533 matrix** (B5; same log): **24 of 24 OK, 0 UNENFORCED.** Each revert
+   that undoes a PA-0533 rule fails at least one test PA-0533 names:
+   - rule (1): `403` 3, `policy_loss` 3, `throttle` 3 (T2 ×2, T11), `throttle_refusal`
+     1 (T2b), `throttle_verdict` 6 (T2c), `noconfirm` 8, `nosubmission` 2,
+     `submission_ignored` 2, `noentrynames` 1, `policy_nocheck` 3;
+   - rule (2): `nogen` 2, `nogenrecord` 2, **`nocas` 2** (T M7b, T M7c; it failed none
+     in the reviewer's matrix), `cover_at_record` 1 (T M7d);
+   - rule (3): `nobucket` 3, `nores_waits` 1, `nosticky` 1, `inconclusive_lost` 1,
+     `inconclusive_live` 1;
+   - rule (4): each `guard_*` 1.
+6. **The prototype as drafted** (same log): **68 passed, 2 failed**: T19's
+   whole-package assertion and F3's pin (§1.9).
+7. **Why each new or changed revert fails** (`reasons_r3_final.log`, `--tb=line`):
+
+| Revert | Test | It fails on |
+|---|---|---|
+| `throttle_refusal` | T2b | the login recorded `('/', 429)` |
+| `throttle_verdict` | T2c ×6 | `Health(state='lost', reason="the resource's refusal status (N)")` for 0, 429, 503, 502, 504 and 407 |
+| `cover_at_record` | T M7d | `(True, [])`: the session stays valid and no listener hears the loss, while the server has ended it |
+| `nocas` | T M7b | the next send on session 2 slept `[5.0]` |
+| `nocas` | T M7c | the listener heard `['user']`, and a third row (session 1's, marked lost) was written over session 2's |
+| `noflight` | T M7 | 6 GETs |
+| `nores_waits` | T15b | `SessionHealthUnknown (re-login budget)` after the 120 s waits |
+| `nobucket` | T15b | `(30, 30, [])`: 30 logins |
+| `verifylive_clears_sticky` | T21c | DID NOT RAISE: the send after `verify_live` went out |
+| `verifylive_budget` | T21d | `SessionHealthUnknown (pause budget)`: `verify_live` had spent 40 of `prepare`'s 50 s |
+| `nocount` | TCP | `{}` |
+| `guard_nodunder` | T19's synthetic proof | the offender list lacks the two `__setattr__` writes |
+
+8. **D measured** (`measure_r3.log`, `measure_r3_proto.out`, `measure_r3_base.out`): §1.6.
+   `json` and `rotate_all` each give 30 sends, 6 logins and **0 s asleep** with the
+   design, against 12 sends, 600 s asleep and `SessionHealthUnknown` with revision 2's
+   rule (`REVERT=nores_waits`).
+9. **The harness** (`scripts/verify_change.py --base f3e731f` on 9609d95; `verify_r3.log`,
+   `vc_r3/summary.json`):
+   - 0 changed package files and 1 changed test file. It selected **67 test files**,
+     this module included: **67 in one parallel pass, 0 serial**.
+   - Result: **2827 passed, 0 failed, 0 errors, 1 skipped, 71 xfailed**, rc 0.
+   - This module's 53 marked tests are among the 71 xfailed.
+   - The one skip is `tests/test_packaging.py:179`, "bdist_wheel unavailable here
+     (Debian setuptools bug)": the environment's, not this item's.
+
+**Found and fixed during this revision's verification (before the commit).** T M7c's
+"no row is written" half was vacuous under the prototype. `_manager` passed only the
+keywords named in `SessionManager.__init__`'s signature, and the prototype's takes
+`store` through `**kw`, so the store double was dropped and recorded nothing. `nocas`
+still failed T M7c, but on the listener alone. `_manager` now passes every keyword to a
+constructor that takes `**kwargs`. T M7c also asserts the double recorded the login's
+and the adopt's rows before the check is released. `nocas` now fails it on both
+halves (step 7).
