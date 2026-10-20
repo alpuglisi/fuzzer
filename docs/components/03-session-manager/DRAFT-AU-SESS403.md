@@ -81,7 +81,11 @@
 **The prototype** (`docs/components/03-session-manager/au-sess403-prototype/`)
 - `proto.py` patches this design onto `SessionManager` and `session.detect` at run time.
   It is never collected and is not part of `fuzzlab/`; Phase 2 deletes it.
-- `REVERT=<name>` undoes one decision (37 names).
+- `REVERT=<name>` undoes one decision (43 names).
+  - 39 undo a decision of the design.
+  - 4 (`guard_*`) weaken T19's own guard.
+  - Every collected test is named by at least one revert, except T19's whole-package
+    assertion and F3's pin (§6).
 - `run_reverts.sh` runs every revert against its named tests, then the design.
 - This is reviewer B's masking technique, applied to every test.
 
@@ -215,9 +219,10 @@ sources predict.
   cannot change; it passes on the implementation.
 - F3's strict-xfail pin is the stated residual R6.
 
-**Every revert** fails every test named for it (§6, the revert column). `run_reverts.sh`
-reports each revert on one line as `selected N failed N`
-(`scratchpad/au-sess403/reverts_r2.log`; the re-run on the committed file is in §12).
+**Every revert** fails every test named for it (§6, the revert column). There are 43,
+and every collected test is named by at least one, except T19's whole-package assertion
+and F3's pin. `run_reverts.sh` reports each revert on one line as
+`selected N failed N`. The runs on the committed files are in §12.
 
 ## 2. The defect, as measured
 
@@ -596,7 +601,7 @@ How to read the columns:
 | T6 `…late_answer_from_an_earlier_session_is_ignored[redirect,none]` | generations | counts (3 logins) | `nogen`, `nogenrecord` |
 | T7 `…single_flight_lock_stops_simultaneous_duplicate_logins` | the audit's claim | pin | `nologinlock` |
 | T8 `…concurrent_forbidden_rounds_never_log_in_again[redirect,none]` | sequential churn | counts (4 logins) | `403` (none), `nocache` (redirect) |
-| T9 `…each_login_records_the_resource_its_answers_prove[redirect,static,presence,forbid,basic,none]` | M4, M5 | `recorded None` (none: pin) | `rule2verify` (static), `nocorrupt` (presence), `norefusal` (forbid), `publicbase` (none) |
+| T9 `…each_login_records_the_resource_its_answers_prove[redirect,static,presence,forbid,basic,none]` | M4, M5 | `recorded None` (none: pin) | `norule2` (redirect, basic), `rule2_cookie_only` (basic), `rule2verify` (static), `nocorrupt` (presence), `norefusal` (forbid), `publicbase` (none) |
 | TP1 `…401_expiry_on_an_api_route…` | a true positive | pin | `redirect_live` |
 | TP2 `…in_place_login_form_expiry…` (BUG-0113) | a true positive | pin | `content_rule_off` |
 | TP3 `…basic_expiry_is_recovered_and_a_password_page_is_never_a_signal` | Basic's exception | pin | `basic_content` |
@@ -623,7 +628,7 @@ How to read the columns:
 | T23 `…request_entry_names…is_total` | SP-16 | API absent | `noentrynames` |
 | T10 `…policy_block_never_as_a_loss[403, 451]` | the predicate | 403: counts; 451: pin | `403`, `policy_loss` |
 | T11 `…keeps_its_loss_signals_and_never_reads_a_throttle` | the predicate | pin | `throttle`, `content_rule_off` |
-| T19 `…only_the_owner_decides_a_session_loss` + `…guard_catches_synthetic_offenders` | PA-0533(4) | 2 offenders (`observe`, `verify_live`) | the 6 synthetic offenders, inside the test |
+| T19 `…only_the_owner_decides_a_session_loss` + `…guard_catches_synthetic_offenders` | PA-0533(4) | 2 offenders (`observe`, `verify_live`) | whole package: fails on the base and on the prototype, since a run-time patch cannot change `fuzzlab/`'s source, so Phase 2 proves it. Synthetic: `guard_noassign`, `guard_nosetattr`, `guard_nokeyword`, `guard_nocall`; each re-executes the guard with one branch off. |
 | F3 `…seam_probe_carries_the_session_generation_it_was_sent_on` | R6 (strict xfail) | API absent | — (a residual's pin; fails on the prototype too) |
 | T20 `tests/test_core_comparability.py::…but_the_owner` (three rows removed) | CC-CORE-0070 | Phase 2 | restoring a status literal in any of the three sites (its existing synthetic offenders) |
 
@@ -955,6 +960,17 @@ them.
   - markers on: 17 passed, 41 xfailed;
   - `--runxfail`: 41 failed, 17 passed. Each failure is on a count, a behaviour or an
     absent API, as §1.9 lists.
+- **Six reverts added, and the whole runner again on 1f85bbf**
+  (`reverts_r2_1f85bbf.log`).
+  - A collection check found five tests that no revert named: T9[redirect],
+    T9[basic], T19's synthetic proof, T19's whole-package assertion and F3.
+  - `norule2` and `rule2_cookie_only` now name the two T9 cases. The four `guard_*`
+    reverts name the synthetic proof.
+  - **All 43 reverts print `OK`.** Each new one fails for its own reason:
+    - each `guard_*` revert fails the synthetic assertion with a shorter offender
+      list;
+    - `norule2` and `rule2_cookie_only` fail on T9[basic] with `recorded: None`.
+  - The prototype as drafted: **2 failed, 56 passed**, the same two.
 - **The harness on the committed tree** (`scripts/verify_change.py --base 15a8a27` on
   fe15c23):
   - It selected the whole suite, because the merged lock changed `tests/conftest.py`:

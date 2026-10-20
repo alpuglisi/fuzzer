@@ -7,8 +7,10 @@ run-time prototype of the design. This is the technique reviewer B used to find 
 masked reverts of revision 1.
 
 - `proto.py` patches the drafted behaviour onto `SessionManager` and `session.detect` at
-  run time. `REVERT=<name>` undoes one decision; `proto.REVERTS` lists all 37, and `run_reverts.sh` runs every one.
-- `proto_plugin.py`: `-p proto_plugin`, with this directory on `PYTHONPATH`.
+  run time. `REVERT=<name>` undoes one decision. `proto.REVERTS` lists all 43, and
+  `run_reverts.sh` runs every one.
+- `proto_plugin.py`: `-p proto_plugin`, with this directory on `PYTHONPATH`. A
+  `guard_*` revert re-executes T19's guard in the test module with one branch off.
 - `run_reverts.sh <worktree>`: each revert against its tests, then the prototype as
   drafted.
 
