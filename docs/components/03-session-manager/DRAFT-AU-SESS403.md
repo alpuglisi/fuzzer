@@ -1012,5 +1012,32 @@ component and no new dependency.
 
 ## 12. Phase-1 verification
 
-The pytest run of `tests/test_session_forbidden_answers.py`, and the `verify_change.py`
-run on the committed lane tree, are recorded here once the host was idle (§1.6).
+Each run started only after no other pytest or `verify_change` was live on the host.
+- My waiter (`scratchpad/au-sess403/wait_then_test.sh`) has no timeout of its own.
+- `verify_change.py` takes the host lock and refuses rather than falling through.
+
+**The new file alone** (2026-10-20 06:49Z, the `FUZZLAB_REQUIRE_*` flags set):
+- `tests/test_session_forbidden_answers.py`: **5 passed, 10 xfailed** in 7.9 s.
+- Each of the 10 was then called directly, without pytest
+  (`scratchpad/au-sess403/why_xfail.py`). Each fails on an `AssertionError` that carries
+  the measured counts, never another exception:
+  - the three 403 scenarios, the scope 401, the privilege redirect and the password 401:
+    `logins 10, invalidations 10, sessions 10`;
+  - the late answer: `logins 3, invalidations 2`;
+  - the concurrent rounds: `logins 4`;
+  - the protected resource: `recorded None`;
+  - `detect_logout(403)`: True.
+
+**The harness:** `scripts/verify_change.py --base 15a8a27` on the committed tree
+`f92d8ed`, in a detached worktree.
+- It selected **66 files** (every package guard plus the changed test file), all in the
+  parallel pass.
+- **2811 passed, 0 failed, 0 errors, 1 skipped, 28 xfailed** in 383 s.
+- The skip is `tests/test_packaging.py:179`: bdist_wheel is unavailable here (a Debian
+  setuptools bug, pre-existing).
+- This file's share of the run, from the junit XML: 5 passed, 10 xfailed.
+- Summary: `scratchpad/au-sess403/vc/summary.json`.
+
+Nothing is implemented, so this run proves only one thing: the committed tests and draft
+break no guard. Every listener, wall-clock, arrival-order, lint and PA guard passes over
+the new test module.
