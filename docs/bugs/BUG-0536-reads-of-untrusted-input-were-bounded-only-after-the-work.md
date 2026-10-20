@@ -127,10 +127,11 @@ the work.
   that is not one boolean per pattern and text is no answer. When the patterns could not
   be evaluated, the case is an `error` "body_matches not evaluated within 5 s
   (inconclusive)", unless other evidence matched. It is never a no-match.
-- **Tests:** `tests/test_bounded_reads.py`, 27 tests and 2 strict xfails. Every reader
+- **Tests:** `tests/test_bounded_reads.py`: 30 test cases and 3 strict xfails. Every reader
   is driven against a dripping and a bombing loopback peer, and the peer's sent-byte
   count shows the connection was dropped. Decoding memory is measured, each coding is
-  pinned, and the runner's drip is tested. The tail tests cover the over-cap line, the
+  pinned, decoding stops exactly at the ceiling for gzip, deflate, raw deflate and
+  Brotli fed in small receives, and the runner's drip is tested. The tail tests cover the over-cap line, the
   boundary, the action log, memory and the copy count, and the copy oracle is proven on
   the pre-fix algorithm. The regex tests cover the catastrophic pattern under a 60 s
   smoke alarm, pins through the worker, the matcher guard and the worker's shape check.
