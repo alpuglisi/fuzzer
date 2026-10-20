@@ -38,17 +38,23 @@ version change:
 
 ## Where encountered
 - `tests/test_web_sitetree_browser.py::test_show_more_from_the_keyboard_keeps_focus_in_the_tree`
-  failed once in a full harness run (200 of 250 items): E3 met an E1 refresh caused by an
-  earlier test's writer frames folded by a reader's close (DRAFT-AU-SITETREE §1.6).
+  failed once in a full harness run (200 of 250 items), taken to be E3 meeting an E1
+  refresh caused by an earlier test's writer frames folded by a reader's close
+  (DRAFT-AU-SITETREE §1.6). Not proven for that run: the same symptom later came with no
+  refresh at all from the tests' own quadratic locator under load (DRAFT §5.6). E3 and
+  E1 are each reproduced (p2, p7) and tested.
 - The AU-SESS403 lane reproduced it; the AU-SITETREE lane measured E1-E6 (DRAFT §1.2-§1.6,
   probes M1-M7 and the browser probes p1-p7).
 - E8: the confirming review of revision 2, after
   `test_a_refresh_keeps_focus_selection_and_loaded_pages` failed once on `7ebf48a` plus
-  the counters-only patch ("/wide/w999" not shown within 10 s; DRAFT §5.6).
+  the counters-only patch ("/wide/w999" not shown within 10 s). E8 is real (its retry
+  test fails on it), but that failure was not E8: it recurred on the implementation under
+  `-n 4` load and was root-caused to the browser tests' own locator, quadratic in the
+  tree (DRAFT §5.6; a separate test defect, its record in DRAFT §9.4).
 
 ## What it caused to fail
-- A harness run failed (one browser test, above), and another test failed once (E8 or
-  E2, above).
+- A harness run failed (one browser test, above). (Another test's one failure, above,
+  was the tests' own locator, not this bug: DRAFT §5.6.)
 - An operator watching a scan saw a site map and a Diagrams page up to 230 commits
   behind (M4), with stale child lists from the cache, and refreshes with no write.
 - A keyboard or screen-reader user lost their place on every refresh (focus to

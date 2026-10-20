@@ -192,3 +192,56 @@ def test_the_sleep_guard_catches_a_synthetic_offender(tmp_path):
     assert sleeping_tests(views, tmp_path) == [
         "tests/test_x.py::test_sleeps: sleep() at line 4",
         "tests/test_x.py::test_sleeps: wait_for_timeout() at line 3"]
+
+
+#: Browser test files whose locators the descendant-filter guard reads.
+_BROWSER_TESTS = ("test_web_*browser*.py", "test_web_diagrams.py")
+#: ``(file, function)`` allowed to filter locators by a descendant (``has=``), with why:
+#: none today.
+_HAS_ALLOWED: dict[tuple[str, str], str] = {}
+
+
+def descendant_filters(src: str) -> list[str]:
+    """Functions that filter a locator by a descendant (``has=`` / ``has_not=``)."""
+    out = []
+
+    def visit(node, where):
+        for ch in ast.iter_child_nodes(node):
+            if isinstance(ch, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                visit(ch, f"{where}.{ch.name}" if where else ch.name)
+                continue
+            if isinstance(ch, ast.Call) and any(k.arg in ("has", "has_not")
+                                                for k in ch.keywords):
+                out.append(where or "<module>")
+            visit(ch, where)
+
+    visit(ast.parse(src), "")
+    return out
+
+
+def test_no_browser_test_locates_by_a_descendant_filter():
+    """G5 (DRAFT-AU-SITETREE §5.6): Playwright evaluates a ``has=`` filter inside every
+    candidate's subtree; over the site map's nested tree items one resolution took ~1.9 s
+    of a renderer core with 250 items (quadratic), and every action and `expect` retry
+    re-resolves it, so under the harness's parallel load live-view tests overran their
+    5 s. A test locates the descendant and steps up instead; any ``has=`` is a reviewed
+    allowance."""
+    tests = REPO / "tests"
+    found = sorted({(p.name, f) for pat in _BROWSER_TESTS for p in tests.glob(pat)
+                    for f in descendant_filters(p.read_text("utf-8"))})
+    assert [k for k in found if k not in _HAS_ALLOWED] == []
+    assert [k for k in _HAS_ALLOWED if k not in found] == []      # no stale allowance
+
+
+def test_the_descendant_filter_guard_catches_synthetic_offenders():
+    """PA-0034(2): the old `Tab.item` (a `has=` filter over tree items) and a `has_not=`
+    are found; locating the label and stepping up (`xpath=../..`) is not."""
+    old = ("class Tab:\n    def item(self, label):\n"
+           "        return self.page.locator('li[role=\"treeitem\"]', has=self.page.locator(\n"
+           "            ':scope > .st-row > .st-label', has_text=label))\n"
+           "def f(page):\n    return page.locator('tr', has_not=page.locator('a'))\n")
+    new = ("class Tab:\n    def item(self, label):\n"
+           "        return self.page.locator('li > .st-row > .st-label', has_text=label)"
+           ".locator('xpath=../..')\n")
+    assert descendant_filters(old) == ["Tab.item", "f"]
+    assert descendant_filters(new) == []

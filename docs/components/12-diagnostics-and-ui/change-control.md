@@ -54,7 +54,18 @@ Newest first.
     `tests/test_web_sitetree_browser.py` (B1-B6, B9, L1-B, the retry, the Issues
     click-first order; "before" writes; the four sleep-synchronised tests on counters);
     `tests/test_web_diagrams.py` (B7 with "before" writes and identity, B8);
-    `tests/test_web_live_focus.py` (G1-G3).
+    `tests/test_web_live_focus.py` (G1-G3; G4, no registered live-view test sleeps; G5,
+    no browser test locates by a descendant filter).
+  - **A registered test that failed once recurred under load, root-caused** (blocker 6;
+    DRAFT §5.6): the browser tests' `Tab.item` located a tree item with a `has=`
+    descendant filter, which Chromium resolves in time quadratic in the tree's size
+    (~1.9 s of renderer CPU per resolution on the 250-item group, measured; ~5 ms for a
+    plain selector), so a click or `expect` under `-n 4` load overran its timeout. A test
+    defect, not the product's: `Tab.item` now matches the label and steps up to its item
+    (`xpath=../..`; steps 0.02-0.06 s); G5 fails any `has=`/`has_not=` locator in a browser
+    test. The B9 helper test scrolls its own container, so a restore without
+    `preventScroll` fails it (the window-scroll check could not, §11.4); the "Show more"
+    test asserts the same element, not a new one found by its key.
 - Divergences from the draft found while implementing (recorded in the draft's §11):
   idle release by a reaper thread, never at a call (a call's release on the same path
   gave two refreshes, against R3, and a page that stopped polling held the store for

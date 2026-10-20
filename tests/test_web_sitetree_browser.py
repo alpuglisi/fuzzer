@@ -111,8 +111,15 @@ class Tab:
         self.page.wait_for_selector('#sitetree-root[data-ready="1"] [role="treeitem"]')
 
     def item(self, label: str):
-        return self.page.locator('li[role="treeitem"]', has=self.page.locator(
-            ":scope > .st-row > .st-label", has_text=re.compile("^" + re.escape(label) + "$")))
+        """The tree items whose own row's label is exactly ``label``, in document order:
+        the labels are matched (one pass), then each label's row's item (``../..``). Never
+        a ``has=`` filter over the items: Playwright evaluates it inside every candidate's
+        subtree and the items nest, so with 250 items one resolution took ~1.9 s of a
+        renderer core (quadratic), and under the harness's parallel load an action or an
+        `expect` retrying it overran its 5 s (DRAFT-AU-SITETREE §5.6)."""
+        return self.page.locator('#st-tree li[role="treeitem"] > .st-row > .st-label',
+                                 has_text=re.compile("^" + re.escape(label) + "$")
+                                 ).locator("xpath=../..")
 
     def open(self, *labels):
         for lab in labels:
@@ -542,14 +549,19 @@ def test_a_refresh_keeps_focus_on_show_more_and_enter_still_loads_the_page(tab, 
     """E3 (p2): a refresh between focusing "Show more" and pressing Enter replaced the
     button; focus fell to <body> and Enter loaded nothing (200 of 250). The write sorts
     after the group, or before it among its siblings (blocker 3): the button keeps focus
-    by identity, and the page's first item (w200) gets it, by identity."""
+    by identity -- the same element, updated in place (FR-UI-514), not a new one found by
+    its key -- and the page's first item (w200) gets it, by identity."""
     page = tab.page
     group = _wide(tab)
     _baseline(page)
-    group.locator(":scope > li.st-more-item button").focus()
+    more = group.locator(":scope > li.st-more-item button")
+    more.focus()
+    more.evaluate("b => { b._fuzzlabProbe = 'same'; }")      # marks this element
     w = _refreshed_by_write(tab, site, "/zz-b1" if where == "after" else "/aa-b1")
     try:
-        expect(group.locator(":scope > li.st-more-item button")).to_be_focused()
+        expect(more).to_be_focused()
+        assert page.evaluate("() => document.activeElement._fuzzlabProbe") == "same", \
+            "a new 'Show more' element: it was re-created, not updated in place"
         page.keyboard.press("Enter")
         expect(group.locator(":scope > li[role=treeitem]")).to_have_count(250)
         assert _focused_item(page)[1] == "w200"
@@ -885,6 +897,8 @@ _B9_HELPER = """async () => {
   const out = {};
   const pane = mk("div", "");
   pane.tabIndex = -1;
+  pane.style.height = "120px";                     // its own scroll container (CSSOM:
+  pane.style.overflow = "auto";                    // allowed by the page's CSP)
   document.querySelector("#sitetree-root").append(pane);
   // 1. the keyed control comes back disabled; then a hidden, a detached and a visible but
   //    unfocusable candidate, and a function finding nothing: each refuses focus
@@ -907,12 +921,14 @@ _B9_HELPER = """async () => {
   spacer.style.height = "4000px";                  // CSSOM, allowed by the page's CSP
   const visible = mk("button", "visible");
   pane.append(disabled, box, inert, spacer, visible);
-  window.scrollTo(0, 0);
+  pane.scrollTop = 0;
+  const scrollY = window.scrollY;
   out.key = key;
   out.lostToBody = document.activeElement === document.body;
   let got = lf.restoreFocus(pane, key, hidden, detached, inert, () => null, visible);
   out.landed = got === visible && document.activeElement === visible;
-  out.scrollY = window.scrollY;                     // preventScroll: 4000 px down, unscrolled
+  // preventScroll: the fallback is 4000 px down its scroll container, which stays put
+  out.scrolled = [pane.scrollTop, window.scrollY - scrollY];
   // 2. nothing usable is left: the pane itself, never the body
   pane.replaceChildren(mk("button", "second"));
   pane.firstChild.dataset.focusKey = "k2";
@@ -944,7 +960,7 @@ def test_restore_focus_skips_every_candidate_that_refuses_focus_and_ends_at_the_
     left, the region's pane takes it -- never the page body. Focus outside the region is
     never taken, and focus still inside it is never moved."""
     out = tab.page.evaluate(_B9_HELPER)
-    assert out == {"key": "k", "lostToBody": True, "landed": True, "scrollY": 0,
+    assert out == {"key": "k", "lostToBody": True, "landed": True, "scrolled": [0, 0],
                    "pane": True, "notStolen": True, "kept": True}, out
     assert tab.problems() == []
 
@@ -952,9 +968,11 @@ def test_restore_focus_skips_every_candidate_that_refuses_focus_and_ends_at_the_
 def test_a_refresh_that_removes_the_focused_item_never_scrolls_nor_drops_to_the_body(tab,
                                                                                     site):
     """B9, in a real refresh (D7): the focused item is deleted (another process); focus
-    goes to its parent item, which is scrolled out of the tree pane's view, and the pane
-    does not scroll (preventScroll). Then, with a run lens showing one host, that host's
-    rows are deleted: the tree is empty and focus ends at the tree's pane, never <body>."""
+    goes to its parent item, whose row is scrolled out of the tree pane's view, and the
+    pane's scroll position is unchanged. (The parent item's box holds the rows in view, so
+    this alone cannot tell `preventScroll` from its absence: the helper test above does.)
+    Then, with a run lens showing one host, that host's rows are deleted: the tree is
+    empty and focus ends at the tree's pane, never <body>."""
     page = tab.page
     group = _wide(tab)
     _baseline(page)

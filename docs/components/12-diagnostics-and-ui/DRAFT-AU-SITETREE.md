@@ -200,8 +200,13 @@ Revision 1's in-process M3 (`m3_frequency.out`) had the same shape (140 and 137 
 | Diagrams: run and scope `<select>` | kept |
 
 The committed tests reproduce each of these on `7ebf48a` (§5.5). The original harness
-failure (one full run, 200 of 250) is p2 meeting an E1 refresh caused by an earlier test's
-writer frames folded by a reader's close.
+failure (one full run, 200 of 250) was taken to be p2 meeting an E1 refresh caused by an
+earlier test's writer frames folded by a reader's close. *(At implementation, §5.6: not
+proven for that run. The same symptom later came with no refresh at all, from the tests'
+own quadratic locator under the harness's load:
+`test_show_more_loads_one_page_per_click_and_works_from_the_keyboard`, which writes
+nothing, failed so on `e55379d`. E3 and E1 are each real, reproduced (p2, p7) and tested;
+which of the two failed that run cannot be told after the fact.)*
 
 ### 1.7 BUG-0535 on today's code (D2: `rev2/d2_today.py`, `rev2/d2_today.out`)
 
@@ -674,18 +679,65 @@ shown). Existing tests keep their waits (D8: only the tests touched change).
 | G2 | `test_the_live_view_registry_catches_synthetic_offenders` | passes (the guard's own proof) |
 | G3 | `test_every_live_view_restores_focus_through_the_one_helper` + `test_the_one_helper_guard_tells_a_definition_from_a_use` | **fails**: `livefocus.js` is missing; the self-test passes |
 
-### 5.6 A registered test that failed once (blocker 6)
+### 5.6 A registered test that failed once (blocker 6): it recurred, root-caused
 
-`test_a_refresh_keeps_focus_selection_and_loaded_pages` failed once in the confirming
-review's browser run on `7ebf48a` plus the counters-only patch: "/wide/w999" was not shown
-within 10 s (`confirm_sitetree/browser.out`); ten re-runs passed (`w999_run_1..10.out`).
-Not called flaky. Two defects of that code each explain it: E2 (the write landed inside
-the WAL's old extent: the fingerprint never changed) and E8 (the poll recorded the new
-version before its refresh, and a refresh whose group fetch failed was never retried).
-The test also waited 900 ms for a baseline instead of observing it. All three are fixed
-(SP-58; "a version is marked seen only once its refresh succeeded"; the page counters),
-and the test is now parametrised with a write that sorts before the focused item. If it
-recurs, it is root-caused from the counters and the request log, never re-run away.
+**The occurrence.** `test_a_refresh_keeps_focus_selection_and_loaded_pages` failed once in
+the confirming review's browser run on `7ebf48a` plus the counters-only patch:
+"/wide/w999" was not shown within 10 s (`confirm_sitetree/browser.out`); ten re-runs
+passed (`w999_run_1..10.out`).
+
+**It recurred** on the implementation (`e55379d`), never in a serial run, only with the
+browser files in one parallel pass (`-n 4`, as the harness runs them): in the first broad
+run (`test_a_refresh_keeps_focus_selection_and_loaded_pages[after]`), then in 4 of 11
+loaded runs of the four browser files (`impl/loop_1.out`..`loop_11.out`, each 250-294 s:
+the same test once, B2b `[after]` once, and twice
+`test_show_more_loads_one_page_per_click_and_works_from_the_keyboard`, a test that writes
+nothing). Each time a "Show more" page was not shown within `expect`'s 5 s, and its call
+log read "2 × locator resolved to 200 elements" (an idle page logs 9 × in 5 s,
+`impl/expect_log.out`).
+
+**Measured** (`impl/dump_*.txt`: page-side clocks from a `fetch` wrapper and a 100 ms
+sampler, server-side timings of each children request, test-side marks, all epoch time):
+the server answered every request in 0-40 ms, the page issued the "Show more" request 5 s
+after the Enter, and its 100 ms sampler ticked 14 times in 13 s: the page's main thread
+was starved, not throttled (Playwright passes `--disable-background-timer-throttling`,
+`--disable-renderer-backgrounding`, `--disable-backgrounding-occluded-windows`) and not the
+host (load 2-3 on 4 cores, CPU pressure 5%, no CFS quota). A per-second sampler of every
+renderer (`impl/rsample.log`) showed the site-map test pages' renderers at 100% of a core
+for 5-22 s at a time. Replaying the failing test step by step outside pytest, charging
+renderer CPU to each step (`impl/cpu_steps.py`, `cpu_steps_old_item.out`,
+`cpu_steps_new_item.out`), on `7ebf48a` and on `e55379d` alike:
+
+| Step (250 tree items) | `Tab.item` as written (`has=` filter) | a plain CSS locator | `Tab.item` fixed |
+|---|---|---|---|
+| one resolution of `item("wide").first` | ~1.7-1.9 s of a full core | ~5 ms | ~10 ms |
+| `focus()` on "Show more" (via `item`) | 1.35-2.28 s | | 0.02 s |
+| `expect(...).to_have_count(250)` | 1.91-2.73 s | | 0.06 s |
+| idle page | 1-2% CPU | | 1% |
+
+**Root cause (Five Whys).** (1) The page did not show the page in 5 s because its
+renderer was starved. (2) It was starved because each Playwright step of the site-map tests
+burned 1-3 s of a renderer core, and four browser workers on four cores ran such steps at
+once. (3) Each step cost that much because `Tab.item(label)` was `page.locator('li[role=
+"treeitem"]', has=page.locator(':scope > .st-row > .st-label', has_text=...))`: Playwright
+evaluates a `has=` filter inside every candidate's subtree, and tree items nest (the host
+item holds every other), so one resolution is quadratic in the tree; every action's
+actionability check and every `expect` retry re-resolves it. (4) It went unnoticed because
+the tests passed in serial runs and nothing measured a test's own cost; the one failure on
+`7ebf48a` was put down to the product's E2/E8 (also real). (5) **Root cause: a test helper
+whose cost grows quadratically with the page under test, invisible on an idle host,
+turned every fixed timeout in the site-map browser tests into a load-dependent race.**
+The product code is not involved (the same profile on `7ebf48a`).
+
+**Fix** (the commit after `e55379d`): `Tab.item` matches the label elements (one pass)
+and steps up to each label's row's item (`xpath=../..`); same structure, same document
+order. Guard G5 (`tests/test_web_live_focus.py::test_no_browser_test_locates_by_a_descendant_filter`,
+proven on the old helper) makes any `has=`/`has_not=` filter in a browser test a reviewed
+allowance. Evidence: §11.5 (loaded runs after the fix).
+
+**Bookkeeping.** This is a test defect with its own root cause, so it needs its own bug
+record. No number was pre-assigned for it (PA-0031), so its text is in §9.4 for the
+coordinator to number.
 
 ### 5.5 The proof runs on `7ebf48a`
 
@@ -956,7 +1008,7 @@ supersedes PA-0518(1) for live views; amends PA-0023.
 - **`ERROR_LOG.md`** (two entries, newest on top, after the format block):
 
 > ## 2026-10-20 — web UI, site map and Diagrams (the store version missed writes and changed without one; a live refresh lost the user's place; BUG-0534)
-> - **Symptom:** `test_web_sitetree_browser.py::test_show_more_from_the_keyboard_keeps_focus_in_the_tree` failed once in a full harness run (200 of 250), and `test_a_refresh_keeps_focus_selection_and_loaded_pages` once (`/wide/w999` not shown in 10 s). The site map and the Diagrams page refreshed with no write, missed most commits of a running scan (2783 of 3000 after WAL restarts), and a refresh dropped focus to the page body on six control kinds, dropped a "Show more" page in either order, reset Issues to its first page, and never retried a refresh that failed.
+> - **Symptom:** `test_web_sitetree_browser.py::test_show_more_from_the_keyboard_keeps_focus_in_the_tree` failed once in a full harness run (200 of 250; its own cause not proven: the same symptom also came from a test defect, BUG-NNNN below). The site map and the Diagrams page refreshed with no write, missed most commits of a running scan (2783 of 3000 after WAL restarts), and a refresh dropped focus to the page body on six control kinds, dropped a "Show more" page in either order, reset Issues to its first page, and never retried a refresh that failed.
 > - **Root cause:** the store version was inferred from SQLite's file side effects (the store's stat, the WAL's size and header), tested only on the states the author pictured; FR-UI-505's "keeping focus" was implemented and tested for one element kind in one order (BUG-0518's root cause recurring; PA-0518(1) neither swept nor enforced); the poll marked a version seen before its refresh.
 > - **Remediation:** the version is `PRAGMA data_version` on one held query-only connection (SP-58, measured across processes); one focus helper with identity keys on every control, one ordering rule for a user's page load against a refresh, a version marked seen only once its refresh succeeded, page counters instead of sleeps (CC-UI-0068, FR-UI-505/510/514, BUG-0534, PA-0534).
 > - **Status:** Fixed
@@ -996,6 +1048,60 @@ supersedes PA-0518(1) for live views; amends PA-0023.
 > - **Impact:** none landed (caught at implementation): the held watch would have turned a hand rename or restore of a project file into data loss while any site-map or Diagrams tab was open.
 > - **Status:** fixed in the implementation (a TRUNCATE checkpoint before a moved store's watch closes; a reaper for idle release); pinned by `test_a_store_moved_under_the_watch_keeps_its_commits_and_spoils_no_other` and `test_an_idle_watch_is_released_and_a_watched_one_is_kept`.
 
+- **`docs/claude_juicelab_failures.md`**, a second entry (F-number from the coordinator):
+
+> ### F-NNN — AU-SITETREE put a test's one failure down to the product without measuring it, and committed two tests that could not fail on the revert they named
+> - **What:** (1) revision 2's text, BUG-0534's draft and its ERROR_LOG draft attributed `test_a_refresh_keeps_focus_selection_and_loaded_pages`'s one failure on `7ebf48a` to the product's E8/E2, and the harness failure that opened the item to E3 meeting an E1 refresh, without measuring either run. At implementation the first recurred under `-n 4` load and was measured to be the tests' own `Tab.item` locator, quadratic in the tree (~1.9 s of renderer CPU per resolution), which also produced the second symptom with no refresh at all (DRAFT §5.6). (2) The revert proofs against `e55379d` found two named tests passing with their defect re-created: B9 claimed "restoring never scrolls" but measured the window, which the site map never scrolls; B1 claimed "the same element" but checked a locator that a re-created button restored by its key also satisfies (§11.4). Both were listed in FR-UI-514's Enforced-by line.
+> - **Evidence:** `scratchpad/au-sitetree/impl/loop_*.out`, `dump_*.txt`, `cpu_steps_old_item.out`, `cpu_steps_new_item.out`; `impl/mut/mutants.out` (two NOT CAUGHT); DRAFT-AU-SITETREE §1.6, §5.6, §11.4.
+> - **Impact:** none landed. E8, E3 and E1 are each real and tested; but three intermittent failures would have reached the harness as "flaky", the bug record named a cause it had not shown, and FR-UI-514's `preventScroll` and in-place clauses had no test that could fail.
+> - **Status:** fixed in the commit after `e55379d`: `Tab.item` locates the label and steps up, guard G5; B9a scrolls its own container; B1 asserts element identity; both mutants re-run (§11.4); the attributions corrected (§1.6, BUG-0534, the ERROR_LOG text).
+
+### 9.4 A new test defect found by blocker 6 (number from the coordinator)
+
+No BUG/PA number was pre-assigned for it (PA-0031); the text below is complete for the
+coordinator to number (`BUG-NNNN`, `PA-NNNN`) and file.
+
+- **`docs/bugs/BUG-NNNN-the-site-map-tests-item-locator-was-quadratic-and-starved-the-page.md`:**
+
+> # BUG-NNNN — The site-map browser tests' item locator was quadratic and starved the page under parallel load
+> - Date: 2026-10-20
+> - Status: fixed (AU-SITETREE, the commit after `e55379d`)
+> - Severity: medium (tests only). Three live-view browser tests failed intermittently under the harness's parallel load; one failure on `7ebf48a` had been put down to the product.
+>
+> ## Description
+> `tests/test_web_sitetree_browser.py::Tab.item(label)` was `page.locator('li[role="treeitem"]', has=page.locator(':scope > .st-row > .st-label', has_text=...))`. Playwright evaluates a `has=` filter inside every candidate's subtree, and tree items nest, so one resolution was quadratic in the tree: ~1.9 s of a renderer core with 250 items. Every action's actionability check and every `expect` retry re-resolves it.
+> ## Where encountered
+> `test_a_refresh_keeps_focus_selection_and_loaded_pages` (the confirming review's run on `7ebf48a` + counters; a broad run on `e55379d`), `test_show_more_pressed_while_a_refresh_loads_its_group_is_kept[after]` and `test_show_more_loads_one_page_per_click_and_works_from_the_keyboard` (4 of 11 loaded runs), only with the browser files in one `-n 4` pass. Possibly also the harness failure that opened BUG-0534 (`test_show_more_from_the_keyboard_keeps_focus_in_the_tree`, 200 of 250): not provable after the fact (DRAFT §1.6).
+> ## What it caused to fail
+> A "Show more" page not shown within `expect`'s 5 s ("2 × locator resolved"; an idle page resolves 9 × in 5 s); a refresh's request not issued within 15 s. No product defect: the same cost profile on `7ebf48a`.
+> ## What the bug was identified to be
+> A test helper whose cost grew quadratically with the page; under four browser workers on four cores each step took seconds of renderer CPU and fixed timeouts overran. Measured: DRAFT-AU-SITETREE §5.6 (page-side clocks, per-process CPU, a step-by-step replay on both trees).
+> ## Root cause analysis
+> Five Whys in DRAFT-AU-SITETREE §5.6. **Root cause:** a test helper whose cost grows quadratically with the page under test, invisible on an idle host, turned every fixed timeout in the site-map browser tests into a load-dependent race; nothing measured a test's own cost, and the test's event timestamps (delivered by Playwright's sync API only inside its calls) could not show it.
+> ## Corrective action
+> `Tab.item` matches the label elements and steps up (`xpath=../..`): ~10 ms per resolution; guard G5 (`tests/test_web_live_focus.py`) makes any `has=`/`has_not=` in a browser test a reviewed allowance; evidence of loaded runs after the fix in DRAFT §11.5.
+> ## Recurrence review
+> `docs/bugs/` searched for load, timeout, flaky, parallel, renderer, locator, wall clock: BUG-0135 (a wall-clock ratio under load), BUG-0526 (a bound over a span holding a browser start), BUG-0511 (arrival order), BUG-0143 (a concurrency-only failure set aside). **Same class: a test's oracle that depends on scheduling under the harness's load.**
+> ## Prior-preventive-action failure analysis
+> PA-0526 covers an explicit clock bound around a run that starts a browser or driver; it does not cover Playwright's own timeouts, nor a test helper's own cost (too narrow). PA-0135 covers complexity claims of product code, not test helpers (wrong layer). PA-0149(2) (reproduce a concurrency-only failure before setting it aside) was followed here and found it.
+> ## Preventive action
+> PA-NNNN (below).
+
+- **`docs/PREVENTIVE_ACTIONS.md`:**
+
+> - **PA-NNNN** — Strengthens PA-0526 and PA-0135 (from product code to test helpers) and applies PA-0149(2), after BUG-NNNN: the site-map browser tests' `Tab.item` filtered nested tree items by a descendant (`has=`), one resolution cost ~1.9 s of a renderer core, and under the harness's parallel load fixed timeouts overran.
+>   1. **A browser test never filters a locator by a descendant over a nested structure**: it locates the descendant and steps up. Any `has=`/`has_not=` in a browser test is a reviewed allowance.
+>   2. **A failure seen only under the harness's load is reproduced under that load and measured with clocks the test does not distort** (page-side timestamps, per-process CPU, server timings), before it is attributed to the product or to the timeout; the test's own event timestamps are not evidence (Playwright's sync API delivers events only inside its calls).
+>   - Enforced by: tests/test_web_live_focus.py::test_no_browser_test_locates_by_a_descendant_filter, tests/test_web_live_focus.py::test_the_descendant_filter_guard_catches_synthetic_offenders
+
+- **`ERROR_LOG.md`:**
+
+> ## 2026-10-20 — tests, site map in a real browser (a quadratic test locator starved the page under parallel load; BUG-NNNN)
+> - **Symptom:** three live-view browser tests failed intermittently, only with the browser files in one parallel pass: a "Show more" page not shown within 5 s, a refresh's request not issued within 15 s.
+> - **Root cause:** the tests' `Tab.item` filtered nested tree items with `has=`; Playwright evaluates it in every candidate's subtree, ~1.9 s of a renderer core per resolution with 250 items, re-run by every action and `expect` retry.
+> - **Remediation:** `Tab.item` locates the label and steps up (~10 ms); guard G5 on `has=` in browser tests (BUG-NNNN, PA-NNNN; DRAFT-AU-SITETREE §5.6).
+> - **Status:** Fixed
+
 ## 10. Questions for the coordinator
 
 - **Q1. `journal_size_limit`.** Measured (§1.8): it bounds the watched WAL (4 MiB, 64 MiB)
@@ -1022,7 +1128,7 @@ Merged first: the pushed tip `4ee8007` (F-106, F-107).
 | 1 | The guard's scope was unsound: `web_scope` kept only modules that open SQLite, missing helpers a route hands a path to, library openers, and 21 reachable modules with 41 raw-open sites (`core/secretfile.py:72,:84` from `web/projects.py:845`). | `tests/test_web_store_locks.py`: the scope is the whole import closure of `fuzzlab/web` (184 modules; lazy imports and literal `importlib.import_module` included); shapes add `shutil.copytree/copyfileobj/make_archive/unpack_archive`, `filecmp.*`, `tempfile.*`, `ZipFile()` and a bound `ZipFile.write`, a bound `TarFile.add`, `FileResponse`, `StaticFiles`; 60 reasoned allowances, 64 sites, 32 modules. Plus a run-time audit hook (`tests/_store_audit.py`, armed by `tests/conftest.py::_no_raw_store_open` for every `test_web_*`, `test_core_project`, `test_core_store_read_only` test): it records every database SQLite opens (`sqlite3.connect` audit event, URIs included) and fails a test during which a production frame opened a store's main file, `-wal`, `-shm` or `-journal` (or any file with a live `-wal`/`-shm`) through any Python-level open. Both proven on synthetic offenders (a helper a route reaches by a lazy import and by `import_module`, a helper's helper, every library shape; for the hook BUG-0535's own read, a route handing the path to a helper, `os.open`, `shutil`, `zipfile`; near misses for each). Stated unseen: code outside the import graph that no web test runs (an entry-point plugin, `web/app.py:444`; a computed import), opens by C code, opens in another process. |
 | 2 | D4 false for L1-7 (an in-process `sqlite3.connect`) and L1-B (an in-process `Store`). | L1-7 runs its rollback-journal writer through `Writer` (`open_plain`, `sql`); L1-B's `_Written` writes through a `Writer` in another process (`_xsql`), as do every browser test's writes (B3's delete and re-insert as single statements). PA-0535(3) holds for them. |
 | 3 | "Never positional" untested: every write sorted after the focused control. | Writes that sort before it, asserting identity: B1 (a sibling before the group), B2 and B2b (an item before the page, focus on `w200` by label), the selection test (an item before the focused `w240`, by `data-id` and label), B4 (a sibling before "shop"; a newer finding listed before the focused open link: the same node, href and item), B5 (a newer finding before the focused Issues link: href, 61 rows kept), B7 (a new origin, interface and first step before each focused kind: key and label). |
-| 4 | D7 had no named test. | B9 is two tests: `test_restore_focus_skips_every_candidate_that_refuses_focus_and_ends_at_the_pane` (disabled, hidden, detached and visible-but-unfocusable candidates refused; a visible fallback 4000 px down takes focus with `scrollY` 0; with nothing usable, the pane; focus outside the region never taken; focus still inside never moved) and `test_a_refresh_that_removes_the_focused_item_never_scrolls_nor_drops_to_the_body` (a real refresh: the parent item out of view takes focus and the tree pane's `scrollTop` is unchanged; an emptied tree leaves focus on `#st-tree`). Both in FR-UI-514's Enforced-by line. |
+| 4 | D7 had no named test. | B9 is two tests: `test_restore_focus_skips_every_candidate_that_refuses_focus_and_ends_at_the_pane` (disabled, hidden, detached and visible-but-unfocusable candidates refused; a visible fallback 4000 px down its own scroll container takes focus with the container's `scrollTop` and the window's `scrollY` unchanged; with nothing usable, the pane; focus outside the region never taken; focus still inside never moved) and `test_a_refresh_that_removes_the_focused_item_never_scrolls_nor_drops_to_the_body` (a real refresh: the parent item out of view takes focus and the tree pane's `scrollTop` is unchanged; an emptied tree leaves focus on `#st-tree`). Both in FR-UI-514's Enforced-by line. |
 | 5 | Bookkeeping: an SP-59 row for the opener; CC-FUZZ-0108 for `harness/auto.py`. | §4.5 (SP-59: C3, C4 and K5 plus the defined-once check); CC-FUZZ-0108 written, with a new direct test of the estimate. |
 | 6 | `test_a_refresh_keeps_focus_selection_and_loaded_pages` failed once; sleep-synchronised tests; a version recorded before its refresh. | The four tests (`:222`, `:343`, `:401`, `:445`) wait on the counters (`data-baseline`, `data-refreshes`, and a new `data-loads` for "a held answer has been handled"); the rule "a version is marked seen only once its refresh succeeded" in both pages, with `test_a_refresh_whose_group_fetch_fails_is_retried_at_the_next_poll` (an injected 500 on the refresh's group fetch); G4 (`test_no_registered_live_view_test_synchronises_by_sleeping`) fails any registered live-view test that sleeps; the occurrence is recorded in §5.6. |
 
@@ -1066,5 +1172,74 @@ first; B5b, refresh first).
 
 ### 11.4 Revert proofs (PA-0034(2)), against the implementation
 
-Recorded after the runs below (scratch copy of the committed tree; each mutant applied
-alone, the named tests run, the file restored).
+Each mutant re-creates one defect a test names, applied alone to a scratch copy of the
+committed tree (`git archive`), the named tests run under `FUZZLAB_REQUIRE_BROWSER=1`, the
+file restored (`impl/mut/mutants.py`, output `impl/mut/mutants.out`). Baseline of every
+named node on `e55379d`: 72 passed. "Caught" = pytest exit 1 with the named test(s)
+failing for the stated reason.
+
+| Mutant (the defect re-created) | Named test(s) that fail | Result on `e55379d` |
+|---|---|---|
+| L1-1/L1-3: the watch released after every read (reopened per call) | L1-1 `test_a_readers_last_close_never_changes_the_version`; L1-3 `test_no_read_close_or_checkpoint_changes_the_version` (5 of 5 cases) | caught (6 failed) |
+| L1-2/L1-4/L1-7/L1-11: `7ebf48a`'s stat-based body | `test_every_commit_of_a_held_writer_in_another_process_changes_the_version`, `test_a_commit_hidden_by_a_wal_restart_is_never_served_from_the_cache`, `test_rollback_journal_commits_are_seen_under_a_coarse_clock`, `test_no_module_fingerprints_the_store_from_its_files` | caught (4 failed, 3 errors: fixtures needing the watch) |
+| L1-5: no identity re-check | `test_a_replaced_or_removed_store_changes_the_version` | caught |
+| L1-6: no epoch; no nonce (two mutants) | `test_a_reopened_watch_never_repeats_a_version` | caught, both |
+| L1-8: a broad swallow | `test_a_failed_read_is_no_version_and_any_other_error_propagates` (the 4 non-SQLite-read errors) | caught |
+| L1-8: a failed read returns the last version | the same test (`OperationalError`, `DatabaseError`) | caught |
+| L1-9: a watch for its own thread only | `test_concurrent_polls_from_many_threads_agree`, `test_the_store_watch_is_used_only_under_its_lock` | caught |
+| L1-9: the watch used outside its lock | `test_the_store_watch_is_used_only_under_its_lock` | caught |
+| L1-10: the watch opened through `open_store` | `test_the_store_version_never_creates_or_migrates_a_store` | caught |
+| L1-12: `summary` with no age bound | `test_the_project_listing_never_serves_a_summary_older_than_its_bound` | caught |
+| L1-13: `_leave` without the release | `test_leaving_a_temporary_project_leaves_no_descriptor_on_its_files` (both cases) | caught |
+| L1-14: a watch kept for another path | `test_only_the_open_projects_store_is_watched` | caught |
+| L1-15: a released watch closed under the lock | `test_a_released_watch_is_closed_outside_the_lock` | caught |
+| L1-15: no `_closing` (a replacement opens while its predecessor closes) | `test_a_replacement_watch_never_reads_before_its_predecessor_closed` | caught |
+| §1.10: no checkpoint before a moved store's watch closes | `test_a_store_moved_under_the_watch_keeps_its_commits_and_spoils_no_other` (3 of 3), `test_a_replaced_or_removed_store_changes_the_version` | caught |
+| §11.3: no reaper (an idle watch never released) | `test_an_idle_watch_is_released_and_a_watched_one_is_kept` | caught |
+| BUG-0535: the magic read with `open()` again (`summary`, `inspect`) | K1, K2, K3, the static guard, `test_whether_a_file_is_sqlite_is_asked_of_sqlite_never_read_raw` | caught (5 failed, 4 errors: the audit hook failing the K tests' teardown) |
+| BUG-0535 through a helper the guard's old scope missed (`core/secretfile.py`) | the static guard, the audit hook (via `test_whether_a_file_is_sqlite...` and K1) | caught |
+| C1: the opener without `query_only` | `test_the_read_only_opener_never_creates_writes_or_migrates` | caught |
+| C2: the opener with a shared cache | `test_the_read_only_opener_pins_a_private_cache` | caught |
+| C4/CC-FUZZ-0108: `harness/auto.py`'s own read-only URI again | `test_every_read_only_open_goes_through_the_opener`, `test_the_header_point_estimate_reads_the_spider_db_through_the_read_only_opener` | caught |
+| J: positional keys and rebuilt rows in the tree; Issues rows keyed by index | the selection test and B5, both `[before]` and `[after]` | caught |
+| J: positional keys in the Diagrams page | B7, the three keyed kinds `[before]` (a write after cannot tell, by design) | caught |
+| J: focus accepted without checking where it landed | B9a | caught |
+| J: no pane at the end of the chain (the body) | B9a, B9b | caught |
+| J: a version marked seen before its refresh | `test_a_refresh_whose_group_fetch_fails_is_retried_at_the_next_poll` | caught |
+| J: a refresh that ignores the user's page (no token, no second read) | B2 `[after]`, B2b `[after]` | caught |
+| J: a refresh that re-reads Issues from its first page | B5 (both), B5b, the click-first Issues test | caught |
+| J: a focused row replaced, not patched | B4 (both controls, both orders) | caught |
+| J: Diagrams regions redrawn without the helper | B7 (interface row, origin group, response step, both orders) | caught |
+| **J: restoring without `preventScroll`** | B9a | **not caught** on `e55379d`; caught after the fix below (`scrolled: [3974, 0]`) |
+| **J: "Show more" re-created on every refresh** | B1 (both orders) | **not caught** on `e55379d`; caught after the fix below (the focused element is a new one) |
+
+**Two tests could not fail on the revert they named** (a test defect each, fixed in the
+next commit; recorded for the coordinator as an F-entry, §9.3):
+- B9a measured `window.scrollY`, but the site map scrolls its own pane and the window
+  never moves; B9b's fallback (the parent item) holds the rows in view, so focusing it
+  scrolls nothing with or without `preventScroll`. Fix: B9a's pane is its own scroll
+  container (120 px, `overflow: auto`), the fallback 4000 px down it, and the test
+  asserts the container's `scrollTop` and the window's `scrollY` are both unchanged; B9b
+  states that it alone cannot tell.
+- B1 asserted that "Show more" is focused through a locator, which a re-created button
+  restored by its key also satisfies, while its docstring and FR-UI-514 say the same
+  element. Fix: the test marks the element before the write and asserts
+  `document.activeElement` is that element after the refresh.
+
+Re-run on a scratch copy of the fixed tree (`impl/mut2/`; the baseline of the named
+nodes plus `tests/test_web_live_focus.py`: 16 passed): **both caught, for the stated
+reason** (`impl/mut2/mutants.out`, `reasons.out`). Without `preventScroll`, B9a's
+container scrolled to the fallback (`{'scrolled': [3974, 0]} != [0, 0]`). With "Show more"
+re-created, B1 failed in both orders on "a new 'Show more' element" -- after
+`to_be_focused` had passed, since the key restored focus to the new button: the case the
+old assertion could not tell.
+
+### 11.5 Loaded runs after the locator fix
+
+The four browser files in one `-n 4` pass, as the harness runs them (`impl/loop_probe.sh`,
+the fixed `Tab.item`; output `impl/loop_12.out`..`loop_19.out`): **8 of 8 runs passed, 68
+tests each, in 49.8-54.0 s**. Before the fix (`impl/loop_1.out`..`loop_11.out`, same set):
+4 of 11 runs failed, each run 250-294 s. Replayed step by step, the renderer CPU of the
+failing steps fell from 1.35-2.73 s to 0.02-0.06 s (§5.6). With a 4-in-11 failure rate,
+eight clean runs in a row would happen by chance with probability about 0.03 ((7/11)^8); the
+measured CPU drop is the causal evidence, the runs corroborate it.
