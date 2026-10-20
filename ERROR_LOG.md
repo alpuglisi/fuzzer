@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-20 — test tooling (ad-hoc pytest runs overlapped other runs; BUG-0532)
+- **Symptom:** agent lanes' ad-hoc `pytest` runs started while another pytest or a `verify_change.py` run was running, seven times in two days (F-092, F-093, F-095, F-097, F-098, F-102, F-104). One harness run was killed, and the extra load produced timing and ML failures that passed serially.
+- **Root cause:** only `verify_change.py` enforced one pytest at a time, through its own lock and a one-sided wait for other pytest processes. Every other pytest relied on prose and on each agent's own check-then-start.
+- **Remediation:** a host-wide pytest lock that every session of the test tree takes in the root conftest (`tests/_pytest_lock.py`). It waits naming the holder, refuses on timeout, skips xdist workers and verified nested sessions, and has no off switch. `verify_change.py`'s child lock wait follows `--wait-other`. BUG-0532, PA-0532.
+- **Status:** Fixed
+
 ## 2026-10-20 — oracle and consumers (a non-comparable control was evidence; BUG-0529, recurrence of BUG-0117's class)
 - **Symptom:** a quote's SQL error with `429 rate limited` on the benign control confirmed SQLi; 401/403/502/504/timeout/login-redirect controls confirmed path traversal, CRLF, the boolean and NoSQL differentials and ReDoS; an unobserved PRG follow-up, a throttled peer replay or probe was a negative; the live WAF filter recorded a 429 as a bypass; the blind-SQLi builder averaged non-application samples; the runner judged a 429 by its status class.
 - **Root cause:** no shared classification of whether an HTTP answer is the application's own, and the facts it needs (credential carried, credential submission, login redirect) never reached the consumers.

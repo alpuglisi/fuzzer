@@ -1040,3 +1040,9 @@ Juice Shop lab is complete.
 - **Evidence:** the AU-REDACT revision-4 report (2026-10-20), draft §9.
 - **Impact:** a 0.3 s overlap; no result affected.
 - **Status:** the host-wide pytest lock (AU-TESTLOCK, BUG-0532) is built and merging now; it refuses such a run instead of relying on the check.
+
+### F-105 — Status update for F-092, F-095, F-097, F-098, F-102 and F-104 (BUG-0532)
+- **What:** every pytest session of the test tree now takes one host-wide lock in the root conftest (`tests/_pytest_lock.py`). A second session waits, naming the holder, then refuses with a usage error. xdist workers and nested sessions with the holder's verified token skip it, and there is no off switch. The one-pytest rule no longer depends on a lane's own `ps` check or wait loop. F-093's kill chosen by pattern is a different failure mode; the lock does not prevent it.
+- **Evidence:** AU-TESTLOCK 129ac1c, 60deb4c, 1bf1286; BUG-0532. Measured: the two-session wait, the timeout refusal, three forged tokens refused, xdist with one acquisition and three workers skipping, and `verify_change`'s child waiting on a held lock. The lane's harness on 60deb4c: 405 files, 8132 passed, 0 failed, 42 skipped, 38 xfailed.
+- **Impact:** none further. Lanes on worktrees without the change still need the old rule until they rebase.
+- **Status:** fixed for overlapping runs. F-093's kill by pattern stays open as a practice.
