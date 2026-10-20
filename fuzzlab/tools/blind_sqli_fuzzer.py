@@ -346,8 +346,11 @@ def main(argv=None):
         sender = SeamSender(client, args.identity, explicit=_explicit_url(args.url))
     else:
         # Realistic browser UA, same rationale/constant as the crawler (BUG-0059).
+        from fuzzlab.core import bodyread
         from fuzzlab.core.http import DEFAULT_BROWSER_HEADERS
-        _session = requests.Session()
+        # bodies read bounded (SP-57, BUG-0536): an incomplete one is a
+        # `RequestException` (`BodyIncomplete`), never a size in the dataset
+        _session = bodyread.bound(requests.Session())
         _session.headers.update(DEFAULT_BROWSER_HEADERS)
         sender = RequestsSender(_session, explicit=_explicit_url(args.url))
 

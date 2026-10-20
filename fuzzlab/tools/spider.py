@@ -585,8 +585,10 @@ class LocalSpider:
         # also checks Accept/Accept-Language/Sec-Fetch-* for the mismatch a
         # spoofed-UA-only client still shows. The local lab never surfaced
         # this since it doesn't discriminate by headers.
+        from fuzzlab.core import bodyread
         from fuzzlab.core.http import DEFAULT_BROWSER_HEADERS
-        self.session = requests.Session()
+        # every body read bounded (SP-57, BUG-0536)
+        self.session = bodyread.bound(requests.Session())
         self.session.headers.update(DEFAULT_BROWSER_HEADERS)
 
         # Resolve which engine to use.
@@ -2850,7 +2852,8 @@ class LocalSpider:
                 return resp.status, dict(resp.headers)
             finally:
                 ctx.dispose()
-        iso = requests.Session()
+        from fuzzlab.core import bodyread
+        iso = bodyread.bound(requests.Session())      # its body read bounded (SP-57)
         iso.headers.update(self.session.headers)
         iso.cookies.update(self.session.cookies.copy())
         if method == "POST":
@@ -2995,7 +2998,8 @@ class LocalSpider:
         other._auth_headers, other._adopted_storage, other._adopted_original = {}, {}, {}
         other._injected_cookies = []
         other._header_scope, other._cookie_scope = other._in_scope, None
-        other.session = requests.Session()
+        from fuzzlab.core import bodyread
+        other.session = bodyread.bound(requests.Session())     # SP-57, BUG-0536
         other.session.headers.update(self.session.headers)
         other._xhr_urls, other._query_navs, other._pending_routes = [], [], []
         other._subresources = self._subresources             # one set: the crawl's

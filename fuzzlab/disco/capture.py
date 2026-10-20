@@ -23,6 +23,8 @@ marked so no schema is inferred from half a document.
 **Reading (PA-0108, PA-0454).** `read_capture` types every line before use: a line over
 `MAX_LINE_BYTES`, JSON that does not parse (deep nesting included) or a field of the
 wrong type is quarantined and counted, never repaired into a record that was not seen.
+The line cap holds while a line is read, not only once it is whole (`JsonlTail`,
+BUG-0536): an over-cap line is never held, and the reading work is linear.
 
 **Reading while it is written (FR-CRAWL-30).** `read_capture` is `CaptureTail` read to
 the end: one loop. A `CaptureTail` reads only what was appended since its last read and
@@ -192,23 +194,43 @@ def _typed(doc) -> CaptureRecord | None:
 READ_CHUNK = 1 << 20
 
 
+class _Overlong(bytes):
+    """The type of `OVERLONG`."""
+
+
+#: What `JsonlTail` yields in place of a line over `MAX_LINE_BYTES` (an empty ``bytes``,
+#: compared by identity): once per such line, where it stands among the lines.
+OVERLONG = _Overlong()
+
+
 class JsonlTail:
     """The complete lines appended to ``path`` since the last `read`, as bytes with their
     ``\n`` (the lines binary iteration gives). A line whose newline has not arrived is
     held; ``read(final=True)`` also returns it (the writer is done). Shared with the
     explorer's action log (`tools.observe.DiscoActionLines`). A missing file raises
-    ``FileNotFoundError``."""
+    ``FileNotFoundError``.
+
+    **Bounded while reading (BUG-0536, audit defect 23).** A line over `MAX_LINE_BYTES`
+    (its newline included) is never held: as soon as the line it is reading passes the
+    cap, `OVERLONG` is yielded once in its place, its bytes are dropped, and the rest of
+    the line is discarded -- across reads -- up to its newline; reading resumes at the
+    next line. At most `MAX_LINE_BYTES` + `READ_CHUNK` bytes are held. The work is
+    linear: the held part of a line grows in one ``bytearray`` and is copied out once;
+    ``copied`` counts every byte copied (PA-0135(2))."""
 
     def __init__(self, path: str | os.PathLike):
         self.path = Path(path)
         self.offset = 0
-        self._rest = b""
+        self._rest = bytearray()
+        self._discarding = False
+        self.copied = 0
 
     def read(self, final: bool = False) -> list[bytes]:
         return list(self.lines(final))
 
     def lines(self, final: bool = False):
         """`read`, one line at a time (a large file is never held whole)."""
+        cap = MAX_LINE_BYTES
         with open(self.path, "rb") as fh:
             fh.seek(self.offset)
             while True:
@@ -216,15 +238,46 @@ class JsonlTail:
                 if not data:
                     break
                 self.offset += len(data)
-                buf = self._rest + data
-                cut = buf.rfind(b"\n") + 1
-                self._rest = buf[cut:]
-                if cut:
-                    for ln in buf[:cut - 1].split(b"\n"):
-                        yield ln + b"\n"
-        if final and self._rest:
-            rest, self._rest = self._rest, b""
-            yield rest
+                yield from self._split(data, cap)
+        if final:
+            if self._rest:                          # never over the cap: it would be
+                rest = bytes(self._rest)            # discarding instead
+                self._rest.clear()
+                self.copied += len(rest)
+                yield rest
+            self._discarding = False
+
+    def _split(self, data: bytes, cap: int):
+        start, end_of_data = 0, len(data)
+        view = memoryview(data)
+        while start < end_of_data:
+            nl = data.find(b"\n", start)
+            if nl < 0:                              # the line goes on past this read
+                if not self._discarding:
+                    if len(self._rest) + end_of_data - start > cap:
+                        self._rest.clear()
+                        self._discarding = True
+                        yield OVERLONG
+                    else:
+                        self._rest += view[start:]
+                        self.copied += end_of_data - start
+                return
+            end = nl + 1
+            if self._discarding:                    # its newline: the next line starts
+                self._discarding = False
+            elif len(self._rest) + end - start > cap:
+                self._rest.clear()
+                yield OVERLONG
+            elif self._rest:
+                self._rest += view[start:end]
+                line = bytes(self._rest)
+                self._rest.clear()
+                self.copied += end - start + len(line)
+                yield line
+            else:
+                self.copied += end - start
+                yield data[start:end]
+            start = end
 
 
 def _parse_line(raw: bytes) -> CaptureRecord | None:
@@ -252,6 +305,9 @@ class CaptureTail:
     def read(self, final: bool = False) -> list[tuple[int, CaptureRecord]]:
         out = []
         for raw in self._lines.lines(final):
+            if raw is OVERLONG:                     # over MAX_LINE_BYTES (BUG-0536)
+                self.quarantined += 1
+                continue
             if not raw.strip():
                 continue
             rec = _parse_line(raw)
