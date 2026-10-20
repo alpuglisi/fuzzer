@@ -1,9 +1,12 @@
 # DRAFT AU-REQID14: every sender places a query value through one owner
 
 - Item: `AU-REQID14`, audit defect 14 only. Owner-supplied audit at 6552276, F-096.
-- Status: **revision 2**, for the last re-review round under the cap. Nothing here is
-  implemented. Revision 1 drew DISAGREE from both reviewers. §12 maps each must-fix (M1–M7)
-  and each adopted item to its change here.
+- Status: **revision 3, part 1 implemented** (CC-FUZZ-0106 part 1, CC-CORE-0068): the
+  owner, every sender's placement, the guard and the tests. Part 2 (Q3:
+  `ExecRequest.entries`, `DomXssStrategy`, the M6-vs-bound-HTTP row) is held until
+  AU-OUTCOME merges. §12 maps revision 2's must-fixes (M1–M7); §13 maps revision 3's
+  blocking fixes (B1, B2) and adopted items. Where this record and the committed tests
+  disagree, the tests are the truth (§4 is the guard's own output).
 - Base: `8100959`. Branch `worktree-agent-aef1371774d69f3f5`.
 - Numbers: CC-FUZZ-0106, CC-CORE-0068, BUG-0531 / PA-0531, FR-FUZZ-64 (this item's
   alone; AU-REQID8 takes a new FR ID).
@@ -162,8 +165,11 @@ vacuous. These all compare different under it:
 - **Scored ground truth: no change on the wire** (`gt_exposure.py`):
   - 157 injection-point rows, and **0** with a query in the URL. M1's accepted residual
     has no exposure.
-  - 179 built points (`points_from_ground_truth`, browser and writes on), of which 8 are
-    bound: 7 JSON leaves and 1 path account value. **None is at query or fragment.**
+  - 179 built points, of which 8 are bound: 7 JSON leaves and 1 path account value.
+    **None is at query or fragment.** The exact call (`gt_exposure.py`):
+    `points_from_ground_truth(gt, "http://127.0.0.1:8080", browser_available=True,
+    writes=True, account_values={"user_id": "7"})`. Reviewer A's 178 and 7 are the same
+    call without `account_values`: the path account-value point is the one difference.
   - 5 DOM points, **none bound**. The M6 sibling change (M2) moves no ground-truth load.
   - A query-less URL gets today's bytes (the hard-payload row).
 - **Crawl runs change on the wire. This is intended.** Each change below is measured
@@ -269,7 +275,7 @@ repeated name follows **two rules**:
 | `tools/probesender.SeamProbeSender._send_on` (every session route) | final `else` (`:822`): `place_query_param` (F2 as above); bound query (`:793`): `bind_query`. Its `_follow` already receives the unplaced `url` (measured) |
 | `greybox/run.RequestsCorrelatingSender.send_correlated` | standalone (`:196`): `place_query_param`; bound query (`:192`): `bind_query`, never `params=list(entries)`, which appends to a URL's own query |
 | `tools/blind_sqli_fuzzer.RequestsSender.get` / `SeamSender.get` | `place_query_param` (`:58`, `:82`) |
-| `tools/browserexec.PlaywrightBrowserExecutor` | the observe navigation (`:552`) and the GET store step (`:539`): `bind_query(url, request.entries, param, value)` when `entries` is given, else `place_query_param`. `_with_query` (`:25-29`) is removed. `_with_fragment` (`:32-48`) becomes a thin wrapper over `place_route_query_param` |
+| `tools/browserexec.PlaywrightBrowserExecutor` | part 1: the observe navigation (`:552`) uses `place_query_param`; part 2 makes it `bind_query(url, request.entries, param, value)` when `entries` is given. The GET store step (`:539`) always uses `place_query_param`: a `StoreStep` has no entries. `_with_query` (`:25-29`) is removed. `_with_fragment` (`:32-48`) becomes a thin wrapper over `place_route_query_param` |
 | `oracle/browser.ExecRequest` | gains `entries: tuple \| None = None`, the bound sibling entries of a query point. No `occurrence` |
 | `oracle/strategies.DomXssStrategy._observe` | passes `entries=candidate.base_entries` when `candidate.location == "query"`. One line, after AU-OUTCOME merges |
 | `harness/auto.header_points_from_store` (`:510`) | `with_query(page_url, …)`, never `"?" + urlencode(...)`. Same bytes |
@@ -318,122 +324,166 @@ sends a bound point with a repeated name through M6 (`ExecRequest.entries`) and 
 `_FormBoundSender` over `RequestsProbeSender`. Both go through `bind_query`, and the two
 wires must be equal under `canonical_pairs`.
 
-### 3.5 The guard (M3)
+### 3.5 The guard (M3, B1)
 
 **`test_every_query_builder_goes_through_the_one_owner`** is an AST check over `fuzzlab/`,
-excluding the owner `core/urls.py`. A finding is keyed by (module, enclosing function,
-shape), with a count, so it survives line moves. It flags:
+excluding the owner `core/urls.py`. A finding is keyed by (module, enclosing function's
+qualified name, shape), with a count, so it survives line moves; the module's own
+statements are scope `<module>`. The shapes:
 
-- **S1, `params=` on a send:** a keyword `params` on a call named `request`, `get`,
-  `post`, `put`, `patch`, `delete`, `head`, `options`, `fetch` (Playwright) or `Request`
-  (`requests.Request`).
-- **S2, a subscript store into `params`:** a subscript whose slice holds the constant
-  `"params"`, including `kwargs["data" if … else "params"] = …`.
+- **S1, `params` on a send:**
+  - a keyword `params` on a call named `request`, `get`, `post`, `put`, `patch`,
+    `delete`, `head`, `options`, `fetch` (Playwright) or `Request` (`requests.Request`);
+  - a positional params: `requests.get(url, p)` (2+ positional arguments on
+    `requests.get`), `x.request(method, url, p)` (3+), `requests.Request(m, u, h, f, d,
+    p)` (6+).
+- **S2, `params` reaching a send another way:**
+  - a subscript store whose slice holds the constant `"params"`, the IfExp form
+    included (`kwargs["data" if … else "params"] = …`);
+  - a dict literal with a `"params"` key, or `dict(params=…)`, passed as `**` to a send;
+  - the same assigned to a local name that the function passes as `**` to a send;
+  - `.update(params=…)`, `.update({"params": …})` or `.setdefault("params", …)` on such
+    a local name.
 - **S3, a parse into a dict:** `dict(parse_qsl(...))`, `dict(parse_qs(...))`, or any
   `parse_qs(...)`.
-- **S4, string building onto a query:** a `+` or `%` BinOp, a `+=`, an f-string, or
-  `.format`. It must contain a `?`/`&` string constant (keyword arguments excluded:
+- **S4, string building onto a query:** a `+` or `%` BinOp, a `+=`, an f-string or
+  `.format`, holding a `?`/`&` string constant (keyword arguments excluded:
   `quote(s, safe="&")` is no query; an IfExp operand such as `("&" if … else "?")`
-  included), and a call to `urlencode`/`quote`/`quote_plus` or a `.query`.
+  included) and **query material**: a call to `urlencode`/`quote`/`quote_plus`, a
+  `.query`, a `"&".join`, or (B1) **a local name the same scope assigned from one of
+  those** (`q = urlencode(d)` … `u + "?" + q`).
+- **S4b, a `[?&]name=` constant in a string build** (B1): the same build expressions,
+  when one of their string constants matches `[?&][A-Za-z_][\w\[\]%.-]*=`
+  (`u + "?id=" + v`, `f"{u}?id={v}"`, `"{}&page={}".format(…)`). A bare constant is not a
+  builder and is not flagged: measured, the only bare ones in `fuzzlab/` are the 16
+  descriptive strings of `tools/build_sql_db.py`'s catalog.
 - **S5, a join on a query separator:** `"&".join(...)` or `"?".join(...)`.
-- **S6, `._replace(query=...)`.**
+- **S6, a rebuilt query or fragment:** `._replace(query=…)` or `._replace(fragment=…)`,
+  and a `SplitResult`/`ParseResult` (and `…Bytes`) constructor.
 - **S7, a tuple rebuild:** tuple-form `urlunsplit`/`urlunparse` whose query or fragment
   slot is neither `""` nor the unchanged `.query`/`.fragment`. So `strip_url` and
-  `_no_query` do not match, and `browserexec:29`/`:48` do.
+  `_no_query` do not match.
 
-**Allow-list.** Each allowed site is listed with its reason (§4.2), and
-**`test_the_query_builder_allow_list_has_no_stale_entry`** fails on an entry the scan no
-longer finds.
+**Exact allow-list.** `ALLOWED` maps each allowed (module, function, shape) to its count
+and its reason. `test_every_query_builder_goes_through_the_one_owner` fails on any finding
+above its listed count (a new builder, or a second one in a listed function), and
+**`test_the_query_builder_allow_list_has_no_stale_entry`** fails unless every listed
+count is found exactly. Together they compare the scan to the list exactly.
 
 **Proof on synthetic offenders.** `test_the_query_builder_guard_catches_synthetic_offenders`
-uses 21 synthetic offenders, one per shape:
-- `kwargs["params"]` and its IfExp form;
-- an f-string;
-- `"&".join`, `.format` and `%`;
-- an IfExp operand;
-- `params=` on `put`, `patch`, `delete`, `head`, `options`, `requests.Request`, Playwright
-  `fetch` and `get`;
-- `urlunsplit` with a rebuilt query and with a rebuilt fragment, and `urlunparse`;
-- `parse_qs`, `dict(parse_qsl)`, `._replace(query=)`.
+runs the guard on **50 synthetic offenders**, one module each, and on **10 near-misses**
+that must not match:
+- offenders: `params=` on `get`/`put`/`patch`/`delete`/`head`/`options`,
+  `requests.Request`, Playwright `fetch` and `get`; the three positional forms; the
+  subscript store and its IfExp form; `**{"params": p}`, `**dict(params=p)`, a local
+  literal and a local `dict(params=)` passed as `**`, `kw.update(params=)`,
+  `kw.update({"params": …})`, `kw.setdefault("params", …)`; `dict(parse_qsl)`,
+  `parse_qs`; concatenation with a quoter and with `.query`; an IfExp operand; an
+  f-string, `.format` and `%` with a quoter; a local name from a quoter, from `.query`
+  and from `"&".join`, each through `+`, an f-string, `.format`, `%` and `+=`; `?id=` and
+  `&page=` through `+`, an f-string and `.format`; `"&".join`, `"?".join`;
+  `._replace(query=)`, `._replace(fragment=)`; `SplitResult(...)`, `ParseResult(...)`;
+  `urlunsplit` with a rebuilt query and with a rebuilt fragment, `urlunparse`; a
+  module-level build;
+- near-misses: `urlunsplit(…, "", "")`; `urlunsplit` with the query and fragment
+  unchanged; `quote(s, safe="&=")`; a model's `{"params": w}`; `d.get(k, None)`;
+  `d.get("params")`; `d.update(params=p)` on a dict never passed as `**`; a docstring
+  holding `/p?id=1`; a `"?" in u` test beside a quoted local; a plain URL constant.
 
-It also uses 5 near-misses that must not match:
-- `urlunsplit(…, "", "")`, and `urlunsplit` with the query and fragment unchanged;
-- `quote(s, safe="&=")`;
-- a model's `{"params": w}`;
-- `d.get("params")`.
+**The guard's limits** (what it does not see):
+- query material that reaches a build through anything but a local name of the same
+  scope: a parameter, an attribute (`self._q`), a name assigned in another function;
+- a separator held in a variable (`sep.join(...)`), or a build through `"".join([...])`;
+- a `params` dict that reaches `**` through an attribute or another function, and
+  session-level `Session.params` (an attribute assignment; flagging it would match the
+  `self.params` model attributes of `web/sitetree.py` and `tools/fetcher.py`);
+- a new function given an allow-listed name in an allow-listed module.
 
-**Prototype.** A prototype of this guard, run on 8100959, flags exactly the fix sites of
-§3.3 and the 41 allow-list entries of §4.2, with zero misses on the offenders and zero
-false positives on the near-misses:
-- guard:
-  `/tmp/claude-0/-home-user-fuzzer/2f299c5d-40a8-582c-a2d4-d0cdcbec2db1/scratchpad/aureqid/guard_proto.py`
-- offenders:
-  `/tmp/claude-0/-home-user-fuzzer/2f299c5d-40a8-582c-a2d4-d0cdcbec2db1/scratchpad/aureqid/guard_offenders.py`
+## 4. The sweep (PA-0002, by mechanism; it is the guard's own output)
 
-## 4. The sweep (PA-0002, by mechanism; it agrees with the guard)
+The guard run on `8100959` (`scan()` over its `fuzzlab/`) finds **57 builders under 54
+keys**. This item removes **12 under 11 keys** (§4.1). The other **45 under 43 keys** are
+the allow-list (§4.2), which the scan of the implemented tree equals exactly
+(`test_every_query_builder_goes_through_the_one_owner` and
+`test_the_query_builder_allow_list_has_no_stale_entry`).
 
-### 4.1 Fixed by this item (the guard's findings that go away)
+### 4.1 Fixed by this item (the guard's findings that go away: 12 under 11 keys)
 
-| Module · function | Shape | Fix |
+| Module · function | Shape (count) | Fix |
 |---|---|---|
-| `tools/authhttp.py` · `with_query_param` | S3, S6 | removed (owner) |
-| `tools/authhttp.py` · `with_query` | S6 | moved to the owner |
-| `tools/probesender.py` · `RequestsProbeSender.send` | S2 (`:964`) | `place_query_param` / `bind_query`; `url` kept for `_follow` |
-| `greybox/run.py` · `RequestsCorrelatingSender.send_correlated` | S2 (`:192`, `:196`) | `place_query_param` / `bind_query` |
-| `tools/blind_sqli_fuzzer.py` · `RequestsSender.get` | S1 (`:58`) | `place_query_param` (and `SeamSender.get`'s `with_query_param` at `:82`) |
-| `tools/browserexec.py` · `_with_query` | S4, S7 (`:28-29`) | removed: `place_query_param` / `bind_query` |
-| `tools/browserexec.py` · `_with_fragment` | S7 (`:48`) | thin wrapper over `place_route_query_param` |
-| `harness/auto.py` · `header_points_from_store` | S4 (`:510`) | `with_query` (same bytes) |
-| `tools/probesender.py` `:822` (seam), `:946` (bound) | calls to the removed helpers | `place_query_param` / `bind_query` |
+| `tools/authhttp.py` · `with_query_param` | S3 (1), S6 (1) | removed; the owner's `place_query_param` |
+| `tools/authhttp.py` · `with_query` | S6 (1) | moved to the owner |
+| `tools/probesender.py` · `RequestsProbeSender.send` | S2 `kwargs["params"]` (1) | `place_query_param` / `bind_query`; `url` kept for `_follow` |
+| `greybox/run.py` · `RequestsCorrelatingSender.send_correlated` | S2 `kwargs["params"]` (2) | `place_query_param` / `bind_query` |
+| `tools/blind_sqli_fuzzer.py` · `RequestsSender.get` | S1 (1) | `place_query_param` (and `SeamSender.get`, which called `with_query_param`) |
+| `tools/browserexec.py` · `_with_query` | S4 (1), S7 (1) | removed: `place_query_param` |
+| `tools/browserexec.py` · `_with_fragment` | S4 (1, the old `:45`, through the local `pair`), S7 (1) | thin wrapper over `place_route_query_param` |
+| `harness/auto.py` · `header_points_from_store` | S4 (1) | `with_query` (same bytes) |
 
-### 4.2 Allow-listed (41 entries, each with its reason; none may go stale)
+`SeamProbeSender._send_on`'s two branches called the removed helpers and had no shape of
+their own; they now call `place_query_param` and `bind_query`.
 
-| Module · function (count) | Shape | Reason |
+### 4.2 Allow-listed (45 under 43 keys, each with its reason; none may go stale)
+
+| Module · function | Shape (count) | Reason |
 |---|---|---|
-| `core/redaction.py` · `redact_query`, `_redact_query_identifiers` (S5); `redact_url`, `redact_url_identifiers` (S6) | 4 | storage redaction of a recorded URL, never sent. **AU-REDACT's file** |
-| `core/trace.py` · `_blank_identifiers` | S5 | trace redaction, never sent |
-| `disco/fingerprint.py` · `normalise_route` | S5 | a route key of parameter names, never sent |
-| `disco/runner.py` · `Runner.prepare` (S4 ×2) | 2 | **hand-off to AU-OUTCOME** (their file): the contract runner appends query pairs (`:262`) |
-| `disco/synth.py` · `parse_body` | S3 | **defect 9's item**: a schema from captured bodies, never sent |
-| `harness/auto.py` · `header_point_estimate` | S4 | a SQLite `file:` URI (`?mode=ro`), not HTTP |
-| `lab_fixtures/external.py` · `_bwapp_install`, `_ecommerce_login` | S1 ×2 | lab provisioning with constant parameters, not probing |
-| `labgen/conformance/django_live_boot.py` · `DjangoLiveBootHarness.get` (S1), `.request` (S4 ×2) | 3 | a harness client of generated cells on query-less paths |
-| `labgen/conformance/live_boot.py` · `LiveBootHarness.fetch`, `.get` (S1), `.request` (S4 ×2) | 4 | same |
-| `labgen/conformance/live_boot_spring_boot.py` · `SpringBootLiveBootHarness.get` (S1), `.request` (S4 ×2) | 3 | same |
-| `labgen/conformance/rails_live_boot.py` · `RailsLiveBootHarness.fetch`, `.get` (S1), `.request` (S4 ×2) | 4 | same |
-| `labgen/conformance/tier2.py` · `LiveBootTier2Oracle._fetch` | S1 | same |
-| `labgen/identifier_sqli_oracle.py` · `_build_url` | S4 | its input is a mapping, so a duplicate cannot be expressed; generated cells declare none |
-| `labgen/oracle_wrapper.py` · `_mark_query_param` | S6 | **LAB hand-off** with evidence (below) |
-| `proxy/server.py` · `target_from_request` (S4 ×2) | 2 | the proxy forwards the client's own query verbatim |
-| `tools/spa.py` · `visit_key` (S4 ×2) | 2 | the crawler's dedup key, never sent |
-| `tools/spa.py` · `query_url` | S5 | **CRAWL hand-off**: the SPA query-seed builder (`:1812-1821`) appends to an existing route query and does not encode its values. It sends fillers, not probes |
-| `tools/spider.py` · `LocalSpider._isolated_submit` (S4, S1) | 2 | a GET form submission: the action's query is replaced by the entries, as a browser does (PA-0111) |
-| `tools/store_adapter.py` · `_store_request` | S4 | a stored endpoint key keeps the request's query verbatim (`:859`), never sent as built |
-| `tools/store_adapter.py` · `import_disco` | S3 | **AU-REQID8** (the importer): a captured form body's repeated name collapses (`:274`) |
-| `web/app.py` · `create_app.repeater_from_finding_prg`, `create_app.repeater_from_flow_prg`; `web/projectroutes.py` · `_form` | S3 ×3 | the operator's own UI form posts, not traffic to a target |
+| `core/project.py` · `_ro_uri` | S4b (1) | a SQLite `file:` URI (`?mode=ro`), not HTTP |
+| `core/store.py` · `_no_create_uri` | S4b (1) | a SQLite `file:` URI (`?mode=rw`), not HTTP |
+| `core/redaction.py` · `redact_query`, `_redact_query_identifiers` | S5 (1 each) | storage redaction of a recorded URL, never sent. **AU-REDACT's file** |
+| `core/redaction.py` · `redact_url`, `redact_url_identifiers` | S6 (1 each) | same |
+| `core/trace.py` · `_blank_identifiers` | S5 (1) | trace redaction, never sent |
+| `disco/fingerprint.py` · `normalise_route` | S4 (2), S5 (2) | a route key of parameter names, never sent. Covers `:83` (`route += "?" + "&".join(spa_names)`) |
+| `disco/runner.py` · `Runner.prepare` | S4 (1) | **AU-OUTCOME's file**: the contract runner appends (`:262`). Pinned: `test_the_contract_runner_places_a_query_value_in_place` |
+| `disco/synth.py` · `parse_body` | S3 (1) | defect 9's item: a schema from captured bodies, never sent |
+| `harness/auto.py` · `header_point_estimate` | S4 (1) | a SQLite `file:` URI (`?mode=ro`), not HTTP |
+| `lab_fixtures/external.py` · `_bwapp_install`, `_ecommerce_login` | S1 (1 each) | lab provisioning with constant parameters, not probing |
+| `labgen/conformance/django_live_boot.py` · `DjangoLiveBootHarness.get` (S1), `.request` (S4) | 1 each | a harness client of generated cells, on query-less paths |
+| `labgen/conformance/live_boot.py` · `LiveBootHarness.fetch`, `.get` (S1), `.request` (S4) | 1 each | same |
+| `labgen/conformance/live_boot_spring_boot.py` · `SpringBootLiveBootHarness.get` (S1), `.request` (S4) | 1 each | same |
+| `labgen/conformance/rails_live_boot.py` · `RailsLiveBootHarness.fetch`, `.get` (S1), `.request` (S4) | 1 each | same |
+| `labgen/conformance/tier2.py` · `LiveBootTier2Oracle._fetch` | S1 (1) | same |
+| `labgen/identifier_sqli_oracle.py` · `_build_url` | S4 (1) | its input is a mapping, so a duplicate cannot be expressed; generated cells declare none |
+| `labgen/oracle_wrapper.py` · `_mark_query_param` | S6 (1) | **LAB**: re-encodes untouched pairs. Pinned: `test_the_labgen_tool_wrapper_keeps_untouched_pairs_as_written` |
+| `oracle/strategies.py` · `OpenRedirectStrategy.confirm` | S4b (1, `:784`) | an open-redirect canary URL (`https://<host>/cb?fzlb=<seed>`): the payload value itself, placed by the owner like any value. AU-OUTCOME's file |
+| `proxy/server.py` · `target_from_request` | S4 (1) | the proxy forwards the client's own query verbatim |
+| `report/diagram.py` · `finding_deep_link` | S4b (1, `:318`) | an in-app link (`/diagrams?run=&finding=`, integer ids), not traffic to a target |
+| `tools/spa.py` · `visit_key` | S4 (1), S6 (1) | the crawler's dedup key, never sent (S6: it drops an origin-less URL's fragment) |
+| `tools/spa.py` · `query_url` | S5 (1) | **CRAWL**: the SPA query-seed builder (`:1812-1821`) appends to an existing route query and does not encode its values. Pinned: `test_the_spa_seed_builder_places_its_route_query_in_place` |
+| `tools/spider.py` · `LocalSpider._isolated_submit` | S4 (1), S1 (1) | a GET form submission replaces the action's query by its entries, as a browser does (PA-0111) |
+| `tools/store_adapter.py` · `_import_forms` | S4 (1, `:634`) | a stored endpoint key keeps the POST action's query verbatim |
+| `tools/store_adapter.py` · `_store_request` | S4 (1) | a stored endpoint key keeps the request's query verbatim, never sent as built |
+| `tools/store_adapter.py` · `import_disco` | S3 (1) | **AU-REQID8** (the importer): a captured form body's repeated name collapses (`:274`). Pinned: `test_a_disco_form_body_keeps_a_repeated_name_in_order` |
+| `web/app.py` · `create_app.repeater_from_finding_prg`, `create_app.repeater_from_flow_prg` | S3 (1 each), S4b (1 each, `:635`, `:1126`) | the operator's own UI form post, and an in-app redirect (`/proxy?repeater_tab=<id>`); not traffic to a target |
+| `web/projectroutes.py` · `_form` | S3 (1) | the operator's own UI form post, not traffic to a target |
 
-**LAB hand-off evidence** (measured):
-`_mark_query_param("http://h/p?id=1&tag=a&tag=b&flag&s=x%20y", "tag", "*")` returns
-`…?id=1&tag=%2A&tag=%2A&flag=&s=x+y`. That is three things:
-- every occurrence is marked;
-- `flag` becomes `flag=`;
-- `%20` becomes `+`.
-
-Marking every occurrence may be right for a tool's injection marker (sqlmap's `*`). The
-re-encoding of untouched pairs is the part to fix. That needs a LAB number, so it is not
-pinned here.
+The reviewer's list for B1 is covered: `tools/store_adapter.py:634`,
+`oracle/strategies.py:784`, `report/diagram.py:318`, `web/app.py:635`,
+`web/app.py:1126`, `core/project.py:117` and `core/store.py:33` are the S4b/S4 rows
+above; the rule set also finds `tools/spa.py` `visit_key`'s `_replace(fragment="")` (S6).
+`disco/fingerprint.py:83` is one of `normalise_route`'s S4 and S5 findings, and
+`browserexec.py:45` was `_with_fragment`'s S4 (through the local `pair`), gone with the fix.
 
 **Not builders, so the guard does not match them:** `session/detect.py` (set comparison),
 `session/browserlogin.strip_url` and `session/state._no_query` (`""` slots),
-`tools/observe.py`, `ml/flow_anomaly.py`, `tools/fetcher.py:517` (names), and the
+`tools/observe.py`, `ml/flow_anomaly.py`, `tools/fetcher.py:517` (names), the
 `{"params": …}` model and history dicts (`ml/persist.py`, `ml/ranker.py`,
-`proxy/history.py`, `tools/observe.py`, `web/sitetree.py`).
+`proxy/history.py`, `tools/observe.py`, `web/sitetree.py`), and `tools/build_sql_db.py`'s
+bare descriptive constants.
 
-**Found while sweeping M6, flagged and not fixed here.** Both probe senders' **path** branch
-also hands `_follow` the placed URL. Measured: a path point `/t/{id}/view` answered
-`302 Location: #top` re-requests `/t/zqmark/view` from both senders. A path URL has no
-payload-free form, so whether that follow-up should be skipped is an FR-FUZZ-49 (PRG)
-design question, not query placement. It is a defect for the coordinator to register.
+**Known instances owned elsewhere: offline strict xfails naming the owner (B2,
+PA-0054(3), PA-0115(3)).** Each fails today for its stated reason (measured with
+`--runxfail`, §13):
+
+| Pin | Owner | Fails with |
+|---|---|---|
+| `test_the_contract_runner_places_a_query_value_in_place` | AU-OUTCOME (`disco/runner.py:262`) | `op=list&q=1&q=zqmark`, not `op=list&q=zqmark` |
+| `test_the_spa_seed_builder_places_its_route_query_in_place` | CRAWL, to be registered (`tools/spa.py:1812-1821`) | `#/s?q=1&p=2&q=x y`, not `#/s?q=x%20y&p=2` |
+| `test_a_stored_link_set_round_trips_its_crawled_query` | AU-REQID8 (residual 2: `query_pairs` drops empty parts and `=` presence) | `flag` comes back as `flag=`, the empty part is gone, `%20` is `+` |
+| `test_a_disco_form_body_keeps_a_repeated_name_in_order` | AU-REQID8 (`store_adapter.py:274`) | `['tag', 'q']`, not `['tag', 'tag', 'q']` |
+| `test_the_labgen_tool_wrapper_keeps_untouched_pairs_as_written` | LAB | `flag` → `flag=`, `%20` → `+` on the untouched pairs only (marking every occurrence is not pinned) |
+| `test_a_path_points_prg_follow_up_never_carries_the_payload[#top/edit × anonymous/seam]` | AU-PRGPATH | the follow-up requests `/p/zqmark/view` (`#top`) and `/p/zqmark/edit` (relative `edit`) |
+| `test_a_bound_duplicate_name_changes_one_occurrence_only` | AU-REQID8 | the binder sends `tag=zqmark&tag=zqmark` |
+| `test_a_dom_query_point_is_loaded_with_its_siblings` | this item's part 2 (after AU-OUTCOME) | `/p?q=<payload>` alone, no `op` |
 
 ## 5. Tests, each with the revert it must fail against (PA-0034(2))
 
@@ -482,235 +532,143 @@ named.
 `test_forms_phase2._App` and `test_json_points._JsonWire` check no placement, so they stay
 as they are (AU-REQID8).
 
-## 6. Requirement text (living specs, edited in place at implementation)
+## 6. Requirement text (written in place at implementation)
 
-**FR-FUZZ-64** *(one query placement for every sender; `CC-FUZZ-0106`, BUG-0531)*. It is
-complete for this item; AU-REQID8 takes a new ID.
+- **FR-FUZZ-64** is in `docs/components/07-fuzzing-harness-and-oracle/requirements.md`,
+  self-contained for this item (AU-REQID8 takes a new ID). Its "Not yet" bullet is
+  part 2 (the DOM point's siblings).
+- **FR-CORE-501** is amended in place in `docs/components/02-core-library/requirements.md`
+  (title: *URL placement: a path segment or a query value*).
 
-- **One owner.** Every sender places a query value through `core.urls` (FR-CORE-501,
-  SP-42). The senders are `RequestsProbeSender`, `SeamProbeSender` (every session route),
-  greybox's `RequestsCorrelatingSender`, both blind-sqli senders, and the M6 browser
-  executor (its observe navigation, its GET store step, and an SPA hash route's query).
-- **Until AU-REQID8, a repeated name follows two rules:**
-  - a **standalone** URL (no entries) addresses the **first occurrence**, in place;
-  - **bound** entries (a link set, a form; the oracle's binder, unchanged) replace
-    **every occurrence**, through `core.urls.bind_query`, for the HTTP senders and the M6
-    executor alike.
-- **Every untouched part keeps** its position, its `=` (or its absence) and its raw text,
-  up to the HTTP client's own rewriting (pinned by a real-browser test). An absent name is
-  appended once. The payload is `quote_plus`-encoded.
-- **No sender adds a second pair** for a name already present. There is no
-  duplicate-parameter probe.
-- **A crawled DOM query point** is loaded in the browser with its bound siblings
-  (`ExecRequest.entries`, from `DomXssStrategy`).
-- **A PRG follow-up** is resolved against the probe's own URL, never the placed one.
-- **Checks.** `tests/test_sender_conformance.py` checks every sender byte for byte on the
-  request requests prepares. `tests/test_query_placement.py` checks them end to end, with
-  Chromium under the measured relation.
-- **Stated gaps:**
-  - a standalone operator URL with a repeated name probes its first occurrence only
-    (0 of 157 ground-truth rows carry a query);
-  - a stored link set's siblings are sent from their stored decoded values, so `flag`
-    becomes `flag=` and `%20` becomes `+`, and `store_adapter.query_pairs` drops empty
-    parts;
-  - the M6 trace records no siblings;
-  - a form-body store request sends no siblings;
-  - query builders in other items' files (§4.2);
-  - a path point's PRG follow-up re-requests the placed path (flagged, §4.2).
+## 7. Shared primitives and architecture (shared docs: the coordinator writes them)
 
-**FR-CORE-501**, amended in place (title: *URL placement: a path segment or a query value;
-`CC-CORE-0059`, `CC-CORE-0068`*). Its current text is kept, and this is added:
+**SP-42 row, replacement text for `docs/SHARED_PRIMITIVES.md`** (the guard parses the
+first `fuzzlab/…::name` of the owner cell; `place_path_param` stays first, and every
+other owner name is defined only in `core/urls.py`, checked by search):
 
-> `core.urls.QueryEntries` is the ordered list of a query's raw parts: split on `&` from
-> `urlsplit`'s query, an empty query having none, empty parts kept, each name decoded with
-> `surrogateescape` for matching only. `place_query_param(url, name, value)` puts
-> `encode_query_value(value)` (`quote_plus`, `safe=""`) into the first part named `name`,
-> or appends one part, and keeps every other part's text. `bind_query(url, entries, name,
-> value)` is `with_query(url, FormEntries(entries).replace(name, value))`. `with_query`
-> sets the query to the urlencoded entries. `place_route_query_param` places inside an SPA
-> hash route's query (`%20`). This is the one placement (SP-42).
+```
+| SP-42 | Placing a value in its URL: a path-segment value in its template (`/ticket/{id}`: the one segment replaced, percent-encoded, or refused), or a query value (standalone: the first occurrence of the name in place, every other raw part kept; bound entries: the binder's rule, every occurrence; an SPA hash route's query) | `fuzzlab/core/urls.py::place_path_param`, with `place_query_param`, `bind_query`, `with_query`, `place_route_query_param`, `QueryEntries` and `encode_query_value` in the same module (read by both probe senders, greybox, both blind-sqli senders, `browserexec`, `harness.auto` and `labels.contract`) | `tests/test_sender_conformance.py::test_every_sender_places_a_path_value_in_its_segment`, `tests/test_sender_conformance.py::test_the_path_check_catches_a_sender_that_queries_it`, `tests/test_sender_conformance.py::test_every_sender_places_a_query_occurrence_in_place`, `tests/test_sender_conformance.py::test_the_occurrence_check_catches_an_appending_and_a_collapsing_sender`, `tests/test_query_placement.py::test_every_query_builder_goes_through_the_one_owner`, `tests/test_query_placement.py::test_the_query_builder_allow_list_has_no_stale_entry`, `tests/test_query_placement.py::test_the_query_builder_guard_catches_synthetic_offenders`, `tests/test_shared_primitives.py::test_every_owner_is_defined_once` | PA-0003, PA-0115, PA-0531 (CC-CORE-0059, CC-CORE-0068) |
+```
 
-## 7. Shared primitives and architecture
-
-**SP-42**, extended. The orchestrator updates the row at merge (`SHARED_PRIMITIVES.md` is a
-shared doc).
-- Mechanism: "Placing a value in its URL: a path segment, or a query value (standalone:
-  the first occurrence in place; bound: the binder's rule)".
-- Owner: `fuzzlab/core/urls.py::place_path_param`, with `place_query_param`, `bind_query`,
-  `with_query`, `place_route_query_param`, `QueryEntries` and `encode_query_value`.
-- Readers:
-  - both probe senders;
-  - greybox;
-  - blind-sqli;
-  - `browserexec`;
-  - `harness.auto`;
-  - `labels.contract`.
-- Added guards:
-  - `test_every_query_builder_goes_through_the_one_owner`;
-  - `test_the_query_builder_guard_catches_synthetic_offenders`;
-  - `test_the_query_builder_allow_list_has_no_stale_entry`;
-  - `test_every_sender_places_a_query_occurrence_in_place`;
-  - `test_the_occurrence_check_catches_an_appending_and_a_collapsing_sender`.
-
-**SP-20** (the sender protocol) gains the two conformance guards in its row.
-
-**`docs/ARCHITECTURE.md` line**, drafted for the coordinator to add after `:1323` (the
-FR-FUZZ-57/58 bullet that cites SP-42):
+**`docs/ARCHITECTURE.md` line**, for the coordinator to add after the FR-FUZZ-57/58
+bullet that cites SP-42 (`:1323` at 8100959):
 
 > - since FR-FUZZ-64 (CC-FUZZ-0106, CC-CORE-0068) every sender places a query value
 >   through the same owner (`core.urls.place_query_param` / `bind_query` /
->   `place_route_query_param`, SP-42). A standalone URL gets the first occurrence of the
->   name in place, every other part kept with its raw text. Bound entries replace every
->   occurrence (the oracle's binder's rule, until AU-REQID8). The M6 executor places
->   through the same functions and loads a crawled DOM query point with its siblings
->   (`ExecRequest.entries`).
+>   `place_route_query_param`, SP-42): both probe senders, greybox, both blind-sqli
+>   senders and the M6 executor. A standalone URL gets the first occurrence of the name
+>   in place, every other part kept with its raw text; bound entries replace every
+>   occurrence (the oracle's binder's rule, until AU-REQID8). An AST guard keeps query
+>   building in `core.urls` (`tests/test_query_placement.py`).
 
-## 8. Draft change-control entries (pre-change gate; Effectiveness pending)
+(When part 2 lands, the line gains: "The M6 executor loads a crawled DOM query point with
+its siblings (`ExecRequest.entries`).")
 
-```
-### CC-FUZZ-0106 — Every sender places a query value through one owner (BUG-0531) (2026-10-19)
-- Change: `RequestsProbeSender`, `SeamProbeSender`, greybox `RequestsCorrelatingSender`,
-  blind-sqli `RequestsSender`/`SeamSender` and `browserexec` (observe navigation, GET
-  store step, `_with_fragment` as a wrapper) place query values through
-  `core.urls.place_query_param` (standalone) / `bind_query` (bound) /
-  `place_route_query_param`; greybox's bound branch no longer appends (`params=`);
-  `RequestsProbeSender` keeps the probe's own URL for its PRG follow-up;
-  `ExecRequest` gains `entries`, which `DomXssStrategy._observe` fills for a query point;
-  `header_points_from_store` builds its query through `with_query` (same bytes);
-  `tools/authhttp.with_query_param` / `with_query` are removed. Files:
-  tools/probesender.py, greybox/run.py, tools/blind_sqli_fuzzer.py, tools/browserexec.py,
-  oracle/browser.py, oracle/strategies.py (one line, after AU-OUTCOME), harness/auto.py,
-  tools/authhttp.py (~70 LOC changed); tests ~500 LOC (§5). oracle/oracle.py and
-  harness/pipeline.py are unchanged.
-- Impact (other components / project): CORE (the owner, CC-CORE-0068). Contract change:
-  `ExecRequest.entries` (writer `DomXssStrategy._observe`; readers
-  `PlaywrightBrowserExecutor.run`, `FakeBrowserExecutor.run` (ignores), the M6 visit
-  trace (records no siblings); 12 test files build `ExecRequest` and keep working with the
-  default). Unchanged: the `Sender` protocol, `Candidate`, the binder, the store. Callers
-  found by search (PA-0152): `with_query_param` (probesender, blind_sqli_fuzzer,
-  tests/test_fuzzer_seam.py), `with_query` (probesender), `_with_fragment`
-  (browserexec, tests/test_json_points.py). Overlap: strategies.py and oracle/* with
-  AU-OUTCOME, which merges first.
-- Risk: medium. The wire changes for any URL that already carries a query, for every
-  crawled DOM query point with a link set, and for the GET store step (intended, measured
-  on fixtures); scored ground truth is unchanged (0 of 157 rows carry a query; 0 bound DOM
-  points). A live development-lab before/after needs owner authorisation (residual).
-- Deliverables:
-  - [ ] senders, executor, header points through the owner; PRG keeps the probe URL — todo
-  - [ ] ExecRequest.entries and DomXssStrategy (after AU-OUTCOME merges) — todo
-  - [ ] conformance on the prepared URL, the AST guard, the tests of §5 — todo
-  - [ ] strict xfails removed, except the AU-REQID8 pin — todo
-  - [ ] BUG-0531, PA-0531, ERROR_LOG, CHANGELOG (at merge) — todo
-- Effectiveness (assessed after landing): pending.
+## 8. Change-control entries (written at implementation)
 
-### CC-CORE-0068 — One query placement: `QueryEntries`, `place_query_param`, `bind_query` (SP-42, FR-CORE-501) (2026-10-19)
-- Change: `core/urls.py` gains `QueryEntries`, `encode_query_value`, `place_query_param`,
-  `bind_query`, `place_route_query_param` and `with_query` (moved from
-  tools/authhttp.py). No schema change; `core/forms.py` unchanged. (~110 LOC.)
-- Impact: every caller in §3.3; SHARED_PRIMITIVES.md SP-42 row and ARCHITECTURE.md line
-  (coordinator, at merge); FR-CORE-501 amended in place.
-- Risk: low-medium (a new primitive; unit-tested over every part shape measured in §1.2;
-  guarded).
-- Deliverables: owner [ ] todo; unit tests [ ] todo; FR-CORE-501 [ ] todo.
-- Effectiveness: pending.
-```
+CC-FUZZ-0106 (part 1 done, part 2 held) is at the top of
+`docs/components/07-fuzzing-harness-and-oracle/change-control.md`; CC-CORE-0068 at the top
+of `docs/components/02-core-library/change-control.md`.
 
 ## 9. Residual limits
 
 1. **Two rules for a repeated name until AU-REQID8.** A standalone, operator-supplied URL
-   with a repeated name now probes the first occurrence, so a last-value server (PHP
-   without `[]`) may miss it. This is an accepted residual. The exposure is 0 of 157
-   ground-truth rows, and AU-REQID8 resolves it. Bound entries keep replacing every
-   occurrence.
+   with a repeated name probes the first occurrence, so a last-value server (PHP without
+   `[]`) may miss it. Exposure: 0 of 157 ground-truth rows. Bound entries keep replacing
+   every occurrence. Pinned: `test_a_bound_duplicate_name_changes_one_occurrence_only`
+   (AU-REQID8).
 2. **A stored link set's siblings are sent from their stored decoded values** (`flag` as
-   `flag=`, `%20` as `+`), and `store_adapter.query_pairs` drops empty parts. AU-REQID8's
-   importer fixes this.
-3. **The M6 visit trace records no siblings.** It records the param and value only.
-4. **Crawled DOM query points now load with their siblings.** That changes the wire for
-   every such point. It was measured on fixtures and on ground truth (0 bound DOM points).
-   A live development-lab before/after needs the owner's authorisation.
-5. **A form-body store step sends no siblings.** Ground truth enumerates JSON store bodies
-   only.
-6. **Query builders in other items' files**, allow-listed with hand-offs (§4.2):
-   - `disco/runner.py:262` (AU-OUTCOME);
-   - `core/redaction.py`'s captured form dict and its URL redaction (AU-REDACT);
-   - `store_adapter.py:274` (AU-REQID8);
-   - `disco/synth` (defect 9);
-   - `labgen/oracle_wrapper` (LAB);
-   - `spa.query_url` (CRAWL).
-7. **Greybox and M10.** Greybox points carry no siblings, and M10 cannot place a bound
+   `flag=`, `%20` as `+`), and `store_adapter.query_pairs` drops empty parts. Pinned:
+   `test_a_stored_link_set_round_trips_its_crawled_query` (AU-REQID8).
+3. **A non-UTF-8 query name never matches its own occurrence.** The store decodes names
+   with `unquote_plus`'s default `errors="replace"` (`store_adapter.query_pairs`), while
+   the owner matches with `surrogateescape` (so `n%E9` and `n%EF%BF%BD` stay two names,
+   as a server reads them). Measured: `place_query_param("…?n%E9=1&a=2", "n�", "M")`
+   appends `n%EF%BF%BD=M`; the bound rule sends `n%EF%BF%BD=M&a=2`. AU-REQID8's importer.
+4. **The M6 visit trace records no siblings.** It records the param and value only.
+5. **The M6 GET store step is always standalone**: a `StoreStep` carries no entries, so
+   it uses `place_query_param` on its own URL. A form-body store request sends no
+   siblings. Ground truth enumerates JSON store bodies only.
+6. **Crawled DOM query points load without their siblings until part 2** (pinned:
+   `test_a_dom_query_point_is_loaded_with_its_siblings`). After part 2 the wire changes for
+   every such point; measured on fixtures and ground truth (0 bound DOM points). A live
+   development-lab before/after needs the owner's authorisation (D11).
+7. **Query builders in other items' code**, each pinned by an offline strict xfail naming
+   its owner (§4.2): `disco/runner.py:262` (AU-OUTCOME), `tools/spa.py` `query_url`
+   (CRAWL, to be registered), `store_adapter.py:274` (AU-REQID8), `labgen/oracle_wrapper`
+   (LAB). `core/redaction.py` and `disco/synth` are allow-listed, never sent.
+8. **Greybox and M10.** Greybox points carry no siblings, and M10 cannot place a bound
    candidate (no verdict, never a negative). Both are unchanged.
-8. **A path point's PRG follow-up re-requests the placed path** (measured; §4.2). This is
-   an FR-FUZZ-49 question, flagged and not fixed here.
+9. **A path point's PRG follow-up re-requests the placed path** (AU-PRGPATH; pinned, not
+   fixed here). It is broader than `#top`: a relative `Location: edit` requests
+   `/p/zqmark/edit`.
 
-## 10. Bug record and preventive action (drafts)
+## 10. Bug record and preventive action
 
-**BUG-0531: each sender placed a query value differently** (audit defect 14).
-- The RCA is §2.
-- The corrective action is CC-FUZZ-0106 and CC-CORE-0068.
+`docs/bugs/BUG-0531-each-sender-placed-a-query-value-differently.md` holds the RCA, the
+recurrence review (BUG-0039/PA-0041, BUG-0044/PA-0046, BUG-0071/PA-0072,
+BUG-0115/PA-0115, BUG-0110/PA-0111, BUG-0311/PA-0311(2)) and the prior-preventive-action
+failure analysis.
 
-**Recurrence review.** The same root cause, one seam's implementations not in step, has
-come before:
+**PA-0531**, exact text for `docs/PREVENTIVE_ACTIONS.md` (B1: (1) states what the guard
+does, and its limits):
 
-| Prior bug | Rule | What it kept in step |
-|---|---|---|
-| BUG-0039 | PA-0041 | transport settings |
-| BUG-0044 | PA-0046 | redirects |
-| BUG-0071 | PA-0072 | the signature |
-| BUG-0115 | PA-0115 | placement by location |
-
-A related rule: BUG-0110 / PA-0111, form serialisation rule by rule. `core.forms.RULES`
-has "duplicates-kept-in-order", for forms only.
-
-**Prior-preventive-action failure analysis.**
-- PA-0115(2) checked placement "by discovery", but at **location granularity**. Its wire
-  (`_Wire`) parses the query into a `dict`, and its probe URL has no query. The check
-  could not observe an occurrence, a duplicate, order or raw text. It was not enforced at
-  the level where the violation lives (cf. PA-0311(2)).
-- PA-0041 and PA-0072 synchronise settings and signatures, not the request a sender
-  builds.
-- PA-0111's rule table covers `core.forms` serialisation. URL query mutation is a
-  different code path, with no rule. Too narrow.
-
-**Preventive action. PA-0531** strengthens PA-0115(2) and PA-0111:
-1. A value placed in a URL, a query value or a path segment, is placed only through the
-   one owner (SP-42).
-   - An AST guard rejects every query-builder shape outside the owner (S1–S7, §3.5), with
-     a reasoned allow-list that cannot go stale. It is proven on synthetic offenders of
-     every shape.
-   - Until AU-REQID8, a repeated name follows two stated rules: a standalone URL addresses
-     the first occurrence; bound entries replace every occurrence (the binder's rule,
-     through `bind_query`, for HTTP and the browser alike).
-2. A placement check observes the raw request through the real client's own URL
-   preparation, never a parsed `dict`. Senders that share a client are compared byte for
-   byte. The check is shown to fail on a sender that appends and on one that collapses.
-3. Senders on different clients (Chromium against requests) are compared under a relation
-   measured on the real clients, pinned by a real-browser test, and proven not vacuous.
-
-- Enforced by: `tests/test_query_placement.py::test_every_query_builder_goes_through_the_one_owner`,
-  `tests/test_query_placement.py::test_the_query_builder_guard_catches_synthetic_offenders`,
-  `tests/test_sender_conformance.py::test_every_sender_places_a_query_occurrence_in_place`,
-  `tests/test_sender_conformance.py::test_the_occurrence_check_catches_an_appending_and_a_collapsing_sender`,
-  `tests/test_query_placement.py::test_platform_clients_rewrite_only_escapes_they_disagree_on`,
-  `tests/test_query_placement.py::test_the_equivalence_still_tells_apart_what_a_server_reads_apart`
+```
+- **PA-0531** — Strengthens `PA-0115(2)`/`(3)` and `PA-0111`, after BUG-0531: each sender
+  placed a query value its own way (an appended second pair; a `dict` rebuild that lost
+  duplicates and rewrote siblings), and PA-0115's conformance check read the query as a
+  `dict` on a query-less URL, so it could not see an occurrence.
+  1. **A value placed in a URL's query goes through the one owner** (`core.urls`, SP-42):
+     `place_query_param` for a standalone URL, `bind_query` for bound entries,
+     `place_route_query_param` for an SPA hash route. An AST guard over `fuzzlab/` (the
+     owner excluded) flags: `params` reaching a send (a keyword; a positional; a
+     `"params"` key or `dict(params=…)` passed as `**`, directly or through a local;
+     `.update`/`.setdefault` adding it to such a local); a subscript store into
+     `"params"`; `dict(parse_qsl/parse_qs)` and `parse_qs`; a string build (`+`, `%`,
+     `+=`, f-string, `.format`) holding a `?`/`&` constant and query material (a quoter,
+     `.query`, `"&".join`, or a local name the same scope assigned from one), or holding
+     a `[?&]name=` constant; `"&".join`/`"?".join`; `._replace(query=…|fragment=…)`;
+     `SplitResult`/`ParseResult(...)`; a tuple `urlunsplit`/`urlunparse` rebuilding the
+     query or fragment. Every finding outside the owner is on an allow-list with its
+     count and its reason, compared exactly (a new builder and a stale entry both fail).
+     The guard is proven on 50 synthetic offenders and 10 near-misses.
+  2. **A placement check observes the raw request through the real client's own URL
+     preparation, never a parsed `dict`,** on a probe URL that already carries the name,
+     a missing `=`, an empty part and a raw escape. Senders that share a client are
+     compared byte for byte, and the check is shown to fail on an appending and on a
+     collapsing sender.
+  3. **Senders on different clients (Chromium against `requests`) are compared under a
+     relation measured on the real clients,** pinned by a real-browser test that fails
+     when a client's rewriting changes, and proven not vacuous on pairs a server reads
+     apart.
+  4. **A known unfixed instance in another item's code is pinned in the same change by an
+     offline strict xfail naming its owner** (`PA-0054(3)`), never a prose deferral.
+  - The guard's limits: it does not see query material reaching a build through a
+    parameter, an attribute or another function's name; a separator held in a variable,
+    or a `"".join([...])` build; a `params` dict reaching `**` through an attribute or
+    another function; session-level `Session.params`; or a new function given an
+    allow-listed name in an allow-listed module. (from BUG-0531)
+  - Enforced by: tests/test_query_placement.py::test_every_query_builder_goes_through_the_one_owner, tests/test_query_placement.py::test_the_query_builder_allow_list_has_no_stale_entry, tests/test_query_placement.py::test_the_query_builder_guard_catches_synthetic_offenders, tests/test_sender_conformance.py::test_every_sender_places_a_query_occurrence_in_place, tests/test_sender_conformance.py::test_the_occurrence_check_catches_an_appending_and_a_collapsing_sender, tests/test_query_placement.py::test_platform_clients_rewrite_only_escapes_they_disagree_on, tests/test_query_placement.py::test_the_equivalence_still_tells_apart_what_a_server_reads_apart
+```
 
 ## 11. Size, merge order and open questions
 
-**Size.** About 180 LOC of production code (owner ~110, senders and executor ~70) and about
-500 LOC of tests. That fits one item.
+**Size (part 1).** Production: about 90 LOC in the owner and about 75 changed across
+seven files (`git diff --stat 7820bcd`). Tests: about 800 LOC changed (most in
+`tests/test_query_placement.py`).
 
 **Merge order.**
-1. AU-OUTCOME merges first.
-2. Merge it into this branch.
-3. Implement the `browser.py` and `strategies.py` parts on top of it.
-4. Verify with `verify_change.py --full`.
+1. AU-OUTCOME merges first. `tools/probesender.py` is shared: AU-OUTCOME's edits are at
+   the base's lines 206-207, 857-861, 993 and 1000; this item's hunks are at 20-27,
+   792-794, 822, 939-946 and 964-965.
+2. This branch merges (part 1). The guard allow-lists `disco/runner.py`
+   `Runner.prepare` and `oracle/strategies.py` `OpenRedirectStrategy.confirm`; if
+   AU-OUTCOME's merge moves or removes one of those builders, the stale-entry test fails
+   by design and the entry is updated at merge.
+3. Part 2 on top of AU-OUTCOME, then `verify_change.py --full`.
 
-**Open questions:**
-- **Q1.** Should FR-CORE-501 be amended in place, or should the query placement get a new
-  FR-CORE ID? The proposal is to amend in place, since SP-42 is the same primitive. No
-  FR-CORE number was assigned.
-- **Q2.** The path-point PRG follow-up (§4.2, residual 8) is a measured defect outside
-  query placement. Should it be registered as its own bug and item?
+**Open questions:** Q1 (FR-CORE-501 amended in place) and Q2 (the path-point PRG defect:
+its own item, AU-PRGPATH) are resolved. None open.
 
 ## 12. Revision 2: changes keyed to the review
 

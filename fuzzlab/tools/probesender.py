@@ -17,14 +17,13 @@ from fuzzlab.core.http import check_send_header
 from fuzzlab.core.jsonbody import ENCTYPE as JSON_ENCTYPE
 from fuzzlab.core.jsonbody import LOCATION as JSON_LOCATION
 from fuzzlab.core.jsonbody import JsonPlacementError, body_for
-from fuzzlab.core.urls import (DestructiveUrlRefused, PathPlacementError, canonical_origin,
-                               check_send_url, place_path_param, to_path,
-                               transaction_reason, url_key)
+from fuzzlab.core.urls import (DestructiveUrlRefused, PathPlacementError, bind_query,
+                               canonical_origin, check_send_url, place_path_param,
+                               place_query_param, to_path, transaction_reason, url_key)
 from fuzzlab.oracle.probe import (PRG_ANY_METHOD, PRG_GET_ONLY, PRG_OBSERVED,
                                   PRG_UNOBSERVED, REDIRECT_STATUSES, HeaderPointsStopped,
                                   Probe, ProbeUnobserved, UnplaceableLocation,
                                   attempt_record, note_attempts)
-from fuzzlab.tools.authhttp import with_query, with_query_param
 
 #: A path-segment point's location (FR-FUZZ-57): ``param`` names the URL template's
 #: ``{param}`` segment.
@@ -789,9 +788,9 @@ class SeamProbeSender(_ExplicitAllowance):
                            headers={"Content-Type": "application/x-www-form-urlencoded"},
                            body=urlencode(list(entries)).encode(), identity=identity,
                            timing=timing, component="oracle")
-                   if location == "body" else
-                   Request(method.upper(), with_query(url, entries), identity=identity,
-                           timing=timing, component="oracle"))
+                   if location == "body" else       # the bound rule (FR-FUZZ-64, SP-42)
+                   Request(method.upper(), bind_query(url, entries, param, value),
+                           identity=identity, timing=timing, component="oracle"))
         elif location == "header":
             req = Request(method.upper(), url, headers={param: value},
                           identity=identity, timing=timing, component="oracle")
@@ -819,7 +818,10 @@ class SeamProbeSender(_ExplicitAllowance):
                           body=urlencode({param: value}).encode(),
                           identity=identity, timing=timing, component="oracle")
         else:
-            req = Request(method.upper(), with_query_param(url, param, value),
+            # the standalone rule (FR-FUZZ-64, SP-42): the URL's own query, the first
+            # occurrence in place. Also an unknown location such as `fragment` (BUG-0115
+            # instance 4, pinned by a strict xfail, unchanged here)
+            req = Request(method.upper(), place_query_param(url, param, value),
                           identity=identity, timing=timing, component="oracle")
         return self._dispatch(client, identity, req, location, param, url)
 
@@ -937,13 +939,16 @@ class RequestsProbeSender(_ExplicitAllowance):
         if jar is not None:
             jar.clear()
         kwargs = {"timeout": self._timeout, "allow_redirects": False}
+        # where the request goes; `url` stays the probe's own URL, which a PRG follow-up
+        # is resolved against, never the placed one (FR-FUZZ-49, FR-FUZZ-64)
+        wire = url
         if body is not None:                             # a JSON leaf (FR-CORE-36)
             kwargs["data"] = body
             kwargs["headers"] = {"Content-Type": JSON_ENCTYPE}
         elif entries is not None and location == "body":   # a form point (forms phase 1)
             kwargs["data"] = list(entries)
         elif entries is not None and location == "query":
-            url = with_query(url, entries)
+            wire = bind_query(url, entries, param, value)    # the bound rule (SP-42)
         elif location == "header":
             check_send_header(param, url, self._explicit)   # FR-FUZZ-43 (PA-0083(1))
             kwargs["headers"] = {param: value}
@@ -961,8 +966,10 @@ class RequestsProbeSender(_ExplicitAllowance):
         elif location == "body":
             kwargs["data"] = {param: value}          # form-encoded body
         else:
-            kwargs["params"] = {param: value}        # query string
-        probe = self._request(method.upper(), url, kwargs)
+            # the standalone rule (SP-42): the first occurrence in place. Also an unknown
+            # location such as `fragment` (BUG-0115 instance 4, pinned, unchanged here)
+            wire = place_query_param(url, param, value)
+        probe = self._request(method.upper(), wire, kwargs)
         if prg and not timing:                 # FR-FUZZ-49; a timing send never follows
             self._follow(probe, url, method)
         return probe

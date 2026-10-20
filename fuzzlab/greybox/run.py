@@ -149,7 +149,7 @@ class RequestsCorrelatingSender:
 
     def send_correlated(self, url: str, param: str, value: str, *,
                         method: str = "GET", location: str = "query", entries=None):
-        from fuzzlab.core.urls import check_send_url
+        from fuzzlab.core.urls import bind_query, check_send_url, place_query_param
         # NFR-FUZZ-safe (BUG-0112); a crawl-sourced DELETE too (FR-FUZZ-47)
         check_send_url(url, self._explicit, method=method)
         # The operator's cookie is the only session material: none a probe response
@@ -184,19 +184,22 @@ class RequestsCorrelatingSender:
             # refuse, never relocate (BUG-0115, PA-0115); `json` included: greybox does
             # not rebuild JSON bodies (forms phase 3, FR-FUZZ-47)
             raise UnplaceableLocation(f"cannot place a probe at location {location!r}")
+        wire = url
         if location == "header":
             from fuzzlab.core.http import check_send_header
             check_send_header(param, url, self._explicit)   # FR-FUZZ-43 (PA-0083(1))
             headers[param] = value                # BUG-0115: it went into the query
-        elif entries is not None:                 # a form point's full entry list
-            kwargs["data" if location == "body" else "params"] = list(entries)
+        elif entries is not None and location == "body":   # a form point's entry list
+            kwargs["data"] = list(entries)
+        elif entries is not None:                 # the bound rule (FR-FUZZ-64, SP-42)
+            wire = bind_query(url, entries, param, value)
         elif location == "body":
             kwargs["data"] = {param: value}
-        else:
-            kwargs["params"] = {param: value}
+        else:                                     # the standalone rule (SP-42)
+            wire = place_query_param(url, param, value)
         start = time.perf_counter()
         try:
-            r = self._session.request(method.upper(), url, **kwargs)
+            r = self._session.request(method.upper(), wire, **kwargs)
             probe = Probe(status=r.status_code, text=r.text,
                           elapsed=time.perf_counter() - start, headers=dict(r.headers),
                           session=note)

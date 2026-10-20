@@ -385,6 +385,7 @@ def test_requests_correlating_sender_sets_header(monkeypatch):
     class _Session:
         def request(self, method, url, **kwargs):
             captured["method"] = method
+            captured["url"] = url
             captured["headers"] = kwargs.get("headers")
             captured["params"] = kwargs.get("params")
             return _Resp()
@@ -394,5 +395,7 @@ def test_requests_correlating_sender_sets_header(monkeypatch):
     probe, cid = sender.send_correlated("http://h/x.php", "id", "1")
     assert cid == "fixedid"
     assert captured["headers"]["X-Fzl-Cov"] == "fixedid"
-    assert captured["params"] == {"id": "1"}
+    # BUG-0531: the value is placed in the URL by `place_query_param` (SP-42), never
+    # handed to requests' `params=`, which appends a second occurrence.
+    assert captured["url"] == "http://h/x.php?id=1" and captured["params"] is None
     assert probe.status == 200

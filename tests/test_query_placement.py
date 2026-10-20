@@ -1,30 +1,38 @@
-"""AU-REQID14 measurement, audit defect 14 (BUG-0531): a query payload is placed
-differently by each sender.
+"""Every sender places a query value through one owner (FR-FUZZ-64, BUG-0531, PA-0531;
+SP-42, FR-CORE-501).
+
+Audit defect 14: each sender placed a query payload its own way. The anonymous senders
+appended a second pair; the authenticated seam rebuilt the query through a ``dict``
+(a duplicate sibling lost, ``%20`` turned into ``+``, empty parts dropped, ``%E9`` turned
+into ``%EF%BF%BD``); the M6 browser appended. Now:
+
+- a **standalone** URL (no entries) gets the payload in the first part of its own query
+  named the parameter, in place; every other part keeps its text
+  (`core.urls.place_query_param`);
+- **bound** entries (a link set, a form) replace every occurrence of the name -- the
+  oracle binder's rule, unchanged until AU-REQID8 (`core.urls.bind_query`).
 
 Every sender sends to a loopback echo server started here (`require_loopback`,
-PA-0130), which records the exact request target it received, byte for byte. The
-contract the draft (docs/components/07-fuzzing-harness-and-oracle/DRAFT-AU-REQID14.md)
-states: for a standalone URL, the payload replaces the value of the first occurrence of
-the parameter, in place; every other part keeps its position, its ``=`` (or its absence)
-and its text. Until AU-REQID8, bound entries (a link set, a form) replace every
-occurrence of the name (the binder's rule), for the HTTP senders and the M6 browser alike.
-
-How a wire is judged (measured, `test_platform_clients_rewrite_only_escapes_they_disagree_on`):
+PA-0130), which records the exact request target it received. How a wire is judged
+(measured, `test_platform_clients_rewrite_only_escapes_they_disagree_on`):
 - every HTTP sender goes through requests, so it is compared **byte for byte** with what
   requests itself prepares from the contract's query (`_prepared`);
 - real Chromium is compared with the contract under `canonical_pairs`: bytes, with only
   the escapes the two clients were measured to treat differently decoded.
 
-Tests that fail on 8100959 are pinned with a strict xfail until CC-FUZZ-0106 (AU-REQID14)
-lands, or until AU-REQID8 for the binder's rule (PA-0054(3)); the combinations that
-already hold are not pinned.
+Known instances this item does not fix are pinned with a strict xfail naming their owner
+(PA-0054(3), PA-0115(3)); the AST guard at the end keeps every other query builder out.
 """
 
 from __future__ import annotations
 
+import ast
+import json
 import re
 import threading
+from collections import Counter
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from urllib.parse import parse_qsl, quote_plus, unquote_to_bytes, urlencode, urlsplit, \
     urlunsplit
 
@@ -32,15 +40,15 @@ import pytest
 
 from fuzzlab.core.net import require_loopback
 
-pin14 = pytest.mark.xfail(strict=True, reason="BUG-0531 (audit defect 14), measured on "
-                          "8100959; fixed by CC-FUZZ-0106 (AU-REQID14)")
-pin8 = pytest.mark.xfail(strict=True, reason="audit defect 14, the binder's rule: bound "
-                         "entries replace every occurrence of a name until AU-REQID8 "
-                         "makes the occurrence part of a point (measured on 8100959)")
-
 MARK = "zqmark"
 #: A payload carrying every character a placement can get wrong.
 HARD = "'\"<>&=#+% é/~"
+
+
+def _pin(owner: str, what: str):
+    """A known instance not fixed here, pinned until its owner fixes it (PA-0054(3))."""
+    return pytest.mark.xfail(strict=True, reason=f"{what}: owned by {owner} (BUG-0531's "
+                             "sweep, PA-0531)")
 
 
 # --- the equivalence the measured clients preserve -------------------------------------
@@ -95,8 +103,9 @@ def test_the_equivalence_still_tells_apart_what_a_server_reads_apart():
 
 class _Echo:
     """A loopback HTTP server that records each request's raw target (path and query
-    exactly as received) to ``/p`` and answers a small HTML page. With ``redirect`` set,
-    a request whose target carries `MARK` is answered ``302 Location: <redirect>``."""
+    exactly as received) to ``/p`` (and below it) and answers a small HTML page. With
+    ``redirect`` set, a request whose target carries `MARK` is answered
+    ``302 Location: <redirect>``."""
 
     def __init__(self):
         require_loopback("127.0.0.1")                      # PA-0130
@@ -109,7 +118,8 @@ class _Echo:
                 length = int(self.headers.get("Content-Length") or 0)
                 if length:
                     self.rfile.read(length)
-                if urlsplit(self.path).path == "/p":
+                path = urlsplit(self.path).path
+                if path == "/p" or path.startswith("/p/"):
                     echo.targets.append(self.path)
                 if echo.redirect is not None and MARK in self.path:
                     self.send_response(302)
@@ -220,6 +230,61 @@ def test_platform_clients_rewrite_only_escapes_they_disagree_on(echo, monkeypatc
         assert sent["requests"] == _prepared(raw)          # what `_prepared` models
 
 
+# --- the owner (core.urls; SP-42, FR-CORE-501) ------------------------------------------
+@pytest.mark.parametrize("url,name,want", [
+    ("http://h/p?id=1&tag=a&tag=b", "id", f"http://h/p?id={MARK}&tag=a&tag=b"),
+    ("http://h/p?tag=a&id=1&tag=b", "tag", f"http://h/p?tag={MARK}&id=1&tag=b"),
+    ("http://h/p?a=%7E&flag&id=1&b=x+y&t=x%20y", "id",
+     f"http://h/p?a=%7E&flag&id={MARK}&b=x+y&t=x%20y"),
+    ("http://h/p?a=1&&id=1&", "id", f"http://h/p?a=1&&id={MARK}&"),
+    ("http://h/p?id=1&e=%E9", "id", f"http://h/p?id={MARK}&e=%E9"),
+    ("http://h/p?a%5B%5D=1&a%5B%5D=2", "a[]", f"http://h/p?a%5B%5D={MARK}&a%5B%5D=2"),
+    ("http://h/p?a+b=1", "a b", f"http://h/p?a+b={MARK}"),
+    ("http://h/p?i=a;b&id=1", "id", f"http://h/p?i=a;b&id={MARK}"),
+    ("http://h/p;m=1?id=1", "id", f"http://h/p;m=1?id={MARK}"),
+    ("http://h/p", "id", f"http://h/p?id={MARK}"),
+    ("http://h/p?", "id", f"http://h/p?id={MARK}"),           # an empty query: no parts
+    ("http://h/p#", "id", f"http://h/p?id={MARK}"),           # an empty `#` is dropped
+    ("http://h/p?x=1#frag", "id", f"http://h/p?x=1&id={MARK}#frag"),
+    ("http://h/p?id=", "id", f"http://h/p?id={MARK}"),
+    ("http://h/p?id", "id", f"http://h/p?id={MARK}"),
+])
+def test_the_owner_places_the_first_occurrence_and_keeps_raw_text(url, name, want):
+    """The standalone rule: every untouched part keeps its text exactly (a missing ``=``,
+    an empty part, ``%20`` vs ``+``, an invalid escape, ``;`` as data, `urlsplit`'s path
+    parameters); an absent name is appended once."""
+    from fuzzlab.core.urls import place_query_param
+    assert place_query_param(url, name, MARK) == want
+
+
+def test_the_owner_encodes_a_payload_as_quote_plus():
+    from fuzzlab.core.urls import place_query_param
+    assert place_query_param("http://h/p?a=1", "id", HARD) == \
+        "http://h/p?a=1&id=" + quote_plus(HARD, safe="")
+
+
+def test_name_matching_never_merges_an_invalid_escape_with_its_replacement():
+    """A part's name is decoded with ``surrogateescape`` for matching: ``n%E9`` is not
+    ``n\\ufffd`` (``errors="replace"`` would make it so and place into the wrong part)."""
+    from fuzzlab.core.urls import place_query_param
+    url = "http://h/p?n%E9=1&n%EF%BF%BD=2"
+    assert place_query_param(url, "n�", MARK) == f"http://h/p?n%E9=1&n%EF%BF%BD={MARK}"
+    assert place_query_param(url, "né", MARK) == url + f"&n%C3%A9={MARK}"
+
+
+def test_bind_query_follows_the_binders_rule_and_adds_nothing_to_bound_entries():
+    """The bound rule (until AU-REQID8): every entry called the name gets the value; on
+    entries the binder already bound it changes nothing; an absent name is appended."""
+    from fuzzlab.core.urls import bind_query
+    entries = [("id", "1"), ("tag", "a"), ("tag", "b")]
+    assert bind_query("http://h/p", entries, "tag", MARK) == \
+        f"http://h/p?id=1&tag={MARK}&tag={MARK}"
+    bound = [("id", "1"), ("tag", MARK)]
+    assert bind_query("http://h/p", bound, "tag", MARK) == f"http://h/p?id=1&tag={MARK}"
+    assert bind_query("http://h/p?x=9", [("id", "1")], "q", MARK) == \
+        f"http://h/p?id=1&q={MARK}"
+
+
 # --- one function per sender: send ``value`` at ``param`` of ``url`` (a GET query point) -
 def _anonymous(url, param, value=MARK):
     from fuzzlab.tools.probesender import RequestsProbeSender
@@ -280,35 +345,25 @@ def _blind_seam(url, param, value=MARK):
 SENDERS = {"probe-anonymous": _anonymous, "probe-seam": _seam,
            "probe-seam-identity": _seam_with_identity, "greybox": _greybox,
            "blind-sqli-anonymous": _blind_requests, "blind-sqli-seam": _blind_seam}
-#: Senders that append a requests ``params=`` pair (the anonymous family) and senders
-#: that rebuild the query through ``dict(parse_qsl(...))`` (`with_query_param`).
-_APPENDING = ("probe-anonymous", "greybox", "blind-sqli-anonymous")
-_DICT = ("probe-seam", "probe-seam-identity", "blind-sqli-seam")
-_ALL = _APPENDING + _DICT
 
-#: (case id, query before, parameter, the query the contract requires, the senders that
-#: fail it on 8100959). A standalone point addresses the first occurrence.
+#: (case id, query before, parameter, the query the contract requires). A standalone point
+#: addresses the first occurrence. On 8100959 the anonymous family appended in every case
+#: and the seam family failed all but ``blank`` (BUG-0531).
 CASES = [
-    ("audit", "id=1&tag=a&tag=b", "id", f"id={MARK}&tag=a&tag=b", _ALL),
-    ("dup-sibling", "tag=a&id=1&tag=b", "tag", f"tag={MARK}&id=1&tag=b", _ALL),
-    ("raw-text", "a=%7E&flag&id=1&b=x+y", "id", f"a=%7E&flag&id={MARK}&b=x+y", _ALL),
-    ("blank", "id=&x=1", "id", f"id={MARK}&x=1", _APPENDING),
-    ("encoded-name", "a%5B%5D=1&a%5B%5D=2", "a[]", f"a%5B%5D={MARK}&a%5B%5D=2", _ALL),
-    ("pct20-sibling", "id=1&t=x%20y", "id", f"id={MARK}&t=x%20y", _ALL),
-    ("empty-parts", "a=1&&id=1&", "id", f"a=1&&id={MARK}&", _ALL),
-    ("pctE9-sibling", "id=1&e=%E9", "id", f"id={MARK}&e=%E9", _ALL),
+    ("audit", "id=1&tag=a&tag=b", "id", f"id={MARK}&tag=a&tag=b"),
+    ("dup-sibling", "tag=a&id=1&tag=b", "tag", f"tag={MARK}&id=1&tag=b"),
+    ("raw-text", "a=%7E&flag&id=1&b=x+y", "id", f"a=%7E&flag&id={MARK}&b=x+y"),
+    ("blank", "id=&x=1", "id", f"id={MARK}&x=1"),
+    ("encoded-name", "a%5B%5D=1&a%5B%5D=2", "a[]", f"a%5B%5D={MARK}&a%5B%5D=2"),
+    ("pct20-sibling", "id=1&t=x%20y", "id", f"id={MARK}&t=x%20y"),
+    ("empty-parts", "a=1&&id=1&", "id", f"a=1&&id={MARK}&"),
+    ("pctE9-sibling", "id=1&e=%E9", "id", f"id={MARK}&e=%E9"),
 ]
 
 
-def _cases():
-    for case_id, before, param, want, failing in CASES:
-        for sender in sorted(SENDERS):
-            yield pytest.param(sender, before, param, want,
-                               marks=[pin14] if sender in failing else [],
-                               id=f"{sender}-{case_id}")
-
-
-@pytest.mark.parametrize("sender,before,param,want", list(_cases()))
+@pytest.mark.parametrize("sender", sorted(SENDERS))
+@pytest.mark.parametrize("before,param,want", [pytest.param(*c[1:], id=c[0])
+                                               for c in CASES])
 def test_every_sender_replaces_the_addressed_occurrence_in_place(echo, sender, before,
                                                                  param, want):
     """Byte for byte against requests' own preparation of the contract (F1)."""
@@ -317,8 +372,8 @@ def test_every_sender_replaces_the_addressed_occurrence_in_place(echo, sender, b
 
 
 def test_control_a_query_less_url_gets_the_pair(echo):
-    """Non-vacuity control (passes on 8100959): the echo server sees each sender's
-    send, and a URL without a query gets ``param=MARK`` from every sender."""
+    """The echo server sees each sender's send, and a URL without a query gets
+    ``param=MARK`` from every sender (today's bytes)."""
     for name in sorted(SENDERS):
         echo.targets.clear()
         SENDERS[name](f"{echo.base}/p", "id")
@@ -328,7 +383,7 @@ def test_control_a_query_less_url_gets_the_pair(echo):
 @pytest.mark.parametrize("sender", sorted(SENDERS))
 def test_a_hard_payload_on_a_query_less_url_is_quote_plus_encoded(echo, sender):
     """Today's bytes for a query-less URL (every ground-truth point): the payload is
-    ``quote_plus(value, safe="")``, exactly. Passes on 8100959; the fix must keep it."""
+    ``quote_plus(value, safe="")``, exactly."""
     SENDERS[sender](f"{echo.base}/p", "id", HARD)
     assert echo.query() == "id=" + quote_plus(HARD, safe="")
 
@@ -346,7 +401,7 @@ def test_the_cases_catch_the_decode_all_reencode_fix(echo):
         pairs[i] = (param, value)
         requests.get(urlunsplit(parts._replace(query=urlencode(pairs))), timeout=5)
     failed = set()
-    for case_id, before, param, want, _failing in CASES:
+    for case_id, before, param, want in CASES:
         echo.targets.clear()
         wrong_fix(f"{echo.base}/p?{before}", param)
         if echo.query() != _prepared(want):
@@ -354,10 +409,9 @@ def test_the_cases_catch_the_decode_all_reencode_fix(echo):
     assert {"raw-text", "pct20-sibling", "empty-parts", "pctE9-sibling"} <= failed
 
 
-@pin14
 def test_the_anonymous_and_authenticated_senders_send_the_same_query(echo):
-    """The defect's own statement: the result depends on the sender, not the target.
-    Both go through requests, so the bytes must be equal (F1)."""
+    """The defect's own statement: the result depended on the sender, not the target.
+    Both go through requests, so the bytes are equal (F1)."""
     got = {}
     for name in ("probe-anonymous", "probe-seam"):
         echo.targets.clear()
@@ -367,10 +421,25 @@ def test_the_anonymous_and_authenticated_senders_send_the_same_query(echo):
 
 
 # --- the bound path: a link set's siblings, bound by the oracle (`_FormBoundSender`) -----
-@pin8
+@pytest.mark.parametrize("inner", ["anonymous", "seam"])
+def test_a_bound_entry_list_is_sent_by_the_binders_rule(echo, inner):
+    """The binder's rule, through `bind_query` in each sender: every ``tag`` gets the
+    value (``id=1&tag=M&tag=M``) -- the documented rule until AU-REQID8."""
+    from fuzzlab.oracle.oracle import _FormBoundSender
+    from fuzzlab.oracle.probe import Candidate
+    from fuzzlab.tools.probesender import RequestsProbeSender
+    url = f"{echo.base}/p"
+    candidate = Candidate(url=url, param="tag",
+                          base_entries=(("id", "1"), ("tag", "a"), ("tag", "b")))
+    sender = RequestsProbeSender(timeout=5) if inner == "anonymous" else _seam_sender()
+    _FormBoundSender(sender, candidate).send(url, "tag", MARK)
+    assert echo.query() == _prepared(f"id=1&tag={MARK}&tag={MARK}")
+
+
+@_pin("AU-REQID8", "the binder replaces every occurrence of a repeated name")
 def test_a_bound_duplicate_name_changes_one_occurrence_only(echo):
     """``tag=a&tag=b``'s point ``tag``: `FormEntries.replace` sets every entry called
-    ``tag`` (``tag=MARK&tag=MARK``). The binder keeps that rule until AU-REQID8."""
+    ``tag``. AU-REQID8 makes the occurrence part of a point and changes `bind_query`."""
     from fuzzlab.oracle.oracle import _FormBoundSender
     from fuzzlab.oracle.probe import Candidate
     from fuzzlab.tools.probesender import RequestsProbeSender
@@ -381,7 +450,7 @@ def test_a_bound_duplicate_name_changes_one_occurrence_only(echo):
     assert echo.query() == _prepared(f"id=1&tag={MARK}&tag=b")
 
 
-# --- PRG: the follow-up never carries the payload (M6) ----------------------------------
+# --- PRG: the follow-up never carries the payload (FR-FUZZ-49) --------------------------
 def _prg_send(sender_name, echo, bound):
     from fuzzlab.tools.probesender import RequestsProbeSender
     sender = RequestsProbeSender(timeout=5) if sender_name == "anonymous" \
@@ -393,17 +462,13 @@ def _prg_send(sender_name, echo, bound):
         sender.send(f"{echo.base}/p?id=1&tag=a", "id", MARK, prg=True)
 
 
-@pytest.mark.parametrize("sender_name,bound", [
-    pytest.param("anonymous", False, id="anonymous-standalone"),
-    pytest.param("anonymous", True, id="anonymous-bound", marks=pin14),
-    pytest.param("seam", False, id="seam-standalone"),
-    pytest.param("seam", True, id="seam-bound")])
+@pytest.mark.parametrize("sender_name", ["anonymous", "seam"])
+@pytest.mark.parametrize("bound", [False, True], ids=["standalone", "bound"])
 def test_a_fragment_only_location_is_followed_without_the_payload(echo, sender_name,
                                                                    bound):
     """A ``302 Location: #top`` resolves to the URL the follow-up is given: the probe's
     own URL, never the placed one (`PRG_RULES['no-body-no-payload']`). On 8100959 the
-    anonymous sender's bound branch hands `_follow` the placed URL and re-sends the
-    payload; its standalone branch and the seam keep the original URL."""
+    anonymous sender's bound branch handed `_follow` the placed URL."""
     echo.redirect = "#top"
     _prg_send(sender_name, echo, bound)
     assert len(echo.targets) == 2 and MARK in echo.targets[0]
@@ -418,6 +483,22 @@ def test_an_empty_location_is_not_followed(echo, sender_name):
     assert len(echo.targets) == 1
 
 
+@_pin("AU-PRGPATH", "a path point's PRG follow-up is resolved against the placed path")
+@pytest.mark.parametrize("sender_name", ["anonymous", "seam"])
+@pytest.mark.parametrize("location", ["#top", "edit"])
+def test_a_path_points_prg_follow_up_never_carries_the_payload(echo, sender_name,
+                                                               location):
+    """Both senders resolve the follow-up of a path probe against the placed path, so a
+    fragment-only or relative ``Location`` re-requests the payload (``/p/zqmark/edit``).
+    Not query placement: its own item (AU-PRGPATH)."""
+    from fuzzlab.tools.probesender import RequestsProbeSender
+    echo.redirect = location
+    sender = RequestsProbeSender(timeout=5) if sender_name == "anonymous" \
+        else _seam_sender()
+    sender.send(f"{echo.base}/p/{{id}}/view", "id", MARK, location="path", prg=True)
+    assert len(echo.targets) == 2 and MARK not in echo.targets[1], echo.targets
+
+
 # --- the M6 browser executor: what Chromium itself sends -------------------------------
 def _executor(monkeypatch):
     from tests.test_navigation_aborts import _chromium_or_skip
@@ -428,12 +509,8 @@ def _executor(monkeypatch):
     return executor
 
 
-def _m6_cases():
-    for case_id, before, param, want, _failing in CASES:
-        yield pytest.param(before, param, want, marks=[pin14], id=case_id)
-
-
-@pytest.mark.parametrize("before,param,want", list(_m6_cases()))
+@pytest.mark.parametrize("before,param,want", [pytest.param(*c[1:], id=c[0])
+                                               for c in CASES])
 def test_the_browser_executor_replaces_the_addressed_occurrence_in_place(echo, monkeypatch,
                                                                          before, param,
                                                                          want):
@@ -448,18 +525,17 @@ def test_the_browser_executor_replaces_the_addressed_occurrence_in_place(echo, m
 
 def test_the_browser_sends_a_hard_payload_on_a_query_less_url_as_quote_plus(echo,
                                                                           monkeypatch):
-    """Today's bytes, kept (passes on 8100959): Chromium keeps the escapes it is given."""
+    """Today's bytes, kept: Chromium keeps the escapes it is given."""
     from fuzzlab.oracle.browser import ExecRequest
     _executor(monkeypatch).run(ExecRequest(url=f"{echo.base}/p", param="id", value=HARD,
                                            location="query"), "tok")
     assert echo.query() == "id=" + quote_plus(HARD, safe="")
 
 
-@pin14
 def test_the_browser_get_store_step_replaces_the_addressed_occurrence_in_place(
         echo, monkeypatch):
-    """The stored-XSS plant through a GET (`browserexec.py:539`): the store URL's own
-    query, placed like any other."""
+    """The stored-XSS plant through a GET: a `StoreStep` has no entries, so the store
+    URL's own query takes the standalone rule."""
     from fuzzlab.oracle.browser import ExecRequest, StoreStep
     _executor(monkeypatch).run(ExecRequest(url=f"{echo.base}/o", store=StoreStep(
         url=f"{echo.base}/p?id=1&tag=a&tag=b", param="id", value=MARK, method="GET",
@@ -467,12 +543,12 @@ def test_the_browser_get_store_step_replaces_the_addressed_occurrence_in_place(
     assert canonical_pairs(echo.query()) == canonical_pairs(f"id={MARK}&tag=a&tag=b")
 
 
-@pin14
+@_pin("CC-FUZZ-0106's Q3 part (held until AU-OUTCOME merges)",
+      "DomXssStrategy hands the M6 executor no entries")
 def test_a_dom_query_point_is_loaded_with_its_siblings(echo, monkeypatch):
     """A crawled DOM query point with a link set (``op=search&q=1``): the browser loads
     it with its siblings, bound by the binder's rule, as the HTTP senders send it. On
-    8100959 `DomXssStrategy` hands the executor no entries, so every load is
-    ``/p?q=<payload>`` alone."""
+    8100959 every load is ``/p?q=<payload>`` alone."""
     from fuzzlab.oracle.probe import Candidate
     from fuzzlab.oracle.strategies import DomXssStrategy
     url = f"{echo.base}/p"
@@ -484,3 +560,466 @@ def test_a_dom_query_point_is_loaded_with_its_siblings(echo, monkeypatch):
         pairs = canonical_pairs(urlsplit(target).query)
         assert [n for n, _eq, _v in pairs] == [b"op", b"q"], target
         assert pairs[0][2] == b"search" and pairs[1][2] != b"1", target
+
+
+# --- known instances in other items' code (PA-0054(3), PA-0115(3)): pinned, offline -----
+@_pin("AU-OUTCOME", "the contract runner appends a query pair (disco/runner.py:262)")
+def test_the_contract_runner_places_a_query_value_in_place():
+    from tests.test_disco_contract import contract_doc, runner
+    doc = contract_doc()
+    doc["endpoints"].append({"id": "ep_q", "method": "GET",
+                             "path": "/api/search?op=list&q=1", "auth": "none"})
+    r, _session = runner(doc)
+    assert urlsplit(r.prepare("ep_q", query={"q": MARK}).url).query == f"op=list&q={MARK}"
+
+
+@_pin("CRAWL (to register)", "the SPA query-seed builder appends unencoded pairs "
+      "(tools/spa.py query_url)")
+def test_the_spa_seed_builder_places_its_route_query_in_place():
+    from fuzzlab.tools.spa import query_url
+    assert query_url("http://h/#/s?q=1&p=2", [("q", "x y")]) == "http://h/#/s?q=x%20y&p=2"
+    assert query_url("http://h/s?q=1&p=2", [("q", "v")]) == "http://h/s?q=v&p=2"
+
+
+@_pin("AU-REQID8", "store_adapter.query_pairs drops empty parts and a missing '='")
+def test_a_stored_link_set_round_trips_its_crawled_query():
+    """A crawled link query, stored as a link set and sent back by the bound rule, keeps
+    ``flag`` (no ``=``), its empty parts and ``%20``."""
+    from fuzzlab.core.urls import with_query
+    from fuzzlab.tools.store_adapter import query_pairs
+    raw = "flag&&a=1&t=x%20y"
+    sent = urlsplit(with_query("http://h/p", [(n, v) for n, _r, v in query_pairs(raw)]))
+    assert canonical_pairs(sent.query) == canonical_pairs(raw)
+
+
+@_pin("AU-REQID8", "a disco form body's repeated name collapses (store_adapter.py:274)")
+def test_a_disco_form_body_keeps_a_repeated_name_in_order(tmp_path):
+    from fuzzlab.core.store import Store
+    from fuzzlab.tools import store_adapter
+    from tests.test_disco_import import _rec, _run_dir
+    run_dir = _run_dir(tmp_path, [_rec("POST", "/api/tags", body="tag=a&tag=b&q=1",
+                                       ctype=store_adapter.FORM_URLENCODED)])
+    with Store(tmp_path / "u.db") as store:
+        run = store.start_run("auto", "h")
+        store_adapter.import_disco(run_dir, store, run)
+        (entries,) = [json.loads(r[0]) for r in store.conn.execute(
+            "SELECT entries FROM form WHERE run_id=? AND enctype=?",
+            (run, store_adapter.FORM_URLENCODED))]
+    assert [n for n, _v in entries] == ["tag", "tag", "q"]
+
+
+@_pin("LAB", "the labgen tool wrapper re-encodes untouched pairs")
+def test_the_labgen_tool_wrapper_keeps_untouched_pairs_as_written():
+    """Only the untouched pairs are pinned (``flag`` stays ``flag``, ``%20`` stays
+    ``%20``); marking every occurrence of the marked name may be right for a tool's
+    injection marker."""
+    from fuzzlab.labgen.oracle_wrapper import _mark_query_param
+    out = _mark_query_param("http://h/p?id=1&flag&s=x%20y&tag=a", "tag", "*")
+    untouched = [p for p in canonical_pairs(urlsplit(out).query) if p[0] != b"tag"]
+    assert untouched == canonical_pairs("id=1&flag&s=x%20y")
+
+
+# --- the guard: every query builder goes through the one owner (PA-0531(1)) -------------
+_PKG = Path(__file__).resolve().parent.parent / "fuzzlab"
+_OWNER = "fuzzlab/core/urls.py"
+_SENDS = frozenset({"request", "get", "post", "put", "patch", "delete", "head", "options",
+                    "fetch", "Request"})
+_QUOTERS = frozenset({"urlencode", "quote", "quote_plus"})
+_PAIR = re.compile(r"[?&][A-Za-z_][\w\[\]%.-]*=")
+_SPLIT_RESULTS = frozenset({"SplitResult", "ParseResult", "SplitResultBytes",
+                            "ParseResultBytes"})
+
+
+def _name(node) -> str:
+    return node.attr if isinstance(node, ast.Attribute) else getattr(node, "id", "")
+
+
+def _walk_no_keywords(node):
+    """``ast.walk`` that skips keyword arguments (``quote(s, safe="&")`` is no query)."""
+    todo = [node]
+    while todo:
+        cur = todo.pop()
+        yield cur
+        todo.extend(c for c in ast.iter_child_nodes(cur) if not isinstance(c, ast.keyword))
+
+
+def _str_consts(node):
+    return [x.value for x in _walk_no_keywords(node)
+            if isinstance(x, ast.Constant) and isinstance(x.value, str)]
+
+
+def _sep_join(node) -> bool:
+    return isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and \
+        node.func.attr == "join" and isinstance(node.func.value, ast.Constant) and \
+        node.func.value.value in ("&", "?")
+
+
+def _material(node, qnames) -> bool:
+    """Query material: a quoter call, a ``.query``, a ``"&".join``, or a local name the
+    function assigned from one of those (B1)."""
+    for x in ast.walk(node):
+        if (isinstance(x, ast.Call) and _name(x.func) in _QUOTERS) or _sep_join(x) \
+                or (isinstance(x, ast.Attribute) and x.attr == "query") \
+                or (isinstance(x, ast.Name) and isinstance(x.ctx, ast.Load)
+                    and x.id in qnames):
+            return True
+    return False
+
+
+def _has_params_key(node) -> bool:
+    return (isinstance(node, ast.Dict) and any(
+        isinstance(k, ast.Constant) and k.value == "params" for k in node.keys)) or (
+        isinstance(node, ast.Call) and _name(node.func) == "dict"
+        and any(k.arg == "params" for k in node.keywords))
+
+
+def _scope_nodes(scope):
+    """Every node of ``scope``'s own body, nested functions and classes excluded."""
+    todo = list(scope.body) if hasattr(scope, "body") else []
+    while todo:
+        cur = todo.pop()
+        yield cur
+        todo.extend(c for c in ast.iter_child_nodes(cur)
+                    if not isinstance(c, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                          ast.ClassDef)))
+
+
+class _Scan:
+    """The shapes of one scope (a function, or the module's own statements)."""
+
+    def __init__(self, scope):
+        self.scope = scope
+        nodes = list(_scope_nodes(scope))
+        self.qnames = {t.id for n in nodes if isinstance(n, (ast.Assign, ast.AnnAssign))
+                       and n.value is not None and _material(n.value, frozenset())
+                       for t in (n.targets if isinstance(n, ast.Assign) else [n.target])
+                       if isinstance(t, ast.Name)}
+        self.starred = {k.value.id for n in nodes if isinstance(n, ast.Call)
+                        and _name(n.func) in _SENDS for k in n.keywords
+                        if k.arg is None and isinstance(k.value, ast.Name)}
+        self.found: list[str] = []
+        for stmt in getattr(scope, "body", []):
+            if not isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                self._visit(stmt, in_build=False)
+
+    def _visit(self, node, in_build):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            return
+        build = isinstance(node, ast.JoinedStr) or (
+            isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Mod))) or (
+            isinstance(node, ast.AugAssign) and isinstance(node.op, ast.Add)) or (
+            isinstance(node, ast.Call) and _name(node.func) == "format")
+        if build and not in_build:
+            consts = _str_consts(node.value if isinstance(node, ast.AugAssign) else node)
+            if any("?" in c or "&" in c for c in consts) and _material(node, self.qnames):
+                self.found.append("S4 string built onto a query")
+                in_build = True
+            elif any(_PAIR.search(c) for c in consts):
+                self.found.append("S4b a ?name= literal")
+                in_build = True
+        shape = self._shape(node)
+        if shape:
+            self.found.append(shape)
+        for child in ast.iter_child_nodes(node):
+            self._visit(child, in_build)
+
+    def _shape(self, n) -> str | None:
+        if isinstance(n, ast.Call):
+            callee = _name(n.func)
+            receiver = _name(n.func.value) if isinstance(n.func, ast.Attribute) else ""
+            if callee in _SENDS:
+                if any(k.arg == "params" for k in n.keywords):
+                    return "S1 params= on a send"
+                if (callee == "get" and receiver == "requests" and len(n.args) >= 2) or \
+                        (callee == "request" and len(n.args) >= 3) or \
+                        (callee == "Request" and len(n.args) >= 6):
+                    return "S1 a positional params on a send"
+                if any(k.arg is None and _has_params_key(k.value) for k in n.keywords):
+                    return "S2 params in a **dict"
+            if callee in ("update", "setdefault") and receiver in self.starred and (
+                    any(k.arg == "params" for k in n.keywords)
+                    or (n.args and (_has_params_key(n.args[0]) or (
+                        isinstance(n.args[0], ast.Constant) and n.args[0].value == "params")))):
+                return "S2 params added to a **dict"
+            if callee == "dict" and n.args and isinstance(n.args[0], ast.Call) \
+                    and _name(n.args[0].func) in ("parse_qsl", "parse_qs"):
+                return "S3 dict(parse_qsl/parse_qs)"
+            if callee == "parse_qs":
+                return "S3 parse_qs"
+            if _sep_join(n):
+                return 'S5 "&".join'
+            if callee == "_replace" and any(k.arg in ("query", "fragment")
+                                            for k in n.keywords):
+                return "S6 _replace(query/fragment=)"
+            if callee in _SPLIT_RESULTS:
+                return "S6 SplitResult/ParseResult(...)"
+            if callee in ("urlunsplit", "urlunparse") and n.args \
+                    and isinstance(n.args[0], (ast.Tuple, ast.List)):
+                elts = n.args[0].elts
+                q, f = (3, 4) if callee == "urlunsplit" else (4, 5)
+
+                def same(node, attr):
+                    return (isinstance(node, ast.Constant) and node.value == "") or \
+                        (isinstance(node, ast.Attribute) and node.attr == attr)
+                if len(elts) > f and not (same(elts[q], "query")
+                                          and same(elts[f], "fragment")):
+                    return "S7 urlunsplit/urlunparse tuple rebuilding a query or fragment"
+        if isinstance(n, (ast.Assign, ast.AugAssign)):
+            targets = n.targets if isinstance(n, ast.Assign) else [n.target]
+            for t in targets:
+                if isinstance(t, ast.Subscript) and any(
+                        isinstance(x, ast.Constant) and x.value == "params"
+                        for x in ast.walk(t.slice)):
+                    return 'S2 kwargs["params"] store'
+                if isinstance(n, ast.Assign) and isinstance(t, ast.Name) \
+                        and t.id in self.starred and _has_params_key(n.value):
+                    return "S2 params in a **dict"
+        return None
+
+
+def _qualname_scopes(tree):
+    """``(qualname, scope)`` for the module and every function, nested ones included."""
+    out = [("<module>", tree)]
+
+    def visit(node, prefix):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                name = f"{prefix}.{child.name}" if prefix else child.name
+                if not isinstance(child, ast.ClassDef):
+                    out.append((name, child))
+                visit(child, name)
+    visit(tree, "")
+    return out
+
+
+def query_builders(source: str) -> Counter:
+    """``{(function, shape): count}`` of every query-builder shape in ``source``."""
+    found: Counter = Counter()
+    for qualname, scope in _qualname_scopes(ast.parse(source)):
+        for shape in _Scan(scope).found:
+            found[(qualname, shape)] += 1
+    return found
+
+
+def scan(pkg: Path = _PKG) -> Counter:
+    """``{(module, function, shape): count}`` over ``fuzzlab/``, the owner excluded."""
+    found: Counter = Counter()
+    for path in sorted(pkg.rglob("*.py")):
+        rel = path.relative_to(pkg.parent).as_posix()
+        if rel == _OWNER:
+            continue
+        for (func, shape), n in query_builders(path.read_text(encoding="utf-8")).items():
+            found[(rel, func, shape)] += n
+    return found
+
+
+_CONF = "labgen/conformance/"
+_HARNESS = "a harness client of generated cells, on query-less paths: no query to keep"
+#: Every query builder outside the owner, with its count and its reason (B1, PA-0531(1)).
+#: The scan must equal this exactly: a new builder (or a second one in a listed function)
+#: and a stale entry both fail.
+ALLOWED: dict[tuple[str, str, str], tuple[int, str]] = {
+    ("fuzzlab/core/project.py", "_ro_uri", "S4b a ?name= literal"):
+        (1, "a SQLite file: URI (?mode=ro), not HTTP"),
+    ("fuzzlab/core/store.py", "_no_create_uri", "S4b a ?name= literal"):
+        (1, "a SQLite file: URI (?mode=rw), not HTTP"),
+    ("fuzzlab/core/redaction.py", "redact_query", 'S5 "&".join'):
+        (1, "storage redaction of a recorded URL, never sent (AU-REDACT's file)"),
+    ("fuzzlab/core/redaction.py", "_redact_query_identifiers", 'S5 "&".join'):
+        (1, "storage redaction of a recorded URL, never sent (AU-REDACT's file)"),
+    ("fuzzlab/core/redaction.py", "redact_url", "S6 _replace(query/fragment=)"):
+        (1, "storage redaction of a recorded URL, never sent (AU-REDACT's file)"),
+    ("fuzzlab/core/redaction.py", "redact_url_identifiers", "S6 _replace(query/fragment=)"):
+        (1, "storage redaction of a recorded URL, never sent (AU-REDACT's file)"),
+    ("fuzzlab/core/trace.py", "_blank_identifiers", 'S5 "&".join'):
+        (1, "trace redaction, never sent"),
+    ("fuzzlab/disco/fingerprint.py", "normalise_route", "S4 string built onto a query"):
+        (2, "a route key of parameter names, never sent"),
+    ("fuzzlab/disco/fingerprint.py", "normalise_route", 'S5 "&".join'):
+        (2, "a route key of parameter names, never sent"),
+    ("fuzzlab/disco/runner.py", "Runner.prepare", "S4 string built onto a query"):
+        (1, "hand-off to AU-OUTCOME (their file): the contract runner appends; pinned by "
+            "test_the_contract_runner_places_a_query_value_in_place"),
+    ("fuzzlab/disco/synth.py", "parse_body", "S3 dict(parse_qsl/parse_qs)"):
+        (1, "defect 9's item: a schema from captured bodies, never sent"),
+    ("fuzzlab/harness/auto.py", "header_point_estimate", "S4 string built onto a query"):
+        (1, "a SQLite file: URI (?mode=ro), not HTTP"),
+    ("fuzzlab/lab_fixtures/external.py", "_bwapp_install", "S1 params= on a send"):
+        (1, "lab provisioning with constant parameters, not probing"),
+    ("fuzzlab/lab_fixtures/external.py", "_ecommerce_login", "S1 params= on a send"):
+        (1, "lab provisioning with constant parameters, not probing"),
+    (f"fuzzlab/{_CONF}django_live_boot.py", "DjangoLiveBootHarness.get",
+     "S1 params= on a send"): (1, _HARNESS),
+    (f"fuzzlab/{_CONF}django_live_boot.py", "DjangoLiveBootHarness.request",
+     "S4 string built onto a query"): (1, _HARNESS),
+    (f"fuzzlab/{_CONF}live_boot.py", "LiveBootHarness.fetch", "S1 params= on a send"):
+        (1, _HARNESS),
+    (f"fuzzlab/{_CONF}live_boot.py", "LiveBootHarness.get", "S1 params= on a send"):
+        (1, _HARNESS),
+    (f"fuzzlab/{_CONF}live_boot.py", "LiveBootHarness.request",
+     "S4 string built onto a query"): (1, _HARNESS),
+    (f"fuzzlab/{_CONF}live_boot_spring_boot.py", "SpringBootLiveBootHarness.get",
+     "S1 params= on a send"): (1, _HARNESS),
+    (f"fuzzlab/{_CONF}live_boot_spring_boot.py", "SpringBootLiveBootHarness.request",
+     "S4 string built onto a query"): (1, _HARNESS),
+    (f"fuzzlab/{_CONF}rails_live_boot.py", "RailsLiveBootHarness.fetch",
+     "S1 params= on a send"): (1, _HARNESS),
+    (f"fuzzlab/{_CONF}rails_live_boot.py", "RailsLiveBootHarness.get",
+     "S1 params= on a send"): (1, _HARNESS),
+    (f"fuzzlab/{_CONF}rails_live_boot.py", "RailsLiveBootHarness.request",
+     "S4 string built onto a query"): (1, _HARNESS),
+    (f"fuzzlab/{_CONF}tier2.py", "LiveBootTier2Oracle._fetch", "S1 params= on a send"):
+        (1, _HARNESS),
+    ("fuzzlab/labgen/identifier_sqli_oracle.py", "_build_url",
+     "S4 string built onto a query"):
+        (1, "its input is a mapping: a duplicate cannot be expressed; generated cells "
+            "declare none"),
+    ("fuzzlab/labgen/oracle_wrapper.py", "_mark_query_param",
+     "S6 _replace(query/fragment=)"):
+        (1, "LAB hand-off: re-encodes untouched pairs; pinned by "
+            "test_the_labgen_tool_wrapper_keeps_untouched_pairs_as_written"),
+    ("fuzzlab/oracle/strategies.py", "OpenRedirectStrategy.confirm", "S4b a ?name= literal"):
+        (1, "an open-redirect canary URL: the payload value itself, placed by the "
+            "owner like any value"),
+    ("fuzzlab/proxy/server.py", "target_from_request", "S4 string built onto a query"):
+        (1, "the proxy forwards the client's own query verbatim"),
+    ("fuzzlab/report/diagram.py", "finding_deep_link", "S4b a ?name= literal"):
+        (1, "an in-app link (/diagrams?run=&finding=, integer ids), not traffic to a "
+            "target"),
+    ("fuzzlab/tools/spa.py", "visit_key", "S4 string built onto a query"):
+        (1, "the crawler's dedup key, never sent"),
+    ("fuzzlab/tools/spa.py", "visit_key", "S6 _replace(query/fragment=)"):
+        (1, "the crawler's dedup key drops the fragment of an origin-less URL; never "
+            "sent"),
+    ("fuzzlab/tools/spa.py", "query_url", 'S5 "&".join'):
+        (1, "CRAWL hand-off: the SPA query-seed builder appends unencoded pairs; pinned by "
+            "test_the_spa_seed_builder_places_its_route_query_in_place"),
+    ("fuzzlab/tools/spider.py", "LocalSpider._isolated_submit",
+     "S4 string built onto a query"):
+        (1, "a GET form submission replaces the action's query by its entries, as a "
+            "browser does (PA-0111)"),
+    ("fuzzlab/tools/spider.py", "LocalSpider._isolated_submit", "S1 params= on a send"):
+        (1, "a GET form submission replaces the action's query by its entries, as a "
+            "browser does (PA-0111)"),
+    ("fuzzlab/tools/store_adapter.py", "_import_forms", "S4 string built onto a query"):
+        (1, "a stored endpoint key keeps the POST action's query verbatim"),
+    ("fuzzlab/tools/store_adapter.py", "_store_request", "S4 string built onto a query"):
+        (1, "a stored endpoint key keeps the request's query verbatim"),
+    ("fuzzlab/tools/store_adapter.py", "import_disco", "S3 dict(parse_qsl/parse_qs)"):
+        (1, "AU-REQID8 (the importer); pinned by "
+            "test_a_disco_form_body_keeps_a_repeated_name_in_order"),
+    ("fuzzlab/web/app.py", "create_app.repeater_from_finding_prg",
+     "S3 dict(parse_qsl/parse_qs)"):
+        (1, "the operator's own UI form post, not traffic to a target"),
+    ("fuzzlab/web/app.py", "create_app.repeater_from_finding_prg", "S4b a ?name= literal"):
+        (1, "an in-app redirect (/proxy?repeater_tab=<id>), not traffic to a target"),
+    ("fuzzlab/web/app.py", "create_app.repeater_from_flow_prg",
+     "S3 dict(parse_qsl/parse_qs)"):
+        (1, "the operator's own UI form post, not traffic to a target"),
+    ("fuzzlab/web/app.py", "create_app.repeater_from_flow_prg", "S4b a ?name= literal"):
+        (1, "an in-app redirect (/proxy?repeater_tab=<id>), not traffic to a target"),
+    ("fuzzlab/web/projectroutes.py", "_form", "S3 dict(parse_qsl/parse_qs)"):
+        (1, "the operator's own UI form post, not traffic to a target"),
+}
+
+
+def test_every_query_builder_goes_through_the_one_owner():
+    """No query builder outside `core.urls` but the listed ones, each no more often than
+    listed (a second builder in a listed function fails too)."""
+    found = scan()
+    extra = {k: n for k, n in found.items() if n > ALLOWED.get(k, (0, ""))[0]}
+    assert extra == {}
+
+
+def test_the_query_builder_allow_list_has_no_stale_entry():
+    """Every listed builder is still there, exactly as often as listed."""
+    found = scan()
+    stale = {k: (n, found.get(k, 0)) for k, (n, _why) in ALLOWED.items()
+             if found.get(k, 0) != n}
+    assert stale == {}
+
+
+#: One synthetic offender per shape the guard claims (PA-0034(2)), each a whole module.
+OFFENDERS = {
+    "params kw": "def f(s, u, p):\n    return s.get(u, params=p)\n",
+    "params kw put": "def f(s, u, p):\n    return s.put(u, params=p)\n",
+    "params kw patch": "def f(s, u, p):\n    return s.patch(u, params=p)\n",
+    "params kw delete": "def f(s, u, p):\n    return s.delete(u, params=p)\n",
+    "params kw head": "def f(s, u, p):\n    return s.head(u, params=p)\n",
+    "params kw options": "def f(s, u, p):\n    return s.options(u, params=p)\n",
+    "requests.Request kw": "def f(u, p):\n    return requests.Request('GET', u, params=p)\n",
+    "playwright fetch": "def f(c, u, p):\n    return c.request.fetch(u, params=p)\n",
+    "playwright get": "def f(c, u, p):\n    return c.request.get(u, params=p)\n",
+    "positional requests.get": "def f(u, p):\n    return requests.get(u, p)\n",
+    "positional request": "def f(s, u, p):\n    return s.request('GET', u, p)\n",
+    "positional Request": "def f(u, p):\n    return requests.Request('GET', u, None, None, "
+                          "None, p)\n",
+    "subscript": "def f(kw, p, v):\n    kw['params'] = {p: v}\n",
+    "subscript ifexp": "def f(kw, loc, e):\n    kw['data' if loc == 'body' else 'params'] "
+                       "= list(e)\n",
+    "** literal": "def f(s, u, p):\n    return s.get(u, **{'params': p})\n",
+    "** dict()": "def f(s, u, p):\n    return s.get(u, **dict(params=p))\n",
+    "** local literal": "def f(s, u, p):\n    kw = {'params': p}\n    return s.get(u, **kw)\n",
+    "** local dict()": "def f(s, u, p):\n    kw = dict(params=p)\n    return s.get(u, **kw)\n",
+    "** update kw": "def f(s, u, p):\n    kw = {}\n    kw.update(params=p)\n"
+                    "    return s.get(u, **kw)\n",
+    "** update dict": "def f(s, u, p):\n    kw = {}\n    kw.update({'params': p})\n"
+                      "    return s.get(u, **kw)\n",
+    "** setdefault": "def f(s, u, p):\n    kw = {}\n    kw.setdefault('params', p)\n"
+                     "    return s.get(u, **kw)\n",
+    "dict(parse_qsl)": "def f(x):\n    return dict(parse_qsl(x))\n",
+    "parse_qs": "def f(x):\n    return parse_qs(x)\n",
+    "concat quoter": "def f(u, q):\n    return u + '?' + urlencode(q)\n",
+    "concat .query": "def f(u, p):\n    return u + '&' + p.query\n",
+    "ifexp operand": "def f(u, q):\n    u += ('&' if '?' in u else '?') + urlencode(q)\n"
+                     "    return u\n",
+    "f-string quoter": "def f(u, q):\n    return f'{u}?{urlencode(q)}'\n",
+    "format quoter": "def f(u, q):\n    return '{}?{}'.format(u, urlencode(q))\n",
+    "percent quoter": "def f(u, q):\n    return '%s?%s' % (u, urlencode(q))\n",
+    "local quoter concat": "def f(u, d):\n    q = urlencode(d)\n    return u + '?' + q\n",
+    "local .query concat": "def f(u, p):\n    q = p.query\n    return u + '?' + q\n",
+    "local join concat": "def f(u, pairs):\n    q = '&'.join(pairs)\n    return u + '?' + q\n",
+    "local f-string": "def f(u, d):\n    q = urlencode(d)\n    return f'{u}?{q}'\n",
+    "local format": "def f(u, d):\n    q = urlencode(d)\n    return '{}&{}'.format(u, q)\n",
+    "local percent": "def f(u, d):\n    q = quote(d)\n    return '%s?x=%s' % (u, q)\n",
+    "local +=": "def f(u, d):\n    q = urlencode(d)\n    u += '&' + q\n    return u\n",
+    "?name= concat": "def f(u, v):\n    return u + '?id=' + v\n",
+    "&name= concat": "def f(u, n):\n    return u + '&page=' + str(n)\n",
+    "?name= f-string": "def f(u, v):\n    return f'{u}?id={v}'\n",
+    "?name= format": "def f(u, v):\n    return '{}?id={}'.format(u, v)\n",
+    '"&".join': "def f(pairs):\n    return '&'.join(pairs)\n",
+    '"?".join': "def f(a, b):\n    return '?'.join([a, b])\n",
+    "_replace query": "def f(p, q):\n    return p._replace(query=q)\n",
+    "_replace fragment": "def f(p, fr):\n    return p._replace(fragment=fr)\n",
+    "SplitResult": "def f(s, n, p, q, fr):\n    return SplitResult(s, n, p, q, fr)\n",
+    "ParseResult": "def f(s, n, p, a, q, fr):\n    return ParseResult(s, n, p, a, q, fr)\n",
+    "urlunsplit query": "def f(p, q):\n    return urlunsplit((p.scheme, p.netloc, p.path, "
+                        "q, p.fragment))\n",
+    "urlunsplit fragment": "def f(p, fr):\n    return urlunsplit((p.scheme, p.netloc, "
+                           "p.path, p.query, fr))\n",
+    "urlunparse query": "def f(p, q):\n    return urlunparse((p.scheme, p.netloc, p.path, "
+                        "p.params, q, p.fragment))\n",
+    "module level": "q = urlencode({'a': 1})\nURL = 'http://h/p?' + q\n",
+}
+#: Shapes that look close and are not query builders: none may be flagged.
+NEAR_MISSES = {
+    "strip": "def f(p):\n    return urlunsplit((p.scheme, p.netloc, p.path, '', ''))\n",
+    "keep": "def f(p):\n    return urlunsplit((p.scheme, p.netloc, p.path, p.query, "
+            "p.fragment))\n",
+    "safe-amp": "def f(s):\n    return '/' + quote(s, safe='&=')\n",
+    "model params": "def f(w):\n    return {'params': w}\n",
+    "dict get": "def f(d, k):\n    return d.get(k, None)\n",
+    "get params key": "def f(d):\n    return d.get('params')\n",
+    "update elsewhere": "def f(d, p):\n    d.update(params=p)\n    return d\n",
+    "docstring": "def f(u):\n    '''See /p?id=1.'''\n    return u\n",
+    "separator test": "def f(u, q):\n    q = urlencode(q)\n    return '?' in u\n",
+    "plain url": "def f():\n    return 'http://h/p'\n",
+}
+
+
+def test_the_query_builder_guard_catches_synthetic_offenders():
+    """PA-0034(2): every shape the guard claims is flagged on its own synthetic offender,
+    and none of the near-misses is."""
+    missed = sorted(k for k, src in OFFENDERS.items() if not query_builders(src))
+    flagged = sorted(k for k, src in NEAR_MISSES.items() if query_builders(src))
+    assert (missed, flagged) == ([], [])

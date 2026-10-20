@@ -33,7 +33,7 @@ except ImportError:
     sys.exit("This tool requires the 'requests' package: pip install requests")
 
 from fuzzlab.core import get_logger
-from fuzzlab.tools.authhttp import with_query_param
+from fuzzlab.core.urls import place_query_param    # the one query placement (SP-42)
 
 
 # --- Request senders -------------------------------------------------------
@@ -55,8 +55,8 @@ class RequestsSender:
             # measured elapsed time -- exactly the kind of client default
             # PA-0030 already forbids silently applying to a timing-
             # sensitive real response.
-            resp = self._session.get(url, params={param: value}, timeout=timeout,
-                                      allow_redirects=False)
+            resp = self._session.get(place_query_param(url, param, value), timeout=timeout,
+                                     allow_redirects=False)
             return time.perf_counter() - start, resp.status_code, len(resp.text)
         except requests.Timeout:
             return float(timeout), 504, 0
@@ -79,7 +79,7 @@ class SeamSender:
         from fuzzlab.core.urls import check_send_url
         check_send_url(url, self._explicit)              # NFR-FUZZ-safe (BUG-0112)
 
-        req = Request("GET", with_query_param(url, param, value),
+        req = Request("GET", place_query_param(url, param, value),
                       identity=self._identity, timing=True, component="fuzzer")
         try:
             resp = self._client.send(req)

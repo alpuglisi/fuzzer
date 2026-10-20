@@ -481,10 +481,10 @@ def header_points_from_store(store, run_id: int, base_url: str, names,
     url values sent neutral -- so the page runs as on a visit. A destructive page is
     left out and reported. ``names`` are already checked
     (`core.http.header_point_refusal`)."""
-    from urllib.parse import urlencode, urlsplit
+    from urllib.parse import urlsplit
 
     from fuzzlab.core.forms import first_link_set
-    from fuzzlab.core.urls import destructive_reason
+    from fuzzlab.core.urls import destructive_reason, with_query
     parts = urlsplit(base_url)
     origin = f"{parts.scheme}://{parts.netloc}"
     rows = store.conn.execute(
@@ -505,9 +505,9 @@ def header_points_from_store(store, run_id: int, base_url: str, names,
                 skipped.extend((path, "GET", name, reason) for name in names)
             continue
         query = first_link_set(store.conn, run_id, path)
-        url = page_url
-        if query:
-            url += "?" + urlencode([(n, _send_value(v)) for n, v in query])
+        # its representative query through the one owner (SP-42), same bytes as before
+        url = with_query(page_url, [(n, _send_value(v)) for n, v in query]) if query \
+            else page_url
         points.extend(InjectionPoint(url=url, param=name, method="GET", location="header",
                                      origin="crawl") for name in names)
     return points

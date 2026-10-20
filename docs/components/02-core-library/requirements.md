@@ -587,11 +587,29 @@ plugin registry. It is the layer that makes the store the integration bus.
   store at the last version that completed (`migrate_with_backup` names it and the
   backup).
 
-- **FR-CORE-501** *(path-segment placement; `CC-CORE-0059`, 2026-10-19).*
+- **FR-CORE-501** *(URL placement: a path segment or a query value; `CC-CORE-0059`,
+  2026-10-19; `CC-CORE-0068`, 2026-10-20, BUG-0531).*
   `core.urls.place_path_param(url, param, value)` replaces the URL path's one segment
   equal to `{param}` with `value` percent-encoded as one segment (`/` and quotes
   encoded), keeping the query; a path without that segment exactly once raises
-  `PathPlacementError`. The one placement (SP-42).
+  `PathPlacementError`.
+  - `core.urls.QueryEntries` is the ordered list of a query's raw parts: split on `&`
+    only from `urlsplit`'s query (`;` is data), an empty query having none, empty parts
+    and the absence of `=` kept, each name decoded with `errors="surrogateescape"` for
+    matching only.
+  - `place_query_param(url, name, value)` puts `encode_query_value(value)`
+    (`quote_plus`, `safe=""`) into the first part named `name` (its raw name text kept),
+    or appends one encoded pair, and keeps every other part's text and the rest of the
+    URL.
+  - `with_query(url, entries)` sets the query to the urlencoded entries;
+    `bind_query(url, entries, name, value)` is `with_query(url,
+    FormEntries(entries).replace(name, value))` (every occurrence: the binder's rule).
+  - `place_route_query_param(url, name, value)` places inside an SPA hash route's query
+    (`%20`); a non-route fragment is replaced by the pair.
+  - These are the one placement (SP-42). Outside this module a query is built only at a
+    site on an exact, reasoned allow-list; a known defect among those sites is pinned by
+    a strict xfail naming its owner
+    (`tests/test_query_placement.py::test_every_query_builder_goes_through_the_one_owner`).
 - **FR-CORE-502** *(account values; `CC-CORE-0059`, 2026-10-19).*
   `CredentialStore.set_attributes(host, identity, {name: value})` stores an account's
   own values (lowercase names, non-empty strings) in its credential's keyring entry
