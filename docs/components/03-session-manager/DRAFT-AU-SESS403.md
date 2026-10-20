@@ -955,3 +955,10 @@ them.
   - markers on: 17 passed, 41 xfailed;
   - `--runxfail`: 41 failed, 17 passed. Each failure is on a count, a behaviour or an
     absent API, as §1.9 lists.
+- **The harness on the committed tree** (`scripts/verify_change.py --base 15a8a27` on
+  fe15c23):
+  - It selected the whole suite, because the merged lock changed `tests/conftest.py`:
+    **406 files, all in one parallel pass, 0 serial.**
+  - Result: **8168 passed, 0 failed, 0 errors, 42 skipped, 77 xfailed**, rc 0.
+  - The new module's 41 marked tests are among the 77 xfailed. The whole-package
+    guards accept the new test module and the prototype directory.
