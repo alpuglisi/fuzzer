@@ -94,8 +94,9 @@ relied on each agent remembering a prose rule and re-implementing it correctly. 
 was no mechanism at the layer that every pytest session passes through.
 
 ## Corrective action
-AU-TESTLOCK (commit: see the CHANGELOG line for 2026-10-20). This is project-level test
-tooling, so there is no component change-control entry (`CLAUDE.md`).
+AU-TESTLOCK, commit 129ac1c (the code and tests). This record was completed in the
+follow-up commit. This is project-level test tooling, so there is no component
+change-control entry (`CLAUDE.md`).
 
 - **`tests/_pytest_lock.py`** (new). The root `tests/conftest.py` calls its
   `pytest_configure` first, before the store guard, and uses its `pytest_unconfigure`.
@@ -118,8 +119,9 @@ tooling, so there is no component change-control entry (`CLAUDE.md`).
 
     A token copied into another shell, a true ancestor's pid and `$$` all fail this
     check (measured). A second session inside the same process reuses the hold.
-  - **A descendant of the holder without the token** fails at once with a usage error.
-    Waiting would deadlock, because its own ancestor is waiting for it.
+  - **A descendant of the holder without the token**, or with a token naming another
+    pid, fails at once with a usage error. Waiting would deadlock, because its own
+    ancestor is waiting for it.
   - **Everyone else waits.** The message names the holder: its pid, argv, cwd and start
     time, from the side file `/tmp/fuzzlab-pytest.lock.holder`. The wait lasts up to
     `FUZZLAB_PYTEST_LOCK_WAIT` seconds (default 1800, the same as `verify_change.py
@@ -152,12 +154,13 @@ tooling, so there is no component change-control entry (`CLAUDE.md`).
   No test calls `pytest.main`, `pytester` or `runpytest`.
 
 - **Tests:**
-  - `tests/test_pytest_lock.py` (12 functions, 14 cases) covers:
+  - `tests/test_pytest_lock.py` (12 functions, 15 cases) covers:
     - the two-session wait;
     - the timeout refusal, with waits of 0 and 1;
     - one acquisition for an xdist session, with its workers skipping;
     - a nested session with the token (plain and xdist);
-    - a tokenless descendant;
+    - a holder's descendant whose token is stripped, or wrong (an ancestor that is not
+      the holder);
     - forged tokens (a sibling's pid, an ancestor that is not the holder, `$$`);
     - a private path refused outside a locked session;
     - the in-process re-entry;
@@ -173,9 +176,23 @@ tooling, so there is no component change-control entry (`CLAUDE.md`).
   - `tests/test_verify_change.py::test_the_child_pytest_waits_for_the_pytest_lock_as_long_as_the_run`.
 
   Every child session takes a private lock under `tmp_path`, so the tests never take the
-  real host lock and cannot deadlock the harness running them. On an idle host, the
-  plain run of both files passed 17 of 17 (14.4 s). With `-n 3`, the two files plus
-  `test_verify_change.py`, `test_storepath.py` and `test_procutil.py` passed 112 of 112.
+  real host lock and cannot deadlock the harness running them. On an idle host:
+  - a plain run of the two files passed 18 of 18 (17.5 s);
+  - before the wrong-token case was added, a `-n 3` run of the two files plus
+    `test_verify_change.py`, `test_storepath.py` and `test_procutil.py` passed 112 of
+    112.
+
+- **Mutation check.** Each mutant was applied to the committed code and both files were
+  run; the tree was restored from the commit after each. All six were killed:
+
+  | Mutant | Killed by |
+  |---|---|
+  | M1: the token alone nests, with no ancestry check | `test_a_token_without_ancestry_does_not_bypass_the_lock` |
+  | M2: any token nests a holder's descendant | `test_a_holders_descendant_without_its_token_fails_at_once[wrong]` (M2 survived the first round; this case was added for it) |
+  | M3: xdist workers not skipped | `test_xdist_takes_the_lock_once_and_its_workers_skip_it`, `test_a_nested_session_with_the_holders_token_runs[xdist]` |
+  | M4: the timeout falls through and runs | `test_a_session_refuses_after_its_wait_and_runs_nothing[0]` and `[1]`, `test_a_token_without_ancestry_does_not_bypass_the_lock` |
+  | M5: the holder does not export its token | both `test_a_nested_session_with_the_holders_token_runs` cases, `…_fails_at_once[stripped]`, `test_an_in_process_nested_session_reuses_the_hold` |
+  | M6: the root conftest without the lock call | all three wiring tests; every `lab` test errors (no host lock held) |
 
 **Measured** (tiny trees, the real default lock path, on an idle host, 2026-10-20
 05:18 UTC; `scratchpad/lock/measure.log`):
@@ -194,8 +211,27 @@ tooling, so there is no component change-control entry (`CLAUDE.md`).
   it; `--help` took none.
 - **`/proc/locks`** names the holder's pid on `/tmp`, on pytest's basetemp and on
   `/home/user`.
-- **`verify_change.py` parent and child:** see the harness run recorded in the lane's
-  report.
+- **`verify_change.py` parent and child.** Measured in `scripts/verify_change.py
+  --base eb5eb4f --wait-other 7200` on 129ac1c, with `FUZZLAB_PYTEST_LOCK_TRACE` set.
+  - The run waited behind another lane's harness, then started its child.
+  - The child pytest (pid 25510, the pid the harness recorded) took the lock once
+    (`acquired`); its parent was the `verify_change.py` process (pid 26750).
+  - Its three xdist workers (gw0..gw2, pids 25516/25519/25522, each with parent 25510)
+    recorded `worker` and took nothing.
+  - `verify_change.py` itself never appears in the trace: it does not hold the pytest
+    lock, so it cannot deadlock against its child. The run completed (26 min 31 s).
+
+**The first harness run on 129ac1c** covered 405 files (the whole suite, since the
+conftest changed): 8130 passed, 2 failed, 42 skipped, 38 xfailed.
+- Both failures were the BUG-0130 loopback guards in `tests/test_loopback_listeners.py`
+  (`test_every_server_launched_through_procutil_pins_loopback`,
+  `test_every_server_site_checks_loopback_right_after_boot`). They flagged the lock
+  tests' one `procutil.start_server` site, which starts a background pytest session,
+  as an unpinned server launch with no boot check.
+- The design check before the change covered the procutil and port-ownership guards,
+  not these. The site listens on nothing. It is now an exact-count entry (1) in the
+  guard's `NON_SERVER_LAUNCHES`, with its reason, so any further site in that file
+  still fails.
 
 ## Recurrence review
 - **`docs/claude_juicelab_failures.md`.** F-029 (before the harness), then F-092, F-093,

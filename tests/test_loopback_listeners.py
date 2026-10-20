@@ -266,6 +266,9 @@ NON_SERVER_LAUNCHES = {
     "tests/test_procutil.py": (None, "process-tree tests (sleep, sh, python -c ...); its listener "
                                      "tests bind a host given in argv on purpose, wildcards only "
                                      "in a private network namespace (the netns rule below)"),
+    "tests/test_pytest_lock.py": (1, "starts background pytest sessions on tiny test trees, the "
+                                     "subjects of the host pytest lock's tests (BUG-0532); they "
+                                     "listen on nothing"),
 }
 
 
