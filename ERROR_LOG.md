@@ -34,7 +34,7 @@ Format per entry:
 - **Symptom:** for `?id=1&tag=a&tag=b`, point `id`, the anonymous senders sent `id=1&tag=a&tag=b&id=M` (a first-value server read `1`), the authenticated seam sent `id=M&tag=b` (and turned `%20` into `+`, dropped empty parts, turned `%E9` into `%EF%BF%BD`), M6 appended, and a bound query point's PRG follow-up re-sent the payload; on 8100959, 45 of 48 sender × case rows and all 8 M6 rows failed.
 - **Root cause:** no owner for query placement (each sender built it: `params=`, a `dict(parse_qsl)` rebuild, string appends), and the conformance check read the query as a `dict` on a query-less URL, so it could not see an occurrence.
 - **Remediation:** `core.urls.place_query_param` / `bind_query` / `place_route_query_param` (SP-42 extended) used by every sender; an AST guard over every builder shape; the conformance check reads the prepared URL byte for byte (CC-CORE-0068, CC-FUZZ-0106 part 1); PA-0531. The M6 DOM point's siblings follow in CC-FUZZ-0106 part 2.
-- **Status:** Fixed (part 2 pending AU-OUTCOME)
+- **Status:** Fixed (part 2, the M6 link set and `spa.query_url`, landed with CC-FUZZ-0106 part 2 and CC-CRAWL-0053)
 
 ## 2026-10-19 — browser navigation (a failed load's late error page overtook the next load; BUG-0522, a recurrence of BUG-0136's X1)
 - **Symptom:** after a load failed with an empty error answer, the next navigation was overtaken by Chromium's late error page: the crawler and the auditor fell back to plain requests (10-20/20 lost), disco lost harvest loads and restores (11-20/20), and the spider lost seeds (8-15/20).
