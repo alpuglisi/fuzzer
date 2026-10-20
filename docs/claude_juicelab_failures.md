@@ -1076,3 +1076,9 @@ Juice Shop lab is complete.
 - **Evidence:** the AU-BOUNDED dispatch prompt (numbers list without an SP); `git grep SP-57` on the lane's 3aed2fa.
 - **Impact:** a renumbering commit on the lane (SP-57 → SP-60) before merge; no merged collision.
 - **Status:** fixed at dispatch level: the lane was assigned SP-60; later dispatches name every number class the change can touch, SP included.
+
+### F-111 — The AU-BOUNDED lane's first implementation turned incomplete bodies into greybox hits and advertised codings it could not decode
+- **What:** the lane's bounded-read change (45750bd) mapped an incomplete body to a status-0 probe whose text is an error string; greybox's `_screening` compared its length with the baseline and scored it 0.5 (a "boolean divergence" hit, fed into reward, accepted variants and confirmation), and an incomplete baseline could be adopted. Its sessions also kept urllib3's default `Accept-Encoding`, which names `br`/`zstd` on hosts where the bounded reader cannot decode them, so every response there would become "not observed". Its sweep test accepted "status-0" as the marker and so could not see the first defect.
+- **Evidence:** the AU-BOUNDED review (2026-10-20, ~23:00Z): `_screening(sqli, <incomplete probe>, <400-char baseline>) == 0.5` on a loopback gzip bomb; `urllib3/util/request.py` ACCEPT_ENCODING vs `bodyread._decoder`.
+- **Impact:** none merged; one revision round on the lane.
+- **Status:** sent back for revision with both as required fixes and tests that drive the run loop and the sent header.
