@@ -552,6 +552,10 @@ class BoundedAdapter(WatchedAdapter):
 
 
 def _mount(session, cls):
+    # the class itself, not ``requests.Session``: a test may replace that name with a
+    # factory of an in-memory site, which is used as given (it reads nothing)
+    if not isinstance(session, requests.sessions.Session):
+        return session
     for prefix in ("https://", "http://"):
         if not isinstance(session.adapters.get(prefix), cls):
             session.mount(prefix, cls())
@@ -560,7 +564,8 @@ def _mount(session, cls):
 
 def bound(session):
     """``session`` (a ``requests.Session``) with every body it reads bounded: its http
-    and https adapters are `BoundedAdapter`. Idempotent; returns ``session``."""
+    and https adapters are `BoundedAdapter`. Idempotent; returns ``session``. Any other
+    object (a test's in-memory stand-in) is returned as given."""
     return _mount(session, BoundedAdapter)
 
 

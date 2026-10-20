@@ -1032,11 +1032,8 @@ def get_checked(session, url: str, timeout: float, may_follow: Callable[[str], b
     its deadline raises `bodyread.BodyIncomplete` and is never returned short. Another
     object (a test's in-memory site) is used as given.
     """
-    import requests
-
     from fuzzlab.core import bodyread
-    if isinstance(session, requests.Session):
-        bodyread.bound(session)
+    bodyread.bound(session)
     resp = None
     for _ in range(MAX_REDIRECTS + 1):
         resp = session.get(url, timeout=timeout, allow_redirects=False)

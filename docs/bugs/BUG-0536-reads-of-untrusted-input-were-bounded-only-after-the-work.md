@@ -127,7 +127,7 @@ the work.
   that is not one boolean per pattern and text is no answer. When the patterns could not
   be evaluated, the case is an `error` "body_matches not evaluated within 5 s
   (inconclusive)", unless other evidence matched. It is never a no-match.
-- **Tests:** `tests/test_bounded_reads.py`: 44 test cases and 2 strict xfails after review round 1. Every reader
+- **Tests:** `tests/test_bounded_reads.py`: 45 test cases and 2 strict xfails after review round 1. Every reader
   is driven against a dripping and a bombing loopback peer, and the peer's sent-byte
   count shows the connection was dropped. Decoding memory is measured, each coding is
   pinned, decoding stops exactly at the ceiling for gzip, deflate, raw deflate and

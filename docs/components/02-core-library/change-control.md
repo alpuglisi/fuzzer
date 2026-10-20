@@ -83,6 +83,14 @@ Newest first.
     the first request (0.18 s idle, measured). Under the revert run's parallel load,
     the head came after the probe sender's 0.25 s read timeout and read as a timeout
     probe ("a normal body of 0 bytes"). The peer now builds it before it listens — done
+  - [x] Regression the harness found on 209355c, root-caused. The spider's form tests
+    (`test_forms_phase1.py`, `test_forms_phase2.py`, four tests) replace
+    `requests.Session` with a factory of an in-memory site. That broke
+    `get_checked`'s `isinstance(session, requests.Session)` ("arg 2 must be a type")
+    and `bound()` on the stand-in (no adapters). `bound` now judges by the class
+    itself (`requests.sessions.Session`) and returns any other object as given, the
+    rule `get_checked` already stated; `get_checked` just calls `bound`. Pinned by
+    `test_bound_mounts_on_a_real_session_and_leaves_a_stand_in_as_given` — done
   - [x] FR-CORE-536 — done
   - [ ] SP-60 row, SP-34 row note, ARCHITECTURE note, PA-0536, CHANGELOG, ERROR_LOG —
     todo (the coordinator, at merge; texts in the lane report)

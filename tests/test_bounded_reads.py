@@ -673,6 +673,19 @@ def test_every_requests_session_fuzzlab_makes_is_bounded():
         f"BUG-0536), or is listed here with its reason: {found} != {expected}")
 
 
+def test_bound_mounts_on_a_real_session_and_leaves_a_stand_in_as_given(monkeypatch):
+    """The spider's form tests replace ``requests.Session`` with a factory of an
+    in-memory site (harness run on 209355c: four failures, ``isinstance() arg 2 must be a
+    type``). `bound` judges by the class itself and leaves such a stand-in as given."""
+    from fuzzlab.core import bodyread
+    site = object()
+    monkeypatch.setattr(requests, "Session", lambda: site)
+    assert bodyread.bound(requests.Session()) is site
+    real = bodyread.bound(requests.sessions.Session())
+    assert isinstance(real.adapters["http://"], bodyread.BoundedAdapter)
+    assert isinstance(real.adapters["https://"], bodyread.BoundedAdapter)
+
+
 def test_the_session_guard_catches_synthetic_offenders():
     offenders = ("import requests\ns = requests.Session()\n",
                  "import requests as rq\nrq.get('http://h/')\n",
