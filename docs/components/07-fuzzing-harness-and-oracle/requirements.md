@@ -1432,6 +1432,12 @@ rewards) derives from it.
   - Out-of-band mechanisms still wait for their callback.
   - A stopped listener is no verdict.
   - A baseline probe with no response leaves the target row unprobed.
+  - *(Note, CC-FUZZ-0105, FR-FUZZ-63.)* The same branch takes `NotComparable` (a
+    `ProbeUnobserved`): a response that is not the application's own answer ends the
+    mechanism with no verdict, the inconclusive mechanism `not-comparable`. A timeout's
+    status-0 stand-in is an observation only on a timing send and only as a **read**
+    timeout (`Probe.timeout == "read"`); a connect timeout, or a stand-in whose kind its
+    sender did not say, is not comparable.
 
   Enforced by `tests/test_probe_unobserved.py`.
 
@@ -1506,8 +1512,9 @@ rewards) derives from it.
   and `results`. `load_contract` is the one reader: the schema, then every reference,
   variable, scope and secret check, each failure a typed `ContractError` before anything
   is sent.
-- **FR-FUZZ-52 (the contract runner, `CC-FUZZ-0089`, 2026-10-17, D70)** `fuzzlab disco run
-  --authorized` executes a contract (`fuzzlab.disco.runner.Runner`):
+- **FR-FUZZ-52 (the contract runner, `CC-FUZZ-0089`, 2026-10-17, D70; edited in place by
+  `CC-FUZZ-0105`, 2026-10-20, BUG-0528, BUG-0529)** `fuzzlab disco run --authorized`
+  executes a contract (`fuzzlab.disco.runner.Runner`):
   - per case, in order: setup steps in order (a failing step is an `error`, not a
     finding), variables extracted by JSONPath, then the request;
   - every send is gated at the send: scope on the final URL; `check_send_url` (SP-09);
@@ -1517,15 +1524,54 @@ rewards) derives from it.
     runs around it only with `--allow-reset-hook`, through `procutil.run_bounded`;
   - credentials go only to the base URL's origin; evidence is redacted
     (`core.redaction`);
-  - a send with no complete response is an `error` for that case and the run goes on
-    (SP-34); a timeout is an `error`, or a `finding` under a latency rule; an
-    unreachable target stops the run with the results so far written;
+  - **Completeness** *(replaces "a send with no complete response is an `error` …",
+    CC-FUZZ-0105).* An exchange is complete when its status line, its headers and its
+    whole body arrived within `timeout_ms` and `max_body_bytes` (`Exchange.incomplete`).
+    An incomplete one -- no response, a timeout before or after the headers, a body cut
+    off, a body over the cap, a cut 5xx included -- is never a pass, a baseline, a match
+    on what was read, a setup success or a satisfied state check: it is an `error`
+    "incomplete response: <why>" for that case and the run goes on (SP-34 classifies the
+    exceptions). Its one finding: a **read** timeout, or the runner's own deadline
+    passing while the answer was read, under a `latency_ms_gt` rule whose bound is at
+    most `timeout_ms`; a **connect** timeout never proves latency. The response is
+    closed on every exit. An incomplete body is never written to evidence (`"body":
+    "omitted (incomplete)"`, `body_bytes`, `incomplete`). An unreachable target stops
+    the run with the results so far written.
+  - **Every complete answer is classified once** (SP-56, FR-CORE-507) with FR-SESS-22's
+    facts: the request is credentialed when the profile's credential is in its final
+    headers (a case's own replacing header, a forged or empty token, is not the
+    profile's); its own names are the query keys and the JSON body's keys.
+    - **Throttle or unavailable** (429, 503) is judged only where `status_in` names its
+      status.
+    - **Auth failure** of a credentialed request (a 401, a 407, a redirect to a login
+      page; not a credential submission's own refusal) is an `error` "credentials not
+      accepted (…)" unless `status_in` names its status. Without the credential, a 401
+      or a login redirect is the endpoint's own answer.
+    - **Policy block** (403, 451) is judged where `expect_status_class` holds `4xx` or
+      `status_in` names its status (any case type).
+    - **Gateway** (502, 504) is judged under the 5xx rule.
+    - Otherwise each is an `error`; none is matched merely by being outside the
+      expected class.
   - the oracle: the case's rules plus a 5xx and `LEAK_PATTERNS` (stack traces, database
-    errors) that the endpoint's baseline (its first clean answer in the run) did not
-    show; an answer outside `expect_status_class` is matched;
+    errors) that the endpoint's baseline did not show; an answer outside
+    `expect_status_class` is matched. **The baseline** is the endpoint's first complete
+    application answer below 400 that passed (CC-FUZZ-0105).
+  - **Setup steps** *(CC-FUZZ-0105)* must be complete application answers below 400 and
+    not a redirect to a login page (a failed login), except a step whose path creates
+    or resets an account (`account_submission`): its redirect to the login page is its
+    success.
+  - **State checks** *(CC-FUZZ-0105)* are satisfied, violated or **unobserved**, each
+    unobserved one with its reason: not prepared; refused at the send; incomplete; not a
+    complete application 2xx; not JSON; not evaluable. A pass needs every state check
+    satisfied. An unobserved one is an `error` "state check N not observed: <why>" (N
+    counts the case's state checks), or, beside a finding, is listed in the result's
+    `unobserved` (`{"check": N, "reason": …}`).
   - the ledger: one JSON line per case as it completes (`test_case`, `endpoint`,
     `class`, `status`, `latency_ms`, `verdict` pass/finding/error/skipped, `matched`,
-    `reason`, `evidence` refs); the verdict counts are printed.
+    `reason`, `evidence` refs; `response_class` and `unobserved`, CC-FUZZ-0105); the
+    verdict counts are printed.
+  - Enforced by: `tests/test_disco_runner_outcomes.py` (58 tests: every rule above,
+    with its pins), `tests/test_disco_contract.py`.
 - **FR-FUZZ-53 (a disco run as auto's input, `CC-FUZZ-0090`, 2026-10-18, D70)**
   `fuzzlab auto --disco-run DIR` (repeatable) consolidates each `fuzzlab disco capture`
   run directory into the run's store as crawl points (`store_adapter.import_disco`,
@@ -1750,6 +1796,55 @@ rewards) derives from it.
   - **Unchanged (tested):** what is sent, every `ExecObservation`, verdict, finding,
     candidate status and request count, and the listener's hits. The windows are
     unchanged by construction.
+- **FR-FUZZ-63 (a control counts only when it is the application's answer,
+  `CC-FUZZ-0105`, 2026-10-20, BUG-0529)**
+  - **Every response a mechanism reads is an observation** (layer 1,
+    `oracle.probe.require_observed`, applied by the oracle's `_ObservedOnly` to every
+    strategy run, the correlated send included): a throttled or unavailable answer (the
+    probe or its PRG follow-up), a non-timing send's incomplete answer (a sender's
+    status-0 stand-in), or a timing send's stand-in that is not a **read** timeout ends
+    the mechanism with `NotComparable`.
+  - **A payload whose PRG follow-up got no observation** (`PRG_UNOBSERVED`) keeps its
+    own response (FR-FUZZ-50) and the other payloads still run; a run that then decides
+    nothing is not comparable, never a negative. A compared send's (a control's)
+    unobserved follow-up matters only where its strategy needs it: when the signature
+    was seen through a follow-up, the control's must be observed too ("observed
+    alike"), or the mechanism is not comparable. A direct signature never needs it.
+  - **A control, a baseline sample, a compared slot or a replay** (layer 2,
+    `ConfirmationStrategy._compared` -> `require_comparable`) counts only when its SP-56
+    class (FR-CORE-507, with FR-SESS-22's facts; the response the strategy judges, a PRG
+    follow-up's when there is one) is one its strategy declares for that role:
+    | Strategy | Compared | Admits |
+    |---|---|---|
+    | SqliError, PathTraversal, PathTraversalFsPathRead, HttpHeaderInjectionCrlf | the benign control | application |
+    | the differential engine (SqliBoolean) | B0, V, B / D | application / application or policy block |
+    | NoSqlOperator | B, V, D | application |
+    | `_confirm_timing` (SqliTiming, CommandInjection), RegexDos | the baseline samples | application |
+    | CrossAccountReplay | the owner's own request, the other-value control, each replay | application or policy block |
+
+    A gateway is admitted nowhere. A probe's credential is its sender's per-probe fact
+    (`Probe.credentialed`): `RequestsProbeSender` and an anonymous seam send say False,
+    a seam send on a session True; an unknown one counts as carried. A follow-up
+    carries its request's fact. A replay's is its role's: the peer's carried, the
+    unauthenticated one's not -- so a credentialed peer's refused credential is never a
+    denial, and an unauthenticated 401 is.
+  - **Outcome:** the candidate is **inconclusive** (`not-comparable`, its reason under
+    `evidence["unobserved"]`, a role and a class, never a URL or payload) unless another
+    mechanism confirms; never confirmed on such a control and never a negative. The
+    scheduler is charged the mechanism's cost without a reward (`charge`,
+    CC-SCHED-0007). `fuzzlab auto` lists it as "a response was not the application's own
+    answer".
+  - **Discovery (M9):** every default strategy is classified by how it reads controls
+    (`tests/test_oracle_comparable_controls.py::CONTROL_READING`); every send of a
+    control reader, and of the shared engine its row names, is `_compared` or a literal
+    `trace.role("mutation")` send.
+  - **The blind-SQLi builder** (`tools/blind_sqli_fuzzer.py`) neither averages a
+    non-application sample (nor a login redirect) into its baseline nor writes a row for
+    a payload answered by anything but the application; a payload's 504 stays a timing
+    observation; a baseline with no application sample is `BaselineNotComparable`, not
+    "could not reach".
+  - Enforced by: `tests/test_oracle_comparable_controls.py` (117 tests, the discovery
+    table and send guard included), `tests/test_oracle_sqli_string.py::test_a_site_that_throttles_mid_differential_is_not_comparable_never_a_negative`.
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
   finding must reproduce.
@@ -2034,6 +2129,10 @@ and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
       most candidates × 3/1458.
     - **Request count:** it does not depend on the drawn order on targets whose
       responses do not depend on earlier probes.
+    - *(Note, CC-FUZZ-0105, FR-FUZZ-63.)* Every slot is compared: B0, V and B must be
+      application answers, D an application answer or a policy block (V carries D's
+      characters, so no lexical filter singles D out). Any other answer stops the
+      engine `not-comparable`: inconclusive, never a negative.
   - **(b) `SqliBooleanStrategy`'s families,** in this fixed order:
     - **numeric:** `1` / `1 AND 1=1` / `1 AND 1=2`, compared by length;
     - **string-grammar:** `v` / `v' AND 't' LIKE 't` / `v' AND 't' LIKE t'`;

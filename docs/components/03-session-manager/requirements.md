@@ -156,6 +156,35 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     account after a few failures sees one per login and re-login). A script that builds
     the body from anything but the form's controls (renamed keys, nesting, an extra
     field) is not reproduced; neither is a linked script's login.
+- **FR-SESS-22 (SP-16 login facts for one exchange, CC-SESS-0028, BUG-0529)**
+  `session.detect.login_facts(url, headers=None, *, response_url=None, login_url=None,
+  entry_names=())` -> `LoginFacts`, the facts SP-56 (FR-CORE-507) needs:
+  - **`credential_submission`:** the request goes to the session's own `login_url` (when
+    known) or an SP-16 login URL (`looks_like_login_url`); or its path names account
+    creation or a password reset or change (`CREDENTIAL_PATH_TOKENS`: register,
+    registration, signup, "sign up", password, passwd, reset -- deliberately narrower
+    than the login window's `browserlogin.account_endpoint_reason`, which also names a
+    user or account collection and a bare `change`); or one of `entry_names` is a
+    credential name (`core.redaction.is_credential_name`; strings only -- a JSON leaf by
+    its `jsonbody.display_name`). Its refusal is that endpoint's answer, never a lost
+    session.
+  - **`redirect_to_login`:** `Location` in any case, resolved against the answer's own
+    URL (`response_url`, a PRG follow-up's) or else `url`, judged by `redirect_is_logout`
+    with the known `login_url`.
+  - **`account_submission`:** the path names account creation or a reset and is not a
+    login URL; its redirect to the login page is its success (the contract runner's
+    setup steps, FR-FUZZ-52).
+  - Total: odd input reads as "no". The contract runner, the oracle, the blind-SQLi
+    builder take these facts from it alone (PA-0003).
+  - Residuals: a credential check none of the rules names (`/rest/2fa/verify` with a
+    `code` field) reads its 401 as a refused credential (fail closed); a field whose
+    name carries the `pass` token (`pass_count`) makes its request a credential
+    submission (a narrow fail-open).
+  - Enforced by: `tests/test_session_detect.py::test_login_facts_names_every_credential_submission`,
+    `tests/test_session_detect.py::test_login_facts_reads_location_in_any_case_against_the_follow_ups_url`,
+    `tests/test_session_detect.py::test_login_facts_uses_the_sessions_known_login_url`,
+    `tests/test_session_detect.py::test_login_facts_names_an_account_submission_apart_from_a_login`,
+    `tests/test_session_detect.py::test_login_facts_is_total`.
 - **FR-SESS-20 (origin-scoped sessions, CC-SESS-0023, BUG-0134; design Revision 2,
   O1-O13; review rounds 1-2, R1-R9, T1-T6)**
   - **Origins (O1).** `SessionState.origins` is a set of canonical origins

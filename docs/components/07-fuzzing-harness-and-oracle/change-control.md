@@ -3,6 +3,130 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0105 — Complete, evaluated, application answers only: the contract runner and the oracle (FR-FUZZ-52, FR-FUZZ-63, BUG-0528, BUG-0529) (2026-10-20)
+- Review gate: drafted as `DRAFT-AU-OUTCOME.md` (this folder; three review rounds, the
+  owner's decisions on B1/B2 and the ADOPT list folded in). Audit defects 15, 16, 17.
+- Change:
+  - **The contract runner** (`fuzzlab/disco/runner.py`; BUG-0528, the runner half of
+    BUG-0529):
+    - `Exchange.incomplete` names why an exchange is not a whole answer: no response, a
+      timeout before connecting or before the headers, a timeout after the headers, a
+      body cut off (`Exchange.cut`, SP-34's reason), a body over `max_body_bytes`.
+      `Exchange.timeout_kind` is `connect`, `read` or `deadline` (the runner's own
+      `timeout_ms` passing while the body is read, checked after the loop too: a drip).
+    - `send` closes the response in a `finally` (every exit) and keeps a partial body
+      only for its length.
+    - `Prepared.credentialed` is read from the **final** headers: the profile's
+      credential was added on the base origin and not replaced by the case's own header
+      (D69; ADOPT 3). `Prepared.entry_names` are the query keys and the JSON body's keys
+      at every depth.
+    - `Runner.classify` (SP-56 with SP-16's `login_facts`). `judge` returns a
+      `Judgement` and classifies first: an incomplete exchange is an `error`
+      "incomplete response: …", except a read or deadline timeout under a
+      `latency_ms_gt` bound at most `timeout_ms` (M7: a connect timeout proves nothing);
+      a throttled or unavailable answer is judged only where `status_in` names it; a
+      credentialed request's auth failure is an `error` "credentials not accepted (…)"
+      unless `status_in` names it (M1, A2); a policy block is judged only where
+      `expect_status_class` holds 4xx or `status_in` names it; a gateway answer falls
+      under the 5xx rule (M6).
+    - Baselines come only from a complete application answer below 400 that passed.
+    - Setup steps (`_setup_failed`) must be complete application answers below 400 and
+      not a redirect to a login page (A8), except a step that creates or resets an
+      account (`account_submission`, ADOPT 5).
+    - `_state_check` is three-valued with a reason (not prepared, refused at the send,
+      incomplete, not a complete application 2xx, not JSON, not evaluable). A pass needs
+      every state check satisfied; an unobserved one is an `error` "state check N not
+      observed: …", or is listed beside a finding. State checks are numbered among the
+      case's state checks.
+    - Evidence of an incomplete exchange writes `"omitted (incomplete)"`, its
+      `body_bytes` and why, never its bytes (M3). Results add `response_class` and
+      `unobserved`; the verdicts are unchanged.
+  - **The oracle** (`fuzzlab/oracle/probe.py`, `oracle.py`, `strategies.py`; BUG-0529):
+    - `Probe.credentialed` (None reads as carried, fail closed) and `Probe.timeout`
+      (`read`/`connect`).
+    - `NotComparable(ProbeUnobserved)`, `APPLICATION_ONLY`, `candidate_entry_names` (a
+      JSON leaf by its `jsonbody.display_name`; ADOPT 1), `comparability`,
+      `require_observed` (layer 1) and `require_comparable` (layer 2).
+    - `_ObservedOnly` wraps every strategy run, `send_correlated` included (A5): a
+      throttled or unavailable answer, a non-timing incomplete answer or a timing send's
+      stand-in that is not a read timeout ends the mechanism `NotComparable`. A payload
+      send whose PRG follow-up got no observation is counted (compared sends, the
+      `control`/`baseline` roles, are not); a run that then ends with no confirmed or
+      inconclusive verdict is `NotComparable` (B2: the payload's own response is still
+      read and the other payloads still run).
+    - `_confirm_outcome` maps `NotComparable` onto FR-FUZZ-50's branch with the
+      inconclusive mechanism `not-comparable` (the reason under
+      `evidence["unobserved"]`), charges the scheduler's cost without a reward
+      (`charge`, CC-SCHED-0007; A7) and logs "response not comparable" with the class.
+    - `ConfirmationStrategy._compared` sends a compared response (a control, a baseline
+      sample, a slot, a replay) under its trace role and requires its class (of the
+      response the strategy judges, `_observed`; a follow-up inherits its request's
+      credential fact) to be one the strategy admits: SqliError's, both path-traversal
+      strategies' and CRLF's controls (application only); the differential's B and V
+      (application only) and D (application or policy); NoSQL's B, V and D (application
+      only); `_confirm_timing`'s and ReDoS's baseline samples (application only);
+      cross-account's owner request, other-value control and both replays (application
+      or policy; a replay's credential by its role: the peer's carried, the
+      unauthenticated one not; a gateway never, ADOPT 4).
+    - B2: SqliError, PathTraversal and PathTraversalFsPathRead raise `NotComparable` in
+      their "observed alike" branch only when the signature was seen through a PRG
+      follow-up and a needed control's follow-up is `PRG_UNOBSERVED`; a direct
+      signature never needs a control's follow-up. Their payload sends, CRLF's and
+      ReDoS's are marked `trace.role("mutation")`.
+  - **`fuzzlab/tools/blind_sqli_fuzzer.py`** (A4): `get()` returns an `Answer` (a 3-tuple
+    carrying `.headers` and `.credentialed`; `test_fuzzer_seam.py` unpacks it as before).
+    `establish_baseline` uses only application answers that are not a login redirect and
+    raises `BaselineNotComparable` when every sample was answered and none counts;
+    `run_fuzzing_cycle` writes no row for a payload answered by anything but the
+    application, except a 504 (a timing observation). The old `status == 504` baseline
+    skip is replaced.
+  - **`fuzzlab/harness/auto_cli.py`** (A9): the inconclusive header names "a response
+    was not the application's own answer" and FR-FUZZ-63; a `not-comparable` item has its
+    own line. `fuzzlab/harness/pipeline.py`: one comment (released to this lane).
+  - **`fuzzlab/tools/probesender.py`**, the five approved changes only: `_is_connect_timeout`
+    beside `_is_timeout`; the timeout probe's `timeout=` and `credentialed=False`; the
+    response probe's `credentialed=False` (`RequestsProbeSender`); the seam response
+    probe's `credentialed=identity != "anonymous" and self._session_note(req) is None`.
+  - Tests: `tests/test_disco_runner_outcomes.py` (58), `tests/test_oracle_comparable_controls.py`
+    (117, with the M9 discovery table and send guard); expectation changes in
+    `tests/test_oracle_sqli_string.py` (the "429" row became
+    `test_a_site_that_throttles_mid_differential_is_not_comparable_never_a_negative`; the
+    auto_cli wording) and `tests/test_json_points.py` (the auto_cli wording).
+- Impact (other components / project):
+  - CORE (SP-56, CC-CORE-0069), SESS (`login_facts`, CC-SESS-0028), SCHED (`charge`,
+    CC-SCHED-0007), MUT (the live filter, CC-MUT-0403, reads SP-56 on its own).
+  - The runner gains no `fuzzlab.oracle` import. `harness/auto.py`'s wrappers forward
+    the per-probe fields unchanged.
+  - ML gets fewer negatives: not-comparable candidates are inconclusive and unlabelled.
+  - FR-FUZZ-52 edited in place; FR-FUZZ-63 new; FR-FUZZ-45 and FR-FUZZ-50 noted.
+  - The web run page's inconclusive sentence (`fuzzlab/web`, UI) still names three
+    reasons; a `not-comparable` row is listed there by mechanism. Not changed here
+    (UI is another component); residual R20.
+- Risk (medium): over-reach on a real application answer. Mitigated by the credential
+  and credential-submission facts (M1, M2, B1), the declared admits, the pins (runner:
+  the clean baseline, the closed exits, the violated/satisfied check, `status_in` for 429
+  and 401, the 4xx policy block, the anonymous 401 and login redirect, the credential
+  submissions, the gateway, the replaced credential, the registration setup; oracle: the
+  application controls, the login URL's 401, the credential submissions incl. JSON, the
+  app's own 403 to the cross-account control and to D, the unauthenticated 401 replay,
+  the read timeout, the 504 blind-SQLi row, the three direct-signature B2 pins, the
+  control that shows the signature, the anonymous plain and seam senders' 401), each
+  proven on its named revert, and the harness's selected suites. Accepted residuals:
+  BUG-0529's list (R1-R20).
+- Deliverables:
+  - [x] measurement and failing tests — done (Phase 1)
+  - [x] the runner — done
+  - [x] the oracle, `_compared` and its admits, B2 — done
+  - [x] blind SQLi; `auto_cli`; the pipeline comment — done
+  - [x] the five `tools/probesender.py` changes — done
+  - [x] the M9 discovery table and send guard (proven on synthetic offenders) — done
+  - [x] FR-FUZZ-52 in place, FR-FUZZ-63, FR-FUZZ-45/50 notes; BUG-0528, BUG-0529 — done
+  - [ ] PA-0528, PA-0529, SP-56, CHANGELOG, ERROR_LOG, ARCHITECTURE — todo (the
+    coordinator, at merge)
+  - [ ] `scripts/verify_change.py --base 8100959` on the committed tree — in progress
+    at this commit (its counts go in the lane's report and the CHANGELOG line)
+- Effectiveness (assessed <date> or pending): pending.
+
 ### CC-FUZZ-0104 — M6's navigations settle a failure before they raise (BUG-0522) (2026-10-19)
 - Placement: written above CC-FUZZ-0103 (DG-UNPLACEABLE, merging first) as pre-assigned.
 - Change: none in `fuzzlab/tools/browserexec.py` or the oracle. The executor's

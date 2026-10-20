@@ -982,8 +982,9 @@ def test_a_fragment_point_no_mechanism_can_place_is_inconclusive_never_a_negativ
                             None, result)
     out = capsys.readouterr().out
     assert ("inconclusive (1 candidate key(s) could not be decided: a cost cap stopped a "
-            "started check, no mechanism could place the point, or a probe got no "
-            "response; unlabelled, FR-FUZZ-45/47/50):") in out
+            "started check, no mechanism could place the point, a probe got no "
+            "response, or a response was not the application's own answer; "
+            "unlabelled, FR-FUZZ-45/47/50/63):") in out             # CC-FUZZ-0105
     assert ("- fragment /#/go [next]: unplaceable (no mechanism could place the point: "
             "a fragment point is placed by the browser only)") in out
     assert "not started" not in out                         # no empty cap detail

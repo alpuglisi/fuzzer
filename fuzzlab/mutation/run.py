@@ -16,7 +16,7 @@ import time
 
 from fuzzlab.core.store import MetricLogger
 from fuzzlab.mutation.catalog import record_search_result
-from fuzzlab.mutation.livefilter import HttpFilter
+from fuzzlab.mutation.livefilter import FilterUnobserved, HttpFilter
 from fuzzlab.mutation.search import MutationSearch
 
 DEFAULT_BASES: dict[str, list[str]] = {
@@ -60,7 +60,7 @@ def run_mutation(*, url: str, param: str, store, run_id: int, sender,
     flt = HttpFilter(sender, url, param, method=method, location=location,
                      allow_destructive=allow_destructive)
     summary = {"bases": 0, "blocked": 0, "bypasses": 0, "recorded": 0, "refused": 0,
-               "results": []}
+               "unobserved": 0, "results": []}
     # B0 emitter (CC-MUT-0011, R-05): one buffered `metric_series` writer for the whole
     # run, shared across each base's MutationSearch so reward/novelty land under a single
     # source="mutation" series per run_id. Purely observational; flushed on exit.
@@ -74,14 +74,22 @@ def run_mutation(*, url: str, param: str, store, run_id: int, sender,
                 summary["results"].append({"base": base, "refused": "destructive "
                                            "payload; pass --allow-destructive (lab-only)"})
                 continue
-            base_blocked = flt.caught(base)
-            search = MutationSearch(flt, coverage_fn=coverage_fn, seed=seed, budget=budget,
-                                    metric_logger=metric_logger)
-            res = search.search(base, vuln_class)
-            bypass = bool(res.evaded and res.semantics_ok and base_blocked)
+            try:
+                base_blocked = flt.caught(base)
+                search = MutationSearch(flt, coverage_fn=coverage_fn, seed=seed,
+                                        budget=budget, metric_logger=metric_logger)
+                res = search.search(base, vuln_class)
+                bypass = bool(res.evaded and res.semantics_ok and base_blocked)
+                base_hits = flt.evaluate(base).hits if bypass else []
+            except FilterUnobserved as exc:
+                # FR-MUT-401: an answer that was no observation of the WAF ends this
+                # base's search; nothing is a block, an allow or a bypass
+                summary["bases"] += 1
+                summary["unobserved"] += 1
+                summary["results"].append({"base": base, "unobserved": str(exc)[:200]})
+                continue
             recorded = None
             if bypass:
-                base_hits = flt.evaluate(base).hits
                 recorded = record_search_result(
                     store, run_id, base, res, vuln_class,
                     bypassed_rule=(",".join(base_hits) or None),

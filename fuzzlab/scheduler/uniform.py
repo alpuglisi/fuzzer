@@ -30,3 +30,7 @@ class UniformScheduler:
     def update(self, context: str, arm: str, reward: float, cost: float = 1.0) -> None:
         """Control: learns nothing from feedback (by design)."""
         return None
+
+    def charge(self, context: str, arm: str, cost: float = 1.0) -> None:
+        """Control: a cost without a reward (CC-SCHED-0007) teaches it nothing either."""
+        return None

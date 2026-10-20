@@ -151,6 +151,17 @@ class ThompsonBandit:
             self._metrics.log(f"posterior/arm_{idx}/mean", self._metric_step,
                               self._posterior(context, arm).mean)
 
+    def charge(self, context: str, arm: str, cost: float = 1.0) -> None:
+        """Count a pull's cost without a reward (CC-SCHED-0007): the arm ran and spent
+        its requests, but the target's answer was not comparable (FR-FUZZ-63), so it
+        says nothing about the arm's success -- the posterior is not moved (no 0.0, which
+        would teach that the arm fails here). Cost ordering still sees what it spent.
+        The arm's posterior is created at its prior so the cost persists with it."""
+        self._posterior(context, arm)
+        c = self._cost.setdefault((context, arm), [0.0, 0.0])
+        c[0] += max(0.0, float(cost))
+        c[1] += 1.0
+
     def attach_metrics(self, metrics: "MetricLogger | None") -> None:
         """Attach (or clear, with ``None``) a :class:`MetricLogger` so every future
         :meth:`update` (bandit pull) emits ``regret/cumulative`` and

@@ -205,6 +205,18 @@ def _is_timeout(exc: BaseException) -> bool:
     return any(isinstance(e, (requests.Timeout, Urllib3Timeout, TimeoutError)) for e in chain)
 
 
+def _is_connect_timeout(exc: BaseException) -> bool:
+    """A timeout before the request was sent (connect), which proves nothing about
+    the server's latency (M7). urllib3's NewConnectionError is not one."""
+    import requests
+    from urllib3.exceptions import ConnectTimeoutError, NewConnectionError
+    chain = _chain(exc)
+    if any(isinstance(e, NewConnectionError) for e in chain):
+        return False
+    return any(isinstance(e, (requests.ConnectTimeout, ConnectTimeoutError))
+               for e in chain)
+
+
 def _unobserved(exc: BaseException) -> ProbeUnobserved | None:
     """``ProbeUnobserved`` when a sent probe got no complete response (BUG-0147): the
     connection was reset or aborted, or the body was cut off or undecodable. Else
@@ -857,6 +869,7 @@ class SeamProbeSender(_ExplicitAllowance):
         return Probe(status=r.status, text=r.body.decode("utf-8", "replace"),
                      elapsed=r.elapsed_ms / 1000.0, headers=dict(r.headers),
                      session=self._session_note(req),
+                     credentialed=identity != "anonymous" and self._session_note(req) is None,
                      attempts=[attempt_record(1, "response", status=r.status,
                                               elapsed=r.elapsed_ms / 1000.0)])
 
@@ -990,14 +1003,16 @@ class RequestsProbeSender(_ExplicitAllowance):
                 tries.append(attempt_record(attempt, "response", status=r.status_code,
                                             elapsed=elapsed))
                 return Probe(status=r.status_code, text=text, elapsed=elapsed,
-                             headers=dict(r.headers), resent=attempt - 1, attempts=tries)
+                             headers=dict(r.headers), resent=attempt - 1, attempts=tries,
+                             credentialed=False)
             except Exception as exc:
                 spent = time.perf_counter() - start
                 if _is_timeout(exc):        # the body's read included (BUG-0147)
                     tries.append(attempt_record(attempt, "timeout", elapsed=spent,
                                                 error=type(exc).__name__))
                     return Probe(status=0, text="", elapsed=float(self._timeout),
-                                 resent=attempt - 1, attempts=tries)
+                                 resent=attempt - 1, attempts=tries, credentialed=False,
+                                 timeout="connect" if _is_connect_timeout(exc) else "read")
                 unobserved = _unobserved(exc)
                 if unobserved is None:
                     if isinstance(exc, requests.ConnectionError):   # refused, DNS, ...

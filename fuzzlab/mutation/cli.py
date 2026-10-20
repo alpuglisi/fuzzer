@@ -97,9 +97,15 @@ def _print_summary(args, summary, run_id, resolved) -> None:
     if summary.get("refused"):
         print(f"  destructive payloads refused (never sent): {summary['refused']}"
               f"  — pass --allow-destructive to send them (lab-only)")
+    if summary.get("unobserved"):
+        print(f"  bases whose live answer was no observation of the WAF (FR-MUT-401): "
+              f"{summary['unobserved']}")
     for r in summary["results"]:
         if r.get("refused"):
             print(f"    [REFUSED] base={r['base']!r}: {r['refused']}")
+            continue
+        if r.get("unobserved"):
+            print(f"    [UNOBSERVED] base={r['base']!r}: {r['unobserved']}")
             continue
         tag = "BYPASS" if (r["evaded"] and r["semantics_ok"] and r["base_blocked"]) else "-"
         cov = f"  +{r['novel_lines']} new line(s)" if r["novel_lines"] else ""

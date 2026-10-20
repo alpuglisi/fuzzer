@@ -3,6 +3,45 @@
 Component code: **SESS**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SESS-0028 — SP-16 login facts for one exchange: credential submission and redirect to a login page (FR-SESS-22, BUG-0529) (2026-10-20)
+- Change: `fuzzlab/session/detect.py` gains `LoginFacts` and `login_facts(url,
+  headers=None, *, response_url=None, login_url=None, entry_names=())` (+79 lines).
+  - `credential_submission`: the request goes to the session's own `login_url` (when
+    known) or an SP-16 login URL (`looks_like_login_url`); or its path names account
+    creation or a password reset (`CREDENTIAL_PATH_TOKENS`: register, registration,
+    signup, sign up, password, passwd, reset); or one of its entry names is a credential
+    name (`core.redaction.is_credential_name`; only strings -- a JSON leaf arrives by
+    its `jsonbody.display_name`).
+  - **B1 (review round 3):** `browserlogin.account_endpoint_reason` is deliberately
+    *not* reused. It names any user/users/account/accounts collection and a bare
+    `change`, so `/api/users/42`, `/api/account/billing`, `/rest/user/whoami` and
+    `/api/orders/42/change-status` were all measured as matches. That would hide a lost
+    session behind "a credential submission's own refusal".
+  - `redirect_to_login`: `Location` found in any case, resolved against the answer's own
+    URL (`response_url`, a PRG follow-up's) or else the request's, judged by
+    `redirect_is_logout` with the known `login_url`.
+  - `account_submission` (ADOPT 5): the path names account creation or a reset and is
+    not a login URL. A redirect to the login page is then its success.
+  - Total: odd input reads as "no".
+- Impact (other components / project): FUZZ (the runner, the oracle's
+  `comparability`, the blind-SQLi builder) and SP-56 (CC-CORE-0069) read the facts. No
+  existing session behaviour changes: `detect_logout`, the manager and the browser
+  login are untouched.
+- Risk (low): read-only reuse of SP-16 (`looks_like_login_url`, `_same_login_url`,
+  `redirect_is_logout`) and of `is_credential_name`. The remaining risk is
+  under-approximation: a credential check named by none of the three rules (for example
+  `/rest/2fa/verify` with a `code` field) reads its 401 as a refused credential, which
+  fails closed (inconclusive; residual R2). `is_credential_name("pass_count")` is True
+  (the `pass` token), so a field so named makes its request a credential submission: a
+  narrow fail-open, stated as residual R19.
+- Deliverables:
+  - [x] `LoginFacts`, `login_facts`, `CREDENTIAL_PATH_TOKENS` — done
+  - [x] 5 tests in `tests/test_session_detect.py` (Location in any case against the
+    follow-up's URL; every credential submission and B1's four non-submissions; the
+    account submission; the known `login_url`; totality) — done
+  - [x] FR-SESS-22 — done
+- Effectiveness (assessed <date> or pending): pending.
+
 ### CC-SESS-0027 — The browser login's navigations settle a failure before they raise (BUG-0522) (2026-10-19)
 - Change: none in `fuzzlab/session/`. `session.browserlogin`'s `navigate` calls (lines
   530 and 537) go through SP-01, which now waits for the error page an empty error

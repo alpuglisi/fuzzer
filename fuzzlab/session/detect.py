@@ -335,6 +335,85 @@ def redirect_is_logout(location: str, page_url: str | None,
     return looks_like_login_url(target, final_token=not login_url)
 
 
+#: Path tokens of an endpoint whose request submits a credential to create, reset or
+#: change an account (FR-SESS-22). Deliberately narrower than
+#: `browserlogin.ACCOUNT_PATH_TOKENS`: that set (with its ``user``/``account``
+#: collections and a bare ``change``) guards writes in the login window, and here it
+#: would name ``/api/users/42`` or ``/api/orders/42/change-status`` a credential
+#: submission (BUG-0529 review, measured), hiding a lost session.
+CREDENTIAL_PATH_TOKENS = frozenset({"register", "registration", "signup", "password",
+                                    "passwd", "reset"})
+CREDENTIAL_PATH_PAIRS = frozenset({("sign", "up")})
+
+
+@dataclass(frozen=True)
+class LoginFacts:
+    """SP-16's facts about one exchange, the inputs SP-56 needs (FR-SESS-22)."""
+    credential_submission: bool
+    redirect_to_login: bool
+    #: The request's path names account creation or a password reset or change
+    #: (`CREDENTIAL_PATH_TOKENS`) and is not a login URL: its redirect to the login page
+    #: is its success ("now log in"), never a failed login (the runner's setup steps).
+    account_submission: bool = False
+
+
+def _credential_path(url: str) -> bool:
+    from urllib.parse import unquote
+
+    from fuzzlab.core.redaction import name_tokens
+    tokens = [t.lower() for t in name_tokens(unquote(urlsplit(url or "").path))]
+    return bool(set(tokens) & CREDENTIAL_PATH_TOKENS
+                or set(zip(tokens, tokens[1:])) & CREDENTIAL_PATH_PAIRS)
+
+
+def login_facts(url: str, headers=None, *, response_url: str | None = None,
+                login_url: str | None = None, entry_names=()) -> LoginFacts:
+    """Whether the request to ``url`` submits a credential, and whether its answer
+    (``headers``) redirects to a login page -- the one place both are decided for the
+    contract runner, the oracle, the blind-SQLi builder and the live filter (SP-16,
+    PA-0003; consumed by `core.comparability.response_class`, SP-56).
+
+    - **A credential submission** is a request to the session's own ``login_url`` (when
+      known) or an SP-16 login URL (`looks_like_login_url`), to a path naming account
+      creation or a password reset (`CREDENTIAL_PATH_TOKENS`), or one whose entries name
+      a credential (`core.redaction.is_credential_name`; JSON leaves by their
+      `jsonbody.display_name`, a string -- any other name is ignored). Its refusal (a
+      401, a redirect back to the login page) is that endpoint's answer, never a lost
+      session.
+    - **A redirect to a login page**: ``Location`` read in any case, resolved against
+      the response's own URL (``response_url``: a PRG follow-up's) or else ``url``, and
+      judged by `redirect_is_logout` with the known ``login_url``.
+    - **An account submission**: the path names account creation or a password reset
+      or change and is not a login URL -- a redirect to the login page is its success.
+
+    Total: odd input reads as "no"."""
+    from fuzzlab.core.redaction import is_credential_name
+    try:
+        at_login = bool(login_url and _same_login_url(url, login_url)) \
+            or looks_like_login_url(url)
+    except (ValueError, TypeError):
+        at_login = False
+    try:
+        path = _credential_path(url)
+    except (ValueError, TypeError):
+        path = False
+    named = any(isinstance(n, str) and is_credential_name(n) for n in (entry_names or ()))
+    location = ""
+    try:
+        location = next((str(v) for k, v in dict(headers or {}).items()
+                         if str(k).lower() == "location"), "")
+    except (TypeError, ValueError):
+        location = ""
+    try:
+        redirect = bool(location) and redirect_is_logout(location, response_url or url,
+                                                         login_url)
+    except (ValueError, TypeError):
+        redirect = False
+    return LoginFacts(credential_submission=at_login or path or named,
+                      redirect_to_login=redirect,
+                      account_submission=path and not at_login)
+
+
 def detect_logout(status: int, headers: dict[str, str], body: str,
                   login_url: str | None = None, page_url: str | None = None,
                   content_check: bool = True, login_fields=None) -> bool:

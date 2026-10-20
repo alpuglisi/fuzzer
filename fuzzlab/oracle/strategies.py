@@ -34,8 +34,16 @@ from fuzzlab.greybox.reward import GreyboxSignal
 from fuzzlab.oracle.context import (locate_reflection, split_form_control_values,
                                     xss_breakouts)
 from fuzzlab.oracle.oob import OobListener
-from fuzzlab.oracle.probe import (Candidate, Probe, ProbeUnobserved, Sender,
-                                  UnplaceableLocation, Verdict)
+from fuzzlab.core.comparability import APPLICATION, POLICY_BLOCK
+from fuzzlab.oracle.probe import (APPLICATION_ONLY, PRG_UNOBSERVED, Candidate, NotComparable,
+                                  Probe, ProbeUnobserved, Sender, UnplaceableLocation,
+                                  Verdict, require_comparable)
+
+#: What a control may answer when its strategy declares the application's own denial a
+#: comparable answer too (FR-FUZZ-63): an API that hides a foreign id with 403 (the
+#: cross-account control), a SQL family's D whose characters V shares (no lexical filter
+#: can single it out).
+APPLICATION_OR_POLICY = frozenset({APPLICATION, POLICY_BLOCK})
 
 # --- error signatures (M2) ---------------------------------------------------
 SQL_ERROR_SIGNATURES = [
@@ -295,6 +303,34 @@ class ConfirmationStrategy:
         return sender.send(candidate.url, candidate.param, value, timing=timing,
                            method=candidate.method, location=candidate.location)
 
+    @classmethod
+    def _compared(cls, sender: Sender, candidate: Candidate, value: str, *, role: str,
+                  admits=APPLICATION_ONLY, timing: bool = False,
+                  location: str | None = None, content_type: str | None = None,
+                  credentialed: bool | None = None, label: str | None = None) -> Probe:
+        """Send a response the strategy **compares** -- a control, a baseline sample, a
+        differential slot, a replay -- and require it to be one its strategy admits
+        (FR-FUZZ-63, SP-56: `require_comparable` on the response the strategy judges,
+        `_observed`). Otherwise `NotComparable`: the mechanism gives no verdict. Marks the
+        send's ``role`` (FR-FUZZ-60). ``location``/``content_type`` place a raw body
+        (NoSQL's JSON); ``credentialed`` overrides the probe's own fact (a replay's
+        sender is known by its role); ``label`` names it in the reason."""
+        with trace.role(role):
+            if location is not None or content_type is not None:
+                probe = sender.send(candidate.url, candidate.param, value, timing=timing,
+                                    method=candidate.method,
+                                    location=location or candidate.location,
+                                    content_type=content_type)
+            else:
+                probe = cls._send(sender, candidate, value, timing=timing)
+        judged = _observed(probe)
+        if credentialed is None and getattr(judged, "credentialed", None) is None:
+            # a PRG follow-up is sent by the same sender as its request: its fact
+            credentialed = getattr(probe, "credentialed", None)
+        require_comparable(judged, url=candidate.url, candidate=candidate,
+                           role=label or role, admits=admits, credentialed=credentialed)
+        return probe
+
     # --- shared bracketed, replicated differential (FR-FUZZ-45 (a), PA-0117) ----
     @staticmethod
     def _similar(a: str, b: str, rel: float = 0.05, absolute: int = 24) -> bool:
@@ -316,9 +352,15 @@ class ConfirmationStrategy:
         responses: dict[str, list[Probe]] = {"B": [], "V": [], "D": []}
         form_cache: dict[str, set[str]] = {}
 
-        def send(value: str) -> Probe:
-            sent_values.append(value)
-            return self._send(sender, candidate, value)
+        def send(value: str, slot: str) -> Probe:
+            """Every slot is compared (FR-FUZZ-63): B and V are the engine's controls
+            (application answers only); D admits a policy answer too -- each SQL family's
+            V carries D's characters, so no lexical filter can single D out, and an app
+            that answers a false condition with 403 is evaluating it."""
+            if slot != "B":
+                sent_values.append(value)
+            return self._compared(sender, candidate, value, role=_SLOT_ROLE[slot],
+                                  admits=_SLOT_ADMITS[slot])
 
         def judge():
             """A comparison for one decision point: every value sent so far (but the
@@ -340,14 +382,12 @@ class ConfirmationStrategy:
                 return memo[id(p)]
             return lambda a, b: a.status == b.status and norm(a) == norm(b)
 
-        with trace.role("baseline"):                  # FR-FUZZ-60: B0
-            b0 = self._send(sender, candidate, base)
+        b0 = send(base, "B")                          # FR-FUZZ-60: B0, the baseline
         count = 1
         order = rng.choice(_SCREEN_ORDERS)
         got, values = {}, {"V": family.keep(base), "D": family.disc(base)}
         for slot in order:
-            with trace.role(_SLOT_ROLE[slot]):
-                got[slot] = send(values[slot])
+            got[slot] = send(values[slot], slot)
         count += 2
         same = judge()
         if not same(got["V"], b0) or same(got["D"], b0):
@@ -359,12 +399,8 @@ class ConfirmationStrategy:
             order = rng.choice(_ROUND_ORDERS)
             got = {}
             for slot in order:
-                with trace.role(_SLOT_ROLE[slot]):
-                    if slot == "B":
-                        got[slot] = self._send(sender, candidate, base)
-                    else:
-                        got[slot] = send(family.keep(base) if slot == "V"
-                                         else family.disc(base))
+                got[slot] = send(base if slot == "B" else family.keep(base)
+                                 if slot == "V" else family.disc(base), slot)
             count += 3
             same = judge()
             if (not same(got["V"], b0) or not same(got["B"], b0)
@@ -396,11 +432,14 @@ class ConfirmationStrategy:
         baseline (median/MAD), a floor above jitter, and a rising-delay check across
         two requested delays — never one slow response.
         """
-        with trace.role("baseline"):                  # FR-FUZZ-60: the samples
-            base = build_baseline([
-                self._send(sender, candidate, baseline_value, timing=True).elapsed
-                for _ in range(self.baseline_samples)
-            ])
+        # FR-FUZZ-60: the samples; FR-FUZZ-63: each an application answer, or the
+        # mechanism gives no verdict (a fast refusal lowers the threshold; a timed-out
+        # sample was never observed)
+        base = build_baseline([
+            self._compared(sender, candidate, baseline_value, role="baseline",
+                           timing=True).elapsed
+            for _ in range(self.baseline_samples)
+        ])
         for template in templates:
             measured, ok = {}, True
             for d in self.delays:
@@ -425,6 +464,8 @@ class ConfirmationStrategy:
 #: FR-FUZZ-60: what each differential slot is -- B the base value, V the benign variant
 #: (a control: it must behave like the base), D the payload (the mutation).
 _SLOT_ROLE = {"B": "baseline", "V": "control", "D": "mutation"}
+#: FR-FUZZ-63: the classes each slot admits (see `ConfirmationStrategy._differential`).
+_SLOT_ADMITS = {"B": APPLICATION_ONLY, "V": APPLICATION_ONLY, "D": APPLICATION_OR_POLICY}
 
 
 def _signature(text: str):
@@ -468,8 +509,15 @@ class SqliErrorStrategy(ConfirmationStrategy):
         only through a PRG follow-up needs every control observed through its own
         follow-up too, without the signature: a control the app rejected (no
         follow-up) or a page that still shows it after the control is a refusal, and
-        the verdict is flagged second-order."""
-        controls: dict[str, tuple[bool, bool]] = {}  # value -> (signature, via PRG)
+        the verdict is flagged second-order.
+
+        FR-FUZZ-63: each control is an application answer (`_compared`), or the
+        mechanism gives no verdict. When the signature was seen through a follow-up and
+        a control's own follow-up got no observation (`PRG_UNOBSERVED`), the controls
+        were not observed alike: not comparable, never a negative (B2). A direct
+        signature never needs a control's follow-up."""
+        # value -> (signature, via PRG, follow-up unobserved)
+        controls: dict[str, tuple[bool, bool, bool]] = {}
         token = _sqli_token()
         for payload in self._probes:
             with trace.role("mutation"):              # FR-FUZZ-60
@@ -480,14 +528,17 @@ class SqliErrorStrategy(ConfirmationStrategy):
             needed = [token] + ([f"1{token}"] if payload[:1].isdigit() else [])
             for value in needed:
                 if value not in controls:
-                    with trace.role("control"):
-                        control = self._send(sender, candidate, value)
+                    control = self._compared(sender, candidate, value, role="control")
                     controls[value] = (_signature(_observed(control).text) is not None,
-                                       _via_prg(control))
+                                       _via_prg(control),
+                                       getattr(control, "prg", None) == PRG_UNOBSERVED)
             if any(controls[v][0] for v in needed):
                 return None                          # the signature is not the quote's
             prg = _via_prg(probe)
             if prg and not all(controls[v][1] for v in needed):
+                if any(controls[v][2] for v in needed):
+                    raise NotComparable(
+                        "not comparable: the control's follow-up got no observation")
                 return None                          # a control without its follow-up
             match, dbms = found
             evidence = {"dbms": dbms, "payload": payload,
@@ -1177,14 +1228,21 @@ class PathTraversalStrategy(ConfirmationStrategy):
 
     def confirm(self, candidate, sender):
         """FR-FUZZ-49: read as observed; a marker seen only through a PRG follow-up
-        needs the control observed through its own follow-up, without it."""
+        needs the control observed through its own follow-up, without it. FR-FUZZ-63:
+        the control is an application answer (`_compared`); a control whose follow-up
+        got no observation, when the marker was seen through one, is not comparable."""
         for payload in _TRAVERSAL_PAYLOADS:
-            probe = self._send(sender, candidate, payload)
+            with trace.role("mutation"):              # FR-FUZZ-60
+                probe = self._send(sender, candidate, payload)
             if _PASSWD_MARKER.search(_observed(probe).text or ""):
-                control = self._send(sender, candidate, self._CONTROL_VALUE)
+                control = self._compared(sender, candidate, self._CONTROL_VALUE,
+                                         role="control")
                 if _PASSWD_MARKER.search(_observed(control).text or ""):
                     return None                     # shown without traversal
                 if _via_prg(probe) and not _via_prg(control):
+                    if getattr(control, "prg", None) == PRG_UNOBSERVED:
+                        raise NotComparable(
+                            "not comparable: the control's follow-up got no observation")
                     return None                     # the control was not observed alike
                 evidence = {"payload": payload}
                 if _via_prg(probe):
@@ -1256,14 +1314,22 @@ class PathTraversalFsPathReadStrategy(ConfirmationStrategy):
                                   # always-echoes-marker-content target
 
     def confirm(self, candidate, sender):
+        """FR-FUZZ-63: the control is an application answer (`_compared`); a control
+        whose follow-up got no observation, when the marker was seen through one, is
+        not comparable (no verdict, never a negative)."""
         for payload in _TRAVERSAL_PAYLOADS:
-            probe = self._send(sender, candidate, payload)
+            with trace.role("mutation"):              # FR-FUZZ-60
+                probe = self._send(sender, candidate, payload)
             if not _PASSWD_MARKER.search(_observed(probe).text or ""):   # FR-FUZZ-49
                 continue
-            control = self._send(sender, candidate, self._CONTROL_VALUE)
+            control = self._compared(sender, candidate, self._CONTROL_VALUE,
+                                     role="control")
             if _PASSWD_MARKER.search(_observed(control).text or ""):
                 continue    # marker present even without traversal -- not attributable, try next payload
             if _via_prg(probe) and not _via_prg(control):
+                if getattr(control, "prg", None) == PRG_UNOBSERVED:
+                    raise NotComparable(
+                        "not comparable: the control's follow-up got no observation")
                 continue    # the control was not observed alike (FR-FUZZ-49)
             evidence = {"payload": payload}
             if _via_prg(probe):
@@ -1360,13 +1426,17 @@ class RegexDosStrategy(ConfirmationStrategy):
     benign_probe = "ordinary-search-term"
 
     def confirm(self, candidate, sender):
+        # FR-FUZZ-63: each sample an application answer, or no verdict (a fast refusal
+        # lowers the threshold; a connect timeout is no latency, M7)
         base = build_baseline([
-            self._send(sender, candidate, self.benign_probe, timing=True).elapsed
+            self._compared(sender, candidate, self.benign_probe, role="baseline",
+                           timing=True).elapsed
             for _ in range(self.baseline_samples)
         ])
         confirming = []
         for template in _REDOS_TEMPLATES:
-            probe = self._send(sender, candidate, template, timing=True)
+            with trace.role("mutation"):              # FR-FUZZ-60
+                probe = self._send(sender, candidate, template, timing=True)
             if base.exceeds(probe.elapsed, k=self.k, floor=self.floor):
                 confirming.append({"template": template, "elapsed": round(probe.elapsed, 4)})
                 if len(confirming) >= self.min_confirming_templates:
@@ -1658,9 +1728,10 @@ class NoSqlOperatorStrategy(ConfirmationStrategy):
             return jsonbody.body_with(base, values).decode("utf-8")
 
         def send(slot: str) -> Probe:
-            return sender.send(candidate.url, candidate.param, body(slot),
-                               method=candidate.method, location="body",
-                               content_type=jsonbody.ENCTYPE)
+            # FR-FUZZ-63: every slot compared, application answers only ($ne and $in
+            # can be singled out, so a policy answer to D is no evaluation)
+            return self._compared(sender, candidate, body(slot), role=_SLOT_ROLE[slot],
+                                  location="body", content_type=jsonbody.ENCTYPE)
 
         def same(a: Probe, b: Probe) -> bool:
             forms = sorted({f for t in sent for f in _reflection_forms(t)}, key=len,
@@ -1683,6 +1754,10 @@ class NoSqlOperatorStrategy(ConfirmationStrategy):
                         "never": '{"$in": []}',
                         "status": {"base": b0.status, "always": d1.status},
                         "len": {"base": len(b0.text or ""), "always": len(d1.text or "")}})
+
+
+#: How a cross-account replay is named in a not-comparable reason (FR-FUZZ-63).
+_REPLAY_LABEL = {"peer": "peer replay", "anonymous": "unauthenticated replay"}
 
 
 @dataclass(frozen=True)
@@ -1740,15 +1815,25 @@ class CrossAccountReplayStrategy(ConfirmationStrategy):
             return p.status == 200 and peer.owner in text and \
                 not (peer.peer_name and peer.peer_name in text)
 
-        if not view_of_owner(self._send(sender, candidate, value)):
+        # FR-FUZZ-63: A's own request, the other-value control and every replay are
+        # compared, so each must be the application's answer -- or a policy block, an
+        # API's own denial of a foreign id. A refused credential (A's, or the peer's), a
+        # gateway, a throttle or an incomplete answer gives no verdict, never "denied".
+        # The unauthenticated replay carries no credential: its 401 is the endpoint's.
+        if not view_of_owner(self._compared(sender, candidate, value, role="baseline",
+                                            admits=APPLICATION_OR_POLICY)):
             return None                          # not A's own private view
-        if view_of_owner(self._send(sender, candidate, "zqac" + _token())):
+        if view_of_owner(self._compared(sender, candidate, "zqac" + _token(),
+                                        role="control", admits=APPLICATION_OR_POLICY)):
             return None                          # A's name whatever the value: no object
         for who, other in (("peer", peer.sender), ("anonymous", peer.anonymous)):
             if other is None:
                 continue
             bound = _FormBoundSender(other, candidate)
-            got = [self._send(bound, candidate, value) for _ in range(2)]
+            got = [self._compared(bound, candidate, value, role="mutation",
+                                  label=_REPLAY_LABEL[who], admits=APPLICATION_OR_POLICY,
+                                  credentialed=who == "peer")
+                   for _ in range(2)]
             if all(view_of_owner(g) for g in got):
                 return Verdict(True, self.vuln_class, self.mechanism,
                                {"who": who, "param": candidate.param,
@@ -2777,13 +2862,15 @@ class HttpHeaderInjectionCrlfStrategy(ConfirmationStrategy):
         header_name = f"X-Fuzzlab-Hdrinj-{token}"
 
         malicious = f"fuzzlab-ok\r\n{header_name}: {token}"
-        probe_a = self._send(sender, candidate, malicious)
+        with trace.role("mutation"):                  # FR-FUZZ-60
+            probe_a = self._send(sender, candidate, malicious)
         injected = self._header(probe_a, header_name.lower())
         if injected != token:
             return None    # no genuinely spliced-in header -- fails closed
 
         control = f"fuzzlab-ok {header_name}: {token}"
-        probe_b = self._send(sender, candidate, control)
+        # FR-FUZZ-63: the control is the application's answer, or no verdict
+        probe_b = self._compared(sender, candidate, control, role="control")
         if self._header(probe_b, header_name.lower()) is not None:
             return None    # the same marker text, sans CRLF, ALSO produced the header
                             # -- not attributable to CRLF splitting specifically

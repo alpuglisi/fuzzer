@@ -636,8 +636,9 @@ def _print_summary(args, counts, result, plugins=None) -> int:
     if unsure:
         from fuzzlab.core.urls import to_route_path
         print(f"  inconclusive ({len(unsure)} candidate key(s) could not be decided: a "
-              f"cost cap stopped a started check, no mechanism could place the point, or "
-              f"a probe got no response; unlabelled, FR-FUZZ-45/47/50):")
+              f"cost cap stopped a started check, no mechanism could place the point, "
+              f"a probe got no response, or a response was not the application's own "
+              f"answer; unlabelled, FR-FUZZ-45/47/50/63):")
         for item in unsure:
             where = (f"    - {item['location']} {to_route_path(item['url'])} "
                      f"[{item['param']}]: {item['mechanism']}")
@@ -646,6 +647,9 @@ def _print_summary(args, counts, result, plugins=None) -> int:
                       f"{item.get('reason') or '-'})")
             elif item["mechanism"] == "unobserved":             # FR-FUZZ-50
                 print(f"{where} (a probe got no response: {item.get('reason') or '-'})")
+            elif item["mechanism"] == "not-comparable":         # FR-FUZZ-63
+                print(f"{where} (a response was not the application's own answer: "
+                      f"{item.get('reason') or '-'})")
             else:                                               # a cost cap, FR-FUZZ-45
                 print(f"{where}; not started: "
                       f"{', '.join(item['families_not_started']) or '-'}")

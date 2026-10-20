@@ -16,11 +16,25 @@ of ``pass`` / ``finding`` / ``error`` / ``skipped``, with what matched and why.
 - each response is read up to ``limits.max_body_bytes`` and within ``limits.timeout_ms``
   (PA-0102(1)); sends are spaced to ``limits.rps``.
 
-**A send that gets no complete response is no verdict** (PA-0153): classified by the
-one owner (`tools.probesender._unobserved`, SP-34) it is an ``error`` for that case and
-the run goes on; a timeout is an ``error`` too, or a ``finding`` when the oracle names a
-latency bound; a target that cannot be reached at all (refused, DNS, TLS) stops the
-run loudly (`TargetUnreachable`) with the results so far written.
+**A send that gets no complete response is no verdict** (PA-0153, BUG-0528): no
+response, a body cut off or over ``max_body_bytes``, or a ``timeout_ms`` that passed
+before the whole answer arrived (`Exchange.incomplete`) is an ``error`` for that case and
+the run goes on -- never a pass, a match on what was read, a baseline or evidence bytes
+(the response is closed on every exit). A read or deadline timeout is a ``finding`` only
+under a ``latency_ms_gt`` bound that ``timeout_ms`` proves; a connect timeout proves
+nothing. SP-34 classifies the exceptions (`tools.probesender`). A target that cannot be
+reached at all (refused, DNS, TLS) stops the run loudly (`TargetUnreachable`) with the
+results so far written.
+
+**Only the application's own answer is judged** (SP-56, `core.comparability`;
+BUG-0529): a throttled or unavailable answer (429, 503) and a credentialed request's
+refused credential (401, 407, a redirect to a login page -- not a credential submission's
+own refusal, SP-16 `session.detect.login_facts`) are judged only where ``status_in``
+names the status; a policy block (403, 451) only where ``expect_status_class`` holds
+``4xx`` or ``status_in`` names it. Otherwise each is an ``error``. A gateway answer
+(502, 504) is judged under the 5xx rule. A state check is satisfied, violated or
+**unobserved**; a pass needs every one satisfied, and the unobserved ones are listed on
+the result (``unobserved``).
 
 **Credentials** come from the auth profile's ``ref`` (`keyring:<identity>` through
 `core.credentials`, ``env:<NAME>``, or a Playwright storage-state file), are sent only to
@@ -30,7 +44,7 @@ belongs to), and are never written: evidence goes through `core.redaction`.
 **The oracle.** A case's ``findings_if`` rules, plus the built-in rules every case gets:
 a 5xx, and a response matching `LEAK_PATTERNS` (a stack trace, a database error) that the
 same endpoint's baseline did not already show (the PA-0117 noise guard: the first
-non-error answer the endpoint gave in this run is its baseline). An answer outside the
+complete application answer below 400 that passed is its baseline). An answer outside the
 case's ``expect_status_class`` is matched as ``expect_status_class``.
 """
 
@@ -146,11 +160,36 @@ class Exchange:
     method: str
     status: int | None = None
     headers: dict = field(default_factory=dict)
+    #: What was read. For an incomplete exchange only its length is ever used: it is
+    #: never judged, a baseline or written as evidence (FR-FUZZ-52, BUG-0528).
     body: bytes = b""
     latency_ms: int | None = None
     error: str | None = None
     timed_out: bool = False
     truncated: bool = False
+    #: Reading the body failed after the headers (cut off, reset): SP-34's reason.
+    cut: str | None = None
+    #: On a timeout: ``"connect"`` (nothing was sent, M7), ``"read"`` (the transport's
+    #: read timeout) or ``"deadline"`` (the runner's own ``timeout_ms`` passed while the
+    #: answer was read).
+    timeout_kind: str | None = None
+
+    @property
+    def incomplete(self) -> str | None:
+        """Why this exchange is not a whole answer (status line, headers and the whole
+        body within ``timeout_ms`` and ``max_body_bytes``), or None."""
+        if self.status is None:
+            if self.timeout_kind == "connect":
+                return "timed out before connecting"
+            return "timed out before the headers" if self.timed_out else \
+                (self.error or "no response")
+        if self.timed_out:
+            return f"timed out after the headers ({self.status})"
+        if self.cut:
+            return f"body cut off ({self.status})"
+        if self.truncated:
+            return f"body over max_body_bytes ({self.status})"
+        return None
 
     def json(self):
         try:
@@ -165,6 +204,39 @@ class Prepared:
     url: str
     headers: dict
     body: bytes | None
+    #: The profile's credential is in the final headers -- added on the base origin and
+    #: not replaced by the case's own header (D69): a forged or empty token is not the
+    #: profile's credential (SP-56's ``credentialed``).
+    credentialed: bool = False
+    #: The request's own names (query keys, JSON body keys at every depth): SP-16 reads
+    #: a credential name among them (`session.detect.login_facts`).
+    entry_names: tuple[str, ...] = ()
+
+
+@dataclass
+class Judgement:
+    """`Runner.judge`'s answer: the verdict, what matched, why, and the state checks
+    that observed nothing (``{"check": n, "reason": ...}``, numbered among the case's
+    state checks)."""
+    verdict: str
+    matched: list[str]
+    reason: str | None = None
+    unobserved: list[dict] = field(default_factory=list)
+    response_class: str | None = None
+
+
+def _json_keys(doc, depth: int = 0) -> list[str]:
+    """Every key of a JSON document, at every depth (bounded)."""
+    if depth > 32:
+        return []
+    if isinstance(doc, dict):
+        out = [str(k) for k in doc]
+        for v in doc.values():
+            out += _json_keys(v, depth + 1)
+        return out
+    if isinstance(doc, list):
+        return [k for v in doc for k in _json_keys(v, depth + 1)]
+    return []
 
 
 class Runner:
@@ -270,12 +342,19 @@ class Runner:
         if content_type_override:
             hdrs = {k: v for k, v in hdrs.items() if k.lower() != "content-type"}
             hdrs["Content-Type"] = content_type_override
-        if in_origin_scope(url, self._session_origins):
-            hdrs.update(self.auth_headers(auth_profile))
+        auth = self.auth_headers(auth_profile) if in_origin_scope(
+            url, self._session_origins) else {}
+        hdrs.update(auth)
         for k, v in (headers or {}).items():          # the case's own headers win (D69)
             hdrs = {h: x for h, x in hdrs.items() if h.lower() != str(k).lower()}
             hdrs[str(k)] = str(v)
-        return Prepared(ep["method"], url, hdrs, data)
+        final = {str(h).lower(): x for h, x in hdrs.items()}
+        credentialed = bool(auth) and all(final.get(str(h).lower()) == x
+                                          for h, x in auth.items())
+        names = [str(k) for k in (query or {})] + (_json_keys(body) if raw_body is None
+                                                   else [])
+        return Prepared(ep["method"], url, hdrs, data, credentialed=credentialed,
+                        entry_names=tuple(names))
 
     def _pace(self) -> None:
         gap = 1.0 / float(self.c.limits["rps"])
@@ -291,19 +370,20 @@ class Runner:
             raise PermissionError(f"refusing an out-of-scope send to "
                                   f"{urlsplit(req.url).hostname!r}")
         check_send_url(req.url, explicit, req.method)
-        from fuzzlab.tools.probesender import _is_timeout, _unobserved
+        from fuzzlab.tools.probesender import _is_connect_timeout, _is_timeout, _unobserved
         import requests
         limits = self.c.limits
         self._pace()
         ex = Exchange(req.url, req.method)
         start = self.clock()
         deadline = start + limits["timeout_ms"] / 1000
+        resp, chunks = None, []
         try:
             resp = self.session.request(req.method, req.url, headers=req.headers,
                                         data=req.body, allow_redirects=False,
                                         timeout=limits["timeout_ms"] / 1000, stream=True)
             ex.status, ex.headers = resp.status_code, dict(resp.headers)
-            chunks, size = [], 0
+            size = 0
             for chunk in resp.iter_content(65536):
                 chunks.append(chunk)
                 size += len(chunk)
@@ -311,19 +391,26 @@ class Runner:
                     ex.truncated = True
                     break
                 if self.clock() > deadline:
-                    ex.timed_out = True
+                    ex.timed_out, ex.timeout_kind = True, "deadline"
                     break
-            ex.body = b"".join(chunks)[:limits["max_body_bytes"]]
-            resp.close()
+            if not (ex.truncated or ex.timed_out) and self.clock() > deadline:
+                ex.timed_out, ex.timeout_kind = True, "deadline"   # a drip (measured)
         except requests.RequestException as exc:
             if _is_timeout(exc):
                 ex.timed_out, ex.error = True, "timeout"
+                ex.timeout_kind = "connect" if _is_connect_timeout(exc) else "read"
             else:
                 unobserved = _unobserved(exc)
                 if unobserved is None:
                     raise TargetUnreachable(f"{urlsplit(req.url).hostname}: "
                                             f"{type(exc).__name__}") from None
                 ex.error = str(unobserved)
+                if ex.status is not None:
+                    ex.cut = ex.error                     # after the headers (BUG-0528)
+        finally:
+            if resp is not None:                          # every exit (BUG-0528)
+                resp.close()
+        ex.body = b"".join(chunks)[:limits["max_body_bytes"]]
         ex.latency_ms = int((self.clock() - start) * 1000)
         return ex
 
@@ -338,8 +425,14 @@ class Runner:
               "body": redact_body(req.body or b"", ctype).decode("utf-8", "replace")}
         rctype = {k.lower(): v for k, v in ex.headers.items()}.get("content-type", "")
         rs = {"status": ex.status, "headers": redact_headers(ex.headers),
-              "body": redact_body(ex.body, rctype).decode("utf-8", "replace")[:MATCH_BYTES],
               "error": ex.error, "latency_ms": ex.latency_ms}
+        if ex.incomplete is not None:
+            # M3: a partial body is never written -- the redactor may only be able to
+            # sniff it (a cut JSON document served as text/plain), so its bytes stay out
+            rs.update(body="omitted (incomplete)", body_bytes=len(ex.body),
+                      incomplete=ex.incomplete)
+        else:
+            rs["body"] = redact_body(ex.body, rctype).decode("utf-8", "replace")[:MATCH_BYTES]
         refs = {}
         for kind, doc in (("req", rq), ("res", rs)):
             p = self.evidence_dir / f"{case_id}.{kind}.json"
@@ -377,10 +470,10 @@ class Runner:
                                    auth_profile=step.get("auth_profile",
                                                          case.get("auth_profile")))
                 ex = self.send(req)
-                if ex.status is None or ex.status >= 400:
+                failed = self._setup_failed(req, ex)
+                if failed:
                     return {**res, "verdict": "error", "matched": [],
-                            "reason": f"setup step {i + 1} ({step['call']}) got "
-                                      f"{ex.status or ex.error}"}
+                            "reason": f"setup step {i + 1} ({step['call']}) got {failed}"}
                 doc = ex.json()
                 for var, jp in (step.get("extract") or {}).items():
                     try:
@@ -403,11 +496,13 @@ class Runner:
         finally:
             if destructive:
                 self._reset()
-        verdict, matched, reason = self.judge(case, ex, variables)
-        out = {**res, "status": ex.status, "latency_ms": ex.latency_ms, "verdict": verdict,
-               "matched": matched}
-        if reason:
-            out["reason"] = reason
+        j = self.judge(case, ex, variables, req)
+        out = {**res, "status": ex.status, "latency_ms": ex.latency_ms, "verdict": j.verdict,
+               "matched": j.matched, "response_class": j.response_class}
+        if j.reason:
+            out["reason"] = j.reason
+        if j.unobserved:
+            out["unobserved"] = j.unobserved
         ev = self._evidence(cid, req, ex)
         if ev:
             out["evidence"] = ev
@@ -417,31 +512,86 @@ class Runner:
     def _baseline(self, eid: str) -> Exchange | None:
         return self._baselines.get(eid)
 
-    def judge(self, case: dict, ex: Exchange, variables: dict) -> tuple[str, list[str], str | None]:
+    @staticmethod
+    def classify(req: Prepared | None, ex: Exchange) -> tuple[str, str, object]:
+        """SP-56's class of a complete exchange, with SP-16's facts (`login_facts`) on the
+        request's URL and own names: ``(class, reason, facts)``."""
+        from fuzzlab.core.comparability import response_class
+        from fuzzlab.session.detect import login_facts
+        facts = login_facts(ex.url, ex.headers,
+                            entry_names=req.entry_names if req is not None else ())
+        cls, why = response_class(ex.status, ex.headers, complete=ex.incomplete is None,
+                                  credentialed=bool(req is not None and req.credentialed),
+                                  credential_submission=facts.credential_submission,
+                                  redirect_to_login=facts.redirect_to_login)
+        return cls, why, facts
+
+    def _setup_failed(self, req: Prepared, ex: Exchange) -> str | None:
+        """Why a setup step's answer set nothing up, or None: it must be a complete
+        application answer below 400 and not a redirect to a login page (a failed form
+        login, A8) -- unless the step itself creates or resets an account, whose
+        redirect to the login page is its success (ADOPT 5)."""
+        from fuzzlab.core.comparability import APPLICATION
+        why = ex.incomplete
+        if why is not None:
+            return f"an incomplete response ({why})"
+        if ex.status >= 400:
+            return str(ex.status)
+        cls, reason, facts = self.classify(req, ex)
+        if cls != APPLICATION:
+            return reason
+        if facts.redirect_to_login and not facts.account_submission:
+            return f"a {ex.status} redirect to a login page (not logged in)"
+        return None
+
+    def judge(self, case: dict, ex: Exchange, variables: dict,
+              req: Prepared | None = None) -> Judgement:
+        """FR-FUZZ-52: only a complete answer that is the application's own is judged.
+        An incomplete exchange is an ``error`` (a read or deadline timeout matches a
+        ``latency_ms_gt`` bound it proves, M7). A throttled or unavailable answer, or a
+        credentialed request's refused credential, is judged only where ``status_in``
+        names its status; a policy block where ``expect_status_class`` holds 4xx or
+        ``status_in`` names it; otherwise each is an ``error`` (SP-56, BUG-0529). Every
+        state check must be observed and satisfied for a pass (BUG-0528)."""
+        from fuzzlab.core.comparability import (APPLICATION, AUTH_FAILURE, INCOMPLETE,
+                                                POLICY_BLOCK, THROTTLE_OR_UNAVAILABLE)
         oracle = case.get("oracle") or {}
         rules = oracle.get("findings_if") or []
         latency_rule = next((r["latency_ms_gt"] for r in rules if "latency_ms_gt" in r), None)
-        if ex.status is None:
-            if ex.timed_out and latency_rule is not None:
-                return "finding", ["latency_ms_gt"], "timed out"
-            return "error", [], ex.error or "no response"
+        why = ex.incomplete
+        if why is not None:
+            if ex.timeout_kind in ("read", "deadline") and latency_rule is not None \
+                    and latency_rule <= self.c.limits["timeout_ms"]:
+                return Judgement("finding", ["latency_ms_gt"], "timed out", [], INCOMPLETE)
+            return Judgement("error", [], f"incomplete response: {why}", [], INCOMPLETE)
+        named = any(ex.status in (r.get("status_in") or ()) for r in rules)
+        expect = oracle.get("expect_status_class") or []
+        cls, reason, _facts = self.classify(req, ex)
+        if cls == THROTTLE_OR_UNAVAILABLE and not named:
+            return Judgement("error", [], f"not judged: {reason}", [], cls)
+        if cls == AUTH_FAILURE and req is not None and req.credentialed and not named:
+            return Judgement("error", [], f"credentials not accepted ({reason})", [], cls)
+        if cls == POLICY_BLOCK and not named and "4xx" not in expect:
+            return Judgement("error", [], f"not judged: {reason}, which the case does not "
+                                          f"expect", [], cls)
         matched: list[str] = []
+        unobserved: list[dict] = []
         text = ex.body[:MATCH_BYTES].decode("utf-8", "replace")
         base = self._baseline(case["endpoint"])
         base_text = base.body[:MATCH_BYTES].decode("utf-8", "replace") if base else ""
-        cls = f"{ex.status // 100}xx"
-        if cls == "5xx":
+        status_class = f"{ex.status // 100}xx"
+        if status_class == "5xx":
             matched.append("status_class:5xx")
         leaks = [p.pattern for p in _LEAK if p.search(text) and not p.search(base_text)]
         if leaks:
             matched.append("leak:" + leaks[0])
-        expect = oracle.get("expect_status_class") or []
-        if expect and cls not in expect:
+        if expect and status_class not in expect:
             matched.append("expect_status_class")
+        checks = 0
         for rule in rules:
-            if "status_class" in rule and cls == rule["status_class"] and \
-                    f"status_class:{cls}" not in matched:
-                matched.append(f"status_class:{cls}")
+            if "status_class" in rule and status_class == rule["status_class"] and \
+                    f"status_class:{status_class}" not in matched:
+                matched.append(f"status_class:{status_class}")
             if "status_in" in rule and ex.status in rule["status_in"]:
                 matched.append("status_in")
             for rx in rule.get("body_matches") or []:
@@ -453,13 +603,24 @@ class Runner:
             if rule.get("response_schema_drift") and self._drift(case["endpoint"], ex):
                 matched.append("response_schema_drift")
             if "state_check" in rule:
-                held = self._state_check(rule["state_check"], variables, case)
+                checks += 1
+                held, why_not = self._state_check(rule["state_check"], variables, case)
                 if held is False:
                     matched.append("state_check")
-        if not matched and ex.status < 500 and case["endpoint"] not in self._baselines \
-                and ex.status < 400:
-            self._baselines[case["endpoint"]] = ex
-        return ("finding" if matched else "pass"), matched, None
+                elif held is None:
+                    unobserved.append({"check": checks, "reason": why_not})
+        if matched:
+            # evidence already observed stands (PA-0137(1)); the unobserved checks are
+            # recorded beside it
+            return Judgement("finding", matched, None, unobserved, cls)
+        if unobserved:
+            first = unobserved[0]
+            return Judgement("error", [], f"state check {first['check']} not observed: "
+                                         f"{first['reason']}", unobserved, cls)
+        if cls == APPLICATION and ex.status < 400 \
+                and case["endpoint"] not in self._baselines:
+            self._baselines[case["endpoint"]] = ex     # a complete application answer
+        return Judgement("pass", [], None, [], cls)
 
     def _drift(self, eid: str, ex: Exchange) -> bool:
         schema = self.c.endpoint(eid).get("response_schema")
@@ -470,16 +631,36 @@ class Runner:
         clean = _strip_extensions(schema)
         return any(True for _ in Draft202012Validator(clean).iter_errors(doc))
 
-    def _state_check(self, sc: dict, variables: dict, case: dict) -> bool | None:
+    def _state_check(self, sc: dict, variables: dict, case: dict
+                     ) -> tuple[bool | None, str | None]:
+        """``(True, None)`` satisfied, ``(False, None)`` violated, or ``(None, why)``
+        unobserved (BUG-0528): it could not be prepared or sent, its answer was not a
+        complete application 2xx (every other SP-56 class is not a 2xx), not JSON, or
+        the assertion could not be evaluated on it. The reason names no URL or value."""
+        from fuzzlab.core.comparability import APPLICATION
         try:
             req = self.prepare(sc["call"], path_params=fill(sc.get("path_params"), variables),
                                query=fill(sc.get("query"), variables),
                                auth_profile=sc.get("auth_profile", case.get("auth_profile")))
+        except (ValueError, PermissionError) as exc:
+            return None, f"could not be prepared ({type(exc).__name__})"
+        try:
             ex = self.send(req)
-        except (ValueError, PermissionError, DestructiveUrlRefused):
-            return None
+        except (PermissionError, DestructiveUrlRefused) as exc:
+            return None, f"refused at the send ({type(exc).__name__})"
+        why = ex.incomplete
+        if why is not None:
+            return None, f"incomplete response ({why})"
+        cls, reason, _facts = self.classify(req, ex)
+        if cls != APPLICATION or not 200 <= ex.status < 300:
+            return None, f"not the application's 2xx answer ({reason or ex.status})"
         doc = ex.json()
-        return None if doc is None else assertion_holds(doc, sc["assert_jsonpath"])
+        if doc is None:
+            return None, "the answer is not JSON"
+        held = assertion_holds(doc, sc["assert_jsonpath"])
+        if held is None:
+            return None, "the assertion could not be evaluated on the answer"
+        return held, None
 
     # --- the run -----------------------------------------------------------------------
     def run(self, on_result: Callable[[dict], None] | None = None) -> list[dict]:

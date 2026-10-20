@@ -106,3 +106,76 @@ def test_session_state_time_expiry():
     assert st.is_time_expired(now=2000.0)
     assert not st.is_time_expired(now=500.0)
     assert not SessionState("h", "u").is_time_expired(now=2000.0)   # no exp -> not expired
+
+
+# --- SP-16 login facts for SP-56 (CC-SESS-0028, FR-SESS-22; AU-OUTCOME, BUG-0529) -------
+
+def test_login_facts_reads_location_in_any_case_against_the_follow_ups_url():
+    """A1: ``Location`` in any case; a relative one resolved against the answer's own URL
+    (a PRG follow-up's), not the request's."""
+    for name in ("Location", "location", "LOCATION"):
+        facts = detect.login_facts("http://h/app/items", {name: "/login"})
+        assert facts.redirect_to_login, name
+    # "enter" relative to the follow-up's URL is /app/enter, the session's login page;
+    # relative to the request's URL it is /other/enter, which is none
+    known = "http://h/app/enter"
+    assert detect.login_facts("http://h/other/x", {"Location": "enter"},
+                              response_url="http://h/app/items",
+                              login_url=known).redirect_to_login
+    assert not detect.login_facts("http://h/other/x", {"Location": "enter"},
+                                  login_url=known).redirect_to_login
+    assert not detect.login_facts("http://h/app/items", {"Location": "/items?page=2"}
+                                  ).redirect_to_login
+    assert not detect.login_facts("http://h/app/items", None).redirect_to_login
+
+
+def test_login_facts_names_every_credential_submission():
+    """M2 (reviewer A's measured true positives) and B1: an SP-16 login URL; a path
+    naming account creation or a password reset; a credential name among the entries
+    (a JSON leaf by its display name). A path that names a user or an account resource
+    is none: the four measured over-matches of the login window's account test."""
+    named = ["http://h/rest/user/login", "http://h/register", "http://h/api/sign-up",
+             "http://h/api/signup", "http://h/user/password/reset",
+             "http://h/registration"]
+    for url in named:
+        assert detect.login_facts(url).credential_submission, url
+    assert detect.login_facts("http://h/j_security_check",
+                              entry_names=("j_username", "j_password")).credential_submission
+    assert detect.login_facts("http://h/api/session",
+                              entry_names=("email", "password")).credential_submission
+    for url in ("http://h/api/users/42", "http://h/api/account/billing",
+                "http://h/rest/user/whoami", "http://h/api/orders/42/change-status",
+                "http://h/api/items"):
+        assert not detect.login_facts(url, entry_names=("id", "csrf_token")
+                                      ).credential_submission, url
+    # a name that is not a string (a JSON path tuple) is ignored, never a TypeError
+    assert not detect.login_facts("http://h/api/x", entry_names=(("password",), 3)
+                                  ).credential_submission
+
+
+def test_login_facts_names_an_account_submission_apart_from_a_login():
+    """ADOPT 5: a registration's redirect to the login page is its success; a login's is
+    its failure -- only a path naming account creation or a password reset, at no login
+    URL, is an account submission."""
+    assert detect.login_facts("http://h/api/register").account_submission
+    assert detect.login_facts("http://h/password/reset").account_submission
+    assert not detect.login_facts("http://h/api/login").account_submission
+    assert not detect.login_facts("http://h/api/session",
+                                  entry_names=("password",)).account_submission
+
+
+def test_login_facts_uses_the_sessions_known_login_url():
+    """A known ``login_url`` names its own login route and its redirects, even one SP-16's
+    anchored tokens would not."""
+    known = "http://h/auth/enter"
+    assert not detect.login_facts("http://h/auth/enter").credential_submission
+    assert detect.login_facts("http://h/auth/enter", login_url=known).credential_submission
+    assert detect.login_facts("http://h/items", {"Location": "/auth/enter"},
+                              login_url=known).redirect_to_login
+
+
+def test_login_facts_is_total():
+    for url, headers in ((None, None), ("", 5), ("::not a url", {"Location": None}),
+                         ("http://h/x", ["bad"])):
+        facts = detect.login_facts(url, headers, entry_names=None)
+        assert facts.credential_submission in (True, False)

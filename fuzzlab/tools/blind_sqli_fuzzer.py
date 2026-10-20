@@ -37,7 +37,45 @@ from fuzzlab.tools.authhttp import with_query_param
 
 
 # --- Request senders -------------------------------------------------------
-# Both expose get(url, param, value, timeout) -> (latency_seconds, status, size).
+# Both expose get(url, param, value, timeout) -> (latency_seconds, status, size), an
+# `Answer`: it unpacks to those three and carries the answer's headers and whether the
+# request carried a credential, so SP-56 can tell the application's answer from a
+# throttle, a gateway or a refused credential (FR-FUZZ-63, BUG-0529).
+class Answer(tuple):
+    """``(latency, status, size)`` plus ``.headers`` and ``.credentialed``."""
+
+    def __new__(cls, latency, status, size, headers=None, credentialed=None):
+        self = super().__new__(cls, (latency, status, size))
+        try:
+            self.headers = dict(headers or {})
+        except (TypeError, ValueError):
+            self.headers = {}
+        self.credentialed = credentialed
+        return self
+
+
+class BaselineNotComparable(RuntimeError):
+    """Every baseline sample was answered, and none was the application's own answer
+    (a throttle, a gateway, a refused credential, a redirect to a login page): there is
+    no baseline to measure a delay against -- the target was reached (FR-FUZZ-63)."""
+
+
+def answer_class(answer, url: str) -> tuple[str, str, bool]:
+    """SP-56's class of one `Answer` for a request to ``url`` (SP-16's facts on the
+    URL and the answer's ``Location``), and whether it redirects to a login page. An
+    answer that does not say whether it carried a credential reads as carrying one
+    (fail closed)."""
+    from fuzzlab.core.comparability import response_class
+    from fuzzlab.session.detect import login_facts
+    headers = getattr(answer, "headers", None)
+    facts = login_facts(url, headers)
+    cls, why = response_class(answer[1], headers, complete=True,
+                              credentialed=getattr(answer, "credentialed", None) is not False,
+                              credential_submission=facts.credential_submission,
+                              redirect_to_login=facts.redirect_to_login)
+    return cls, why, facts.redirect_to_login
+
+
 class RequestsSender:
     """Standalone path: a raw requests.Session (unauthenticated, unchanged behavior)."""
 
@@ -57,9 +95,10 @@ class RequestsSender:
             # sensitive real response.
             resp = self._session.get(url, params={param: value}, timeout=timeout,
                                       allow_redirects=False)
-            return time.perf_counter() - start, resp.status_code, len(resp.text)
+            return Answer(time.perf_counter() - start, resp.status_code, len(resp.text),
+                          getattr(resp, "headers", None), credentialed=False)
         except requests.Timeout:
-            return float(timeout), 504, 0
+            return Answer(float(timeout), 504, 0, credentialed=False)
 
 
 class SeamSender:
@@ -81,11 +120,13 @@ class SeamSender:
 
         req = Request("GET", with_query_param(url, param, value),
                       identity=self._identity, timing=True, component="fuzzer")
+        credentialed = self._identity not in (None, "", "anonymous")
         try:
             resp = self._client.send(req)
         except requests.Timeout:
-            return float(timeout), 504, 0
-        return resp.elapsed_ms / 1000.0, resp.status, len(resp.body)
+            return Answer(float(timeout), 504, 0, credentialed=credentialed)
+        return Answer(resp.elapsed_ms / 1000.0, resp.status, len(resp.body),
+                      getattr(resp, "headers", None), credentialed=credentialed)
 
 
 # --- Payload catalog -------------------------------------------------------
@@ -105,22 +146,35 @@ PAYLOADS = [
 
 
 def establish_baseline(sender, url, param, iterations, timeout):
-    """Measure normal latency and body size to resist jitter-driven false positives."""
+    """Measure normal latency and body size to resist jitter-driven false positives.
+
+    FR-FUZZ-63 (SP-56): a sample counts only when it is the application's own answer and
+    not a redirect to a login page -- a throttle, a gateway (a client timeout is
+    reported as 504), a refused credential or a block is a fast or slow answer of
+    something else, and would move the threshold. When every sample was answered and
+    none counts, `BaselineNotComparable`; "could not reach" is for request errors."""
+    from fuzzlab.core.comparability import APPLICATION
     print(f"[*] Baselining target over {iterations} requests...")
-    times, sizes = [], []
+    times, sizes, excluded = [], [], {}
     for _ in range(iterations):
         try:
-            latency, status, size = sender.get(
-                url, param, random.randint(1, 100), timeout
-            )
+            answer = sender.get(url, param, random.randint(1, 100), timeout)
         except requests.RequestException:
             continue
-        if status == 504:
+        cls, _why, to_login = answer_class(answer, url)
+        if cls != APPLICATION or to_login:
+            key = "redirect-to-login" if cls == APPLICATION else cls
+            excluded[key] = excluded.get(key, 0) + 1
             continue
+        latency, _status, size = answer
         times.append(latency)
         sizes.append(size)
 
     if not times:
+        if excluded:
+            raise BaselineNotComparable(
+                "baseline not comparable: no sample was the application's answer ("
+                + ", ".join(f"{n} {k}" for k, n in sorted(excluded.items())) + ")")
         raise ConnectionError("Could not reach the target to establish a baseline.")
 
     baseline = {
@@ -138,7 +192,10 @@ def establish_baseline(sender, url, param, iterations, timeout):
 
 
 def run_fuzzing_cycle(sender, url, param, baseline, payloads, args):
-    """Execute payloads and classify by measured timing (label-independent)."""
+    """Execute payloads and classify by measured timing (label-independent). A payload
+    answered by anything but the application (SP-56; a 504 excepted) gets no row, so
+    no reward-0 attempt is ever imported for it (FR-FUZZ-63)."""
+    from fuzzlab.core.comparability import APPLICATION
     rows = []
     # A hit needs a clear multi-second delay AND to clear the jitter band.
     jitter_band = baseline["avg_time"] + args.sigma * baseline["std_dev_time"]
@@ -151,13 +208,19 @@ def run_fuzzing_cycle(sender, url, param, baseline, payloads, args):
         latencies, status, size = [], None, None
         for _ in range(args.repeats):
             try:
-                latency, status, size = sender.get(
-                    url, param, payload, args.timeout
-                )
+                answer = sender.get(url, param, payload, args.timeout)
             except requests.RequestException as exc:
                 print(f"[-] Request error on {payload[:24]!r}: {exc}")
                 latency = None
                 break
+            # FR-FUZZ-63: only the application's answer is a timing observation; a 504
+            # stays one (a gateway, or the client's timeout, waited on the query)
+            cls, why, _to_login = answer_class(answer, url)
+            if cls != APPLICATION and answer[1] != 504:
+                print(f"[-] Not comparable on {payload[:24]!r}: {why}; no row")
+                latencies = []
+                break
+            latency, status, size = answer
             latencies.append(latency)
             time.sleep(args.pause)
 
@@ -319,6 +382,9 @@ def main(argv=None):
                        "mechanism": verdict.mechanism if verdict else None})
     except KeyboardInterrupt:
         print("\n[-] Interrupted by user.")
+    except BaselineNotComparable as exc:
+        # the target answered every sample, so "could not reach" would be wrong (A4)
+        sys.exit(f"[!] {exc}; nothing measured")
     except Exception as exc:  # noqa: BLE001 - top-level guard
         sys.exit(f"[!] Critical error: {exc}")
 

@@ -14,8 +14,9 @@ import json
 from fuzzlab.core import jsonbody, trace
 from fuzzlab.core.forms import FormEntries
 from fuzzlab.core.urls import to_path, to_route_path, url_key
-from fuzzlab.oracle.probe import (PRG_UNOBSERVED, Candidate, Probe, ProbeUnobserved,
-                                  Sender, UnplaceableLocation, Verdict, accepts_prg)
+from fuzzlab.oracle.probe import (PRG_UNOBSERVED, Candidate, NotComparable, Probe,
+                                  ProbeUnobserved, Sender, UnplaceableLocation, Verdict,
+                                  accepts_prg, require_observed)
 from fuzzlab.oracle.strategies import ConfirmationStrategy, default_strategies
 from fuzzlab.scheduler.context import context_for
 
@@ -25,6 +26,11 @@ UNPLACEABLE = "unplaceable"
 #: The mechanism of the inconclusive verdict a candidate gets when a probe got no
 #: response (`ProbeUnobserved`, BUG-0147) and nothing confirmed it.
 UNOBSERVED = "unobserved"
+#: ... and when a response a mechanism needed was not the application's own answer
+#: (`NotComparable`, FR-FUZZ-63, BUG-0529): a throttled probe, a control or baseline
+#: that was not comparable, a follow-up that got no observation. Its reason travels under
+#: ``evidence["unobserved"]`` like `UNOBSERVED`'s.
+NOT_COMPARABLE = "not-comparable"
 
 
 def finding_url(candidate: Candidate) -> str:
@@ -258,6 +264,60 @@ class _SessionNotes:
         return probe
 
 
+class _ObservedOnly:
+    """Layer 1 of FR-FUZZ-63 (SP-56): every response a strategy reads is an observation
+    of the application at all (`require_observed`) -- a throttled or unavailable answer,
+    or a stand-in for no response on a non-timing send (on a timing send, anything but a
+    read timeout, M7), ends the mechanism with `NotComparable` before the strategy reads
+    it. The correlated send (M10's ``send_correlated``) is read the same way.
+
+    It also counts a payload send whose PRG follow-up got no observation
+    (`PRG_UNOBSERVED`, M4 as narrowed by B2): the strategy keeps reading the probe's own
+    response (FR-FUZZ-50) and its other payloads still run; a run that then ends with no
+    verdict is not comparable (`Oracle._confirm_outcome`), never a negative. A compared
+    send (`ConfirmationStrategy._compared`, the ``control`` and ``baseline`` roles) is not
+    counted: whether its follow-up was needed is its strategy's "observed alike" check.
+    Forwards like `_SessionNotes`: only what differs from the protocol's defaults."""
+
+    def __init__(self, inner: Sender):
+        self._inner = inner
+        self.unobserved_follow_ups = 0
+
+    @property
+    def prg_capable(self) -> bool:
+        return accepts_prg(self._inner)
+
+    def __getattr__(self, name):
+        if name == "_inner":
+            raise AttributeError(name)
+        attr = getattr(self._inner, name)
+        if name != "send_correlated" or not callable(attr):
+            return attr
+
+        def send_correlated(*args, **kwargs):
+            probe, request_id = attr(*args, **kwargs)
+            require_observed(probe)
+            return probe, request_id
+        return send_correlated
+
+    def send(self, url, param, value, timing: bool = False,
+             method: str = "GET", location: str = "query",
+             content_type: str | None = None, entries=None, prg: bool = False):
+        given = dict(timing=timing, method=method, location=location,
+                     content_type=content_type, entries=entries, prg=prg)
+        kwargs = {k: given[k] for k, default in _SEND_DEFAULTS if given[k] != default}
+        probe = self._inner.send(url, param, value, **kwargs)
+        require_observed(probe, timing=timing)
+        if not timing and getattr(probe, "prg", None) == PRG_UNOBSERVED \
+                and trace.current()[2] not in _COMPARED_ROLES:
+            self.unobserved_follow_ups += 1
+        return probe
+
+
+#: The trace roles of a compared send (`ConfirmationStrategy._compared`; FR-FUZZ-60).
+_COMPARED_ROLES = ("control", "baseline")
+
+
 def _restore_value(candidate: Candidate) -> str:
     """The benign value a PRG restore sends (P9): the form's own default for the field
     when it is a string, else the importer's text filler."""
@@ -384,13 +444,21 @@ class Oracle:
                 # whole run, set here once, never per send by the strategy
                 opted = getattr(strategy, "prg", False) is True   # a plugin may lack it
                 run = _PrgRun(sender, counts) if opted and prg_ok else sender
-                notes = _SessionNotes(run)                   # FR-SESS-20 (O2)
+                observed = _ObservedOnly(run)                # FR-FUZZ-63 (layer 1)
+                notes = _SessionNotes(observed)              # FR-SESS-20 (O2)
                 try:
                     if self.scheduler is not None:
                         probe = _CostCounter(notes)          # measure this mechanism's cost
                         verdict = strategy.confirm(candidate, probe)
                     else:
                         verdict = strategy.confirm(candidate, notes)
+                    if observed.unobserved_follow_ups and not (
+                            verdict is not None and (verdict.confirmed
+                                                     or verdict.inconclusive)):
+                        # M4: a follow-up got no observation and nothing decided: the run
+                        # read only what it could, so it is no negative (FR-FUZZ-63)
+                        raise NotComparable("not comparable: a probe's follow-up got no "
+                                            "observation")
                 except UnplaceableLocation as exc:
                     # this mechanism cannot place the point (PA-0115): no verdict from it,
                     # and no reward or cost for its arm; the others still run
@@ -410,10 +478,20 @@ class Oracle:
                     # the probes it sent, as for any inconclusive arm. Logged with the host
                     # and the error class only.
                     placed = placed or _decides(strategy, candidate)
+                    comparable = isinstance(exc, NotComparable)      # FR-FUZZ-63
                     if self.scheduler is not None:
-                        self.scheduler.update(ctx, strategy.arm, 0.0, cost=max(1, probe.count))
+                        if comparable:
+                            # the mechanism could not judge: charge its probes, never
+                            # move its success estimate (A7)
+                            charge = getattr(self.scheduler, "charge", None)
+                            if charge is not None:
+                                charge(ctx, strategy.arm, cost=max(1, probe.count))
+                        else:
+                            self.scheduler.update(ctx, strategy.arm, 0.0,
+                                                  cost=max(1, probe.count))
                     if inconclusive is None:
-                        inconclusive = Verdict(False, candidate.vuln_class or "", UNOBSERVED,
+                        inconclusive = Verdict(False, candidate.vuln_class or "",
+                                               NOT_COMPARABLE if comparable else UNOBSERVED,
                                                {"unobserved": str(exc)[:200],
                                                 "mechanism": getattr(strategy, "arm",
                                                                      type(strategy).__name__)},
@@ -421,11 +499,20 @@ class Oracle:
                     from urllib.parse import urlsplit
 
                     from fuzzlab.core.obs import get_logger
-                    get_logger("oracle").warning(
-                        "probe got no response",
-                        extra={"host": urlsplit(candidate.url).hostname or "",
-                               "error": type(exc.__cause__ or exc).__name__})
-                    _trace_strategy("unobserved", detail=type(exc.__cause__ or exc).__name__,
+                    if comparable:
+                        get_logger("oracle").warning(
+                            "response not comparable",
+                            extra={"host": urlsplit(candidate.url).hostname or "",
+                                   "error": getattr(exc, "response_class", None)
+                                   or "follow-up"})
+                    else:
+                        get_logger("oracle").warning(
+                            "probe got no response",
+                            extra={"host": urlsplit(candidate.url).hostname or "",
+                                   "error": type(exc.__cause__ or exc).__name__})
+                    _trace_strategy("unobserved",
+                                    detail=(str(exc)[:120] if comparable
+                                            else type(exc.__cause__ or exc).__name__),
                                     decides=_decides(strategy, candidate))
                     continue
                 placed = placed or _decides(strategy, candidate)

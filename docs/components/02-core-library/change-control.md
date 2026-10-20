@@ -3,6 +3,42 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0069 — One classification of an HTTP answer (SP-56, FR-CORE-507, BUG-0528, BUG-0529) (2026-10-20)
+- Change: new `fuzzlab/core/comparability.py` (90 lines).
+  - `response_class(status, headers=None, *, complete, credentialed,
+    credential_submission, redirect_to_login) -> (class, reason)`. The four facts are
+    required keyword inputs with no default.
+  - The classes, first match wins: `incomplete` (no status, a status of 0 or below or
+    not an integer, or `complete` false); `throttle-or-unavailable` (429; 503 with or
+    without `Retry-After`, **by policy**: RFC 9110 §15.6.4 and nginx's documented
+    `limit_req_status` default, not measured here); `gateway` (502, 504);
+    `auth-failure` (407; a 401 or a redirect to a login page when the request was
+    credentialed and is not itself a credential submission); `policy-block` (403, 451);
+    `application` (anything else).
+  - Pure and total: malformed input is `incomplete`, never an exception (PA-0500(1)).
+    The reason names a class and a status, never a URL, header value or body. It imports
+    nothing from `fuzzlab.session` or `fuzzlab.oracle`.
+  - Whether a class is admitted is each consumer's decision.
+- Impact (other components / project):
+  - FUZZ reads it: the contract runner, the oracle's `require_observed` /
+    `require_comparable`, the blind-SQLi builder (CC-FUZZ-0105). MUT reads it: the live
+    WAF filter (CC-MUT-0403). SESS supplies the login facts (`login_facts`,
+    CC-SESS-0028); `detect_logout` is defect 6's later item and will read it.
+  - New shared primitive SP-56 and an ARCHITECTURE note (the coordinator writes both at
+    merge).
+- Risk (low): a new pure function; the risk sits with its consumers' admission
+  decisions (CC-FUZZ-0105, CC-MUT-0403). A 503 classified by policy is residual R14
+  (BUG-0529).
+- Deliverables:
+  - [x] `fuzzlab/core/comparability.py` — done
+  - [x] `tests/test_core_comparability.py` (33 tests): the rule table over the full
+    complete x credentialed x credential-submission x login-redirect matrix for 17
+    statuses, the 503/`Retry-After` reason, totality, required keywords, the import
+    guard and the status guard (each proven on a synthetic offender) — done
+  - [x] FR-CORE-507 — done
+  - [ ] SP-56 row, ARCHITECTURE note — todo (the coordinator, at merge)
+- Effectiveness (assessed <date> or pending): pending.
+
 ### CC-CORE-0065 — Trace steps a strategy run cites, and the M6 browser in the testing overlay (FR-CORE-505, FR-FUZZ-62) (2026-10-19)
 - Change: `fuzzlab/core/trace.py`:
   - `strategy_scope` also resets a new `_STEPS` contextvar.

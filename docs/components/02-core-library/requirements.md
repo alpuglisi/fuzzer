@@ -691,6 +691,32 @@ plugin registry. It is the layer that makes the store the integration bus.
     context (`test_scope`, `strategy_scope`, `role`, `collected`). A confirmation step
     is emitted with `emit_step`, which also adds its key to the strategy run's
     `collected_steps` (reset by `strategy_scope`; `CC-CORE-0065`).
+- **FR-CORE-507** *(one classification of an HTTP answer; `CC-CORE-0069`, 2026-10-20,
+  BUG-0528, BUG-0529; SP-56).* `core.comparability.response_class(status, headers=None,
+  *, complete, credentialed, credential_submission, redirect_to_login) -> (class,
+  reason)` names an answer, first match wins:
+  - **incomplete:** no status, a status of 0 or below or not an integer, or `complete`
+    false;
+  - **throttle-or-unavailable:** 429; 503 with or without `Retry-After` -- by policy
+    (RFC 9110 §15.6.4; nginx's documented `limit_req_status` default), not by
+    measurement;
+  - **gateway:** 502, 504;
+  - **auth-failure:** 407; a 401 or a 3xx redirect to a login page when `credentialed`
+    and not `credential_submission`;
+  - **policy-block:** 403, 451;
+  - **application:** anything else, an uncredentialed request's or a credential
+    submission's 401 or login redirect included.
+
+  The facts are required keyword inputs (FR-SESS-22 supplies the login facts; the
+  sender the credential). It is total (odd input is `incomplete`, never an exception);
+  its reason names a class and a status, never a URL, header value or body; it imports
+  nothing from `fuzzlab.session` or `fuzzlab.oracle`. Whether a class is admitted is the
+  consumer's decision (FR-FUZZ-52, FR-FUZZ-63, FR-MUT-401). No other module compares a
+  status against these classes' statuses except the reviewed allowance list in
+  `tests/test_core_comparability.py::ALLOWED` (the session manager's own checks until
+  defect 6's item, JWT's rejection control, the blind-SQLi payload's 504).
+  - Enforced by: `tests/test_core_comparability.py` (the rule table, totality, the
+    import guard and the status guard, each guard proven on a synthetic offender).
 - **FR-CORE-500** *(one reader for a run's target; one method key; `CC-CORE-0500`,
   2026-10-15).*
   - `fuzzlab/core/runtarget.py` is the one reader of the `target` table (PA-0063(1)): a

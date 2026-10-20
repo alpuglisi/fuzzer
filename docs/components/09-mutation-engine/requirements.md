@@ -123,6 +123,22 @@ feedback and the scheduler.
     search skips refused variants (counted as `refused`, never as a WAF block).
   - **`run_mutation`** skips a destructive base entirely, and `run_greybox` checks
     every probe (FR-FUZZ-8). The CLIs print the refused counts.
+
+- **FR-MUT-401 (the live WAF filter decides only on an observation, `CC-MUT-0403`,
+  2026-10-20, BUG-0529)** `HttpFilter` decides "caught" and "allowed" only on an answer
+  that observed the WAF:
+  - the block status (403 by default) is caught, as before;
+  - a throttle-or-unavailable (429, 503), gateway (502, 504) or incomplete answer (a
+    sender's status-0 stand-in), classified by SP-56 (FR-CORE-507), raises
+    `FilterUnobserved` -- never a block, an allow or a bypass;
+  - any other answer is an allow (a 401 included: the WAF let it through).
+
+  `run_mutation` contains it per base: the base's search ends, it is counted in
+  `summary["unobserved"]` with its reason, and no bypass is recorded for it; `fuzzlab
+  mutate-run` prints the count and an `[UNOBSERVED]` line. The coverage sends are not
+  classified (a throttled one scores no novelty; no bypass rests on it).
+  - Enforced by: `tests/test_oracle_comparable_controls.py::test_a_live_filter_never_reads_a_non_observation_as_allowed`,
+    `tests/test_oracle_comparable_controls.py::test_a_throttled_variant_is_never_an_evasion`.
 ## 5. Interfaces and data contracts
 Reads catalog payloads and canary/filter observations; reads coverage signals and
 scheduler operator choices; writes new payload candidates back to the

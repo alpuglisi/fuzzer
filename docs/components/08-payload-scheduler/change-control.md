@@ -3,6 +3,30 @@
 Component code: **SCHED**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SCHED-0007 — Charge a pull's cost without a reward (BUG-0529, A7) (2026-10-20)
+- Change:
+  - `ThompsonBandit.charge(context, arm, cost=1.0)`: adds the cost to the arm's
+    `_cost` (sum and count) and creates its posterior at the prior so the cost persists
+    with it; the posterior is **not** updated and no parent context is touched.
+  - `UniformScheduler.charge`: a no-op, like its `update`.
+  - The oracle calls `charge` instead of `update(ctx, arm, 0.0, cost)` when a mechanism
+    ended `NotComparable` (FR-FUZZ-63; CC-FUZZ-0105), and calls neither when the
+    scheduler has no `charge`.
+- Impact (other components / project): FUZZ's oracle is the only caller. A strategy
+  whose controls were throttled, refused or blocked is no longer taught that it fails
+  at that context; cost ordering still sees what it spent. The `bandit_posteriors`
+  table is unchanged.
+- Risk (low): +15 lines. A duck-typed scheduler without `charge` gets no feedback for a
+  not-comparable run, which is the safe direction.
+- Deliverables:
+  - [x] `ThompsonBandit.charge`, `UniformScheduler.charge` — done
+  - [x] pinned by
+    `tests/test_oracle_comparable_controls.py::test_a_non_comparable_run_charges_its_cost_and_leaves_the_arms_estimate`
+    (fails when the oracle updates with 0.0) — done
+  - [x] FR-SCHED-8 amended in place (no new requirement ID was assigned to this lane;
+    the oracle side is FR-FUZZ-63) — done
+- Effectiveness (assessed <date> or pending): pending.
+
 ### CC-SCHED-0006 — Hierarchical backoff pools pulls into parent contexts (BUG-0088) (2026-10-13)
 - Change:
   - **Pooling.** With `backoff`, `ThompsonBandit.update` also updates each parent

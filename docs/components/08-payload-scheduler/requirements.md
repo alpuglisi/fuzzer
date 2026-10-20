@@ -29,7 +29,12 @@ from oracle and grey-box reward.
 - **FR-SCHED-7** Provide a uniform-random selection control for measuring lift
   over no learning.
 - **FR-SCHED-8** Take reward from the oracle (confirmed finding) and, when
-  available, grey-box coverage (dense reward).
+  available, grey-box coverage (dense reward). *(Amended in place, CC-SCHED-0007,
+  2026-10-20, BUG-0529:)* when a mechanism could not judge because a response it needed
+  was not the application's own answer (FR-FUZZ-63), the oracle calls `charge(context,
+  arm, cost)` instead of a 0.0 reward: `ThompsonBandit.charge` counts the cost (cost
+  normalisation, FR-SCHED-5) without moving the posterior; `UniformScheduler.charge` is a
+  no-op. A scheduler without `charge` gets neither call.
 - **FR-SCHED-9** *(added 2026-09-22, CC-SCHED-0005)* Optionally emit per-pull
   diagnostics into the shared `metric_series` sink: `ThompsonBandit.attach_metrics`
   takes a `fuzzlab.core.store.MetricLogger`, after which every `update()` call

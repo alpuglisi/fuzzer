@@ -368,7 +368,8 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
                "oracle_no_confirmer": statuses.count(NO_CONFIRMER),
                "oracle_inconclusive": statuses.count(INCONCLUSIVE),
                # of those, rows no mechanism could place (FR-FUZZ-47); the rest were
-               # stopped by a cost cap (FR-FUZZ-45) or got no response (FR-FUZZ-50)
+               # stopped by a cost cap (FR-FUZZ-45), got no response (FR-FUZZ-50) or met
+               # a response that was not the application's own answer (FR-FUZZ-63)
                "oracle_unplaceable": undecided.get(UNPLACEABLE, 0),
                "oracle_checked_keys": checked_keys, "confirmable_keys": len(keyed),
                "findings": findings, "scored": plan.scored, **budget_info}

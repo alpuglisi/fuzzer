@@ -6,6 +6,12 @@
 lab WAF: it sends the payload as a parameter value through a probe sender and treats the
 WAF's block status (HTTP 403 by default) as "caught", parsing the matched rule ids from
 the block page for evidence. Lab-only; the caller supplies an authorized sender.
+
+**Only an observation is a block or an allow** (FR-MUT-401, SP-56, BUG-0529): a throttled
+or unavailable answer (429, 503), a gateway (502, 504) or no complete answer (a sender's
+status-0 stand-in) says nothing about the WAF, so it raises `FilterUnobserved` -- never
+"allow", which the search would record as a bypass. Any other answer that is not the
+block status passed the WAF (a 401 included: the app refused it, the WAF did not).
 """
 
 from __future__ import annotations
@@ -19,6 +25,13 @@ from fuzzlab.mutation.filtermodel import FilterResult
 class DestructiveRefused(Exception):
     """A destructive payload reached the live filter with ``allow_destructive`` off; it
     was not sent (BUG-0082). Distinct from a WAF block: never counted as one."""
+
+class FilterUnobserved(Exception):
+    """The live filter's answer was not an observation of the WAF (FR-MUT-401): a
+    throttle, a gateway or no complete answer. Like `DestructiveRefused`, never counted
+    as a block or an allow; `run.run_mutation` ends that base's search on it. The
+    message names a class and a status, never the payload."""
+
 
 # Lab WAF rule ids look like "sqli-union-select", "xss-script-tag", "path-traversal".
 _RULE_ID = re.compile(r"\b[a-z][a-z0-9]*(?:-[a-z0-9]+)+\b")
@@ -57,8 +70,19 @@ class HttpFilter:
     def _probe(self, payload: str):
         if self.refuses(payload):                    # the gate sits at the send itself
             raise DestructiveRefused(payload)
-        return self._sender.send(self._url, self._param, payload,
-                                 method=self._method, location=self._location)
+        probe = self._sender.send(self._url, self._param, payload,
+                                  method=self._method, location=self._location)
+        status = getattr(probe, "status", None)
+        if status != self._block:
+            # SP-56: the classes refused here depend on no credential or login fact
+            from fuzzlab.core.comparability import (GATEWAY, INCOMPLETE,
+                                                    THROTTLE_OR_UNAVAILABLE, response_class)
+            cls, why = response_class(status, getattr(probe, "headers", None),
+                                      complete=True, credentialed=False,
+                                      credential_submission=False, redirect_to_login=False)
+            if cls in (THROTTLE_OR_UNAVAILABLE, GATEWAY, INCOMPLETE):
+                raise FilterUnobserved(f"the live filter's answer was {why}")
+        return probe
 
     def caught(self, payload: str) -> bool:
         return self._probe(payload).status == self._block

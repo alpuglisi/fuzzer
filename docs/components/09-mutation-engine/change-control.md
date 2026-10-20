@@ -3,6 +3,34 @@
 Component code: **MUT**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-MUT-0403 — The live WAF filter never reads a throttled, gateway or unanswered request as "allowed" (FR-MUT-401, BUG-0529) (2026-10-20)
+- Change:
+  - `fuzzlab/mutation/livefilter.py`: `HttpFilter._probe` classifies every answer that
+    is not the block status through SP-56 (`core.comparability.response_class`). A
+    throttle-or-unavailable, gateway or incomplete answer raises the new
+    `FilterUnobserved(reason)`. Like `DestructiveRefused`, it is never a block or an
+    allow. The block status (403 by default) stays a block; any other answer stays an
+    allow (a 401 included: the WAF let it through). Those classes depend on no
+    credential or login fact, so none is passed.
+  - `fuzzlab/mutation/run.py::run_mutation`: contains `FilterUnobserved` per base. The
+    base is counted in the new `summary["unobserved"]`, its result names the reason, its
+    search ends, and no bypass is recorded.
+  - `fuzzlab/mutation/cli.py::_print_summary`: prints the unobserved count and an
+    `[UNOBSERVED]` line per such base (it would otherwise read a missing `evaded` key).
+- Impact (other components / project): the mutation runs' bypass records. `MutationSearch`
+  and `FilterLearner` are unchanged: the exception passes through `search`, and the
+  live filter is built only in `run.py`. No other component.
+- Risk (low): a run against a throttling WAF now reports unobserved bases instead of
+  bypasses. That is the intent. The coverage sends (`RequestsCorrelatingSender`) are
+  not classified (residual R16).
+- Deliverables:
+  - [x] `FilterUnobserved` and its containment — done
+  - [x] 3 tests in `tests/test_oracle_comparable_controls.py`
+    (`test_a_live_filter_never_reads_a_non_observation_as_allowed` [429, status 0],
+    `test_a_throttled_variant_is_never_an_evasion`) — done
+  - [x] FR-MUT-401 — done
+- Effectiveness (assessed <date> or pending): pending.
+
 ### CC-MUT-0402 — Runtime payload synthesis: LLM test cases per discovered endpoint, opt-in (D70, FR-MUT-10) (2026-10-17)
 - Change:
   - **`fuzzlab/disco/generate.py` (new):** inventory -> contract endpoints; with a

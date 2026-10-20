@@ -579,13 +579,32 @@ class _RateLimited:
 
 @pytest.mark.parametrize("make", [
     lambda: _Escaping("sqli_14"), lambda: _Escaping("sqli_11"), _QuoteValidator,
-    _Reflecting, _Shell, _XPath, _Hash, _Guestbook,
-    lambda: _RateLimited(_SqliteSite("sqli_14"), 8)],
+    _Reflecting, _Shell, _XPath, _Hash, _Guestbook],
     ids=["escape-14", "escape-11", "validator", "reflection", "shell", "xpath", "hash",
-         "guestbook", "429"])
+         "guestbook"])
 def test_false_positive_classes_are_not_confirmed(make):
     for seed in range(5):
         assert SqliBooleanStrategy().confirm(CAND, make(), rng=random.Random(seed)) is None
+
+
+def test_a_site_that_throttles_mid_differential_is_not_comparable_never_a_negative():
+    """Was this file's "429" false-positive row (CC-FUZZ-0105, FR-FUZZ-63; ADOPT 8).
+    Unthrottled, the site confirms after 24 requests; throttled from request 8, a seed
+    that reaches the 429 stops there, not comparable -- never a None, which is a
+    negative. A seed that ended before request 8 never met the 429 and keeps its plain
+    None. Measured at this change: every seed reaches it, at request 8."""
+    from fuzzlab.oracle.probe import NotComparable
+    reached = []
+    for seed in range(5):
+        site = _RateLimited(_SqliteSite("sqli_14"), 8)
+        try:
+            verdict = SqliBooleanStrategy().confirm(CAND, site, rng=random.Random(seed))
+        except NotComparable:
+            assert site.n == 8, (seed, site.n)              # stopped at the first 429
+            reached.append(seed)
+        else:
+            assert site.n < 8 and verdict is None, (seed, site.n, verdict)
+    assert reached == list(range(5))
 
 
 def test_evaluation_marker_rejects_reflection_and_evaluation_that_also_reflects():
@@ -903,10 +922,12 @@ def test_cap_exhaustion_is_inconclusive_never_a_negative(tmp_path, budgeted, cap
     auto_cli._print_summary(SimpleNamespace(score=False, rank=False, anomaly=False),
                             None, result)
     out = capsys.readouterr().out
-    # reworded when "inconclusive" gained its second meaning (CC-FUZZ-0068, J2)
+    # reworded when "inconclusive" gained its second meaning (CC-FUZZ-0068, J2), and
+    # its not-comparable one (CC-FUZZ-0105, FR-FUZZ-63)
     assert ("inconclusive (1 candidate key(s) could not be decided: a cost cap stopped a "
-            "started check, no mechanism could place the point, or a probe got no "
-            "response; unlabelled, FR-FUZZ-45/47/50):") in out
+            "started check, no mechanism could place the point, a probe got no "
+            "response, or a response was not the application's own answer; "
+            "unlabelled, FR-FUZZ-45/47/50/63):") in out
     assert "unplaceable:" not in out                    # printed only when non-zero
     assert ("- query /bWAPP/page.php [title]: boolean-differential; not started: "
             "string-grammar, string-evaluation") in out
