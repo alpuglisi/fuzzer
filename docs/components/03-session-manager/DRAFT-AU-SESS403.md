@@ -978,3 +978,27 @@ them.
   - Result: **8168 passed, 0 failed, 0 errors, 42 skipped, 77 xfailed**, rc 0.
   - The new module's 41 marked tests are among the 77 xfailed. The whole-package
     guards accept the new test module and the prototype directory.
+- **The harness again on 791728f** (the revert additions):
+  - Result: **406 files, 8167 passed, 1 failed, 0 errors, 42 skipped, 77 xfailed**.
+  - The failure: `tests/test_web_sitetree_browser.py::test_show_more_from_the_keyboard_keeps_focus_in_the_tree`
+    (200 items, expected 250).
+  - From fe15c23 to 791728f, `tests/` changed only in docstrings of this module. The
+    prototype is never collected.
+  - **Root-caused; it is a UI defect, not this item's.** Two layers:
+    1. `web/sitetree.store_version` changes when a *reader* closes. Measured
+       (`fingerprint_on_read_close.py`): a reader holds the store while the test's
+       `Store` commits and closes, so the WAL keeps its frames. The reader's later last
+       close checkpoints and deletes the WAL, and the fingerprint changes with no
+       write. That contradicts the docstring's "reads never change the fingerprint".
+       The previous test in file order (`test_a_refresh_keeps_focus_selection_and_loaded_pages`,
+       run on the same worker under `--dist loadfile`) writes while its tab reads.
+    2. `sitetree.js` `refreshGroup` then calls `setTail`, which replaces the "Show
+       more" button. `lostFocus` covers only the removed tree items, so a focused
+       button's focus falls to `<body>`. A click whose load is in flight goes stale and
+       loads nothing.
+  - **Reproduced deterministically** (`repro_sitetree_refresh/test_repro_show_more.py`,
+    in the scratchpad, under the host lock):
+    - the control gives `BUTTON`, 250;
+    - a checkpoint-only fingerprint change between the focus and the Enter gives
+      `BODY`, 200: the harness's exact failure.
+  - Flagged to the coordinator: it needs its own bug number and an owner (UI).
