@@ -227,8 +227,11 @@ def test_single_flight_logs_in_once():
         t.start()
     for t in threads:
         t.join(timeout=5)
-    # Concurrent ensure -> exactly one login handshake.
-    assert len(created) == 1
+    # Concurrent ensure -> exactly one login handshake. (CC-SESS-0029: the factory is
+    # also asked for the login's stable-protected-resource fetches, FR-SESS-23, so the
+    # handshake is counted by its attempts and POSTs, not by fetchers created.)
+    assert mgr.login_attempts() == 1
+    assert created and all(f is created[0] for f in created)
     assert created[0].post_count == 1
 
 

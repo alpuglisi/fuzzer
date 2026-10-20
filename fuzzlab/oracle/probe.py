@@ -71,6 +71,11 @@ class Probe:
     #: the answer was late, which is latency) or ``"connect"`` (nothing was sent,
     #: which proves nothing, M7). None: not a timeout, or a sender that does not say.
     timeout: str | None = None
+    #: The request was sent on a session its manager already knew to be lost and could
+    #: not yet recover (FR-FUZZ-65, FR-SESS-23's D window; `core.http.Request.
+    #: session_lost`), set per probe by the seam sender. Layer 1 (`require_observed`)
+    #: reads any answer to such a request as not comparable, whatever its class.
+    session_lost: bool = False
 
     @property
     def prg_sends(self) -> int:
@@ -177,6 +182,9 @@ class NotComparable(ProbeUnobserved):
 
 #: The classes a control admits unless its strategy declares more (FR-FUZZ-63).
 APPLICATION_ONLY = frozenset({"application"})
+#: `NotComparable.response_class` for an answer to a request sent on a session known to
+#: be lost (FR-FUZZ-65): not one of SP-56's classes, since no class is read.
+LOST_SESSION = "lost-session"
 
 
 def candidate_entry_names(candidate) -> tuple[str, ...]:
@@ -230,7 +238,13 @@ def require_observed(probe, *, timing: bool = False) -> None:
     only a **read** timeout is kept, as latency (M7); a connect timeout, or a stand-in
     whose kind its sender did not say, proves nothing. Which classes a control admits
     is layer 2's (`require_comparable`). ``resent`` carries what the sender re-sent, so
-    cost counts stay exact."""
+    cost counts stay exact.
+
+    *(FR-FUZZ-65, D′.)* Before any class is read: an answer to a request sent on a
+    session its manager knew to be lost (`Probe.session_lost`, the probe's or its
+    follow-up's) is `NotComparable`, whatever its class -- a guest view, a 404 or a
+    non-login redirect included -- for every send a mechanism reads (payloads,
+    controls, baselines and replays alike)."""
     from fuzzlab.core.comparability import (INCOMPLETE, THROTTLE_OR_UNAVAILABLE,
                                             response_class)
     if not isinstance(probe, Probe):
@@ -238,6 +252,11 @@ def require_observed(probe, *, timing: bool = False) -> None:
     for p, what in ((probe, "probe"), (probe.followed, "probe's follow-up")):
         if p is None:
             continue
+        if p.session_lost is True:
+            exc = NotComparable(f"not comparable: the {what} was sent on a lost session",
+                                resent=probe.follow_up_sends, attempts=probe.attempts)
+            exc.response_class = LOST_SESSION
+            raise exc
         cls, why = response_class(p.status, p.headers, complete=True, credentialed=False,
                                   credential_submission=False, redirect_to_login=False)
         if cls == THROTTLE_OR_UNAVAILABLE or (

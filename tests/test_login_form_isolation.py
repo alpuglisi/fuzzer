@@ -638,6 +638,9 @@ def test_a_logout_seen_by_a_copy_is_not_passed_to_the_main_listener():
     main.add_logout_listener(lambda h, i: seen.append((h, i)))
     copy = main.isolated_copy("admin", ordinal=1)
     copy.ensure("localhost", "admin", BASE)
+    # CC-SESS-0029 (FR-SESS-23): a 401 is a suspicion, confirmed on the copy's resource,
+    # so the copy's session really ends first
+    app.sessions.pop(app.issued[-1], None)
     copy.observe(Request("GET", BASE + "x.php"), Response(401, {}, b"", 1.0),
                  copy.label)
     assert not copy._state[("localhost", "admin")].valid and seen == []

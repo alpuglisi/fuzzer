@@ -16,7 +16,13 @@ def _mgr():
     return mgr
 
 
-REQ = Request("GET", "http://localhost/profile.php", identity="admin")
+def _req() -> Request:
+    """A fresh request per use: `prepare` records the session generation it applied on
+    the request (CC-SESS-0029, FR-SESS-23), so one shared module-level request would
+    carry another test's manager's generation into this one's `observe`."""
+    return Request("GET", "http://localhost/profile.php", identity="admin")
+
+
 LOGGED_OUT = Response(200, {}, LOGIN_HTML.encode(), 5.0)
 FINE = Response(200, {}, b"<html>welcome admin</html>", 5.0)
 
@@ -26,13 +32,13 @@ def test_listener_told_once_per_logout_with_origin_and_identity():
     of the session's origins; loopback aliases folded), never a bare host."""
     mgr, seen = _mgr(), []
     mgr.add_logout_listener(lambda origin, identity: seen.append((origin, identity)))
-    mgr.observe(REQ, FINE, "admin")
+    mgr.observe(_req(), FINE, "admin")
     assert seen == []
-    mgr.observe(REQ, LOGGED_OUT, "admin")
-    mgr.observe(REQ, LOGGED_OUT, "admin")        # already invalid: not told again
+    mgr.observe(_req(), LOGGED_OUT, "admin")
+    mgr.observe(_req(), LOGGED_OUT, "admin")        # already invalid: not told again
     assert seen == [("http://127.0.0.1:80", "admin")]
-    mgr.prepare(REQ, "admin")                    # re-login; a new logout is told again
-    mgr.observe(REQ, LOGGED_OUT, "admin")
+    mgr.prepare(_req(), "admin")                    # re-login; a new logout is told again
+    mgr.observe(_req(), LOGGED_OUT, "admin")
     assert seen == [("http://127.0.0.1:80", "admin")] * 2
 
 
@@ -51,7 +57,7 @@ def test_adding_the_same_listener_twice_registers_it_once():
     listener = lambda host, identity: seen.append(identity)
     mgr.add_logout_listener(listener)
     mgr.add_logout_listener(listener)
-    mgr.observe(REQ, LOGGED_OUT, "admin")
+    mgr.observe(_req(), LOGGED_OUT, "admin")
     assert seen == ["admin"]
 
 
@@ -60,7 +66,7 @@ def test_another_managers_logout_is_not_told():
     main manager's listeners."""
     main, other, seen = _mgr(), _mgr(), []
     main.add_logout_listener(lambda host, identity: seen.append(identity))
-    other.observe(REQ, LOGGED_OUT, "admin")
+    other.observe(_req(), LOGGED_OUT, "admin")
     assert seen == []
 
 
@@ -72,7 +78,7 @@ def test_a_listener_error_propagates_after_the_state_is_invalid():
         raise RuntimeError("listener failed")
     mgr.add_logout_listener(boom)
     with pytest.raises(RuntimeError, match="listener failed"):
-        mgr.observe(REQ, LOGGED_OUT, "admin")
+        mgr.observe(_req(), LOGGED_OUT, "admin")
     assert not mgr._state[("localhost", "admin")].valid
 
 
@@ -85,7 +91,7 @@ def test_concurrent_sends_seeing_one_logout_tell_the_listener_once():
 
     def send():
         start.wait()
-        mgr.observe(REQ, LOGGED_OUT, "admin")
+        mgr.observe(_req(), LOGGED_OUT, "admin")
     threads = [threading.Thread(target=send) for _ in range(8)]
     for th in threads:
         th.start()

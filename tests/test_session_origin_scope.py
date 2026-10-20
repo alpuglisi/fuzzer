@@ -420,7 +420,10 @@ def test_another_ports_login_page_never_logs_the_session_out(apps):
     resp = _get(client, b.base + "login.php")            # B's login page
     assert b"password" in resp.body
     assert mgr._state[("127.0.0.1", "user")].valid and told == []
-    _get(client, a.base + "login.php")                   # A's own: a logout
+    # A's own loss is one (CC-SESS-0029, FR-SESS-23: A's login page shown to a live
+    # session is no loss; the session must really end, and its check confirms it)
+    a.sessions.clear()                                   # A ends the session
+    _get(client, a.base + "api/me")                      # A's own 401: a logout
     assert not mgr._state[("127.0.0.1", "user")].valid
     assert told == [f"http://127.0.0.1:{a.port}"]
 
@@ -464,9 +467,11 @@ def test_the_probe_differential_never_fetches_another_port(apps):
                          cookies={"sid": "sid-good-0123456789abcdef"},
                          origins=origin_scope(a.base))
     assert mgr._spa_probe("127.0.0.1", a.base, state,
-                          [b.base + "api/me", a.base + "hop"]) == (None, None)
+                          [b.base + "api/me", a.base + "hop"]) == (None, None, None)
     assert b.requests == []
-    found, _digest = mgr._spa_probe("127.0.0.1", a.base, state, [a.base + "api/me"])
+    # (CC-SESS-0029: the one resource owner also returns the refusal status, FR-SESS-23)
+    found, _status, _digest = mgr._spa_probe("127.0.0.1", a.base, state,
+                                             [a.base + "api/me"])
     assert found == a.base + "api/me"                      # the positive control
 
 
@@ -816,8 +821,13 @@ def test_an_authenticated_crawl_never_hands_the_session_to_another_port(monkeypa
     assert not {"/link", "/frame", "/land", "/ws", "/only-b"} & set(b_paths)
     assert not [p for p in a_paths if p.startswith(("/leak", "/only-b"))]
     assert not [c for c in a_sessions if "FROM_B" in c]     # B's cookie never in the jar
-    assert a_sessions and all(any(f"sid={v}" in c for v in a.sessions)
-                              for c in a_sessions)          # A keeps getting A's value
+    # A keeps getting A's value. The one other value is the login's corrupted-credential
+    # arm (CC-SESS-0029, FR-SESS-23 M4(b)): a random id the manager sends once or twice
+    # to the base, never stored in any jar.
+    foreign = [(p, c) for _m, p, c, _h in a.requests if c and "sid=" in c
+               and not any(f"sid={v}" in c for v in a.sessions)]
+    assert a_sessions and {p for p, _c in foreign} <= {"/"}, foreign
+    assert len({c for _p, c in foreign}) <= 1, foreign
     rows = sqlite3.connect(str(tmp_path / "s.db")).execute(
         "SELECT url, content FROM discovered_pages").fetchall()
     assert not [u for u, c in rows if "B-LANDING-BODY" in (c or "")]

@@ -45,6 +45,15 @@ class SessionState:
     #: (the differential was the body, A-M1): a live session's probe must answer
     #: something else. In memory only.
     probe_refusal_digest: str | None = field(default=None, repr=False)
+    #: The protected probe's recorded refusal status (FR-SESS-23, M5): the status its
+    #: anonymous and corrupted answers agreed on, admitted only when SP-56 classes it as
+    #: the application's answer or a policy block below 500 (never a throttle, gateway or
+    #: 407). A health GET answered with it reads the session lost. In memory only.
+    probe_refusal_status: int | None = field(default=None, repr=False)
+    #: This state's session generation (FR-SESS-23): the next per-(host, identity) value
+    #: at each login and each `adopt`, set by the manager when it installs the state.
+    #: `prepare` records it on the request it applies the state to. In memory only.
+    generation: int | None = None
     #: The names in ``cookies`` that a browser login adopted from the browser's own
     #: cookie jar (a cookie the app's JS set, e.g. Juice Shop's ``token``) rather than
     #: from the login response (BUG-0132). In memory only.

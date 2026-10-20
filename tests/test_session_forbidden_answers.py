@@ -24,19 +24,18 @@ The app modes (`_App`) are the shapes the design must tell apart:
 - `presence`: `/` reacts to any cookie;
 - `forbid`: a lost session gets 403;
 - `basic`: HTTP Basic;
-- `json`: a JSON/bearer login;
+- `json`: a JSON/bearer login (`/api/bounce` ends the bearer it carries; `/api/cart`
+  answers 200 to anyone, a guest view without a live bearer);
 - `rotate` / `rotate_all`: a rotating session id;
 - `ratelimit`: `/` answers anyone without a live session 429 (an anonymous rate limit).
 
 Every new-API keyword (`clock`, `sleep`, the bounds) is passed only when
 `SessionManager` accepts it, so every test also runs against today's code.
 
-A test marked ``_BUG_0533`` fails on the base (15a8a27 + 7ebf48a). It is a strict
-xfail until CC-SESS-0029 lands and removes the marker. Every test passes with the
-revision-3 prototype patched in
-(`docs/components/03-session-manager/au-sess403-prototype/`, ``-p proto_plugin``).
-Every test also fails against its named revert (``REVERT=<name>``; `run_reverts.sh`;
-DRAFT-AU-SESS403 §6).
+Written first (Phase 1, a strict xfail each on the base, 15a8a27 + 7ebf48a); CC-SESS-0029
+implemented the design and removed the markers. The one marker left is residual R6's
+pin (``_R6``). Every test fails against its named revert, a source edit of the real
+modules (DRAFT-AU-SESS403 §6 and §13; PA-0034(2)).
 
 ``python3 -m tests.test_session_forbidden_answers`` prints the measurement table the
 draft cites."""
@@ -72,10 +71,6 @@ ACCOUNTS = {"user": ("alice", "pw-alice-0533", "user"),
             "admin": ("root", "pw-root-0533", "admin")}
 #: Probes per scenario.
 N = 10
-
-_BUG_0533 = pytest.mark.xfail(
-    strict=True, reason="BUG-0533: a forbidden or unconfirmed answer logs the session in "
-                        "again (defect 6); CC-SESS-0029 removes this marker")
 
 #: The stable protected resource each mode's login should record (None: none can be).
 #: `rotate_all` records none: the login's own verification already rotates the id away
@@ -159,6 +154,7 @@ class _App:
         self.referer_bound = False
         self.offorigin_login: str | None = None
         self.throttle_root = False
+        self.cart: list[str] = []          # `json`: each /api/cart view, live or guest
         self.server = self._serve()
         self.base = f"http://{HOST}:{self.server.server_address[1]}/"
 
@@ -298,7 +294,7 @@ class _App:
                 if app.mode == "basic":
                     return self._basic(path, who, auth)
                 if app.mode == "json":
-                    return self._json(method, path, who, form)
+                    return self._json(method, path, who, form, auth)
                 if path == app.login_path and method == "GET":
                     if who and app.mode == "static":
                         return self._send(302, b"", [("Location", "/dashboard")])
@@ -465,9 +461,20 @@ class _App:
                     return self._send(200, b'{"me":"alice"}', ctype="application/json")
                 return self._send(404, b"not found")
 
-            def _json(self, method, path, who, form):
+            def _json(self, method, path, who, form, auth=""):
                 if path == "/" and method == "GET":
                     return self._send(200, _JSON_SHELL)
+                if path == "/api/bounce":                 # it ends the bearer it carries
+                    with app._lock:
+                        app.bearers.pop(auth[7:] if auth.startswith("Bearer ") else "",
+                                        None)
+                    return self._send(401, b'{"error":"unauthenticated"}',
+                                      ctype="application/json")
+                if path == "/api/cart":                   # anyone: a guest view without
+                    with app._lock:                      # a live bearer (review 4's Q1)
+                        app.cart.append("live" if who else "guest")
+                    return self._send(200, b'{"items":["book"]}' if who else
+                                      b'{"items":[]}', ctype="application/json")
                 if path == "/api/login" and method == "POST":
                     ident = next((i for i, (u, p, _r) in ACCOUNTS.items()
                                   if u == form.get("email") and p == form.get("password")),
@@ -730,7 +737,6 @@ def run_protected_resource(mode: str) -> dict:
 
 # --- T1-T8: each layer of the decision ------------------------------------------------
 
-@_BUG_0533
 @pytest.mark.parametrize("mode", ["redirect", "none"])
 @pytest.mark.parametrize("name", ["admin-403", "waf-403", "csrf-403"])
 def test_a_forbidden_answer_never_logs_in_and_checks_at_most_once(name, mode):
@@ -753,7 +759,6 @@ def test_a_throttled_answer_never_triggers_anything(mode):
     assert (got["logins"], got["invalidations"], got["checks"]) == (1, 0, 0), got
 
 
-@_BUG_0533
 def test_a_throttle_is_never_a_resources_refusal_status_nor_a_loss():
     """T2b (B1; the reviewer's P1). On the `ratelimit` app, `/` answers a live session
     200 and everyone else 429, so its anonymous and corrupted arms agree on a throttle.
@@ -781,7 +786,6 @@ def test_a_throttle_is_never_a_resources_refusal_status_nor_a_loss():
         app.close()
 
 
-@_BUG_0533
 @pytest.mark.parametrize("status", [0, 429, 503, 502, 504, 407])
 def test_health_verdict_never_matches_a_throttle_gateway_407_or_incomplete_answer(status):
     """T2c (B1). SP-56 classifies before any refusal status is matched: an incomplete
@@ -801,7 +805,6 @@ def test_health_verdict_never_matches_a_throttle_gateway_407_or_incomplete_answe
     assert got.state == M.INCONCLUSIVE, got
 
 
-@_BUG_0533
 @pytest.mark.parametrize("name", ["scope-401", "privilege-login-redirect"])
 def test_a_suspected_loss_on_a_live_session_is_checked_once_and_never_logs_in(name):
     """T3. A credentialed 401 or login redirect is a suspected loss. One health check
@@ -812,7 +815,6 @@ def test_a_suspected_loss_on_a_live_session_is_checked_once_and_never_logs_in(na
     assert got["checks"] == 1, got
 
 
-@_BUG_0533
 @pytest.mark.parametrize("mode", ["redirect", "none"])
 @pytest.mark.parametrize("name", ["password-401", "name-only-401"])
 def test_a_credential_submissions_answer_is_checked_never_an_unconfirmed_loss(name, mode):
@@ -855,7 +857,6 @@ def test_a_real_expiry_is_recovered_with_one_login_and_one_check():
     assert got["checks"] <= 1, got
 
 
-@_BUG_0533
 @pytest.mark.parametrize("mode", ["redirect", "none"])
 def test_a_late_answer_from_an_earlier_session_is_ignored(mode):
     """T6 (the generation bound). Session 1's late answer says nothing about session 2:
@@ -873,7 +874,6 @@ def test_the_single_flight_lock_stops_simultaneous_duplicate_logins():
     assert got["logins_per_round"] == [1], got
 
 
-@_BUG_0533
 @pytest.mark.parametrize("mode", ["redirect", "none"])
 def test_concurrent_forbidden_rounds_never_log_in_again(mode):
     """T8. The lock does not stop sequential churn: each round of concurrent 403s costs
@@ -887,11 +887,11 @@ def test_concurrent_forbidden_rounds_never_log_in_again(mode):
 # --- T9: the stable protected resource (M4, M5) ---------------------------------------
 
 @pytest.mark.parametrize("mode,refusal", [
-    pytest.param("redirect", None, marks=_BUG_0533),
-    pytest.param("static", None, marks=_BUG_0533),
-    pytest.param("presence", None, marks=_BUG_0533),
-    pytest.param("forbid", 403, marks=_BUG_0533),
-    pytest.param("basic", None, marks=_BUG_0533),
+    ("redirect", None),
+    ("static", None),
+    ("presence", None),
+    ("forbid", 403),
+    ("basic", None),
     ("none", None),
 ])
 def test_each_login_records_the_resource_its_answers_prove(mode, refusal):
@@ -972,7 +972,6 @@ def test_a_page_that_answers_any_cookie_never_hides_a_real_expiry():
     assert (got["logins"], got["invalidations"]) == (2, 1), got
 
 
-@_BUG_0533
 def test_a_static_redirect_base_neither_churns_nor_misses_an_expiry():
     """TP6 (M4a). On the `static` app, ten scope 401s cost one check and no login, and a
     real expiry is recovered with one login. Revert: `rule2verify` (`/` is recorded,
@@ -984,7 +983,6 @@ def test_a_static_redirect_base_neither_churns_nor_misses_an_expiry():
     assert (exp["logins"], exp["invalidations"]) == (2, 1), exp
 
 
-@_BUG_0533
 def test_an_inconclusive_check_pauses_and_never_changes_the_identity():
     """T12 (FR-SESS-23's pause). The check of a suspicion answers 503, which is
     inconclusive.
@@ -1009,7 +1007,6 @@ def test_an_inconclusive_check_pauses_and_never_changes_the_identity():
         app.close()
 
 
-@_BUG_0533
 def test_a_live_verdict_is_cached_for_its_window_its_generation_and_its_url():
     """T14 (M6). A live verdict covers later signals of the same generation and URL key
     within `health_ttl_s` (30 s), and nothing else:
@@ -1060,7 +1057,6 @@ def test_an_expiry_that_redirects_to_another_origins_login_is_lost_at_its_hop():
 
 # --- M6, M7: the cache, the breakers, single flight, compare-and-set ------------------
 
-@_BUG_0533
 def test_n_concurrent_signals_make_one_health_get():
     """M7 (B2). Six concurrent 401s on six URLs. The first GET is answered only after
     all six signals are seen. A live verdict covers only the signals seen before its
@@ -1085,16 +1081,16 @@ def test_n_concurrent_signals_make_one_health_get():
         app.close()
 
 
-@_BUG_0533
 def test_a_pause_found_for_an_older_generation_never_pauses_the_new_one():
     """M7 (the compare-and-set on the generation).
     1. A check of session 1 is in flight.
     2. Session 2 is adopted meanwhile.
     3. The check then answers 503, which is inconclusive for session 1.
-    4. The verdict is stale (B3): no pause is recorded, and the next send on session 2
-       neither waits nor rechecks.
+    4. The verdict is stale (B3): no pause is recorded (none counted, none logged), and
+       the next send on session 2 neither waits nor rechecks.
 
-    Revert: `nocas` (it waits)."""
+    Revert: `nocas` (the check's compare-and-set: a pause is recorded for session 1,
+    logged as "pausing the identity", though nothing is paused any more)."""
     app = _App()
     try:
         clock, kw = _fake()
@@ -1112,13 +1108,44 @@ def test_a_pause_found_for_an_older_generation_never_pauses_the_new_one():
                                origins=frozenset(old.origins), login_url=old.login_url))
         release.set()
         first.join(10)
+        assert _report(mgr).get("stale_verdicts") == 1, _report(mgr)
+        assert _report(mgr).get("pauses", 0) == 0, _report(mgr)
+        checks = app.health_gets()
         resp, _req = _get(client, app, "home.php")
         assert resp.status == 200 and clock.sleeps == []
+        assert app.health_gets() == checks
     finally:
         app.close()
 
 
-@_BUG_0533
+def test_a_pause_of_a_replaced_generation_never_delays_its_replacement():
+    """M7 (a pause is keyed by its generation; §3.4). The 503 of a check pauses
+    session 1, as it should. Session 2 is then adopted, which takes no health lock and
+    leaves session 1's pause in place. The next send on session 2 neither waits nor
+    re-checks: the pause is session 1's.
+
+    Revert: `pause_anygen` (`prepare` waits a pause of any generation: 5 s, then a
+    re-check of the replaced session)."""
+    app = _App()
+    try:
+        clock, kw = _fake()
+        mgr, losses, client = _logged_in(app, **kw)
+        _get(client, app, "home.php")                                # session 1
+        app.health_queue = [503]
+        _get(client, app, "api/reports")                             # 503: paused
+        assert _report(mgr).get("pauses") == 1, _report(mgr)
+        old = mgr._state[(HOST, "user")]
+        mgr.adopt(SessionState(HOST, "user", kind="cookie",
+                               cookies={"SID": app.issue_session("user")},
+                               origins=frozenset(old.origins), login_url=old.login_url))
+        checks = app.health_gets()
+        resp, _req = _get(client, app, "home.php")
+        assert (resp.status, clock.sleeps, app.health_gets()) == (200, [], checks)
+        assert (losses, app.logins) == ([], 1)
+    finally:
+        app.close()
+
+
 def test_a_lost_verdict_for_a_replaced_session_tells_no_listener_and_writes_no_row():
     """M7 / B3 (the compare-and-set against the current state, LOST branch; the
     reviewer's P4).
@@ -1129,8 +1156,11 @@ def test_a_lost_verdict_for_a_replaced_session_tells_no_listener_and_writes_no_r
        is told, no row is written over session 2's, and session 2 stays current and
        valid.
 
-    Revert: `nocas` (session 1 is marked lost, its row is persisted, and the listener
-    hears a loss of the session that replaced it)."""
+    Two compare-and-sets stand in the way, the check's and `_mark_lost`'s, and either
+    alone holds here; each has its own test (`nocas`: T M7b and T M7e; `nomlcas`: T M7f
+    and T M7h). Revert: `cas_both` (both off: session 1 is marked lost, its row is
+    persisted over session 2's, and the listener hears a loss of the session that
+    replaced it)."""
     app = _App()
     store = _RecordingStore()
     try:
@@ -1159,7 +1189,6 @@ def test_a_lost_verdict_for_a_replaced_session_tells_no_listener_and_writes_no_r
         app.close()
 
 
-@_BUG_0533
 def test_a_loss_seen_while_a_check_is_in_flight_is_still_acted_on():
     """M7 / B2 (a live verdict covers only the signals seen before its GET was sent;
     the reviewer's P2).
@@ -1200,6 +1229,193 @@ def test_a_loss_seen_while_a_check_is_in_flight_is_still_acted_on():
         app.close()
 
 
+def test_verify_live_asked_about_a_session_replaced_while_it_checked_answers_live():
+    """M7 / B3 (the check's compare-and-set; §3.10's STALE row). `verify_live` (an isolated
+    copy's `_verify_main`, the crawler) checks session 1. While its GET is in flight,
+    session 2 is adopted, and the GET then answers 401: LOST, for session 1. The
+    verdict is stale, so `verify_live` answers for the session that replaced it: True,
+    and nothing is marked or told. A False here would trip the single-session breaker
+    on a session that is not the run's any more.
+
+    Revert: `nocas` (the stale LOST is returned: `verify_live` says False)."""
+    app = _App()
+    try:
+        _clock, kw = _fake()
+        mgr, losses, client = _logged_in(app, **kw)
+        _get(client, app, "home.php")                                # session 1
+        arrived, release = threading.Event(), threading.Event()
+        app.hold_health = (arrived, release, 401)
+        got: list = []
+        check = threading.Thread(target=lambda: got.append(
+            mgr.verify_live(HOST, "user", app.base)), daemon=True)
+        check.start()
+        assert arrived.wait(10)                                      # the GET in flight
+        old = mgr._state[(HOST, "user")]
+        new = mgr.adopt(SessionState(HOST, "user", kind="cookie",
+                                     cookies={"SID": app.issue_session("user")},
+                                     origins=frozenset(old.origins),
+                                     login_url=old.login_url))
+        release.set()
+        check.join(10)
+        assert got == [True], got
+        assert (losses, mgr._state[(HOST, "user")] is new, new.valid) == ([], True, True)
+    finally:
+        app.close()
+
+
+def test_mark_lost_on_a_replaced_state_changes_nothing_and_writes_no_row():
+    """B3 (`_mark_lost`'s own compare-and-set; review round 4's Q2). Session 2 has been
+    adopted; `_mark_lost` is then asked to invalidate session 1 (of its own generation).
+    It changes nothing: it returns False, session 1 stays as it was, and no row is
+    written over session 2's.
+
+    Revert: `nomlcas` (session 1 is marked lost and its row is written last)."""
+    app = _App()
+    store = _RecordingStore()
+    try:
+        _clock, kw = _fake()
+        mgr, losses, client = _logged_in(app, store=store, **kw)
+        _get(client, app, "home.php")
+        old = mgr._state[(HOST, "user")]
+        new = mgr.adopt(SessionState(HOST, "user", kind="cookie",
+                                     cookies={"SID": app.issue_session("user")},
+                                     origins=frozenset(old.origins),
+                                     login_url=old.login_url))
+        rows = len(store.rows)
+        assert rows >= 2 and store.rows[-1]["valid"] is True, store.rows
+        moved = mgr._mark_lost(old, old.generation)
+        assert (moved, old.valid, len(store.rows)) == (False, True, rows), store.rows[rows:]
+        assert mgr._state[(HOST, "user")] is new and new.valid and losses == []
+    finally:
+        app.close()
+
+
+def test_an_adopt_between_the_checks_compare_and_the_mark_tells_no_listener():
+    """B3 (`_mark_lost`'s compare-and-set on the observing send). A 401 on session 1 is
+    checked; the check's own compare-and-set passes (session 1 is current when its GET
+    returns), and before `_mark_lost` takes its lock, session 2 is adopted. (The race is
+    made deterministic: the adopt runs at `_mark_lost`'s entry.) `_mark_lost` finds
+    session 1 replaced: no listener is told and no row lands after session 2's.
+
+    Revert: `nomlcas` (the listener hears a loss of the session that replaced it, and
+    session 1's row is written last)."""
+    app = _App()
+    store = _RecordingStore()
+    try:
+        _clock, kw = _fake()
+        mgr, losses, client = _logged_in(app, store=store, **kw)
+        _get(client, app, "home.php")
+        old = mgr._state[(HOST, "user")]
+        app.expire_all()                                   # the check will read LOST
+        new = SessionState(HOST, "user", kind="cookie",
+                           cookies={"SID": app.issue_session("user")},
+                           origins=frozenset(old.origins), login_url=old.login_url)
+        real, raced = mgr._mark_lost, []
+
+        def racing(state, generation):
+            if not raced:
+                raced.append(mgr.adopt(new))                   # lands between the two
+            return real(state, generation)
+        mgr._mark_lost = racing
+        rows = len(store.rows)
+        assert _get(client, app, "api/me")[0].status == 401        # a suspicion: LOST
+        assert raced == [new] and app.health_gets() == 1, (raced, app.health_gets())
+        assert losses == [], losses
+        assert [r["valid"] for r in store.rows[rows:]] == [True], store.rows[rows:]
+        assert mgr._state[(HOST, "user")] is new and new.valid
+    finally:
+        app.close()
+
+
+class _SlowStore(_RecordingStore):
+    """A store whose first write of an invalid row is slow (review round 4's Q3): it
+    waits until ``release`` is set (bounded) before it lands."""
+
+    def __init__(self):
+        super().__init__()
+        self.entered, self.release, self._armed = (threading.Event(), threading.Event(),
+                                                   True)
+
+    def upsert_session_state(self, row) -> None:
+        if self._armed and row.get("valid") is False:
+            self._armed = False
+            self.entered.set()
+            self.release.wait(10)
+        super().upsert_session_state(row)
+
+
+class _ContendedLock:
+    """A lock that records a second thread waiting for it (stamped where the waiter
+    acts, PA-0511), so a test can release a held step only once the other thread is
+    blocked on the lock."""
+
+    def __init__(self, lock):
+        self._lock, self.contended = lock, threading.Event()
+
+    def acquire(self, blocking=True, timeout=-1):
+        if self._lock.acquire(False):
+            return True
+        self.contended.set()
+        return self._lock.acquire(blocking, timeout)
+
+    def release(self):
+        self._lock.release()
+
+    def __enter__(self):
+        return self.acquire()
+
+    def __exit__(self, *exc):
+        self.release()
+
+
+@pytest.mark.parametrize("install", ["relogin", "adopt"])
+def test_a_slow_row_write_never_leaves_a_replaced_sessions_row_last(install):
+    """B3 and review round 4's Q3 (the compare-and-set is atomic with installs). An
+    unconfirmed loss marks session 1 lost, and its row's write is slow. Meanwhile session
+    2 is installed: by a re-login (`ensure`) or by `adopt`. Session 2's install and row
+    wait for the lock `_mark_lost` writes under, so session 1's row lands first and the
+    rows' last word is the current session's: valid.
+
+    Reverts: `persist_unlocked` (`_mark_lost` persists after releasing the lock),
+    `install_unlocked` (an install and its row take no lock). Either way session 2's
+    row lands first, and session 1's invalid row is written over it."""
+    app = _App(mode="none")
+    store = _SlowStore()
+    try:
+        _clock, kw = _fake()
+        mgr, losses, client = _logged_in(app, store=store, **kw)
+        mgr._observe_guard = guard = _ContendedLock(mgr._observe_guard)
+        _get(client, app, "home.php")
+        app.expire_all()
+        lose = threading.Thread(target=_get, args=(client, app, "api/me"), daemon=True)
+        lose.start()                                    # 401: an unconfirmed loss
+        assert store.entered.wait(10)                   # session 1's row, held
+        got: list = []
+
+        def install_new():
+            if install == "relogin":
+                got.append(mgr.ensure(HOST, "user", app.base))
+            else:
+                old = mgr._state[(HOST, "user")]
+                got.append(mgr.adopt(SessionState(
+                    HOST, "user", kind="cookie", cookies={"SID": app.issue_session("user")},
+                    origins=frozenset(old.origins), login_url=old.login_url)))
+        installer = threading.Thread(target=install_new, daemon=True)
+        installer.start()
+        # release the held row once the installer waits on the lock, or once it has
+        # finished without waiting (an unlocked install: its row is already written)
+        assert _until(lambda: guard.contended.is_set() or not installer.is_alive(), 10)
+        store.release.set()
+        lose.join(10)
+        installer.join(10)
+        current = mgr._state[(HOST, "user")]
+        assert got == [current] and current.valid, (got, current.valid)
+        assert store.rows[-1]["valid"] is True, [r["valid"] for r in store.rows]
+    finally:
+        store.release.set()
+        app.close()
+
+
 def test_a_header_probe_bypasses_a_warm_cache_and_trips_the_breaker_on_its_own_send():
     """T18 (M6).
     1. A scope 401 warms the cache for `/api/reports`.
@@ -1223,7 +1439,6 @@ def test_a_header_probe_bypasses_a_warm_cache_and_trips_the_breaker_on_its_own_s
         app.close()
 
 
-@_BUG_0533
 def test_listeners_hear_only_a_lost_session_and_a_pause_recheck_has_no_culprit():
     """T17 (FR-SESS-16, M6). The listener is never told for a 403, a live suspicion, a
     cached repeat or an inconclusive check. A loss found by a pause re-check has no
@@ -1250,7 +1465,6 @@ def test_listeners_hear_only_a_lost_session_and_a_pause_recheck_has_no_culprit()
         app.close()
 
 
-@_BUG_0533
 def test_the_health_and_login_locks_never_deadlock():
     """T24. A confirmed loss is checked under the health lock. The login takes the
     health lock inside the login lock (a new generation ends the old pause). So the
@@ -1274,7 +1488,6 @@ def test_the_health_and_login_locks_never_deadlock():
 
 # --- M8, M9, M10: unknown health, verify_live, the re-login budget ---------------------
 
-@_BUG_0533
 def test_an_unknown_session_is_sticky_and_costs_nothing_after():
     """T13 (M8). The resource answers 503.
     - The suspicion pauses the identity.
@@ -1303,7 +1516,6 @@ def test_an_unknown_session_is_sticky_and_costs_nothing_after():
         app.close()
 
 
-@_BUG_0533
 def test_the_runs_pause_budget_ends_a_second_pause_early():
     """T13b (M8). The first pause resolves after 15 s. The second would last its whole
     40 s bound, but the run's 50 s budget ends it first. Revert: `nobudget` (55 s
@@ -1327,7 +1539,6 @@ def test_the_runs_pause_budget_ends_a_second_pause_early():
         app.close()
 
 
-@_BUG_0533
 @pytest.mark.parametrize("max_pause_s,last", [(100.0, "raises"), (300.0, 200)])
 def test_relogins_draw_on_a_refilling_budget(max_pause_s, last):
     """T15 (M10). Every probe of `/bounce.php` ends the session, and a confirmed loss
@@ -1353,7 +1564,6 @@ def test_relogins_draw_on_a_refilling_budget(max_pause_s, last):
         app.close()
 
 
-@_BUG_0533
 def test_a_no_resource_identity_whose_budget_is_spent_carries_on_at_once():
     """T15b (the owner's decision D). The `json` app's login records no resource, and
     its `/api/reports` answers the low-privilege bearer 401 (scope): an unconfirmed loss
@@ -1381,23 +1591,70 @@ def test_a_no_resource_identity_whose_budget_is_spent_carries_on_at_once():
         app.close()
 
 
-@_BUG_0533
 def test_credential_posts_are_counted_and_the_json_control_too():
-    """M10. Credential POSTs are counted per account (the credential store's
+    """M10, F7. Credential POSTs are counted per account (the credential store's
     `(host, identity)`), each kind apart: a JSON login's wrong-password control too.
-    These are the lockout residual's numbers. An isolated copy of the same identity
-    counts into the same account. Revert: `nocount`."""
+    These are the lockout residual's numbers (R15).
+    - An isolated copy of the same identity counts into the same account (review round
+      4, follow-up 3).
+    - A peer identity is another account, on its own manager.
+
+    Reverts: `nocount`, `copy_own_budget` (the copy counts apart: the run's account
+    shows one login)."""
     app = _App(mode="json")
     try:
-        mgr, _losses = _manager()
+        _clock, kw = _fake()
+        mgr, _losses = _manager(**kw)
         mgr.ensure(HOST, "user", app.base, operator=True)
         assert mgr.health_report()["credential_posts"] == {
             f"{HOST}/user": {"control": 1, "submitted": 1}}
+        copy = mgr.isolated_copy("user", ordinal=1)
+        copy.ensure(HOST, "user", app.base)
+        assert mgr.health_report()["credential_posts"] == {
+            f"{HOST}/user": {"control": 2, "submitted": 2}}
+        peer, _l = _manager(**kw)
+        peer.ensure(HOST, "admin", app.base, operator=True)
+        assert peer.health_report()["credential_posts"] == {
+            f"{HOST}/admin": {"control": 1, "submitted": 1}}
+        assert mgr.health_report()["credential_posts"] == {
+            f"{HOST}/user": {"control": 2, "submitted": 2}}
     finally:
         app.close()
 
 
-@_BUG_0533
+def test_an_isolated_copys_pauses_draw_on_the_runs_pause_budget():
+    """M8, F3 (whose budget; review round 4, follow-up 3). A run's manager and its
+    isolated copies share one pause budget (50 s here, each pause bounded at 40 s).
+    1. The copy's resource answers 503: its pause runs to its 40 s bound and the copy
+       goes unknown (`IsolatedHealthUnknown`).
+    2. The run's own pause would resolve after 15 s, but only 10 s of the budget are
+       left: the run's send raises `SessionHealthUnknown`, within the 50 s.
+
+    Revert: `copy_own_budget` (the copy spends a budget of its own: the run's pause
+    resolves and its send goes out)."""
+    app = _App()
+    try:
+        clock, kw = _fake(max_pause_s=40.0, pause_budget_s=50.0)
+        mgr, _losses, client = _logged_in(app, **kw)
+        _get(client, app, "home.php")
+        copy = mgr.isolated_copy("user", ordinal=1)
+        cclient = _client(copy)
+        assert _get(cclient, app, "home.php", identity=copy.label)[0].status == 200
+        app.health_status = 503
+        _get(cclient, app, "api/reports", identity=copy.label)    # the copy pauses
+        with pytest.raises(SessionAuthError):
+            _get(cclient, app, "home.php", identity=copy.label)   # its bound: unknown
+        assert sum(clock.sleeps) == 40.0, clock.sleeps
+        app.health_status = None
+        app.health_queue = [503, 503, None]
+        _get(client, app, "api/reports")                          # the run pauses
+        with pytest.raises(SessionAuthError):
+            _get(client, app, "home.php")
+        assert sum(clock.sleeps) <= 50.0, clock.sleeps
+    finally:
+        app.close()
+
+
 def test_verify_live_waits_out_an_unknown_and_then_reads_live():
     """T21 (M9). The resource answers 503. `verify_live` waits on its own bounded wait
     (never the identity's pause) and checks again. Still inconclusive, it keeps today's
@@ -1431,7 +1688,6 @@ def test_verify_live_never_reads_the_cache():
         app.close()
 
 
-@_BUG_0533
 def test_an_inconclusive_verify_live_never_clears_a_sticky_unknown():
     """M9 (the reviewer's P3). The resource answers 503 until the identity is sticky
     unknown. `verify_live` (an isolated copy's `_verify_main`, the crawler) then
@@ -1457,7 +1713,6 @@ def test_an_inconclusive_verify_live_never_clears_a_sticky_unknown():
         app.close()
 
 
-@_BUG_0533
 def test_verify_lives_waits_never_spend_the_runs_pause_budget():
     """M9 (a follow-up of review round 3). `verify_live`'s waits draw on their own
     budget, never on the one `prepare`'s pauses share.
@@ -1487,7 +1742,6 @@ def test_verify_lives_waits_never_spend_the_runs_pause_budget():
 
 # --- ADOPT: fail fast on an unapproved hop; a rotating id; generations; names ---------
 
-@_BUG_0533
 def test_an_unapproved_redirect_from_the_resource_fails_fast_and_never_pauses():
     """ADOPT. The resource now redirects to another origin. The check refuses the hop
     (FR-SESS-20) and raises at once; it never pauses. Revert: `hop_pauses`."""
@@ -1504,7 +1758,6 @@ def test_an_unapproved_redirect_from_the_resource_fails_fast_and_never_pauses():
         app.close()
 
 
-@_BUG_0533
 def test_a_health_check_never_kills_a_rotating_session():
     """ADOPT. A live health answer that rotates the session id is adopted, so the check
     never kills its own session: the next send uses the new id and nothing logs in.
@@ -1522,7 +1775,6 @@ def test_a_health_check_never_kills_a_rotating_session():
         app.close()
 
 
-@_BUG_0533
 def test_prepare_records_the_generation_it_applied():
     """T22. A request carries the generation it was prepared with, and a re-login
     starts the next one."""
@@ -1539,7 +1791,6 @@ def test_prepare_records_the_generation_it_applied():
         app.close()
 
 
-@_BUG_0533
 def test_request_entry_names_reads_query_form_and_json_leaves_and_is_total():
     """T23 (SP-16). Revert: `noentrynames`."""
     names = detect.request_entry_names
@@ -1553,18 +1804,20 @@ def test_request_entry_names_reads_query_form_and_json_leaves_and_is_total():
                  "multipart/form-data; boundary=b") == ()
 
 
-#: F3 (DRAFT-AU-SESS403 §3.14), a stated residual: the oracle cannot tell a comparison
-#: whose probes straddle a re-login, because a probe does not carry the session generation
-#: it was sent on. It needs `Probe.session_generation` (set by `SeamProbeSender`) and the
-#: oracle's layer-1 check: a FUZZ follow-up with its own CC-FUZZ number.
-_F3 = pytest.mark.xfail(strict=True, reason="AU-SESS403 residual R6 (F3): a comparison "
-                                            "that straddles a re-login is not detected")
+#: Residual R6 (DRAFT-AU-SESS403 §3.13), stated: the oracle cannot tell a comparison whose
+#: probes straddle a re-login, because a probe does not carry the session generation it
+#: was sent on. It needs `Probe.session_generation` (set by `SeamProbeSender`) and the
+#: oracle's layer-1 check: a FUZZ follow-up with its own CC-FUZZ number. (Revision 3
+#: called this "F3", which was also its change table's label for whose budget: renamed.)
+_R6 = pytest.mark.xfail(strict=True, reason="AU-SESS403 residual R6: a comparison that "
+                                            "straddles a re-login is not detected")
 
 
-@_F3
+@_R6
 def test_a_seam_probe_carries_the_session_generation_it_was_sent_on():
-    """F3's first half, pinned (PA-0054(3)). It fails on the base and on the prototype:
-    `Probe` has no `session_generation`."""
+    """R6's first half, pinned (PA-0054(3)). It fails on the base and on the
+    implementation: `Probe` has no `session_generation`. (D′'s `Probe.session_lost` is
+    another fact: a probe sent on a session known lost, FR-FUZZ-65.)"""
     app = _App()
     try:
         _clock, kw = _fake()
@@ -1575,13 +1828,111 @@ def test_a_seam_probe_carries_the_session_generation_it_was_sent_on():
         app.close()
 
 
+# --- D′ (FR-FUZZ-65): an answer on a session known to be lost is never evidence --------
+
+def test_an_answer_on_a_session_known_lost_is_never_evidence():
+    """D′ (the owner's decision after review round 4's Q1; FR-FUZZ-65). The `json` app's
+    login records no resource. Seven probes of `/api/bounce` each end the bearer they
+    carry: five re-logins draw the burst, and the seventh goes out in D's window, on
+    the session marked lost.
+    - A probe of `/api/cart` in that window gets the app's **guest view** (200
+      ``{"items":[]}``), which SP-56 alone classes as the application's answer.
+    - The request was marked (`Request.session_lost`), the probe carries the mark, and
+      layer 1 (`require_observed`) reads it as not comparable, whatever its class.
+    - Through the oracle, the candidate ends **inconclusive** (`not-comparable`, "sent
+      on a lost session"), never a negative and never a finding: the payload itself
+      was sent in the window.
+
+    Reverts: `nolostmark` (`prepare` drops the mark: the guest view is a negative),
+    `oracle_ignores_lost` (layer 1 ignores it: the same)."""
+    from fuzzlab.oracle import Oracle
+    from fuzzlab.oracle.oracle import NOT_COMPARABLE
+    from fuzzlab.oracle.probe import Candidate, NotComparable, comparability, \
+        require_observed
+    from fuzzlab.oracle.strategies import ReflectedXssStrategy
+    app = _App(mode="json")
+    try:
+        clock, kw = _fake()
+        mgr, losses = _manager(**kw)
+        sender = _sender(app, mgr)
+        bounces = [sender.send(app.base + "api/bounce", "id", "1") for _ in range(7)]
+        assert [p.status for p in bounces] == [401] * 7
+        assert (app.logins, len(losses), clock.sleeps) == (6, 6, [])
+        assert [p.session_lost for p in bounces] == [False] * 6 + [True]
+        cart = sender.send(app.base + "api/cart", "id", "1")
+        assert (cart.status, cart.text, app.cart) == (200, '{"items":[]}', ["guest"])
+        assert comparability(cart, url=app.base + "api/cart")[0] == "application"
+        assert cart.session_lost is True
+        with pytest.raises(NotComparable, match="sent on a lost session"):
+            require_observed(cart)
+        verdict, unsure = Oracle(strategies=[ReflectedXssStrategy()]).confirm_outcome(
+            Candidate(app.base + "api/cart", "q"), sender)
+        assert verdict is None and unsure is not None and unsure.inconclusive, \
+            (verdict, unsure)
+        assert unsure.mechanism == NOT_COMPARABLE, unsure
+        assert "sent on a lost session" in unsure.evidence["unobserved"], unsure.evidence
+        assert len(app.cart) == 2 and set(app.cart) == {"guest"}, app.cart
+        assert app.logins == 6
+    finally:
+        app.close()
+
+
+def test_a_resource_backed_identity_never_sends_on_a_lost_session():
+    """D′'s other half: the base still re-logs in. On the `redirect` app every probe of
+    `/bounce.php` ends the session, and each loss is confirmed on the resource. With a
+    burst of 2 and a 300 s pause bound, the fourth re-login waits 120 s for its token
+    and then logs in: four logins, and no request is ever sent on a lost state, so no
+    probe carries the mark.
+
+    Revert: `d_for_all` (D extended to a resource-backed identity: the fourth probe goes
+    out on the lost session, marked, with no login)."""
+    app = _App()
+    try:
+        clock, kw = _fake(relogin_burst=2, relogin_refill_s=120.0, max_pause_s=300.0)
+        mgr, _losses = _manager(**kw)
+        sender = _sender(app, mgr)
+        probes = [sender.send(app.base + "bounce.php", "id", "1") for _ in range(4)]
+        assert (app.logins, clock.sleeps) == (4, [120.0]), (app.logins, clock.sleeps)
+        assert [p.session_lost for p in probes] == [False] * 4
+        assert app.health_gets() == 4
+    finally:
+        app.close()
+
+
+@pytest.mark.parametrize("status,headers", [
+    (200, {}), (404, {}), (302, {"Location": "/cart"}), (302, {"Location": "/login"}),
+    (401, {}), (403, {}), (500, {})])
+def test_layer_one_reads_any_answer_on_a_lost_session_as_not_comparable(status, headers):
+    """D′ (FR-FUZZ-65), layer 1 on its own: an answer to a request sent on a session
+    known lost is `NotComparable` whatever its class -- the probe's own or its PRG
+    follow-up's, and on a timing send too (a read timeout's latency included). The same
+    answers unmarked pass layer 1 (which reads only throttles and incomplete answers).
+    Revert: `oracle_ignores_lost`."""
+    from fuzzlab.oracle.probe import (LOST_SESSION, PRG_OBSERVED, NotComparable, Probe,
+                                      require_observed)
+    with pytest.raises(NotComparable, match="the probe was sent on a lost session") as err:
+        require_observed(Probe(status, "body", headers=dict(headers), session_lost=True))
+    assert err.value.response_class == LOST_SESSION
+    followed = Probe(status, "body", headers=dict(headers), url="http://h/cart",
+                     session_lost=True)
+    outer = Probe(303, "", headers={"Location": "/cart"}, followed=followed,
+                  prg=PRG_OBSERVED)
+    with pytest.raises(NotComparable, match="follow-up was sent on a lost session"):
+        require_observed(outer)
+    with pytest.raises(NotComparable, match="sent on a lost session"):
+        require_observed(Probe(0, "", elapsed=10.0, timeout="read", session_lost=True),
+                         timing=True)
+    require_observed(Probe(status, "body", headers=dict(headers)))
+    require_observed(Probe(0, "", elapsed=10.0, timeout="read"), timing=True)
+
+
 # --- T10, T11: SP-16's predicate on its own -------------------------------------------
 
 LOGIN = "http://127.0.0.1:8080/login.php"
 PAGE = "http://127.0.0.1:8080/admin.php"
 
 
-@pytest.mark.parametrize("status", [pytest.param(403, marks=_BUG_0533), 451])
+@pytest.mark.parametrize("status", [403, 451])
 def test_detect_logout_reads_a_policy_block_never_as_a_loss(status):
     """T10. SP-56's policy block (403, 451) is never a loss shape, for a form session
     or a Basic one. 451 never was one (a pin); 403 always was (BUG-0533). Revert:
@@ -1674,7 +2025,6 @@ def loss_decision_offenders(source: str, rel: str) -> list[str]:
     return out
 
 
-@_BUG_0533
 def test_only_the_owner_decides_a_session_loss():
     """T19 (PA-0533(4)). Over the whole package: `valid` is written only by its listed
     writers, each with its constant, and `detect_logout` is called only by the signal
