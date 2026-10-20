@@ -334,3 +334,129 @@ def test_the_page_never_counts_a_capped_attribute():
     assert _capped_reads((STATIC / "diagrams.js").read_text()) == []
     assert _capped_reads("const finds = (k.attrs.finding || []).length;") != []
 
+
+
+# --- a live refresh keeps the user's place (FR-UI-514, CC-UI-0068, BUG-0534) ------------
+# Synchronised by the page's counters (`#diagrams-root` data-baseline, -polls, -refreshes:
+# D8), never by sleeping; each test asserts its refresh happened.
+
+@pytest.fixture(scope="module")
+def live(tmp_path_factory):
+    from playwright.sync_api import sync_playwright
+
+    from tests._browser import Server, free_port, launch_browser_or_skip
+    path = tmp_path_factory.mktemp("dglive") / "s.db"
+    run = _seed(path)
+    port = free_port()
+    cfg = load_config(overrides={"store_path": str(path), "web_port": port,
+                                 "diagram_poll_ms": 400}, environ={})
+    server = Server(create_app(cfg), port)
+    server.start()
+    try:
+        with sync_playwright() as pw:
+            browser = launch_browser_or_skip(pw)
+            yield {"base": f"http://127.0.0.1:{port}", "browser": browser, "path": path,
+                   "run": run, "n": [0]}
+            browser.close()
+    finally:
+        server.stop()
+
+
+def _dg_count(page, name: str) -> int:
+    return page.eval_on_selector("#diagrams-root",
+                                 f"r => parseInt(r.dataset.{name} || '0', 10)")
+
+
+def _dg_reach(page, name: str, n: int) -> None:
+    page.wait_for_function(
+        "([k, n]) => parseInt(document.querySelector('#diagrams-root').dataset[k] || '0', "
+        "10) >= n", arg=[name, n], timeout=15000)
+
+
+def _dg_page(live):
+    ctx = live["browser"].new_context()
+    page = ctx.new_page()
+    page.set_default_timeout(15000)
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(live["base"] + "/diagrams")
+    page.wait_for_function("() => document.querySelector('#diagrams-root')"
+                           ".dataset.baseline === '1'")
+    page.select_option("#dg-scope", "workflow:act-1")   # a capture: request, forward,
+    page.locator("#dg-seq g.dg-step").nth(3).wait_for()  # two responses on one key
+    page.wait_for_selector("#dg-flow svg", state="attached")
+    return ctx, page, errors
+
+
+def _dg_write(live) -> str:
+    """A capture record in the run (another connection of the server's process)."""
+    live["n"][0] += 1
+    late = f"/late{live['n'][0]}"
+    with Store(live["path"]) as store:
+        rec = trace.TraceRecorder(store, live["run"])
+        rec.emit("observe.exchange", {"src": "capture", "ref": f"record {100 + live['n'][0]}",
+                                      "method": "POST", "url": O + late, "origin": O,
+                                      "status": 201}, t=5.0 + live["n"][0])
+        rec.close()
+    return late
+
+
+_DG_TARGETS = {
+    "interface row": "#dg-ifaces tbody tr[tabindex]",
+    "origin group": "#dg-flow g[role=button]",
+    "response step": "#dg-seq g.dg-step >> nth=2",
+    "export link": "#dg-exports a >> nth=0",
+    "run select": "#dg-run",
+    "scope select": "#dg-scope",
+}
+
+
+@pytest.mark.parametrize("kind", list(_DG_TARGETS))
+def test_a_live_refresh_keeps_focus_on_every_kind_of_control(live, kind):
+    """E6: the Diagrams page's refresh re-renders its regions; focus fell from 4 of 6
+    control kinds to <body> (the selects kept it). Each kind keeps focus on the same
+    control, matched by its focus key."""
+    ctx, page, errors = _dg_page(live)
+    try:
+        target = page.locator(_DG_TARGETS[kind]).first
+        target.focus()
+        before = page.evaluate("() => document.activeElement.getAttribute('data-focus-key')"
+                               " || document.activeElement.id")
+        r0 = _dg_count(page, "refreshes")
+        late = _dg_write(live)
+        _dg_reach(page, "refreshes", r0 + 1)
+        page.locator("#dg-ifaces").get_by_text(f"POST {late}").wait_for()
+        after = page.evaluate("() => [document.activeElement.tagName, "
+                              "document.activeElement.getAttribute('data-focus-key') "
+                              "|| document.activeElement.id]")
+        assert after[0] != "BODY" and after[1] == before, (before, after)
+    finally:
+        ctx.close()
+    assert errors == []
+
+
+def test_every_focusable_control_in_the_diagrams_live_regions_has_a_focus_key(live):
+    """FR-UI-514 (D5): every focusable control the refresh re-renders carries a focus key,
+    unique in its region; the request, forward and response steps of one capture record
+    share their evidence key, so a step's key is derived from more than its evidence."""
+    ctx, page, errors = _dg_page(live)
+    try:
+        found = page.evaluate("""() => {
+          const sel = 'a[href], button, input, select, textarea, [tabindex]';
+          const out = [];
+          for (const r of ['#dg-flow', '#dg-ifaces', '#dg-seq', '#dg-exports']) {
+            for (const e of document.querySelector(r).querySelectorAll(sel)) {
+              if (e.closest('[hidden]') || e.getAttribute('tabindex') === '-1') continue;
+              out.push({region: r, tag: e.tagName, key: e.getAttribute('data-focus-key')});
+            }
+          }
+          return out;
+        }""")
+        regions = {f["region"] for f in found}
+        assert regions == {"#dg-flow", "#dg-ifaces", "#dg-seq", "#dg-exports"}
+        assert [f for f in found if not f["key"]] == []
+        keys = [(f["region"], f["key"]) for f in found]
+        assert len(keys) == len(set(keys))
+    finally:
+        ctx.close()
+    assert errors == []

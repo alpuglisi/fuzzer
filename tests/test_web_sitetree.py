@@ -10,9 +10,12 @@ target rows (`harness/pipeline.py`). API tests go through the app's routes.
 
 from __future__ import annotations
 
+import ast
 import inspect
 import json
+import os
 import re
+from pathlib import Path
 
 import pytest
 
@@ -1080,3 +1083,287 @@ def test_a_lone_surrogate_in_stored_evidence_is_unreadable_not_a_500(seed):
     assert labels(seed.conn, node(host["key"])) == ["ok.php"]
     client = _client(seed.path)
     assert client.get("/api/sitetree/node", params={"node": host["key"]}).status_code == 200
+
+
+# --- the store version (CC-UI-0068, FR-UI-505, BUG-0534; DRAFT-AU-SITETREE rev 2) -------
+# Every writer below runs in ANOTHER PROCESS (`tests/_xproc.py`, D4): the web server is one
+# process and a scan another, and SQLite's locks, shared memory and WAL fold are per
+# process. The web process's own readers are this process's connections.
+
+def _fresh_store(tmp_path, name="v.db"):
+    path = tmp_path / name
+    with Store(path) as s:
+        s.start_run("t", "h")
+    return path
+
+
+def test_a_readers_last_close_never_changes_the_version(tmp_path):
+    """E1 (M1 case 1): a writer in another process commits while a web reader is open,
+    so its close leaves the frames in the WAL; the reader's later close was the last and
+    folded the WAL, which changed the version with no write."""
+    from fuzzlab.web.projects import open_reader
+    from tests._xproc import Writer
+    path = _fresh_store(tmp_path)
+    reader = open_reader(str(path))
+    reader.conn.execute("SELECT count(*) FROM run").fetchone()
+    with Writer(path) as w:
+        w("open")
+        w("ins", 3)
+        w("close")
+    v = st.store_version(path)
+    reader.close()
+    assert st.store_version(path) == v
+
+
+def test_every_commit_of_a_held_writer_in_another_process_changes_the_version(tmp_path):
+    """E2 (M1 case 5, M4): after a WAL restart a commit lands inside the WAL's old extent
+    and the old fingerprint missed it (2782 of 3000). Asserts a restart happened, so the
+    case is not vacuous."""
+    from tests._xproc import Writer
+    path = _fresh_store(tmp_path)
+    with Writer(path) as w:
+        w("open")
+        prev, unseen = st.store_version(path), 0
+        for _ in range(3000):
+            w("ins", 1, 400)
+            cur = st.store_version(path)
+            unseen += cur == prev
+            prev = cur
+        restarts = w("wal_header")["checkpoint_seq"]
+        w("close")
+    assert restarts > 0, "no WAL restart happened: the case would prove nothing"
+    assert unseen == 0
+
+
+def _web_reader_cycle(path, _w):
+    from fuzzlab.web.projects import open_reader
+    r = open_reader(str(path))
+    try:
+        r.conn.execute("SELECT count(*) FROM endpoint").fetchone()
+    finally:
+        r.close()
+
+
+_NO_WRITE = {
+    "a web reader opens, reads and closes": _web_reader_cycle,
+    "the writer process closes with frames in the WAL": lambda path, w: w("close"),
+    "a passive checkpoint by the writer process": lambda path, w: w("checkpoint", "PASSIVE"),
+    "an empty write transaction": lambda path, w: w("empty"),
+    "an UPDATE that matches no row":
+        lambda path, w: w("sql", "UPDATE endpoint SET method=method WHERE 0"),
+}
+
+
+@pytest.mark.parametrize("case", sorted(_NO_WRITE))
+def test_no_read_close_or_checkpoint_changes_the_version(tmp_path, case):
+    """E1 (M1 cases 2 and 3; M2 C1-C5): nothing that leaves the content as it was
+    changes the version."""
+    from tests._xproc import Writer
+    path = _fresh_store(tmp_path)
+    with Writer(path) as w:
+        w("open")
+        w("ins", 5)                                  # frames in the WAL, the writer open
+        v = st.store_version(path)
+        _NO_WRITE[case](path, w)
+        assert st.store_version(path) == v
+        if "closes with frames" not in case:
+            w("close")
+
+
+def test_a_commit_hidden_by_a_wal_restart_is_never_served_from_the_cache(tmp_path):
+    """E2 through the route (G11): a child list cached after a WAL restart was served
+    again for a commit that kept the WAL's size and header."""
+    from tests._xproc import Writer
+    path = tmp_path / "c.db"
+    with Store(path) as s:
+        rid = s.start_run("auto", "h")
+        s.conn.execute("INSERT INTO target (run_id, base_url) VALUES (?,?)", (rid, ORIGIN))
+        s.conn.execute("INSERT INTO endpoint (run_id, url, method) VALUES (?, '/a', 'GET')",
+                       (rid,))
+        s.conn.commit()
+    st.child_cache.clear()
+    client = _client(path)
+    (host,) = [c["key"] for c in client.get("/api/sitetree/children").json()["children"]
+               if c["label"] == ORIGIN]
+
+    def shown():
+        return [c["label"] for c in client.get(
+            "/api/sitetree/children", params={"node": host}).json()["children"]]
+    with Writer(path) as w:
+        w("open")
+        w("ins", 1500, 400)                          # a scan: the WAL grows past 1000 pages
+        w("checkpoint", "PASSIVE")
+        w("ins", 1, 400)                             # the WAL restarts at its start
+        assert shown() == ["a"]                      # cached under this version
+        w("sql", "INSERT INTO endpoint (run_id, url, method) VALUES (?, '/b', 'GET')", rid)
+        assert shown() == ["a", "b"]
+        w("close")
+
+
+def test_a_replaced_or_removed_store_changes_the_version(tmp_path):
+    """Fact F: a store replaced at its path (a new inode) is another store; a removed one
+    has no version, and asking recreates nothing."""
+    path = _fresh_store(tmp_path, "a.db")
+    v = st.store_version(path)
+    other = _fresh_store(tmp_path, "b.db")
+    os.replace(other, path)
+    after = [st.store_version(path), st.store_version(path)]
+    assert v not in after and after[-1] is not None
+    os.unlink(path)
+    assert st.store_version(path) is None
+    assert [s for s in ("", "-wal", "-shm", "-journal")
+            if os.path.exists(str(path) + s)] == []
+
+
+def test_rollback_journal_commits_are_seen_under_a_coarse_clock(tmp_path):
+    """FR-UI-505's old residual, emulated: a same-size UPDATE inside one mtime tick
+    (`os.utime` restores the mtime; this host's clock is fine-grained, M6)."""
+    import sqlite3
+    path = tmp_path / "r.db"
+    plain = sqlite3.connect(path)
+    plain.execute("PRAGMA journal_mode=DELETE")
+    plain.execute("CREATE TABLE t (v INTEGER)")
+    plain.execute("INSERT INTO t VALUES (0)")
+    plain.commit()
+    unseen = 0
+    try:
+        for i in range(1, 21):
+            before = os.stat(path)
+            v = st.store_version(path)
+            plain.execute("UPDATE t SET v=?", (i % 2,))
+            plain.commit()
+            assert os.stat(path).st_size == before.st_size
+            os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+            unseen += st.store_version(path) == v
+    finally:
+        plain.close()
+    assert unseen == 0
+
+
+def test_the_store_version_never_creates_or_migrates_a_store(tmp_path):
+    """NFR-UI-read-only: asking for a version creates nothing, and an older-schema
+    store is never migrated nor switched to WAL by it."""
+    import sqlite3
+    missing = tmp_path / "missing.db"
+    assert st.store_version(missing) is None
+    assert [s for s in ("", "-wal", "-shm", "-journal")
+            if os.path.exists(str(missing) + s)] == []
+    old = tmp_path / "old.db"
+    plain = sqlite3.connect(old)
+    plain.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)")
+    plain.execute("INSERT INTO schema_version VALUES (1)")
+    plain.commit()
+    plain.close()
+    assert st.store_version(old) is not None
+    plain = sqlite3.connect(old)
+    try:
+        assert plain.execute("SELECT version FROM schema_version").fetchall() == [(1,)]
+        assert plain.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
+    finally:
+        plain.close()
+
+
+def test_the_project_listing_never_serves_a_summary_older_than_its_bound(tmp_path,
+                                                                          monkeypatch):
+    """`core.project._stat_key` (the Projects listing's cache) missed a commit inside the
+    WAL's old extent within one coarse mtime tick, for ever. Fixed in CC-CORE-0071 by a
+    bound on a cached summary's age (`_summary_clock`); emulated with `os.utime`."""
+    from fuzzlab.core import project as core_project
+    from tests._xproc import Writer
+    now = [1000.0]
+    monkeypatch.setattr(core_project, "_summary_clock", lambda: now[0], raising=False)
+    path = _fresh_store(tmp_path, "l.fuzzlab")
+    with Writer(path) as w:
+        w("open")
+        w("ins", 1500, 400)
+        w("checkpoint", "PASSIVE")
+        w("ins", 1, 400)                             # the WAL restarts
+        core_project._SUMMARY_CACHE.clear()
+        main, wal = os.stat(path), os.stat(str(path) + "-wal")
+        runs = core_project.summary(path)["runs"]
+        w("sql", "INSERT INTO run (tool, config_hash) VALUES ('late', 'h')")
+        assert os.stat(str(path) + "-wal").st_size == wal.st_size     # inside the old extent
+        os.utime(path, ns=(main.st_atime_ns, main.st_mtime_ns))       # one coarse tick
+        os.utime(str(path) + "-wal", ns=(wal.st_atime_ns, wal.st_mtime_ns))
+        now[0] += 3600.0                                              # an hour later
+        assert core_project.summary(path)["runs"] == runs + 1
+        w("close")
+
+
+_CHANGE_ATTRS = {"st_size", "st_mtime", "st_mtime_ns", "st_ctime", "st_ctime_ns"}
+_CHANGE_CALLS = {"getsize", "getmtime", "getctime", "read"}
+
+
+def store_fingerprints(src: str) -> list[str]:
+    """Functions that combine a ``-wal`` name with its size, a time or a raw read: a
+    change signal inferred from SQLite's storage side effects (PA-0534(1))."""
+    out: list[str] = []
+
+    def visit(node, where):
+        for ch in ast.iter_child_nodes(node):
+            if isinstance(ch, ast.ClassDef):
+                visit(ch, f"{where}.{ch.name}" if where else ch.name)
+            elif isinstance(ch, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                name = f"{where}.{ch.name}" if where else ch.name
+                docs = {id(s.value) for s in ast.walk(ch)
+                        if isinstance(s, ast.Expr) and isinstance(s.value, ast.Constant)}
+                wal = change = False
+                for n in ast.walk(ch):
+                    if isinstance(n, ast.Constant) and isinstance(n.value, str) \
+                            and "-wal" in n.value and id(n) not in docs:
+                        wal = True
+                    if isinstance(n, ast.Attribute) and n.attr in _CHANGE_ATTRS:
+                        change = True
+                    if isinstance(n, ast.Call):
+                        f = n.func
+                        nm = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", None)
+                        change = change or nm in _CHANGE_CALLS
+                if wal and change:
+                    out.append(name)
+                visit(ch, name)
+            else:
+                visit(ch, where)
+
+    visit(ast.parse(src), "")
+    return out
+
+
+#: The reasoned allowances: none is a "has the store changed" signal a page relies on.
+_FINGERPRINT_ALLOWED = {
+    "fuzzlab/core/project.py::_stat_key": "the Projects listing's cache key; a summary is "
+        "never served older than its bound (`_summary_clock`), so a missed coarse tick "
+        "costs at most that bound",
+    "fuzzlab/core/project.py::file_facts": "a display of size and last write, not a "
+        "change signal",
+    "fuzzlab/core/project.py::copy_to": "a disk-space estimate before a copy",
+}
+
+
+def test_no_module_fingerprints_the_store_from_its_files():
+    """PA-0534(1): the store version is SQLite's own change counter (SP-58); nothing
+    infers a store change from the WAL's size, times or header -- the owner included."""
+    found = []
+    for path in sorted((Path(__file__).resolve().parents[1] / "fuzzlab").rglob("*.py")):
+        rel = path.relative_to(Path(__file__).resolve().parents[1]).as_posix()
+        found += [f"{rel}::{f}" for f in store_fingerprints(path.read_text("utf-8"))]
+    assert sorted(set(found) - set(_FINGERPRINT_ALLOWED)) == []
+    assert sorted(set(_FINGERPRINT_ALLOWED) - set(found)) == []        # no stale allowance
+
+
+def test_the_store_fingerprint_guard_catches_synthetic_offenders():
+    """PA-0034(2): the 7ebf48a body, a `Path.stat()` variant and an `os.path.getmtime`
+    variant are found; identity checks and docstrings are not."""
+    old = ('def store_version(path):\n'
+           '    st = os.stat(path)\n'
+           '    with open(path + "-wal", "rb") as fh:\n'
+           '        header = fh.read(32)\n'
+           '        size = os.fstat(fh.fileno()).st_size\n')
+    pathstat = ('def v(p):\n    return Path(str(p) + "-wal").stat().st_mtime_ns\n')
+    getm = ('def v(p):\n    return os.path.getmtime(f"{p}-wal")\n')
+    near = ('def ident(p):\n    """The -wal\'s size is not read here."""\n'
+            '    st = os.stat(str(p) + "-wal")\n    return (st.st_dev, st.st_ino)\n'
+            'def gone(p):\n    return os.path.lexists(str(p) + "-wal")\n')
+    assert store_fingerprints(old) == ["store_version"]
+    assert store_fingerprints(pathstat) == ["v"]
+    assert store_fingerprints(getm) == ["v"]
+    assert store_fingerprints(near) == []

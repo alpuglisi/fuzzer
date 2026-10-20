@@ -1748,3 +1748,52 @@ def test_the_default_store_guard_sees_changes_to_an_existing_store(tmp_path):
     assert _default_store_state(path) != before
     (tmp_path / "fuzzlab.db.d").mkdir()
     assert _default_store_state(path)[path + ".d"] is not None
+
+
+# --- the store watch follows the open project (CC-UI-0068, D3; DRAFT-AU-SITETREE rev 2) --
+
+def _descriptors_on(path) -> list[str]:
+    """This process's open descriptors on ``path`` or its side files (Linux /proc)."""
+    out = []
+    for fd in os.listdir("/proc/self/fd"):
+        try:
+            target = os.readlink(f"/proc/self/fd/{fd}")
+        except OSError:                              # closed meanwhile
+            continue
+        if target.startswith(str(path)):
+            out.append(target)
+    return out
+
+
+@pytest.mark.skipif(not os.path.isdir("/proc/self/fd"), reason="needs Linux /proc")
+@pytest.mark.parametrize("leave", ["close with discard", "save as"])
+def test_leaving_a_temporary_project_leaves_no_descriptor_on_its_files(tmp_path, leave):
+    """The site map's poll holds a watch on the open store; leaving a temporary project
+    releases it before its files are removed, so no descriptor keeps them (D3)."""
+    app, c = _client(tmp_path, store=None)
+    c.post("/projects/temporary")
+    tpath = Path(_state(c)["path"])
+    with Store(tpath, create=False) as store:
+        store.start_run("x", "h")
+    assert c.get("/api/sitetree/version").json()["version"] is not None
+    if leave == "save as":
+        c.post("/projects/save-as", data={"name": "kept"})
+        assert _state(c)["name"] == "kept"
+    else:
+        c.post("/projects/close", data={"discard": "1"})
+        assert _state(c)["status"] == "none"
+    assert not tpath.exists()
+    assert _descriptors_on(tpath) == []
+
+
+@pytest.mark.skipif(not os.path.isdir("/proc/self/fd"), reason="needs Linux /proc")
+def test_only_the_open_projects_store_is_watched(tmp_path):
+    """One watch, for the store the request names; asking for another releases it (D3)."""
+    from fuzzlab.web import sitetree
+    a, b = tmp_path / "a.db", tmp_path / "b.db"
+    for p in (a, b):
+        with Store(p) as s:
+            s.start_run("t", "h")
+    assert sitetree.store_version(str(a)) is not None
+    assert sitetree.store_version(str(b)) is not None
+    assert _descriptors_on(a) == []
