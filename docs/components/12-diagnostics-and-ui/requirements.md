@@ -650,16 +650,46 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
   (`parameter.example`, form entries, candidate evidence beyond its projected fields,
   finding evidence), a query string, a target's raw `base_url`, run notes or config;
   nothing is "un-redacted" or rebuilt from parts.
-- **FR-UI-505** *(added CC-UI-0500)* **Site tree: live.** The page polls
-  `GET /api/sitetree/version` (the store file's `os.stat` and its WAL's size and
-  header; no SQLite; reads never change it) while visible and, when it changes,
-  refreshes in place -- the root, every expanded group (as many items as it shows) and
-  the selection -- keeping focus, expansion, selection and loaded pages, at most once
-  per poll interval; a node that is gone is removed. Stated residual: in rollback-journal
-  mode (only if WAL could not be set) an UPDATE within one mtime tick that keeps the file
-  size is not seen. SSE is not
-  used: a long-lived stream holds uvicorn's graceful shutdown, and with it the
+- **FR-UI-505** *(added CC-UI-0500; the version and the refresh's guarantees CC-UI-0068,
+  BUG-0534)* **Site tree: live.** The page polls `GET /api/sitetree/version` while
+  visible, one poll at a time, at most every `sitetree_poll_ms` (clamped to
+  `sitetree.MAX_POLL_MS`, 30 s). The version (`sitetree.store_version`, SP-58) is
+  SQLite's own change counter (`PRAGMA data_version`) read through **one** connection the
+  server holds on the open project's store (`core.store.open_read_only`: query-only,
+  private cache; it never creates, migrates or writes the store), hashed with the
+  identity of the store, a reopen epoch and a per-process nonce:
+  - every commit by any other connection, of any process, changes it -- an UPDATE-only
+    one, one after a WAL restart, each commit of a long held-writer burst, one in
+    rollback-journal mode, a schema change -- and so do the store being replaced at its
+    path, removed, or switched for another;
+  - a read, any connection's close, an empty transaction and a passive checkpoint never
+    change it;
+  - a reopened watch (another store, a release, a failed read, a changed identity, a
+    server restart) always gives a new version; a failed read or a changed identity
+    gives none (`null`), never the previous one; a busy read waits at most 1 s.
+
+  The watch is released when the project is left (before any of its files is removed),
+  when unused for 60 s (a reaper thread), when another store or none is asked for, and at
+  shutdown; a released watch closes outside the watch's lock, and no new watch opens on a
+  path while its predecessor closes. A watch whose store was removed, renamed away or
+  replaced at its path first truncates its WAL into the store it opened (SQLite never
+  folds a moved database's WAL at its last close: the store renamed away would lose its
+  last commits and a store replaced at the path would show the old one's content). It is
+  safe only because the web process never opens a store's file except through SQLite
+  (FR-CORE-508, PA-0535). When the version changes the page refreshes in place -- the
+  root, every expanded group (the pages it shows, down to its last shown item, plus a
+  page the user asked for), the selection (its Issues pages as loaded) -- at most once
+  per poll interval; a node that is gone is removed; the user's place is kept
+  (FR-UI-514). A version is marked seen only once its refresh succeeded: a failed refresh
+  is retried at the next poll. Stated residuals: an explicit RESTART or TRUNCATE
+  checkpoint by another program, and a reopened watch, each cause one refresh with no
+  write; a failed read or a changed identity causes two (to `null`, then to the new
+  version); a byte-for-byte overwrite of the live store file in place (same inode) is
+  seen only at the next commit; replacing or removing a store by hand while another
+  process still has it open, and Windows and network filesystems, are unsupported. SSE
+  is not used: a long-lived stream holds uvicorn's graceful shutdown, and with it the
   lifespan shutdown that stops launched jobs (BUG-0125).
+  - Enforced by: `tests/test_web_sitetree.py::test_every_commit_of_a_held_writer_in_another_process_changes_the_version`, `tests/test_web_sitetree.py::test_no_read_close_or_checkpoint_changes_the_version`, `tests/test_web_sitetree.py::test_a_readers_last_close_never_changes_the_version`, `tests/test_web_sitetree.py::test_a_commit_hidden_by_a_wal_restart_is_never_served_from_the_cache`, `tests/test_web_sitetree.py::test_a_replaced_or_removed_store_changes_the_version`, `tests/test_web_sitetree.py::test_a_store_moved_under_the_watch_keeps_its_commits_and_spoils_no_other`, `tests/test_web_sitetree.py::test_a_reopened_watch_never_repeats_a_version`, `tests/test_web_sitetree.py::test_rollback_journal_commits_are_seen_under_a_coarse_clock`, `tests/test_web_sitetree.py::test_a_failed_read_is_no_version_and_any_other_error_propagates`, `tests/test_web_sitetree.py::test_a_released_watch_is_closed_outside_the_lock`, `tests/test_web_sitetree.py::test_a_replacement_watch_never_reads_before_its_predecessor_closed`, `tests/test_web_sitetree.py::test_an_idle_watch_is_released_and_a_watched_one_is_kept`, `tests/test_web_sitetree.py::test_the_store_watch_is_used_only_under_its_lock`, `tests/test_web_sitetree.py::test_concurrent_polls_from_many_threads_agree`, `tests/test_web_projects.py::test_leaving_a_temporary_project_leaves_no_descriptor_on_its_files`, `tests/test_web_projects.py::test_only_the_open_projects_store_is_watched`, `tests/test_web_store_locks.py::test_a_projects_listing_never_drops_the_store_watchs_locks`, `tests/test_web_sitetree_browser.py::test_a_checkpoint_with_no_write_never_refreshes_the_page`, `tests/test_web_sitetree_browser.py::test_a_refresh_whose_group_fetch_fails_is_retried_at_the_next_poll`
 
 - **FR-UI-510** *(added CC-UI-0058)* **Diagrams page.** `/diagrams` (nav "Diagrams")
   draws a run's data flow and sequences from its trace model (`report.diagram`) through
@@ -689,9 +719,39 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
     malformed sequence scope is refused with 400; the status line shows
     the completeness state, run end, written / dropped / duplicate events, forced
     flushes and the maximum lag, with warnings for a partial model.
-  - live: the store version is taken before the first read and polled every
-    `diagram_poll_ms` (3000); a change reloads the run.
+  - live: the store version (FR-UI-505) is taken before the first read and polled every
+    `diagram_poll_ms` (3000, clamped to `sitetree.MAX_POLL_MS`) while the page is
+    visible, one poll at a time; a change reloads the run, keeping the user's place
+    (FR-UI-514), and the version is marked seen only once the reload succeeded
+    *(CC-UI-0068)*.
   - text only (`textContent` / `createElementNS`; the page scripts' banned-sink guard).
+- **FR-UI-514** *(added CC-UI-0068, BUG-0534)* **A live refresh keeps the user's
+  place.** Every page that refreshes itself while open (the site map, FR-UI-505; the
+  Diagrams page, FR-UI-510; any later one) keeps the focused control focused across a
+  refresh: the same element where it is updated in place (a focused tree row is patched
+  around it), else the control with the same focus key (`data-focus-key`, naming its
+  identity, unique in its region, never its position); else its nearest visible
+  equivalent -- a removed tree item's parent, a gone "Show more"'s group's last item, a
+  row control's tree item -- ending at the region's pane (`tabindex="-1"`), never the
+  page body. Focus is accepted only where it actually landed (a disabled, hidden,
+  detached or unfocusable candidate is skipped), restoring never scrolls
+  (`preventScroll`), and focus outside the region is never taken. A view using
+  `aria-activedescendant` re-points it at the element with the same key. Work the user
+  started that a refresh overlaps (a "Show more" page, a page of Issues) is delivered
+  exactly once, whichever comes first, and never dropped silently (one ordering rule: a
+  token registered before the user's fetch, read by the refresh before and after its
+  own). One helper remembers and restores (`static/js/livefocus.js`). Each live page
+  exposes `data-baseline`, `data-polls` and `data-refreshes` on its root (the site map
+  also `data-loads`), and its browser tests wait on them, never on a sleep. Every page
+  script that polls or streams is registered with its real-browser focus tests or a
+  reasoned exemption; each focusable control a live region re-renders carries a focus
+  key, and each kind is tested across a change after the first load, with a write that
+  sorts before it as well as after (PA-0518(1), PA-0534). Stated residuals: a control
+  re-created by key (an Issues link, a Diagrams control) is announced again by a screen
+  reader; identical sequence steps are told apart by occurrence (`#2`, the one positional
+  tie-break); a click whose row is replaced between mousedown and mouseup is lost;
+  scroll position itself is not restored; the Diagrams selection highlight is not kept.
+  - Enforced by: `tests/test_web_live_focus.py::test_every_live_view_is_registered_with_its_focus_test`, `tests/test_web_live_focus.py::test_the_live_view_registry_catches_synthetic_offenders`, `tests/test_web_live_focus.py::test_every_live_view_restores_focus_through_the_one_helper`, `tests/test_web_sitetree_browser.py::test_a_refresh_keeps_focus_on_show_more_and_enter_still_loads_the_page`, `tests/test_web_sitetree_browser.py::test_a_refresh_during_a_show_more_load_still_delivers_that_page`, `tests/test_web_sitetree_browser.py::test_show_more_pressed_while_a_refresh_loads_its_group_is_kept`, `tests/test_web_sitetree_browser.py::test_a_refresh_that_ends_a_groups_paging_keeps_focus_in_the_tree`, `tests/test_web_sitetree_browser.py::test_a_refresh_keeps_focus_on_a_control_inside_a_row`, `tests/test_web_sitetree_browser.py::test_a_refresh_keeps_the_issues_pages_and_the_focused_finding`, `tests/test_web_sitetree_browser.py::test_show_more_findings_pressed_while_a_refresh_loads_issues_is_kept`, `tests/test_web_sitetree_browser.py::test_a_refresh_during_a_show_more_findings_load_still_delivers_that_page`, `tests/test_web_sitetree_browser.py::test_a_refresh_keeps_focus_selection_and_loaded_pages`, `tests/test_web_sitetree_browser.py::test_every_focusable_control_in_the_site_maps_live_regions_has_a_focus_key`, `tests/test_web_sitetree_browser.py::test_restore_focus_skips_every_candidate_that_refuses_focus_and_ends_at_the_pane`, `tests/test_web_sitetree_browser.py::test_a_refresh_that_removes_the_focused_item_never_scrolls_nor_drops_to_the_body`, `tests/test_web_diagrams.py::test_a_live_refresh_keeps_focus_on_every_kind_of_control`, `tests/test_web_diagrams.py::test_every_focusable_control_in_the_diagrams_live_regions_has_a_focus_key`
 - **FR-UI-511** *(added CC-UI-0058)* **Diagram views and exports.** `report.diagram`:
   `status`, `dataflow`, `interface_coverage`, `scopes`, `sequence`, `evidence`,
   `finding_links`, `export_json` (`fuzzlab.diagram/1`: the model with each item's
@@ -816,7 +876,7 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
   - Enforced by: `tests/test_web_overview.py::test_overview_is_read_only_get_makes_no_writes`, `tests/test_web_findings.py::test_api_findings_and_page_are_read_only`, `tests/test_holdout_seal_table.py::test_readers_never_write_on_an_upgraded_store`, `tests/test_web_ml.py::test_anomaly_panel_is_read_only`, `tests/test_web_diagnostics.py::test_diagnostics_routes_are_read_only_no_store_file`
 
   not violate this invariant.
-  - Enforced by: `tests/test_web_sitetree.py::test_site_tree_routes_are_read_only`, `tests/test_web_overview.py::test_overview_is_read_only_get_makes_no_writes`, `tests/test_web_findings.py::test_api_findings_and_page_are_read_only`, `tests/test_holdout_seal_table.py::test_readers_never_write_on_an_upgraded_store`, `tests/test_web_ml.py::test_anomaly_panel_is_read_only`, `tests/test_web_diagnostics.py::test_diagnostics_routes_are_read_only_no_store_file`
+  - Enforced by: `tests/test_web_sitetree.py::test_site_tree_routes_are_read_only`, `tests/test_web_sitetree.py::test_the_store_version_never_creates_or_migrates_a_store`, `tests/test_core_store_read_only.py::test_the_read_only_opener_never_creates_writes_or_migrates`, `tests/test_web_overview.py::test_overview_is_read_only_get_makes_no_writes`, `tests/test_web_findings.py::test_api_findings_and_page_are_read_only`, `tests/test_holdout_seal_table.py::test_readers_never_write_on_an_upgraded_store`, `tests/test_web_ml.py::test_anomaly_panel_is_read_only`, `tests/test_web_diagnostics.py::test_diagnostics_routes_are_read_only_no_store_file`
   - Not yet enforced: read-only by convention (a read-write `Store`); attempt/candidate counts and the /results, /runs/{id} and /proxy routes are unchecked; the Repeater writes `repeater_tab`/`run`/`flow`. (BUG-0111 sweep.)
 - **NFR-UI-browser-verified** *(added CC-UI-0036/CC-UI-0037, BUG-0063/BUG-0064,
   PA-0065)* Every HTML page loads in a real browser with zero page errors, zero console
@@ -859,8 +919,16 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
   - Enforced by: `web.projects.ProjectManager` (`lock`, `busy_reasons`), `web.runner.Runner` (`recorded`) — `tests/test_web_projects.py::test_a_real_job_records_provenance_privately_and_blocks_switching`, `tests/test_web_projects.py::test_busy_lasts_until_the_jobs_end_is_recorded`, `tests/test_web_projects.py::test_a_switch_issued_during_a_launch_waits_and_is_refused`, `tests/test_web_projects.py::test_a_spawn_failure_marks_the_launch_failed_and_never_leaves_it_busy`, `tests/test_web_projects.py::test_the_in_process_proxy_creates_its_project_and_keeps_it_busy`, `tests/test_web_projects.py::test_temporary_project_discard_needs_confirmation_and_removes_only_its_files`
   - Not yet enforced: a `fuzzlab` CLI process writing the same file outside the UI is not visible to it (stated residual).
 - **NFR-UI-live** Live views reflect the current run without blocking the tools.
-  *(CC-UI-0500:)* the site tree polls a store fingerprint (FR-UI-505) and holds no
-  long-lived connection.
+  *(CC-UI-0500:)* the site tree polls the store version (FR-UI-505) and holds no
+  long-lived HTTP connection. *(CC-UI-0068:)* the server holds one SQLite connection, on
+  the open project's store, while a live page polls it (released within 60-75 s of the
+  last poll by a reaper thread, when the project is left, and at shutdown); it never
+  holds a transaction between reads -- a writer's checkpoint completes -- and never writes
+  (query-only). While it is held: no other connection's close folds the WAL, so `-wal`
+  keeps its high-water mark (the largest transaction's WAL; 135 MB measured for one
+  ~40 MB insert) until a writer's restart or the release; a hand copy of the bare `.db`
+  lacks recent commits (as with any writer open); SQLite defers per-request readers'
+  descriptor closes, bounded by the peak concurrency and freed with the release.
 - **NFR-UI-redacted** Secrets never render; the UI shows redacted values only.
   - Enforced by (at write time): `tests/test_proxy_redaction.py::test_no_secret_reaches_any_persisted_copy`
   - Enforced by (site tree, CC-UI-0500): `tests/test_web_sitetree.py::test_no_planted_secret_reaches_any_sitetree_response`, `tests/test_web_sitetree.py::test_a_stored_query_is_never_shown_searched_or_split_into_nodes`, `tests/test_web_sitetree.py::test_host_labels_never_show_the_raw_base_url`

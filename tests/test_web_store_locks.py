@@ -167,14 +167,34 @@ def test_a_projects_listing_never_drops_the_store_watchs_locks(tmp_path):
         scan("close")
 
 
-# --- the guard (PA-0535): no raw open in the modules that handle stores in the web ------
+# --- the guard (PA-0535): no raw open of a file in the web process's code ----------------
+# Two layers. (1) A static guard over the web process's code: every module the web
+# package imports, transitively, lazy imports and literal `importlib.import_module`
+# included -- a helper a route hands a path to opens it in the web process whether or not
+# it opens SQLite itself (the confirming review found 21 such modules with 41 sites
+# outside revision 2's SQLite-only scope). Every call that opens a file by name outside
+# SQLite is a reviewed allowance with its count and its reason. (2) A run-time audit hook
+# (`tests/_store_audit.py`, armed for every web test by `tests/conftest.py`) fails a test
+# during which production code opened a store's main file, -wal or -shm outside SQLite,
+# whatever the call.
+#
+# What neither sees: code that is not in the import graph (an entry-point plugin
+# `PluginManager.from_entry_points` loads into the web process, a module imported by a
+# computed name) is outside (1) and, unless a web test runs it, (2); an open by C code
+# that raises no audit event; an open in another process. The cross-process tests above
+# are the proof of the behaviour; these keep the code from regressing.
 
-#: Calls that open a file outside SQLite. Any one of them, on a store's main file, -wal or
-#: -shm, drops the process's locks when it closes.
+#: Calls that open a file by name outside SQLite. Any one of them, on a store's main
+#: file, -wal or -shm, drops the process's SQLite locks on that file when it closes.
 _READS = {"read_bytes", "read_text", "write_bytes", "write_text"}
-_SHUTIL = {"copy", "copy2", "copyfile", "move"}
-#: What makes a module one that handles stores: it opens SQLite.
-_SQLITE_OPENERS = {"open_store", "Store", "open_read_only"}
+_SHUTIL = {"copy", "copy2", "copyfile", "copyfileobj", "move", "copytree", "make_archive",
+           "unpack_archive"}
+_FILECMP = {"cmp", "cmpfiles", "dircmp"}
+_TEMPFILE = {"mkstemp", "NamedTemporaryFile", "TemporaryFile", "SpooledTemporaryFile"}
+#: Starlette serves a file by its path (`FileResponse`) or from a directory (`StaticFiles`).
+_SERVERS = {"FileResponse", "StaticFiles"}
+#: An archive opened by name, and the call that reads another file into it.
+_ARCHIVES = {"ZipFile": "write", "TarFile": "add"}
 
 
 def _module_name(root: Path, path: Path) -> str:
@@ -192,7 +212,8 @@ def _module_path(root: Path, name: str) -> Path | None:
 
 
 def _imports(root: Path, path: Path) -> set[str]:
-    """Every fuzzlab module ``path`` imports, function-level (lazy) imports included."""
+    """Every fuzzlab module ``path`` imports: module- and function-level ``import``s and
+    ``importlib.import_module("fuzzlab....")`` with a literal name."""
     me = _module_name(root, path)
     pkg = me if path.name == "__init__.py" else me.rpartition(".")[0]
     out: set[str] = set()
@@ -206,28 +227,17 @@ def _imports(root: Path, path: Path) -> set[str]:
                 base = ".".join(up + ([base] if base else []))
             if base.startswith("fuzzlab"):
                 out |= {base} | {f"{base}.{a.name}" for a in n.names}
+        elif isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) \
+                and n.func.attr == "import_module" and n.args \
+                and isinstance(n.args[0], ast.Constant) and isinstance(n.args[0].value, str) \
+                and n.args[0].value.startswith("fuzzlab"):
+            out.add(n.args[0].value)
     return out
 
 
-def _opens_sqlite(tree) -> bool:
-    for n in ast.walk(tree):
-        if not isinstance(n, ast.Call):
-            continue
-        f = n.func
-        if isinstance(f, ast.Attribute) and f.attr == "connect" \
-                and isinstance(f.value, ast.Name) and f.value.id == "sqlite3":
-            return True
-        if isinstance(f, ast.Name) and f.id in _SQLITE_OPENERS:
-            return True
-        if isinstance(f, ast.Attribute) and f.attr in _SQLITE_OPENERS:
-            return True
-    return False
-
-
 def web_scope(root: Path) -> list[Path]:
-    """The modules the web process uses to handle stores: every module of ``fuzzlab/web``,
-    and every module the web package imports (transitively, lazy imports included) that
-    opens SQLite. Computed, never listed."""
+    """The web process's code: every module of ``fuzzlab/web`` and every module it imports,
+    transitively (with each module's parent packages). Computed, never listed."""
     roots = [_module_name(root, p) for p in sorted((root / "fuzzlab" / "web").rglob("*.py"))]
     seen: set[str] = set()
     todo = list(roots)
@@ -242,43 +252,85 @@ def web_scope(root: Path) -> list[Path]:
         todo += sorted(_imports(root, p))
         parts = name.split(".")
         todo += [".".join(parts[:i]) for i in range(1, len(parts))]
-    out = []
-    for name in sorted(seen):
-        p = _module_path(root, name)
-        if name == "fuzzlab.web" or name.startswith("fuzzlab.web.") \
-                or _opens_sqlite(ast.parse(p.read_text(encoding="utf-8"))):
-            out.append(p)
+    return [_module_path(root, name) for name in sorted(seen)]
+
+
+def _callee(f) -> tuple[str | None, str | None]:
+    """``(owner, name)`` of a call: ``(None, "open")`` for ``open(...)``, ``("os", "open")``
+    for ``os.open(...)``, ``("", "open")`` for ``x.y.open(...)``."""
+    if isinstance(f, ast.Name):
+        return None, f.id
+    if isinstance(f, ast.Attribute):
+        return (f.value.id if isinstance(f.value, ast.Name) else ""), f.attr
+    return None, None
+
+
+def _archive_bindings(scope) -> dict[str, str]:
+    """Names a scope binds to an archive opened by name (``with ZipFile(p) as z``,
+    ``t = tarfile.open(p)``): their ``.write``/``.add`` open another file."""
+    out = {}
+    for n in ast.walk(scope):
+        pairs = []
+        if isinstance(n, ast.withitem) and isinstance(n.optional_vars, ast.Name):
+            pairs.append((n.optional_vars.id, n.context_expr))
+        elif isinstance(n, ast.Assign):
+            pairs += [(t.id, n.value) for t in n.targets if isinstance(t, ast.Name)]
+        for name, value in pairs:
+            if isinstance(value, ast.Call):
+                owner, attr = _callee(value.func)
+                if attr in _ARCHIVES:
+                    out[name] = attr
+                elif owner == "tarfile" and attr == "open":
+                    out[name] = "TarFile"
     return out
+
+
+def _shape(call: ast.Call, bound: dict[str, str]) -> str | None:
+    owner, attr = _callee(call.func)
+    if attr is None:
+        return None
+    if owner is None:                                   # a bare name
+        if attr == "open":
+            return "open()"
+        return f"{attr}()" if attr in _SERVERS or attr in _ARCHIVES else None
+    if owner in ("os", "io") and attr in ("open", "fdopen"):
+        return f"{owner}.{attr}()"
+    if owner == "shutil" and attr in _SHUTIL:
+        return f"shutil.{attr}()"
+    if owner == "filecmp" and attr in _FILECMP:
+        return f"filecmp.{attr}()"
+    if owner == "tempfile" and attr in _TEMPFILE:
+        return f"tempfile.{attr}()"
+    if attr in _SERVERS or attr in _ARCHIVES:
+        return f"{attr}()"
+    if owner in bound and attr == _ARCHIVES[bound[owner]]:
+        return f"{bound[owner]}.{attr}()"
+    if attr == "open":
+        return ".open()"
+    return f".{attr}()" if attr in _READS else None
 
 
 def raw_opens(src: str) -> Counter:
     """``{(function, shape): count}`` of every call that opens a file outside SQLite."""
     found: Counter = Counter()
 
-    def visit(node, where):
+    def visit(node, where, bound):
         for ch in ast.iter_child_nodes(node):
-            if isinstance(ch, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                visit(ch, f"{where}.{ch.name}" if where else ch.name)
+            if isinstance(ch, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                visit(ch, f"{where}.{ch.name}" if where else ch.name,
+                      {**bound, **_archive_bindings(ch)})
+                continue
+            if isinstance(ch, ast.ClassDef):
+                visit(ch, f"{where}.{ch.name}" if where else ch.name, bound)
                 continue
             if isinstance(ch, ast.Call):
-                f, shape = ch.func, None
-                if isinstance(f, ast.Name) and f.id == "open":
-                    shape = "open()"
-                elif isinstance(f, ast.Attribute):
-                    owner = f.value.id if isinstance(f.value, ast.Name) else None
-                    if owner in ("os", "io") and f.attr in ("open", "fdopen"):
-                        shape = f"{owner}.{f.attr}()"
-                    elif f.attr == "open":
-                        shape = ".open()"
-                    elif f.attr in _READS:
-                        shape = f".{f.attr}()"
-                    elif owner == "shutil" and f.attr in _SHUTIL:
-                        shape = f"shutil.{f.attr}()"
+                shape = _shape(ch, bound)
                 if shape:
                     found[(where or "<module>", shape)] += 1
-            visit(ch, where)
+            visit(ch, where, bound)
 
-    visit(ast.parse(src), "")
+    tree = ast.parse(src)
+    visit(tree, "", _archive_bindings(tree))
     return found
 
 
@@ -294,19 +346,101 @@ def scan(root: Path = REPO) -> Counter:
 _NEW = ("a new inode this call created with O_EXCL; no SQLite connection of any process "
         "can hold it when it is opened or closed")
 _NOT_A_STORE = "never a store's main file, -wal or -shm: "
+_CLI = " (a CLI's own process; the web process imports it for its parser)"
+_LAB = " (lab generation; the web process imports it for the lab page's command specs)"
 #: Every raw open in the scope, with its count and why it never touches a store's files.
 #: The scan must equal this exactly: a new site and a stale entry both fail.
 ALLOWED: dict[tuple[str, str, str], tuple[int, str]] = {
+    ("fuzzlab/audit/rules.py", "load_rules", ".read_text()"): (
+        2, _NOT_A_STORE + "the packaged default rules, or a rules JSON the operator names"),
+    ("fuzzlab/core/config.py", "load_config", ".read_text()"): (
+        1, _NOT_A_STORE + "a JSON config file"),
+    ("fuzzlab/core/credentials.py", "_CryptographyFileBackend._load", ".read_bytes()"): (
+        1, _NOT_A_STORE + "the encrypted credential file (D12)"),
     ("fuzzlab/core/project.py", "create", "os.open()"): (1, _NEW),
     ("fuzzlab/core/project.py", "copy_to", "os.open()"): (
         2, _NEW + "; the second open (fsync) follows the close of every connection of the "
            "copy, which no other process knows"),
+    ("fuzzlab/core/secretfile.py", "_fsync_dir", "os.open()"): (
+        1, _NOT_A_STORE + "a directory descriptor (O_DIRECTORY)"),
+    ("fuzzlab/core/secretfile.py", "create_secret", "os.open()"): (
+        1, _NOT_A_STORE + "a secret file (O_EXCL; the recent list, a key)"),
+    ("fuzzlab/core/secretfile.py", "locked", "os.open()"): (
+        1, _NOT_A_STORE + "a sibling '<file>.lock' (flock), never the file itself"),
+    ("fuzzlab/core/secretfile.py", "write_secret", "os.open()"): (
+        1, _NOT_A_STORE + "a secret file's temporary sibling (the recent list, a key; "
+           "web/projects.py:845 writes recent.json through it)"),
+    ("fuzzlab/disco/capture.py", "JsonlTail.lines", "open()"): (
+        1, _NOT_A_STORE + "a disco capture JSONL file"),
+    ("fuzzlab/disco/capture.py", "append_record", "open()"): (
+        1, _NOT_A_STORE + "a disco capture JSONL file"),
+    ("fuzzlab/greybox/coverage.py", "FileCoverageSource.lines_for", ".read_text()"): (
+        1, _NOT_A_STORE + "a coverage JSON file" + _CLI),
+    ("fuzzlab/greybox/dbfault.py", "FileDbFaultSource.fault_for", ".read_text()"): (
+        1, _NOT_A_STORE + "a database-fault JSON file" + _CLI),
     ("fuzzlab/greybox/greybox_cli.py", "_cookie_for", ".open()"): (
-        1, _NOT_A_STORE + "the operator's cookie file (the CLI's process)"),
+        1, _NOT_A_STORE + "the operator's cookie file" + _CLI),
     ("fuzzlab/harness/auto_cli.py", "_account_values", ".open()"): (
-        1, _NOT_A_STORE + "the account values file (the CLI's process)"),
+        1, _NOT_A_STORE + "the account values file" + _CLI),
     ("fuzzlab/harness/auto_cli.py", "_precheck_peer", ".open()"): (
-        1, _NOT_A_STORE + "the peer account file (the CLI's process)"),
+        1, _NOT_A_STORE + "the peer account file" + _CLI),
+    ("fuzzlab/labels/contract.py", "_load_expected_csv", ".open()"): (
+        1, _NOT_A_STORE + "a ground-truth CSV"),
+    ("fuzzlab/labels/contract.py", "_load_schema", ".read_text()"): (
+        1, _NOT_A_STORE + "a packaged JSON schema"),
+    ("fuzzlab/labels/contract.py", "load", ".read_text()"): (
+        1, _NOT_A_STORE + "a ground-truth labels.json"),
+    ("fuzzlab/labels/contract.py", "load_injection_points", ".read_text()"): (
+        1, _NOT_A_STORE + "a ground-truth injection-points JSON"),
+    ("fuzzlab/labels/contract.py", "load_labels", ".read_text()"): (
+        1, _NOT_A_STORE + "a ground-truth labels JSON"),
+    ("fuzzlab/labgen/cli.py", "write_tree", ".write_bytes()"): (
+        1, _NOT_A_STORE + "a generated application's source files" + _LAB),
+    ("fuzzlab/labgen/conformance/tier0.py", "lint_php", ".write_bytes()"): (
+        1, _NOT_A_STORE + "a temporary source file to lint" + _LAB),
+    ("fuzzlab/labgen/conformance/tier0.py", "lint_python", ".write_bytes()"): (
+        1, _NOT_A_STORE + "a temporary source file to lint" + _LAB),
+    ("fuzzlab/labgen/conformance/tier0.py", "lint_ruby", ".write_bytes()"): (
+        1, _NOT_A_STORE + "a temporary source file to lint" + _LAB),
+    ("fuzzlab/labgen/corpus_analysis.py", "write_corpus_report", ".write_text()"): (
+        1, _NOT_A_STORE + "a corpus report" + _LAB),
+    ("fuzzlab/labgen/identity.py", "load_identities", ".read_text()"): (
+        1, _NOT_A_STORE + "an identities YAML/JSON file" + _LAB),
+    ("fuzzlab/labgen/identity.py", "load_identities_schema", ".read_text()"): (
+        1, _NOT_A_STORE + "a packaged JSON schema" + _LAB),
+    ("fuzzlab/labgen/schema.py", "load_manifest", ".read_text()"): (
+        1, _NOT_A_STORE + "a lab manifest" + _LAB),
+    ("fuzzlab/labgen/schema.py", "load_manifest_schema", ".read_text()"): (
+        1, _NOT_A_STORE + "a packaged JSON schema" + _LAB),
+    ("fuzzlab/labgen/secret_scanner.py", "_parse_report", ".read_text()"): (
+        1, _NOT_A_STORE + "a secret scanner's JSON report" + _LAB),
+    ("fuzzlab/labgen/secret_scanner.py", "_write_tree", ".write_bytes()"): (
+        1, _NOT_A_STORE + "a generated source tree to scan" + _LAB),
+    ("fuzzlab/labgen/verdict.py", "load_safety_matrix", ".read_text()"): (
+        1, _NOT_A_STORE + "a safety matrix" + _LAB),
+    ("fuzzlab/labgen/verdict.py", "load_safety_matrix_schema", ".read_text()"): (
+        1, _NOT_A_STORE + "a packaged JSON schema" + _LAB),
+    ("fuzzlab/labgen/zap_oracle.py", "_load_alerts", ".read_text()"): (
+        1, _NOT_A_STORE + "a ZAP JSON report" + _LAB),
+    ("fuzzlab/labgen/zap_oracle.py", "run_zap_whole_app_scan", "open()"): (
+        1, _NOT_A_STORE + "the descriptor of its own new temporary plan file" + _LAB),
+    ("fuzzlab/labgen/zap_oracle.py", "run_zap_whole_app_scan", "tempfile.mkstemp()"): (
+        1, _NOT_A_STORE + "a new temporary plan file (O_EXCL)" + _LAB),
+    ("fuzzlab/mutation/filtermodel.py", "FilterModel.from_rules_file", ".read_text()"): (
+        1, _NOT_A_STORE + "a filter rules JSON"),
+    ("fuzzlab/procutil.py", "_Supervisor.run.child_setup", "open()"): (
+        1, _NOT_A_STORE + "/proc/self/oom_score_adj, in a child before exec"),
+    ("fuzzlab/procutil.py", "_listen_table", "open()"): (
+        1, _NOT_A_STORE + "/proc/<pid>/net/tcp*"),
+    ("fuzzlab/procutil.py", "_read_oom", "open()"): (
+        1, _NOT_A_STORE + "/proc/<pid>/oom_score_adj"),
+    ("fuzzlab/procutil.py", "read_stat", "open()"): (1, _NOT_A_STORE + "/proc/<pid>/stat"),
+    ("fuzzlab/proxy/ca.py", "LocalCA.ensure_ca", ".read_bytes()"): (
+        2, _NOT_A_STORE + "the proxy CA's certificate and key"),
+    ("fuzzlab/scheduler/context.py", "catalog_priors", ".read_text()"): (
+        1, _NOT_A_STORE + "a payload catalog file"),
+    ("fuzzlab/session/cli.py", "main", ".open()"): (
+        1, "CredentialStore.open, a method, not a file (AU-SESS403's file)"),
     ("fuzzlab/tools/authhttp.py", "_build_parts", ".open()"): (
         1, _NOT_A_STORE + "a request body part the operator named"),
     ("fuzzlab/tools/blind_sqli_fuzzer.py", "save_dataset", "open()"): (
@@ -321,6 +455,8 @@ ALLOWED: dict[tuple[str, str, str], tuple[int, str]] = {
         1, _NOT_A_STORE + "a disco run's code segments file"),
     ("fuzzlab/tools/store_adapter.py", "import_fuzz_csv", "open()"): (
         1, _NOT_A_STORE + "the fuzz CSV"),
+    ("fuzzlab/web/app.py", "create_app", "StaticFiles()"): (
+        1, _NOT_A_STORE + "the package's own static directory (`_STATIC_DIR`)"),
     ("fuzzlab/web/labcontrol.py", "_load_compose", ".read_text()"): (
         1, _NOT_A_STORE + "the lab's compose YAML"),
     ("fuzzlab/web/projectroutes.py", "register.project_open.go", ".open()"): (
@@ -347,9 +483,11 @@ def _mismatch(found: Counter, allowed=ALLOWED) -> list[str]:
 
 
 def test_no_web_process_module_opens_a_store_file_except_through_sqlite():
-    """PA-0535: in the modules the web process uses to handle stores, a file is opened
-    outside SQLite only at a reviewed site that never touches a store's files. Whether a
-    file is SQLite is asked of SQLite (`core.store.open_read_only`, FR-CORE-508)."""
+    """PA-0535: in the web process's code -- every module the web package imports,
+    transitively -- a file is opened outside SQLite only at a reviewed site that never
+    touches a store's files. Whether a file is SQLite is asked of SQLite
+    (`core.store.open_read_only`, `is_sqlite`; FR-CORE-508)."""
+    assert len(web_scope(REPO)) > 150                     # the closure, not a hand list
     assert _mismatch(scan()) == []
 
 
@@ -362,20 +500,25 @@ def _tree(tmp_path, files: dict[str, str]) -> Path:
 
 
 def test_the_store_file_guard_catches_synthetic_offenders(tmp_path):
-    """PA-0034(2): each raw-open shape is found; a module reached only by a lazy import is
-    in scope when it opens SQLite and out of scope when it does not; an allowed site
-    passes; a new site in an allowed function and a stale allowance both fail."""
+    """PA-0034(2): each raw-open shape is found, library openers included; a helper a
+    route reaches by a lazy import or a literal `import_module` is in scope whether or
+    not it opens SQLite (the confirming review's `core/secretfile.py` case); a module the
+    web package never imports is not; an allowed site passes; a new site in an allowed
+    function and a stale allowance both fail."""
     root = _tree(tmp_path, {
         "fuzzlab/__init__.py": "",
         "fuzzlab/web/__init__.py": "",
         "fuzzlab/web/page.py": (
+            "import importlib\n"
             "def route(p):\n"
             "    from fuzzlab.core import helper\n"
-            "    from fuzzlab.core.other import x\n"
+            "    importlib.import_module('fuzzlab.core.later')\n"
             "    return helper.check(p)\n"),
         "fuzzlab/web/direct.py": (
-            "import io, os, shutil\n"
+            "import filecmp, io, os, shutil, tarfile, tempfile, zipfile\n"
             "from pathlib import Path\n"
+            "from zipfile import ZipFile\n"
+            "from starlette.responses import FileResponse\n"
             "def magic(p):\n"
             "    with open(p, 'rb') as fh:\n"
             "        return fh.read(16)\n"
@@ -386,15 +529,33 @@ def test_the_store_file_guard_catches_synthetic_offenders(tmp_path):
             "    Path(p).read_bytes(); Path(p).read_text()\n"
             "    Path(p).write_bytes(b''); Path(p).write_text('')\n"
             "    shutil.copyfile(p, p + '.bak')\n"
-            "    os.fdopen(3)\n"),
+            "    os.fdopen(3)\n"
+            "def library(p, d):\n"
+            "    shutil.copytree(d, d + '.copy')\n"
+            "    filecmp.cmp(p, p + '.bak')\n"
+            "    tempfile.mkstemp()\n"
+            "    with zipfile.ZipFile(d + '.zip', 'w') as z:\n"
+            "        z.write(p)\n"
+            "    t = tarfile.open(d + '.tar', 'w')\n"
+            "    t.add(p)\n"
+            "    return FileResponse(p)\n"
+            "def near_misses(fh, z2, p):\n"
+            "    fh.write(b'x')                       # a file object's write, not a name\n"
+            "    z2.write(p)                          # not bound to an archive here\n"
+            "    os.pidfd_open(1)                     # a process descriptor\n"),
         "fuzzlab/core/__init__.py": "",
-        "fuzzlab/core/helper.py": (
-            "import sqlite3\n"
+        "fuzzlab/core/helper.py": (                # no SQLite here: still in scope
+            "from fuzzlab.core import secret\n"
             "def check(p):\n"
-            "    sqlite3.connect(p).close()\n"
-            "    return open(p, 'rb').read(16)\n"),
-        "fuzzlab/core/other.py": (
-            "x = 1\n"
+            "    return secret.write(p)\n"),
+        "fuzzlab/core/secret.py": (
+            "import os\n"
+            "def write(p):\n"
+            "    os.close(os.open(p, os.O_WRONLY | os.O_CREAT))\n"),
+        "fuzzlab/core/later.py": (
+            "def read(p):\n"
+            "    return open(p).read()\n"),
+        "fuzzlab/core/unused.py": (                # never imported by the web package
             "def unrelated(p):\n"
             "    return open(p).read()\n"),
     })
@@ -410,13 +571,116 @@ def test_the_store_file_guard_catches_synthetic_offenders(tmp_path):
         ("fuzzlab/web/direct.py", "many", ".write_text()"): 1,
         ("fuzzlab/web/direct.py", "many", "shutil.copyfile()"): 1,
         ("fuzzlab/web/direct.py", "many", "os.fdopen()"): 1,
-        ("fuzzlab/core/helper.py", "check", "open()"): 1,     # lazy import, opens SQLite
-    })                                                         # core/other.py: no SQLite
+        ("fuzzlab/web/direct.py", "library", "shutil.copytree()"): 1,
+        ("fuzzlab/web/direct.py", "library", "filecmp.cmp()"): 1,
+        ("fuzzlab/web/direct.py", "library", "tempfile.mkstemp()"): 1,
+        ("fuzzlab/web/direct.py", "library", "ZipFile()"): 1,
+        ("fuzzlab/web/direct.py", "library", "ZipFile.write()"): 1,
+        ("fuzzlab/web/direct.py", "library", ".open()"): 1,          # tarfile.open
+        ("fuzzlab/web/direct.py", "library", "TarFile.add()"): 1,
+        ("fuzzlab/web/direct.py", "library", "FileResponse()"): 1,
+        ("fuzzlab/core/secret.py", "write", "os.open()"): 1,       # a helper's helper
+        ("fuzzlab/core/later.py", "read", "open()"): 1,            # import_module("...")
+    })                                                            # core/unused.py: out
     allowed = {k: (n, "synthetic") for k, n in found.items()}
     assert _mismatch(found, allowed) == []
-    grown = found + Counter({("fuzzlab/core/helper.py", "check", "open()"): 1})
+    grown = found + Counter({("fuzzlab/core/secret.py", "write", "os.open()"): 1})
     assert _mismatch(grown, allowed) == [
-        "('fuzzlab/core/helper.py', 'check', 'open()'): 2 raw open(s), not allowed"]
+        "('fuzzlab/core/secret.py', 'write', 'os.open()'): 2 raw open(s), not allowed"]
     stale = {**allowed, ("fuzzlab/web/gone.py", "f", "open()"): (1, "synthetic")}
     assert _mismatch(found, stale) == ["('fuzzlab/web/gone.py', 'f', 'open()'): stale allowance"]
     assert _mismatch(found, {}) != []
+
+
+# --- the run-time audit hook (tests/_store_audit.py), proven on synthetic offenders -------
+
+_HELPER = """
+import os, shutil, zipfile
+from pathlib import Path
+
+def summary_7ebf48a(p):                 # BUG-0535's own shape: the Projects listing's read
+    with open(p, "rb") as fh:
+        return fh.read(16)
+
+def side_file(p):
+    return Path(str(p) + "-wal").read_bytes()
+
+def low_level(p):
+    os.close(os.open(p, os.O_RDONLY))
+
+def through_a_library(p, dst):
+    shutil.copyfile(p, dst)
+    with zipfile.ZipFile(dst + ".zip", "w") as z:
+        z.write(p)
+
+def route(p):                           # a route handing the path to a helper
+    return summary_7ebf48a(p)
+
+def create(p):                          # an allowed name: a new inode created O_EXCL
+    os.close(os.open(str(p) + ".new", os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+
+def not_a_store(p):
+    return open(p).read()
+"""
+
+
+def test_the_store_open_audit_catches_synthetic_offenders(tmp_path):
+    """PA-0034(2) for the audit hook: a production frame's open of a store's main file, its
+    -wal or its -shm is caught -- BUG-0535's own read, a helper a route hands the path to,
+    `os.open`, a library (`shutil`, `zipfile`) -- through the real audit event; a test's
+    own open, an allowed function and a file that is not a store are not."""
+    import importlib.util
+
+    from tests import _store_audit
+    prod = tmp_path / "prod"
+    prod.mkdir()
+    (prod / "helper.py").write_text(_HELPER)
+    spec = importlib.util.spec_from_file_location("au_sitetree_helper", prod / "helper.py")
+    helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helper)
+    store = tmp_path / "s.fuzzlab"
+    held = Store(store)                         # recorded by the hook: SQLite opened it
+    held.start_run("t", "h")
+    plain = tmp_path / "plain.json"
+    plain.write_text("{}")
+    rel = "prod/helper.py"
+    monitor = _store_audit.arm(_store_audit.StoreOpenAudit(
+        roots=[prod], allowed={(rel, "create")}, repo=tmp_path))
+    try:
+        open(store, "rb").close()                         # the test's own: not counted
+        helper.not_a_store(str(plain))
+        helper.create(str(store))
+        assert monitor.found == []
+        helper.route(str(store))
+        helper.side_file(str(store))
+        helper.low_level(str(store))
+        helper.through_a_library(str(store), str(tmp_path / "copy.db"))
+    finally:
+        found = _store_audit.disarm(monitor)
+        held.close()
+    who = [f.split(" opened ")[0] for f in found]
+    assert who == [f"{rel}::summary_7ebf48a", f"{rel}::side_file", f"{rel}::low_level",
+                   f"{rel}::through_a_library", f"{rel}::through_a_library"], found
+    assert all(os.path.realpath(store) in f for f in found)
+
+
+def test_the_store_open_audit_knows_a_store_opened_by_uri_and_a_live_wal_file(tmp_path):
+    """The hook's notion of a store: a database SQLite opened through a `file:` URI (the
+    read-only opener's, quoted), and any file with a live -wal beside it even if this
+    process never connected to it (another process's store)."""
+    from fuzzlab.core.store import open_read_only
+    from tests import _store_audit
+    a = tmp_path / "a b#.db"                              # quoted in its URI
+    with Store(a) as s:
+        s.start_run("t", "h")
+    _store_audit._stores.discard(os.path.realpath(a))    # only the URI open counts below
+    conn = open_read_only(a, timeout=1.0)
+    conn.close()
+    mon = _store_audit.StoreOpenAudit()
+    assert mon.store_of(os.path.realpath(a)) == os.path.realpath(a)
+    assert mon.store_of(os.path.realpath(str(a) + "-shm")) == os.path.realpath(a)
+    other = tmp_path / "other.db"
+    other.write_bytes(b"")
+    (tmp_path / "other.db-wal").write_bytes(b"")
+    assert mon.store_of(os.path.realpath(other)) == os.path.realpath(other)
+    assert mon.store_of(os.path.realpath(tmp_path / "plain.json")) is None

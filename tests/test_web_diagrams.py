@@ -153,8 +153,9 @@ def test_the_page_renders_labels_as_text_navigates_evidence_and_updates_live(tmp
                 rec.close()
             page.locator(f"#dg-origin option[value='{other}']").wait_for(
                 state="attached", timeout=10000)
+            polls = _dg_count(page, "polls")
             page.select_option("#dg-origin", O)
-            page.wait_for_timeout(1200)                       # two polls
+            _dg_reach(page, "polls", polls + 2)               # two polls (D8: no sleep)
             values = page.eval_on_selector_all("#dg-origin option",
                                                "els => els.map(e => e.value)")
             assert values == ["", O, other]
@@ -388,17 +389,38 @@ def _dg_page(live):
     return ctx, page, errors
 
 
-def _dg_write(live) -> str:
-    """A capture record in the run (another connection of the server's process)."""
+def _dg_write(live, before: bool = False) -> str:
+    """A capture record in the run (another connection of the server's process); its
+    interface's label. ``before``: on a new origin, at a path and in act-1 at a time that
+    sort before everything already there (entity ids sort by origin, then method and
+    path; ``http://127.0.0.1:9000`` < ``:9001``... as text) -- a new origin group,
+    interface row and first step, ahead of whatever is focused."""
     live["n"][0] += 1
-    late = f"/late{live['n'][0]}"
+    n = live["n"][0]
     with Store(live["path"]) as store:
         rec = trace.TraceRecorder(store, live["run"])
-        rec.emit("observe.exchange", {"src": "capture", "ref": f"record {100 + live['n'][0]}",
-                                      "method": "POST", "url": O + late, "origin": O,
-                                      "status": 201}, t=5.0 + live["n"][0])
+        if before:
+            early = f"http://127.0.0.1:{9001 - n}"
+            rec.emit("observe.exchange", {"src": "capture", "ref": f"record {100 + n}",
+                                          "method": "GET", "url": early + f"/0early{n}",
+                                          "origin": early, "status": 200,
+                                          "action": "act-1"},
+                     key=f"early{n}", scope="workflow:act-1", t=0.5 - n / 1000)
+        else:
+            rec.emit("observe.exchange", {"src": "capture", "ref": f"record {100 + n}",
+                                          "method": "POST", "url": O + f"/late{n}",
+                                          "origin": O, "status": 201}, t=5.0 + n)
         rec.close()
-    return late
+    return f"GET /0early{n}" if before else f"POST /late{n}"
+
+
+#: the focused control's identity: its focus key and what it shows (a row's first cell,
+#: a box's or step's title, a link's text, a select's id), never its position
+_DG_IDENTITY = """() => { const a = document.activeElement;
+  const title = a.querySelector && a.querySelector('title');
+  const label = a.tagName === 'SELECT' ? a.id : a.tagName === 'TR' ? a.cells[0].textContent
+    : title ? title.textContent.split('\\n')[0] : a.textContent;
+  return [a.tagName, a.getAttribute('data-focus-key') || a.id, label]; }"""
 
 
 _DG_TARGETS = {
@@ -411,25 +433,28 @@ _DG_TARGETS = {
 }
 
 
+@pytest.mark.parametrize("where", ["after", "before"])
 @pytest.mark.parametrize("kind", list(_DG_TARGETS))
-def test_a_live_refresh_keeps_focus_on_every_kind_of_control(live, kind):
+def test_a_live_refresh_keeps_focus_on_every_kind_of_control(live, kind, where):
     """E6: the Diagrams page's refresh re-renders its regions; focus fell from 4 of 6
     control kinds to <body> (the selects kept it). Each kind keeps focus on the same
-    control, matched by its focus key."""
+    control. The write sorts after the focused control, or before it -- a new origin
+    group, interface row and first step ahead of the focused one (blocker 3): the
+    control is matched by identity (its key and what it shows), never by position."""
     ctx, page, errors = _dg_page(live)
     try:
         target = page.locator(_DG_TARGETS[kind]).first
         target.focus()
-        before = page.evaluate("() => document.activeElement.getAttribute('data-focus-key')"
-                               " || document.activeElement.id")
+        before = page.evaluate(_DG_IDENTITY)
         r0 = _dg_count(page, "refreshes")
-        late = _dg_write(live)
+        label = _dg_write(live, before=(where == "before"))
         _dg_reach(page, "refreshes", r0 + 1)
-        page.locator("#dg-ifaces").get_by_text(f"POST {late}").wait_for()
-        after = page.evaluate("() => [document.activeElement.tagName, "
-                              "document.activeElement.getAttribute('data-focus-key') "
-                              "|| document.activeElement.id]")
-        assert after[0] != "BODY" and after[1] == before, (before, after)
+        page.locator("#dg-ifaces").get_by_text(label).wait_for()
+        after = page.evaluate(_DG_IDENTITY)
+        assert after[0] != "BODY" and after == before, (before, after)
+        if where == "before" and kind in ("interface row", "origin group", "response step"):
+            assert page.locator(_DG_TARGETS[kind]).first.evaluate(
+                "e => e !== document.activeElement"), "nothing was inserted before it"
     finally:
         ctx.close()
     assert errors == []

@@ -5,10 +5,11 @@
 - Numbers (pre-assigned): CC-UI-0068, CC-CORE-0071; FR-UI-514 (new), FR-UI-505 and
   FR-UI-510 (amended), FR-CORE-508 (new); BUG-0534 / PA-0534 (the version and the focus
   defect), BUG-0535 / PA-0535 (the lock drop); SP-58.
-- Status: **phase 1, revision 2, for one confirming review** (`docs/components/README.md`).
-  Nothing in `fuzzlab/` is changed. The failing tests are committed with this draft
-  (§5): each was run on `7ebf48a` and fails for its stated reason (§5.5). The probes are
-  scratch files (§1.9).
+- Status: **phase 2, implemented** on the confirming review's verdict (core design
+  sound; six blockers, all in this text or the tests, fixed first: §11). Revision 2's
+  text below is kept as the reviewed record; where implementation diverged, §11.3 says
+  so and the change-control entries (CC-UI-0068, CC-CORE-0071, CC-FUZZ-0108) describe
+  what landed. The probes are scratch files (§1.9, §11.2).
 
 ## R. Revision 2 at a glance
 
@@ -240,6 +241,24 @@ is held, SQLite defers a per-request reader's close (its inode has locks) and re
 deferred descriptors: after 1, 4, 8, 16 concurrent reader threads the store's descriptors
 were 4, 7, 11, 19, then stayed at 19 for 4 and 1 threads; 0 after the release. Bounded by
 the peak concurrency (uvicorn's thread pool: 40), released with the watch (R10).
+
+### 1.10 A store moved under the watch (at implementation: `impl/m_leftover_wal.py`, `.out`)
+
+Not in revision 2 (its L1-5 was a "design guard" never run against the watch). SQLite
+never folds the WAL of a database whose file was moved when its last connection closes
+(`databaseIsUnmoved`), and leaves `-wal` and `-shm` at the old path. With the watch the
+last connection of the web process, a scan in another process committed 50 rows and
+closed (frames stay), then the main file was moved by hand:
+
+| Move | No watch | Watched, closed plainly | Watched, `wal_checkpoint(TRUNCATE)` before the close |
+|---|---|---|---|
+| removed, then a new store created at the path | ok, 0 rows | ok, 0 rows (a new file starts in rollback mode; the stale WAL is ignored) | ok, 0 rows; a 0-byte `-wal` left |
+| renamed away; the renamed store read | ok, **50** rows | ok, **0** rows: the commits stayed in the orphaned `-wal` (**data loss**) | ok, **50** rows |
+| another store moved in (`os.replace`) | ok; its own row | ok, but **50 rows of the old store, 0 of its own** (the old WAL recovered over it) | ok; its own row |
+
+`wal_checkpoint(TRUNCATE)` runs on a `query_only` connection (`(0, 0, 0)`). The watch now
+runs it before closing when its store moved (§11.3), and
+`test_a_store_moved_under_the_watch_keeps_its_commits_and_spoils_no_other` pins all three.
 
 ### 1.9 Probe files
 
@@ -576,13 +595,14 @@ keydown handler); the Diagrams selection highlight across a refresh; keyboard ac
   watches after each test (it lands with the implementation: on `7ebf48a` the function it
   calls does not exist).
 
-### 4.5 `docs/SHARED_PRIMITIVES.md`: proposed row (text for the coordinator)
+### 4.5 `docs/SHARED_PRIMITIVES.md`: the rows (text for the coordinator; final, §11)
 
-> | SP-58 | Whether the open store changed since a page last looked: the store version (SQLite's `PRAGMA data_version` on one held, `query_only`, private-cache connection on the open project's store, through `core.store.open_read_only`, with the identity of the store, its `-wal` and `-shm`, a reopen epoch and a process nonce; every commit changes it, no read, close or passive checkpoint does; safe only because the web process never opens a store file except through SQLite, PA-0535) | `fuzzlab/web/sitetree.py::store_version` (with `release_watches`; read by `/api/sitetree/version` for the site map and Diagrams pages and as the child-list cache key, G11; released by `ProjectManager._leave` and the lifespan) | `tests/test_web_sitetree.py::test_every_commit_of_a_held_writer_in_another_process_changes_the_version`, `tests/test_web_sitetree.py::test_no_read_close_or_checkpoint_changes_the_version`, `tests/test_web_sitetree.py::test_no_module_fingerprints_the_store_from_its_files`, `tests/test_web_sitetree.py::test_the_store_fingerprint_guard_catches_synthetic_offenders`, `tests/test_web_store_locks.py::test_no_web_process_module_opens_a_store_file_except_through_sqlite`, `tests/test_shared_primitives.py::test_every_owner_is_defined_once` | PA-0534, PA-0535 (CC-UI-0068, CC-CORE-0071) |
+> | SP-58 | Whether the open store changed since a page last looked: the store version (SQLite's `PRAGMA data_version` on one held, query-only, private-cache connection on the open project's store, opened through `core.store.open_read_only` (SP-59), hashed with the process nonce, the store's device and inode, a reopen epoch and the count; every commit by any connection of any process changes it, and no read, close, empty transaction or passive checkpoint does; one watch, used only under its lock, released before a project's files are removed, idle-released by a reaper thread, closed outside the lock, never replaced while its predecessor still closes, its WAL truncated into its store before it closes when the store was moved; safe only because the web process never opens a store file except through SQLite, PA-0535) | `fuzzlab/web/sitetree.py::store_version` (with `release_watches`; read by `/api/sitetree/version` for the site map and Diagrams pages and as the child-list cache key, G11; released by `ProjectManager._leave` and the app's lifespan) | `tests/test_web_sitetree.py::test_every_commit_of_a_held_writer_in_another_process_changes_the_version`, `tests/test_web_sitetree.py::test_no_read_close_or_checkpoint_changes_the_version`, `tests/test_web_sitetree.py::test_a_store_moved_under_the_watch_keeps_its_commits_and_spoils_no_other`, `tests/test_web_sitetree.py::test_no_module_fingerprints_the_store_from_its_files`, `tests/test_web_sitetree.py::test_the_store_fingerprint_guard_catches_synthetic_offenders`, `tests/test_web_sitetree.py::test_the_store_watch_is_used_only_under_its_lock`, `tests/test_web_sitetree.py::test_the_watch_lock_guard_catches_synthetic_offenders`, `tests/test_web_sitetree.py::test_concurrent_polls_from_many_threads_agree`, `tests/test_web_store_locks.py::test_no_web_process_module_opens_a_store_file_except_through_sqlite`, `tests/test_shared_primitives.py::test_every_owner_is_defined_once` | PA-0534, PA-0535 (CC-UI-0068, CC-CORE-0071) |
+> | SP-59 | A read-only open of a SQLite file, and whether a file is SQLite at all: an existing file only (nothing is created), a private cache, `query_only`, `trusted_schema=OFF`, `mode=ro` (or `mode=rw` when its last close should fold the WAL like any reader's), never a journal-mode change, a migration or a write; whether a file is SQLite is asked of SQLite (`SQLITE_NOTADB`), never read from its bytes, because a raw open and close of a store drops the process's SQLite locks on it (BUG-0535) | `fuzzlab/core/store.py::open_read_only` (with `is_sqlite`; read by `core.project.inspect`, `summary` and `copy_to`, `web.sitetree.store_version` and `harness.auto.header_point_estimate`) | `tests/test_core_store_read_only.py::test_whether_a_file_is_sqlite_is_asked_of_sqlite_never_read_raw`, `tests/test_core_store_read_only.py::test_every_read_only_open_goes_through_the_opener`, `tests/test_core_store_read_only.py::test_the_read_only_open_guard_catches_synthetic_offenders`, `tests/test_web_store_locks.py::test_no_web_process_module_opens_a_store_file_except_through_sqlite`, `tests/test_shared_primitives.py::test_every_owner_is_defined_once` | PA-0535 (CC-CORE-0071, CC-FUZZ-0108) |
 
-The table accepts Python owners only, so `livefocus.js` is held by its own guard (G1-G3).
-The opener is a CORE primitive used by the SP-58 owner; it gets no row of its own unless the
-coordinator prefers one (Q3).
+The table accepts Python owners only, so `livefocus.js` is held by its own guards (G1-G4).
+SP-59 answers Q3 (the coordinator asked for a row: C3, C4 and K5, plus the defined-once
+check).
 
 ## 5. Tests
 
@@ -653,6 +673,19 @@ shown). Existing tests keep their waits (D8: only the tests touched change).
 | G1 | `test_every_live_view_is_registered_with_its_focus_test` (discovery by text; registry of tests checked by AST, or a reasoned exemption; stale fails) | passes (the registry is written; the views are known) |
 | G2 | `test_the_live_view_registry_catches_synthetic_offenders` | passes (the guard's own proof) |
 | G3 | `test_every_live_view_restores_focus_through_the_one_helper` + `test_the_one_helper_guard_tells_a_definition_from_a_use` | **fails**: `livefocus.js` is missing; the self-test passes |
+
+### 5.6 A registered test that failed once (blocker 6)
+
+`test_a_refresh_keeps_focus_selection_and_loaded_pages` failed once in the confirming
+review's browser run on `7ebf48a` plus the counters-only patch: "/wide/w999" was not shown
+within 10 s (`confirm_sitetree/browser.out`); ten re-runs passed (`w999_run_1..10.out`).
+Not called flaky. Two defects of that code each explain it: E2 (the write landed inside
+the WAL's old extent: the fingerprint never changed) and E8 (the poll recorded the new
+version before its refresh, and a refresh whose group fetch failed was never retried).
+The test also waited 900 ms for a baseline instead of observing it. All three are fixed
+(SP-58; "a version is marked seen only once its refresh succeeded"; the page counters),
+and the test is now parametrised with a write that sorts before the focused item. If it
+recurs, it is root-caused from the counters and the request log, never re-run away.
 
 ### 5.5 The proof runs on `7ebf48a`
 
@@ -856,15 +889,16 @@ Diagrams tests for the requirements that failed), and too narrow even on its own
 (FR-UI-510's "a change reloads the run" was never tested for the user's place). Layer 1 has
 no prior PA that failed.
 
-**PA-0534 (proposed text).** Strengthens PA-0083(2), PA-0311(2) and §7; strengthens and
+**PA-0534 (final text, §11).** Strengthens PA-0083(2), PA-0311(2) and §7; strengthens and
 supersedes PA-0518(1) for live views; amends PA-0023.
 
-> - **PA-0534** — After BUG-0534: the store version was read from SQLite's file side effects, so a reader's close refreshed the page and a running scan's commits went unseen (a review fix for one case opened the other); and a live refresh dropped focus from every control kind but the one tested, in either order of a user's page load and a refresh (a recurrence of BUG-0518's root cause; PA-0518 not swept or enforced).
+> - **PA-0534** — After BUG-0534: the store version was read from SQLite's file side effects, so a reader's close refreshed the page and a running scan's commits went unseen (a review fix for one case opened the other); a live refresh dropped focus from every control kind but the one tested, in either order of a user's page load and a refresh (BUG-0518's root cause recurring; PA-0518(1) neither swept nor enforced); and a version was marked seen before its refresh ran, so a failed refresh was never retried.
 >   1. **A change signal over state another engine manages is that engine's own documented change counter** (SQLite: `PRAGMA data_version` on one held connection) plus the identity of what it watches -- never inferred from the engine's storage side effects (file sizes, mtimes, journal headers). One owner: `web/sitetree.py::store_version` (SP-58).
->   2. **Its never / always claims, correctness ones included, are tested against every engine operation that touches what it reads, with the writer in another process**: a commit (UPDATE-only, after a WAL restart, a held writer's burst, rollback mode), each checkpoint kind, a reader's and a writer's last close, a replace, a delete. A fix for one case re-runs all of them.
->   3. **A live view keeps the user's place across every refresh**: each focusable control it re-renders carries a focus key unique in its region and is restored through the one helper (`static/js/livefocus.js`), verified where focus landed, falling back to a visible equivalent and ending at the pane, never the page body; work the user started that a refresh overlaps is delivered once, in either order, tested by holding each side's fetch. Every polling or streaming page script is registered with its real-browser focus tests, synchronised on the page's own counters (never a sleep), or a reasoned exemption -- PA-0518(1) made mechanical and swept.
+>   2. **Its never / always claims, correctness ones included, are tested against every engine operation that touches what it reads, with the writer in another process**: a commit (UPDATE-only, after a WAL restart, a held writer's burst, rollback mode), each checkpoint kind, a reader's and a writer's last close, a replace, a rename and a removal of the file. A fix for one case re-runs all of them.
+>   3. **A live view keeps the user's place across every refresh**: each focusable control it re-renders carries a focus key naming its identity, unique in its region, and is restored through the one helper (`static/js/livefocus.js`), verified where focus landed, falling back to a visible equivalent and ending at the region's pane, never the page body, never scrolling; work the user started that a refresh overlaps is delivered once, in either order, tested by holding each side's fetch. Every polling or streaming page script is registered with its real-browser focus tests -- each control kind tested across a change after the first load, with writes that sort before it as well as after, asserting identity (an id, an href, a label), synchronised on the page's own counters, never a sleep -- or a reasoned exemption. This is PA-0518(1) made mechanical and swept.
 >   4. **Amends PA-0023 with a third pattern**: a handle whose value is meaningful only on one connection (here `data_version`) may be one shared instance if every use is under one lock, it is opened for any thread, the invariant is in its docstring, and an AST guard plus a many-thread test pin it.
->   - Enforced by: tests/test_web_sitetree.py::test_every_commit_of_a_held_writer_in_another_process_changes_the_version, tests/test_web_sitetree.py::test_no_read_close_or_checkpoint_changes_the_version, tests/test_web_sitetree.py::test_no_module_fingerprints_the_store_from_its_files, tests/test_web_sitetree.py::test_the_store_fingerprint_guard_catches_synthetic_offenders, tests/test_web_sitetree.py::test_the_store_watch_is_used_only_under_its_lock, tests/test_web_store_locks.py::test_a_projects_listing_never_drops_the_store_watchs_locks, tests/test_web_live_focus.py::test_every_live_view_is_registered_with_its_focus_test, tests/test_web_live_focus.py::test_the_live_view_registry_catches_synthetic_offenders, tests/test_web_live_focus.py::test_every_live_view_restores_focus_through_the_one_helper, tests/test_web_sitetree_browser.py::test_a_refresh_during_a_show_more_load_still_delivers_that_page, tests/test_web_sitetree_browser.py::test_every_focusable_control_in_the_site_maps_live_regions_has_a_focus_key, tests/test_web_diagrams.py::test_every_focusable_control_in_the_diagrams_live_regions_has_a_focus_key
+>   5. **A live view marks a version seen only once its refresh of that version succeeded**: a failed or overtaken refresh is retried at the next poll, and a test injects a failed fetch to prove it.
+>   - Enforced by: tests/test_web_sitetree.py::test_every_commit_of_a_held_writer_in_another_process_changes_the_version, tests/test_web_sitetree.py::test_no_read_close_or_checkpoint_changes_the_version, tests/test_web_sitetree.py::test_a_store_moved_under_the_watch_keeps_its_commits_and_spoils_no_other, tests/test_web_sitetree.py::test_no_module_fingerprints_the_store_from_its_files, tests/test_web_sitetree.py::test_the_store_fingerprint_guard_catches_synthetic_offenders, tests/test_web_sitetree.py::test_the_store_watch_is_used_only_under_its_lock, tests/test_web_sitetree.py::test_the_watch_lock_guard_catches_synthetic_offenders, tests/test_web_sitetree.py::test_concurrent_polls_from_many_threads_agree, tests/test_web_store_locks.py::test_a_projects_listing_never_drops_the_store_watchs_locks, tests/test_web_live_focus.py::test_every_live_view_is_registered_with_its_focus_test, tests/test_web_live_focus.py::test_the_live_view_registry_catches_synthetic_offenders, tests/test_web_live_focus.py::test_every_live_view_restores_focus_through_the_one_helper, tests/test_web_live_focus.py::test_no_registered_live_view_test_synchronises_by_sleeping, tests/test_web_live_focus.py::test_the_sleep_guard_catches_a_synthetic_offender, tests/test_web_sitetree_browser.py::test_a_refresh_during_a_show_more_load_still_delivers_that_page, tests/test_web_sitetree_browser.py::test_every_focusable_control_in_the_site_maps_live_regions_has_a_focus_key, tests/test_web_sitetree_browser.py::test_restore_focus_skips_every_candidate_that_refuses_focus_and_ends_at_the_pane, tests/test_web_sitetree_browser.py::test_a_refresh_whose_group_fetch_fails_is_retried_at_the_next_poll, tests/test_web_diagrams.py::test_every_focusable_control_in_the_diagrams_live_regions_has_a_focus_key
 
 ### 9.2 BUG-0535 (the lock drop) and PA-0535
 
@@ -907,30 +941,60 @@ supersedes PA-0518(1) for live views; amends PA-0023.
   threads and first opens, not processes); PA-0023 (thread affinity, not process locks);
   BUG-0534 layer 1 (found in the same item: a sibling, "SQLite's files read as plain
   files", which PA-0535 and PA-0534(1) state from two sides).
-- **PA-0535 (proposed text).**
+- **PA-0535 (final text, §11).** Revision 2's (2) scoped the guard to modules that open
+  SQLite; the confirming review found that unsound (blocker 1), so (2) now names the whole
+  import closure, library openers and a run-time audit hook.
 
-> - **PA-0535** — After BUG-0535: the Projects listing read the store's magic bytes with `open()` in the web process, whose close released the POSIX locks of every SQLite connection the process held; another process's close then deleted `-wal`/`-shm` under them (a corrupt project under `--with-proxy`, lost commits, wrong reads).
->   1. **A process that holds, or may hold, SQLite connections never opens, reads, writes or copies a database's main file, `-wal` or `-shm` outside SQLite.** Whether a file is SQLite is asked of SQLite (`core.store.is_sqlite`); a read-only open goes through `core.store.open_read_only` (FR-CORE-508); a copy uses the backup API.
->   2. **Enforced by a computed scope, not a list**: every module of `fuzzlab/web/` and every module the web package imports that opens SQLite; each raw open there is a reviewed allowance with its count and its reason, and a stale one fails.
+> - **PA-0535** — After BUG-0535: the Projects listing read a store's magic bytes with `open()` in the web process, whose close released the POSIX locks of every SQLite connection the process held; another process's close then deleted `-wal`/`-shm` under them (a corrupt project under `--with-proxy`, lost commits, wrong reads).
+>   1. **A process that holds, or may hold, SQLite connections never opens, reads, writes or copies a database's main file, `-wal` or `-shm` outside SQLite.** Whether a file is SQLite is asked of SQLite (`core.store.is_sqlite`); a read-only open goes through `core.store.open_read_only` (FR-CORE-508, SP-59); a copy uses the backup API.
+>   2. **Enforced by a computed scope, not a list, and at run time**: the static guard covers every module the web package imports, transitively (lazy imports and literal `import_module` included), whatever the module itself opens, and every library call that opens a file by name (`shutil`, `filecmp`, `tempfile`, `zipfile`, `tarfile`, Starlette's `FileResponse` and `StaticFiles`); each raw open there is a reviewed allowance with its count and its reason, and a stale one fails. A test-time audit hook (`tests/_store_audit.py`) fails any web test during which production code opened a store's file outside SQLite, whatever the call. Both are proven on synthetic offenders, a helper module's open included. What neither sees is stated with them (code outside the import graph that no web test runs, such as an entry-point plugin; C code; another process).
 >   3. **Store behaviour across connections is tested with the other connection in another process** (`tests/_xproc.py`): SQLite's locks, shared memory and WAL fold are per process, so a second connection of the test's own process cannot show a cross-process failure.
->   - Enforced by: tests/test_web_store_locks.py::test_no_web_process_module_opens_a_store_file_except_through_sqlite, tests/test_web_store_locks.py::test_the_store_file_guard_catches_synthetic_offenders, tests/test_web_store_locks.py::test_a_projects_listing_never_drops_the_in_process_proxys_store_locks, tests/test_web_store_locks.py::test_a_projects_listing_never_drops_a_request_readers_locks, tests/test_web_store_locks.py::test_opening_a_project_never_drops_a_held_connections_locks, tests/test_core_store_read_only.py::test_whether_a_file_is_sqlite_is_asked_of_sqlite_never_read_raw, tests/test_core_store_read_only.py::test_every_read_only_open_goes_through_the_opener
+>   - Enforced by: tests/test_web_store_locks.py::test_no_web_process_module_opens_a_store_file_except_through_sqlite, tests/test_web_store_locks.py::test_the_store_file_guard_catches_synthetic_offenders, tests/test_web_store_locks.py::test_the_store_open_audit_catches_synthetic_offenders, tests/test_web_store_locks.py::test_a_projects_listing_never_drops_the_in_process_proxys_store_locks, tests/test_web_store_locks.py::test_a_projects_listing_never_drops_a_request_readers_locks, tests/test_web_store_locks.py::test_opening_a_project_never_drops_a_held_connections_locks, tests/test_core_store_read_only.py::test_whether_a_file_is_sqlite_is_asked_of_sqlite_never_read_raw, tests/test_core_store_read_only.py::test_every_read_only_open_goes_through_the_opener
 
-### 9.3 Text for the coordinator (files this lane must not edit)
+### 9.3 Text for the coordinator (files this lane must not edit; final, §11)
 
-- **ERROR_LOG.md** (two lines):
-  > 2026-10-20 — `test_web_sitetree_browser.py::test_show_more_from_the_keyboard_keeps_focus_in_the_tree` failed once in a full harness run (200 of 250). Root cause: the site map's store version changed with no write (a reader's last close folds the WAL) and, since review fix A1, missed most commits of a running scan (2783 of 3000, after WAL restarts); a live refresh then dropped focus from "Show more". Remediation: the version is `PRAGMA data_version` on one held, query-only connection; live views keep the user's place through one helper (CC-UI-0068, BUG-0534, PA-0534). Status: fix drafted.
-  > 2026-10-20 — A Projects view under `fuzzlab web --with-proxy` let another process's close delete the store's `-wal`/`-shm` under the proxy's open Store, corrupting the project file (measured on 7ebf48a). Root cause: `core.project.inspect`/`summary` read the SQLite magic with `open()`, whose close released the web process's SQLite locks (POSIX). Remediation: a SQLite file is touched only through SQLite (CC-CORE-0071, FR-CORE-508, BUG-0535, PA-0535). Status: fix drafted.
-- **CHANGELOG.md:**
-  > 2026-10-20 — The web process never drops SQLite's locks (a Projects view could corrupt the project under `--with-proxy`, BUG-0535, CC-CORE-0071); the site map and Diagrams read the store version from SQLite's own change counter on one held, query-only connection, so a read or checkpoint no longer refreshes the page and a running scan's commits are no longer missed (2783 of 3000 were); a live refresh keeps the focused control and delivers a page the user asked for (BUG-0534, CC-UI-0068).
-- **docs/ARCHITECTURE.md** (the Site map paragraph): "polling refresh on an `os.stat` store
-  fingerprint (no SSE: …)" becomes "polling refresh on the store version (SQLite's
-  `PRAGMA data_version` through one held, query-only connection on the open store, SP-58;
-  the web process touches a store's files only through SQLite, FR-CORE-508; a refresh keeps
-  the user's place, FR-UI-514; no SSE: …)".
-- **docs/SHARED_PRIMITIVES.md**: the SP-58 row (§4.5).
-- **docs/PREVENTIVE_ACTIONS.md**: PA-0534, PA-0535 (§9.1, §9.2).
-- **docs/claude_juicelab_failures.md** (F-number from the coordinator):
-  > F-NNN — The agent built the site tree's store fingerprint (CC-UI-0500) from SQLite's file side effects without measuring them; review fix A1 (`1d02cd0`) claimed "reads never change the fingerprint" while a reader's last close still changed it and hid 2782 of 3000 commits of a running scan. FR-UI-505's "keeping focus" was tested on one element kind. Project files (CC-CORE-0450) read the SQLite magic with `open()` in the web process, which drops SQLite's locks: a Projects view under `--with-proxy` could corrupt the project (measured on 7ebf48a). AU-SITETREE revision 1 then proposed a held connection without measuring across processes; both reviewers found the lock drop. Evidence: DRAFT-AU-SITETREE §1.2, §1.3, §1.4 (X3), §1.6, §1.7. Impact: one harness failure; a site map and Diagrams page lagging a scan by up to 230 commits; focus lost to the page body on 6 control kinds; a corruption and data-loss path in the web UI since 2026-10-15. Status: fix drafted (CC-UI-0068, CC-CORE-0071), failing tests committed, pending the confirming review.
+- **`ERROR_LOG.md`** (two entries, newest on top, after the format block):
+
+> ## 2026-10-20 — web UI, site map and Diagrams (the store version missed writes and changed without one; a live refresh lost the user's place; BUG-0534)
+> - **Symptom:** `test_web_sitetree_browser.py::test_show_more_from_the_keyboard_keeps_focus_in_the_tree` failed once in a full harness run (200 of 250), and `test_a_refresh_keeps_focus_selection_and_loaded_pages` once (`/wide/w999` not shown in 10 s). The site map and the Diagrams page refreshed with no write, missed most commits of a running scan (2783 of 3000 after WAL restarts), and a refresh dropped focus to the page body on six control kinds, dropped a "Show more" page in either order, reset Issues to its first page, and never retried a refresh that failed.
+> - **Root cause:** the store version was inferred from SQLite's file side effects (the store's stat, the WAL's size and header), tested only on the states the author pictured; FR-UI-505's "keeping focus" was implemented and tested for one element kind in one order (BUG-0518's root cause recurring; PA-0518(1) neither swept nor enforced); the poll marked a version seen before its refresh.
+> - **Remediation:** the version is `PRAGMA data_version` on one held query-only connection (SP-58, measured across processes); one focus helper with identity keys on every control, one ordering rule for a user's page load against a refresh, a version marked seen only once its refresh succeeded, page counters instead of sleeps (CC-UI-0068, FR-UI-505/510/514, BUG-0534, PA-0534).
+> - **Status:** Fixed
+
+> ## 2026-10-20 — web UI and core (a Projects view dropped SQLite's locks; BUG-0535)
+> - **Symptom:** under `fuzzlab web --with-proxy`, one Projects view and one short writer in another process deleted the store's `-wal`/`-shm` under the proxy's open `Store`; the project file was corrupt on disk (`vtable constructor failed: flow_fts`). With a request's reader across a listing, 100 of 100 reads were wrong and 4 of 5 UI commits were lost silently (measured on 7ebf48a).
+> - **Root cause:** `core.project.inspect`/`summary` read the SQLite magic with `open()` in the web process; on POSIX the close of any descriptor of a file releases every lock the process holds on it, SQLite's WAL protection included. No rule or guard kept raw file access to a database out of a process holding connections, and no test ran store behaviour across processes.
+> - **Remediation:** a SQLite file is touched only through SQLite: `core.store.open_read_only` and `is_sqlite` (FR-CORE-508, SP-59); a static guard over the web package's whole import closure, a run-time audit hook over the web tests, cross-process regression tests (CC-CORE-0071, CC-FUZZ-0108, BUG-0535, PA-0535).
+> - **Status:** Fixed
+
+- **`CHANGELOG.md`** (under a `## 2026-10-20` heading, newest on top):
+
+> - **What:** the web process never touches a store's files outside SQLite (one read-only opener, `core.store.open_read_only`, and `is_sqlite`; a guard over the web package's whole import closure and a run-time audit hook); the site map and the Diagrams page read the store version from SQLite's own change counter on one held, query-only connection, released before a project's files go, idle-released by a reaper, and truncating its WAL into a store moved under it; a live refresh keeps the focused control by identity, delivers a page the user asked for in either order, marks a version seen only once its refresh succeeded, and is tested on page counters, never a sleep (CC-UI-0068, CC-CORE-0071, CC-FUZZ-0108; FR-UI-505/510/514, FR-CORE-508; SP-58, SP-59; BUG-0534, BUG-0535; PA-0534, PA-0535). **Why:** a Projects view could corrupt the project under `--with-proxy` (BUG-0535); the old version changed on a reader's close and missed 2783 of 3000 commits of a running scan, and a refresh dropped a keyboard user's focus on six control kinds and dropped requested pages (BUG-0534).
+
+- **`docs/ARCHITECTURE.md`**:
+  - the **Site map** paragraph: "polling refresh on an `os.stat` store fingerprint (no
+    SSE: a long-lived stream holds uvicorn's graceful shutdown)" becomes "polling refresh
+    on the store version (SQLite's `PRAGMA data_version` through one held, query-only
+    connection on the open store, SP-58; the web process touches a store's files only
+    through SQLite, FR-CORE-508, SP-59; a refresh keeps the user's place through one
+    focus helper, `static/js/livefocus.js`, FR-UI-514; no SSE: a long-lived stream holds
+    uvicorn's graceful shutdown)";
+  - the **Store** bullet gains: "One read-only opener, `core.store.open_read_only` (with
+    `is_sqlite`; FR-CORE-508, SP-59): every read-only open of a SQLite file goes through
+    it, and a process holding SQLite connections never opens a database's files outside
+    SQLite (BUG-0535).";
+  - the **Diagrams** bullet: "live refresh while a run writes" becomes "live refresh
+    while a run writes, keeping the user's place (FR-UI-514)".
+
+- **`docs/SHARED_PRIMITIVES.md`**: the SP-58 and SP-59 rows (§4.5).
+- **`docs/PREVENTIVE_ACTIONS.md`**: PA-0534, PA-0535 (§9.1, §9.2).
+- **`docs/claude_juicelab_failures.md`** (F-number from the coordinator):
+
+> ### F-NNN — AU-SITETREE's held watch was designed, and its L1-5 test written, without measuring a store moved under it
+> - **What:** revision 2 (and its reviews) declared "replacing a store at its path without its side files while the UI watches it" unsupported and committed L1-5 as a "design guard" asserting no side file is left after a removal, a test never run against the watch. At implementation it failed: SQLite never folds a moved database's WAL at its last close. Measured with every writer in another process: with the watch the last connection, a store renamed away lost its last 50 commits, and a store replaced at its path showed the old store's content (DRAFT-AU-SITETREE §1.10). Revision 2's text also had the watch released for idleness only at the next call, which gives two refreshes on the same path (against its own R3) and never releases the store of a page that stopped polling.
+> - **Evidence:** `scratchpad/au-sitetree/impl/m_leftover_wal.out`; DRAFT §1.10, §11.3; the first run of `test_a_replaced_or_removed_store_changes_the_version` against the implementation.
+> - **Impact:** none landed (caught at implementation): the held watch would have turned a hand rename or restore of a project file into data loss while any site-map or Diagrams tab was open.
+> - **Status:** fixed in the implementation (a TRUNCATE checkpoint before a moved store's watch closes; a reaper for idle release); pinned by `test_a_store_moved_under_the_watch_keeps_its_commits_and_spoils_no_other` and `test_an_idle_watch_is_released_and_a_watched_one_is_kept`.
 
 ## 10. Questions for the coordinator
 
@@ -944,3 +1008,63 @@ supersedes PA-0518(1) for live views; amends PA-0023.
 - **Q4. Opened by this session (PA-0143, waiting for the user):** Diagrams keyboard
   activation, the selection highlight across a refresh, `proxy.js`'s pending rows; and
   Q1's CORE item.
+
+## 11. Implementation (phase 2): the confirming review's blockers, divergences, proofs
+
+The confirming review found the core design sound and reproduced every measurement; its
+six blockers were all in this text or the tests. Each is fixed below, then implemented.
+Merged first: the pushed tip `4ee8007` (F-106, F-107).
+
+### 11.1 The six blockers
+
+| # | Blocker | Fix |
+|---|---|---|
+| 1 | The guard's scope was unsound: `web_scope` kept only modules that open SQLite, missing helpers a route hands a path to, library openers, and 21 reachable modules with 41 raw-open sites (`core/secretfile.py:72,:84` from `web/projects.py:845`). | `tests/test_web_store_locks.py`: the scope is the whole import closure of `fuzzlab/web` (184 modules; lazy imports and literal `importlib.import_module` included); shapes add `shutil.copytree/copyfileobj/make_archive/unpack_archive`, `filecmp.*`, `tempfile.*`, `ZipFile()` and a bound `ZipFile.write`, a bound `TarFile.add`, `FileResponse`, `StaticFiles`; 60 reasoned allowances, 64 sites, 32 modules. Plus a run-time audit hook (`tests/_store_audit.py`, armed by `tests/conftest.py::_no_raw_store_open` for every `test_web_*`, `test_core_project`, `test_core_store_read_only` test): it records every database SQLite opens (`sqlite3.connect` audit event, URIs included) and fails a test during which a production frame opened a store's main file, `-wal`, `-shm` or `-journal` (or any file with a live `-wal`/`-shm`) through any Python-level open. Both proven on synthetic offenders (a helper a route reaches by a lazy import and by `import_module`, a helper's helper, every library shape; for the hook BUG-0535's own read, a route handing the path to a helper, `os.open`, `shutil`, `zipfile`; near misses for each). Stated unseen: code outside the import graph that no web test runs (an entry-point plugin, `web/app.py:444`; a computed import), opens by C code, opens in another process. |
+| 2 | D4 false for L1-7 (an in-process `sqlite3.connect`) and L1-B (an in-process `Store`). | L1-7 runs its rollback-journal writer through `Writer` (`open_plain`, `sql`); L1-B's `_Written` writes through a `Writer` in another process (`_xsql`), as do every browser test's writes (B3's delete and re-insert as single statements). PA-0535(3) holds for them. |
+| 3 | "Never positional" untested: every write sorted after the focused control. | Writes that sort before it, asserting identity: B1 (a sibling before the group), B2 and B2b (an item before the page, focus on `w200` by label), the selection test (an item before the focused `w240`, by `data-id` and label), B4 (a sibling before "shop"; a newer finding listed before the focused open link: the same node, href and item), B5 (a newer finding before the focused Issues link: href, 61 rows kept), B7 (a new origin, interface and first step before each focused kind: key and label). |
+| 4 | D7 had no named test. | B9 is two tests: `test_restore_focus_skips_every_candidate_that_refuses_focus_and_ends_at_the_pane` (disabled, hidden, detached and visible-but-unfocusable candidates refused; a visible fallback 4000 px down takes focus with `scrollY` 0; with nothing usable, the pane; focus outside the region never taken; focus still inside never moved) and `test_a_refresh_that_removes_the_focused_item_never_scrolls_nor_drops_to_the_body` (a real refresh: the parent item out of view takes focus and the tree pane's `scrollTop` is unchanged; an emptied tree leaves focus on `#st-tree`). Both in FR-UI-514's Enforced-by line. |
+| 5 | Bookkeeping: an SP-59 row for the opener; CC-FUZZ-0108 for `harness/auto.py`. | §4.5 (SP-59: C3, C4 and K5 plus the defined-once check); CC-FUZZ-0108 written, with a new direct test of the estimate. |
+| 6 | `test_a_refresh_keeps_focus_selection_and_loaded_pages` failed once; sleep-synchronised tests; a version recorded before its refresh. | The four tests (`:222`, `:343`, `:401`, `:445`) wait on the counters (`data-baseline`, `data-refreshes`, and a new `data-loads` for "a held answer has been handled"); the rule "a version is marked seen only once its refresh succeeded" in both pages, with `test_a_refresh_whose_group_fetch_fails_is_retried_at_the_next_poll` (an injected 500 on the refresh's group fetch); G4 (`test_no_registered_live_view_test_synchronises_by_sleeping`) fails any registered live-view test that sleeps; the occurrence is recorded in §5.6. |
+
+The review's notes: L1-6, L1-8 and L1-15 inject a fake connection (`fake_watch`); L1-6
+varies `_NONCE` and resets `_epoch` (a restarted server). L1-9's "agree" oracle: no thread
+raises; within a step all 8 values are equal and not `None`; each step's value differs
+from the step before. The autouse fixture `_release_store_watches` imports nothing (it
+uses `fuzzlab.web.sitetree` only if already in `sys.modules`). `_closing`'s decrement is
+in a `finally`. D6's Issues path is tested in both orders
+(`test_a_refresh_during_a_show_more_findings_load_still_delivers_that_page`, click
+first; B5b, refresh first).
+
+### 11.2 Measured at implementation
+
+- The opener on non-SQLite files (`impl/opener_facts.out`): text, a bare magic, random
+  bytes and JSON are `is_sqlite` False under both modes with no side file; an empty file
+  is True (the callers' size check stays); a missing file raises `OperationalError` and
+  creates nothing.
+- A store moved under the watch: §1.10 (`impl/m_leftover_wal.out`).
+
+### 11.3 Divergences from revision 2
+
+- **Idle release by a reaper, never at a call.** §3.1 step 3 released an idle watch at the
+  next call; on the same path that call then found `_closing[path] > 0` and gave `null`
+  (two refreshes, against R3), and a page that stopped polling held the store until some
+  later call. Now a call never releases a watch for idleness (its count stays valid); a
+  daemon reaper (started with the first watch, ending with the last) releases a watch
+  unused for `WATCH_IDLE_S` within `WATCH_IDLE_S / 4`.
+- **A moved store's WAL is truncated before the watch closes** (§1.10): `_close_released`
+  runs `wal_checkpoint(TRUNCATE)` when the file at the watch's path is no longer the store
+  it opened (`_moved`, `os.stat` only); a busy checkpoint leaves the WAL as SQLite does.
+  L1-5 now asserts the measured outcome (an emptied `-wal`) instead of no side file.
+- **A refresh's group fetch reaches its last shown item**: it fetches whole pages until it
+  has the items shown (plus a token's page) and, at most one page further, the last shown
+  item, so an item that sorts earlier never pushes a shown one behind "Show more", and an
+  item appended to a complete group appears (an exact-count fetch lost both).
+- **`data-loads`** on the site map (completed child-list and "Show more findings" loads,
+  stale ones included): the only observable for "a held stale answer has been handled".
+- **Identity for "Show more"'s delivered page**: the first item after the item that was
+  last when the user pressed it (`token.after`), never an index.
+
+### 11.4 Revert proofs (PA-0034(2)), against the implementation
+
+Recorded after the runs below (scratch copy of the committed tree; each mutant applied
+alone, the named tests run, the file restored).

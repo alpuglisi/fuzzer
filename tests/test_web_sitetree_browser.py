@@ -219,20 +219,13 @@ def test_status_toggle_and_run_lens_filter_the_tree(tab, site):
 def test_the_page_refreshes_when_the_store_changes(tab, site):
     page = tab.page
     tab.open(ORIGIN)
-    page.wait_for_timeout(900)                  # the first poll has taken its baseline
-    with Store(site["path"]) as s:
-        s.conn.execute("INSERT INTO endpoint (run_id, url, method) VALUES (?, "
-                       "'/zz-new/page', 'GET')", (site["a"],))
-        s.conn.commit()
-    try:
-        page.wait_for_selector('#st-tree [role="treeitem"] .st-label >> text="zz-new"',
-                               timeout=10000)
+    _baseline(page)                             # the first poll has its baseline (D8)
+    r0 = _count(page, "refreshes")
+    with _Written(site, "/zz-new/page"):        # a writer in another process (D4)
+        _reach(page, "refreshes", r0 + 1)
+        expect(tab.item("zz-new").first).to_be_attached()
         # expansion was kept across the refresh
         assert tab.item(ORIGIN).first.get_attribute("aria-expanded") == "true"
-    finally:
-        with Store(site["path"]) as s:
-            s.conn.execute("DELETE FROM endpoint WHERE url='/zz-new/page'")
-            s.conn.commit()
     assert tab.problems() == []
 
 
@@ -331,8 +324,12 @@ def test_a_double_click_on_show_more_loads_the_page_once(tab):
     assert tab.problems() == []
 
 
-def test_a_refresh_keeps_focus_selection_and_loaded_pages(tab, site):
-    """Code review A2 (FR-UI-505): the store changing refreshes in place."""
+@pytest.mark.parametrize("where", ["after", "before"])
+def test_a_refresh_keeps_focus_selection_and_loaded_pages(tab, site, where):
+    """Code review A2 (FR-UI-505): the store changing refreshes in place. The write
+    sorts after the focused item, or before it (blocker 3): focus and selection stay on
+    the same item, by identity, never on whatever now holds its position. Synchronised
+    on the page's counters (it once failed waiting 10 s for /wide/w999: DRAFT §5.6)."""
     page = tab.page
     group = _wide(tab)
     group.locator(":scope > li.st-more-item button").click()
@@ -340,21 +337,16 @@ def test_a_refresh_keeps_focus_selection_and_loaded_pages(tab, site):
     late = tab.item("w240").first
     late.locator(":scope > .st-row .st-label").click()      # select + focus on page 2
     expect(late).to_be_focused()
-    page.wait_for_timeout(900)                               # the poll has its baseline
-    with Store(site["path"]) as s:
-        s.conn.execute("INSERT INTO endpoint (run_id, url, method) VALUES (?, "
-                       "'/wide/w999', 'GET')", (site["a"],))
-        s.conn.commit()
+    ident = late.get_attribute("data-id")
+    _baseline(page)
+    w = _refreshed_by_write(tab, site, "/wide/w999" if where == "after" else "/wide/w0005")
     try:
-        expect(tab.item("w999").first).to_be_attached(timeout=10000)
         expect(group.locator(":scope > li[role=treeitem]")).to_have_count(251)
-        expect(late).to_be_focused()
+        assert _focused_item(page) == [ident, "w240"]
         assert late.get_attribute("aria-selected") == "true"
         assert tab.item("wide").first.get_attribute("aria-expanded") == "true"
     finally:
-        with Store(site["path"]) as s:
-            s.conn.execute("DELETE FROM endpoint WHERE url='/wide/w999'")
-            s.conn.commit()
+        w.__exit__(None, None, None)
     assert tab.problems() == []
 
 
@@ -398,30 +390,24 @@ def test_a_refresh_that_overtakes_an_expand_still_fills_the_node(tab, site):
             route.continue_()
     page.route("**/api/sitetree/children?*", hold_first_shop_load)
     tab.open(ORIGIN)
-    page.wait_for_timeout(900)                              # the poll has its baseline
+    _baseline(page)                                         # the poll has its baseline
     shop = tab.item("shop").first
     shop.focus()
-    page.keyboard.press("ArrowRight")                       # expand only: its load is held
+    with page.expect_request(lambda r: "/api/sitetree/children" in r.url and "shop" in r.url):
+        page.keyboard.press("ArrowRight")                   # expand only: its load is held
     expect(shop).to_have_attribute("aria-expanded", "true")
-    page.wait_for_timeout(300)
-    assert held, "the expand's own load was not held"
+    assert _until(page, lambda: held), "the expand's own load was not held"
     expect(shop.locator(":scope > ul > li[role=treeitem]")).to_have_count(0)
-    with Store(site["path"]) as s:                          # a write: the next poll refreshes
-        s.conn.execute("INSERT INTO endpoint (run_id, url, method) VALUES (?, "
-                       "'/zz-race', 'GET')", (site["a"],))
-        s.conn.commit()
-    try:
-        expect(tab.item("zz-race").first).to_be_attached(timeout=10000)
+    r0 = _count(page, "refreshes")
+    with _Written(site, "/zz-race"):                        # the next poll refreshes
+        _reach(page, "refreshes", r0 + 1)
+        expect(tab.item("zz-race").first).to_be_attached()
         expect(shop.locator(":scope > ul > li[role=treeitem]")).to_have_count(2)
-        assert held, "the expand's own load was not held"
+        loads = _count(page, "loads")
         held[0].continue_()                                 # the stale answer arrives last
-        page.wait_for_timeout(500)
+        _reach(page, "loads", loads + 1)                    # ...and has been handled
         expect(shop.locator(":scope > ul > li[role=treeitem]")).to_have_count(2)
         assert shop.get_attribute("aria-expanded") == "true"
-    finally:
-        with Store(site["path"]) as s:
-            s.conn.execute("DELETE FROM endpoint WHERE url='/zz-race'")
-            s.conn.commit()
     assert tab.problems() == []
 
 
@@ -442,35 +428,31 @@ def test_an_expand_inside_a_refresh_loads_the_node_once(tab, site):
     armed = [False]
     page.route("**/api/sitetree/children?*", hold)
     tab.open(ORIGIN)
-    page.wait_for_timeout(900)                         # the poll has its baseline
+    _baseline(page)                                    # the poll has its baseline
     armed[0] = True
-    with Store(site["path"]) as s:
-        s.conn.execute("INSERT INTO endpoint (run_id, url, method) VALUES (?, "
-                       "'/zz-r31', 'GET')", (site["a"],))
-        s.conn.commit()
+    r0 = _count(page, "refreshes")
+    with page.expect_request(lambda r: "/api/sitetree/children" in r.url
+                             and "node=" not in r.url, timeout=15000):
+        w = _Written(site, "/zz-r31").__enter__()      # the next poll's refresh starts
     try:
-        for _ in range(50):                            # until the next poll's refresh
-            if held["root"] is not None:
-                break
-            page.wait_for_timeout(200)
-        assert held["root"] is not None, "the refresh never started"
+        assert _until(page, lambda: held["root"] is not None), "the refresh never started"
         wide = tab.item("wide").first
         wide.focus()
-        page.keyboard.press("ArrowRight")              # expand during the refresh
-        page.wait_for_timeout(300)
-        assert held["wide"] is not None, "the expand's fetch was not held"
+        with page.expect_request(lambda r: "wide" in r.url):
+            page.keyboard.press("ArrowRight")          # expand during the refresh
+        assert _until(page, lambda: held["wide"] is not None), \
+            "the expand's fetch was not held"
+        loads = _count(page, "loads")
         held["root"].continue_()                       # the refresh reaches the node...
-        page.wait_for_timeout(500)
+        _reach(page, "loads", loads + 1)
         held["wide"].continue_()                       # ...then the expand's answer lands
         group = wide.locator(":scope > ul[role=group] > li[role=treeitem]")
         expect(group).to_have_count(200)
-        page.wait_for_timeout(500)
+        _reach(page, "refreshes", r0 + 1)              # the refresh is over
         ids = group.evaluate_all("els => els.map(e => e.dataset.id)")
         assert len(ids) == len(set(ids)) == 200
     finally:
-        with Store(site["path"]) as s:
-            s.conn.execute("DELETE FROM endpoint WHERE url='/zz-r31'")
-            s.conn.commit()
+        w.__exit__(None, None, None)
     assert tab.problems() == []
 
 
@@ -494,27 +476,56 @@ def _baseline(page, root: str = "#sitetree-root") -> None:
                            arg=root, timeout=15000)
 
 
+def _xsql(site, sql: str, *params) -> None:
+    """One commit by a writer in **another process** (D4: the web server runs in this
+    test's process; a scan is another process). A plain connection: no run is added."""
+    from tests._xproc import Writer
+    with Writer(site["path"]) as w:
+        w("open_plain")
+        w("sql", sql, *params)
+        w("close")
+
+
 class _Written:
-    """One endpoint written (in the server's process: another connection) and undone."""
+    """One endpoint written by another process, and undone by another process."""
 
     def __init__(self, site, url):
         self.site, self.url = site, url
 
     def __enter__(self):
-        with Store(self.site["path"]) as s:
-            s.conn.execute("INSERT INTO endpoint (run_id, url, method) VALUES (?,?, 'GET')",
-                           (self.site["a"], self.url))
-            s.conn.commit()
+        _xsql(self.site, "INSERT INTO endpoint (run_id, url, method) VALUES (?,?, 'GET')",
+              self.site["a"], self.url)
         return self
 
     def __exit__(self, *exc):
-        with Store(self.site["path"]) as s:
-            s.conn.execute("DELETE FROM endpoint WHERE url=?", (self.url,))
-            s.conn.commit()
+        _xsql(self.site, "DELETE FROM endpoint WHERE url=?", self.url)
+
+
+class _Finding:
+    """One newer finding under /shop/item.php's `id` (it sorts first: newest first)."""
+
+    def __init__(self, site):
+        self.site = site
+
+    def __enter__(self):
+        _xsql(self.site, "INSERT INTO finding (run_id, vuln_class, label, confidence, "
+              "evidence, url, method, param) VALUES (?, 'sqli', 1, 'zz-newest', '{}', "
+              "'/shop/item.php', 'GET', 'id')", self.site["a"])
+        return self
+
+    def __exit__(self, *exc):
+        _xsql(self.site, "DELETE FROM finding WHERE confidence='zz-newest'")
+
+
+def _focused_item(page) -> list:
+    """The focused tree item's identity: ``[data-id, label]``."""
+    return page.evaluate("() => { const a = document.activeElement; return [a.dataset.id, "
+                         "(a.querySelector(':scope > .st-row .st-label') || {}).textContent]; }")
 
 
 def _refreshed_by_write(tab, site, url):
-    """Write ``url``, wait for the page's next refresh to show it; returns the write."""
+    """Write ``url`` (another process), wait for the page's next refresh to show it;
+    returns the write, to be undone."""
     r0 = _count(tab.page, "refreshes")
     w = _Written(site, url).__enter__()
     try:
@@ -526,19 +537,22 @@ def _refreshed_by_write(tab, site, url):
     return w
 
 
-def test_a_refresh_keeps_focus_on_show_more_and_enter_still_loads_the_page(tab, site):
+@pytest.mark.parametrize("where", ["after", "before"])
+def test_a_refresh_keeps_focus_on_show_more_and_enter_still_loads_the_page(tab, site, where):
     """E3 (p2): a refresh between focusing "Show more" and pressing Enter replaced the
-    button; focus fell to <body> and Enter loaded nothing (200 of 250)."""
+    button; focus fell to <body> and Enter loaded nothing (200 of 250). The write sorts
+    after the group, or before it among its siblings (blocker 3): the button keeps focus
+    by identity, and the page's first item (w200) gets it, by identity."""
     page = tab.page
     group = _wide(tab)
     _baseline(page)
     group.locator(":scope > li.st-more-item button").focus()
-    w = _refreshed_by_write(tab, site, "/zz-b1")
+    w = _refreshed_by_write(tab, site, "/zz-b1" if where == "after" else "/aa-b1")
     try:
         expect(group.locator(":scope > li.st-more-item button")).to_be_focused()
         page.keyboard.press("Enter")
         expect(group.locator(":scope > li[role=treeitem]")).to_have_count(250)
-        expect(group.locator(":scope > li[role=treeitem]").nth(200)).to_be_focused()
+        assert _focused_item(page)[1] == "w200"
     finally:
         w.__exit__(None, None, None)
     assert tab.problems() == []
@@ -567,9 +581,12 @@ def _hold(page, want):
     return held
 
 
-def test_a_refresh_during_a_show_more_load_still_delivers_that_page(tab, site):
+@pytest.mark.parametrize("where", ["after", "before"])
+def test_a_refresh_during_a_show_more_load_still_delivers_that_page(tab, site, where):
     """E4 (p3), one order: the user's page is in flight when a refresh starts. The
-    refresh dropped it as stale: 200 items, focus on <body>."""
+    refresh dropped it as stale: 200 items, focus on <body>. The write sorts after the
+    group, or inside it before the page (blocker 3): the page's first item (w200) gets
+    focus by identity."""
     page = tab.page
     group = _wide(tab)
     _baseline(page)
@@ -578,31 +595,37 @@ def test_a_refresh_during_a_show_more_load_still_delivers_that_page(tab, site):
     with page.expect_request(lambda r: "wide" in r.url and "after=" in r.url):
         page.keyboard.press("Enter")                       # the user's page: held
     assert _until(page, lambda: held), "the user's page load was not held"
-    w = _refreshed_by_write(tab, site, "/zz-b2")
+    w = _refreshed_by_write(tab, site, "/zz-b2" if where == "after" else "/wide/w0005")
+    n = 250 if where == "after" else 251
     try:
         held[0].continue_()                                # the stale answer lands last
-        expect(group.locator(":scope > li[role=treeitem]")).to_have_count(250)
-        expect(group.locator(":scope > li[role=treeitem]").nth(200)).to_be_focused()
+        expect(group.locator(":scope > li[role=treeitem]")).to_have_count(n)
+        assert _focused_item(page)[1] == "w200"
         ids = group.locator(":scope > li[role=treeitem]").evaluate_all(
             "els => els.map(e => e.dataset.id)")
-        assert len(ids) == len(set(ids)) == 250
+        assert len(ids) == len(set(ids)) == n
         assert group.locator(":scope > li.st-more-item").count() == 0
     finally:
         w.__exit__(None, None, None)
     assert tab.problems() == []
 
 
-def test_show_more_pressed_while_a_refresh_loads_its_group_is_kept(tab, site):
+@pytest.mark.parametrize("where", ["after", "before"])
+def test_show_more_pressed_while_a_refresh_loads_its_group_is_kept(tab, site, where):
     """E4, the other order (D6): the refresh's fetch of the group is in flight when the
-    user presses "Show more"; the refresh must neither drop nor duplicate that page."""
+    user presses "Show more"; the refresh must neither drop nor duplicate that page. The
+    write sorts after the group or inside it before the page (blocker 3): focus stays on
+    the page's first item (w200), by identity."""
     page = tab.page
     group = _wide(tab)
     _baseline(page)
     held = _hold(page, lambda u: "wide" in u and "after=" not in u)
     r0 = _count(page, "refreshes")
+    url = "/zz-b2b" if where == "after" else "/wide/w0005"
+    n = 250 if where == "after" else 251
     with page.expect_request(lambda r: "wide" in r.url and "after=" not in r.url,
                              timeout=15000):
-        w = _Written(site, "/zz-b2b").__enter__()          # the next poll refreshes
+        w = _Written(site, url).__enter__()                # the next poll refreshes
     try:
         assert _until(page, lambda: held), "the refresh's fetch of the group was not held"
         group.locator(":scope > li.st-more-item button").focus()
@@ -610,12 +633,12 @@ def test_show_more_pressed_while_a_refresh_loads_its_group_is_kept(tab, site):
         expect(group.locator(":scope > li[role=treeitem]")).to_have_count(250)
         held[0].continue_()                                # the refresh's answer lands
         _reach(page, "refreshes", r0 + 1)
-        expect(tab.item("zz-b2b").first).to_be_attached()
+        expect(tab.item(url.rsplit("/", 1)[-1]).first).to_be_attached()
         items = group.locator(":scope > li[role=treeitem]")
-        expect(items).to_have_count(250)
+        expect(items).to_have_count(n)
         ids = items.evaluate_all("els => els.map(e => e.dataset.id)")
-        assert len(ids) == len(set(ids)) == 250
-        expect(items.nth(200)).to_be_focused()
+        assert len(ids) == len(set(ids)) == n
+        assert _focused_item(page)[1] == "w200"
     finally:
         w.__exit__(None, None, None)
     assert tab.problems() == []
@@ -628,28 +651,33 @@ def test_a_refresh_that_ends_a_groups_paging_keeps_focus_in_the_tree(tab, site):
     group = _wide(tab)
     _baseline(page)
     group.locator(":scope > li.st-more-item button").focus()
-    gone = [f"/wide/w{i:03d}" for i in range(190, 250)]
     r0 = _count(page, "refreshes")
-    with Store(site["path"]) as s:
-        s.conn.executemany("DELETE FROM endpoint WHERE url=?", [(u,) for u in gone])
-        s.conn.commit()
+    _xsql(site, "DELETE FROM endpoint WHERE url BETWEEN '/wide/w190' AND '/wide/w249'")
     try:
         _reach(page, "refreshes", r0 + 1)
         expect(group.locator(":scope > li[role=treeitem]")).to_have_count(190)
         expect(group.locator(":scope > li.st-more-item")).to_have_count(0)
-        expect(group.locator(":scope > li[role=treeitem]").last).to_be_focused()
+        assert _focused_item(page)[1] == "w189"            # the group's last item
     finally:
-        with Store(site["path"]) as s:
-            s.conn.executemany("INSERT INTO endpoint (run_id, url, method) VALUES "
-                               "(?,?, 'GET')", [(site["a"], u) for u in gone])
-            s.conn.commit()
+        _xsql(site, "WITH RECURSIVE n(i) AS (SELECT 190 UNION ALL SELECT i + 1 FROM n "
+              "WHERE i < 249) INSERT INTO endpoint (run_id, url, method) "
+              "SELECT ?, printf('/wide/w%03d', i), 'GET' FROM n", site["a"])
     assert tab.problems() == []
 
 
+_ROW_FOCUS = """() => { const a = document.activeElement;
+  return [a === window.__focused, a.tagName, a.getAttribute('href') || a.getAttribute('aria-label'),
+          a.closest('li[role=treeitem]').dataset.id]; }"""
+
+
+@pytest.mark.parametrize("where", ["after", "before"])
 @pytest.mark.parametrize("control", ["findings count", "open link"])
-def test_a_refresh_keeps_focus_on_a_control_inside_a_row(tab, site, control):
+def test_a_refresh_keeps_focus_on_a_control_inside_a_row(tab, site, control, where):
     """E5 (p4): a refresh rebuilt the row and dropped focus from its control to <body>.
-    The focused control is updated in place: the same element keeps focus."""
+    The focused control is updated in place: the same element keeps focus. The write
+    sorts after the row, or before it (blocker 3: a sibling before "shop"; a newer
+    finding, listed first, before the focused one): the same node, the same href or
+    label, in the same item."""
     page = tab.page
     if control == "findings count":
         tab.open(ORIGIN)
@@ -659,12 +687,25 @@ def test_a_refresh_keeps_focus_on_a_control_inside_a_row(tab, site, control):
         target = tab.item("id · query").first.locator(
             ":scope > ul > li.st-finding > .st-row .st-open").first
     _baseline(page)
+    findings = tab.item("id · query").first.locator(":scope > ul > li.st-finding")
+    shown = findings.count()
     target.focus()
     page.evaluate("() => { window.__focused = document.activeElement; }")
-    w = _refreshed_by_write(tab, site, "/zz-b4")
+    before = page.evaluate(_ROW_FOCUS)
+    if where == "after":
+        w = _refreshed_by_write(tab, site, "/zz-b4")
+    elif control == "findings count":
+        w = _refreshed_by_write(tab, site, "/aa-b4")
+    else:
+        r0 = _count(page, "refreshes")
+        w = _Finding(site).__enter__()
+        _reach(page, "refreshes", r0 + 1)
     try:
-        assert page.evaluate("() => document.activeElement === window.__focused"), \
-            page.evaluate("() => document.activeElement.tagName")
+        if where == "before" and control == "open link":    # the newer finding is first
+            expect(findings).to_have_count(shown + 1)
+            assert findings.first.locator(".st-open").get_attribute("href") != before[2]
+        after = page.evaluate(_ROW_FOCUS)
+        assert after == before and after[0], (before, after)
     finally:
         w.__exit__(None, None, None)
     assert tab.problems() == []
@@ -679,9 +720,12 @@ def _issues_60(tab):
     return rows
 
 
-def test_a_refresh_keeps_the_issues_pages_and_the_focused_finding(tab, site):
+@pytest.mark.parametrize("where", ["after", "before"])
+def test_a_refresh_keeps_the_issues_pages_and_the_focused_finding(tab, site, where):
     """E5 (p5): a refresh re-rendered Issues from its first page (60 rows back to 50) and
-    dropped the focused finding link to <body>."""
+    dropped the focused finding link to <body>. The write is an endpoint (no new row),
+    or a newer finding, listed first, before the focused one (blocker 3): every row shown
+    stays, and focus stays on the same finding, by its href."""
     page = tab.page
     rows = _issues_60(tab)
     page.click("#st-issues-more")
@@ -690,10 +734,19 @@ def test_a_refresh_keeps_the_issues_pages_and_the_focused_finding(tab, site):
     link = rows.nth(55).locator("a")
     key = link.get_attribute("href")
     link.focus()
-    w = _refreshed_by_write(tab, site, "/zz-b5")
+    if where == "after":
+        w = _refreshed_by_write(tab, site, "/zz-b5")
+    else:
+        r0 = _count(page, "refreshes")
+        w = _Finding(site).__enter__()
+        _reach(page, "refreshes", r0 + 1)
     try:
-        expect(rows).to_have_count(60)
+        expect(rows).to_have_count(60 if where == "after" else 61)
         expect(page.locator(f'#st-issues-table a[href="{key}"]')).to_be_focused()
+        assert page.evaluate("() => document.activeElement.getAttribute('href')") == key
+        if where == "before":                               # the newer one is first
+            assert rows.nth(0).locator("a").get_attribute("href") != key
+            assert rows.nth(56).locator("a").get_attribute("href") == key
     finally:
         w.__exit__(None, None, None)
     assert tab.problems() == []
@@ -723,6 +776,40 @@ def test_show_more_findings_pressed_while_a_refresh_loads_issues_is_kept(tab, si
         expect(rows).to_have_count(60)
         held[0].continue_()
         _reach(page, "refreshes", r0 + 1)
+        expect(rows).to_have_count(60)
+        hrefs = rows.locator("a").evaluate_all("els => els.map(e => e.getAttribute('href'))")
+        assert len(hrefs) == len(set(hrefs)) == 60
+    finally:
+        w.__exit__(None, None, None)
+    assert tab.problems() == []
+
+
+def test_a_refresh_during_a_show_more_findings_load_still_delivers_that_page(tab, site):
+    """E5, the click-first order (D6; B5b is the other): the user's "Show more findings"
+    is in flight when a refresh starts and re-reads Issues. The refresh must deliver that
+    page (60, never 50) exactly once, whichever answer lands last."""
+    page = tab.page
+    rows = _issues_60(tab)
+    _baseline(page)
+    held = []
+
+    def route(r):
+        if not held and "before=" in r.request.url:
+            held.append(r)                                 # the user's page: held
+        else:
+            r.continue_()
+    page.route("**/api/sitetree/node?*", route)
+    with page.expect_request(lambda r: "/api/sitetree/node" in r.url and "before=" in r.url):
+        page.click("#st-issues-more")
+    assert _until(page, lambda: held), "the user's page was not held"
+    r0 = _count(page, "refreshes")
+    w = _Written(site, "/zz-b5c").__enter__()
+    try:
+        _reach(page, "refreshes", r0 + 1)                  # the refresh delivered the page
+        expect(rows).to_have_count(60)
+        loads = _count(page, "loads")
+        held[0].continue_()                                # the user's answer lands last
+        _reach(page, "loads", loads + 1)                   # ...and has been handled
         expect(rows).to_have_count(60)
         hrefs = rows.locator("a").evaluate_all("els => els.map(e => e.getAttribute('href'))")
         assert len(hrefs) == len(set(hrefs)) == 60
@@ -765,8 +852,9 @@ def test_every_focusable_control_in_the_site_maps_live_regions_has_a_focus_key(t
 
 
 def test_a_checkpoint_with_no_write_never_refreshes_the_page(tab, site):
-    """E1 in the real app (p7): frames a writer left in the WAL are folded by a reader's
-    last close after the page's baseline; no commit happened, so nothing refreshes."""
+    """E1 in the real app (p7): frames a writer (another process, D4) left in the WAL are
+    folded by a reader's last close after the page's baseline; no commit happened, so
+    nothing refreshes."""
     from fuzzlab.web.projects import open_reader
     page = tab.page
     roots = []
@@ -775,7 +863,7 @@ def test_a_checkpoint_with_no_write_never_refreshes_the_page(tab, site):
     reader = open_reader(str(site["path"]))
     try:
         reader.conn.execute("SELECT count(*) FROM endpoint").fetchall()
-        with _Written(site, "/zz-l1b"):
+        with _Written(site, "/zz-l1b"):                    # two commits by another process
             pass                                           # content as before; frames stay
         page.reload()
         page.wait_for_selector('#sitetree-root[data-ready="1"] [role="treeitem"]')
@@ -787,3 +875,151 @@ def test_a_checkpoint_with_no_write_never_refreshes_the_page(tab, site):
     assert _count(page, "refreshes") == refreshes
     assert len(roots) == base
     assert tab.problems() == []
+
+
+# --- B9 (D7): focus counts only where it lands, ends at the pane, never scrolls ----------
+
+_B9_HELPER = """async () => {
+  const lf = await import("/static/js/livefocus.js");
+  const mk = (tag, text) => { const e = document.createElement(tag); e.textContent = text; return e; };
+  const out = {};
+  const pane = mk("div", "");
+  pane.tabIndex = -1;
+  document.querySelector("#sitetree-root").append(pane);
+  // 1. the keyed control comes back disabled; then a hidden, a detached and a visible but
+  //    unfocusable candidate, and a function finding nothing: each refuses focus
+  let first = mk("button", "first");
+  first.dataset.focusKey = "k";
+  pane.append(first);
+  first.focus();
+  const key = lf.focusKeyIn(pane);
+  pane.replaceChildren();
+  const disabled = mk("button", "disabled");
+  disabled.dataset.focusKey = "k";
+  disabled.disabled = true;
+  const box = mk("div", "");
+  box.hidden = true;
+  const hidden = mk("button", "hidden");
+  box.append(hidden);
+  const detached = mk("button", "detached");
+  const inert = mk("div", "visible but unfocusable");
+  const spacer = mk("div", "");
+  spacer.style.height = "4000px";                  // CSSOM, allowed by the page's CSP
+  const visible = mk("button", "visible");
+  pane.append(disabled, box, inert, spacer, visible);
+  window.scrollTo(0, 0);
+  out.key = key;
+  out.lostToBody = document.activeElement === document.body;
+  let got = lf.restoreFocus(pane, key, hidden, detached, inert, () => null, visible);
+  out.landed = got === visible && document.activeElement === visible;
+  out.scrollY = window.scrollY;                     // preventScroll: 4000 px down, unscrolled
+  // 2. nothing usable is left: the pane itself, never the body
+  pane.replaceChildren(mk("button", "second"));
+  pane.firstChild.dataset.focusKey = "k2";
+  pane.firstChild.focus();
+  const key2 = lf.focusKeyIn(pane);
+  pane.replaceChildren(box);
+  got = lf.restoreFocus(pane, key2, hidden, detached, () => null);
+  out.pane = got === pane && document.activeElement === pane;
+  // 3. focus outside the region is never taken; focus still inside it is never moved
+  const outside = document.querySelector("#st-q");
+  outside.focus();
+  out.notStolen = lf.restoreFocus(pane, lf.focusKeyIn(pane), visible) === null
+    && document.activeElement === outside;
+  pane.replaceChildren(visible);
+  visible.focus();
+  const other = mk("button", "other");
+  pane.append(other);
+  out.kept = lf.restoreFocus(pane, "k", other) === visible && document.activeElement === visible;
+  pane.remove();
+  return out;
+}"""
+
+
+def test_restore_focus_skips_every_candidate_that_refuses_focus_and_ends_at_the_pane(tab):
+    """B9, the helper (D7): a candidate counts only where focus actually landed. A
+    disabled keyed control, a hidden, a detached and a visible-but-unfocusable fallback
+    and a function finding nothing are each skipped, and a visible fallback takes focus
+    without scrolling (preventScroll: 4000 px below the viewport). With nothing usable
+    left, the region's pane takes it -- never the page body. Focus outside the region is
+    never taken, and focus still inside it is never moved."""
+    out = tab.page.evaluate(_B9_HELPER)
+    assert out == {"key": "k", "lostToBody": True, "landed": True, "scrollY": 0,
+                   "pane": True, "notStolen": True, "kept": True}, out
+    assert tab.problems() == []
+
+
+def test_a_refresh_that_removes_the_focused_item_never_scrolls_nor_drops_to_the_body(tab,
+                                                                                    site):
+    """B9, in a real refresh (D7): the focused item is deleted (another process); focus
+    goes to its parent item, which is scrolled out of the tree pane's view, and the pane
+    does not scroll (preventScroll). Then, with a run lens showing one host, that host's
+    rows are deleted: the tree is empty and focus ends at the tree's pane, never <body>."""
+    page = tab.page
+    group = _wide(tab)
+    _baseline(page)
+    pane = page.locator(".st-tree-pane")
+    pane.evaluate("e => { e.style.overflowAnchor = 'none'; }")  # no scroll anchoring
+    w150 = tab.item("w150").first
+    w150.scroll_into_view_if_needed()
+    w150.focus()                                            # focus only: no select, no expand
+    expect(w150).to_be_focused()
+    top = pane.evaluate("e => e.scrollTop")
+    wide_row = tab.item("wide").first.locator(":scope > .st-row")
+    assert top > 0 and wide_row.evaluate(
+        "(row, pane) => row.getBoundingClientRect().bottom < pane.getBoundingClientRect().top",
+        pane.element_handle()), "the parent item is in view: the case proves nothing"
+    r0 = _count(page, "refreshes")
+    _xsql(site, "DELETE FROM endpoint WHERE url='/wide/w150'")
+    try:
+        _reach(page, "refreshes", r0 + 1)
+        expect(group.locator(":scope > li[role=treeitem]")).to_have_count(200)
+        assert _focused_item(page)[1] == "wide"
+        assert pane.evaluate("e => e.scrollTop") == top
+    finally:
+        _xsql(site, "INSERT INTO endpoint (run_id, url, method) VALUES (?, '/wide/w150', "
+              "'GET')", site["a"])
+    page.select_option("#st-run", str(site["b"]))           # one host: run b's
+    hosts = page.locator('#st-tree > li[role="treeitem"]')
+    expect(hosts).to_have_count(1)
+    hosts.first.focus()
+    r0 = _count(page, "refreshes")
+    _xsql(site, "DELETE FROM endpoint WHERE run_id=?", site["b"])
+    try:
+        _reach(page, "refreshes", r0 + 1)
+        expect(hosts).to_have_count(0)
+        assert page.evaluate("() => document.activeElement.id") == "st-tree"
+    finally:
+        _xsql(site, "INSERT INTO endpoint (run_id, url, method) VALUES (?, '/crawl/only', "
+              "'GET')", site["b"])
+    assert tab.problems() == []
+
+
+def test_a_refresh_whose_group_fetch_fails_is_retried_at_the_next_poll(tab, site):
+    """FR-UI-505 (blocker 6): a version is marked seen only once its refresh succeeded.
+    The refresh's fetch of an expanded group fails once (an injected 500): the page keeps
+    the old version, and a later poll's refresh shows the write. Before, the poll
+    recorded the version first and the failed group was never re-read."""
+    page = tab.page
+    _wide(tab)
+    _baseline(page)
+    failed = []
+
+    def route(r):
+        if not failed and "wide" in r.request.url and "after=" not in r.request.url:
+            failed.append(r.request.url)
+            r.fulfill(status=500, content_type="application/json",
+                      body='{"error": "injected"}')
+        else:
+            r.continue_()
+    page.route("**/api/sitetree/children?*", route)
+    r0 = _count(page, "refreshes")
+    w = _Written(site, "/wide/w0005").__enter__()
+    try:
+        _reach(page, "refreshes", r0 + 1)
+        assert failed, "the group's fetch never failed: the case proves nothing"
+        expect(tab.item("w0005").first).to_be_attached()
+        assert _count(page, "refreshes") == r0 + 1
+    finally:
+        w.__exit__(None, None, None)
+    assert [p for p in tab.problems() if "status of 500" not in p] == []

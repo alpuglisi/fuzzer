@@ -60,6 +60,7 @@ from fuzzlab.core import project as core_project
 from fuzzlab.core.config import Config
 from fuzzlab.core.project import BACKUPS_DIRNAME, PROJECT_EXT, ProjectError, sidecar_dir
 from fuzzlab.core.store import LAUNCH_TOKEN_ENV, Store
+from fuzzlab.web import sitetree
 
 try:                                                # POSIX only
     import fcntl
@@ -946,9 +947,12 @@ class ProjectManager:
     def _leave(self, discard_temporary: bool = False) -> list[str]:
         """Close the open project (the lock is held). A temporary one is deleted when
         ``discard_temporary`` (the caller checked the operator said so); ``current`` is
-        cleared **before** any file is removed, so no reader is handed a vanishing path."""
+        cleared **before** any file is removed, so no reader is handed a vanishing path,
+        and the site map's store watch is released (and closed) after that and before any
+        file is removed, so no descriptor of this process holds them (CC-UI-0068, D3)."""
         cur = self.current
         self.current = None
+        sitetree.release_watches()
         if cur is None or cur.kind != "temporary":
             return []
         try:                     # the owner lock is held until the files are gone

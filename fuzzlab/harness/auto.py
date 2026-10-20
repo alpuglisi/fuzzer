@@ -519,13 +519,14 @@ def header_point_estimate(spider_db, names) -> tuple[int, int]:
     store is opened (PA-0079)."""
     import sqlite3
     from pathlib import Path
-    from urllib.parse import quote
 
+    from fuzzlab.core.store import open_read_only
     from fuzzlab.core.urls import destructive_reason, to_path
     path = Path(spider_db)
     if not path.exists():
         return 0, 0
-    conn = sqlite3.connect(f"file:{quote(str(path.resolve()))}?mode=ro", uri=True)
+    # the one read-only opener (FR-CORE-508, CC-FUZZ-0108): never creates or writes it
+    conn = open_read_only(path, timeout=5.0)
     try:
         rows = conn.execute("SELECT url, status_code FROM discovered_pages").fetchall()
     except sqlite3.Error:

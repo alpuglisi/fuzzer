@@ -3,6 +3,93 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0068 — The store version is SQLite's change counter on one held read-only connection; a live refresh keeps the user's place (FR-UI-505, FR-UI-510, FR-UI-514, BUG-0534, BUG-0535) (2026-10-20)
+- Placement: pre-assigned to AU-SITETREE. Design record: `DRAFT-AU-SITETREE.md`
+  (revision 2, its confirming review's six blockers fixed in §11). Depends on
+  CC-CORE-0071 (no raw open of a store file in the web process): the held watch is unsafe
+  without it (§1.4 X3).
+- Change:
+  - **`fuzzlab/web/sitetree.py`**: `store_version(path)` is `PRAGMA data_version` on one
+    held `core.store.open_read_only` connection (query-only, private cache,
+    `fold_on_close`, `any_thread`) on the store last asked about, hashed with the
+    process nonce, the store's device and inode, a reopen epoch and the count (SP-58).
+    `path` may be a callable, called under `_watch_lock`. One watch; released (moved out
+    under the lock, closed outside it, `_closing` dropping back in a `finally`) on
+    another path or `None`, an identity change of the store, `-wal` or `-shm`, a failed
+    read (named swallows: `OperationalError` and exactly `DatabaseError`, PA-0106), a
+    reaper thread's idle release (60 s unused), `release_watches()`. No new watch opens on
+    a path while its predecessor closes (X3b). A watch whose store moved (removed,
+    renamed away, replaced) runs `wal_checkpoint(TRUNCATE)` before its close (§1.10).
+    `MAX_POLL_MS` (30 s). The old file-stat body and its raw `-wal` read are gone.
+  - **`fuzzlab/web/sitetree_routes.py`**: the version and children routes pass the
+    `store_path` callable.
+  - **`fuzzlab/web/projects.py`**: `ProjectManager._leave` calls
+    `sitetree.release_watches()` after `current = None`, before any file is removed.
+  - **`fuzzlab/web/app.py`**: the lifespan releases the watch at shutdown; both poll
+    intervals clamped to `sitetree.MAX_POLL_MS`.
+  - **`fuzzlab/web/static/js/livefocus.js`** (new): `focusKeyIn`, `restoreFocus`
+    (verified landing, visible fallbacks ending at the pane, `preventScroll`, never takes
+    focus from outside its region), `rerender`, `patchInPlace`.
+  - **`fuzzlab/web/static/js/sitetree.js`**: focus keys (`item:`, `count:`, `open:`,
+    `more:`, `issue:`, `issues-more`); "Show more" reused in place; one ordering rule (a
+    token before the fetch, read by a refresh before and after its own) for "Show more"
+    and "Show more findings"; a refresh fetches the pages a group shows down to its last
+    shown item; focused rows patched in place; Issues kept on refresh (`showNode({keep})`,
+    de-duplicated by id) and awaited by `refresh()`; a version is marked seen only once
+    its refresh succeeded; one poll at a time; the baseline taken before the first read;
+    counters `data-baseline`, `data-polls`, `data-refreshes`, `data-loads`.
+  - **`fuzzlab/web/static/js/diagrams.js`**: focus keys (`origin:`, `iface:`, `export:`,
+    `step:` derived beyond the evidence key, `#n` among identical steps); every region
+    re-rendered through `rerender`; the poll skips a hidden page; a version is marked
+    seen only once its reload succeeded; counters.
+  - **Templates**: `tabindex="-1"` on `#st-tree`, `#dg-flow`, `#dg-ifaces`, `#dg-seq`,
+    `#dg-exports`; `data-focus-key="issues-more"`.
+  - **`web/diagram_routes.py`**: docstring only.
+  - **Tests**: `tests/_xproc.py` (a writer in another process); `tests/_store_audit.py`
+    (the run-time audit hook) and `tests/conftest.py` (`_store_audit_hook`,
+    `_no_raw_store_open`, `_release_store_watches`); `tests/test_web_sitetree.py`
+    (L1-1..L1-15 and the moved-store test; L1-5 and L1-7 with the writer in another
+    process); `tests/test_web_projects.py` (L1-13, L1-14);
+    `tests/test_web_store_locks.py` (K1-K6, the audit hook's proofs);
+    `tests/test_web_sitetree_browser.py` (B1-B6, B9, L1-B, the retry, the Issues
+    click-first order; "before" writes; the four sleep-synchronised tests on counters);
+    `tests/test_web_diagrams.py` (B7 with "before" writes and identity, B8);
+    `tests/test_web_live_focus.py` (G1-G3).
+- Divergences from the draft found while implementing (recorded in the draft's §11):
+  idle release by a reaper thread, never at a call (a call's release on the same path
+  gave two refreshes, against R3, and a page that stopped polling held the store for
+  ever); the moved-store checkpoint (measured: data loss and a wrong store without it);
+  a refresh's group fetch reaches its last shown item (an exact-count fetch hid an item
+  appended to a complete group); `data-loads`.
+- Impact:
+  - The web UI, plus CORE's opener (CC-CORE-0071). No schema or API-shape change:
+    `{"version": str | null}` stays opaque.
+  - Consumers of `store_version`, from the code (PA-0152): `/api/sitetree/version`
+    (`sitetree.js`, `diagrams.js`), `sitetree_children` (the cache key, G11),
+    `ProjectManager._leave` and the lifespan (releases), `tests/test_web_sitetree_scale.py`.
+  - The server holds one read-only connection while a page watches the store
+    (NFR-UI-live amended; R4, R10) and one daemon reaper thread while it does. It
+    reverses CC-UI-0500's "a fingerprint with no SQLite at all".
+- Risk: **medium-high**: a held resource in a multi-threaded server whose correctness
+  depends on a process-wide invariant (no raw open). Mitigated by the static guard over
+  the whole web import closure and the run-time audit hook (PA-0535), the cross-process
+  regression tests (K1-K4, L1-*), the identity re-check (a partial defence, X3b), one
+  watch only, release before removal, the moved-store checkpoint, named swallows,
+  query-only and no-create, the lock with its AST guard and a many-thread test
+  (PA-0023's third pattern), and real-browser tests under `FUZZLAB_REQUIRE_BROWSER=1`.
+  Rollback: the old function body and the JS files (re-opens BUG-0534).
+- Deliverables:
+  - [x] measurements: rev 1, rev 2 and implementation (§1.10, the moved store) — done
+  - [x] failing tests committed and run on `7ebf48a` (§5.5) — done
+  - [x] the confirming review's six blockers and notes (§11) — done
+  - [x] `store_version`, `release_watches`, the reaper, the routes, `_leave`, the lifespan, the clamps — done
+  - [x] `livefocus.js`; `sitetree.js`; `diagrams.js`; templates — done
+  - [x] L1-6, L1-8, L1-9, L1-15, B9, the autouse fixtures; every named revert re-proved (§11.4) — done
+  - [x] FR-UI-505, FR-UI-510 edited; FR-UI-514 added; NFR-UI-live, NFR-UI-read-only amended — done
+  - [x] BUG-0534; texts for PA-0534, SP-58, ERROR_LOG, CHANGELOG, ARCHITECTURE to the coordinator — done
+  - [ ] `scripts/verify_change.py --base 4ee8007` on the committed tree; counts quoted — in-progress
+- Effectiveness: pending (the harness run on the committed tree).
+
 ### CC-UI-0066 — A run that does not decide its candidate is drawn as such and not counted as evaluated (FR-UI-510/511, BUG-0523) (2026-10-19)
 - Change (`fuzzlab/report/diagram.py`):
   - `_test_sequence` draws a `test.strategy` with `decides: false` as "<arm>: <outcome>

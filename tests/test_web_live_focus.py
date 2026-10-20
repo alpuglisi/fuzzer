@@ -36,10 +36,19 @@ LIVE_VIEWS: dict[str, tuple[str, ...] | tuple[str, str]] = {
         "tests/test_web_sitetree_browser.py::test_show_more_findings_pressed_while_a_refresh_loads_issues_is_kept",
         "tests/test_web_sitetree_browser.py::test_every_focusable_control_in_the_site_maps_live_regions_has_a_focus_key",
         "tests/test_web_sitetree_browser.py::test_a_refresh_keeps_focus_selection_and_loaded_pages",
+        "tests/test_web_sitetree_browser.py::test_a_refresh_during_a_show_more_findings_load_still_delivers_that_page",
+        "tests/test_web_sitetree_browser.py::test_restore_focus_skips_every_candidate_that_refuses_focus_and_ends_at_the_pane",
+        "tests/test_web_sitetree_browser.py::test_a_refresh_that_removes_the_focused_item_never_scrolls_nor_drops_to_the_body",
+        "tests/test_web_sitetree_browser.py::test_a_refresh_whose_group_fetch_fails_is_retried_at_the_next_poll",
+        "tests/test_web_sitetree_browser.py::test_the_page_refreshes_when_the_store_changes",
+        "tests/test_web_sitetree_browser.py::test_a_refresh_that_overtakes_an_expand_still_fills_the_node",
+        "tests/test_web_sitetree_browser.py::test_an_expand_inside_a_refresh_loads_the_node_once",
+        "tests/test_web_sitetree_browser.py::test_a_checkpoint_with_no_write_never_refreshes_the_page",
     ),
     "diagrams.js": (
         "tests/test_web_diagrams.py::test_a_live_refresh_keeps_focus_on_every_kind_of_control",
         "tests/test_web_diagrams.py::test_every_focusable_control_in_the_diagrams_live_regions_has_a_focus_key",
+        "tests/test_web_diagrams.py::test_the_page_renders_labels_as_text_navigates_evidence_and_updates_live",
     ),
     "proxy.js": ("exempt", "its 1.2 s poll re-renders the pending-flow rows, which hold no "
                            "focusable control (no tabindex, link or button); the editor "
@@ -137,3 +146,49 @@ def test_every_live_view_restores_focus_through_the_one_helper():
 ])
 def test_the_one_helper_guard_tells_a_definition_from_a_use(src, defines):
     assert bool(_DEFINES.search(src)) is defines
+
+
+_SLEEPS = {"wait_for_timeout", "sleep"}
+
+
+def sleeping_tests(views: dict, repo: Path = REPO) -> list[str]:
+    """Registered real-browser focus tests that synchronise by sleeping (a Playwright
+    `wait_for_timeout`, a `time.sleep`) instead of the page's counters (D8)."""
+    out = []
+    for entry in views.values():
+        if not entry or entry[0] == "exempt":
+            continue
+        for node in entry:
+            rel, _sep, name = node.partition("::")
+            tree = ast.parse((repo / rel).read_text("utf-8"))
+            for fn in ast.walk(tree):
+                if isinstance(fn, ast.FunctionDef) and fn.name == name:
+                    for n in ast.walk(fn):
+                        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) \
+                                and n.func.attr in _SLEEPS:
+                            out.append(f"{node}: {n.func.attr}() at line {n.lineno}")
+    return sorted(set(out))
+
+
+def test_no_registered_live_view_test_synchronises_by_sleeping():
+    """G4 (D8, PA-0534(3)): a live view's focus tests wait on the page's own counters
+    (`data-baseline`, `data-polls`, `data-refreshes`, `data-loads`), never on a sleep.
+    A 900 ms "the poll has its baseline" sleep stood behind one failure (DRAFT §5.6)."""
+    assert sleeping_tests(LIVE_VIEWS) == []
+
+
+def test_the_sleep_guard_catches_a_synthetic_offender(tmp_path):
+    """PA-0034(2): a `wait_for_timeout` and a `time.sleep` in a registered test are found;
+    a counter wait and an unregistered test's sleep are not."""
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_x.py").write_text(
+        "import time\n"
+        "def test_sleeps(page):\n    page.wait_for_timeout(900)\n    time.sleep(1)\n"
+        "def test_counts(page):\n    page.wait_for_function('() => 1')\n"
+        "def test_unregistered(page):\n    page.wait_for_timeout(500)\n")
+    views = {"a.js": ("tests/test_x.py::test_sleeps", "tests/test_x.py::test_counts"),
+             "b.js": ("exempt", "a reason long enough to be one")}
+    assert sleeping_tests(views, tmp_path) == [
+        "tests/test_x.py::test_sleeps: sleep() at line 4",
+        "tests/test_x.py::test_sleeps: wait_for_timeout() at line 3"]

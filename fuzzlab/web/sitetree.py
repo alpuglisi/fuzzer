@@ -32,8 +32,12 @@ as data; the page renders them as text.
 **Cost** (FR-UI-502): a constant number of statements per request. Dir nodes narrow
 endpoint/page/finding rows by an index-usable range on the stored path; findings and
 candidates are scanned per selected run (no path index -- see the index request in
-CC-UI-0500). A node's whole child list is built once and cached against the store's
-version fingerprint, so paging is linear overall.
+CC-UI-0500). A node's whole child list is built once and cached against the store
+version (`store_version`, SP-58), so paging is linear overall.
+
+**The store version** (`store_version`, `release_watches`; SP-58, CC-UI-0068) is SQLite's
+own change counter on one held, query-only connection to the open store; see its section
+below.
 """
 
 from __future__ import annotations
@@ -41,9 +45,11 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import secrets
 import sqlite3
 import threading
-from collections import OrderedDict
+import time
+from collections import Counter, OrderedDict
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -52,6 +58,7 @@ from fuzzlab.core.oracle_status import (CHECKED, INCONCLUSIVE, NO_CONFIRMER, PEN
                                          SKIPPED_BUDGET)
 from fuzzlab.core.runmode import to_category
 from fuzzlab.core.runtarget import origin_of, run_target_rows
+from fuzzlab.core.store import open_read_only
 from fuzzlab.web.findingsview import SEVERITIES, derive_severity
 
 # --- bounds (PA-0096(1): sizes are bounded before anything is allocated) ------------
@@ -827,34 +834,243 @@ class _ChildCache:
 child_cache = _ChildCache()
 
 
-# --- the store's version fingerprint (F2, G6) ---------------------------------------
+# --- the store version (SP-58, FR-UI-505, CC-UI-0068) ---------------------------------
+#
+# The version is SQLite's own change counter, `PRAGMA data_version`, read on ONE held
+# connection to the open project's store (the "watch"), hashed with the store's identity,
+# a reopen epoch and a process nonce. Measured with every writer in another process
+# (DRAFT-AU-SITETREE §1.4): every commit by any other connection of any process changes it
+# (an UPDATE-only one, one after a WAL restart, each of a held writer's 3000 commits, a
+# rollback-journal commit, a schema change); a read, any connection's close, an empty
+# transaction and a passive checkpoint never do. `data_version` is meaningful only on the
+# connection that read it (a fresh connection's value is not comparable), so the watch is
+# one shared handle by necessity: opened for any thread and used ONLY under `_watch_lock`
+# (PA-0023's third pattern, PA-0534(4); pinned by an AST guard and a many-thread test).
+#
+# Safe only because the web process never opens a store's file outside SQLite
+# (FR-CORE-508, PA-0535): a raw open/close drops the watch's POSIX locks, another process's
+# close then deletes -wal/-shm under it, and it misses every later commit (X3). The
+# identity re-check below is a defence, not the fix (X3b).
+
+WATCH_IDLE_S = 60.0          # a watch unused this long is released by the reaper
+WATCH_TIMEOUT_S = 1.0        # the watch's busy wait; a busy read gives no version
+MAX_POLL_MS = 30_000         # half the idle release: the pages' poll intervals are clamped
+_REAP_EVERY_S = WATCH_IDLE_S / 4
+_clock = time.monotonic      # injectable: tests never wait on wall time
+_NONCE = secrets.token_hex(8)        # a server restart never repeats a version
+_watch_lock = threading.Lock()       # every use of the watch, `_closing` and `_epoch`
+_watch_closed = threading.Condition(_watch_lock)   # a released watch finished closing
+_watch: "_Watch | None" = None
+_closing: Counter = Counter()        # paths whose released watch is still closing
+_epoch = 0                           # process-wide reopen counter
+_reaper: "threading.Thread | None" = None
+
+
+@dataclass
+class _Watch:
+    path: str
+    conn: sqlite3.Connection
+    ident: tuple
+    epoch: int
+    used: float
+
+
+def _ident(path: str) -> tuple:
+    """``(st_dev, st_ino)`` of the store, its ``-wal`` and its ``-shm`` (``None`` for one
+    that does not exist): ``os.stat`` only, never an open (PA-0535)."""
+    out = []
+    for suffix in ("", "-wal", "-shm"):
+        try:
+            st = os.stat(path + suffix)
+        except FileNotFoundError:
+            out.append(None)
+        else:
+            out.append((st.st_dev, st.st_ino))
+    return tuple(out)
+
+
+def _no_version(exc: BaseException) -> bool:
+    """The read failures that mean "no version now" (PA-0106): ``OperationalError`` (busy,
+    I/O, a vanished file) and exactly ``DatabaseError`` (a file that is not a database).
+    Anything else -- ``ProgrammingError``, ``InterfaceError``, ``IntegrityError``, a
+    non-SQLite error -- is a defect and propagates."""
+    return isinstance(exc, sqlite3.OperationalError) or type(exc) is sqlite3.DatabaseError
+
+
+def _release(stale: list) -> None:
+    """Move the watch out (``_watch_lock`` held by the caller) into ``stale``, to be closed
+    by `_close_released` outside the lock: its close may fold the WAL."""
+    global _watch
+    if _watch is not None:
+        _closing[_watch.path] += 1
+        stale.append(_watch)
+        _watch = None
+
+
+def _moved(w: "_Watch") -> bool:
+    """Whether the file at the watch's path is no longer the store it opened (removed,
+    renamed away or replaced): ``os.stat`` only."""
+    try:
+        st = os.stat(w.path)
+    except FileNotFoundError:
+        return True
+    return (st.st_dev, st.st_ino) != w.ident[0]
+
+
+def _close_released(stale: list) -> None:
+    """Close released watches; called WITHOUT ``_watch_lock`` (D3). ``_closing`` drops back
+    in a ``finally``, so a failed close never leaves its path blocked.
+
+    SQLite never folds the WAL of a database whose file was moved when its last
+    connection closes, and leaves ``-wal`` at the old path. Measured
+    (DRAFT-AU-SITETREE §1.10, writers in another process): with the watch the last
+    connection, a store renamed away lost its last 50 commits, and a store replaced at
+    its path showed the old store's content. So a watch whose store moved first
+    truncates its WAL into the store it opened (``wal_checkpoint(TRUNCATE)``: the commits
+    land in that store wherever it now is; an empty WAL is left at the path). A busy
+    checkpoint (another connection still reads) leaves the WAL as SQLite left it."""
+    for w in stale:
+        try:
+            if _moved(w):
+                try:
+                    w.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchall()
+                except sqlite3.OperationalError:
+                    pass                       # busy or I/O: as SQLite leaves it (stated)
+            w.conn.close()
+        finally:
+            with _watch_lock:
+                _closing[w.path] -= 1
+                if _closing[w.path] <= 0:
+                    del _closing[w.path]
+                _watch_closed.notify_all()
+
+
+def _reap() -> None:
+    """Release the watch if it went unused for `WATCH_IDLE_S` (the reaper's one step)."""
+    stale: list = []
+    with _watch_lock:
+        if _watch is not None and _clock() - _watch.used > WATCH_IDLE_S:
+            _release(stale)
+    if stale:
+        _close_released(stale)
+
+
+def _reap_while_watched() -> None:
+    """The reaper thread: releases an idle watch, so a page that stopped polling frees
+    the store (its descriptors, and the WAL's high-water mark, NFR-UI-live) within
+    `WATCH_IDLE_S` + `_REAP_EVERY_S`; it ends when no watch is held."""
+    global _reaper
+    while True:
+        time.sleep(_REAP_EVERY_S)
+        _reap()
+        with _watch_lock:
+            if _watch is None:
+                _reaper = None
+                return
+
 
 def store_version(path) -> str | None:
-    """A fingerprint of the store with no SQLite at all: the store file's ``os.stat``
-    (device, inode, size, mtime) and its WAL's size and 32-byte header (checkpoint
-    sequence and salts); ``None`` when the store does not exist. A commit appends WAL
-    frames (UPDATE-only ones too), a checkpoint rewrites the store file, a WAL restart
-    changes the salts, and a store switch or copy changes the file. A reader opening
-    the store creates an empty WAL, so a WAL shorter than its header counts as absent,
-    and its inode and mtime are not used: reads never change the fingerprint (code
-    review). Stated residual: in rollback-journal mode (only if WAL could not be set)
-    an UPDATE inside one mtime tick that keeps the file size is not seen."""
-    if path is None:            # no project open (FR-UI-458): no store, no fingerprint
-        return None
-    base = os.fspath(path)
+    """The open store's version (SP-58): an opaque string that changes with every commit
+    to the store by any connection of any process, and with nothing else that leaves its
+    content as it was. ``None``: no store (``path`` is ``None`` or names no file), or no
+    version now (a failed or busy read, a changed identity) -- never the previous one.
+
+    ``path`` is a path, or a callable returning one (the routes pass ``store_path``): it
+    is called under ``_watch_lock``, so a project transition that cleared the open
+    project and then released the watch (`release_watches`) is never followed by a call
+    that read the old path earlier (D3).
+
+    One watch, for the store last asked about only; asking about another path (or
+    ``None``) releases it. The watch is a `core.store.open_read_only` connection
+    (query-only, private cache, ``fold_on_close``: its own last close folds the WAL like
+    any reader's; never created, migrated or written). It is released, and closed
+    outside the lock, when: another path or ``None`` is asked; the identity (device and
+    inode) of the store, its ``-wal`` or its ``-shm`` changed (a replace, a removal, or
+    side files deleted under it); a read failed; it went unused for `WATCH_IDLE_S` (the
+    reaper); the project is left (`release_watches`, before any of its files is removed);
+    the server stops. A new watch is never opened on a path whose released watch is
+    still closing (a replacement would attach to its predecessor's stale shared-memory
+    node, X3b): that call gives ``None``.
+
+    The value hashes the process nonce, the store's device and inode, the watch's epoch
+    (bumped at every open) and ``data_version``: a reopened watch (another store, a
+    release, a server restart) never repeats a version. Thread-safe: every use of the
+    watch is under ``_watch_lock`` (opened ``any_thread``, PA-0023's third pattern)."""
+    global _watch, _epoch, _reaper
+    stale: list = []
     try:
-        st = os.stat(base)
-    except FileNotFoundError:
-        return None
-    parts = [f"{st.st_dev}:{st.st_ino}:{st.st_size}:{st.st_mtime_ns}"]
-    try:
-        with open(base + "-wal", "rb") as fh:
-            header = fh.read(32)
-            size = os.fstat(fh.fileno()).st_size
-        parts.append(f"{size}:{header.hex()}" if len(header) == 32 else "-")
-    except FileNotFoundError:
-        parts.append("-")
-    return hashlib.sha256("|".join(parts).encode()).hexdigest()[:32]
+        with _watch_lock:
+            if callable(path):
+                path = path()                                  # under the lock (D3)
+            if path is None:                                   # no project open
+                _release(stale)
+                return None
+            p = os.path.abspath(os.fspath(path))
+            if _watch is not None and _watch.path != p:
+                _release(stale)                                # one watch: this store
+            ident = _ident(p)
+            if ident[0] is None:                               # no store file
+                _release(stale)
+                return None
+            if _watch is not None and ident != _watch.ident:
+                _release(stale)                                # replaced, or side files gone
+                return None
+            opened = False
+            if _watch is None:
+                if _closing[p] > 0:                            # its predecessor still closes
+                    return None
+                try:
+                    conn = open_read_only(p, timeout=WATCH_TIMEOUT_S, fold_on_close=True,
+                                          any_thread=True)
+                except sqlite3.DatabaseError as exc:
+                    if _no_version(exc):
+                        return None
+                    raise
+                _epoch += 1
+                _watch = _Watch(p, conn, ident, _epoch, _clock())
+                opened = True
+                if _reaper is None:
+                    _reaper = threading.Thread(target=_reap_while_watched, daemon=True,
+                                               name="fuzzlab-store-watch-reaper")
+                    _reaper.start()
+            w = _watch
+            read = False
+            try:
+                dv = w.conn.execute("PRAGMA data_version").fetchone()[0]
+                read = True
+            except sqlite3.DatabaseError as exc:
+                if _no_version(exc):
+                    return None                                # released below
+                raise
+            finally:
+                if not read:                                   # any failure releases it
+                    _release(stale)
+            if opened:
+                w.ident = _ident(p)                 # after the first read: it makes -wal/-shm
+                if w.ident[0] != ident[0]:          # replaced while it opened
+                    _release(stale)
+                    return None
+            w.used = _clock()
+            dev, ino = w.ident[0]
+            return hashlib.sha256(f"{_NONCE}:{dev}:{ino}:{w.epoch}:{dv}".encode()
+                                  ).hexdigest()[:32]
+    finally:
+        if stale:
+            _close_released(stale)
+
+
+def release_watches(timeout: float = 30.0) -> None:
+    """Release the store watch and return once it -- and any watch another thread
+    released -- has closed: `ProjectManager._leave` calls it after clearing the open
+    project and before removing any of its files, and the app's lifespan at shutdown
+    (D3). ``timeout`` bounds the wait for another thread's close."""
+    stale: list = []
+    with _watch_lock:
+        _release(stale)
+    if stale:
+        _close_released(stale)
+    with _watch_lock:
+        _watch_closed.wait_for(lambda: not _closing, timeout)
 
 
 # --- requests ------------------------------------------------------------------------
@@ -897,7 +1113,8 @@ def children(conn, key: NodeKey, filters: Filters, *, after: str | None = None,
              limit: int | None = None, version: str | None = None) -> dict:
     """The children of ``key`` (FR-UI-500/502): ``{"children": [...], "next": cursor}``;
     for a parameter node, its findings and candidates (`items`). ``version`` is the
-    store fingerprint taken **before** this request's snapshot (G11), the cache key."""
+    store version taken **before** this request's snapshot (G11), the cache key
+    (``None``: not cached)."""
     limit = _check_limit(limit, PAGE_DEFAULT, PAGE_MAX)
     if after is not None:
         _bounded_str(after, "cursor")

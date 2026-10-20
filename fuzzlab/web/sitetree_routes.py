@@ -4,14 +4,17 @@ Registered from `web/app.py` in one block (`register`), so the app keeps one lin
 section. Every route is a sync ``def`` (store I/O never runs on the event loop,
 PA-0102(3)) and a GET: the API reads the store through the app's own accessor
 (``with_store``, the same one the diagnostics views use) and never creates the store
-file. The store's version fingerprint is taken **before** each request opens its read
-snapshot (G11), so a cached child list is never older than its key.
+file. The store version (`sitetree.store_version`, SP-58) is taken **before** each
+request opens its read snapshot (G11), so a cached child list is never older than its
+key; the routes pass the ``store_path`` callable itself, which the version reads under
+its own lock (a project transition never races it, CC-UI-0068).
 
 - ``GET /sitetree`` -- the page.
 - ``GET /api/sitetree/children?node=&after=&limit=`` + filters -- a node's children.
 - ``GET /api/sitetree/node?node=&before=&limit=`` + filters -- roll-up and findings.
 - ``GET /api/sitetree/facets`` -- filter choices.
-- ``GET /api/sitetree/version`` -- the store fingerprint the page polls (no SQLite).
+- ``GET /api/sitetree/version`` -- the store version the page polls (SQLite's change
+  counter on one held, query-only connection; ``null`` with no store or no version now).
 
 Filters: ``run``, ``category``, ``severity``, ``status`` (repeatable) and ``q``.
 """
@@ -42,7 +45,7 @@ def register(app: FastAPI, *, templates, shell_context: Callable[[], dict],
              with_store: Callable[[Callable[[Any], Any], Any], Any],
              store_path: Callable[[], str | None], poll_ms: int = 5000) -> None:
     """Add the site tree's routes to ``app``. ``with_store(fn, default)`` is the app's
-    store accessor; ``store_path()`` names the same store, for the version fingerprint."""
+    store accessor; ``store_path()`` names the same store, for the store version."""
 
     @app.get("/sitetree", response_class=HTMLResponse)
     def sitetree_page(request: Request):
@@ -51,7 +54,7 @@ def register(app: FastAPI, *, templates, shell_context: Callable[[], dict],
 
     @app.get("/api/sitetree/version")
     def sitetree_version():
-        return {"version": sitetree.store_version(store_path())}
+        return {"version": sitetree.store_version(store_path)}
 
     @app.get("/api/sitetree/facets")
     def sitetree_facets():
@@ -68,7 +71,7 @@ def register(app: FastAPI, *, templates, shell_context: Callable[[], dict],
         try:
             key = sitetree.parse_key(node)
             filters = _filters(run, category, severity, status, q)
-            version = sitetree.store_version(store_path())     # before the snapshot (G11)
+            version = sitetree.store_version(store_path)       # before the snapshot (G11)
             return with_store(
                 lambda store: sitetree.children(store.conn, key, filters, after=after,
                                                 limit=limit, version=version),

@@ -59,7 +59,8 @@
   <div class="st-panes">
     <div class="card st-tree-pane">
       <h2 class="st-pane-h" id="st-tree-h">Sites</h2>
-      <ul role="tree" id="st-tree" class="st-tree" aria-labelledby="st-tree-h"></ul>
+      {#- tabindex -1: the pane a live refresh's focus ends at, never the page body (FR-UI-514) #}
+      <ul role="tree" id="st-tree" class="st-tree" aria-labelledby="st-tree-h" tabindex="-1"></ul>
       <p class="muted" id="st-empty" hidden>Nothing recorded yet. Run a tool with
         <code>--store</code>, then this map fills in.</p>
       <p class="muted" id="st-status" aria-live="polite"></p>
@@ -93,7 +94,7 @@
             <th scope="col">run</th><th scope="col">finding</th></tr></thead>
           <tbody></tbody>
         </table>
-        <button type="button" id="st-issues-more" hidden>Show more findings</button>
+        <button type="button" id="st-issues-more" data-focus-key="issues-more" hidden>Show more findings</button>
       </div>
     </div>
   </div>

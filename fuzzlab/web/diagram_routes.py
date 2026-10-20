@@ -2,9 +2,9 @@
 
 One page and a read-only JSON/text API over a run's trace model. Every route is a sync
 ``def`` and a GET that reads the store through the app's own accessor (never creating
-the store); nothing here sends a request to a target. The page polls the store's
-version fingerprint (`sitetree.store_version`, ``/api/sitetree/version``) and refreshes
-while a scan writes.
+the store); nothing here sends a request to a target. The page polls the store
+version (FR-UI-505, SP-58: `sitetree.store_version`, ``/api/sitetree/version``) and
+refreshes while a scan writes, keeping the user's place (FR-UI-514).
 
 - ``GET /diagrams[?run=&finding=]`` -- the page; with a finding's deep link
   (FR-UI-513), validated here: malformed is a 400, a link that does not hold is a notice.

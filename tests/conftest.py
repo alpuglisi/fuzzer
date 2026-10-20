@@ -8,6 +8,10 @@ FR-CORE-400: no test reads or writes a default store outside ``tmp_path`` (see
 
 BUG-0532: one pytest session at a time on this host; the session's controller takes the
 host pytest lock before anything else (see ``tests/_pytest_lock.py``).
+
+BUG-0535 (PA-0535): while a web test runs, no production code opens a store's file
+outside SQLite (an audit hook, see ``tests/_store_audit.py``); and the site map's held
+store watch (CC-UI-0068) is released after every test.
 """
 
 import pytest
@@ -62,3 +66,48 @@ def _no_default_store_in_the_working_directory():
         pytest.fail("a test created or changed the default store in the working "
                     f"directory ({', '.join(changed)}; BUG-0452): give it an explicit, "
                     "private store_path", pytrace=False)
+
+
+# --- no store file is opened outside SQLite in a web test (BUG-0535, PA-0535) -----------
+
+@pytest.fixture(scope="session", autouse=True)
+def _store_audit_hook():
+    """Install the process's audit hook before any fixture opens a store, so every
+    database SQLite opens in this session is known to it (``tests/_store_audit.py``)."""
+    from tests import _store_audit
+    _store_audit.install()
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _no_raw_store_open(request):
+    """PA-0535 at run time: for the web tests (`_store_audit.applies`), fail a test during
+    which production code opened a store's main file, ``-wal`` or ``-shm`` outside SQLite
+    -- through any call, library or alias the static guard
+    (`tests/test_web_store_locks.py`) cannot see."""
+    from tests import _store_audit
+    if not _store_audit.applies(request.node.nodeid):
+        yield
+        return
+    monitor = _store_audit.arm()
+    try:
+        yield
+    finally:
+        found = _store_audit.disarm(monitor)
+    if found:
+        pytest.fail("a store's file was opened outside SQLite (BUG-0535, PA-0535): "
+                    + "; ".join(sorted(set(found))), pytrace=False)
+
+
+# --- the site map's held store watch (CC-UI-0068) ------------------------------------------
+
+@pytest.fixture(autouse=True)
+def _release_store_watches():
+    """Release the store version's held watch after every test, so no test hands the next
+    one a held connection (or a descriptor on its files). Only when the web package is
+    already loaded: this fixture never imports it."""
+    yield
+    import sys
+    sitetree = sys.modules.get("fuzzlab.web.sitetree")
+    if sitetree is not None:
+        sitetree.release_watches()
