@@ -273,6 +273,19 @@ def test_end_to_end_on_a_synthetic_repo(synth, tmp_path, capsys):
     assert (out / "pids.txt").read_text().split()
 
 
+def test_the_child_pytest_waits_for_the_pytest_lock_as_long_as_the_run(monkeypatch):
+    """BUG-0532: the harness's child takes the host pytest lock; another session can take
+    it between the quiet-host check and the child's start, so the child waits for it as
+    long as the run waits for other pytest processes, unless the caller set the wait."""
+    monkeypatch.delenv(vc.PYTEST_LOCK_WAIT, raising=False)
+    env = vc.pytest_env(7200)
+    assert env[vc.PYTEST_LOCK_WAIT] == "7200"
+    assert all(env[k] == v for k, v in vc.REQUIRE_FLAGS.items())
+    assert vc.pytest_env(1800.0)[vc.PYTEST_LOCK_WAIT] == "1800"
+    monkeypatch.setenv(vc.PYTEST_LOCK_WAIT, "5")
+    assert vc.pytest_env(7200)[vc.PYTEST_LOCK_WAIT] == "5"
+
+
 def _alive(pid: int) -> bool:
     try:
         state = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
