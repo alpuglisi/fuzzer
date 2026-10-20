@@ -91,7 +91,10 @@ Newest first.
     (117, with the M9 discovery table and send guard); expectation changes in
     `tests/test_oracle_sqli_string.py` (the "429" row became
     `test_a_site_that_throttles_mid_differential_is_not_comparable_never_a_negative`; the
-    auto_cli wording) and `tests/test_json_points.py` (the auto_cli wording).
+    auto_cli wording), `tests/test_json_points.py` (the auto_cli wording) and
+    `tests/test_forms_phase1.py::test_the_oracle_wraps_the_sender_in_a_fixed_order`
+    (the pinned chain gains `_ObservedOnly` inside `_SessionNotes`, outside the form
+    binding; found by the first harness run on 15bef4d).
 - Impact (other components / project):
   - CORE (SP-56, CC-CORE-0069), SESS (`login_facts`, CC-SESS-0028), SCHED (`charge`,
     CC-SCHED-0007), MUT (the live filter, CC-MUT-0403, reads SP-56 on its own).

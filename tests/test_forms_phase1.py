@@ -438,13 +438,16 @@ class _OneArm:
 
 
 @pytest.mark.parametrize("scheduler,chain", [
-    (None, ["_SessionNotes", "_FormBoundSender", "_Rec"]),
-    (_OneArm(), ["_CostCounter", "_SessionNotes", "_FormBoundSender", "_Rec"]),
+    (None, ["_SessionNotes", "_ObservedOnly", "_FormBoundSender", "_Rec"]),
+    (_OneArm(), ["_CostCounter", "_SessionNotes", "_ObservedOnly", "_FormBoundSender",
+                 "_Rec"]),
 ])
 def test_the_oracle_wraps_the_sender_in_a_fixed_order(scheduler, chain):
     """The intended order (CC-FUZZ-0080): `_SessionNotes` outermost without a
     scheduler, `_CostCounter(_SessionNotes(...))` with one; the form binding is inside
-    both, so every send the run makes is bound, noted and counted."""
+    both, so every send the run makes is bound, noted and counted. FR-FUZZ-63's layer 1
+    (`_ObservedOnly`, CC-FUZZ-0105) sits just inside `_SessionNotes` and outside the
+    binding, so every response the run reads -- bound or not -- is checked once."""
     s = _ChainSeen()
     Oracle(strategies=[s], scheduler=scheduler).confirm(_cand(), _Rec())
     assert s.seen == [chain]
