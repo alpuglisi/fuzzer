@@ -4,7 +4,10 @@
   another login").
 - **Base:** `15a8a27`, with the branch tip `7ebf48a` (the host pytest lock, BUG-0532)
   merged in.
-- **Status:** revision 3, Phase 1: measured and drafted, **not implemented**.
+- **Status:** **implemented (Phase 2)**: revision 3, the owner's decisions D and D′ and
+  review round 4's follow-ups, in `fuzzlab/` (CC-SESS-0029, CC-CORE-0070, CC-FUZZ-0107).
+  The prototype is deleted; §13 records the implementation's verification.
+  Phase 1's history:
   - Revision 1 went to the review gate. Both reviewers disagreed with it and endorsed
     the direction: SP-56 first, then a health check on a protected resource, then
     generation binding.
@@ -21,7 +24,8 @@
 | CC-SESS-0029 | `session/detect.py`, `session/manager.py`, `session/state.py` |
 | FR-SESS-23 | the new requirement (§7). FR-SESS-5, -15, -16, -17 and -18 and NFR-SESS-single-flight are amended in place. |
 | BUG-0533 / PA-0533 | the bug record and the preventive action (§10). PA-0533 strengthens PA-0134 among others. |
-| CC-CORE-0070 | `core/http.Request.session_generation` (one field, declared in FR-CORE-6, §7), and three rows removed from SP-56's guard allowance list (`tests/test_core_comparability.py`) |
+| CC-CORE-0070 | `core/http.Request.session_generation` and `Request.session_lost` (D′), declared in FR-CORE-6 (§7), and three rows removed from SP-56's guard allowance list (`tests/test_core_comparability.py`) |
+| CC-FUZZ-0107 / FR-FUZZ-65 | D′, the oracle part: `Probe.session_lost`, carried by `SeamProbeSender`, read by layer 1 (`require_observed`) (§3.15) |
 
 ## 0. What changed in revision 3
 
@@ -33,7 +37,7 @@
 | **B4** the recurrence review | BUG-0134 / PA-0134 added: `observe` logged a session out on another origin's login page, the "not bound to this session" half of the root cause. Its prior-preventive-action failure analysis is written, and PA-0533 names PA-0134 as strengthened. | §10.1, §10.2 |
 | **B5** PA-0533's enforcement | Rule (2) names T M7b and T M7c (and T M7d). Rule (1)'s throttle clause names T2 and T11 (and T2b, T2c). `run_reverts.sh` ends with a PA-0533 matrix: each revert that undoes a PA-0533 rule must fail at least one PA-named test. `nocas` fails two. | §10.2, §12 |
 | **B6** CC-CORE-0070 | The FR-CORE-6 amendment that declares `Request.session_generation` beside `session_decision` is drafted, and is a CC-CORE-0070 deliverable. | §7, §9 |
-| **D** identities with no protected resource (the owner's decision) | When such an identity's re-login budget is spent, it skips the re-login and carries on at once: no sleep, no `SessionHealthUnknown`, no abort. The next re-login is allowed when the bucket refills (1 per 120 s, burst 5). Probes in that window may run on a dead session; their answers read as not comparable (R16). Measured on `json` (30 probes of `/api/reports`) and `rotate_all`: 30 sends, 6 logins, 0 s asleep. A resource-backed identity keeps M8's pause and sticky unknown, and the bucket's bounded wait. | §1.6, §3.9, §8 R16, T15b |
+| **D** identities with no protected resource (the owner's decision) | When such an identity's re-login budget is spent, it skips the re-login and carries on at once: no sleep, no `SessionHealthUnknown`, no abort. The next re-login is allowed when the bucket refills (1 per 120 s, burst 5). Probes in that window may run on a dead session. **Every request sent in that window is marked (`Request.session_lost`), and the oracle reads any answer to it as not comparable, whatever its class (D′, §3.15, FR-FUZZ-65); the candidate ends inconclusive.** Measured on `json` (30 probes of `/api/reports`) and `rotate_all`: 30 sends, 6 logins, 0 s asleep. A resource-backed identity keeps M8's pause and sticky unknown, and the bucket's bounded wait, and never sends on a lost state. | §1.6, §3.9, §3.15, §8 R16, T15b, TD1, TD2 |
 | F1 per-hop timeout | The health GET has a 15 s timeout per hop. A timeout is no response: INCONCLUSIVE. | §3.4 |
 | F2 `verify_live`'s wait (P3) | `verify_live` waits on its own. It never records a pause for the identity, its waits draw on their own budget (never `prepare`'s), and an inconclusive check never sets or clears a sticky unknown. | §3.10, T21c, T21d |
 | F3 whose budget | Per run: a run's manager and its isolated copies share one pause budget and one credential-POST count. The peer identity has its own manager, so its own budget (stated). The re-login bucket is per (host, identity) per manager. | §3.8, §3.9 |
@@ -94,7 +98,7 @@ in it still holds unless a row above changes it.
     now also undoes B3's check of the current state.
   - 5 (`guard_*`) weaken T19's own guard. `guard_nodunder` (F6) is new.
   - Every collected test is named by at least one revert, except T19's whole-package
-    assertion and F3's pin (§6).
+    assertion and R6's pin (§6).
 - `run_reverts.sh` runs every revert against its named tests, then the PA-0533 matrix
   (B5), then the design.
 - This is reviewer B's masking technique, applied to every test.
@@ -256,7 +260,7 @@ sources predict.
     unknown should, no wait in `verify_live`, and listeners told on a 403.
   - **10 on an absent API:** `health_verdict` (T2c, six cases), `health_report`,
     `Request.session_generation`, `request_entry_names`, and `Probe.session_generation`
-    (F3).
+    (R6).
 - The 17 that pass are pins:
   - T2 ×2, T4b, T5, T7;
   - T9[none], TP1, TP2, TP3, TP4, TP5;
@@ -266,11 +270,11 @@ sources predict.
 **With the prototype:** **68 passed, 2 failed.**
 - T19's whole-package assertion reads `fuzzlab/`'s source, which a run-time patch
   cannot change; it passes on the implementation.
-- F3's strict-xfail pin is the stated residual R6.
+- R6's strict-xfail pin is the stated residual.
 
 **Every revert** fails every test named for it (§6, the revert column). There are 50,
 and every collected test is named by at least one, except T19's whole-package assertion
-and F3's pin. `run_reverts.sh` reports each revert on one line as
+and R6's pin. `run_reverts.sh` reports each revert on one line as
 `selected N failed N`. The PA-0533 matrix and the runs on the committed files are in
 §12.
 
@@ -512,7 +516,7 @@ Listeners are called after the health lock is released, once per transition.
 - Past the bound, `SessionHealthUnknown` propagates the way today's `max_reauth` cap
   does: `_unobserved` returns None, and the oracle does not catch a `SessionAuthError`.
   The run ends marked aborted. No oracle change.
-- A comparison that straddles a re-login is R6 / F3 (§3.13).
+- A comparison that straddles a re-login is R6 (§3.13).
 
 **How it reaches the runner: it does not.** The contract runner has no
 `SessionManager`. SP-56 already makes a credentialed 401 or login redirect an `error`.
@@ -545,7 +549,10 @@ Listeners are called after the health lock is released, once per transition.
   - The state stays marked lost (believed lost, unconfirmed). Further loss shapes on
     it are ignored, and no listener is told again.
   - The next `prepare` after a token has refilled (1 per 120 s) logs in once.
-  - Probes in that window may run on a dead session (R16). Measured in §1.6; T15b.
+  - Probes in that window may run on a dead session. Every request so sent is marked
+    (`Request.session_lost`), and the oracle reads any answer to it as not comparable,
+    whatever its class (D′, §3.15, FR-FUZZ-65; R16). Measured in §1.6; T15b; Q1's shape
+    in TD1.
 - `max_reauth` (consecutive failed logins) and a copy's `max_logins` are unchanged.
 - **Credential POSTs are counted per account (F7)** in
   `health_report()["credential_posts"]`, as `{"<host>/<identity>": {"submitted": n,
@@ -607,9 +614,9 @@ The order is login lock → health lock → `_observe_guard`, and never the reve
   health → login → health. The test's observing send then never returns.
 - The pause, the bucket and `verify_live`'s waits hold no lock.
 
-### 3.13 F3: a comparison that straddles a re-login (residual R6)
+### 3.13 R6: a comparison that straddles a re-login (a stated residual)
 
-The coordinator approved F3 "if small". It is small (about 15 LOC in three FUZZ files):
+The coordinator approved this "if small". It is small (about 15 LOC in three FUZZ files):
 - `Probe.session_generation`, set by `SeamProbeSender._dispatch` from the request;
 - `_ObservedOnly` raises `NotComparable` when a mechanism's credentialed probes carry
   two generations.
@@ -777,7 +784,7 @@ How to read the columns:
 | T10 `…policy_block_never_as_a_loss[403, 451]` | the predicate | 403: counts; 451: pin | `403`, `policy_loss` |
 | T11 `…keeps_its_loss_signals_and_never_reads_a_throttle` | the predicate | pin | `throttle`, `content_rule_off` |
 | **(r3)** T19 `…only_the_owner_decides_a_session_loss` + `…guard_catches_synthetic_offenders` | PA-0533(4) | 2 offenders (`observe`, `verify_live`) | whole package: fails on the base and on the prototype, since a run-time patch cannot change `fuzzlab/`'s source, so Phase 2 proves it. Synthetic (now with `object.__setattr__` and a bound `__setattr__`, F6): `guard_noassign`, `guard_nosetattr`, `guard_nodunder`, `guard_nokeyword`, `guard_nocall`; each re-executes the guard with one branch off. |
-| F3 `…seam_probe_carries_the_session_generation_it_was_sent_on` | R6 (strict xfail) | API absent | — (a residual's pin; fails on the prototype too) |
+| R6 `…seam_probe_carries_the_session_generation_it_was_sent_on` | R6 (strict xfail) | API absent | — (a residual's pin; fails on the implementation too) |
 | T20 `tests/test_core_comparability.py::…but_the_owner` (three rows removed) | CC-CORE-0070 | Phase 2 | restoring a status literal in any of the three sites (its existing synthetic offenders) |
 
 ## 7. Requirement text
@@ -908,16 +915,24 @@ BUG-0533).**
   - Loss shapes are unconfirmed losses: FR-SESS-18's privilege-redirect residual
     stays, bounded by the bucket, and then by D (R16).
   - 403s and submissions change nothing.
+  - **A re-login during a throttle records no resource** (review round 4, follow-up 4):
+    a throttled candidate is never admitted (B1) and a throttled credentialed arm is not
+    LIVE, so a session that logs in while the app throttles has no resource. That
+    session moves to this no-resource path (unconfirmed losses, the bucket, then D),
+    until a later login records one.
 - **R3. The TTL.** A live verdict covers same-URL signals for `health_ttl_s`. A session
   that dies inside the window is found at the next signal from another URL, from a
   foreign-header request, or after the window. Its probes in between are auth failures
   (not comparable at the oracle).
-- **R4. A moved or broken resource.** A 404 or 5xx is inconclusive, so it pauses and
-  then goes sticky. A refusal status recorded as 404 (admitted: SP-56 calls it the
-  application's) reads a deleted resource as LOST, which costs a re-login.
+- **R4. A moved, broken or throttled resource.** A 404 or 5xx is inconclusive, so it
+  pauses and then goes sticky. A refusal status recorded as 404 (admitted: SP-56 calls it
+  the application's) reads a deleted resource as LOST, which costs a re-login. A
+  resource throttled at a **re-login** is not recorded: the new session has no resource
+  and moves to R2's no-resource path (unconfirmed losses, the bucket, then D), not to
+  the pause (review round 4, follow-up 4).
 - **R5. The health GET is untraced and unbudgeted,** as the login handshake already is.
   It is counted in `health_report()`.
-- **R6 (F3). A comparison that straddles a re-login is not detected** (strict xfail).
+- **R6. A comparison that straddles a re-login is not detected** (strict xfail).
 - **R7. A probe whose own answer was a 200 login page is still `application` to the
   oracle** (BUG-0529's R3 and R10). Its loss is detected and recovered here, but the
   oracle reads that probe's answer as an observation. This half of F1/F2 is
@@ -943,8 +958,8 @@ BUG-0533).**
     5 + ⌊t / 120 s⌋ in t seconds per identity, copies included in the count.
   - Each JSON login adds one wrong-password control POST.
   - Both are counted per account.
-- **R16 (D). A no-resource identity may run probes on a dead session once its re-login
-  budget is spent.**
+- **R16 (D, D′). A no-resource identity may send probes on a dead session once its
+  re-login budget is spent; their answers are never evidence.**
   - **The window.** After the burst (5 loss-driven re-logins), each further
     unconfirmed loss leaves the identity sending on the session it has until the next
     token: at most 120 s per token (`relogin_refill_s`). So at most 5 + ⌊t / 120 s⌋
@@ -953,14 +968,20 @@ BUG-0533).**
   - **Measured** (§1.6): on `json` and on `rotate_all`, 24 of 30 probes were sent in
     the window, with 0 s asleep. On `json` the session was in fact live (scope 401s);
     on `rotate_all` it was dead.
-  - **What the oracle makes of them.** A credentialed 401 or a login redirect is
-    SP-56's auth failure. The oracle's controls admit only the application's answer by
-    default (`oracle/probe.py:249-262`), so such a probe is `NotComparable`: it never
-    confirms and never negates.
-  - **The exception: R7.** An app that shows a dead session its login form at 200 gives
-    the oracle an `application` answer. In the window, such a probe is read as an
-    observation and could become a false negative. Bounded by the window; no lab in
-    §1.7 is known to have both no resource and an in-place login form (not measured).
+  - **What the oracle makes of them (D′, the owner's decision after review round 4).**
+    Revision 3 relied on SP-56: a credentialed 401 or a login redirect is an auth
+    failure, which the oracle's controls do not admit. Review round 4's Q1 measured the
+    gap: a dead session's **guest view** (200, `application`), a 404 or a non-login
+    redirect is admitted, and a payload's answer is not a control at all. So every
+    request sent in the window is marked (`Request.session_lost`), the seam sender
+    carries the mark to the probe (`Probe.session_lost`), and layer 1
+    (`require_observed`) raises `NotComparable` for any answer to it, whatever its class
+    -- payloads, controls, baselines and replays alike. The candidate ends
+    inconclusive, never a pass, a negative or a finding (TD1: Q1's guest cart). R7's
+    200 login page is covered in the window too.
+  - **Not covered (pinned):** the live WAF filter (MUT) and the blind-SQLi builder (FUZZ)
+    read such answers as observations; each is pinned by a strict xfail naming its owner
+    (BUG-0533's sweep). The auditor's and crawler's fetches use them for discovery only.
   - **`verify_live` in the window.** The state is marked lost, so `verify_live`
     returns False at once, as it does today right after any loss. If an isolated copy
     logs in during the window, `_verify_main` trips the single-session breaker: the run
@@ -1016,7 +1037,7 @@ BUG-0533).**
   - FR-CORE-6 declares it beside `session_decision` (the text in §7).
   - `tests/test_core_comparability.py::ALLOWED` drops the rows for `verify_live`,
     `_verify_authenticated` and `detect_logout`.
-- **Impact:** SESS only. F3 would add FUZZ as a reader.
+- **Impact:** SESS only. R6's fix would add FUZZ as a reader.
 - **Risk (low):** an optional field with a None default.
 - **Deliverables:**
   - [ ] field — todo
@@ -1175,7 +1196,7 @@ One sentence in the session manager's paragraph. No new component or dependency.
 
 ## 11. Open questions
 
-- **Q1.** F3 is small but needs a CC-FUZZ number. Assign one to bring it in, or keep R6
+- **Q1.** R6's fix is small but needs a CC-FUZZ number. Assign one to bring it in, or keep R6
   with its strict xfail.
 - **Q2.** Should `health_report()` appear in `auto`'s run metrics? That is a FUZZ change.
 - **Q3.** The defaults: TTL 30 s; a burst of 5, refilled at 1 per 120 s; a 300 s pause
@@ -1199,7 +1220,7 @@ order. `au-sess403-prototype/run_reverts.sh <worktree>` reproduces steps 4-5.
    passed**. 43 fail on a count or a behaviour and 10 on an absent API, as §1.9 lists.
 3. **The collection check** (`collected_r3.txt`, `unnamed_r3.py`): 70 tests collected,
    68 named by a revert. The two unnamed are the stated ones: T19's whole-package
-   assertion and F3's pin. No name in `run_reverts.sh` is unknown.
+   assertion and R6's pin. No name in `run_reverts.sh` is unknown.
 4. **The 50 reverts** (`reverts_r3_final.log`): **50 OK, 0 MASKED.** Every named test
    fails on its revert.
 5. **The PA-0533 matrix** (B5; same log): **24 of 24 OK, 0 UNENFORCED.** Each revert
@@ -1213,7 +1234,7 @@ order. `au-sess403-prototype/run_reverts.sh <worktree>` reproduces steps 4-5.
      `inconclusive_live` 1;
    - rule (4): each `guard_*` 1.
 6. **The prototype as drafted** (same log): **68 passed, 2 failed**: T19's
-   whole-package assertion and F3's pin (§1.9).
+   whole-package assertion and R6's pin (§1.9).
 7. **Why each new or changed revert fails** (`reasons_r3_final.log`, `--tb=line`):
 
 | Revert | Test | It fails on |

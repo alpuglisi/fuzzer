@@ -1635,6 +1635,7 @@ class SessionManager:
                 f"could not log {identity}@{host} in: no server-rendered login form or "
                 f"Basic challenge at {base_url}, and the browser login failed: {exc}"
             ) from None
+        self._count_credential_post(host, identity, "submitted")       # FR-SESS-23
         if not self._credential_destination_ok(obs.login_url, base_url,
                                                floor_https=obs.floor_https):
             raise SessionAuthError(                    # the route refused it already
@@ -1679,7 +1680,6 @@ class SessionManager:
             state.valid = True
             self._record_auth_endpoints(obs.login_url, state.logout_url)
             # its non-secret row is written when `ensure` installs it (`_install`, B3)
-            self._count_credential_post(host, identity, "submitted")   # FR-SESS-23
             if self._log:
                 self._log.info("authenticated (browser login)", extra=state.redacted())
             return state

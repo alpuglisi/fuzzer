@@ -1926,6 +1926,65 @@ def test_layer_one_reads_any_answer_on_a_lost_session_as_not_comparable(status, 
     require_observed(Probe(0, "", elapsed=10.0, timeout="read"), timing=True)
 
 
+#: D′'s sweep (PA-0002; FR-FUZZ-65 "not covered"): consumers outside the oracle that read
+#: answers through a session-managed seam do not read the lost-session mark yet. Each known
+#: instance is pinned by an offline strict xfail naming its owner (PA-0531(4), PA-0054(3)).
+_DPRIME_MUT = pytest.mark.xfail(
+    strict=True, reason="BUG-0533 sweep (D′): the live WAF filter (MUT, "
+                        "mutation/livefilter.HttpFilter) reads an answer sent on a session "
+                        "known lost as an observation; owner: a MUT follow-up")
+_DPRIME_BSQLI = pytest.mark.xfail(
+    strict=True, reason="BUG-0533 sweep (D′): the blind-SQLi builder (FUZZ, "
+                        "tools/blind_sqli_fuzzer SeamSender and answer_class) admits an "
+                        "answer sent on a session known lost; owner: a FUZZ follow-up")
+
+
+def _in_ds_window(app: _App):
+    """``(mgr, sender)`` on the `json` app, driven into D's window: seven probes of
+    `/api/bounce` (six logins: the first and the burst of five; the seventh sent on the
+    session marked lost)."""
+    _clock, kw = _fake()
+    mgr, _losses = _manager(**kw)
+    sender = _sender(app, mgr)
+    for _ in range(7):
+        sender.send(app.base + "api/bounce", "id", "1")
+    assert app.logins == 6 and not mgr._state[(HOST, "user")].valid
+    return mgr, sender
+
+
+@_DPRIME_MUT
+def test_the_live_waf_filter_never_reads_an_answer_on_a_lost_session():
+    """D′'s sweep, pinned. In D's window the live filter's probe of `/api/cart` gets the
+    guest view (200): today an "allow" verdict; it should be no observation
+    (`FilterUnobserved`), as a throttle is."""
+    from fuzzlab.mutation.livefilter import FilterUnobserved, HttpFilter
+    app = _App(mode="json")
+    try:
+        _mgr, sender = _in_ds_window(app)
+        with pytest.raises(FilterUnobserved):
+            HttpFilter(sender, app.base + "api/cart", "q").evaluate("<b>x</b>")
+    finally:
+        app.close()
+
+
+@_DPRIME_BSQLI
+def test_the_blind_sqli_builder_never_admits_an_answer_on_a_lost_session():
+    """D′'s sweep, pinned. In D's window the builder's seam send of `/api/cart` gets the
+    guest view (200): today SP-56's `application`, a sample it would write; it should
+    never be admitted."""
+    from fuzzlab.core.comparability import APPLICATION
+    from fuzzlab.tools.blind_sqli_fuzzer import SeamSender, answer_class
+    app = _App(mode="json")
+    try:
+        mgr, _sender = _in_ds_window(app)
+        answer = SeamSender(_client(mgr), "user").get(app.base + "api/cart", "id", "1",
+                                                      5.0)
+        assert answer[1] == 200 and app.cart == ["guest"]
+        assert answer_class(answer, app.base + "api/cart")[0] != APPLICATION
+    finally:
+        app.close()
+
+
 # --- T10, T11: SP-16's predicate on its own -------------------------------------------
 
 LOGIN = "http://127.0.0.1:8080/login.php"

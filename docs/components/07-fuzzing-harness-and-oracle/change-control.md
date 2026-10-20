@@ -3,6 +3,44 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0107 — An answer on a session known to be lost is never evidence (FR-FUZZ-65, BUG-0533; decision D′) (2026-10-20)
+- Placement: AU-SESS403 (audit defect 6), the oracle part of the owner's decision D′
+  after review round 4's probe Q1. Design record: `docs/components/03-session-manager/
+  DRAFT-AU-SESS403.md`.
+- Change:
+  - `fuzzlab/oracle/probe.py`: `Probe.session_lost: bool = False`; `LOST_SESSION`;
+    `require_observed` (layer 1, SP-56's oracle reader) raises `NotComparable("... sent
+    on a lost session")` for a marked probe or a marked PRG follow-up, **before** any
+    class is read, whatever the class (+20 lines).
+  - `fuzzlab/tools/probesender.py::SeamProbeSender._dispatch` carries
+    `Request.session_lost` (CC-CORE-0070), read and never recomputed, onto the probe it
+    returns (+3 lines). A follow-up is built by the same `_dispatch`, so it carries its
+    own request's mark.
+- Impact (other components / project):
+  - Every strategy run goes through `_ObservedOnly`, so payloads, controls, baselines,
+    compared slots, replays and the correlated send all read the rule; a candidate with
+    such answers is inconclusive (`not-comparable`), never a pass, a negative or a
+    finding. The scheduler is charged as for any not-comparable arm.
+  - The mark fires only in FR-SESS-23's D window (a no-resource identity with its
+    re-login budget spent); a resource-backed identity never sends on a lost state.
+  - Not covered here (BUG-0533's sweep, pinned by strict xfails naming each owner): the
+    live WAF filter (MUT, `mutation/livefilter.HttpFilter`) and the blind-SQLi builder
+    (FUZZ, `tools/blind_sqli_fuzzer` `SeamSender` / `answer_class`) read such answers as
+    observations. The auditor's and crawler's fetches use them for discovery only.
+  - R6 (a comparison that straddles a re-login, `Probe.session_generation`) stays a
+    stated residual with its strict xfail.
+- Risk (low): an additive field read in one place; it can only turn an answer into no
+  verdict, never into a confirmation. The cost: a candidate probed in D's window is
+  inconclusive instead of decided.
+- Deliverables:
+  - [x] `Probe.session_lost`, the layer-1 rule, the sender's carry — done
+  - [x] FR-FUZZ-65 — done
+  - [x] tests: the guest view in D's window ends inconclusive through the oracle (Q1's
+    shape; reverts `nolostmark`, `oracle_ignores_lost`); layer 1 on every class, a
+    follow-up and a timing read timeout; a resource-backed identity never marked
+    (`d_for_all`); two strict-xfail pins for the unswept consumers — done
+- Effectiveness (assessed <date> or pending): pending.
+
 ### CC-FUZZ-0106 — Every sender places a query value through one owner (BUG-0531) (2026-10-20)
 - Placement: pre-assigned to AU-REQID14 (audit defect 14); CC-FUZZ-0105 is another
   lane's. Design record: `DRAFT-AU-REQID14.md` (revision 3).

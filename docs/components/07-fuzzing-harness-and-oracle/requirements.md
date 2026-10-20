@@ -1849,6 +1849,36 @@ rewards) derives from it.
     "could not reach".
   - Enforced by: `tests/test_oracle_comparable_controls.py` (117 tests, the discovery
     table and send guard included), `tests/test_oracle_sqli_string.py::test_a_site_that_throttles_mid_differential_is_not_comparable_never_a_negative`.
+- **FR-FUZZ-65 (an answer on a session known to be lost is never evidence,
+  `CC-FUZZ-0107`, 2026-10-20, BUG-0533; the owner's decision D′ after AU-SESS403's
+  review round 4)**
+  - **The mark.** When the session manager sends a request on a state it already knows
+    to be lost and cannot yet recover -- FR-SESS-23's D window: an identity with no
+    stable protected resource whose re-login budget is spent -- `prepare` marks the
+    request (`core.http.Request.session_lost`, FR-CORE-6). `SeamProbeSender` carries the
+    mark, read and never recomputed, to the probe it returns (`Probe.session_lost`); a
+    PRG follow-up carries its own request's mark.
+  - **Layer 1** (`oracle.probe.require_observed`, applied by the oracle's
+    `_ObservedOnly` to every send a strategy reads -- payloads, controls, baselines,
+    compared slots and replays alike, the correlated send included) raises
+    `NotComparable("... sent on a lost session")` for any answer to a marked request,
+    the probe's own or its follow-up's, **whatever its SP-56 class** (a guest view, a
+    404, a non-login redirect, a 401, a 403, a read timeout on a timing send) and before
+    any class is read. Its `response_class` is `lost-session` (`LOST_SESSION`).
+  - **Outcome:** the mechanism gives no verdict and the candidate is **inconclusive**
+    (`not-comparable`) unless another mechanism confirms on unmarked answers: never a
+    pass, a negative or a finding from such an answer. The run goes on (D); the scheduler
+    is charged as for any not-comparable arm (FR-FUZZ-63).
+  - **Never fires for a resource-backed identity:** its loss is confirmed and re-logged
+    in under the bucket, or it waits, or it goes sticky unknown; it never sends on a lost
+    state (FR-SESS-23).
+  - **Not covered (stated):** consumers outside the oracle that read answers through a
+    session-managed seam (the blind-SQLi builder, the live WAF filter, the auditor's and
+    crawler's fetches) do not read the mark yet; R6 (a comparison that straddles a
+    re-login) is separate and stays pinned.
+  - Enforced by: `tests/test_session_forbidden_answers.py::test_an_answer_on_a_session_known_lost_is_never_evidence`,
+    `tests/test_session_forbidden_answers.py::test_layer_one_reads_any_answer_on_a_lost_session_as_not_comparable`,
+    `tests/test_session_forbidden_answers.py::test_a_resource_backed_identity_never_sends_on_a_lost_session`.
 - **FR-FUZZ-64 (one query placement for every sender, `CC-FUZZ-0106`, 2026-10-20,
   BUG-0531)**
   - **One owner.** Every sender places a query value through `core.urls` (FR-CORE-501,

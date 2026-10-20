@@ -1,7 +1,7 @@
 # Session Manager — Requirement Specification
 
 Component code: **SESS** · Status: `[built; live validation + resume pending]` (Phase 1)
-· Last updated: 2026-10-14
+· Last updated: 2026-10-20
 
 Related: `ARCHITECTURE.md` #3; `DECISIONS_AND_ROADMAP.md` (D3, D10, D12, D13);
 `./change-control.md`.
@@ -39,9 +39,14 @@ data. Shared by all tools; a hard dependency for external validation (D10).
   `WWW-Authenticate` challenge → Basic/Bearer. (D13)
 - **FR-SESS-5 (success/expiry detection)** Confirm login by differential behavior
   (a protected probe stops redirecting to login); detect logout/expiry from
-  multiple signals (401/403, redirect to the detected login, the login form
-  reappearing, JWT `exp`) and re-authenticate under a single-flight lock; cap
-  attempts then hard-fail.
+  multiple signals ~~(401/403, redirect to the detected login, the login form
+  reappearing, JWT `exp`)~~ *(amended CC-SESS-0029, FR-SESS-23, BUG-0533:)* -- a
+  credentialed 401, a redirect to the detected login, the login form reappearing, JWT
+  `exp` -- confirmed on the session's stable protected resource (FR-SESS-23); and
+  re-authenticate under a single-flight lock, with loss-driven re-logins limited by a
+  refilling budget: past it an identity with a resource is unknown and the run fails
+  loudly, and an identity with none carries on until the budget refills. A 403 is a
+  policy answer, never by itself a loss. Cap failed attempts then hard-fail.
 - **FR-SESS-6 (fail loud)** When detection cannot parse a login (multi-step,
   CAPTCHA, an SPA login the browser fallback cannot find or confirm, FR-SESS-19), fail
   loudly with diagnostics (what was found, where it stopped) rather than silently
@@ -185,6 +190,132 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     `tests/test_session_detect.py::test_login_facts_uses_the_sessions_known_login_url`,
     `tests/test_session_detect.py::test_login_facts_names_an_account_submission_apart_from_a_login`,
     `tests/test_session_detect.py::test_login_facts_is_total`.
+- **FR-SESS-23 (a forbidden answer is never, by itself, a lost session, CC-SESS-0029,
+  BUG-0533; DRAFT-AU-SESS403 revision 3, decisions D and D′, review round 4)**
+  - **One loss predicate.** `detect.detect_logout(status, headers, body, login_url=None,
+    page_url=None, content_check=True, login_fields=None, *, credentialed=True,
+    credential_submission=False)` names a **loss shape** in two cases only:
+    - an auth failure SP-56 (FR-CORE-507) gives only because the request carried the
+      session (a credentialed 401; a redirect to this session's login page or an
+      anchored login URL, FR-SESS-18) -- never a 407, an auth failure to anyone;
+    - this session's login form at 200, to a credentialed request that is not a
+      submission (FR-SESS-15's form rules; never for Basic).
+
+    No classified status is written as a literal. `health_verdict` decides through the
+    same predicate, and only `observe` and `health_verdict` call it (T19's guard).
+    `detect.request_entry_names(url, body, content_type)` gives a request's entry
+    names (its query's, a urlencoded body's, a JSON body's leaves by
+    `jsonbody.display_name`; at most 64 KiB; multipart not read; total).
+  - **Classification first** (`observe`). A throttle, gateway, 407, incomplete or other
+    application answer never changes the session (counted by class).
+    - With a stable protected resource, three answers trigger the health check: a loss
+      shape; a credentialed policy block (403, 451); a credential submission's loss
+      shape (`login_facts` with `request_entry_names`).
+    - Without one, only a loss shape that is not a submission counts, as an
+      **unconfirmed loss**. Nothing else does.
+  - **Generations.** Each login and `adopt` gives the state the next
+    `SessionState.generation`, numbered before it is installed. `prepare` records it on
+    the request (`core.http.Request.session_generation`, FR-CORE-6) from the state it
+    applied, never re-read. A signal from another generation is ignored; an unstated one
+    is read as the current generation. A signal on an invalid or paused generation is
+    ignored.
+  - **The health check** (`check_health`) is one GET of the resource, carrying the
+    session's own material and sent with the seam's headers (`requests` per hop, no
+    browser header set), with a 15 s timeout per hop (a timeout or other transport error
+    is no response: inconclusive).
+    - **The walk.** Redirects are walked by hand inside the session's origins and the
+      transport floor (`_navigate(stop_at=)`), stopping at a login redirect (a login on
+      another origin is judged at its hop, never fetched). An unapproved hop that is not
+      one raises at once (fail fast, never a pause).
+    - **The verdict** (`health_verdict`, public and total over any state), first match:
+      **lost** for a stop at a login redirect; **inconclusive** for an answer SP-56
+      classes incomplete, throttle-or-unavailable or gateway, or a 407 -- before any
+      refusal is matched; **lost** for a loss shape or the resource's recorded refusal
+      (status or body); **live** for any other 2xx; **inconclusive** otherwise.
+    - **Cookies.** A live answer's rotated value of one of the session's own cookies is
+      adopted.
+    - **Single flight, the cover, compare-and-set.** Single flight per (host,
+      identity), the verdict recorded before the lock is released. A live verdict
+      covers a signal only when the signal was **seen before its GET was sent** (a
+      sequence counter, never a clock). After the GET, the verdict counts only for the
+      state object it judged, if that object is still the current one and of the
+      generation judged; otherwise it is stale and records nothing (no live mark, no
+      pause, no `_mark_lost`, no row, no listener).
+  - **The cache.** For `health_ttl_s` (30 s), a live verdict also covers later signals
+    of the same generation and URL key, except from a request carrying a header the
+    session does not own (`Content-Type` and `Content-Length` excepted). Neither a pause
+    re-check nor `verify_live` reads it.
+  - **The stable protected resource** is recorded at login by one owner (`_spa_probe`):
+    a candidate whose credentialed answer is live on the stopping walk and whose
+    anonymous and corrupted answers agree as a refusal -- both lost; or the same status
+    `admitted_refusal` admits (a non-2xx below 500 that SP-56 classes as the
+    application's answer or a policy block, never a throttle, gateway or 407), recorded
+    as `probe_refusal_status`; or the same stable body apart from the credentialed one,
+    recorded as its sha256.
+    - Candidates: a browser login's post-click GETs (FR-SESS-19); the operator's base
+      URL (every HTTP session kind, Basic included); the post-login landing.
+    - `adopt(state, *, protected_probe=None, refusal_status=None)` may give one, with a
+      refusal status held to the same admission (refused loudly otherwise).
+  - **Lost.** `_mark_lost(state, generation)` is the only writer of `valid = False`.
+    Under the manager's observe lock it compare-and-sets on the current state and
+    generation, marks the next login loss-driven, and persists the row **inside the
+    same critical section**. Every install -- a login's (`ensure`), `adopt`'s -- numbers
+    the state, installs it and persists its row under that same lock (`_install`), so a
+    replaced state's row never lands after its replacement's.
+  - **Listeners** are told only when the loss was seen on a send (FR-SESS-16).
+  - **Pause.** An inconclusive check changes nothing else.
+    - **The wait.** The identity is paused for that generation (5 s doubling to 60 s;
+      `Retry-After` up to 60 s; one log line, and a `pauses` count). `prepare` waits it
+      out on the injectable `sleep`, holding no lock, then checks again: live, send;
+      lost, `_mark_lost` (no listener) and a re-login under the bucket; inconclusive,
+      pause again. A pause of another generation never pauses the current one.
+    - **The bounds.** Past `max_pause_s` (300 s) or the run's `pause_budget_s` (600 s),
+      `prepare` raises `SessionHealthUnknown` (a copy: `IsolatedHealthUnknown`), sticky:
+      every later `prepare` raises at once, with no clock and no network, until a check
+      gives a definite answer.
+    - **Whose budget.** One budget per run, shared by the run's manager and its isolated
+      copies (with the run's credential-POST count). A peer identity has its own manager
+      and its own budget.
+  - **Re-login budget.** Loss-driven re-logins draw on a token bucket per (host,
+    identity) per manager: a burst of 5, refilled at 1 per 120 s, drawn under the login
+    lock in the critical section that logs in. The first login and a JWT refresh do not
+    draw.
+    - With the bucket empty, an identity **with** a stable protected resource waits for
+      a token within the pause bound and the budget, holding no lock; otherwise it goes
+      sticky unknown.
+    - With the bucket empty, an identity **without** one (decision D) skips the
+      re-login and sends at once on the session it has, still marked lost: no wait, no
+      `SessionHealthUnknown`, no abort. It logs in again when a token has refilled.
+      **Every request so sent is marked** (`Request.session_lost`, FR-CORE-6;
+      decision D′), and the oracle reads any answer to it as not comparable
+      (FR-FUZZ-65): such a probe never confirms, never negates and never passes.
+    - Credential POSTs are counted per account (`submitted`, a JSON login's `control`;
+      a browser login's submission counts as `submitted`), the run's isolated copies
+      included.
+  - **`verify_live`** is a fresh check (never the cache): live True; lost False and
+    invalid (no listener); an unapproved hop raises; inconclusive, it waits on its own,
+    bounded by `max_pause_s` per call and its own run budget (never `prepare`'s, never
+    the identity's pause), checks again, and still inconclusive returns True, logged
+    once; a session replaced while it checked returns True, logged. It never records a
+    pause, and never sets or clears a sticky unknown on an inconclusive check (a live or
+    lost answer clears one).
+  - **`_verify_authenticated`** (a login's follow-up) decides through `health_verdict`:
+    lost or a policy block fails the login; anything else accepts it (R8).
+  - **Reported.** `health_report()` gives counts per class and outcome (signals,
+    checks, covered, cached, stale, pauses, unconfirmed, re-logins drawn and skipped),
+    `prepare`'s and `verify_live`'s waited seconds, and credential POSTs per account. It
+    holds no URL, header value or body.
+  - **Residuals** (DRAFT-AU-SESS403 §8): R1 (a 403 on expiry with no resource), R2 (no
+    resource; a re-login during a throttle records none), R3 (the TTL), R4 (a moved,
+    broken or throttled resource), R5 (the health GET is untraced), R6 (a comparison
+    that straddles a re-login, pinned by a strict xfail), R7 (a 200 login page is
+    `application` to the oracle outside D's window), R8, R9 (the contract runner,
+    disco, greybox's static header), R10-R15, R16 (D's window: answers are not
+    comparable, D′).
+  - Enforced by: `tests/test_session_forbidden_answers.py` (86 tests: the
+    classification, the cover, both compare-and-sets, the install atomicity, the
+    resource rules, the pause, sticky unknown, both budgets, D and D′, T19's
+    whole-package guard), `tests/test_core_comparability.py::test_no_module_classifies_a_throttle_or_refusal_but_the_owner`.
 - **FR-SESS-20 (origin-scoped sessions, CC-SESS-0023, BUG-0134; design Revision 2,
   O1-O13; review rounds 1-2, R1-R9, T1-T6)**
   - **Origins (O1).** `SessionState.origins` is a set of canonical origins
@@ -354,7 +485,12 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     probe (and the corrupted credential's body sha256 when that was 2xx) is kept in
     memory on the `SessionState`; `verify_live` re-fetches it (2xx, and not the
     corrupted-credential body), so a revoked token reads as lost even when the app
-    answers it with a 2xx error body. The login request URL and `logout` are auth
+    answers it with a 2xx error body. *(CC-SESS-0029, FR-SESS-23:)* the probe is chosen
+    by the one owner of "a stable protected resource" (`_spa_probe`, which every HTTP
+    login's rules 2 and 3 share): the credentialed answer must be live by
+    `health_verdict` on the walk that stops at a login redirect, and an agreeing
+    non-2xx status counts only when `admitted_refusal` admits it (it is recorded as
+    `probe_refusal_status`); the health check reads it through `health_verdict`. The login request URL and `logout` are auth
     endpoints (FR-SESS-7); the SPA shell is not.
   - **The browser's cookies go with the session (CC-SESS-0022, BUG-0132).** The
     session's cookies are the detected credential's **plus** the browser jar's cookies
@@ -413,7 +549,10 @@ data. Shared by all tools; a hard dependency for external validation (D10).
   - Never a substring test (PA-0122).
   - Only one hop is judged.
   - **Residuals:**
-    - privilege-gated redirects to the real login page still read as a logout;
+    - privilege-gated redirects to the real login page still read as a logout
+      ~~;~~ *(amended CC-SESS-0029, FR-SESS-23:)* only as a suspected loss: confirmed
+      live on the stable protected resource when there is one, an unconfirmed loss
+      (bounded by the re-login budget, then D) when there is none;
     - without a known `login_url`, an app page whose name ends in a login token
       (`xss_login.php`) still reads as a login URL (fails safe);
     - the fallback misses `/auth`, `/sso`, IdP redirects and unlisted routing
@@ -441,7 +580,11 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     `SessionAuthError`.
   - **`verify_live(host, identity, base_url)`** re-checks the run's session with one
     fresh-fetcher walk of the operator's base carrying its cookies; on failure it marks
-    the state invalid and persists that, without telling listeners. The session goes
+    the state invalid and persists that, without telling listeners. *(Amended
+    CC-SESS-0029:)* it is FR-SESS-23's fresh health check of the stable protected
+    resource (else the base): live True, lost False, an unapproved hop raises, an
+    inconclusive answer waits on its own bounded budget and then reads live, and a
+    session replaced while it checked reads live. The session goes
     only to its own origins *(FR-SESS-20; before: its own host)*: a hop to any other
     origin, another port of the same host included, is never fetched and raises
     `SessionAuthError` ("cannot verify"), as an unapproved hop does. A copy's session
@@ -458,7 +601,13 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     the logout, one of the session's origins; a listener compares it with
     `session_origins_for(target, identity)`, never a host. `observe` calls it once
     each time it marks a valid session of this manager logged out; the check-and-set
-    is atomic, so concurrent sends seeing one logout tell it once.
+    is atomic, so concurrent sends seeing one logout tell it once. *(Amended
+    CC-SESS-0029, FR-SESS-23:)* it is told once per valid -> invalid transition **seen
+    on a send** (an unconfirmed loss, or a check that confirmed the send's suspicion),
+    after the health lock is released; never for a loss a pause re-check or
+    `verify_live` found (no culprit send), never for a session that was replaced while
+    its check was in flight, and never again in D's window (the state is already
+    lost).
   - It runs inside the observing send, after the state is invalid, and its errors
     propagate. Adding the same listener twice is a no-op.
 - **FR-SESS-15 (the discovery base is the operator's URL, CC-SESS-0016, BUG-0113)**
@@ -471,7 +620,9 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     directory, with no query or fragment: a probe URL or its payload is never a
     discovery base.
   - **Basic auth.** A Basic session has `login_url=None`, so its logout signal is
-    401/403.
+    ~~401/403~~ *(amended CC-SESS-0029, FR-SESS-23:)* a credentialed 401, confirmed on
+    its base URL (rule 2: the base URL that challenged is its stable protected
+    resource); its page content is never read.
   - **"The login page" is this session's login form.** A rejected login, a failed
     verification and a logout are recognised by a password form posting to the
     session's login action or carrying exactly its entry names
@@ -498,7 +649,9 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     form before the login form would be chosen).
 
 ## 4. Non-functional requirements
-- **NFR-SESS-single-flight** Concurrent expiry triggers exactly one re-auth.
+- **NFR-SESS-single-flight** Concurrent expiry triggers exactly one re-auth. *(Amended
+  CC-SESS-0029, FR-SESS-23:)* and at most two health checks per (host, identity) for
+  concurrent signals; a late answer from an earlier generation triggers neither.
 - **NFR-SESS-zero-request** Prefer validity signals that cost no request (e.g.
   JWT `exp`); validate on a schedule or reactively, not before every request.
 - **NFR-SESS-redaction** Credentials, cookies, and tokens redacted on write.

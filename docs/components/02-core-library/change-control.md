@@ -3,6 +3,28 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0070 — The request records its session generation and a lost-session mark; SP-56's guard list loses three session rows (FR-SESS-23, FR-FUZZ-65, BUG-0533) (2026-10-20)
+- Change:
+  - `fuzzlab/core/http.py::Request` gains `session_generation: int | None = None` and
+    `session_lost: bool = False` (+11 lines with comments). The seam neither reads nor
+    changes them: the session addon's `prepare` sets both, its `observe` reads the
+    generation, and the sender that built the request carries the mark to its reader.
+  - FR-CORE-6 declares both beside `session_decision` (B6).
+  - `tests/test_core_comparability.py::ALLOWED` drops the rows for
+    `SessionManager.verify_live`, `SessionManager._verify_authenticated` and
+    `detect.detect_logout` (8 rows to 5): those decisions now go through SP-56.
+- Impact (other components / project): SESS writes and reads both fields
+  (CC-SESS-0029). FUZZ reads the mark (CC-FUZZ-0107: `Probe.session_lost`, layer 1).
+  An optional field with a default changes no existing sender.
+- Risk (low): two defaulted fields; the allowance list is exact (a stale or new row
+  fails), and the three removed sites carry no classified literal.
+- Deliverables:
+  - [x] the fields — done
+  - [x] FR-CORE-6 amended (`02-core-library/requirements.md`) — done
+  - [x] three rows removed; `test_no_module_classifies_a_throttle_or_refusal_but_the_owner`
+    green — done
+- Effectiveness (assessed <date> or pending): pending.
+
 ### CC-CORE-0069 — One classification of an HTTP answer (SP-56, FR-CORE-507, BUG-0528, BUG-0529) (2026-10-20)
 - Change: new `fuzzlab/core/comparability.py` (90 lines).
   - `response_class(status, headers=None, *, complete, credentialed,
