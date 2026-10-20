@@ -233,6 +233,12 @@ conftest changed): 8130 passed, 2 failed, 42 skipped, 38 xfailed.
   guard's `NON_SERVER_LAUNCHES`, with its reason, so any further site in that file
   still fails.
 
+**The harness on 60deb4c** (`--base eb5eb4f --wait-other 7200`, 405 files): 8132
+passed, 0 failed, 0 errors, 42 skipped, 38 xfailed, in 27 min 25 s. Its lock trace
+again shows one `acquired` and one `released`, both by the child pytest (pid 8988,
+whose parent is `verify_change.py`, pid 8874). The three workers (pids 9008, 9011 and
+9014) recorded `worker` with parent 8988.
+
 ## Recurrence review
 - **`docs/claude_juicelab_failures.md`.** F-029 (before the harness), then F-092, F-093,
   F-095, F-097, F-098 and F-102: the same bug six times in two days, after the harness
