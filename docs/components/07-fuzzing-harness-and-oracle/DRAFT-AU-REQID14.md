@@ -727,3 +727,55 @@ its own item, AU-PRGPATH) are resolved. None open.
 | **ADOPT: AU-PRGPATH** | Not fixed here. `test_a_path_points_prg_follow_up_never_carries_the_payload` is a strict xfail naming AU-PRGPATH over `#top` and a relative `edit`, for both probe senders |
 | **Implemented now** | `core/urls.py`; every sender's placement; the guard; the tests; CC-FUZZ-0106 (part 1), CC-CORE-0068, FR-FUZZ-64, FR-CORE-501, BUG-0531 |
 | **Held (Q3)** | `ExecRequest.entries`, `DomXssStrategy._observe`, the executor's `bind_query` with entries, the M6-vs-bound-HTTP row, and unpinning `test_a_dom_query_point_is_loaded_with_its_siblings`, after AU-OUTCOME merges |
+
+## 14. Part 2 (on eb5eb4f, after AU-OUTCOME merged)
+
+**What changed** (commit 74d42d5; CC-FUZZ-0106 part 2, CC-CRAWL-0053, CC-CORE-0068's
+part 2 addition):
+- `oracle/browser.py`: `ExecRequest.entries` (a query point's bound sibling entries).
+- `oracle/strategies.py`: `DomXssStrategy._observe` passes the candidate's non-empty
+  `base_entries` for a query point, which is the same truthiness test the oracle uses
+  to wrap the HTTP sender in `_FormBoundSender`. A fragment point gets nothing. The M6
+  load is an observation, not a control: it does not go through AU-OUTCOME's
+  `_compared`, and `require_observed` (the HTTP sender chain) does not apply to it.
+- `tools/browserexec.py`: the observe navigation is `bind_query(url, entries, param,
+  value)` when `entries` is given, else `place_query_param`; fragment unchanged. The GET
+  store step stays standalone: a `StoreStep`'s `entries` are a JSON store body's leaves,
+  not query siblings (this corrects the part 1 wording "a `StoreStep` has no entries").
+- `core/urls.py`: `encode_route_value` and `place_route_query_pairs(url, pairs,
+  encode)`: each pair by the standalone rule in the route's query (the fragment's own
+  query in hash mode, the URL's own query in history mode). `place_route_query_param`'s
+  route branch calls it, with the same bytes.
+- `tools/spa.py` (CC-CRAWL-0053, option (a)): `query_url` calls
+  `place_route_query_pairs` with `seed_value` = `quote(text, safe="/")`, so a
+  redirect-type name's `/` stays `/` in both modes. FR-CRAWL-17's safety test, which
+  pins `redirectUrl=/`, is unchanged. Names are identifier-shaped, markers are letters
+  and the filler is `fuzzlab`, so no other byte changes today. The fix is in-place
+  replacement on a route that already has the name.
+- Guard: the allow-list is 43 findings under 41 keys (`Runner.prepare` was removed by
+  AU-OUTCOME, `spa.query_url` by this part).
+
+**Tests and mechanism:**
+
+| Test | Mechanism |
+|---|---|
+| `test_a_dom_query_point_is_loaded_with_its_siblings` (unpinned) | echo + real Chromium, through `DomXssStrategy` |
+| `test_the_browser_and_the_bound_http_sender_place_a_duplicate_name_alike` (new) | echo + real Chromium vs `_FormBoundSender` over `RequestsProbeSender`; equal under `canonical_pairs` and equal to `id=1&tag=M&tag=M` |
+| `test_dom_xss_hands_the_executor_a_query_points_link_set` ×4 (new) | offline recording executor: query with entries, query with none, query with `()`, fragment |
+| `test_the_spa_seed_builder_places_its_route_query_in_place` ×8 (was the CRAWL strict xfail) | pure, `spa.query_url` |
+| `test_a_seeds_redirect_type_value_stays_a_same_origin_path_in_both_modes` ×2 (new, the unit row asked for) | pure, `spa.seed_url`, hash and history mode |
+| `test_the_route_query_owner_places_each_pair_by_the_standalone_rule` ×3 (new) | pure, the owner |
+
+**Per-revert proof** (`scratchpad/aureqid/revert_proof2.py`, results in
+`revert_proof2.json`). Each set mutated the committed 74d42d5 tree, or put back a file's
+eb5eb4f version. It ran `tests/test_query_placement.py`, `tests/test_spa_query.py` and
+`tests/test_json_points.py` in one pytest (`-n 4`, `FUZZLAB_REQUIRE_BROWSER=1`, after
+waiting for an idle host), then restored the files; `git status` was clean afterwards.
+
+| Revert / mutation | Failed | What failed |
+|---|---|---|
+| `DomXssStrategy` passes no entries | 2 | the DOM siblings test, and the "query with entries" row of `test_dom_xss_hands_the_executor_a_query_points_link_set` |
+| the executor ignores `ExecRequest.entries` | 2 | the DOM siblings test, and `test_the_browser_and_the_bound_http_sender_place_a_duplicate_name_alike` |
+| `spa.py` back to eb5eb4f | 8 | 5 of the 8 seed-builder rows (the three that hold append to a route without the name, as before), both `/` rows, and the guard (`query_url`'s S5 is back) |
+| the seed encoder encodes `/` | 7 | the two `/` rows of the seed builder, both `/` rows, and 3 tests in `tests/test_spa_query.py`: `test_a_seed_gets_the_filler_and_a_redirect_name_gets_a_same_origin_path` (FR-CRAWL-17's safety test), `test_paired_seeds_are_visited_after_their_bare_route_as_fragment_points` and `test_a_destructive_seed_is_never_visited_and_a_redirect_name_stays_on_origin` |
+| the owner appends instead of replacing | 10 | 5 seed-builder rows, both `/` rows, 2 route-owner rows, and `test_the_executor_places_a_fragment_inside_the_hash_route` |
