@@ -1,7 +1,9 @@
 #!/bin/bash
 # AU-SESS403 revision 2 (PA-0034(2)): each revert recreates one defect in the prototype,
-# and every test named for it must fail. Then the prototype as drafted: every test passes
-# but two:
+# and every test named for it must fail. A guard_* revert instead weakens T19's own guard
+# (proto_plugin), and T19's synthetic-offender proof must fail. Every collected test is
+# named by at least one revert, except the two below. Then the prototype as drafted:
+# every test passes but two:
 # - T19's whole-package assertion: it reads fuzzlab/'s source, which the run-time
 #   prototype cannot change;
 # - F3's strict-xfail pin: a stated residual, not in this item.
@@ -51,6 +53,7 @@ T22=test_prepare_records_the_generation_it_applied
 T23=test_request_entry_names_reads_query_form_and_json_leaves_and_is_total
 T10=test_detect_logout_reads_a_policy_block_never_as_a_loss
 T11=test_detect_logout_keeps_its_loss_signals_and_never_reads_a_throttle
+T19s=test_the_loss_decision_guard_catches_synthetic_offenders
 
 run() {   # run <revert> <node ids...>: every selected test must FAIL
   local revert=$1; shift
@@ -109,6 +112,12 @@ run nocas "$TM7b"
 run hop_pauses "$THOP"
 run noadopt "$TROT"
 run relogin_under_health_lock "$T24"
+run norule2 "$T9[redirect-None]" "$T9[basic-None]"
+run rule2_cookie_only "$T9[basic-None]"
+run guard_noassign "$T19s"
+run guard_nosetattr "$T19s"
+run guard_nokeyword "$T19s"
+run guard_nocall "$T19s"
 
 echo "== the prototype as drafted (no revert)"
 REVERT= timeout 1200 python3 -m pytest -q -p no:cacheprovider -p proto_plugin --runxfail \

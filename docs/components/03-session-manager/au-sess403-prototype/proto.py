@@ -65,6 +65,14 @@ REVERTS = {
     "nogenrecord": "prepare does not record the generation on the request",
     "nologinlock": "ensure takes a fresh lock per call (no single flight)",
     "policy_loss": "detect_logout reads any policy block (403, 451) as a loss",
+    "norule2": "the base URL is never a resource candidate (rule 2 dropped; the landing only)",
+    "rule2_cookie_only": "rule 2 runs for cookie sessions only (M4(b) undone for Basic)",
+    # T19's guard with one write form or the predicate call left unseen (proto_plugin
+    # re-executes the test module's `loss_decision_offenders` with that branch off).
+    "guard_noassign": "T19's guard misses an assignment to `.valid`",
+    "guard_nosetattr": "T19's guard misses `setattr(x, 'valid', v)`",
+    "guard_nokeyword": "T19's guard misses a `valid=` keyword (dataclasses.replace)",
+    "guard_nocall": "T19's guard misses a call of detect_logout outside its callers",
 }
 if REVERT and REVERT not in REVERTS:
     raise SystemExit(f"unknown REVERT {REVERT!r}; one of {sorted(REVERTS)}")
@@ -502,8 +510,10 @@ def install() -> None:
         if REVERT == "rule2verify" and getattr(self._tl, "base_redirected", False):
             state.protected_probe, state.probe_refusal_status = base_url, None
             return
+        rule2 = REVERT != "norule2" and not (REVERT == "rule2_cookie_only"
+                                             and state.kind != "cookie")
         url, rs, digest = _select_resource(self, state, base_url,
-                                           [base_url, *extra])
+                                           [*([base_url] if rule2 else []), *extra])
         state.protected_probe = url
         state.probe_refusal_status = rs
         if digest is not None:

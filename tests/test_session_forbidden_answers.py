@@ -806,6 +806,8 @@ def test_concurrent_forbidden_rounds_never_log_in_again(mode):
 def test_each_login_records_the_resource_its_answers_prove(mode, refusal):
     """T9. The credentialed answer must be LIVE on the walk that stops at a login
     redirect. The anonymous and the corrupted answers must agree as a refusal.
+    - `redirect`: rule 2 on the base, so the resource is `/`, not the landing.
+    - `basic`: rule 2 for a Basic session too (M4(b)), so the resource is `/`.
     - `static`: `/` always redirects to `/login`, so the resource is `/dashboard`.
     - `presence`: `/` answers any cookie, so the resource is `/home.php`.
     - `forbid`: refuses with 403, and that status is recorded.
@@ -815,8 +817,8 @@ def test_each_login_records_the_resource_its_answers_prove(mode, refusal):
     base is its login page, an auth endpoint, and it has no landing, so no revert can
     make it a candidate.
 
-    Reverts: `rule2verify` (static), `nocorrupt` (presence), `norefusal` (forbid),
-    `publicbase` (none)."""
+    Reverts: `norule2` (redirect, basic), `rule2_cookie_only` (basic), `rule2verify`
+    (static), `nocorrupt` (presence), `norefusal` (forbid), `publicbase` (none)."""
     got = run_protected_resource(mode)
     assert got["recorded"] == RESOURCE[mode], got
     assert got["refusal_status"] == refusal, got
@@ -1419,7 +1421,10 @@ def test_the_loss_decision_guard_catches_synthetic_offenders():
     """T19's guard, proven on each write form (PA-0034(2)). Each of these must be
     found: `state.valid = ok`, `setattr`, `dataclasses.replace(valid=…)`,
     `.valid = False` outside `_mark_lost`, `True` written by a non-writer, and
-    `detect_logout` called elsewhere. The owner's own write is not."""
+    `detect_logout` called elsewhere. The owner's own write is not.
+
+    Reverts (the guard weakened, by `proto_plugin`): `guard_noassign`,
+    `guard_nosetattr`, `guard_nokeyword`, `guard_nocall`."""
     rel = "fuzzlab/session/manager.py"
     src = ("import dataclasses\n"
            "class SessionManager:\n"
