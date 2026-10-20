@@ -145,7 +145,7 @@ def _requests_transport(method: str, url: str, headers: Mapping[str, str],
     import requests  # imported lazily so core has no hard runtime import cost
 
     from fuzzlab.core import bodyread
-    # The body is read bounded (SP-57, BUG-0536): wire and decoded ceilings and a
+    # The body is read bounded (SP-60, BUG-0536): wire and decoded ceilings and a
     # wall-clock deadline; an incomplete one raises `bodyread.BodyIncomplete`, never
     # comes back short. A fresh session per send, as `requests.request` made.
     with bodyread.bound(requests.Session()) as session:

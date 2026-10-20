@@ -3,7 +3,7 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
-### CC-CORE-0072 — One bounded reader of a target's HTTP body (SP-57, FR-CORE-536, BUG-0536) (2026-10-20)
+### CC-CORE-0072 — One bounded reader of a target's HTTP body (SP-60, FR-CORE-536, BUG-0536) (2026-10-20)
 - Placement: pre-assigned to AU-BOUNDED (audit defect 21); CC-CORE-0070 and CC-CORE-0071
   are other lanes'.
 - Change: new `fuzzlab/core/bodyread.py`; `core/http.py::_requests_transport` reads through
@@ -40,7 +40,7 @@ Newest first.
     - the auditor's seam fetch lets it reach its "Fetch failed" handler.
   - FUZZ and CRAWL bound their own sessions with `bound` (CC-FUZZ-0109, CC-CRAWL-0054).
   - SESS's login fetcher is pinned by a strict xfail (AU-SESS403's file).
-  - New shared primitive SP-57, and an ARCHITECTURE note (the coordinator writes both).
+  - New shared primitive SP-60, and an ARCHITECTURE note (the coordinator writes both).
   - AU-SESS403 adds a `Request` field to the same file; this change touches only
     `_requests_transport`.
 - Risk (medium): every target read now has ceilings and a deadline. A legitimate body
@@ -59,7 +59,7 @@ Newest first.
     an undecodable or unbounded coding never a body; the session guard and its
     synthetic offenders; R1 and R2 as strict xfails — done
   - [x] FR-CORE-536 — done
-  - [ ] SP-57 row, SP-34 row note, ARCHITECTURE note, PA-0536, CHANGELOG, ERROR_LOG —
+  - [ ] SP-60 row, SP-34 row note, ARCHITECTURE note, PA-0536, CHANGELOG, ERROR_LOG —
     todo (the coordinator, at merge; texts in the lane report)
 - Effectiveness (assessed <date> or pending): pending.
 

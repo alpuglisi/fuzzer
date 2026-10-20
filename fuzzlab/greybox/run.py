@@ -130,7 +130,7 @@ class RequestsCorrelatingSender:
         if session is None:
             from fuzzlab.core import bodyread
             from fuzzlab.core.http import DEFAULT_BROWSER_HEADERS
-            # bodies read bounded (SP-57, BUG-0536): an incomplete one is a
+            # bodies read bounded (SP-60, BUG-0536): an incomplete one is a
             # `RequestException` (`BodyIncomplete`), this sender's status-0 try
             session = bodyread.bound(requests.Session())
             session.headers.update(DEFAULT_BROWSER_HEADERS)

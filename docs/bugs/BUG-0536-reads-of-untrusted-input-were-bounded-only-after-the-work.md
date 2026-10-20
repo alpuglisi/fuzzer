@@ -84,7 +84,7 @@ the work.
 
 ## Corrective action
 (CC-CORE-0072, CC-CRAWL-0054, CC-FUZZ-0109.)
-- **One bounded reader, `fuzzlab/core/bodyread.py`** (SP-57, FR-CORE-536).
+- **One bounded reader, `fuzzlab/core/bodyread.py`** (SP-60, FR-CORE-536).
   `read_body(resp, deadline=, limits=)` reads the undecoded stream one receive at a time (urllib3
   `read1`). It counts wire bytes (`MAX_WIRE_BYTES`, 16 MiB) and decodes incrementally
   with an output ceiling per step (`MAX_DECODED_BYTES`, 32 MiB): zlib's `max_length`,
@@ -201,7 +201,7 @@ buffering, caps applied after the work and unbounded pattern evaluation:
 PA-0528's R6 for body bytes. A bound on untrusted input is enforced inside the loop that
 does the work: each receive, each buffered chunk, each match. It is never checked only on
 the finished artefact (a whole body, a whole line, a compiled pattern).
-1. **Reading a target's HTTP body has one owner** (SP-57, `core.bodyread`), with:
+1. **Reading a target's HTTP body has one owner** (SP-60, `core.bodyread`), with:
    - a wire ceiling and a decoded ceiling;
    - a wall-clock deadline checked at every receive;
    - a typed incomplete marker that no consumer takes for a body (SP-34 maps it to "not

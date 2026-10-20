@@ -1,4 +1,4 @@
-"""Bounded reads (BUG-0536; audit defects 21, 23 and 27; SP-57).
+"""Bounded reads (BUG-0536; audit defects 21, 23 and 27; SP-60).
 
 - **21.** Every ``requests`` reader of a target's body reads it through one bounded
   reader (`core.bodyread`): a wire-byte and a decoded-byte ceiling and a wall-clock
@@ -398,7 +398,7 @@ def test_the_session_managers_login_fetch_is_bounded(peer):
     assert _incomplete(info.value) == "decoded"
 
 
-# --- the guard: every requests session fuzzlab makes is bounded (SP-57) ---------------------
+# --- the guard: every requests session fuzzlab makes is bounded (SP-60) ---------------------
 
 _SENDS = {"request", "get", "post", "put", "patch", "delete", "head", "options"}
 
@@ -459,7 +459,7 @@ def test_every_requests_session_fuzzlab_makes_is_bounded():
     expected = {k: n for k, (n, _why) in UNBOUNDED_ALLOWED.items()}
     assert found == expected, (
         "every requests.Session() / requests.<verb>() a module of fuzzlab makes reads "
-        "bodies through core.bodyread (bodyread.bound(requests.Session()), SP-57, "
+        "bodies through core.bodyread (bodyread.bound(requests.Session()), SP-60, "
         f"BUG-0536), or is listed here with its reason: {found} != {expected}")
 
 

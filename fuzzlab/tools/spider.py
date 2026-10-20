@@ -587,7 +587,7 @@ class LocalSpider:
         # this since it doesn't discriminate by headers.
         from fuzzlab.core import bodyread
         from fuzzlab.core.http import DEFAULT_BROWSER_HEADERS
-        # every body read bounded (SP-57, BUG-0536)
+        # every body read bounded (SP-60, BUG-0536)
         self.session = bodyread.bound(requests.Session())
         self.session.headers.update(DEFAULT_BROWSER_HEADERS)
 
@@ -2853,7 +2853,7 @@ class LocalSpider:
             finally:
                 ctx.dispose()
         from fuzzlab.core import bodyread
-        iso = bodyread.bound(requests.Session())      # its body read bounded (SP-57)
+        iso = bodyread.bound(requests.Session())      # its body read bounded (SP-60)
         iso.headers.update(self.session.headers)
         iso.cookies.update(self.session.cookies.copy())
         if method == "POST":
@@ -2999,7 +2999,7 @@ class LocalSpider:
         other._injected_cookies = []
         other._header_scope, other._cookie_scope = other._in_scope, None
         from fuzzlab.core import bodyread
-        other.session = bodyread.bound(requests.Session())     # SP-57, BUG-0536
+        other.session = bodyread.bound(requests.Session())     # SP-60, BUG-0536
         other.session.headers.update(self.session.headers)
         other._xhr_urls, other._query_navs, other._pending_routes = [], [], []
         other._subresources = self._subresources             # one set: the crawl's

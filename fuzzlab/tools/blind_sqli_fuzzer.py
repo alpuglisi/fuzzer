@@ -348,7 +348,7 @@ def main(argv=None):
         # Realistic browser UA, same rationale/constant as the crawler (BUG-0059).
         from fuzzlab.core import bodyread
         from fuzzlab.core.http import DEFAULT_BROWSER_HEADERS
-        # bodies read bounded (SP-57, BUG-0536): an incomplete one is a
+        # bodies read bounded (SP-60, BUG-0536): an incomplete one is a
         # `RequestException` (`BodyIncomplete`), never a size in the dataset
         _session = bodyread.bound(requests.Session())
         _session.headers.update(DEFAULT_BROWSER_HEADERS)

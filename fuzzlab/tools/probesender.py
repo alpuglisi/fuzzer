@@ -220,7 +220,7 @@ def _unobserved(exc: BaseException) -> ProbeUnobserved | None:
     """``ProbeUnobserved`` when a sent probe got no complete response (BUG-0147): the
     connection was reset or aborted, or the body was cut off or undecodable, or the
     bounded reader stopped it (`core.bodyread.BodyIncomplete`: over a ceiling, past its
-    deadline, an unbounded coding; SP-57, BUG-0536 -- never re-sent, and never latency
+    deadline, an unbounded coding; SP-60, BUG-0536 -- never re-sent, and never latency
     evidence: a body that kept arriving proves no delay). Else None, and the caller
     re-raises the original:
     - a timeout is not one (each sender has its own rule for it, `_is_timeout`);
@@ -918,7 +918,7 @@ class RequestsProbeSender(_ExplicitAllowance):
         if session is None:
             from fuzzlab.core import bodyread
             from fuzzlab.core.http import DEFAULT_BROWSER_HEADERS
-            # every body read bounded (SP-57, BUG-0536): an incomplete one raises
+            # every body read bounded (SP-60, BUG-0536): an incomplete one raises
             # `BodyIncomplete`, which `_unobserved` makes "not observed"
             session = bodyread.bound(requests.Session())
             session.headers.update(DEFAULT_BROWSER_HEADERS)

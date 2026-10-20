@@ -15,7 +15,7 @@ of ``pass`` / ``finding`` / ``error`` / ``skipped``, with what matched and why.
 - redirects are never followed (PA-0046): the oracle judges what the server said;
 - each response is read up to ``limits.max_body_bytes`` (on the wire and decoded) and
   within ``limits.timeout_ms``, checked at every receive, by the one bounded reader
-  (`core.bodyread.read_body`, SP-57, BUG-0536; PA-0102(1)); sends are spaced to
+  (`core.bodyread.read_body`, SP-60, BUG-0536; PA-0102(1)); sends are spaced to
   ``limits.rps``.
 
 **A send that gets no complete response is no verdict** (PA-0153, BUG-0528): no
@@ -429,7 +429,7 @@ class Runner:
                                         data=req.body, allow_redirects=False,
                                         timeout=limits["timeout_ms"] / 1000, stream=True)
             ex.status, ex.headers = resp.status_code, dict(resp.headers)
-            # the one bounded reader (SP-57, BUG-0536): max_body_bytes on the wire and
+            # the one bounded reader (SP-60, BUG-0536): max_body_bytes on the wire and
             # decoded, timeout_ms checked at every receive
             cap = limits["max_body_bytes"]
             body = bodyread.read_body(resp, deadline=deadline, clock=self.clock,

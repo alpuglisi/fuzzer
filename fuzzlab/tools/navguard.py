@@ -1027,7 +1027,7 @@ def get_checked(session, url: str, timeout: float, may_follow: Callable[[str], b
     only if ``may_follow(next_url)`` allows it (scope, and no destructive token). A
     refused hop is not followed; the redirect response itself is returned (BUG-0111).
 
-    Every body is read bounded (SP-57, BUG-0536): a ``requests.Session`` given here is
+    Every body is read bounded (SP-60, BUG-0536): a ``requests.Session`` given here is
     bounded first (`core.bodyread.bound`, idempotent), so a body over a ceiling or past
     its deadline raises `bodyread.BodyIncomplete` and is never returned short. Another
     object (a test's in-memory site) is used as given.

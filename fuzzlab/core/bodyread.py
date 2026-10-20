@@ -1,4 +1,4 @@
-"""Bounded reads of a target's HTTP response body (SP-57, FR-CORE-536; BUG-0536).
+"""Bounded reads of a target's HTTP response body (SP-60, FR-CORE-536; BUG-0536).
 
 The one owner of reading a response body from a target over ``requests``. A body is read
 under three limits, each checked inside the read loop:

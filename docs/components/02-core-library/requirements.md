@@ -740,7 +740,7 @@ plugin registry. It is the layer that makes the store the integration bus.
   - Enforced by: `tests/test_core_comparability.py` (the rule table, totality, the
     import guard and the status guard, each guard proven on a synthetic offender).
 - **FR-CORE-536** *(one bounded reader of a target's HTTP body; `CC-CORE-0072`,
-  2026-10-20, BUG-0536, audit defect 21; SP-57).* `core.bodyread` is the one owner of
+  2026-10-20, BUG-0536, audit defect 21; SP-60).* `core.bodyread` is the one owner of
   reading a response body from a target over `requests`.
   - **Three limits, each checked inside the read loop.** `read_body(resp, *, deadline,
     limits=None, clock=time.monotonic) -> Body` reads the undecoded stream one receive
