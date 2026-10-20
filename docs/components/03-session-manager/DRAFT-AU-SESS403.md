@@ -47,6 +47,21 @@
 | F7 credential POSTs | Counted per account (`"<host>/<identity>"`), each kind nested. TCP asserts the account key. A copy counts into its account. | §3.9, TCP |
 | F8 | The stale line "at most two review rounds remain" is removed. | header |
 
+## 0b. What changed in Phase 2 (the owner's decision D′ and review round 4)
+
+Review round 4 confirmed B1-B6, D and every round-3 follow-up, measured probes Q1-Q7,
+and raised the items below. Phase 2 implements them with the design.
+
+| Item | Change | Where |
+|---|---|---|
+| **D′** (the owner's decision after Q1) | In D's window a probe on the known-lost session can get an `application` answer (a guest view, a 404, a non-login redirect), which the oracle admitted. Now `prepare` marks every request it sends on a lost-but-unrecovered state (`Request.session_lost`, CC-CORE-0070), `SeamProbeSender` carries the mark to the probe (`Probe.session_lost`), and layer 1 (`require_observed`) raises `NotComparable("... sent on a lost session")` for any answer to it, whatever its class: payloads, controls, baselines and replays alike. The candidate ends inconclusive. A resource-backed identity never sends on a lost state, so the mark never fires for it. | §3.15, §8 R16, TD1, TD2, TD3; CC-FUZZ-0107, FR-FUZZ-65 |
+| Follow-up 1 (split `nocas`) | `nocas` is now the check's compare-and-set only, and `nomlcas` is `_mark_lost`'s. `nocas` fails T M7b (a pause recorded and counted for the replaced session) and T M7e (`verify_live` says False for a replaced session). `nomlcas` fails T M7f (Q2's shape: `_mark_lost` on a replaced state writes no row) and T M7h (an `adopt` landing between the check's compare and the mark: no listener, no row). T M7c, which either layer alone keeps green, is named for `cas_both`; a pause of another generation (T M7b2) for `pause_anygen`. PA-0533's line names T M7b2, T M7e, T M7f and T M7h. | §6, §10.2, §13 |
+| Follow-up 2 (the compare-and-set is atomic with installs) | `_mark_lost` persists its row inside its lock. Every install -- `ensure`'s login and `adopt` -- goes through `_install`, which numbers the state, installs it and persists its row under the same lock (the persist moved out of `_established`, `_basic_login` and `_browser_login_state`). T M7g (Q3's shape, a slow store write, for a re-login and for an `adopt`): the rows' last word is the current session's. Reverts `persist_unlocked`, `install_unlocked`. | §3.7, T M7g |
+| Follow-up 3 (a copy shares the run's budget and account) | TCP now logs an isolated copy in (it counts into the run's account) and a peer (another account). T13c: a copy's pause spends the run's pause budget, so the run's own pause ends early. Revert `copy_own_budget`. | §3.8, §3.9, TCP, T13c |
+| Follow-up 4 (R2, R4) | A re-login during a throttle records no resource, so that session takes the no-resource path. | §8 R2, R4 |
+| Follow-up 5 (the "F3" label clash) | "F3" stays revision 3's change-table label for *whose budget*. The residual of a comparison that straddles a re-login is R6 only (its pin: `_R6`). | §3.13, §6, §8 |
+| D′'s sweep | Two consumers outside the oracle read answers through a session-managed seam and do not read the mark: the live WAF filter (MUT) and the blind-SQLi builder (FUZZ). Each is pinned by a strict xfail naming its owner (PA-0531(4)). | BUG-0533's sweep |
+
 Revision 2's own change table (M1-M10, ADOPT) is in this file's history
 (`git show f3e731f:docs/components/03-session-manager/DRAFT-AU-SESS403.md`). Every item
 in it still holds unless a row above changes it.
@@ -85,7 +100,8 @@ in it still holds unless a row above changes it.
   (`_RecordingStore`). T M7c first asserts the double recorded the login's and the
   adopt's rows, so the channel can carry the violation (PA-0311(2)).
 
-**The prototype** (`docs/components/03-session-manager/au-sess403-prototype/`)
+**The prototype** (`docs/components/03-session-manager/au-sess403-prototype/`; Phase 1
+only: deleted in Phase 2, kept in git at `fc57a9c`)
 - `proto.py` patches this design onto `SessionManager` and `session.detect` at run time.
   It is never collected and is not part of `fuzzlab/`; Phase 2 deletes it.
 - It re-implements `prepare` and `ensure`: copies of the base bodies plus the design,
@@ -468,7 +484,12 @@ A live verdict covers a later signal in two cases:
 (T19). Under `_observe_guard` it compare-and-sets on the **current state**: it changes
 nothing and returns False unless `state` is still `self._state[(state.host,
 state.identity)]` and still of `generation` (B3). So it never persists a replaced object
-over the live one's row (T M7c). Its caller states `notify`:
+over the live one's row (T M7c, T M7f, T M7h). **Its persist happens inside that
+critical section, and every install takes the same lock** (`_install`: `ensure`'s login
+and `adopt` number the state, install it and persist its row under `_observe_guard`;
+review round 4, follow-up 2). An invalidation of the state an install replaces therefore
+lands wholly before it (its row first) or finds it replaced (no row): the rows' last word
+is the current state's (T M7g). Its caller decides whether listeners are told:
 
 | Path | `notify` | Why |
 |---|---|---|
@@ -637,6 +658,28 @@ Q1.
 | `tests/test_core_comparability.py` | three rows removed | -6 |
 | tests | markers removed; the prototype directory deleted | -900 (prototype) |
 
+### 3.15 D′: an answer on a session known to be lost is never evidence (CC-FUZZ-0107)
+
+- **The mark (session layer).** `prepare` sets `Request.session_lost = not state.valid`
+  on the state it applied. A state is applied while invalid only in D's window (§3.9:
+  `ensure` returned it without a login), so the mark fires exactly there. It sits beside
+  `Request.session_generation` (CC-CORE-0070, FR-CORE-6).
+- **The carry (the seam sender).** `SeamProbeSender._dispatch` sets
+  `Probe.session_lost` from the request, read and never recomputed. A PRG follow-up is
+  dispatched the same way and carries its own request's mark.
+- **Layer 1 (the oracle; SP-56's oracle reader).** `require_observed` checks the mark
+  of the probe and of its follow-up **before** any class is read and raises
+  `NotComparable("not comparable: the probe was sent on a lost session")`
+  (`response_class = "lost-session"`). Every strategy run goes through `_ObservedOnly`,
+  so payloads, controls, baselines, compared slots, replays and the correlated send all
+  meet it; a timing send's read timeout too.
+- **Outcome.** The mechanism gives no verdict; the candidate is `not-comparable`
+  (inconclusive) unless another mechanism confirms on unmarked answers. The run goes on.
+- **Never for a resource-backed identity**: its losses are confirmed and re-logged in,
+  or it waits for a token, or it goes sticky unknown (TD2, revert `d_for_all`).
+- **Not covered (pinned):** the live WAF filter and the blind-SQLi builder (BUG-0533's
+  sweep).
+
 ## 4. Unchanged on purpose
 
 - The form rules (BUG-0113) and the redirect rules (FR-SESS-18).
@@ -734,9 +777,10 @@ change is listed with before and after, PA-0073(3)):
 How to read the columns:
 - **"Base"** is how the test fails on the base: by the measured counts or behaviour, or
   by an absent API, or "pin" (it passes).
-- **"Revert"** names the `REVERT` each test fails against on the prototype.
-- Every revert below was run (`run_reverts.sh`; §12). New or changed rows in revision 3
-  are marked **(r3)**.
+- **"Revert"** names the revert each test fails against. Phase 1 proved them on the
+  prototype (`REVERT=<name>`, §12); **Phase 2 re-proved every one on the implementation**
+  as a literal source edit of the real modules (§13). New or changed rows in revision 3
+  are marked **(r3)**, in Phase 2 **(p2)**.
 
 | Test | Layer | Base | Revert(s) |
 |---|---|---|---|
@@ -762,17 +806,27 @@ How to read the columns:
 | T14 `…live_verdict_is_cached_for_its_window_its_generation_and_its_url` | M6 | no checks | `nocache`, `cache_nourl`, `cache_nogen` |
 | TOFF `…expiry_that_redirects_to_another_origins_login_is_lost_at_its_hop` | `stop_at` | pin | `nostop` |
 | **(r3)** T M7 `…n_concurrent_signals_make_one_health_get` | M7, B2: **at most two** GETs | no GET | `noflight` (six GETs) |
-| T M7b `…pause_found_for_an_older_generation_never_pauses_the_new_one` | M7, B3: INCONCLUSIVE branch | no GET | `nocas` |
-| **(r3)** T M7c `…lost_verdict_for_a_replaced_session_tells_no_listener_and_writes_no_row` | B3 (P4): LOST branch, listener and row | no GET | `nocas` (listener told, a row written over session 2's) |
+| T M7b `…pause_found_for_an_older_generation_never_pauses_the_new_one` | M7, B3: INCONCLUSIVE branch | no GET | **(p2)** `nocas` (the check's compare-and-set only: a pause recorded, counted and logged for the replaced session) |
+| **(p2)** T M7b2 `…pause_of_a_replaced_generation_never_delays_its_replacement` | a pause is keyed by its generation | -- | `pause_anygen` |
+| **(r3)** T M7c `…lost_verdict_for_a_replaced_session_tells_no_listener_and_writes_no_row` | B3 (P4): LOST branch, listener and row | no GET | **(p2)** `cas_both` (either compare-and-set alone keeps it green: listener told, a row written over session 2's) |
+| **(p2)** T M7e `…verify_live_asked_about_a_session_replaced_while_it_checked_answers_live` | B3: the check's compare-and-set, §3.10's STALE row | -- | `nocas` (`verify_live` says False) |
+| **(p2)** T M7f `…mark_lost_on_a_replaced_state_changes_nothing_and_writes_no_row` | B3: `_mark_lost`'s own compare-and-set (Q2) | -- | `nomlcas` |
+| **(p2)** T M7h `…an_adopt_between_the_checks_compare_and_the_mark_tells_no_listener` | B3: `_mark_lost`'s compare-and-set on the observing send | -- | `nomlcas` (listener told, a row after the adopt's) |
+| **(p2)** T M7g `…a_slow_row_write_never_leaves_a_replaced_sessions_row_last[relogin, adopt]` | the compare-and-set atomic with installs (Q3) | -- | `persist_unlocked`, `install_unlocked` |
 | **(r3)** T M7d `…loss_seen_while_a_check_is_in_flight_is_still_acted_on` | B2 (P2): the cover is the send | no GET | `cover_at_record` (the session stays valid, dead on the server) |
 | T18 `…header_probe_bypasses_a_warm_cache_and_trips_the_breaker_on_its_own_send` | M6 | pin | `foreign` |
 | T17 `…listeners_hear_only_a_lost_session_and_a_pause_recheck_has_no_culprit` | FR-SESS-16 | told 5 times | `notify_pause` |
 | T24 `…health_and_login_locks_never_deadlock` | locks | no GET | `relogin_under_health_lock` (a real cycle) |
 | T13 `…unknown_session_is_sticky_and_costs_nothing_after` | M8 | DID NOT RAISE | `nosticky` |
 | T13b `…runs_pause_budget_ends_a_second_pause_early` | M8 | no sleeps | `nobudget` (55 s slept) |
+| **(p2)** T13c `…an_isolated_copys_pauses_draw_on_the_runs_pause_budget` | F3: a copy shares the run's pause budget | -- | `copy_own_budget` |
 | T15 `…relogins_draw_on_a_refilling_budget[100-raises, 300-200]` | M10, a resource-backed identity | DID NOT RAISE / no wait | `nobucket` |
 | **(r3)** T15b `…no_resource_identity_whose_budget_is_spent_carries_on_at_once` | D | counts (30 logins) | `nores_waits` (sleeps, then raises), `nobucket` (30 logins) |
-| **(r3)** TCP `…credential_posts_are_counted_and_the_json_control_too` | M10, F7: per account | API absent | `nocount` |
+| **(r3)** TCP `…credential_posts_are_counted_and_the_json_control_too` | M10, F7: per account; **(p2)** a copy counts into its account, a peer is another | API absent | `nocount`, `copy_own_budget` |
+| **(p2)** TD1 `…an_answer_on_a_session_known_lost_is_never_evidence` | D′ (Q1's shape): the guest cart is not comparable; the candidate ends inconclusive | -- | `nolostmark`, `oracle_ignores_lost` |
+| **(p2)** TD2 `…a_resource_backed_identity_never_sends_on_a_lost_session` | D′'s other half: the base still re-logs in; the mark never fires | -- | `d_for_all` |
+| **(p2)** TD3 `…layer_one_reads_any_answer_on_a_lost_session_as_not_comparable[×7]` | D′, layer 1: every class, a follow-up, a timing read timeout | -- | `oracle_ignores_lost` |
+| **(p2)** two D′ sweep pins (`…live_waf_filter…`, `…blind_sqli_builder…`) | strict xfails naming MUT and FUZZ | -- | -- (stated pins) |
 | T21 `…verify_live_waits_out_an_unknown_and_then_reads_live` | M9 | no GET | `verifylive_false` |
 | T21b `…verify_live_never_reads_the_cache` | M6 | pin | `verifylive_cache` |
 | **(r3)** T21c `…inconclusive_verify_live_never_clears_a_sticky_unknown` | F2 (P3) | DID NOT RAISE | `verifylive_clears_sticky` (the next send goes out) |
@@ -783,9 +837,9 @@ How to read the columns:
 | T23 `…request_entry_names…is_total` | SP-16 | API absent | `noentrynames` |
 | T10 `…policy_block_never_as_a_loss[403, 451]` | the predicate | 403: counts; 451: pin | `403`, `policy_loss` |
 | T11 `…keeps_its_loss_signals_and_never_reads_a_throttle` | the predicate | pin | `throttle`, `content_rule_off` |
-| **(r3)** T19 `…only_the_owner_decides_a_session_loss` + `…guard_catches_synthetic_offenders` | PA-0533(4) | 2 offenders (`observe`, `verify_live`) | whole package: fails on the base and on the prototype, since a run-time patch cannot change `fuzzlab/`'s source, so Phase 2 proves it. Synthetic (now with `object.__setattr__` and a bound `__setattr__`, F6): `guard_noassign`, `guard_nosetattr`, `guard_nodunder`, `guard_nokeyword`, `guard_nocall`; each re-executes the guard with one branch off. |
+| **(r3)** T19 `…only_the_owner_decides_a_session_loss` + `…guard_catches_synthetic_offenders` | PA-0533(4) | 2 offenders (`observe`, `verify_live`) | whole package: **(p2)** green on the implementation; `observe_writes_valid` (observe invalidates by writing `valid` itself) fails it. Synthetic (now with `object.__setattr__` and a bound `__setattr__`, F6): `guard_noassign`, `guard_nosetattr`, `guard_nodunder`, `guard_nokeyword`, `guard_nocall`; each edits the guard with one branch off. |
 | R6 `…seam_probe_carries_the_session_generation_it_was_sent_on` | R6 (strict xfail) | API absent | — (a residual's pin; fails on the implementation too) |
-| T20 `tests/test_core_comparability.py::…but_the_owner` (three rows removed) | CC-CORE-0070 | Phase 2 | restoring a status literal in any of the three sites (its existing synthetic offenders) |
+| T20 `tests/test_core_comparability.py::…but_the_owner` (three rows removed) | CC-CORE-0070 | Phase 2 | **(p2)** `403`, `policy_loss`, `throttle` (each restores a status literal in `detect_logout`) |
 
 ## 7. Requirement text
 
@@ -988,211 +1042,119 @@ BUG-0533).**
     stops making copies (fail closed, never a wrong verdict). D makes that window last
     up to 120 s instead of one send. Not measured; no FUZZ change.
 
-## 9. Change-control drafts
+## 9. Change-control entries (landed)
 
-### CC-SESS-0029 — A forbidden answer is never, by itself, a lost session (FR-SESS-23, BUG-0533) (2026-10-20)
-- **Change:** §3, in `session/detect.py`, `session/manager.py` and `session/state.py`.
-  About +480 / -50 LOC. The tests are listed in §6. The prototype directory is deleted.
-- **Impact (other components / project):**
-  - **CORE:** `Request.session_generation` (CC-CORE-0070, FR-CORE-6 amended), and
-    SP-56's allowance list loses three rows.
-  - **FUZZ:** every `SeamProbeSender` (the run's, the peer's, the mutation's, the
-    blind-SQLi confirmer's) stops re-logging in on forbidden answers.
-    `SessionHealthUnknown` ends a run as the `max_reauth` cap does; a no-resource
-    identity never raises it from the bucket (D).
-  - **No FUZZ code changes. `_verify_main`'s behaviour is unchanged:** it trips on
-    False and on a raise, as before. `verify_live` now returns False only for a real
-    loss, so an unresolved throttle no longer trips it falsely (§3.10).
-  - A copy's health-unknown counts toward the failed-logins breaker (§5.4). A copy
-    shares the run's pause budget and credential-POST count (§3.8, §3.9).
-  - **AUD:** `audit_page` swallows the sticky unknown per page, without traffic.
-  - **CRAWL:** `verify_live`'s API is unchanged; its waits have their own budget.
-  - **SP-16:** gains `request_entry_names`; its one loss predicate is shared with
-    `health_verdict`.
-  - **A new shared-primitive row** (§10.5).
-  - The consumers were found by grep (§5; PA-0152).
-- **Risk (medium):**
-  - A missed real loss: mitigated by the true-positive pins (TP1-TP6), by T M7d (a loss
-    during a check), and by unconfirmed losses without a resource.
-  - A run that now ends loudly on an unknown identity: bounded and sticky, stated.
-  - A no-resource identity sending on a dead session in D's window: bounded by the
-    bucket, not comparable at the oracle, stated (R16).
-  - Lock order: §3.12, T24.
-  - Login cost: R13.
-  - A wrong resource (a public page, a throttled one): mitigated by the corrupted arm,
-    M4(a) and the admission (B1), with T9, T2b and TP5/TP6.
-- **Deliverables:**
-  - [ ] detect.py — todo
-  - [ ] manager.py — todo
-  - [ ] state.py — todo
-  - [ ] tests (markers removed) — todo
-  - [ ] the prototype deleted — todo
-  - [ ] FR-SESS-23 and the amendments — todo
-  - [ ] the sweep recorded in BUG-0533 — todo
-- **Effectiveness:** pending.
+The drafts landed, updated to what was built, in each component's log:
+- `03-session-manager/change-control.md` **CC-SESS-0029** (with the re-derived existing
+  expectations, PA-0073(3));
+- `02-core-library/change-control.md` **CC-CORE-0070** (`session_generation`,
+  `session_lost`, three allowance rows);
+- `07-fuzzing-harness-and-oracle/change-control.md` **CC-FUZZ-0107** (D′).
 
-### CC-CORE-0070 — The request records its session generation; SP-56's guard list loses three session rows (FR-SESS-23, BUG-0533) (2026-10-20)
-- **Change:**
-  - `core/http.py::Request` gains `session_generation: int | None = None` (+4).
-  - FR-CORE-6 declares it beside `session_decision` (the text in §7).
-  - `tests/test_core_comparability.py::ALLOWED` drops the rows for `verify_live`,
-    `_verify_authenticated` and `detect_logout`.
-- **Impact:** SESS only. R6's fix would add FUZZ as a reader.
-- **Risk (low):** an optional field with a None default.
-- **Deliverables:**
-  - [ ] field — todo
-  - [ ] FR-CORE-6 amended (`02-core-library/requirements.md:35-39`) — todo
-  - [ ] rows removed, T20 green — todo
-- **Effectiveness:** pending.
+The bug record is `docs/bugs/BUG-0533-a-forbidden-answer-logged-the-session-in-again.md`
+(recurrence review: PA-0007, PA-0113, PA-0122, PA-0134, PA-0529(3); the sweep).
 
 ## 10. Bookkeeping text (for the coordinator; this lane edits none of those files)
 
-### 10.1 BUG-0533 (lands with the fix as `docs/bugs/BUG-0533-a-forbidden-answer-logged-the-session-in-again.md`)
+### 10.1 BUG-0533
 
-- **Description:** a 403, a scope 401, a privilege-gated login redirect, or a credential
-  submission's own 401 made the session manager invalidate the session. The next send
-  logged in again.
-- **Where encountered:** the owner's audit, defect 6. Measured at 15a8a27 (§1.2).
-- **What it caused to fail:**
-  - N forbidden probes made N logins (6 requests each), with no cap.
-  - Every probe ran on a new session.
-  - The cross-account peer re-logged in on each denied replay, including the lab's own
-    secure twins.
-  - A late answer from an earlier session cost one more login.
-- **What the bug was:** `detect_logout`'s `status in (401, 403)`, acted on by `observe`
-  with no confirmation, no generation and no submission fact. Nothing limited
-  successful re-logins.
-- **Root cause (Five Whys):**
-  1. A login per 403? `observe` invalidated on `detect_logout`.
-  2. Why "loss"? FR-SESS-5 listed 403.
-  3. Why was a status taken as proof? The state change had no evidence standard: one
-     answer's surface feature decided it, unconfirmed on a session-dependent resource
-     and untied to the session the request carried.
-  4. Why did SP-56 and PA-0529(3) not prevent it? They were enforced at the oracle, and
-     the session manager was deferred (CC-SESS-0028; SP-56's allowance list).
-  5. Why persistent? PA-0007's positive differential was required for login only.
-
-  **Root cause:** a session-state change decided from one answer's surface feature,
-  without positive evidence about that session or a binding to it.
-- **Corrective action:** CC-SESS-0029, CC-CORE-0070.
-- **Recurrence review** (`docs/bugs/` session, logout and scope records, and
-  `docs/PREVENTIVE_ACTIONS.md`):
-  - **BUG-0008 / PA-0007:** login from an ambient cookie. The same root cause, login
-    side.
-  - **BUG-0113:** its logout rule (any password field) **had no preventive action of its
-    own**. PA-0113 covers base URLs, cookie scope and sub-path tests, not logout
-    evidence.
-  - **BUG-0122 / PA-0122:** a substring login redirect.
-  - **BUG-0134 / PA-0134:** `observe` looked the state up by host, so another app's
-    login page on another port of the host logged this session out
-    (`BUG-0134-session-sent-to-another-port-of-the-host.md:20-21, 204`). The same root
-    cause, its **"not bound to this session"** half: an answer that was not evidence
-    about this session changed it.
-  - **BUG-0529 / PA-0529(3):** a submission's refusal read as a loss, fixed at the
-    oracle only.
-  - **Result:** a recurrence: the fifth time on logout detection.
-- **Prior-preventive-action failure analysis:**
-  - **PA-0122:** too narrow, the wrong layer (one signal's grammar).
-  - **BUG-0113's rule:** too narrow and never made a PA (one signal's content).
-  - **PA-0529(3):** not applied at the actor. Its own guard allow-listed
-    `detect_logout`.
-  - **PA-0007:** too narrow (login only).
-  - **PA-0134** (BUG-0134). It did not prevent this recurrence, for three reasons:
-    1. **Too narrow: it bound the send, not the evidence.** PA-0134(1) governs where a
-       secret-bearing artefact may go. Its sweep fixed `observe` as one of eight send
-       carriers, by changing its lookup key from the host to the origin. Being on one of
-       the session's origins is necessary for an answer to be about the session, but it
-       is not enough. The answer must also be to a request that carried *this* session,
-       of *this* generation, and the loss must be confirmed on a session-dependent
-       resource. None of that was asked. So a late answer from an earlier generation on
-       the same origin, and a 403 to the same session, still changed the state.
-    2. **The wrong layer for its guard.** PA-0134(3)'s AST guard finds hostname
-       comparisons that decide a send. It cannot see a state change decided from the
-       wrong evidence.
-    3. **The actor was not changed.** After BUG-0134, `observe` still wrote
-       `valid = False` itself, on its own reading of one answer. No single owner
-       decided the state change, the gap PA-0529(3) left from the oracle's side.
-  - **The common failure:** each rule constrained a signal, a reader or a send path,
-    never the state change, and PA-0134 bound a session's evidence to its origin only.
-- **Preventive action:** PA-0533. It strengthens PA-0134 by extending "bound to this
-  session" from the origin to the generation, the current state object and the time
-  the evidence was taken, and by moving the decision to one owner with a whole-package
-  guard (T19).
-- **The sweep:** §5.
+Landed with the fix (§9).
 
 ### 10.2 PA-0533
 
-**PA-0533** strengthens `PA-0007`, `PA-0122`, `PA-0134` and `PA-0529(3)`, after
-BUG-0533: a 403 logged the session in again. Each earlier rule constrained one signal,
-one reader or one send path; none constrained the state change, and PA-0134 bound a
-session's evidence to its origin only.
-
-1. **An identity's state changes only on evidence about that session.**
-   - SP-56 classifies first. A throttle, gateway, 407 or incomplete answer never
-     changes it, and is never recorded or matched as a resource's refusal.
-   - A loss shape, a credentialed policy block or a submission's loss shape triggers a
-     check of the session's stable protected resource. The resource's answer, not the
-     probe's, decides.
-   - Without a resource, only a non-submission loss shape counts, as an unconfirmed
-     loss.
+**PA-0533** — Strengthens `PA-0007`, `PA-0113`, `PA-0122`, `PA-0134` and `PA-0529(3)`,
+after BUG-0533: a 403 logged the session in again. Each earlier rule constrained one
+signal, one reader or one send path; none constrained the state change, and PA-0134 bound
+a session's evidence to its origin only.
+1. **An identity's state changes only on evidence about that session.** SP-56
+   classifies first: a throttle, gateway, 407 or incomplete answer never changes it, and
+   is never recorded or matched as a resource's refusal. A loss shape, a credentialed
+   policy block or a submission's loss shape triggers a check of the session's stable
+   protected resource, and the resource's answer decides. Without a resource, only a
+   non-submission loss shape counts, as an unconfirmed loss.
 2. **Evidence is bound to the session it is about:** to its origins (PA-0134), to its
    generation and the state object judged, and to the time it was taken (a verdict
    covers only the signals seen before its request was sent). Every write
-   compare-and-sets on the current state and that generation.
+   compare-and-sets on the current state and that generation, and is atomic with every
+   install: the invalidation's row and every install's row are written under one lock.
 3. **Re-logins draw on a refilling budget.** With it spent, an identity with a resource
-   waits within its bounds or goes sticky unknown; an identity without one carries on
-   at once, never sleeping or aborting. An unknown identity pauses, then goes sticky. It
+   waits within its bounds or goes sticky unknown; an identity without one carries on at
+   once, never sleeping or aborting. An unknown identity pauses, then goes sticky; it
    never logs in or out on an inconclusive check.
 4. **Enforced at the actor.** `_mark_lost` is the only writer of `valid = False`, and
    `detect_logout` is the one loss predicate: a whole-package AST guard, proven on
    synthetic offenders. The loss decisions leave SP-56's allowance list.
+5. **An answer to a request sent on a session known to be lost is never evidence**
+   (the owner's decision D′): the session layer marks the request, the sender carries
+   the mark, and the oracle's layer 1 reads any answer to it as not comparable, whatever
+   its class. A consumer outside the oracle that does not read the mark yet is pinned by
+   a strict xfail naming its owner (`PA-0531(4)`). (from BUG-0533)
+- Enforced by: tests/test_session_forbidden_answers.py::test_a_forbidden_answer_never_logs_in_and_checks_at_most_once, tests/test_session_forbidden_answers.py::test_a_throttled_answer_never_triggers_anything, tests/test_session_forbidden_answers.py::test_a_throttle_is_never_a_resources_refusal_status_nor_a_loss, tests/test_session_forbidden_answers.py::test_health_verdict_never_matches_a_throttle_gateway_407_or_incomplete_answer, tests/test_session_forbidden_answers.py::test_detect_logout_keeps_its_loss_signals_and_never_reads_a_throttle, tests/test_session_forbidden_answers.py::test_a_suspected_loss_on_a_live_session_is_checked_once_and_never_logs_in, tests/test_session_forbidden_answers.py::test_a_credential_submissions_answer_is_checked_never_an_unconfirmed_loss, tests/test_session_forbidden_answers.py::test_a_late_answer_from_an_earlier_session_is_ignored, tests/test_session_forbidden_answers.py::test_a_pause_found_for_an_older_generation_never_pauses_the_new_one, tests/test_session_forbidden_answers.py::test_a_pause_of_a_replaced_generation_never_delays_its_replacement, tests/test_session_forbidden_answers.py::test_a_lost_verdict_for_a_replaced_session_tells_no_listener_and_writes_no_row, tests/test_session_forbidden_answers.py::test_a_loss_seen_while_a_check_is_in_flight_is_still_acted_on, tests/test_session_forbidden_answers.py::test_verify_live_asked_about_a_session_replaced_while_it_checked_answers_live, tests/test_session_forbidden_answers.py::test_mark_lost_on_a_replaced_state_changes_nothing_and_writes_no_row, tests/test_session_forbidden_answers.py::test_an_adopt_between_the_checks_compare_and_the_mark_tells_no_listener, tests/test_session_forbidden_answers.py::test_a_slow_row_write_never_leaves_a_replaced_sessions_row_last, tests/test_session_forbidden_answers.py::test_an_unknown_session_is_sticky_and_costs_nothing_after, tests/test_session_forbidden_answers.py::test_relogins_draw_on_a_refilling_budget, tests/test_session_forbidden_answers.py::test_a_no_resource_identity_whose_budget_is_spent_carries_on_at_once, tests/test_session_forbidden_answers.py::test_an_answer_on_a_session_known_lost_is_never_evidence, tests/test_session_forbidden_answers.py::test_a_resource_backed_identity_never_sends_on_a_lost_session, tests/test_session_forbidden_answers.py::test_layer_one_reads_any_answer_on_a_lost_session_as_not_comparable, tests/test_session_forbidden_answers.py::test_only_the_owner_decides_a_session_loss, tests/test_session_forbidden_answers.py::test_the_loss_decision_guard_catches_synthetic_offenders, tests/test_core_comparability.py::test_no_module_classifies_a_throttle_or_refusal_but_the_owner
 
-- Enforced by: tests/test_session_forbidden_answers.py::test_a_forbidden_answer_never_logs_in_and_checks_at_most_once, tests/test_session_forbidden_answers.py::test_a_throttled_answer_never_triggers_anything, tests/test_session_forbidden_answers.py::test_a_throttle_is_never_a_resources_refusal_status_nor_a_loss, tests/test_session_forbidden_answers.py::test_health_verdict_never_matches_a_throttle_gateway_407_or_incomplete_answer, tests/test_session_forbidden_answers.py::test_detect_logout_keeps_its_loss_signals_and_never_reads_a_throttle, tests/test_session_forbidden_answers.py::test_a_suspected_loss_on_a_live_session_is_checked_once_and_never_logs_in, tests/test_session_forbidden_answers.py::test_a_credential_submissions_answer_is_checked_never_an_unconfirmed_loss, tests/test_session_forbidden_answers.py::test_a_late_answer_from_an_earlier_session_is_ignored, tests/test_session_forbidden_answers.py::test_a_pause_found_for_an_older_generation_never_pauses_the_new_one, tests/test_session_forbidden_answers.py::test_a_lost_verdict_for_a_replaced_session_tells_no_listener_and_writes_no_row, tests/test_session_forbidden_answers.py::test_a_loss_seen_while_a_check_is_in_flight_is_still_acted_on, tests/test_session_forbidden_answers.py::test_an_unknown_session_is_sticky_and_costs_nothing_after, tests/test_session_forbidden_answers.py::test_relogins_draw_on_a_refilling_budget, tests/test_session_forbidden_answers.py::test_a_no_resource_identity_whose_budget_is_spent_carries_on_at_once, tests/test_session_forbidden_answers.py::test_only_the_owner_decides_a_session_loss, tests/test_session_forbidden_answers.py::test_the_loss_decision_guard_catches_synthetic_offenders, tests/test_core_comparability.py::test_no_module_classifies_a_throttle_or_refusal_but_the_owner
-
-**Which named tests enforce which rule** (B5; each proven by the PA-0533 matrix in
-`run_reverts.sh`, §12):
+**Which named tests enforce which rule** (each proven by the PA-0533 matrix on the
+implementation, §13):
 
 | Rule | Named tests | Reverts that undo it (each must fail at least one named test) |
 |---|---|---|
-| (1) classification first, the check decides | T1, T3, T4; the throttle clause: **T2, T11**, T2b, T2c | `403`, `policy_loss`, `throttle`, `throttle_refusal`, `throttle_verdict`, `noconfirm`, `nosubmission`, `submission_ignored`, `noentrynames`, `policy_nocheck` |
-| (2) bound to the session; compare-and-set | T6; the compare-and-set: **T M7b, T M7c**; the cover: T M7d | `nogen`, `nogenrecord`, **`nocas`** (fails T M7b and T M7c), `cover_at_record` |
-| (3) the budget, the pause, sticky | T13, T15, T15b | `nobucket`, `nores_waits`, `nosticky`, `inconclusive_lost`, `inconclusive_live` |
-| (4) the actor | T19 (whole package: Phase 2), T19's synthetic proof, T20 (Phase 2) | `guard_noassign`, `guard_nosetattr`, `guard_nodunder`, `guard_nokeyword`, `guard_nocall` |
+| (1) classification first, the check decides | T1, T3, T4; the throttle clause: T2, T11, T2b, T2c; T20 | `403`, `policy_loss`, `throttle`, `throttle_refusal`, `throttle_verdict`, `noconfirm`, `nosubmission`, `submission_ignored`, `noentrynames`, `policy_nocheck` |
+| (2) bound to the session; compare-and-set, atomic with installs | T6; T M7b, T M7b2, T M7c, T M7e, T M7f, T M7h; the cover: T M7d; installs: T M7g | `nogen`, `nogenrecord`, `nocas`, `nomlcas`, `cas_both`, `cover_at_record`, `pause_anygen`, `persist_unlocked`, `install_unlocked` |
+| (3) the budget, the pause, sticky | T13, T15, T15b, TD2 | `nobucket`, `nores_waits`, `d_for_all`, `nosticky`, `inconclusive_lost`, `inconclusive_live` |
+| (4) the actor | T19 (whole package), T19's synthetic proof, T20 | `guard_noassign`, `guard_nosetattr`, `guard_nodunder`, `guard_nokeyword`, `guard_nocall`, `observe_writes_valid` |
+| (5) an answer on a lost session is never evidence | TD1, TD3 | `nolostmark`, `oracle_ignores_lost` |
 
-### 10.3 ERROR_LOG line
+### 10.3 ERROR_LOG entry
 
-`2026-10-20 — BUG-0533`:
-- **Symptom:** a 403 (and a scope 401, a privilege-gated login redirect, a password
-  check's 401) logged the session in again: N probes, N logins.
-- **Cause:** `detect_logout`'s 401/403 rule, acted on without confirmation or a
-  generation.
-- **Remediation:** CC-SESS-0029 and CC-CORE-0070.
-- **Status:** fixed.
+```
+## 2026-10-20 — session manager (a forbidden answer logged the session in again; BUG-0533, a recurrence of BUG-0134's and BUG-0113's class)
+- **Symptom:** a 403 (and a scope 401, a privilege-gated login redirect, a password check's 401) invalidated the session and the next send logged in again: N such probes made N logins, each probe on a new session, the peer re-logging in on each denied replay; a late answer from an earlier session logged the current one out.
+- **Root cause:** `detect_logout`'s `status in (401, 403)`, acted on by `observe` at once: a session-state change decided from one answer's surface feature, without positive evidence about that session or a binding to it.
+- **Remediation:** one loss predicate through SP-56; a check of the session's stable protected resource; generations and compare-and-set on the current state, atomic with installs; a pause and sticky unknown; a refilling re-login budget, with decision D for an identity with no resource and D′ (an answer sent on a session known lost is not comparable at the oracle) (CC-SESS-0029, CC-CORE-0070, CC-FUZZ-0107); BUG-0533, PA-0533.
+- **Status:** Fixed (two consumers outside the oracle, the live WAF filter and the blind-SQLi builder, pinned for D′ by strict xfails)
+```
 
 ### 10.4 CHANGELOG line
 
-`2026-10-20`: forbidden answers no longer log the session in again. A suspected loss is
-confirmed on a stable protected resource and bound to its session generation;
-re-logins draw on a refilling budget, and an identity with no protected resource
-carries on when it is spent; an unknown identity pauses, then fails loudly (AU-SESS403,
-audit defect 6; CC-SESS-0029, CC-CORE-0070, BUG-0533).
+```
+- **What:** a forbidden answer no longer logs the session in again: SP-56 classifies first, a suspected loss is confirmed on the session's stable protected resource and bound to its session generation and current state (compare-and-set, atomic with installs), re-logins draw on a refilling budget, an identity with no protected resource carries on when it is spent with every answer in that window not comparable at the oracle (decisions D and D′), and an unknown identity pauses, then fails loudly (AU-SESS403, audit defect 6; CC-SESS-0029, CC-CORE-0070, CC-FUZZ-0107; BUG-0533, PA-0533). **Why:** every 403, scope 401, privilege-gated login redirect or password check's 401 cost a login and a new session (10 probes, 10 logins), the peer re-logged in on each denied replay, and a late answer from an earlier session logged the current one out.
+```
 
 ### 10.5 SHARED_PRIMITIVES
 
-- **SP-16:** `detect_logout` is the one loss predicate, through SP-56. Add
-  `request_entry_names`.
-- **SP-56:** add the session manager to its readers (the loss predicate, the verdict and
-  the refusal admission).
-- **New row (number for the coordinator):** "Is an identity's session live now."
-  - Owner: `fuzzlab/session/manager.py::SessionManager.check_health`, with
-    `health_verdict`, `_mark_lost` and `_spa_probe`.
-  - Guards: T19 and `test_every_owner_is_defined_once`.
-  - Note: disco's defect-4 item may build on `health_verdict` (a known gap, not a
-    consumer).
+- **SP-16, amend the mechanism and owner cells:** "Is a URL a login URL (session and
+  auth state); **is an answer a loss of the session the request carried**
+  (`detect_logout`, through SP-56; called only by `SessionManager.observe` and
+  `health_verdict`); a request's entry names (`request_entry_names`)". Owner: add
+  `fuzzlab/session/detect.py::detect_logout` and `::request_entry_names`. Guards: add
+  `tests/test_session_forbidden_answers.py::test_only_the_owner_decides_a_session_loss`,
+  `tests/test_session_forbidden_answers.py::test_the_loss_decision_guard_catches_synthetic_offenders`.
+  From: add PA-0533.
+- **SP-56, amend the readers:** "... the blind-SQLi builder, the live WAF filter **and
+  the session manager (`detect_logout`, `health_verdict`, the refusal admission
+  `admitted_refusal`, `_verify_authenticated`)**". The oracle's `require_observed` also
+  reads `Probe.session_lost` first (FR-FUZZ-65). From: add CC-SESS-0029, CC-FUZZ-0107.
+- **New row (the coordinator's number; SP-57 if free):**
+  `| SP-57 | Is an identity's session live now: the health verdict of one answer, the check of the stable protected resource (single flight, the cover at the send, compare-and-set on the current state), the one invalidation and every install under one lock, and the choice of the stable protected resource | `fuzzlab/session/manager.py::SessionManager.check_health` (with `health_verdict`, `admitted_refusal`, `SessionManager._mark_lost`, `SessionManager._install`, `SessionManager._spa_probe`) | `tests/test_session_forbidden_answers.py::test_only_the_owner_decides_a_session_loss`, `tests/test_session_forbidden_answers.py::test_the_loss_decision_guard_catches_synthetic_offenders`, `tests/test_shared_primitives.py::test_every_owner_is_defined_once` | PA-0533 (CC-SESS-0029) |`
+  Note for the row: disco's defect-4 item may build on `health_verdict` (a known gap,
+  not a consumer).
 
 ### 10.6 ARCHITECTURE
 
-One sentence in the session manager's paragraph. No new component or dependency.
+In §3 (Session manager), after "...`verify_live` re-checks the run's session
+(CC-SESS-0018, FR-SESS-17).", add:
+
+```
+A forbidden answer is never, by itself, a lost session (FR-SESS-23, CC-SESS-0029,
+BUG-0533): `observe` classifies an answer through SP-56 first, and a suspected loss is
+confirmed by one health check of the session's stable protected resource (chosen at
+login by one owner, `_spa_probe`), bound to the session's generation and current state
+(`check_health`, `health_verdict`, `_mark_lost`; every install under the same lock).
+Re-logins draw on a refilling budget; an unknown identity pauses, then fails loudly
+(`SessionHealthUnknown`); an identity with no resource carries on when the budget is
+spent, and every request it sends then is marked lost (`Request.session_lost`), which
+the oracle reads as not comparable (FR-FUZZ-65, CC-FUZZ-0107).
+```
+
+No new component or dependency.
 
 ## 11. Open questions
 
@@ -1206,13 +1168,14 @@ One sentence in the session manager's paragraph. No new component or dependency.
 - **Q5.** A run with a peer has two pause budgets (one per identity's manager). Should
   one budget span both? That needs a FUZZ change in `auto_cli.py`.
 
-## 12. Verification of this revision
+## 12. Verification of revision 3 (Phase 1, on the prototype)
 
 Every run below is on the committed tree **9609d95** (clean), one pytest at a time
 under the host lock. The logs are in this lane's scratchpad,
 `/tmp/claude-0/-home-user-fuzzer/2f299c5d-40a8-582c-a2d4-d0cdcbec2db1/scratchpad/au-sess403/`,
 and are not committed. `final_r3.sh <worktree> f3e731f` there reproduces all of them in
-order. `au-sess403-prototype/run_reverts.sh <worktree>` reproduces steps 4-5.
+order. `au-sess403-prototype/run_reverts.sh <worktree>` (at `fc57a9c`; the directory is
+deleted in Phase 2) reproduces steps 4-5.
 
 1. **The test module on the base, markers on** (`r3_final_base.log`): **17 passed, 53
    xfailed**.
@@ -1273,3 +1236,27 @@ still failed T M7c, but on the listener alone. `_manager` now passes every keywo
 constructor that takes `**kwargs`. T M7c also asserts the double recorded the login's
 and the adopt's rows before the check is released. `nocas` now fails it on both
 halves (step 7).
+
+## 13. Verification of the implementation (Phase 2)
+
+Every run below is one pytest at a time under the host lock (BUG-0532). The scripts and
+logs are in this lane's scratchpad,
+`/tmp/claude-0/-home-user-fuzzer/2f299c5d-40a8-582c-a2d4-d0cdcbec2db1/scratchpad/au-sess403/impl/`,
+and are not committed.
+
+1. **The test module** on the implementation: **85 passed, 3 xfailed** (88 collected).
+   The three are the stated pins: R6 (`_R6`) and D′'s two sweep pins (`_DPRIME_MUT`,
+   `_DPRIME_BSQLI`), each failing for its stated reason with `--runxfail` (the live
+   filter: DID NOT RAISE `FilterUnobserved`; the builder: `'application' !=
+   'application'`). T19's whole-package assertion passes.
+2. **Every named revert, re-proven on the implementation** (`reverts.py <repo> d79d846`,
+   `reverts_d79d846.log`): each revert is a literal source edit of the real modules
+   (or of T19's guard in the test module), applied in a detached worktree of the commit
+   and reset after. **60 reverts, 60 OK, 0 MASKED**: every test named for a revert
+   fails under it. They are revision 3's 50, with `nocas` split into `nocas` (the
+   check's compare-and-set) and `nomlcas` (`_mark_lost`'s), plus `cas_both`,
+   `pause_anygen`, `persist_unlocked`, `install_unlocked`, `copy_own_budget`,
+   `d_for_all`, `nolostmark`, `oracle_ignores_lost` and `observe_writes_valid` (T19's
+   whole-package assertion). The edit table is the script's `REVERTS`; every collected
+   test is named by at least one revert except the three stated pins (checked by
+   collection).

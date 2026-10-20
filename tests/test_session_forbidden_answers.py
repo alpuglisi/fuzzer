@@ -44,7 +44,6 @@ from __future__ import annotations
 
 import ast
 import base64
-import inspect
 import json
 import secrets
 import threading
@@ -539,14 +538,9 @@ def _creds() -> CredentialStore:
 
 def _manager(**kw):
     """The real manager with its default requests fetcher (no browser), and the list a
-    logout listener appends each valid -> invalid transition to (FR-SESS-16). Only the
-    keywords this `SessionManager` accepts are passed (today's has none of the design's);
-    a constructor that takes ``**kwargs`` (the prototype's, which passes `store` on to
-    today's) is given all of them."""
-    params = inspect.signature(SessionManager.__init__).parameters
-    takes_any = any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
-    mgr = SessionManager(_creds(), scope_hosts=[HOST], browser_login=False,
-                         **{k: v for k, v in kw.items() if takes_any or k in params})
+    logout listener appends each valid -> invalid transition to (FR-SESS-16). FR-SESS-23's
+    keywords (the clock, the bounds, a store double) are passed as given."""
+    mgr = SessionManager(_creds(), scope_hosts=[HOST], browser_login=False, **kw)
     losses: list[str] = []
     mgr.add_logout_listener(lambda origin, identity: losses.append(identity))
     return mgr, losses
@@ -2103,8 +2097,9 @@ def test_the_loss_decision_guard_catches_synthetic_offenders():
     `_mark_lost`, `True` written by a non-writer, and `detect_logout` called elsewhere.
     The owner's own write is not.
 
-    Reverts (the guard weakened, by `proto_plugin`): `guard_noassign`,
-    `guard_nosetattr`, `guard_nodunder`, `guard_nokeyword`, `guard_nocall`."""
+    Reverts (the guard weakened: one branch of `loss_decision_offenders` switched off):
+    `guard_noassign`, `guard_nosetattr`, `guard_nodunder`, `guard_nokeyword`,
+    `guard_nocall`."""
     rel = "fuzzlab/session/manager.py"
     src = ("import dataclasses\n"
            "class SessionManager:\n"
@@ -2183,8 +2178,8 @@ def run_relogin_window(mode: str, path: str, n: int = 30) -> dict:
 
 
 def measure() -> None:
-    """Print what the code under test does in each scenario (the base, or the prototype
-    when it is installed)."""
+    """Print what the code under test does in each scenario (DRAFT-AU-SESS403 §1 cites
+    the tables printed for the base and for the design)."""
     print("scenario | mode | probes | logins | invalidations | sessions | checks | statuses")
     for mode in ("redirect", "none"):
         for name in SCENARIOS:

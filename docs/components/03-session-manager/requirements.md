@@ -312,10 +312,13 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     `application` to the oracle outside D's window), R8, R9 (the contract runner,
     disco, greybox's static header), R10-R15, R16 (D's window: answers are not
     comparable, D′).
-  - Enforced by: `tests/test_session_forbidden_answers.py` (86 tests: the
-    classification, the cover, both compare-and-sets, the install atomicity, the
+  - Enforced by: `tests/test_session_forbidden_answers.py` (88 tests: 85 that pass --
+    the classification, the cover, both compare-and-sets, the install atomicity, the
     resource rules, the pause, sticky unknown, both budgets, D and D′, T19's
-    whole-package guard), `tests/test_core_comparability.py::test_no_module_classifies_a_throttle_or_refusal_but_the_owner`.
+    whole-package guard -- and three stated strict-xfail pins: R6 and D′'s two sweep
+    pins), `tests/test_core_comparability.py::test_no_module_classifies_a_throttle_or_refusal_but_the_owner`.
+    Every test but the pins fails against a named revert of the implementation
+    (DRAFT-AU-SESS403 §13).
 - **FR-SESS-20 (origin-scoped sessions, CC-SESS-0023, BUG-0134; design Revision 2,
   O1-O13; review rounds 1-2, R1-R9, T1-T6)**
   - **Origins (O1).** `SessionState.origins` is a set of canonical origins
