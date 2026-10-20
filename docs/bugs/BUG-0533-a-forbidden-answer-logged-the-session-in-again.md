@@ -1,7 +1,7 @@
 # BUG-0533 — A forbidden answer logged the session in again
 
 - Date: 2026-10-20
-- Status: fixed (CC-SESS-0029, CC-CORE-0070, CC-FUZZ-0107)
+- Status: fixed (CC-SESS-0029, CC-CORE-0070, CC-FUZZ-0107, CC-FUZZ-0110, CC-MUT-0404)
 - Severity: high. Every 403, scope 401, privilege-gated login redirect or credential
   submission's own 401 invalidated the session: N such probes cost N logins (6 requests
   each, uncapped), every probe ran on a new session, and the run's peer re-logged in on
@@ -59,7 +59,8 @@ Five Whys:
 without positive evidence about that session or a binding to it.
 
 ## Corrective action
-CC-SESS-0029, CC-CORE-0070, CC-FUZZ-0107 (FR-SESS-23, FR-FUZZ-65; design
+CC-SESS-0029, CC-CORE-0070, CC-FUZZ-0107, CC-FUZZ-0110, CC-MUT-0404 (FR-SESS-23,
+FR-FUZZ-65, FR-MUT-401; design
 `docs/components/03-session-manager/DRAFT-AU-SESS403.md`, revision 3 and the owner's
 decisions D and D′):
 - one loss predicate through SP-56; classification first; a stable protected resource
@@ -68,7 +69,10 @@ decisions D and D′):
   invalidation's row and every install's row in one critical section;
 - a pause and a sticky unknown for an inconclusive check; a refilling re-login budget;
   with no resource and no token, decision D (carry on at once), each request so sent
-  marked lost, and the oracle reading its answer as not comparable (D′);
+  marked lost, and every consumer -- the oracle (any sender), the live WAF filter and
+  the blind-SQLi builder -- reading its answer as not comparable (D′);
+- a policy block covered by any live verdict of its generation within the TTL, so a WAF
+  that blocks every path or header payload costs one health check per window;
 - `verify_live` on its own bounded wait; `_verify_authenticated` through the verdict.
 
 Measured after the fix (§1.3 of the draft; the same fixtures): every forbidden scenario
@@ -152,8 +156,9 @@ By primitive, from the code (PA-0152); dispositions:
 | SP-56's allowance list | 8 rows | 5 rows |
 | listeners (`_on_logout`, `_on_main_logout`) | told on every 401/403 | told once per transition seen on a send |
 | `SessionHealthUnknown` catch-alls: `tools/fetcher.py:881` (per page), `oracle.py` PRG restore, `blind_sqli_fuzzer` top level, `mutation/run.py`, `SeamProbeSender._on_copy` | -- | stated in DRAFT §5.4: loud, sticky, no traffic; a copy's counts toward the failed-logins breaker |
-| answers sent in D's window, read by the **oracle** | -- | **fixed** (D′, FR-FUZZ-65): layer 1, not comparable |
-| ... read by the **live WAF filter** (MUT, `mutation/livefilter.HttpFilter`) | -- | **pinned**: `test_the_live_waf_filter_never_reads_an_answer_on_a_lost_session` (strict xfail naming MUT) |
-| ... read by the **blind-SQLi builder** (FUZZ, `SeamSender` / `answer_class`) | -- | **pinned**: `test_the_blind_sqli_builder_never_admits_an_answer_on_a_lost_session` (strict xfail naming FUZZ) |
+| answers sent in D's window, read by the **oracle** through the run's sender | -- | **fixed** (D′, FR-FUZZ-65): layer 1 in `_ObservedOnly`, not comparable |
+| ... read by the oracle through **another sender** (the cross-account replay's peer and anonymous senders, `CrossAccountReplayStrategy` via `_FormBoundSender` and `_compared`) | -- | **fixed** in review round 5 (CC-FUZZ-0107): `_compared` applies layer 1 whichever sender made the send. Found by reviewer A at f1d31dd: a guest view gave a negative, an open object a confirmation |
+| ... read by the **live WAF filter** (MUT, `mutation/livefilter.HttpFilter`) | -- | **fixed** (CC-MUT-0404): `FilterUnobserved`; the round-4 pin is a passing test |
+| ... read by the **blind-SQLi builder** (FUZZ, `SeamSender` / `answer_class`) | -- | **fixed** (CC-FUZZ-0110): never a baseline sample or a row, its 504 included; the round-4 pin is a passing test |
 | ... read by the auditor's and crawler's fetches | -- | discovery, not evidence: stated (a degraded audit or crawl in the window), no pin |
 | contract runner, disco, greybox's static header | no `SessionManager` / a captured state | not consumers (R9); disco's defect 4 may build on the public `health_verdict` |

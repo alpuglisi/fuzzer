@@ -62,6 +62,19 @@ and raised the items below. Phase 2 implements them with the design.
 | Follow-up 5 (the "F3" label clash) | "F3" stays revision 3's change-table label for *whose budget*. The residual of a comparison that straddles a re-login is R6 only (its pin: `_R6`). | §3.13, §6, §8 |
 | D′'s sweep | Two consumers outside the oracle read answers through a session-managed seam and do not read the mark: the live WAF filter (MUT) and the blind-SQLi builder (FUZZ). Each is pinned by a strict xfail naming its owner (PA-0531(4)). | BUG-0533's sweep |
 
+## 0c. What changed in review round 5 (the one revision round)
+
+Both reviewers returned REVISE on f1d31dd with two blockers; everything else they
+checked held. The owner's decision D′ was also extended to every consumer.
+
+| Item | Change | Where |
+|---|---|---|
+| **Blocker 1** (D′ hole: a peer replay skips layer 1) | `CrossAccountReplayStrategy` sends through the peer's (and the anonymous) sender, which the oracle does not wrap in `_ObservedOnly`, and `_compared` called only `require_comparable`. Measured at f1d31dd with a peer whose probes carry the mark: a guest view gave a negative, an open object a `cross-account-replay` confirmation. Now `ConfirmationStrategy._compared` calls `require_observed` first, so every compared send meets layer 1 whichever sender made it. | §3.15, TD4 (revert `compared_skips_layer1`), CC-FUZZ-0107 |
+| **Blocker 2** (a policy block costs one health GET per distinct path or header) | The cache was keyed by (generation, URL key) and bypassed by a foreign header, so behind a WAF that 403s every probe, 20 path payloads cost 20 health GETs and 20 `X-Forwarded-For` payloads 20 more. Now a policy block (no loss shape) is covered by any live verdict of its generation within `health_ttl_s`, whatever its URL or headers; a loss shape keeps the URL and foreign-header rule. Two dict lookups replace the linear scan, and only the latest live generation's entries are kept. | §3.6, T14p (revert `policy_cache_by_url`); T14 now uses a scope 401 as its "other URL" |
+| D′ for every consumer | The live WAF filter: `FilterUnobserved`, never an allow or a block (CC-MUT-0404). The blind-SQLi builder: `Answer.session_lost`, `answer_class` reads it as `lost-session`, no baseline sample and no row, a lost 504 included (CC-FUZZ-0110). The two round-4 pins are passing tests. | §3.15, §8 R16 |
+| The D window's log line | One warning, naming the identity and never a credential, when an identity enters D's window, once per window. `ensure`'s docstring states that it can return a state known to be lost. | §3.9, TD5 (revert `no_window_log`) |
+| Claims and residuals | FR-FUZZ-65's timing case is synthetic (`SeamProbeSender` re-raises a timeout). New residuals R17 (Laravel 419), R18 (RFC 6750 `insufficient_scope`), R19 (concurrent pause waiters); R3 and R4 extended. The test module's docstring no longer claims keywords are filtered. The new shared-primitive row is SP-61. | §8, §10.5 |
+
 Revision 2's own change table (M1-M10, ADOPT) is in this file's history
 (`git show f3e731f:docs/components/03-session-manager/DRAFT-AU-SESS403.md`). Every item
 in it still holds unless a row above changes it.
@@ -467,9 +480,14 @@ nothing for 403s or submissions.
 A live verdict covers a later signal in two cases:
 - **(a)** The verdict's GET was sent after the signal was seen (B2). This is the
   single-flight rule; a sequence counter orders signals and sends, never a clock.
-- **(b)** For `health_ttl_s` (default 30 s), a signal of the **same generation and the
-  same URL key** (`url_key`, origin and path), unless the request carries a **foreign
-  header**.
+- **(b)** For `health_ttl_s` (default 30 s), a loss shape of the **same generation and
+  the same URL key** (`url_key`, origin and path), unless the request carries a
+  **foreign header**.
+- **(c)** *(Review round 5.)* For `health_ttl_s`, a **policy block** (a 403 or 451 that
+  is no loss shape) of the **same generation**, whatever its URL or headers. A WAF that
+  blocks every path or header payload then costs one check per window, not one per
+  path (T14p). Only the latest live generation's entries are kept, in two dicts:
+  `(generation, url key) -> at` and `generation -> at`.
   - Foreign means a header the session does not own: anything but `Cookie`,
     `Authorization`, the state's own header names, and the body's `Content-Type` and
     `Content-Length`.
@@ -670,15 +688,22 @@ Q1.
 - **Layer 1 (the oracle; SP-56's oracle reader).** `require_observed` checks the mark
   of the probe and of its follow-up **before** any class is read and raises
   `NotComparable("not comparable: the probe was sent on a lost session")`
-  (`response_class = "lost-session"`). Every strategy run goes through `_ObservedOnly`,
-  so payloads, controls, baselines, compared slots, replays and the correlated send all
-  meet it; a timing send's read timeout too.
+  (`response_class = "lost-session"`). It runs in two places: the oracle's
+  `_ObservedOnly`, around the run's own sender (payloads, controls, baselines, compared
+  slots, the correlated send), and *(review round 5)* `ConfirmationStrategy._compared`,
+  around every compared send whichever sender made it: the cross-account replay's peer
+  and anonymous senders are not the run's (TD4). A timing send's read-timeout stand-in
+  is checked the same way, but none is marked today: `SeamProbeSender` re-raises a
+  timeout, so TD3's timing case is synthetic.
 - **Outcome.** The mechanism gives no verdict; the candidate is `not-comparable`
   (inconclusive) unless another mechanism confirms on unmarked answers. The run goes on.
 - **Never for a resource-backed identity**: its losses are confirmed and re-logged in,
   or it waits for a token, or it goes sticky unknown (TD2, revert `d_for_all`).
-- **Not covered (pinned):** the live WAF filter and the blind-SQLi builder (BUG-0533's
-  sweep).
+- **Every consumer reads the mark** (the owner's decision covers them all; review
+  round 5): the live WAF filter raises `FilterUnobserved` (CC-MUT-0404); the blind-SQLi
+  builder never takes such an answer as a baseline sample or a row, its 504 included
+  (CC-FUZZ-0110). The auditor's and crawler's fetches read such answers for discovery
+  only.
 
 ## 4. Unchanged on purpose
 
@@ -826,7 +851,11 @@ How to read the columns:
 | **(p2)** TD1 `…an_answer_on_a_session_known_lost_is_never_evidence` | D′ (Q1's shape): the guest cart is not comparable; the candidate ends inconclusive | -- | `nolostmark`, `oracle_ignores_lost` |
 | **(p2)** TD2 `…a_resource_backed_identity_never_sends_on_a_lost_session` | D′'s other half: the base still re-logs in; the mark never fires | -- | `d_for_all` |
 | **(p2)** TD3 `…layer_one_reads_any_answer_on_a_lost_session_as_not_comparable[×7]` | D′, layer 1: every class, a follow-up, a timing read timeout | -- | `oracle_ignores_lost` |
-| **(p2)** two D′ sweep pins (`…live_waf_filter…`, `…blind_sqli_builder…`) | strict xfails naming MUT and FUZZ | -- | -- (stated pins) |
+| **(p2, r5)** TD4 `…a_peer_replay_on_a_session_known_lost_is_never_evidence` | D′ through the peer's sender (blocker 1): a guest view and an open object both inconclusive | -- | `compared_skips_layer1` |
+| **(p2, r5)** `…the_live_waf_filter_never_reads_an_answer_on_a_lost_session` | D′ at the live filter (the round-4 pin, closed) | -- | `livefilter_reads_lost` |
+| **(p2, r5)** `…the_blind_sqli_builder_never_admits_an_answer_on_a_lost_session` | D′ at the builder: no sample, no row, a lost 504 included (the round-4 pin, closed) | -- | `bsqli_nomark`, `bsqli_class_ignores_lost`, `bsqli_504_kept` |
+| **(r5)** T14p `…policy_blocks_on_many_paths_and_headers_cost_one_check_per_window` | blocker 2: one check per window for 403s on 40 paths and headers; a loss shape keeps its rule | -- | `policy_cache_by_url` |
+| **(r5)** TD5 `…entering_ds_window_is_logged_once_per_window_without_a_credential` | D's log line | -- | `no_window_log` |
 | T21 `…verify_live_waits_out_an_unknown_and_then_reads_live` | M9 | no GET | `verifylive_false` |
 | T21b `…verify_live_never_reads_the_cache` | M6 | pin | `verifylive_cache` |
 | **(r3)** T21c `…inconclusive_verify_live_never_clears_a_sticky_unknown` | F2 (P3) | DID NOT RAISE | `verifylive_clears_sticky` (the next send goes out) |
@@ -974,16 +1003,21 @@ BUG-0533).**
     LIVE, so a session that logs in while the app throttles has no resource. That
     session moves to this no-resource path (unconfirmed losses, the bucket, then D),
     until a later login records one.
-- **R3. The TTL.** A live verdict covers same-URL signals for `health_ttl_s`. A session
-  that dies inside the window is found at the next signal from another URL, from a
-  foreign-header request, or after the window. Its probes in between are auth failures
-  (not comparable at the oracle).
+- **R3. The TTL.** A live verdict covers same-URL loss shapes for `health_ttl_s`, and
+  every policy block of its generation (round 5). A session that dies inside the window
+  is found at the next loss shape from another URL, from a foreign-header request, or
+  after the window. Its probes in between are auth failures (not comparable at the
+  oracle) or policy blocks; an app that ends a session with a 403 everywhere (`forbid`)
+  is found only after the window, at most `health_ttl_s` later.
 - **R4. A moved, broken or throttled resource.** A 404 or 5xx is inconclusive, so it
   pauses and then goes sticky. A refusal status recorded as 404 (admitted: SP-56 calls it
   the application's) reads a deleted resource as LOST, which costs a re-login. A
   resource throttled at a **re-login** is not recorded: the new session has no resource
   and moves to R2's no-resource path (unconfirmed losses, the bucket, then D), not to
-  the pause (review round 4, follow-up 4).
+  the pause (review round 4, follow-up 4). A resource that turns 403 for a policy reason
+  (a WAF blocking the health GET, an IP ban): with 403 recorded as its refusal status it
+  reads LOST, a re-login per loss bounded by the bucket; without, it is inconclusive,
+  pauses and goes sticky (round 5).
 - **R5. The health GET is untraced and unbudgeted,** as the login handshake already is.
   It is counted in `health_report()`.
 - **R6. A comparison that straddles a re-login is not detected** (strict xfail).
@@ -1033,14 +1067,28 @@ BUG-0533).**
     -- payloads, controls, baselines and replays alike. The candidate ends
     inconclusive, never a pass, a negative or a finding (TD1: Q1's guest cart). R7's
     200 login page is covered in the window too.
-  - **Not covered (pinned):** the live WAF filter (MUT) and the blind-SQLi builder (FUZZ)
-    read such answers as observations; each is pinned by a strict xfail naming its owner
-    (BUG-0533's sweep). The auditor's and crawler's fetches use them for discovery only.
+  - **Every consumer reads the mark** (review round 5): the oracle through any sender
+    (the peer replay included, TD4), the live WAF filter (CC-MUT-0404) and the blind-SQLi
+    builder (CC-FUZZ-0110). The auditor's and crawler's fetches use such answers for
+    discovery only (a guest view can only hide a point).
   - **`verify_live` in the window.** The state is marked lost, so `verify_live`
     returns False at once, as it does today right after any loss. If an isolated copy
     logs in during the window, `_verify_main` trips the single-session breaker: the run
     stops making copies (fail closed, never a wrong verdict). D makes that window last
     up to 120 s instead of one send. Not measured; no FUZZ change.
+
+- **R17. Laravel's 419 after an expiry** ("page expired", a CSRF token from the old
+  session) is SP-56's `application` answer: no loss shape and no policy block, so it
+  triggers nothing. Its expiry is found at the next loss shape (a login redirect). Not
+  measured; no lab answers 419.
+- **R18. RFC 6750's `401` with `WWW-Authenticate: Bearer error="insufficient_scope"`**
+  is still a credentialed 401: with a resource it is checked (and found live), without
+  one it is an unconfirmed loss (the bucket, then D), as `json`'s scope 401 is. Reading
+  the error code would be a new signal rule; not done.
+- **R19. Concurrent pause waiters.** Several sends of one identity that meet the same
+  pause each sleep to its deadline and each re-check (one GET each, serialised by the
+  health lock, `use_cache=False`), and each charges its own sleep to the run's budget.
+  Low impact: the oracle sends one probe at a time.
 
 ## 9. Change-control entries (landed)
 
@@ -1086,10 +1134,13 @@ a session's evidence to its origin only.
    synthetic offenders. The loss decisions leave SP-56's allowance list.
 5. **An answer to a request sent on a session known to be lost is never evidence**
    (the owner's decision D′): the session layer marks the request, the sender carries
-   the mark, and the oracle's layer 1 reads any answer to it as not comparable, whatever
-   its class. A consumer outside the oracle that does not read the mark yet is pinned by
-   a strict xfail naming its owner (`PA-0531(4)`). (from BUG-0533)
-- Enforced by: tests/test_session_forbidden_answers.py::test_a_forbidden_answer_never_logs_in_and_checks_at_most_once, tests/test_session_forbidden_answers.py::test_a_throttled_answer_never_triggers_anything, tests/test_session_forbidden_answers.py::test_a_throttle_is_never_a_resources_refusal_status_nor_a_loss, tests/test_session_forbidden_answers.py::test_health_verdict_never_matches_a_throttle_gateway_407_or_incomplete_answer, tests/test_session_forbidden_answers.py::test_detect_logout_keeps_its_loss_signals_and_never_reads_a_throttle, tests/test_session_forbidden_answers.py::test_a_suspected_loss_on_a_live_session_is_checked_once_and_never_logs_in, tests/test_session_forbidden_answers.py::test_a_credential_submissions_answer_is_checked_never_an_unconfirmed_loss, tests/test_session_forbidden_answers.py::test_a_late_answer_from_an_earlier_session_is_ignored, tests/test_session_forbidden_answers.py::test_a_pause_found_for_an_older_generation_never_pauses_the_new_one, tests/test_session_forbidden_answers.py::test_a_pause_of_a_replaced_generation_never_delays_its_replacement, tests/test_session_forbidden_answers.py::test_a_lost_verdict_for_a_replaced_session_tells_no_listener_and_writes_no_row, tests/test_session_forbidden_answers.py::test_a_loss_seen_while_a_check_is_in_flight_is_still_acted_on, tests/test_session_forbidden_answers.py::test_verify_live_asked_about_a_session_replaced_while_it_checked_answers_live, tests/test_session_forbidden_answers.py::test_mark_lost_on_a_replaced_state_changes_nothing_and_writes_no_row, tests/test_session_forbidden_answers.py::test_an_adopt_between_the_checks_compare_and_the_mark_tells_no_listener, tests/test_session_forbidden_answers.py::test_a_slow_row_write_never_leaves_a_replaced_sessions_row_last, tests/test_session_forbidden_answers.py::test_an_unknown_session_is_sticky_and_costs_nothing_after, tests/test_session_forbidden_answers.py::test_relogins_draw_on_a_refilling_budget, tests/test_session_forbidden_answers.py::test_a_no_resource_identity_whose_budget_is_spent_carries_on_at_once, tests/test_session_forbidden_answers.py::test_an_answer_on_a_session_known_lost_is_never_evidence, tests/test_session_forbidden_answers.py::test_a_resource_backed_identity_never_sends_on_a_lost_session, tests/test_session_forbidden_answers.py::test_layer_one_reads_any_answer_on_a_lost_session_as_not_comparable, tests/test_session_forbidden_answers.py::test_only_the_owner_decides_a_session_loss, tests/test_session_forbidden_answers.py::test_the_loss_decision_guard_catches_synthetic_offenders, tests/test_core_comparability.py::test_no_module_classifies_a_throttle_or_refusal_but_the_owner
+   the mark, and **every consumer reads it**: the oracle's layer 1, applied to every
+   compared send whichever sender made it, reads any answer to it as not comparable,
+   whatever its class; the live WAF filter never records it as an allow or a block; the
+   blind-SQLi builder never takes it as a sample or a row. A consumer found not reading
+   it is fixed in the same change, or pinned by a strict xfail naming its owner
+   (`PA-0531(4)`). (from BUG-0533)
+- Enforced by: tests/test_session_forbidden_answers.py::test_a_forbidden_answer_never_logs_in_and_checks_at_most_once, tests/test_session_forbidden_answers.py::test_a_throttled_answer_never_triggers_anything, tests/test_session_forbidden_answers.py::test_a_throttle_is_never_a_resources_refusal_status_nor_a_loss, tests/test_session_forbidden_answers.py::test_health_verdict_never_matches_a_throttle_gateway_407_or_incomplete_answer, tests/test_session_forbidden_answers.py::test_detect_logout_keeps_its_loss_signals_and_never_reads_a_throttle, tests/test_session_forbidden_answers.py::test_a_suspected_loss_on_a_live_session_is_checked_once_and_never_logs_in, tests/test_session_forbidden_answers.py::test_a_credential_submissions_answer_is_checked_never_an_unconfirmed_loss, tests/test_session_forbidden_answers.py::test_a_late_answer_from_an_earlier_session_is_ignored, tests/test_session_forbidden_answers.py::test_a_pause_found_for_an_older_generation_never_pauses_the_new_one, tests/test_session_forbidden_answers.py::test_a_pause_of_a_replaced_generation_never_delays_its_replacement, tests/test_session_forbidden_answers.py::test_a_lost_verdict_for_a_replaced_session_tells_no_listener_and_writes_no_row, tests/test_session_forbidden_answers.py::test_a_loss_seen_while_a_check_is_in_flight_is_still_acted_on, tests/test_session_forbidden_answers.py::test_verify_live_asked_about_a_session_replaced_while_it_checked_answers_live, tests/test_session_forbidden_answers.py::test_mark_lost_on_a_replaced_state_changes_nothing_and_writes_no_row, tests/test_session_forbidden_answers.py::test_an_adopt_between_the_checks_compare_and_the_mark_tells_no_listener, tests/test_session_forbidden_answers.py::test_a_slow_row_write_never_leaves_a_replaced_sessions_row_last, tests/test_session_forbidden_answers.py::test_an_unknown_session_is_sticky_and_costs_nothing_after, tests/test_session_forbidden_answers.py::test_relogins_draw_on_a_refilling_budget, tests/test_session_forbidden_answers.py::test_a_no_resource_identity_whose_budget_is_spent_carries_on_at_once, tests/test_session_forbidden_answers.py::test_an_answer_on_a_session_known_lost_is_never_evidence, tests/test_session_forbidden_answers.py::test_a_resource_backed_identity_never_sends_on_a_lost_session, tests/test_session_forbidden_answers.py::test_layer_one_reads_any_answer_on_a_lost_session_as_not_comparable, tests/test_session_forbidden_answers.py::test_a_peer_replay_on_a_session_known_lost_is_never_evidence, tests/test_session_forbidden_answers.py::test_the_live_waf_filter_never_reads_an_answer_on_a_lost_session, tests/test_session_forbidden_answers.py::test_the_blind_sqli_builder_never_admits_an_answer_on_a_lost_session, tests/test_session_forbidden_answers.py::test_only_the_owner_decides_a_session_loss, tests/test_session_forbidden_answers.py::test_the_loss_decision_guard_catches_synthetic_offenders, tests/test_core_comparability.py::test_no_module_classifies_a_throttle_or_refusal_but_the_owner
 
 **Which named tests enforce which rule** (each proven by the PA-0533 matrix on the
 implementation, §13):
@@ -1100,7 +1151,7 @@ implementation, §13):
 | (2) bound to the session; compare-and-set, atomic with installs | T6; T M7b, T M7b2, T M7c, T M7e, T M7f, T M7h; the cover: T M7d; installs: T M7g | `nogen`, `nogenrecord`, `nocas`, `nomlcas`, `cas_both`, `cover_at_record`, `pause_anygen`, `persist_unlocked`, `install_unlocked` |
 | (3) the budget, the pause, sticky | T13, T15, T15b, TD2 | `nobucket`, `nores_waits`, `d_for_all`, `nosticky`, `inconclusive_lost`, `inconclusive_live` |
 | (4) the actor | T19 (whole package), T19's synthetic proof, T20 | `guard_noassign`, `guard_nosetattr`, `guard_nodunder`, `guard_nokeyword`, `guard_nocall`, `observe_writes_valid` |
-| (5) an answer on a lost session is never evidence | TD1, TD3 | `nolostmark`, `oracle_ignores_lost` |
+| (5) an answer on a lost session is never evidence, at every consumer | TD1, TD3, TD4, the live filter's and the builder's tests | `nolostmark`, `oracle_ignores_lost`, `compared_skips_layer1`, `livefilter_reads_lost`, `bsqli_nomark`, `bsqli_class_ignores_lost`, `bsqli_504_kept` |
 
 ### 10.3 ERROR_LOG entry
 
@@ -1108,14 +1159,14 @@ implementation, §13):
 ## 2026-10-20 — session manager (a forbidden answer logged the session in again; BUG-0533, a recurrence of BUG-0134's and BUG-0113's class)
 - **Symptom:** a 403 (and a scope 401, a privilege-gated login redirect, a password check's 401) invalidated the session and the next send logged in again: N such probes made N logins, each probe on a new session, the peer re-logging in on each denied replay; a late answer from an earlier session logged the current one out.
 - **Root cause:** `detect_logout`'s `status in (401, 403)`, acted on by `observe` at once: a session-state change decided from one answer's surface feature, without positive evidence about that session or a binding to it.
-- **Remediation:** one loss predicate through SP-56; a check of the session's stable protected resource; generations and compare-and-set on the current state, atomic with installs; a pause and sticky unknown; a refilling re-login budget, with decision D for an identity with no resource and D′ (an answer sent on a session known lost is not comparable at the oracle) (CC-SESS-0029, CC-CORE-0070, CC-FUZZ-0107); BUG-0533, PA-0533.
-- **Status:** Fixed (two consumers outside the oracle, the live WAF filter and the blind-SQLi builder, pinned for D′ by strict xfails)
+- **Remediation:** one loss predicate through SP-56; a check of the session's stable protected resource, a policy block covered by any live verdict of its generation for the cache window; generations and compare-and-set on the current state, atomic with installs; a pause and sticky unknown; a refilling re-login budget, with decision D for an identity with no resource and D′ (an answer sent on a session known lost is never evidence: not comparable at the oracle through any sender, never an allow or block at the live WAF filter, never a sample or row at the blind-SQLi builder) (CC-SESS-0029, CC-CORE-0070, CC-FUZZ-0107, CC-FUZZ-0110, CC-MUT-0404); BUG-0533, PA-0533.
+- **Status:** Fixed
 ```
 
 ### 10.4 CHANGELOG line
 
 ```
-- **What:** a forbidden answer no longer logs the session in again: SP-56 classifies first, a suspected loss is confirmed on the session's stable protected resource and bound to its session generation and current state (compare-and-set, atomic with installs), re-logins draw on a refilling budget, an identity with no protected resource carries on when it is spent with every answer in that window not comparable at the oracle (decisions D and D′), and an unknown identity pauses, then fails loudly (AU-SESS403, audit defect 6; CC-SESS-0029, CC-CORE-0070, CC-FUZZ-0107; BUG-0533, PA-0533). **Why:** every 403, scope 401, privilege-gated login redirect or password check's 401 cost a login and a new session (10 probes, 10 logins), the peer re-logged in on each denied replay, and a late answer from an earlier session logged the current one out.
+- **What:** a forbidden answer no longer logs the session in again: SP-56 classifies first, a suspected loss is confirmed on the session's stable protected resource and bound to its session generation and current state (compare-and-set, atomic with installs), re-logins draw on a refilling budget, an identity with no protected resource carries on when it is spent with every answer in that window ignored by every consumer (the oracle through any sender, the live WAF filter, the blind-SQLi builder; decisions D and D′), a WAF that blocks every probe costs one health check per cache window, and an unknown identity pauses, then fails loudly (AU-SESS403, audit defect 6; CC-SESS-0029, CC-CORE-0070, CC-FUZZ-0107, CC-FUZZ-0110, CC-MUT-0404; BUG-0533, PA-0533). **Why:** every 403, scope 401, privilege-gated login redirect or password check's 401 cost a login and a new session (10 probes, 10 logins), the peer re-logged in on each denied replay, and a late answer from an earlier session logged the current one out.
 ```
 
 ### 10.5 SHARED_PRIMITIVES
@@ -1130,10 +1181,12 @@ implementation, §13):
   From: add PA-0533.
 - **SP-56, amend the readers:** "... the blind-SQLi builder, the live WAF filter **and
   the session manager (`detect_logout`, `health_verdict`, the refusal admission
-  `admitted_refusal`, `_verify_authenticated`)**". The oracle's `require_observed` also
-  reads `Probe.session_lost` first (FR-FUZZ-65). From: add CC-SESS-0029, CC-FUZZ-0107.
-- **New row (the coordinator's number; SP-57 if free):**
-  `| SP-57 | Is an identity's session live now: the health verdict of one answer, the check of the stable protected resource (single flight, the cover at the send, compare-and-set on the current state), the one invalidation and every install under one lock, and the choice of the stable protected resource | `fuzzlab/session/manager.py::SessionManager.check_health` (with `health_verdict`, `admitted_refusal`, `SessionManager._mark_lost`, `SessionManager._install`, `SessionManager._spa_probe`) | `tests/test_session_forbidden_answers.py::test_only_the_owner_decides_a_session_loss`, `tests/test_session_forbidden_answers.py::test_the_loss_decision_guard_catches_synthetic_offenders`, `tests/test_shared_primitives.py::test_every_owner_is_defined_once` | PA-0533 (CC-SESS-0029) |`
+  `admitted_refusal`, `_verify_authenticated`)**". Before any class: the oracle's
+  `require_observed` (in `_ObservedOnly` and in `ConfirmationStrategy._compared`), the
+  live filter and the builder's `answer_class` read the lost-session mark (FR-FUZZ-65).
+  From: add CC-SESS-0029, CC-FUZZ-0107, CC-FUZZ-0110, CC-MUT-0404.
+- **New row: SP-61** (the coordinator's number):
+  `| SP-61 | Is an identity's session live now: the health verdict of one answer, the check of the stable protected resource (single flight, the cover at the send, compare-and-set on the current state), the one invalidation and every install under one lock, and the choice of the stable protected resource | `fuzzlab/session/manager.py::SessionManager.check_health` (with `health_verdict`, `admitted_refusal`, `SessionManager._mark_lost`, `SessionManager._install`, `SessionManager._spa_probe`) | `tests/test_session_forbidden_answers.py::test_only_the_owner_decides_a_session_loss`, `tests/test_session_forbidden_answers.py::test_the_loss_decision_guard_catches_synthetic_offenders`, `tests/test_shared_primitives.py::test_every_owner_is_defined_once` | PA-0533 (CC-SESS-0029) |`
   Note for the row: disco's defect-4 item may build on `health_verdict` (a known gap,
   not a consumer).
 
@@ -1150,8 +1203,9 @@ login by one owner, `_spa_probe`), bound to the session's generation and current
 (`check_health`, `health_verdict`, `_mark_lost`; every install under the same lock).
 Re-logins draw on a refilling budget; an unknown identity pauses, then fails loudly
 (`SessionHealthUnknown`); an identity with no resource carries on when the budget is
-spent, and every request it sends then is marked lost (`Request.session_lost`), which
-the oracle reads as not comparable (FR-FUZZ-65, CC-FUZZ-0107).
+spent, and every request it sends then is marked lost (`Request.session_lost`), whose
+answer no consumer takes as evidence: the oracle (any sender), the live WAF filter and
+the blind-SQLi builder (FR-FUZZ-65; CC-FUZZ-0107, CC-FUZZ-0110, CC-MUT-0404).
 ```
 
 No new component or dependency.

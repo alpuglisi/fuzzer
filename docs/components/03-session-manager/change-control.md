@@ -21,6 +21,13 @@ Newest first.
     the current state after the GET, STALE recording nothing), **`_health_get`** (the
     seam's plain `requests` per hop, 15 s per hop, `_navigate(stop_at=)`, a live answer's
     rotated cookie adopted, an unapproved hop raising).
+  - *(Review round 5, blocker 2.)* The cache is two dict lookups, only the latest live
+    generation's entries kept: a loss shape is covered by a live verdict of its
+    generation and URL key unless it carries a foreign header; a **policy block** (403,
+    451, no loss shape; `check_health(policy=)`) by any live verdict of its generation
+    within `health_ttl_s`, whatever its URL or headers. Measured at f1d31dd behind a WAF
+    that 403s every probe: 20 path payloads made 20 health GETs and 20
+    `X-Forwarded-For` payloads 20 more; now one per window (T14p).
   - **`_mark_lost`**: the only writer of `valid = False`; compare-and-set on the current
     state and generation, its row persisted **inside** the same critical section.
     **`_install`**: every login's and `adopt`'s state is numbered (`generation`),
@@ -41,7 +48,10 @@ Newest first.
     (`_draw_relogin`, under the login lock, the login in `_log_in_locked`) with
     **decision D** (no resource and no token: carry on at once on the session it has),
     **`verify_live`**'s own bounded wait and budget, `_verify_authenticated` through
-    `health_verdict`, `health_report()`, credential POSTs per account.
+    `health_verdict`, `health_report()`, credential POSTs per account. One warning,
+    naming the identity and never a credential, when an identity enters D's window, once
+    per window (review round 5); `ensure`'s docstring states that it can return a state
+    known to be lost (D).
   - **`prepare`** records `Request.session_generation` from the state it applied and
     **`Request.session_lost`** in D's window (decision D′; CC-CORE-0070, CC-FUZZ-0107).
   - `SessionState.generation`, `SessionState.probe_refusal_status` (in memory).
@@ -62,8 +72,8 @@ Newest first.
     traffic. **CRAWL**: `verify_live`'s API is unchanged; its waits have their own
     budget; the login's resource selection sends a corrupted credential to the base once
     or twice (seen by `tests/test_session_origin_scope.py`'s crawl test).
-  - **MUT** and the FUZZ blind-SQLi builder: they do not read D′'s mark yet; pinned by
-    two strict xfails naming their owners (BUG-0533's sweep).
+  - **MUT** (CC-MUT-0404) and the FUZZ blind-SQLi builder (CC-FUZZ-0110) read D′'s
+    mark (review round 5), as does every compared send of the oracle (CC-FUZZ-0107).
   - Login cost (R13): rule 2 or 3 costs up to 3 GETs per candidate (6 with the byte
     rule) at every HTTP login, isolated copies included.
   - Consumers found by grep (PA-0152): `detect_logout`, `observe`, `.valid`,
@@ -84,6 +94,9 @@ Newest first.
       the copy's session is ended on the server before its 401 (now confirmed).
     - `tests/test_logout_listener.py`: one module-level `Request` shared across tests
       carried an earlier manager's generation; a fresh request per use.
+    - `tests/test_session_forbidden_answers.py` T14 (this module): its "another URL"
+      was a 403, which a live verdict now covers whatever its URL (T14p); it is a scope
+      401 on `/api/r1`, so T14 keeps its meaning (a loss shape's URL rule).
   - Four new base-URL functions registered in `tests/test_base_url_subpath_registry.py`
     (`check_health`, `_health_get`, `_log_in_locked`, `_record_resource`), each pointer
     traced to a call with a sub-path base.
@@ -104,7 +117,8 @@ Newest first.
   - [x] state.py — done
   - [x] tests (29 strict xfails turned into passing tests; R6's pin kept; new tests for
     the split compare-and-sets, the install atomicity, a copy's shared budget and
-    account, D′ and its sweep) — done
+    account, D′ and its sweep; review round 5: the policy-block cache (T14p), the peer
+    replay (TD4), the D window's log line (TD5), the two sweep pins closed) — done
   - [x] every named revert re-proven on the implementation (DRAFT §13) — done
   - [x] the prototype deleted — done
   - [x] FR-SESS-23 and the amendments (FR-SESS-5, -15, -16, -17, -18, -19,

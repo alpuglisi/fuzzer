@@ -191,8 +191,12 @@ class _HealthRecord:
     #: the health lock: single flight of the check, and every write below but the
     #: bucket's (which the login lock guards)
     lock: threading.Lock = field(default_factory=threading.Lock)
-    #: (generation, url key) -> when a live verdict for it was taken (the TTL cache)
+    #: (generation, url key) -> when a live verdict for it was taken (the TTL cache for
+    #: loss shapes); only the latest live generation's entries are kept
     live: dict = field(default_factory=dict)
+    #: generation -> when its latest live verdict was taken, whatever its URL (the TTL
+    #: cache for policy blocks)
+    live_any: dict = field(default_factory=dict)
     #: generation -> the sequence number at which a live verdict's GET was **sent**
     live_seq: dict = field(default_factory=dict)
     verdict: tuple | None = None                  # (generation, state), the last one
@@ -201,6 +205,7 @@ class _HealthRecord:
     tokens: float | None = None                   # the re-login bucket (login lock)
     refill_at: float = 0.0
     relogin_due: bool = False                     # set by `_mark_lost`
+    in_window: bool = False                       # in D's window (logged once per window)
     report: Counter = field(default_factory=Counter)
 
 
@@ -764,7 +769,8 @@ class SessionManager:
         _health, moved = self.check_health(state.host, identity, self._bases.get(key),
                                            generation=generation, signal_url=request.url,
                                            seen_seq=seen_seq,
-                                           foreign=_foreign_header(request, state))
+                                           foreign=_foreign_header(request, state),
+                                           policy=not shape)
         if moved:
             self._tell(origin, identity)
 
@@ -797,7 +803,16 @@ class SessionManager:
         one of the existing ``(host, identity)`` session's origins -- never from a base
         derived from a request on another origin. An operator base whose origin is not
         one of the existing session's (or of an earlier operator base's) is refused
-        loudly (`SessionAuthError`), naming the remedy: a distinct identity per app."""
+        loudly (`SessionAuthError`), naming the remedy: a distinct identity per app.
+
+        *(FR-SESS-23.)* A loss-driven re-login draws a token from the (host, identity)
+        bucket under the login lock. With none left, an identity with a stable
+        protected resource waits for the next token (holding no lock) or raises
+        `SessionHealthUnknown`; an identity **without** one (decision D) gets the
+        current state back **still invalid** -- a session known to be lost -- with no
+        login, no wait and no error, and `prepare` marks each request it sends on it
+        (`Request.session_lost`). One warning is logged when an identity enters that
+        window."""
         if identity != ANONYMOUS:
             self._check_base(host, identity, base_url, operator=operator)
         if operator:
@@ -887,10 +902,18 @@ class SessionManager:
             rec.refill_at = now
         if rec.tokens >= 1.0:
             rec.tokens -= 1.0
+            rec.in_window = False
             self._count(rec, "relogins")
             return None
         if not state.protected_probe:
             self._count(rec, "relogins_skipped")
+            if not rec.in_window:                  # one warning per window (no secret)
+                rec.in_window = True
+                _HEALTH_LOG.warning(
+                    "%s@%s: the re-login budget is spent and the session has no stable "
+                    "protected resource: sending on the session marked lost until a token "
+                    "refills (FR-SESS-23 D); answers sent meanwhile are not comparable "
+                    "(FR-FUZZ-65)", self._label or key[1], key[0])
             return _SKIP_RELOGIN
         wait = (1.0 - rec.tokens) * self._relogin_refill_s
         with self._run_budget.lock:
@@ -1080,7 +1103,8 @@ class SessionManager:
     def check_health(self, host: str, identity: str, base_url: str | None = None, *,
                      generation: int | None = None, signal_url: str | None = None,
                      seen_seq: int | None = None, foreign: bool = False,
-                     use_cache: bool = True, pause: bool = True) -> tuple[Health, bool]:
+                     policy: bool = False, use_cache: bool = True,
+                     pause: bool = True) -> tuple[Health, bool]:
         """Is (host, identity)'s session of ``generation`` (default: the current one)
         live? The one owner of the answer (FR-SESS-23). Returns ``(Health,
         transitioned)``: ``transitioned`` is whether this call marked a valid session
@@ -1093,9 +1117,12 @@ class SessionManager:
           while the GET was in flight makes its own check. So N concurrent signals make
           at most two GETs.
         - **The cache (M6):** for ``health_ttl_s``, a live verdict also covers later
-          signals of the same generation and URL key (``signal_url``), unless the
-          request carried a header the session does not own (``foreign``).
-          ``use_cache=False`` (a pause re-check, `verify_live`) reads neither.
+          loss shapes of the same generation and URL key (``signal_url``), unless the
+          request carried a header the session does not own (``foreign``); and it covers
+          a **policy block** (``policy``: a 403 or 451 that is no loss shape) of the
+          same generation whatever its URL or headers (review round 5: a WAF that
+          blocks every path or header payload costs one check per window, not one per
+          path). ``use_cache=False`` (a pause re-check, `verify_live`) reads neither.
         - **Compare-and-set (B3):** after the GET, still under the lock, the verdict
           counts only if the judged object is still the current state of its key and of
           the generation judged; otherwise it is STALE and records nothing (no live
@@ -1121,12 +1148,15 @@ class SessionManager:
                 if seen_seq is not None and last is not None and last > seen_seq:
                     self._count(rec, "covered")
                     return Health(LIVE, "covered", gen), False
-                if signal_key is not None and not foreign:
-                    hits = [at for (g, k), at in rec.live.items()
-                            if g == gen and k == signal_key]
-                    if hits and now - max(hits) < self._health_ttl_s:
-                        self._count(rec, "cached")
-                        return Health(LIVE, "cached", gen), False
+                if policy:                        # a policy block: any URL, any header
+                    at = rec.live_any.get(gen)
+                elif signal_key is not None and not foreign:
+                    at = rec.live.get((gen, signal_key))
+                else:
+                    at = None
+                if at is not None and now - at < self._health_ttl_s:
+                    self._count(rec, "cached")
+                    return Health(LIVE, "cached", gen), False
             sent_seq = self._next_seq()           # B2: the cover point is the send
             started = self._clock()
             health = self._health_get(state, base_url or self._bases.get(key))
@@ -1138,7 +1168,10 @@ class SessionManager:
                 return Health(STALE, "replaced while its check was in flight", gen), False
             moved = False
             if health.state == LIVE:
-                rec.live_seq[gen] = max(rec.live_seq.get(gen, 0), sent_seq)
+                # only this generation's entries are kept: an older one never covers
+                rec.live = {k: at for k, at in rec.live.items() if k[0] == gen}
+                rec.live_seq = {gen: max(rec.live_seq.get(gen, 0), sent_seq)}
+                rec.live_any = {gen: started}
                 if signal_key is not None:
                     rec.live[(gen, signal_key)] = started
             elif health.state == LOST:

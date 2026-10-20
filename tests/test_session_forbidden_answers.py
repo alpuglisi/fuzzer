@@ -29,8 +29,10 @@ The app modes (`_App`) are the shapes the design must tell apart:
 - `rotate` / `rotate_all`: a rotating session id;
 - `ratelimit`: `/` answers anyone without a live session 429 (an anonymous rate limit).
 
-Every new-API keyword (`clock`, `sleep`, the bounds) is passed only when
-`SessionManager` accepts it, so every test also runs against today's code.
+FR-SESS-23's keywords (`clock`, `sleep`, the bounds, a store double) are passed to
+`SessionManager` as given (`_manager`). Phase 1 passed only those the constructor
+accepted, so the same module could run against the base; since CC-SESS-0029 every one is
+accepted.
 
 Written first (Phase 1, a strict xfail each on the base, 15a8a27 + 7ebf48a); CC-SESS-0029
 implemented the design and removed the markers. The one marker left is residual R6's
@@ -121,6 +123,10 @@ class _App:
       origin (an IdP).
     - ``throttle_root`` (`ratelimit`): a GET of `/` carrying a live session, sent
       without the login fetcher's browser headers, is throttled (429) too.
+    - ``waf_403``: a WAF answers 403 to every request to an `/item/` path and to every
+      request carrying ``X-Forwarded-For`` (a path or header payload), whoever sends it.
+    - ``idor_unauthenticated`` (`json`): `/api/orders?id=7` answers alice's orders to
+      anyone, a guest included (an object reference with no check at all).
 
     Other controls:
     - ``referer_bound``: a request that carries a live session and a ``Referer`` ends
@@ -154,6 +160,9 @@ class _App:
         self.offorigin_login: str | None = None
         self.throttle_root = False
         self.cart: list[str] = []          # `json`: each /api/cart view, live or guest
+        self.orders: list[str] = []        # `json`: who each /api/orders view went to
+        self.idor_unauthenticated = False  # `json`: /api/orders?id=7 answers anyone
+        self.waf_403 = False               # a WAF: 403 to every /item/ path and XFF probe
         self.server = self._serve()
         self.base = f"http://{HOST}:{self.server.server_address[1]}/"
 
@@ -288,6 +297,9 @@ class _App:
                     who = None
                 if method == "GET" and self._health(path, sid, auth, browser):
                     return None
+                if app.waf_403 and (path.startswith("/item/")
+                                    or self.headers.get("X-Forwarded-For")):
+                    return self._send(403, b"<h1>Request blocked by the WAF</h1>")
                 role = ACCOUNTS[who][2] if who else None
                 login = [("Location", app.login_path)]
                 if app.mode == "basic":
@@ -469,6 +481,19 @@ class _App:
                                         None)
                     return self._send(401, b'{"error":"unauthenticated"}',
                                       ctype="application/json")
+                if path == "/api/orders":                 # alice's object, id 7
+                    oid = dict(parse_qsl(urlsplit(self.path).query)).get("id")
+                    with app._lock:
+                        app.orders.append(who or "guest")
+                    if oid == "7" and (who == "user" or app.idor_unauthenticated):
+                        return self._send(200, b"<p>orders of alice</p>")
+                    if who is None:
+                        return self._send(200, b"<p>guest: please sign in</p>")
+                    return self._send(200, b"<p>no such order</p>")
+                if path == "/api/slow":                   # slower than a short timeout
+                    import time
+                    time.sleep(1.0)
+                    return self._send(200, b"{}", ctype="application/json")
                 if path == "/api/cart":                   # anyone: a guest view without
                     with app._lock:                      # a live bearer (review 4's Q1)
                         app.cart.append("live" if who else "guest")
@@ -1002,9 +1027,10 @@ def test_an_inconclusive_check_pauses_and_never_changes_the_identity():
 
 
 def test_a_live_verdict_is_cached_for_its_window_its_generation_and_its_url():
-    """T14 (M6). A live verdict covers later signals of the same generation and URL key
-    within `health_ttl_s` (30 s), and nothing else:
-    - another URL is checked;
+    """T14 (M6). A live verdict covers later loss shapes of the same generation and URL
+    key within `health_ttl_s` (30 s), and nothing else:
+    - another URL's loss shape is checked (a scope 401 on `/api/r1`; review round 5: a
+      403 would now be covered whatever its URL, T14p);
     - the same URL after the window is checked;
     - the same URL on the next generation is checked.
 
@@ -1014,7 +1040,7 @@ def test_a_live_verdict_is_cached_for_its_window_its_generation_and_its_url():
         clock, kw = _fake()
         mgr, _losses, client = _logged_in(app, **kw)
         checks = []
-        for path in ("api/reports", "api/reports", "admin.php"):
+        for path in ("api/reports", "api/reports", "api/r1"):
             _get(client, app, path)
             checks.append(app.health_gets())
         clock.t += 31.0
@@ -1027,6 +1053,46 @@ def test_a_live_verdict_is_cached_for_its_window_its_generation_and_its_url():
         _get(client, app, "api/reports")
         checks.append(app.health_gets())
         assert checks == [1, 1, 2, 3, 5], checks
+    finally:
+        app.close()
+
+
+def test_policy_blocks_on_many_paths_and_headers_cost_one_check_per_window():
+    """T14p (M6; review round 5). A WAF answers 403 to every path payload and every
+    `X-Forwarded-For` payload. A policy block is no loss shape: within `health_ttl_s`
+    one live verdict of the generation covers it whatever its URL or headers.
+    - 20 path payloads and 20 header payloads: one health GET in the window;
+    - the next window: one more;
+    - a loss shape keeps its rule: a scope 401 on a new URL is checked, the same URL
+      again is cached, and the same URL with a foreign header is checked (T18's rule).
+
+    Revert: `policy_cache_by_url` (a policy block keyed by URL and bypassed by a foreign
+    header: 40 health GETs)."""
+    app = _App()
+    app.waf_403 = True
+    try:
+        clock, kw = _fake()
+        mgr, losses, client = _logged_in(app, **kw)
+        _get(client, app, "home.php")
+        statuses = [_get(client, app, f"item/{i}")[0].status for i in range(20)]
+        for i in range(20):
+            req = Request("GET", app.base + "home.php", identity="user",
+                          headers={"X-Forwarded-For": f"10.0.0.{i}"})
+            statuses.append(client.send(req).status)
+        assert statuses == [403] * 40
+        assert app.health_gets() == 1, app.health_gets()
+        clock.t += 31.0                                            # the next window
+        for i in range(5):
+            _get(client, app, f"item/x{i}")
+        assert app.health_gets() == 2, app.health_gets()
+        _get(client, app, "api/reports")                           # a loss shape: checked
+        _get(client, app, "api/reports")                           # same URL: cached
+        assert app.health_gets() == 3, app.health_gets()
+        req = Request("GET", app.base + "api/reports", identity="user",
+                      headers={"X-Probe": "1"})                    # foreign: checked
+        assert client.send(req).status == 401
+        assert app.health_gets() == 4, app.health_gets()
+        assert (losses, app.logins) == ([], 1)
     finally:
         app.close()
 
@@ -1899,9 +1965,11 @@ def test_a_resource_backed_identity_never_sends_on_a_lost_session():
 def test_layer_one_reads_any_answer_on_a_lost_session_as_not_comparable(status, headers):
     """D′ (FR-FUZZ-65), layer 1 on its own: an answer to a request sent on a session
     known lost is `NotComparable` whatever its class -- the probe's own or its PRG
-    follow-up's, and on a timing send too (a read timeout's latency included). The same
-    answers unmarked pass layer 1 (which reads only throttles and incomplete answers).
-    Revert: `oracle_ignores_lost`."""
+    follow-up's. The timing case is **synthetic**: layer 1 checks the mark before it
+    keeps a read timeout as latency, but `SeamProbeSender` re-raises a timeout rather
+    than returning a stand-in, so no live marked stand-in exists today. The same answers
+    unmarked pass layer 1 (which reads only throttles and incomplete answers). Revert:
+    `oracle_ignores_lost`."""
     from fuzzlab.oracle.probe import (LOST_SESSION, PRG_OBSERVED, NotComparable, Probe,
                                       require_observed)
     with pytest.raises(NotComparable, match="the probe was sent on a lost session") as err:
@@ -1920,17 +1988,10 @@ def test_layer_one_reads_any_answer_on_a_lost_session_as_not_comparable(status, 
     require_observed(Probe(0, "", elapsed=10.0, timeout="read"), timing=True)
 
 
-#: D′'s sweep (PA-0002; FR-FUZZ-65 "not covered"): consumers outside the oracle that read
-#: answers through a session-managed seam do not read the lost-session mark yet. Each known
-#: instance is pinned by an offline strict xfail naming its owner (PA-0531(4), PA-0054(3)).
-_DPRIME_MUT = pytest.mark.xfail(
-    strict=True, reason="BUG-0533 sweep (D′): the live WAF filter (MUT, "
-                        "mutation/livefilter.HttpFilter) reads an answer sent on a session "
-                        "known lost as an observation; owner: a MUT follow-up")
-_DPRIME_BSQLI = pytest.mark.xfail(
-    strict=True, reason="BUG-0533 sweep (D′): the blind-SQLi builder (FUZZ, "
-                        "tools/blind_sqli_fuzzer SeamSender and answer_class) admits an "
-                        "answer sent on a session known lost; owner: a FUZZ follow-up")
+#: D′'s sweep (PA-0002): every consumer that reads answers through a session-managed seam
+#: reads the lost-session mark -- the oracle (TD1, TD4), the live WAF filter (CC-MUT-0404)
+#: and the blind-SQLi builder (CC-FUZZ-0110). Revision 1 of Phase 2 pinned the last two
+#: with strict xfails; the owner's decision closed them.
 
 
 def _in_ds_window(app: _App):
@@ -1946,36 +2007,141 @@ def _in_ds_window(app: _App):
     return mgr, sender
 
 
-@_DPRIME_MUT
 def test_the_live_waf_filter_never_reads_an_answer_on_a_lost_session():
-    """D′'s sweep, pinned. In D's window the live filter's probe of `/api/cart` gets the
-    guest view (200): today an "allow" verdict; it should be no observation
-    (`FilterUnobserved`), as a throttle is."""
+    """D′ (FR-FUZZ-65, FR-MUT-401; CC-MUT-0404). In D's window the live filter's probe
+    of `/api/cart` gets the guest view (200), and a WAF-like 403 would look like a block.
+    Neither is recorded as an allow or a block: the answer is not an observation of the
+    WAF (`FilterUnobserved`, counted and skipped by `run_mutation`), as a throttle is.
+    Revert: `livefilter_reads_lost` (the guest view reads as an allow)."""
     from fuzzlab.mutation.livefilter import FilterUnobserved, HttpFilter
     app = _App(mode="json")
     try:
         _mgr, sender = _in_ds_window(app)
-        with pytest.raises(FilterUnobserved):
-            HttpFilter(sender, app.base + "api/cart", "q").evaluate("<b>x</b>")
+        flt = HttpFilter(sender, app.base + "api/cart", "q")
+        with pytest.raises(FilterUnobserved, match="sent on a lost session"):
+            flt.evaluate("<b>x</b>")
+        with pytest.raises(FilterUnobserved, match="sent on a lost session"):
+            flt.caught("<b>y</b>")
+        assert app.cart == ["guest", "guest"]
     finally:
         app.close()
 
 
-@_DPRIME_BSQLI
 def test_the_blind_sqli_builder_never_admits_an_answer_on_a_lost_session():
-    """D′'s sweep, pinned. In D's window the builder's seam send of `/api/cart` gets the
-    guest view (200): today SP-56's `application`, a sample it would write; it should
-    never be admitted."""
+    """D′ (FR-FUZZ-65; CC-FUZZ-0110). In D's window the builder's seam sends are marked:
+    - the guest view (200) is not SP-56's `application` to `answer_class`;
+    - the baseline admits no such sample (`BaselineNotComparable`, "lost-session");
+    - the cycle writes no row for it, nor for a lost session's client timeout (504),
+      which otherwise stays a timing observation.
+
+    Reverts: `bsqli_nomark` (the seam sender drops the mark), `bsqli_class_ignores_lost`
+    (`answer_class` reads the guest view as the application's), `bsqli_504_kept` (the
+    lost 504 is written as a row)."""
+    from types import SimpleNamespace
+
     from fuzzlab.core.comparability import APPLICATION
-    from fuzzlab.tools.blind_sqli_fuzzer import SeamSender, answer_class
+    from fuzzlab.tools.blind_sqli_fuzzer import (BaselineNotComparable, SeamSender,
+                                                 answer_class, establish_baseline,
+                                                 run_fuzzing_cycle)
     app = _App(mode="json")
     try:
         mgr, _sender = _in_ds_window(app)
-        answer = SeamSender(_client(mgr), "user").get(app.base + "api/cart", "id", "1",
-                                                      5.0)
-        assert answer[1] == 200 and app.cart == ["guest"]
-        assert answer_class(answer, app.base + "api/cart")[0] != APPLICATION
+        cart, slow = app.base + "api/cart", app.base + "api/slow"
+        seam = SeamSender(HttpClient(RequestBudget(10_000), [HOST], session=mgr,
+                                     timeout=0.3), "user")
+        answer = seam.get(cart, "id", "1", 0.3)
+        assert (answer[1], answer.session_lost, app.cart) == (200, True, ["guest"])
+        assert answer_class(answer, cart)[0] != APPLICATION
+        with pytest.raises(BaselineNotComparable, match="lost-session"):
+            establish_baseline(seam, cart, "id", 3, 0.3)
+        args = SimpleNamespace(sigma=3.0, min_delay=2.0, repeats=2, timeout=0.3,
+                               pause=0.0)
+        baseline = {"avg_time": 0.01, "std_dev_time": 0.01, "avg_size": 12, "samples": 3}
+        payloads = [{"text": "1", "family": "benign", "is_malicious": 0,
+                     "expected_delay": 0}]
+        assert run_fuzzing_cycle(seam, cart, "id", baseline, payloads, args) == []
+        timed_out = seam.get(slow, "id", "1", 0.3)
+        assert (timed_out[1], timed_out.session_lost) == (504, True)
+        assert run_fuzzing_cycle(seam, slow, "id", baseline, payloads, args) == []
     finally:
+        app.close()
+
+
+def test_a_peer_replay_on_a_session_known_lost_is_never_evidence():
+    """D′ (FR-FUZZ-65; review round 5). The cross-account replay sends through the
+    **peer's** seam sender, which the oracle does not wrap in `_ObservedOnly`. The peer
+    (root) is driven into its own D's window; the run's identity (alice) stays live.
+    Alice's own request is her view and the other-value control is not, so the replay
+    decides -- and every replay was sent on the peer's lost session:
+    - the app shows the dead peer session a guest view: never a negative;
+    - the app answers alice's object to anyone (no check at all): never a confirmation.
+
+    Both end inconclusive (`not-comparable`, "sent on a lost session"): `_compared`
+    applies layer 1 whichever sender made the send. Revert: `compared_skips_layer1`
+    (a negative for the guest view, `confirmed` for the open object)."""
+    from fuzzlab.oracle import Oracle
+    from fuzzlab.oracle.oracle import NOT_COMPARABLE
+    from fuzzlab.oracle.probe import Candidate
+    from fuzzlab.oracle.strategies import CrossAccountReplayStrategy, PeerAccounts
+    for idor in (False, True):
+        app = _App(mode="json")
+        try:
+            _clock, kw = _fake()
+            mgr, _losses = _manager(**kw)
+            sender = _sender(app, mgr)                           # alice, live
+            peer_mgr, _peer_losses = _manager(**_fake()[1])
+            peer = SeamProbeSender(_client(peer_mgr), "admin", manager=peer_mgr,
+                                   base_url=app.base)            # root, then lost
+            for _ in range(7):
+                peer.send(app.base + "api/bounce", "id", "1")
+            assert not peer_mgr._state[(HOST, "admin")].valid
+            app.idor_unauthenticated = idor
+            strategy = CrossAccountReplayStrategy(PeerAccounts(
+                sender=peer, owner="alice", peer_name="root", anonymous=None))
+            verdict, unsure = Oracle(strategies=[strategy]).confirm_outcome(
+                Candidate(app.base + "api/orders", "id", base_entries=(("id", "7"),),
+                          category="access-control", vuln_class="access_control"),
+                sender)
+            assert verdict is None, (idor, verdict)
+            assert unsure is not None and unsure.mechanism == NOT_COMPARABLE, (idor, unsure)
+            assert "sent on a lost session" in unsure.evidence["unobserved"], unsure
+            assert app.orders[:2] == ["user", "user"] and app.orders[2] == "guest", \
+                app.orders
+        finally:
+            app.close()
+
+
+def test_entering_ds_window_is_logged_once_per_window_without_a_credential():
+    """D (review round 5). When an identity enters D's window one warning names it
+    (never a credential), however many probes the window holds; a later window (after a
+    token refilled and was spent) logs once more. Revert: `no_window_log`."""
+    import logging
+    records: list[logging.LogRecord] = []
+    handler = logging.Handler()
+    handler.emit = records.append
+    log = logging.getLogger("fuzzlab.session.health")
+    log.addHandler(handler)
+    app = _App(mode="json")
+    try:
+        clock, kw = _fake()
+        mgr, _losses = _manager(**kw)
+        sender = _sender(app, mgr)
+        for _ in range(12):
+            sender.send(app.base + "api/reports", "id", "1")       # 6 logins, then D
+        window = [r.getMessage() for r in records if "re-login budget is spent" in
+                  r.getMessage()]
+        assert len(window) == 1 and window[0].startswith("user@"), window
+        tokens = [b for b in app.bearers] + [v for v in mgr._state[(HOST, "user")]
+                                              .headers.values()]
+        assert not any(t and t.split()[-1] in window[0] for t in tokens), window
+        clock.t += 120.0                                           # one token refills
+        for _ in range(3):
+            sender.send(app.base + "api/reports", "id", "1")       # a login, then D again
+        window = [r.getMessage() for r in records if "re-login budget is spent" in
+                  r.getMessage()]
+        assert len(window) == 2 and app.logins == 7, (window, app.logins)
+    finally:
+        log.removeHandler(handler)
         app.close()
 
 

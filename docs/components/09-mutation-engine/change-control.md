@@ -3,6 +3,29 @@
 Component code: **MUT**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-MUT-0404 — The live WAF filter never reads an answer sent on a session known to be lost (FR-MUT-401, FR-FUZZ-65, BUG-0533; decision D′) (2026-10-20)
+- Placement: AU-SESS403 (audit defect 6), review round 5; the owner's decision D′
+  ("ignore dead-session answers") covers every consumer, so BUG-0533's sweep pin for this
+  filter was closed instead of queued.
+- Change: `fuzzlab/mutation/livefilter.py::HttpFilter._probe` raises `FilterUnobserved`
+  ("the live filter's answer was sent on a lost session") when the probe carries
+  `Probe.session_lost` (set by `SeamProbeSender` from `core.http.Request.session_lost`,
+  CC-CORE-0070, CC-FUZZ-0107), before the block status is read. +5 lines with comments.
+- Impact (other components / project): `run_mutation` already contains
+  `FilterUnobserved` per base: it is counted in `summary["unobserved"]` and that base's
+  search ends; no allow, block or bypass is recorded for it. The mark fires only in
+  FR-SESS-23's D window (an identity with no stable protected resource and its re-login
+  budget spent), so a run outside that window is unchanged.
+- Risk (low): it can only turn an answer into no observation. The cost: a base whose
+  probe meets D's window ends early (stated; the window is bounded by the bucket).
+- Deliverables:
+  - [x] the check — done
+  - [x] FR-MUT-401 amended — done
+  - [x] `tests/test_session_forbidden_answers.py::test_the_live_waf_filter_never_reads_an_answer_on_a_lost_session`
+    (the strict xfail turned into a passing test; it fails on f1d31dd and against the
+    revert `livefilter_reads_lost`) — done
+- Effectiveness (assessed <date> or pending): pending.
+
 ### CC-MUT-0403 — The live WAF filter never reads a throttled, gateway or unanswered request as "allowed" (FR-MUT-401, BUG-0529) (2026-10-20)
 - Change:
   - `fuzzlab/mutation/livefilter.py`: `HttpFilter._probe` classifies every answer that

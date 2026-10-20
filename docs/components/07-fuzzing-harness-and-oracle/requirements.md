@@ -1850,21 +1850,26 @@ rewards) derives from it.
   - Enforced by: `tests/test_oracle_comparable_controls.py` (117 tests, the discovery
     table and send guard included), `tests/test_oracle_sqli_string.py::test_a_site_that_throttles_mid_differential_is_not_comparable_never_a_negative`.
 - **FR-FUZZ-65 (an answer on a session known to be lost is never evidence,
-  `CC-FUZZ-0107`, 2026-10-20, BUG-0533; the owner's decision D′ after AU-SESS403's
-  review round 4)**
+  `CC-FUZZ-0107`, `CC-FUZZ-0110`, `CC-MUT-0404`, 2026-10-20, BUG-0533; the owner's
+  decision D′ after AU-SESS403's review round 4, extended in round 5)**
   - **The mark.** When the session manager sends a request on a state it already knows
     to be lost and cannot yet recover -- FR-SESS-23's D window: an identity with no
     stable protected resource whose re-login budget is spent -- `prepare` marks the
     request (`core.http.Request.session_lost`, FR-CORE-6). `SeamProbeSender` carries the
     mark, read and never recomputed, to the probe it returns (`Probe.session_lost`); a
     PRG follow-up carries its own request's mark.
-  - **Layer 1** (`oracle.probe.require_observed`, applied by the oracle's
-    `_ObservedOnly` to every send a strategy reads -- payloads, controls, baselines,
-    compared slots and replays alike, the correlated send included) raises
-    `NotComparable("... sent on a lost session")` for any answer to a marked request,
-    the probe's own or its follow-up's, **whatever its SP-56 class** (a guest view, a
-    404, a non-login redirect, a 401, a 403, a read timeout on a timing send) and before
-    any class is read. Its `response_class` is `lost-session` (`LOST_SESSION`).
+  - **Layer 1** (`oracle.probe.require_observed`) raises `NotComparable("... sent on a
+    lost session")` for any answer to a marked request, the probe's own or its
+    follow-up's, **whatever its SP-56 class** (a guest view, a 404, a non-login
+    redirect, a 401, a 403), before any class is read. Its `response_class` is
+    `lost-session` (`LOST_SESSION`). It is applied to every send a strategy reads, from
+    two places: the oracle's `_ObservedOnly` (the run's own sender: payloads, controls,
+    baselines, compared slots, the correlated send) and `ConfirmationStrategy._compared`
+    (every compared send, **whichever sender made it**: a cross-account replay's peer
+    and anonymous senders are not wrapped by the oracle; review round 5). A timing
+    send's read-timeout stand-in is checked the same way, but no live marked stand-in
+    exists today: `SeamProbeSender` re-raises a timeout (TD3's timing case is
+    synthetic).
   - **Outcome:** the mechanism gives no verdict and the candidate is **inconclusive**
     (`not-comparable`) unless another mechanism confirms on unmarked answers: never a
     pass, a negative or a finding from such an answer. The run goes on (D); the scheduler
@@ -1872,12 +1877,22 @@ rewards) derives from it.
   - **Never fires for a resource-backed identity:** its loss is confirmed and re-logged
     in under the bucket, or it waits, or it goes sticky unknown; it never sends on a lost
     state (FR-SESS-23).
-  - **Not covered (stated):** consumers outside the oracle that read answers through a
-    session-managed seam (the blind-SQLi builder, the live WAF filter, the auditor's and
-    crawler's fetches) do not read the mark yet; R6 (a comparison that straddles a
-    re-login) is separate and stays pinned.
+  - **Every consumer reads the mark** (the owner's decision D′ covers all of them):
+    - the oracle, above;
+    - the live WAF filter: `FilterUnobserved`, never an allow or a block (FR-MUT-401,
+      CC-MUT-0404);
+    - the blind-SQLi builder (`tools/blind_sqli_fuzzer`): `Answer.session_lost` from the
+      seam send, `answer_class` reads it as `lost-session` (never a baseline sample), and
+      no row is written for it, a lost session's 504 included (CC-FUZZ-0110).
+
+    The auditor's and crawler's fetches read such answers for discovery only (a guest
+    view can only hide a point; stated). R6 (a comparison that straddles a re-login) is
+    separate and stays pinned.
   - Enforced by: `tests/test_session_forbidden_answers.py::test_an_answer_on_a_session_known_lost_is_never_evidence`,
+    `tests/test_session_forbidden_answers.py::test_a_peer_replay_on_a_session_known_lost_is_never_evidence`,
     `tests/test_session_forbidden_answers.py::test_layer_one_reads_any_answer_on_a_lost_session_as_not_comparable`,
+    `tests/test_session_forbidden_answers.py::test_the_live_waf_filter_never_reads_an_answer_on_a_lost_session`,
+    `tests/test_session_forbidden_answers.py::test_the_blind_sqli_builder_never_admits_an_answer_on_a_lost_session`,
     `tests/test_session_forbidden_answers.py::test_a_resource_backed_identity_never_sends_on_a_lost_session`.
 - **FR-FUZZ-64 (one query placement for every sender, `CC-FUZZ-0106`, 2026-10-20,
   BUG-0531)**

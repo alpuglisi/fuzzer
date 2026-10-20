@@ -241,10 +241,14 @@ data. Shared by all tools; a hard dependency for external validation (D10).
       state object it judged, if that object is still the current one and of the
       generation judged; otherwise it is stale and records nothing (no live mark, no
       pause, no `_mark_lost`, no row, no listener).
-  - **The cache.** For `health_ttl_s` (30 s), a live verdict also covers later signals
-    of the same generation and URL key, except from a request carrying a header the
-    session does not own (`Content-Type` and `Content-Length` excepted). Neither a pause
-    re-check nor `verify_live` reads it.
+  - **The cache.** For `health_ttl_s` (30 s), a live verdict also covers later loss
+    shapes of the same generation and URL key, except from a request carrying a header
+    the session does not own (`Content-Type` and `Content-Length` excepted); and it
+    covers a **policy block** (a 403 or 451 that is no loss shape) of the same
+    generation **whatever its URL or headers** (review round 5: a WAF that blocks every
+    path or header payload costs one check per window, not one per path). Only the
+    latest live generation's entries are kept (dict lookups). Neither a pause re-check
+    nor `verify_live` reads it.
   - **The stable protected resource** is recorded at login by one owner (`_spa_probe`):
     a candidate whose credentialed answer is live on the stopping walk and whose
     anonymous and corrupted answers agree as a refusal -- both lost; or the same status
@@ -286,6 +290,8 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     - With the bucket empty, an identity **without** one (decision D) skips the
       re-login and sends at once on the session it has, still marked lost: no wait, no
       `SessionHealthUnknown`, no abort. It logs in again when a token has refilled.
+      One warning names the identity (never a credential) when it enters that window,
+      once per window.
       **Every request so sent is marked** (`Request.session_lost`, FR-CORE-6;
       decision D′), and the oracle reads any answer to it as not comparable
       (FR-FUZZ-65): such a probe never confirms, never negates and never passes.
@@ -306,18 +312,23 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     `prepare`'s and `verify_live`'s waited seconds, and credential POSTs per account. It
     holds no URL, header value or body.
   - **Residuals** (DRAFT-AU-SESS403 §8): R1 (a 403 on expiry with no resource), R2 (no
-    resource; a re-login during a throttle records none), R3 (the TTL), R4 (a moved,
-    broken or throttled resource), R5 (the health GET is untraced), R6 (a comparison
+    resource; a re-login during a throttle records none), R3 (the TTL; a policy block is
+    covered whatever its URL), R4 (a moved, broken or throttled resource, or one that
+    turns 403 for a policy reason), R5 (the health GET is untraced), R6 (a comparison
     that straddles a re-login, pinned by a strict xfail), R7 (a 200 login page is
     `application` to the oracle outside D's window), R8, R9 (the contract runner,
     disco, greybox's static header), R10-R15, R16 (D's window: answers are not
-    comparable, D′).
-  - Enforced by: `tests/test_session_forbidden_answers.py` (88 tests: 85 that pass --
-    the classification, the cover, both compare-and-sets, the install atomicity, the
-    resource rules, the pause, sticky unknown, both budgets, D and D′, T19's
-    whole-package guard -- and three stated strict-xfail pins: R6 and D′'s two sweep
-    pins), `tests/test_core_comparability.py::test_no_module_classifies_a_throttle_or_refusal_but_the_owner`.
-    Every test but the pins fails against a named revert of the implementation
+    comparable, D′, at every consumer), R17 (Laravel's 419 after an expiry is an
+    application answer), R18 (RFC 6750's `401 insufficient_scope` is still an
+    unconfirmed loss without a resource), R19 (concurrent pause waiters each send a
+    re-check and each charge the budget).
+  - Enforced by: `tests/test_session_forbidden_answers.py` (91 tests: 90 that pass --
+    the classification, the cover, the cache (policy blocks per window), both
+    compare-and-sets, the install atomicity, the resource rules, the pause, sticky
+    unknown, both budgets, D and its log line, D′ at the oracle (the peer included), the
+    live filter and the blind-SQLi builder, T19's whole-package guard -- and R6's
+    strict-xfail pin), `tests/test_core_comparability.py::test_no_module_classifies_a_throttle_or_refusal_but_the_owner`.
+    Every test but the pin fails against a named revert of the implementation
     (DRAFT-AU-SESS403 §13).
 - **FR-SESS-20 (origin-scoped sessions, CC-SESS-0023, BUG-0134; design Revision 2,
   O1-O13; review rounds 1-2, R1-R9, T1-T6)**
