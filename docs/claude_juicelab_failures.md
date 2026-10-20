@@ -1052,3 +1052,9 @@ Juice Shop lab is complete.
 - **Evidence:** the AU-SITETREE round-1 reviews (2026-10-20), `scratchpad/reviewA_sitetree/x_lockdrop_*.out`, `scratchpad/review-b-au-sitetree/x2.out`.
 - **Impact:** none landed (caught at the design gate); the approval would have shipped a store-corrupting design.
 - **Status:** revision 2 removes every raw open of a store from the web process behind a guard, measures across processes, and records the pre-existing hazard as BUG-0535.
+
+### F-107 — The AU-SESS403 lane wrote a stray output into the main working tree
+- **What:** during revision 3 a backgrounded subshell ran in the default directory instead of the lane's worktree, wrote `measure_r3_base.out` into `/home/user/fuzzer` (97 bytes: "can't open file '/home/user/fuzzer/smoke_proto.py'"), and left it untracked there; the stop hook flagged it.
+- **Evidence:** the file and the lane's revision-3 report (2026-10-20), which traced it to its own command.
+- **Impact:** none beyond the stray file (deleted, not committed); the measurement was re-run from the worktree with identical results.
+- **Status:** the lane runs every command with an explicit `cd` or absolute paths into its worktree. Not enforced mechanically: a dispatch rule, like the one-pytest rule before BUG-0532.
