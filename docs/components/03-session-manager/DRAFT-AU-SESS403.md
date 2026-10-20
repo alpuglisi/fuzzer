@@ -1260,3 +1260,68 @@ and are not committed.
    whole-package assertion). The edit table is the script's `REVERTS`; every collected
    test is named by at least one revert except the three stated pins (checked by
    collection).
+3. **The PA-0533 matrix on the implementation** (B5; each revert that undoes a PA-0533
+   rule must fail at least one test PA-0533's Enforced-by line names, the whole set run
+   each time): **33 of 33 OK, 0 UNENFORCED**. The first run stopped after 14 rows (the
+   lane stopped its own runner; `reverts_d79d846.log`), and `matrix_rest.py` ran the
+   other 19 on the same tree (`matrix_rest_d79d846.log`). PA-named tests failed per
+   revert:
+   - rule (1): `403` 4, `policy_loss` 4, `throttle` 4, `throttle_refusal` 1,
+     `throttle_verdict` 6, `noconfirm` 11, `nosubmission` 2, `submission_ignored` 2,
+     `noentrynames` 1, `policy_nocheck` 3;
+   - rule (2): `nogen` 2, `nogenrecord` 2, `nocas` 2, `nomlcas` 2, `cas_both` 5,
+     `cover_at_record` 1, `pause_anygen` 1, `persist_unlocked` 2, `install_unlocked` 2;
+   - rule (3): `nobucket` 5, `nores_waits` 2, `d_for_all` 3, `nosticky` 1,
+     `inconclusive_lost` 2, `inconclusive_live` 2;
+   - rule (4): each `guard_*` 1, `observe_writes_valid` 5;
+   - rule (5): `nolostmark` 1, `oracle_ignores_lost` 8.
+
+   The same tree, no revert: 85 passed, 3 xfailed.
+4. **The harness** (`scripts/verify_change.py --base 4ee8007 --wait-other 7200`):
+   - on **6bb41bf** (the code, tests and docs before the merge of 01192c3): 6 changed
+     package files, 7 changed test files; **157 test files, 157 in one parallel pass,
+     0 serial; 4165 passed, 0 failed, 0 errors, 5 skipped, 25 xfailed**, rc 0
+     (`vc_final/summary.json`). The skips are the environment's: `test_packaging.py:179`
+     (bdist_wheel, Debian setuptools) and four live external-lab tests
+     (`FUZZLAB_LIVE_EXTERNAL_LABS` unset). An earlier run on 6b41dd0 (before the pins)
+     gave 4165 passed, 23 xfailed.
+   - on **f1d31dd** (the same with 01192c3 merged: the harness queues on the host
+     lock, BUG-0537): 6 changed package files, 8 changed test files; **157 test files,
+     157 parallel, 0 serial; 4166 passed, 0 failed, 0 errors, 5 skipped, 25 xfailed**, rc
+     0 (`vc_f1d31dd/summary.json`; the same five environment skips; the one more pass is
+     01192c3's own test). `fuzzlab/` is identical on d79d846, 6bb41bf and f1d31dd.
+5. **Why each new or changed revert fails** (`reasons.py`, `--tb=line`;
+   `reasons_d79d846.log`, `reasons2_d79d846.log`):
+
+| Revert | Test | It fails on |
+|---|---|---|
+| `nocas` | T M7b | the report: a stale verdict uncounted, a pause counted for the replaced session |
+| `nocas` | T M7e | `verify_live` returned `[False]` for the session that replaced it |
+| `nomlcas` | T M7f | a row (session 1's, invalid) written after the adopt's |
+| `nomlcas` | T M7h | the listener heard `['user']` |
+| `cas_both` | T M7c | a row written over session 2's (and the listener told) |
+| `pause_anygen` | T M7b2 | `(200, [5.0], 1)`: the send on session 2 slept 5 s |
+| `persist_unlocked`, `install_unlocked` | T M7g [relogin, adopt] | the rows end `[True, True, False]`: session 1's invalid row last |
+| `copy_own_budget` | TCP | the run's account shows 1 submitted, not 2 |
+| `copy_own_budget` | T13c | DID NOT RAISE: the run's pause resolved on its own budget |
+| `nolostmark` | TD1 | no probe carries the mark |
+| `oracle_ignores_lost` | TD1, TD3 ×7 | DID NOT RAISE `NotComparable` |
+| `d_for_all` | TD2 | `(3, [])`: 3 logins, no wait: the fourth probe went out on the lost session |
+| `observe_writes_valid` | T19 | `observe writes valid=non-constant` |
+
+6. **Q1 before and after D′** (`q1/test_q1_before_after.py`, `q1/run_q1.sh`,
+   `q1/q1.log`; the reviewer's guest-view JSON app: seven bounces, one cart probe, then
+   the oracle with ReflectedXss on the cart):
+
+| Code | Logins | The cart probe | SP-56 class | Layer 1 | Oracle |
+|---|---|---|---|---|---|
+| the base (fc57a9c, no prototype) | 7 | 200 `{"items":["book"]}` (a live session: every bounce re-logged in) | application | admitted | negative (a real observation) |
+| revision 3's prototype | 6 | 200 `{"items":[]}`, the **guest view**, in D's window | application | admitted | **negative** (the false negative Q1 measured) |
+| the implementation (D′) | 6 | 200 `{"items":[]}`, the guest view, `session_lost=True` | application | **NotComparable** ("sent on a lost session") | **inconclusive** (`not-comparable`) |
+
+   Layer 2 (`require_comparable`) alone still classes the guest view `application`; in
+   the oracle every send reaches layer 1 first (`_ObservedOnly`), which refuses it.
+7. **The changed files** (`git diff --numstat 4ee8007 f1d31dd -- fuzzlab`):
+   `session/manager.py` +899/-155, `session/detect.py` +71/-10, `oracle/probe.py`
+   +20/-1, `core/http.py` +10, `session/state.py` +9, `tools/probesender.py` +4/-1
+   (docstrings included).
