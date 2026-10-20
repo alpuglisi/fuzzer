@@ -1064,3 +1064,9 @@ Juice Shop lab is complete.
 - **Evidence:** `scripts/orchestration_guard.py report` at 20:55Z (stall 15.9 h; review-cap and budget triggers on both active items); checkpoints at 10:20Z and 14:29Z recorded "no new defect closed" without a stall report.
 - **Impact:** about 10 hours of work at a pace the owner had not agreed to; an ETA of 5–7 days surfaced only on request.
 - **Status:** reported to the owner with the causes (review rounds, two container restarts, an unplanned corruption bug, an unused slot) and a proposed process change; open until the owner decides.
+
+### F-109 — My lock dispatch kept the harness's quiet-host wait, which then starved every verification
+- **What:** dispatching AU-TESTLOCK I told the lane to keep `verify_change.py`'s own lock and quiet-host wait. Once lanes queued sessions on the new host lock there was always another pytest process, so the harness's wait for zero never ended: a docs-only verification waited 30 minutes and every push was blocked (BUG-0537).
+- **Evidence:** the waiting harness run for 7855b8c (2026-10-20, ~21:40Z), listing successive lane sessions; BUG-0537.
+- **Impact:** about 30 minutes of blocked pushes during the speed-up the owner asked for.
+- **Status:** fixed (`pytest_lock_enforced`, PA-0537).
