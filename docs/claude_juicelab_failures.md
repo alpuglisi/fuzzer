@@ -1070,3 +1070,9 @@ Juice Shop lab is complete.
 - **Evidence:** the waiting harness run for 7855b8c (2026-10-20, ~21:40Z), listing successive lane sessions; BUG-0537.
 - **Impact:** about 30 minutes of blocked pushes during the speed-up the owner asked for.
 - **Status:** fixed (`pytest_lock_enforced`, PA-0537).
+
+### F-110 — I dispatched AU-BOUNDED without pre-assigning its shared-primitive number
+- **What:** the AU-BOUNDED dispatch pre-assigned BUG-0536/PA-0536 and three CC numbers but no SP number, although the work adds a one-implementation mechanism (the bounded body reader). The lane took the next free number, SP-57, which was already reserved for AU-REQID8, and used it in 32 places (PA-0031).
+- **Evidence:** the AU-BOUNDED dispatch prompt (numbers list without an SP); `git grep SP-57` on the lane's 3aed2fa.
+- **Impact:** a renumbering commit on the lane (SP-57 → SP-60) before merge; no merged collision.
+- **Status:** fixed at dispatch level: the lane was assigned SP-60; later dispatches name every number class the change can touch, SP included.
