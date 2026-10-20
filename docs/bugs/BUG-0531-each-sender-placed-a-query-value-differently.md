@@ -152,3 +152,26 @@ owner:
 - found while sweeping M6: both probe senders' **path** branch hands `_follow` the placed
   path, so a relative `Location` (`#top`, `edit`) re-requests `/t/zqmark/…` (AU-PRGPATH,
   its own bug item).
+
+## Update (2026-10-20): part 2 landed
+Appended, not edited (this log is append-only).
+- **The M6 DOM point's siblings:** CC-FUZZ-0106 part 2, after AU-OUTCOME merged.
+  `ExecRequest.entries` carries a query point's link set from `DomXssStrategy._observe`,
+  and the executor binds it with `core.urls.bind_query`, as the HTTP senders do.
+  `test_a_dom_query_point_is_loaded_with_its_siblings` is no longer pinned, and a real
+  Chromium test compares the browser's and the bound HTTP sender's query for a repeated
+  name. The status above now reads: fixed for every sender, the M6 executor included.
+- **`tools/spa.query_url`:** fixed in this bug's sweep under CC-CRAWL-0053 (not a
+  separate item: same class). The seed builder places its route query through
+  `core.urls.place_route_query_pairs`; its encoder keeps `/`, so a redirect-type name's
+  same-origin path stays `/` (FR-CRAWL-17's safety test unchanged). Its strict xfail is
+  now a positive test.
+- **`disco/runner.py:262`:** fixed by AU-OUTCOME (CC-FUZZ-0105); its pin is positive.
+- **Still pinned to their owners:** `store_adapter.query_pairs` and
+  `store_adapter.py:274` (AU-REQID8), `labgen/oracle_wrapper` (LAB), the path point's
+  PRG follow-up (AU-PRGPATH), the bound duplicate name (AU-REQID8).
+- **Correction:** the corrective action above says a `StoreStep` has no entries. It has
+  `entries`, but they are a JSON store body's leaves; it carries no query siblings,
+  which is why the GET store step takes the standalone rule.
+- **The guard's count:** 43 allow-listed findings under 41 keys (the runner's and
+  `spa.query_url`'s entries are gone).

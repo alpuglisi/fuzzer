@@ -1854,13 +1854,16 @@ rewards) derives from it.
   - **One owner.** Every sender places a query value through `core.urls` (FR-CORE-501,
     SP-42): `RequestsProbeSender`, `SeamProbeSender` (every session route), greybox's
     `RequestsCorrelatingSender`, both blind-sqli senders, and the M6 browser executor
-    (its observe navigation, its GET store step and an SPA hash route's query).
+    (its observe navigation, its GET store step and an SPA hash route's query). The
+    crawler's SPA seed builder places its route query through the same owner
+    (CC-CRAWL-0053).
   - **Until AU-REQID8, a repeated name follows two rules:**
     - a **standalone** URL (no entries) addresses the **first occurrence** of the name,
       in place (`place_query_param`);
     - **bound** entries (a link set, a form; the oracle's binder, unchanged) replace
-      **every occurrence**, through `core.urls.bind_query`. The M6 GET store step is
-      always standalone: a `StoreStep` carries no entries.
+      **every occurrence**, through `core.urls.bind_query`, for the HTTP senders and
+      the M6 executor alike. The M6 GET store step is always standalone: a `StoreStep`
+      carries no query siblings (its `entries` are a JSON store body's leaves).
   - **Every untouched part keeps** its position, its `=` (or its absence) and its raw
     text, up to the HTTP client's own rewriting (measured on requests 2.34.2 and
     Chromium 141.0.7390.37, pinned by a real-browser test). An absent name is appended
@@ -1874,9 +1877,12 @@ rewards) derives from it.
     the URL `requests` prepares; `tests/test_query_placement.py` checks every sender end
     to end on a loopback echo server, Chromium under the measured relation, and holds
     the AST guard that keeps query building in `core.urls`.
-  - **Not yet (CC-FUZZ-0106 part 2, after AU-OUTCOME merges):** a crawled DOM query
-    point is loaded in the browser with its bound siblings (`ExecRequest.entries`, from
-    `DomXssStrategy`). Pinned by a strict xfail until then.
+  - **A crawled DOM query point** is loaded in the browser with its bound siblings
+    (CC-FUZZ-0106 part 2): `DomXssStrategy` passes a query point's `base_entries`, when
+    it has any, as `ExecRequest.entries`, and the executor binds them with
+    `bind_query`, so the browser and the bound HTTP senders send the same query. The
+    browser load is an observation, never a comparison control (FR-FUZZ-63's
+    `_compared` does not apply to it).
   - **Stated gaps:**
     - a standalone operator URL with a repeated name probes its first occurrence only
       (0 of 157 ground-truth rows carry a query), until AU-REQID8;
@@ -1887,10 +1893,10 @@ rewards) derives from it.
       matches its URL's own raw occurrence and is appended as `%EF%BF%BD` (AU-REQID8);
     - the M6 trace records no siblings; a form-body store request sends none;
     - query builders in other items' code, each pinned by a strict xfail naming its
-      owner: `tools/spa.query_url` (CRAWL), `store_adapter.import_disco` (AU-REQID8),
-      `labgen/oracle_wrapper` (LAB). (`disco/runner.py`'s was fixed by AU-OUTCOME,
-      CC-FUZZ-0105: `Runner.prepare` places each case query value through
-      `place_query_param`.)
+      owner: `store_adapter.import_disco` (AU-REQID8), `labgen/oracle_wrapper` (LAB).
+      (`disco/runner.py`'s was fixed by AU-OUTCOME, CC-FUZZ-0105: `Runner.prepare`
+      places each case query value through `place_query_param`; `tools/spa.query_url`'s
+      by CC-CRAWL-0053.)
     - a **path** point's PRG follow-up re-requests the placed path (AU-PRGPATH, pinned).
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed

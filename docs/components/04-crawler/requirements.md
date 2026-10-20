@@ -457,6 +457,11 @@ fuzzer.
     redirect-ish name (a whole token, or the whole name, in the one shared open-redirect
     name set, `core.urls.REDIRECT_PARAMS`, FR-CORE-39) set to `/` instead -- hygiene:
     the guard is the window, which aborts every navigation a seed or probe load makes.
+    The pairs are placed in the route's query through the one owner
+    (`core.urls.place_route_query_pairs`, SP-42; CC-CRAWL-0053): a name the route query
+    already has is replaced in place, never sent twice, and names and values are
+    percent-encoded by `spa.seed_value`, which keeps `/` as written (so a redirect-ish
+    name's value is `/` in hash and history mode alike).
     PA-0003 tension, stated: the auditor's rules-data `R-OPEN-REDIRECT` `name_regex` is
     a second, regex-shaped list (detection is out of this requirement's scope). A route
     with a `.` or `..` segment is not a route (`classify_route`). The seed passes

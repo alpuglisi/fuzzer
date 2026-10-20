@@ -75,7 +75,19 @@ Newest first.
 - Deliverables:
   - [x] the owner and its unit tests (`tests/test_query_placement.py`) — done
   - [x] FR-CORE-501 amended in place — done
-  - [ ] SP-42 row, ARCHITECTURE line — coordinator, at merge
+  - [x] SP-42 row, ARCHITECTURE line — coordinator, at the part 1 merge (6551fbc)
+  - [ ] the SP-42 owner names for the part 2 addition — coordinator, at merge
+- Part 2 addition (2026-10-20, with CC-CRAWL-0053 and CC-FUZZ-0106 part 2; no new CORE
+  number was assigned, so it is recorded here):
+  - `encode_route_value(text)`: `quote(text, safe="")`, the route-query encoder
+    `place_route_query_param` already used inline.
+  - `place_route_query_pairs(url, pairs, encode=encode_route_value)`: each pair, in
+    order, by the standalone rule in the URL's *route* query (a fragment's own query in
+    hash mode; the URL's own query when it has no fragment, history mode).
+  - `place_route_query_param`'s route branch now calls it (same bytes,
+    `tests/test_json_points.py::test_the_executor_places_a_fragment_inside_the_hash_route`).
+  - Caller: `tools/spa.query_url` (CC-CRAWL-0053), with its own encoder that keeps `/`.
+  - Unit test: `tests/test_query_placement.py::test_the_route_query_owner_places_each_pair_by_the_standalone_rule`.
 - Effectiveness (assessed after landing): pending.
 
 ### CC-CORE-0065 — Trace steps a strategy run cites, and the M6 browser in the testing overlay (FR-CORE-505, FR-FUZZ-62) (2026-10-19)

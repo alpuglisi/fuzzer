@@ -16,7 +16,7 @@ import time
 import uuid
 from contextlib import suppress
 from fuzzlab.core import trace
-from fuzzlab.core.urls import place_query_param    # the one query placement (SP-42)
+from fuzzlab.core.urls import bind_query, place_query_param   # the one placement (SP-42)
 from fuzzlab.oracle.browser import SENTINEL, ExecObservation, ExecRequest, NotObserved
 from fuzzlab.oracle.probe import UnplaceableLocation
 
@@ -519,8 +519,8 @@ class PlaywrightBrowserExecutor:
                     else:
                         # the commit, then a bounded load, as the observe navigation
                         # (BUG-0137 review A-N3; the one helper since BUG-0138)
-                        # a `StoreStep` has no sibling entries: the standalone rule
-                        # (FR-FUZZ-64, SP-42)
+                        # a `StoreStep` carries no query siblings (its `entries` are
+                        # a JSON body's leaves): the standalone rule (FR-FUZZ-64)
                         resp = navigate(page, place_query_param(s.url, s.param, s.value),
                                         timeout_ms=self._timeout, wait_until="load",
                                         wait_ms=load_ms).response
@@ -533,9 +533,14 @@ class PlaywrightBrowserExecutor:
 
             target = request.url
             if request.param is not None and request.value is not None:
-                target = (_with_fragment if request.location == "fragment"
-                          else place_query_param)(request.url, request.param,
-                                                  request.value)
+                if request.location == "fragment":
+                    target = _with_fragment(request.url, request.param, request.value)
+                elif request.entries is not None:     # the bound rule (FR-FUZZ-64)
+                    target = bind_query(request.url, request.entries, request.param,
+                                        request.value)
+                else:                                 # the standalone rule
+                    target = place_query_param(request.url, request.param,
+                                               request.value)
             # when the observe navigation's `load` fires (BUG-0137 review Z3)
             load_at: list = [None]
             page.once("load", (lambda *_: load_at.__setitem__(0, time.monotonic()))

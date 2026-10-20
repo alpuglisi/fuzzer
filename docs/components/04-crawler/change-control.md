@@ -3,6 +3,46 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0053 — The SPA seed builder places its route query through the one owner (BUG-0531 sweep, SP-42) (2026-10-20)
+- Placement: assigned by the coordinator to AU-REQID14's part 2; CC-CRAWL-0051/0052 are
+  other lanes'. The PA-0002 sweep of BUG-0531 found `spa.query_url` in its class.
+- Change (`fuzzlab/tools/spa.py`):
+  - `query_url(route_url, pairs)` now calls `core.urls.place_route_query_pairs`
+    (CC-CORE-0068's part 2 addition): each pair by the standalone rule
+    (`QueryEntries.replace_first`) in the route's query, a hash route's fragment query
+    or, in history mode, the URL's own query. A name the route query already has is
+    replaced in place; before, a second pair was appended (`#/s?q=1&p=2` + `q` gave
+    `#/s?q=1&p=2&q=…`), and values were not encoded at all.
+  - New `seed_value(text)`, the seed and probe encoder: `quote(text, safe="/")`. It keeps
+    `/` as written. A redirect-type name's value is the same-origin path `/`
+    (`query_value`, FR-CRAWL-17), and its safety test,
+    `tests/test_spa_query.py::test_a_seed_gets_the_filler_and_a_redirect_name_gets_a_same_origin_path`,
+    pins `redirectUrl=/`. Encoding it as `%2F` would rest on how each SPA router decodes
+    it, which is not measured; the test stays unchanged. A space is `%20` in both modes,
+    which every decoder reads as a space.
+  - What reaches it is otherwise byte-identical: names are identifier-shaped
+    (`query_name_ok`), probe markers are lower-case letters, the filler is `fuzzlab`, so
+    the encoder changes no other byte today. The visible change is in-place
+    replacement on a route that already carries the name, and no trailing `?` when
+    `pairs` is empty.
+- Reason: BUG-0531's sweep (PA-0002; PA-0531(4) had pinned it with a strict xfail for
+  CRAWL). Not a separate item: same class, fixed under AU-REQID14 (coordinator).
+- Impact (other components / project): CORE (the owner gains `place_route_query_pairs`
+  and `encode_route_value`; `place_route_query_param`'s route branch now calls it, same
+  bytes). Callers of `query_url` (by search): `spa.seed_url`, `spider.LocalSpider`'s
+  probe builder (`spider.py:1851`); `disco/explore.py` uses `query_url_refusal` only. The
+  query guard's allow-list loses the `spa.query_url` entry (43 findings under 41 keys).
+- Risk: low. Mitigation: the seed tests of `tests/test_spa_query.py` (FR-CRAWL-17's
+  safety enforcement) unchanged and passing; new rows in `tests/test_query_placement.py`:
+  `test_the_spa_seed_builder_places_its_route_query_in_place` (8 rows, was the strict
+  xfail), `test_a_seeds_redirect_type_value_stays_a_same_origin_path_in_both_modes`
+  (2 rows), `test_the_route_query_owner_places_each_pair_by_the_standalone_rule` (3 rows).
+- Deliverables:
+  - [x] `query_url` through the owner; `seed_value` keeps `/` — done
+  - [x] the strict xfail turned positive; the unit rows for `/` in both modes — done
+  - [x] the allow-list entry removed; FR-CRAWL-17's seed text updated — done
+- Effectiveness (assessed after landing): pending.
+
 ### CC-CRAWL-0049 — A failed navigation settles on its own error page before it raises; a failed load's cleanup has one owner (SP-01, BUG-0522) (2026-10-19)
 - Placement: pre-assigned before CC-CRAWL-0050 was written (PA-0031), so it lands above that higher-numbered entry.
 - Change (`fuzzlab/tools/navguard.py`, SP-01's owner; `fuzzlab/tools/spider.py`):

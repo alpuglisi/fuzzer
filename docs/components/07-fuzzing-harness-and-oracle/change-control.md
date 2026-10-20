@@ -81,8 +81,37 @@ Newest first.
   - [x] conformance on the prepared URL; every sender's occurrence check and its synthetic offenders — done
   - [x] the AST guard (S1–S7), its exact allow-list (45 findings, 43 keys), 50 offenders, 10 near-misses — done
   - [x] strict xfails for known unfixed instances naming their owners (AU-OUTCOME, CRAWL, AU-REQID8 ×3, LAB, AU-PRGPATH ×4, this entry's part 2) — done
-  - [ ] part 2: `ExecRequest.entries`, `DomXssStrategy`, the M6-vs-bound-HTTP row (after AU-OUTCOME merges) — held
-  - [ ] ERROR_LOG, CHANGELOG, PA-0531, SP-42 row, ARCHITECTURE line, failure record — coordinator, at merge
+  - [x] part 2: `ExecRequest.entries`, `DomXssStrategy`, the M6-vs-bound-HTTP row — done (below)
+  - [x] ERROR_LOG, CHANGELOG, PA-0531, SP-42 row, ARCHITECTURE line, failure record — coordinator, at the part 1 merge (6551fbc)
+  - [ ] part 2's CHANGELOG line, ARCHITECTURE sentence and SP-42 row change — coordinator, at merge
+- Part 2 (2026-10-20, on eb5eb4f, after AU-OUTCOME merged):
+  - `fuzzlab/oracle/browser.py`: `ExecRequest` gains `entries: tuple | None = None`, a
+    query point's bound sibling entries.
+  - `fuzzlab/oracle/strategies.py` (`DomXssStrategy._observe`, one statement): passes the
+    candidate's `base_entries` as `entries` for a query point when it has any (the same
+    test, truthiness, as the oracle's `_FormBoundSender` wrapping), nothing for a
+    fragment point. The M6 load is an observation, not a comparison control: it does not
+    go through AU-OUTCOME's `_compared`, and `require_observed` (the HTTP sender chain)
+    does not apply to it.
+  - `fuzzlab/tools/browserexec.py`: the observe navigation uses
+    `core.urls.bind_query(url, entries, param, value)` when `entries` is given, else
+    `place_query_param`; a fragment point is unchanged (`_with_fragment`).
+  - Consumers of `ExecRequest.entries` (PA-0152, by search for `ExecRequest(` and
+    `.run(`): writer `DomXssStrategy._observe`; readers `PlaywrightBrowserExecutor.run`
+    and `FakeBrowserExecutor.run` (ignores it); the M6 visit trace records the param and
+    value only (no siblings, a stated gap). `StoredXssStrategy` builds `ExecRequest`
+    without entries, unchanged.
+  - Wire change: a crawled DOM query point with a link set is now loaded with its
+    siblings, bound by the binder's rule, as the HTTP senders send it. Scored ground
+    truth: 0 bound DOM points (of 5), so no change there.
+  - Tests: `test_a_dom_query_point_is_loaded_with_its_siblings` unpinned (real
+    Chromium); new `test_the_browser_and_the_bound_http_sender_place_a_duplicate_name_alike`
+    (real Chromium against `_FormBoundSender` over `RequestsProbeSender`, equal under the
+    measured relation) and `test_dom_xss_hands_the_executor_a_query_points_link_set`
+    (offline, 4 rows).
+  - Correction to this entry's part 1 text: a `StoreStep` does carry `entries`, but they
+    are a JSON store body's leaves; it carries no query siblings, which is why the GET
+    store step always takes the standalone rule.
 - Effectiveness (assessed after landing): pending.
 
 ### CC-FUZZ-0105 — Complete, evaluated, application answers only: the contract runner and the oracle (FR-FUZZ-52, FR-FUZZ-63, BUG-0528, BUG-0529) (2026-10-20)
