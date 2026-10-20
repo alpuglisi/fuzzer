@@ -37,6 +37,17 @@ Newest first.
   - **`tools/spider.py` (defect 21's sweep).** The crawl session, a worker clone's
     session and the isolated form-submission session (`iso`, which read whole a body
     it never used) are `bodyread.bound(requests.Session())`.
+  - *(Review round 1.)*
+    - The runner's session is `bodyread.watched`, and `Runner.send` runs inside a
+      `bodyread.watch` of `timeout_ms`: the watchdog cuts a dripped status line or
+      header too, and that is a `deadline` timeout.
+    - Its requests advertise only codings the reader can bound (`bodyread.advertise`,
+      applied to a copy of the case's headers).
+    - The in-process matcher guard also flags `re.compile` of a non-literal (so
+      `re.compile(rx).search(...)` and a kept compiled pattern) and `re` aliases. It is
+      proven on synthetic offenders.
+    - The optional persistent matcher worker was not built: the per-case worker start
+      (about 140 ms) is residual R6.
 - Impact (other components / project):
   - The live trace (FR-CRAWL-30) and the import read the same capped tail, so live and
     imported results stay equal (`tests/test_disco_livetrace.py`, with its over-cap

@@ -211,7 +211,9 @@ def run_fuzzing_cycle(sender, url, param, baseline, payloads, args):
                 answer = sender.get(url, param, payload, args.timeout)
             except requests.RequestException as exc:
                 print(f"[-] Request error on {payload[:24]!r}: {exc}")
-                latency = None
+                # the payload's samples are incomplete: no row, never a median of the
+                # repeats before it (BUG-0536; an incomplete body is one of these)
+                latencies = []
                 break
             # FR-FUZZ-63: only the application's answer is a timing observation; a 504
             # stays one (a gateway, or the client's timeout, waited on the query)

@@ -13,6 +13,11 @@ under three limits, each checked inside the read loop:
   deadline is checked before each; a body that ends after it is late too. A ``requests``
   timeout is per receive, not a total (measured: a body dripped a byte every 50 ms under
   a 1 s timeout took 1.96 s in one ``iter_content`` step; ``read1`` returned each byte).
+  What ``http.client`` reads in one call -- the status line, the headers, a chunked
+  body's chunk-size and trailer lines -- is cut by **one process-wide watchdog thread**
+  (`watch`): a socket a watched exchange still uses at its deadline is shut down
+  (``SHUT_RDWR``), so the blocked receive returns and the exchange is incomplete
+  (``deadline``). A send with no timeout is covered the same way.
 
 `read_body` returns a typed `Body`: ``complete``, or the ``reason`` it is not (`REASONS`). An
 incomplete body is never a short one: `bound`'s adapter raises `BodyIncomplete` (a
@@ -22,26 +27,33 @@ itself (FR-FUZZ-52).
 
 `bound(session)` applies `read_body` to every response a ``requests.Session`` gets, with a
 deadline of `DEADLINE_TIMEOUTS` x the request's read timeout (`DEFAULT_SECONDS` without
-one). Every session fuzzlab makes for a target is bounded where it is made
-(``tests/test_bounded_reads.py`` guard).
+one), watched. Every session fuzzlab makes for a target is bounded where it is made
+(``tests/test_bounded_reads.py`` guard); the contract runner's session is `watched` and
+reads with `read_body` under its own limits.
 
 Content codings, as urllib3 decodes them: identity; ``gzip`` / ``x-gzip`` (several
 members; bytes after a whole member ignored); ``deflate`` (zlib-wrapped or raw); ``br``
 with a Brotli that bounds its output (``Decompressor.process(..., output_buffer_limit)``,
 Brotli >= 1.2). A coding urllib3 has no decoder for is passed through undecoded, as
-urllib3 does. ``br`` without such a Brotli, ``zstd`` (decoded by urllib3 only with
-``backports.zstd``, which fuzzlab does not declare) and a chain of codings are
-incomplete (``"encoding"``): fail closed, never handed on as text.
+urllib3 does. ``br`` without such a Brotli, ``zstd`` and a chain of codings are
+incomplete (``"encoding"``): fail closed, never handed on as text. So a bounded send
+**advertises only what it can decode** (`advertise`): urllib3's default
+``Accept-Encoding`` names ``br`` with any Brotli and ``zstd`` on Python 3.14, and a
+request naming such a coding gets `accept_encoding` instead; a bounded one is kept.
 
-Stated limit (measured): framing lines -- the status line and the headers, before the
-response exists, and a chunked body's chunk-size and trailer lines -- are read by
-``http.client`` in one call each (up to 64 KiB a line, 100 headers) and are bounded only
-by the per-receive timeout. The late read is still incomplete (the deadline is checked
-when it returns); its liveness is pinned by a strict xfail.
+Stated limit: the connect (and a TLS handshake) is bounded by the connect timeout only --
+a socket shutdown does not interrupt a connect -- so a send with no timeout to a host
+that never answers its SYN is not cut.
 """
 
 from __future__ import annotations
 
+import contextlib
+import functools
+import heapq
+import itertools
+import socket
+import threading
 import time
 import zlib
 from dataclasses import dataclass
@@ -49,6 +61,8 @@ from typing import Callable
 
 import requests
 from requests.adapters import HTTPAdapter
+from urllib3.connection import HTTPConnection, HTTPSConnection
+from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
 
 #: Body bytes as they crossed the wire (content-coded), at most.
 MAX_WIRE_BYTES = 16 << 20
@@ -182,14 +196,44 @@ class _Brotli:
         return out
 
 
+@functools.cache
 def _bounded_brotli():
-    """The ``brotli`` module when it can bound its output, else None."""
+    """The ``brotli`` module when it can bound its output, else None (``brotlicffi``,
+    which urllib3 also uses, is not one: it has no output limit)."""
     try:
         import brotli
         brotli.Decompressor().process(b"", output_buffer_limit=1)
         return brotli
     except (ImportError, TypeError, AttributeError):
         return None
+
+
+def accept_encoding() -> str:
+    """The ``Accept-Encoding`` a bounded send advertises: the codings `read_body` decodes
+    under a ceiling."""
+    return "gzip, deflate, br" if _bounded_brotli() is not None else "gzip, deflate"
+
+
+def _decodable(value) -> bool:
+    allowed = {"gzip", "x-gzip", "deflate", "identity"}
+    if _bounded_brotli() is not None:
+        allowed.add("br")
+    tokens = [t.split(";")[0].strip().lower() for t in str(value).split(",")]
+    return all(t in allowed for t in tokens if t)
+
+
+def advertise(headers):
+    """Make ``headers`` (a mutable mapping, changed in place and returned) ask only for
+    codings `read_body` can bound: an ``Accept-Encoding`` that names another (``zstd``,
+    ``br`` without a bounded Brotli, ``*``) is replaced by `accept_encoding`, a missing
+    one is set, and a bounded one a caller set is kept."""
+    key = next((k for k in list(headers) if str(k).lower() == "accept-encoding"), None)
+    if key is not None and _decodable(headers[key]):
+        return headers
+    if key is not None:
+        del headers[key]
+    headers["Accept-Encoding"] = accept_encoding()
+    return headers
 
 
 #: Codings urllib3 decodes (and so requests advertises) that this reader cannot bound.
@@ -271,8 +315,17 @@ def read_body(resp, *, deadline: float, limits: Limits | None = None,
 
     A response with no raw stream (an adapter's or a test's) is read through
     ``iter_content``: its chunks are already decoded, and count on the smaller
-    ceiling."""
+    ceiling. A response whose body was already read is its kept ``content`` (under the
+    decoded ceiling), never an empty body read from a spent stream; one read and not
+    kept raises ``RuntimeError``."""
     lim = limits or default_limits()
+    if getattr(resp, "_content_consumed", False) is True:
+        kept = getattr(resp, "_content", None)
+        if not isinstance(kept, bytes):
+            raise RuntimeError("read_body: the body was already read and not kept")
+        if len(kept) > lim.decoded:
+            return Body(kept[:lim.decoded], False, "decoded", len(kept))
+        return Body(kept, True, None, len(kept))
     out = bytearray()
     wire = 0
 
@@ -331,30 +384,188 @@ def deadline_for(timeout) -> float:
     return time.monotonic() + seconds
 
 
-class BoundedAdapter(HTTPAdapter):
-    """An ``HTTPAdapter`` whose every response body is read by `read_body` before ``send``
-    returns: whole, or `BodyIncomplete` (the response closed, its connection dropped)."""
+# --- the watchdog: one thread for every watched exchange ---------------------------------
+
+class _Watch:
+    """One exchange's deadline (``time.monotonic``), the sockets it armed, and whether
+    the watchdog cut it (``fired``)."""
+
+    def __init__(self, deadline: float):
+        self.deadline = deadline
+        self.fired = False
+        self.entries: list[list] = []
+        self.socks: set[int] = set()
+
+
+class _Watchdog:
+    """One process-wide daemon thread (started on first use): at a watched exchange's
+    deadline, shuts down (``SHUT_RDWR``) every socket it armed and has not released, so
+    a receive blocked in ``http.client`` returns. Entries are ``[socket, watch]``; a
+    released one has no socket and is dropped when it reaches the top of the heap."""
+
+    def __init__(self):
+        self._cond = threading.Condition()
+        self._heap: list = []
+        self._seq = itertools.count()
+        self._thread: threading.Thread | None = None
+
+    def arm(self, sock, watch: _Watch) -> list:
+        with self._cond:
+            entry = [sock, watch]
+            heapq.heappush(self._heap, (watch.deadline, next(self._seq), entry))
+            if self._thread is None or not self._thread.is_alive():
+                self._thread = threading.Thread(target=self._run, daemon=True,
+                                                name="fuzzlab-bodyread-watchdog")
+                self._thread.start()
+            self._cond.notify()
+        return entry
+
+    def release(self, entry: list) -> None:
+        with self._cond:
+            entry[0] = None
+
+    def _run(self) -> None:
+        with self._cond:
+            while True:
+                while self._heap and self._heap[0][2][0] is None:
+                    heapq.heappop(self._heap)
+                if not self._heap:
+                    self._cond.wait()
+                    continue
+                wait = self._heap[0][0] - time.monotonic()
+                if wait > 0:
+                    self._cond.wait(wait)
+                    continue
+                _deadline, _seq, entry = heapq.heappop(self._heap)
+                sock, watch = entry
+                entry[0] = None
+                watch.fired = True
+                try:     # the plain socket's shutdown: an SSL socket's own drops its state
+                    socket.socket.shutdown(sock, socket.SHUT_RDWR)
+                except OSError:
+                    pass                                 # already closed
+
+
+_WATCHDOG = _Watchdog()
+_LOCAL = threading.local()
+
+
+@contextlib.contextmanager
+def watch(deadline: float):
+    """While open, every socket a watched connection (`WatchedAdapter`) uses on this
+    thread is shut down at ``deadline`` (``time.monotonic``) if it is still in use;
+    the yielded watch's ``fired`` says it was. Released on exit."""
+    w = _Watch(deadline)
+    outer = getattr(_LOCAL, "watch", None)
+    _LOCAL.watch = w
+    try:
+        yield w
+    finally:
+        _LOCAL.watch = outer
+        for entry in w.entries:
+            _WATCHDOG.release(entry)
+
+
+def _arm(sock) -> None:
+    w = getattr(_LOCAL, "watch", None)
+    if w is None or sock is None or id(sock) in w.socks:
+        return
+    w.socks.add(id(sock))
+    w.entries.append(_WATCHDOG.arm(sock, w))
+
+
+def _watched(base):
+    """``base`` (a urllib3 connection class) arming its socket under the thread's
+    `watch`: when it connects, and before it sends and reads (a reused connection)."""
+    class Watched(base):
+        def connect(self):
+            super().connect()
+            _arm(self.sock)
+
+        def request(self, *args, **kwargs):
+            _arm(self.sock)
+            return super().request(*args, **kwargs)
+
+        def getresponse(self, *args, **kwargs):
+            _arm(self.sock)
+            return super().getresponse(*args, **kwargs)
+    Watched.__name__ = Watched.__qualname__ = "Watched" + base.__name__
+    return Watched
+
+
+class _WatchedHTTPPool(HTTPConnectionPool):
+    ConnectionCls = _watched(HTTPConnection)
+
+
+class _WatchedHTTPSPool(HTTPSConnectionPool):
+    ConnectionCls = _watched(HTTPSConnection)
+
+
+_WATCHED_POOLS = {"http": _WatchedHTTPPool, "https": _WatchedHTTPSPool}
+
+
+class WatchedAdapter(HTTPAdapter):
+    """An ``HTTPAdapter`` whose connections are watched (`watch`), direct or through an
+    http(s) proxy (a SOCKS proxy keeps its own pools, unwatched)."""
+
+    def init_poolmanager(self, *args, **kwargs):
+        super().init_poolmanager(*args, **kwargs)
+        self.poolmanager.pool_classes_by_scheme = _WATCHED_POOLS
+
+    def proxy_manager_for(self, proxy, **kwargs):
+        manager = super().proxy_manager_for(proxy, **kwargs)
+        if not str(proxy).lower().startswith("socks"):
+            manager.pool_classes_by_scheme = _WATCHED_POOLS
+        return manager
+
+
+class BoundedAdapter(WatchedAdapter):
+    """A `WatchedAdapter` whose every response body is read by `read_body` before
+    ``send`` returns, under one deadline (`deadline_for`) the watchdog also enforces on
+    the status line and headers: whole, or `BodyIncomplete` (the response closed, its
+    connection dropped). Its requests advertise only codings it can bound
+    (`advertise`)."""
 
     def send(self, request, stream=False, timeout=None, verify=True, cert=None,
              proxies=None):
+        advertise(request.headers)
         deadline = deadline_for(timeout)
-        resp = super().send(request, stream=True, timeout=timeout, verify=verify,
-                            cert=cert, proxies=proxies)
-        try:
-            body = read_body(resp, deadline=deadline)
-        except BaseException:
-            resp.close()
-            raise
+        with watch(deadline) as w:
+            try:
+                resp = super().send(request, stream=True, timeout=timeout, verify=verify,
+                                    cert=cert, proxies=proxies)
+            except requests.RequestException as exc:
+                if w.fired:
+                    raise BodyIncomplete("deadline") from exc
+                raise
+            try:
+                body = read_body(resp, deadline=deadline)
+            except BaseException as exc:
+                resp.close()
+                if w.fired and isinstance(exc, requests.RequestException):
+                    raise BodyIncomplete("deadline") from exc
+                raise
         if not body.complete:
             resp.close()
             raise BodyIncomplete(body.reason, wire=body.wire, decoded=len(body.data))
         return resp
 
 
+def _mount(session, cls):
+    for prefix in ("https://", "http://"):
+        if not isinstance(session.adapters.get(prefix), cls):
+            session.mount(prefix, cls())
+    return session
+
+
 def bound(session):
     """``session`` (a ``requests.Session``) with every body it reads bounded: its http
     and https adapters are `BoundedAdapter`. Idempotent; returns ``session``."""
-    for prefix in ("https://", "http://"):
-        if not isinstance(session.adapters.get(prefix), BoundedAdapter):
-            session.mount(prefix, BoundedAdapter())
-    return session
+    return _mount(session, BoundedAdapter)
+
+
+def watched(session):
+    """``session`` with watched connections (`WatchedAdapter`), for a caller that streams
+    and reads with `read_body` itself inside a `watch` (the contract runner). Keeps a
+    `BoundedAdapter`. Returns ``session``."""
+    return _mount(session, WatchedAdapter)

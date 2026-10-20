@@ -309,7 +309,9 @@ class Runner:
     @staticmethod
     def _session():
         import requests
-        s = requests.Session()
+
+        from fuzzlab.core import bodyread
+        s = bodyread.watched(requests.Session())     # the watchdog's connections (SP-60)
         s.trust_env = False            # the contract's scope decides; no ambient proxy
         return s
 
@@ -424,16 +426,20 @@ class Runner:
         start = self.clock()
         deadline = start + limits["timeout_ms"] / 1000
         resp = None
+        # the one bounded reader (SP-60, BUG-0536): max_body_bytes on the wire and
+        # decoded, timeout_ms checked at every receive, and the watchdog cutting a
+        # socket still in use at timeout_ms (a dripped status line or header included)
+        cut = bodyread.watch(time.monotonic() + limits["timeout_ms"] / 1000)
         try:
-            resp = self.session.request(req.method, req.url, headers=req.headers,
-                                        data=req.body, allow_redirects=False,
-                                        timeout=limits["timeout_ms"] / 1000, stream=True)
-            ex.status, ex.headers = resp.status_code, dict(resp.headers)
-            # the one bounded reader (SP-60, BUG-0536): max_body_bytes on the wire and
-            # decoded, timeout_ms checked at every receive
-            cap = limits["max_body_bytes"]
-            body = bodyread.read_body(resp, deadline=deadline, clock=self.clock,
-                                 limits=bodyread.Limits(wire=cap, decoded=cap))
+            with cut as watched:
+                resp = self.session.request(
+                    req.method, req.url, headers=bodyread.advertise(dict(req.headers)),
+                    data=req.body, allow_redirects=False,
+                    timeout=limits["timeout_ms"] / 1000, stream=True)
+                ex.status, ex.headers = resp.status_code, dict(resp.headers)
+                cap = limits["max_body_bytes"]
+                body = bodyread.read_body(resp, deadline=deadline, clock=self.clock,
+                                          limits=bodyread.Limits(wire=cap, decoded=cap))
             ex.body = body.data
             if body.reason == "deadline":
                 ex.timed_out, ex.timeout_kind = True, "deadline"
@@ -442,7 +448,9 @@ class Runner:
             elif body.reason is not None:                 # a coding it cannot bound
                 ex.error = ex.cut = f"no complete response: incomplete body ({body.reason})"
         except requests.RequestException as exc:
-            if _is_timeout(exc):
+            if watched.fired:                             # the watchdog cut it
+                ex.timed_out, ex.error, ex.timeout_kind = True, "timeout", "deadline"
+            elif _is_timeout(exc):
                 ex.timed_out, ex.error = True, "timeout"
                 ex.timeout_kind = "connect" if _is_connect_timeout(exc) else "read"
             else:

@@ -20,10 +20,20 @@ Newest first.
     static fetch. An object that is not a `requests.Session` (a test's site) is used as
     given.
   - `greybox/run.py::RequestsCorrelatingSender`'s own session is bounded. An incomplete
-    body is its status-0 try (its contract for any `RequestException`).
+    body is a typed `UnobservedProbe` (review round 1, below), not the status-0 try
+    its contract keeps for any other `RequestException`.
   - `tools/blind_sqli_fuzzer.py`'s standalone session is bounded. An incomplete body
     meets the existing `requests.RequestException` handlers: no baseline sample, no
     row.
+  - *(Review round 1.)*
+    - **greybox:** a body the reader stopped is a typed `UnobservedProbe` (its
+      `reason`), never the status-0 "request error" probe whose text `_screening` scored
+      0.5 as a boolean divergence (measured by the reviewer on a gzip bomb).
+      `run_greybox` never scores it, records an attempt for it, accepts it as a
+      mutation variant or adopts it as the point's baseline. It counts it
+      (`summary["unobserved"]`, the `greybox_unobserved` metric when non-zero).
+    - **blind-SQLi:** a request error on a later repeat empties the payload's samples
+      (no row), where it kept the earlier latencies and wrote a `repeats=1` row.
 - Impact (other components / project):
   - The oracle sees an incomplete body only as `ProbeUnobserved`: no verdict from that
     mechanism, inconclusive, never a negative (FR-FUZZ-50).
@@ -41,9 +51,11 @@ Newest first.
   - [x] the four senders and `get_checked` — done
   - [x] `tests/test_bounded_reads.py`: a dripped body and a gzip bomb for the core seam,
     the static fetch, both probe senders and greybox, each with its own marker
-    (`BodyIncomplete`, SP-34's `ProbeUnobserved`, greybox's status-0 try), and the
-    peer's sent count showing the connection dropped — done
-  - [x] FR-FUZZ-50 edited in place — done
+    (`BodyIncomplete`, SP-34's `ProbeUnobserved`, greybox's typed `UnobservedProbe`;
+    a bare status-0 probe does not count), and the peer's sent count showing the
+    connection dropped; review round 1: greybox's run loop with incomplete baseline
+    and variants, and the blind-SQLi failed repeat — done
+  - [x] FR-FUZZ-50 and FR-FUZZ-8 edited in place — done
 - Effectiveness (assessed <date> or pending): pending.
 
 ### CC-FUZZ-0106 — Every sender places a query value through one owner (BUG-0531) (2026-10-20)

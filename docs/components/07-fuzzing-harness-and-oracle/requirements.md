@@ -87,6 +87,13 @@ rewards) derives from it.
   `greybox_session_out_of_origin` metric when non-zero, the CLI summary).
   `greybox-run --auth-origin ORIGIN` (repeatable; bare, in scope) hands the session
   manager the operator's auth origins (FR-SESS-20, R5).
+  *(CC-FUZZ-0109, BUG-0536:)* `RequestsCorrelatingSender`'s session reads bounded
+  (FR-CORE-536). A body the reader stopped comes back as a typed
+  `greybox.run.UnobservedProbe` (its `reason`), never as the status-0 "request error"
+  probe whose text would be scored. `run_greybox` never scores it, records an attempt
+  for it, accepts it as a mutation variant or adopts it as the point's baseline; it
+  counts it (`summary["unobserved"]`, the `greybox_unobserved` metric when non-zero).
+  Enforced by `tests/test_bounded_reads.py::test_greybox_never_scores_records_or_adopts_an_incomplete_probe`.
 - **FR-FUZZ-9** `run_greybox()` emits the run-wide `CoverageFrontier`'s growth
   to `core/store.py`'s `metric_series` table (component #2, CORE) once per
   attempt, via a buffered `MetricLogger(store, run_id, source="coverage")`
@@ -1529,7 +1536,10 @@ rewards) derives from it.
     no redirect followed; the body read up to `max_body_bytes` (on the wire and
     decoded) within `timeout_ms`, checked at every receive, by the one bounded reader
     (`core.bodyread.read_body`, FR-CORE-536; BUG-0536, which closes BUG-0528's
-    residual R6 for body bytes); sends spaced to `rps`. A case marked destructive is `skipped` unless
+    residual R6); its session is `bodyread.watched`, so the watchdog also cuts a
+    dripped status line or header at `timeout_ms` (a `deadline` timeout), and it
+    advertises only codings the reader can bound (`bodyread.advertise`); sends spaced
+    to `rps`. A case marked destructive is `skipped` unless
     `--allow-destructive` (then its own URL is the explicit allowance); a `reset_hook`
     runs around it only with `--allow-reset-hook`, through `procutil.run_bounded`;
   - credentials go only to the base URL's origin; evidence is redacted

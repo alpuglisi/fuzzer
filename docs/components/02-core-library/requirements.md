@@ -751,9 +751,18 @@ plugin registry. It is the layer that makes the store the integration bus.
       incrementally with an output ceiling per step.
     - A wall-clock deadline is checked before every receive and once the body has
       ended: a late body is incomplete.
+    - **One process-wide watchdog thread** (`watch`) also holds the deadline where
+      `http.client` reads in one call: the status line, the headers, a chunked body's
+      chunk-size and trailer lines. A socket a watched exchange still uses at its
+      deadline is shut down (`SHUT_RDWR`), so the blocked receive returns and the
+      exchange is incomplete (`deadline`). A send with no timeout is held to the
+      deadline the same way. Watched connections come from `WatchedAdapter`
+      (`watched(session)`), which `BoundedAdapter` extends.
   - **The result is typed.** `Body(data, complete, reason, wire)` has `reason` in
     `wire` / `decoded` / `deadline` / `encoding`. A complete body becomes
-    `resp.content`. An incomplete body is never handed on as a body.
+    `resp.content`. An incomplete body is never handed on as a body. A response whose
+    body was already read is its kept `content` (under the decoded ceiling), never an
+    empty body read from a spent stream; one read and not kept raises `RuntimeError`.
   - **Errors.** urllib3's errors are named as `iter_content` names them (a cut is
     `ChunkedEncodingError`, a read timeout `ConnectionError`), and a failed decode is
     `ContentDecodingError`. `read_body` never closes the response; its caller closes it on
@@ -762,7 +771,11 @@ plugin registry. It is the layer that makes the store the integration bus.
     (several members, trailing bytes after a whole member ignored), deflate
     (zlib-wrapped or raw), and br through a Brotli that bounds its output (1.2 or
     later). `zstd`, a br body without such a Brotli, and a chain of codings are
-    `encoding`: fail closed. A coding urllib3 does not decode passes through.
+    `encoding`: fail closed. A coding urllib3 does not decode passes through. **A
+    bounded send advertises only what it can decode** (`advertise`): urllib3's default
+    `Accept-Encoding` names `br` with any Brotli and `zstd` on Python 3.14, so a request
+    naming a coding the reader cannot bound gets `accept_encoding()` (`gzip, deflate`,
+    plus `br` with a bounded Brotli); a bounded one a caller set is kept.
   - **`bound(session)`** mounts `BoundedAdapter` on a `requests.Session`. Every
     response is read before `send` returns, with a deadline of `DEADLINE_TIMEOUTS` (4)
     x the request's read timeout (`DEFAULT_SECONDS`, 60, without one).
@@ -771,9 +784,8 @@ plugin registry. It is the layer that makes the store the integration bus.
     - Every `requests` session fuzzlab makes for a target is bounded where it is made.
       The core seam's transport makes one per send.
     - SP-34 maps the marker to "not observed" (FR-FUZZ-50).
-  - **Stated limit.** Framing lines (the status line, the headers, a chunked body's
-    chunk-size and trailer lines) are read by `http.client` in one call each and are
-    bounded only per receive. A late one still reads as incomplete.
+  - **Stated limit.** The connect (and a TLS handshake) is bounded by the connect
+    timeout only: a socket shutdown does not interrupt a connect.
   - Enforced by: `tests/test_bounded_reads.py`:
     - `test_a_dripped_body_is_cut_at_its_deadline_and_never_taken_whole` and
       `test_a_gzip_bomb_stops_at_the_decoded_ceiling_and_is_never_taken_whole`, over
@@ -784,8 +796,12 @@ plugin registry. It is the layer that makes the store the integration bus.
       `test_an_undecodable_or_unbounded_coding_is_never_a_body`;
     - `test_every_requests_session_fuzzlab_makes_is_bounded`, the AST guard proven by
       `test_the_session_guard_catches_synthetic_offenders`;
-    - the framing-line limit, pinned by the strict xfail
-      `test_a_dripped_chunk_size_line_is_cut_at_the_deadline`.
+    - the watchdog: `test_a_dripped_status_line_and_headers_are_cut_at_the_deadline`
+      (every reader), `test_a_dripped_chunk_size_line_is_cut_at_the_deadline`,
+      `test_a_send_with_no_timeout_is_still_cut_at_its_deadline`;
+    - codings: `test_a_bounded_send_advertises_only_codings_it_can_bound`,
+      `test_brotli_is_advertised_when_it_can_be_bounded`;
+    - `test_a_response_already_read_is_its_kept_body_never_an_empty_one`.
 - **FR-CORE-500** *(one reader for a run's target; one method key; `CC-CORE-0500`,
   2026-10-15).*
   - `fuzzlab/core/runtarget.py` is the one reader of the `target` table (PA-0063(1)): a

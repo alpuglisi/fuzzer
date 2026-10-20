@@ -99,6 +99,16 @@ DEFAULT_PROBES: tuple[ProbeSpec, ...] = (
 #   send_correlated(url, param, value, *, method, location) -> (Probe, correlation_id)
 
 
+@dataclass
+class UnobservedProbe(Probe):
+    """A probe whose answer the bounded reader stopped (`core.bodyread.BodyIncomplete`:
+    over a ceiling, past its deadline, a coding it cannot bound; BUG-0536). Not an
+    observation: `run_greybox` never scores it, records an attempt for it, accepts it as
+    a mutation variant or adopts it as a point's baseline; it counts it
+    (``unobserved``). ``reason`` is the `bodyread.REASONS` key."""
+    reason: str = ""
+
+
 class RequestsCorrelatingSender:
     """Live sender: plain ``requests`` with a fresh ``X-Fzl-Cov`` id per request.
 
@@ -200,12 +210,16 @@ class RequestsCorrelatingSender:
             kwargs["data"] = {param: value}
         else:                                     # the standalone rule (SP-42)
             wire = place_query_param(url, param, value)
+        from fuzzlab.core.bodyread import BodyIncomplete
         start = time.perf_counter()
         try:
             r = self._session.request(method.upper(), wire, **kwargs)
             probe = Probe(status=r.status_code, text=r.text,
                           elapsed=time.perf_counter() - start, headers=dict(r.headers),
                           session=note)
+        except BodyIncomplete as exc:          # no observation, typed (BUG-0536)
+            probe = UnobservedProbe(status=0, text="", elapsed=time.perf_counter() - start,
+                                    session=note, reason=exc.reason)
         except self._requests.RequestException as exc:
             probe = Probe(status=0, text=f"<request-error: {exc}>",
                           elapsed=time.perf_counter() - start, session=note)
@@ -355,7 +369,7 @@ def run_greybox(*, base_url: str, store, run_id: int,
                "novel_lines": 0, "m10_would_confirm": 0, "max_reward": 0.0,
                "baseline_reward": 0.0, "newcode_reward": 0.0, "coverage_lines_seen": 0,
                "mutation_variants_probed": 0, "mutation_variants_recorded": 0,
-               "destructive_refused": 0, "session_out_of_origin": 0}
+               "destructive_refused": 0, "session_out_of_origin": 0, "unobserved": 0}
 
     if lab_control is not None:
         lab_control.snapshot("baseline")
@@ -382,6 +396,11 @@ def run_greybox(*, base_url: str, store, run_id: int,
                 continue
             probe, cid = sender.send_correlated(
                 pt.url, pt.param, spec.value, method=pt.method, location=pt.location)
+            if isinstance(probe, UnobservedProbe):
+                # no observation (BUG-0536): never scored, recorded, accepted as a
+                # variant or adopted as the baseline -- counted
+                summary["unobserved"] += 1
+                continue
             if settle:
                 time.sleep(settle)
             cov = app_lines(coverage_source.lines_for(cid), include_prefixes=include)
@@ -470,6 +489,8 @@ def run_greybox(*, base_url: str, store, run_id: int,
     if summary["session_out_of_origin"]:                       # FR-SESS-20 (O2)
         _record_metric(store, run_id, "greybox_session_out_of_origin",
                        summary["session_out_of_origin"])
+    if summary["unobserved"]:                                  # BUG-0536
+        _record_metric(store, run_id, "greybox_unobserved", summary["unobserved"])
     if mutation_variants:
         _record_metric(store, run_id, "greybox_mutation_variants_probed",
                        summary["mutation_variants_probed"])

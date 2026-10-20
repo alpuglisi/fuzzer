@@ -32,6 +32,21 @@ Newest first.
   - The transport sends through `bodyread.bound(requests.Session())`, one session per
     send as `requests.request` made, so an incomplete body raises out of
     `HttpClient.send`.
+  - *(Review round 1.)*
+    - **One process-wide watchdog thread** (`watch`, `_Watchdog`): watched connections
+      (`WatchedAdapter` pools; urllib3 connection subclasses arming their socket on
+      connect, request and getresponse) are shut down (`SHUT_RDWR`, the plain socket's
+      method) when still in use at the exchange's deadline. That cuts a dripped status
+      line, header or chunk-size line, and a send with no timeout.
+      `BoundedAdapter` extends it, and `watched(session)` gives a caller that reads
+      itself (the contract runner) the same watch.
+    - **Advertised codings:** `advertise` / `accept_encoding` set `Accept-Encoding` to
+      `gzip, deflate` (plus `br` with a bounded Brotli) whenever a request names a
+      coding the reader cannot bound. urllib3's default names `br` with any Brotli and
+      `zstd` on Python 3.14, so every answer would have been incomplete. A bounded one
+      a caller set is kept.
+    - `read_body` on a response already read returns its kept `content`, never b""
+      from the spent stream; one read and not kept raises.
 - Impact (other components / project):
   - Every caller of `HttpClient.send` may now get `BodyIncomplete`:
     - `SeamProbeSender` maps it to `ProbeUnobserved` through SP-34 (CC-FUZZ-0109);
@@ -47,17 +62,23 @@ Newest first.
   over 16 MiB on the wire or 32 MiB decoded, or one that ends after 4 read timeouts, is
   now incomplete where it used to be read. That is the intended trade, and the values
   are module constants.
-  - Framing lines (status, headers, chunk-size and trailer lines) remain bounded only
-    per receive: residual R1, pinned by a strict xfail.
+  - The watchdog is one daemon thread that shuts sockets down from outside the
+    reading thread. A shutdown racing a just-finished exchange can drop a pooled
+    connection, which urllib3 detects and replaces on reuse. The connect itself is not
+    interrupted (stated limit).
   - `BoundedAdapter` and `read_body` set `resp._content` / `_content_consumed`, requests'
-    own private fields, the way requests does.
+    own private fields, the way requests does. The watched pools subclass urllib3's
+    connection pool and connection classes; a SOCKS proxy keeps its own, unwatched.
 - Deliverables:
   - [x] `fuzzlab/core/bodyread.py`, `core/http.py::_requests_transport` — done
   - [x] `tests/test_bounded_reads.py`: each reader against a dripping and a gzip-bomb
     loopback peer, the peer's sent count showing the connection dropped; decoding
     memory (traced peak under a 1 MiB ceiling); the wire ceiling; every coding pinned;
     an undecodable or unbounded coding never a body; the session guard and its
-    synthetic offenders; R1 and R2 as strict xfails — done
+    synthetic offenders; R2 as a strict xfail. Review round 1: a dripped status line
+    and headers (every reader), a dripped chunk-size line and a send with no timeout
+    cut by the watchdog; the advertised codings on a simulated zstd/brotlicffi host;
+    the consumed-response guard — done
   - [x] FR-CORE-536 — done
   - [ ] SP-60 row, SP-34 row note, ARCHITECTURE note, PA-0536, CHANGELOG, ERROR_LOG —
     todo (the coordinator, at merge; texts in the lane report)

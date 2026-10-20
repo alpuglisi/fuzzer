@@ -137,13 +137,34 @@ the work.
   smoke alarm, pins through the worker, the matcher guard and the worker's shape check.
   The session guard (AST) is proven on synthetic offenders.
 
+**Review round 1 (REVISE; one round).** The reviewer confirmed defects 23 and 27 closed
+and the decoded-size and short-body logic sound, and required:
+- **Greybox scored an incomplete body.** Its status-0 probe carried the error text,
+  which `_screening` scored 0.5 as a boolean divergence (measured on a gzip bomb). It
+  flowed into the reward, the attempt, the accepted variants and M10, and it could
+  become the point's baseline. Now the sender returns a typed `UnobservedProbe`, and
+  `run_greybox` never scores, records, accepts or adopts it; it counts it.
+- **Sessions advertised codings the reader rejects.** urllib3's default
+  `Accept-Encoding` names `br` with any Brotli (brotlicffi too) and `zstd` on Python
+  3.14. On such a host every answer would have been `BodyIncomplete("encoding")`. Every
+  bounded send, and the runner's, now advertises only what `read_body` can bound
+  (`advertise`).
+- **R1 closed, as defect 21 asks for a total-time bound.** The reviewer measured a
+  dripped status line and headers at 6 s against a 1 s deadline. One process-wide
+  watchdog thread (`watch`) shuts down (`SHUT_RDWR`) the socket of any watched exchange
+  still in use at its deadline. That cuts a dripped status line, header or chunk-size
+  line, and a send with no timeout. The runner's session is watched too.
+- **Correctness fixes:**
+  - `read_body` on an already-read response returns its kept content, never b"";
+  - blind-SQLi drops a payload whose later repeat failed, where it wrote a `repeats=1`
+    row;
+  - the in-process matcher guard also sees `re.compile(rx).search(...)`.
+- **Not built (optional):** a persistent matcher worker. Residual R6 records its cost.
+
 **Residuals (stated):**
-- **R1, framing lines.** `http.client` reads the status line, the headers, and a chunked
-  body's chunk-size and trailer lines in one call each (at most 64 KiB a line, 100
-  headers). They are bounded only by the per-receive timeout. Measured: a dripped
-  chunk-size line held `read1` and `iter_content` alike for 2.01 s. The late read is
-  still marked incomplete. Liveness needs a socket shutdown at the deadline. Pinned by
-  the strict xfail `test_a_dripped_chunk_size_line_is_cut_at_the_deadline`.
+- **R1, the connect.** Closed for framing lines by the watchdog (above). What remains:
+  the connect itself, and a TLS handshake, are bounded by the connect timeout only,
+  because a socket shutdown does not interrupt a connect.
 - **R2, the session manager's login fetcher.** `session/manager.py::
   _requests_fetch_factory` reads `r.text` unbounded. The file is AU-SESS403's; the
   remedy is `bodyread.bound(requests.Session())`. Pinned by the strict xfail
@@ -158,6 +179,15 @@ the work.
 - **R5, a cut exchange's byte count.** The runner's evidence of a cut exchange now
   records 0 bytes: what was read before the cut is not kept. The body is still never
   written (PA-0528(1)).
+- **R6, the matcher's cost.** A judged case with `body_matches` starts one worker
+  interpreter, measured at 130-165 ms per call on this host (`procutil.run_bounded`,
+  `python -I -S`). A persistent worker, restarted only after a kill, would remove this.
+  It was not built: the leak guard requires every started server to be stopped, and a
+  `Runner` has no close.
+- **R7, greybox's other request errors.** A request error that is not an incomplete
+  body (refused, timeout) is still greybox's status-0 try, scored by `_screening`
+  from its error text, as before this change (its documented contract, for M10's side
+  channel). Flagged as a follow-up, not changed here.
 
 ## Recurrence review
 Checked `docs/bugs/` and `docs/PREVENTIVE_ACTIONS.md` for unbounded reads, quadratic
@@ -204,13 +234,20 @@ does the work: each receive, each buffered chunk, each match. It is never checke
 the finished artefact (a whole body, a whole line, a compiled pattern).
 1. **Reading a target's HTTP body has one owner** (SP-60, `core.bodyread`), with:
    - a wire ceiling and a decoded ceiling;
-   - a wall-clock deadline checked at every receive;
+   - a wall-clock deadline checked at every receive, and held by a watchdog that cuts
+     the socket wherever a library reads in one call (status line, headers, chunk
+     lines);
    - a typed incomplete marker that no consumer takes for a body (SP-34 maps it to "not
-     observed").
+     observed");
+   - a request that advertises only the codings the reader can decode under its
+     ceiling.
 
    Every `requests` session fuzzlab makes is bounded where it is made. An AST guard
    fails on a new unbounded `requests.Session()` or module-level `requests.<verb>()`,
    apart from listed and reasoned sites; it is proven on synthetic offenders.
+   *(Review round 1.)* **Every consumer keeps the marker typed.** A stand-in that only
+   looks like a response (status 0, error text as its body) is not a type, and no
+   consumer scores, records, accepts or adopts as a baseline what the marker names.
 2. **A timeout argument is not a deadline.** A sweep verdict that a read is bounded in
    time cites a test against a dripping peer, never the presence of a timeout.
 3. **A line or record cap is enforced by the reader that buffers it**, as soon as the
@@ -230,8 +267,8 @@ reader's scope (PA-0067(1)).
 | `core/http.py::_requests_transport` | target bodies through the seam (both probe senders' seam path, the blind-SQLi seam, the auditor's seam fetch) | fixed |
 | `tools/navguard.py::get_checked` | the spider's and the auditor's static fetch | fixed: bounds the session it is given |
 | `tools/probesender.py::RequestsProbeSender` | the oracle's anonymous probes | fixed; SP-34 maps the marker |
-| `greybox/run.py::RequestsCorrelatingSender` | greybox probes | fixed: its status-0 try |
-| `tools/blind_sqli_fuzzer.py` (`main`'s session) | timing probes | fixed |
+| `greybox/run.py::RequestsCorrelatingSender` | greybox probes | fixed: a typed `UnobservedProbe`, never scored, recorded or adopted (review round 1) |
+| `tools/blind_sqli_fuzzer.py` (`main`'s session) | timing probes | fixed; a failed later repeat drops the payload (review round 1) |
 | `tools/spider.py` (`self.session`, the worker clone's, `iso`) | the crawl; `iso.post` read a body it never used | fixed |
 | `disco/runner.py::Runner.send` | the contract runner | fixed through `read_body`, contract limits |
 | `tools/fetcher.py` (`self.session`) | the auditor's static fetch, through `get_checked` only | covered by `get_checked`; listed (AUD, no CC in this item) |
@@ -246,4 +283,4 @@ reader's scope (PA-0067(1)).
 | `disco/runner.py::LEAK_PATTERNS`, `mutation/xss.py::_blocked`, the proxy's match/replace rules | reviewed constants; our own payloads; operator-written rules | out of class: author trusted, or subject our own |
 | BUG-0101's cleared proxy readers (`proxy/server._read_http_message`, `h2client`, `ws`) | the native proxy | audit defects 18-20 are another item's; not re-judged here, flagged |
 
-- Enforced by: tests/test_bounded_reads.py::test_every_requests_session_fuzzlab_makes_is_bounded, tests/test_bounded_reads.py::test_the_session_guard_catches_synthetic_offenders, tests/test_bounded_reads.py::test_a_dripped_body_is_cut_at_its_deadline_and_never_taken_whole, tests/test_bounded_reads.py::test_a_gzip_bomb_stops_at_the_decoded_ceiling_and_is_never_taken_whole, tests/test_bounded_reads.py::test_an_unterminated_line_over_the_cap_is_quarantined_once_and_never_held, tests/test_bounded_reads.py::test_reading_a_long_line_in_small_pieces_copies_each_byte_a_bounded_number_of_times, tests/test_bounded_reads.py::test_the_copy_oracle_flags_a_quadratic_tail, tests/test_bounded_reads.py::test_a_catastrophic_pattern_is_an_error_never_a_hang_nor_a_no_match, tests/test_bounded_reads.py::test_the_matcher_never_runs_a_contract_pattern_in_the_runners_process
+- Enforced by: tests/test_bounded_reads.py::test_every_requests_session_fuzzlab_makes_is_bounded, tests/test_bounded_reads.py::test_the_session_guard_catches_synthetic_offenders, tests/test_bounded_reads.py::test_a_dripped_body_is_cut_at_its_deadline_and_never_taken_whole, tests/test_bounded_reads.py::test_a_gzip_bomb_stops_at_the_decoded_ceiling_and_is_never_taken_whole, tests/test_bounded_reads.py::test_an_unterminated_line_over_the_cap_is_quarantined_once_and_never_held, tests/test_bounded_reads.py::test_reading_a_long_line_in_small_pieces_copies_each_byte_a_bounded_number_of_times, tests/test_bounded_reads.py::test_the_copy_oracle_flags_a_quadratic_tail, tests/test_bounded_reads.py::test_a_catastrophic_pattern_is_an_error_never_a_hang_nor_a_no_match, tests/test_bounded_reads.py::test_the_matcher_never_runs_a_contract_pattern_in_the_runners_process, tests/test_bounded_reads.py::test_a_dripped_status_line_and_headers_are_cut_at_the_deadline, tests/test_bounded_reads.py::test_a_bounded_send_advertises_only_codings_it_can_bound, tests/test_bounded_reads.py::test_greybox_never_scores_records_or_adopts_an_incomplete_probe

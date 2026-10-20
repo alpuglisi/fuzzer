@@ -52,6 +52,9 @@ GAP = 0.05
 TIMEOUT = 0.25
 #: A dripped chunk-size line: this many ``0`` before its ``1``.
 SIZELINE_BYTES = 40
+#: A status line and headers dripped a byte every `GAP` s (about 4 s in all).
+HEAD_DRIP = (b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nX-Pad: " + b"a" * 30
+             + b"\r\nContent-Length: 2\r\n\r\n")
 #: A gzip body that decodes to this many bytes (past the default decoded ceiling).
 BOMB_DECODED = 40 << 20
 
@@ -68,13 +71,19 @@ class _Peer:
       `GAP` s; ``sent`` counts the bytes it got out before the client hung up;
     - ``bomb``: a 200 whose gzip body decodes to `BOMB_DECODED` bytes;
     - ``sizeline``: a chunked 200 whose first chunk-size line is dripped
-      (``0`` x `SIZELINE_BYTES`, then ``1``): a framing line, not body bytes.
+      (``0`` x `SIZELINE_BYTES`, then ``1``): a framing line, not body bytes;
+    - ``head``: the status line and headers themselves dripped a byte at a time
+      (`HEAD_DRIP`), then a 2-byte body;
+    - ``silent``: reads the request and answers nothing until the client hangs up;
+    - ``echo``: a 200 whose body is the request's ``Accept-Encoding`` (also kept in
+      ``accept``).
     """
 
     def __init__(self, mode: str):
         self.mode = mode
         self.requests = 0
         self.sent = 0
+        self.accept: list[str] = []
         self.done = threading.Event()
         self.sock = socket.socket()
         self.sock.bind((require_loopback("127.0.0.1"), 0))
@@ -92,8 +101,24 @@ class _Peer:
 
     def _one(self, conn: socket.socket) -> None:
         try:
-            while conn.recv(65536):
+            while (head := conn.recv(65536)):
                 self.requests += 1
+                if self.mode == "silent":
+                    continue                     # until the client closes (recv b"")
+                if self.mode == "echo":
+                    value = next((ln.split(b":", 1)[1].strip() for ln in head.split(b"\r\n")
+                                  if ln.lower().startswith(b"accept-encoding:")), b"")
+                    self.accept.append(value.decode())
+                    conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: %d\r\n\r\n"
+                                 % len(value) + value)
+                    continue
+                if self.mode == "head":
+                    for i in range(len(HEAD_DRIP)):
+                        time.sleep(GAP)
+                        conn.sendall(HEAD_DRIP[i:i + 1])
+                        self.sent += 1
+                    conn.sendall(b"ok")
+                    continue
                 if self.mode == "drip":
                     conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n"
                                  b"Content-Length: %d\r\n\r\n" % DRIP_BYTES)
@@ -139,7 +164,7 @@ def _client(timeout: float):
 
 def _incomplete(exc: BaseException) -> str | None:
     """The reason of a typed incomplete-body marker, or None."""
-    if type(exc).__name__ == "BodyIncomplete":
+    if type(exc).__name__ in ("BodyIncomplete", "_GreyboxUnobserved"):
         return exc.reason
     if isinstance(exc, ProbeUnobserved) and "incomplete body" in str(exc):
         return str(exc).rsplit("(", 1)[-1].rstrip(")")
@@ -167,35 +192,64 @@ def _seam_probe(url):
     return SeamProbeSender(_client(TIMEOUT)).send(url, "q", "x").text
 
 
+class _GreyboxUnobserved(Exception):
+    def __init__(self, reason):
+        super().__init__(reason)
+        self.reason = reason
+
+
 def _greybox(url):
-    from fuzzlab.greybox.run import RequestsCorrelatingSender
-    probe, _cid = RequestsCorrelatingSender(timeout=TIMEOUT, id_factory=lambda: "c") \
+    """Only greybox's typed marker counts; a bare status-0 probe (its "request error"
+    try, whose text the run loop would score) is read as the body it pretends to be."""
+    from fuzzlab.greybox import run as greybox
+    probe, _cid = greybox.RequestsCorrelatingSender(timeout=TIMEOUT, id_factory=lambda: "c") \
         .send_correlated(url, "q", "x")
-    if probe.status == 0:                     # its contract: an error is a status-0 try
-        raise RuntimeError(probe.text)
+    unobserved = getattr(greybox, "UnobservedProbe", None)
+    if unobserved is not None and isinstance(probe, unobserved) and probe.reason:
+        raise _GreyboxUnobserved(probe.reason)
     return probe.text
+
+
+def _run_contract(peer, timeout_ms: int = 1000) -> list[dict]:
+    """One case, ``GET /p`` on the peer, through the real contract runner and its own
+    session."""
+    from fuzzlab.disco.contract import Contract
+    from fuzzlab.disco.runner import Runner
+    origin = peer.url.rsplit("/", 1)[0]
+    doc = {"contract_version": "1.0",
+           "run": {"id": "r", "target": {"base_url": origin + "/",
+                                         "scope_allowlist": [origin.split("//", 1)[1]]},
+                   "limits": {"rps": 1000, "timeout_ms": timeout_ms,
+                              "max_body_bytes": 65536},
+                   "reset_hook": None},
+           "auth_profiles": [{"id": "anon", "kind": "none"}],
+           "endpoints": [{"id": "ep_1", "method": "GET", "path": "/p"}],
+           "test_cases": [{"id": "tc_1", "endpoint": "ep_1", "class": "type",
+                           "auth_profile": "anon", "request": {},
+                           "oracle": {"expect_status_class": ["2xx"], "findings_if": []},
+                           "safety": {"destructive": False}}],
+           "results": []}
+    return Runner(Contract(doc), authorized=True).run()
 
 
 #: Every reader of a target's body over ``requests`` that audit defect 21 named, plus the
 #: senders its sweep found (greybox), with the marker each must give an incomplete body:
 #: the typed ``BodyIncomplete`` at the transport, SP-34's ``ProbeUnobserved`` at the
-#: oracle's senders, greybox's own status-0 try (its contract, read here as an error).
+#: oracle's senders, greybox's typed ``UnobservedProbe`` (never its bare status-0 try).
 READERS = {"core seam transport": (_core_seam, "BodyIncomplete"),
            "static fetch (navguard)": (_static_fetch, "BodyIncomplete"),
            "anonymous probe sender": (_anonymous_probe, "ProbeUnobserved"),
            "seam probe sender": (_seam_probe, "ProbeUnobserved"),
-           "greybox sender": (_greybox, "RuntimeError")}
+           "greybox sender": (_greybox, "_GreyboxUnobserved")}
 
 
 def _outcome(reader, url, marker="BodyIncomplete"):
     try:
         body = reader(url)
-    except (requests.RequestException, ProbeUnobserved, RuntimeError) as exc:
+    except (requests.RequestException, ProbeUnobserved, _GreyboxUnobserved) as exc:
         if type(exc).__name__ != marker:
             return f"error {type(exc).__name__}: {exc}"
-        reason = _incomplete(exc) or (
-            "deadline" if "deadline" in str(exc) else
-            "decoded" if "decoded" in str(exc) else None)
+        reason = _incomplete(exc)
         return f"incomplete ({reason})" if reason else f"error {type(exc).__name__}"
     return f"a normal body of {len(body)} bytes"
 
@@ -233,22 +287,7 @@ def test_the_contract_runner_cuts_a_dripped_body_at_its_deadline(peer):
     ``iter_content`` steps, so a drip held it until the peer stopped (measured there: 3 s
     for a 1 s deadline). Through the one reader the deadline cuts it: an ``error``, and
     the peer could not send its whole body."""
-    from fuzzlab.disco.contract import Contract
-    from fuzzlab.disco.runner import Runner
-    origin = peer.url.rsplit("/", 1)[0]
-    doc = {"contract_version": "1.0",
-           "run": {"id": "r", "target": {"base_url": origin + "/",
-                                         "scope_allowlist": [origin.split("//", 1)[1]]},
-                   "limits": {"rps": 1000, "timeout_ms": 1000, "max_body_bytes": 65536},
-                   "reset_hook": None},
-           "auth_profiles": [{"id": "anon", "kind": "none"}],
-           "endpoints": [{"id": "ep_1", "method": "GET", "path": "/p"}],
-           "test_cases": [{"id": "tc_1", "endpoint": "ep_1", "class": "type",
-                           "auth_profile": "anon", "request": {},
-                           "oracle": {"expect_status_class": ["2xx"], "findings_if": []},
-                           "safety": {"destructive": False}}],
-           "results": []}
-    [res] = Runner(Contract(doc), authorized=True).run()
+    [res] = _run_contract(peer)
     assert res["verdict"] == "error" and "timed out" in res["reason"], res
     assert peer.done.wait(10)
     assert peer.sent < DRIP_BYTES, peer.sent
@@ -368,20 +407,107 @@ def test_an_undecodable_or_unbounded_coding_is_never_a_body():
     assert unknown.complete and unknown.data == b"as sent"     # requests' own pass-through
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG-0536 stated limit: framing lines (the status line and headers, a chunked "
-    "body's chunk-size and trailer lines) are read by http.client in one call each, "
-    "bounded only by the per-receive timeout (measured: a dripped chunk-size line "
-    "held read1 and iter_content alike for 2.01 s); a deadline there needs a socket "
-    "shutdown, not a read loop"))
+def _codings_sent(peer, send) -> set[str]:
+    send(peer.url)
+    return {t.split(";")[0].strip() for t in peer.accept[-1].split(",") if t.strip()}
+
+
+@pytest.mark.parametrize("peer", ["echo"], indirect=True)
+def test_a_bounded_send_advertises_only_codings_it_can_bound(peer, monkeypatch):
+    """Review item 2: urllib3's default ``Accept-Encoding`` names ``br`` with any Brotli
+    (brotlicffi included) and ``zstd`` on Python 3.14; the reader refuses both there, so
+    every answer would be incomplete. A host with both and no bounded Brotli is
+    simulated: every bounded send -- the core seam, the probe sender, the static fetch
+    and the contract runner -- asks for gzip and deflate only."""
+    from fuzzlab.core import bodyread
+    from fuzzlab.core.http import Request
+    monkeypatch.setattr(requests.utils, "DEFAULT_ACCEPT_ENCODING", "gzip, deflate, br, zstd")
+    monkeypatch.setattr(bodyread, "_bounded_brotli", lambda: None)
+    assert "zstd" in requests.Session().headers["Accept-Encoding"]       # the premise
+    want = {"gzip", "deflate"}
+    assert _codings_sent(peer, _core_seam) == want
+    assert _codings_sent(peer, _anonymous_probe) == want
+    assert _codings_sent(peer, _static_fetch) == want
+    _run_contract(peer)
+    assert {t.strip() for t in peer.accept[-1].split(",")} == want
+    # a caller's own bounded choice is kept; one naming an unbounded coding is not
+    seam = _client(TIMEOUT)
+    assert _codings_sent(peer, lambda u: seam.send(Request(
+        "GET", u, headers={"Accept-Encoding": "gzip"}))) == {"gzip"}
+    assert _codings_sent(peer, lambda u: seam.send(Request(
+        "GET", u, headers={"accept-encoding": "br, zstd"}))) == want
+
+
+@pytest.mark.parametrize("peer", ["echo"], indirect=True)
+def test_brotli_is_advertised_when_it_can_be_bounded(peer):
+    from fuzzlab.core import bodyread
+    want = {"gzip", "deflate"} | ({"br"} if bodyread._bounded_brotli() else set())
+    assert _codings_sent(peer, _core_seam) == want
+    assert bodyread.advertise({"Accept-Encoding": "*"}) == {
+        "Accept-Encoding": bodyread.accept_encoding()}
+
+
+def test_a_response_already_read_is_its_kept_body_never_an_empty_one():
+    """Review 4(a): its raw stream is spent, so a read returned b"" as a complete body.
+    Its kept content is the body; a body read and not kept is an error."""
+    from fuzzlab.core import bodyread
+    resp = requests.Response()
+    resp.raw, resp.headers = _Raw(b""), requests.structures.CaseInsensitiveDict()
+    resp._content, resp._content_consumed = b"kept", True
+    got = bodyread.read_body(resp, deadline=time.monotonic() + 9)
+    assert (got.complete, got.data) == (True, b"kept")
+    resp._content = False
+    with pytest.raises(RuntimeError):
+        bodyread.read_body(resp, deadline=time.monotonic() + 9)
+
+
 @pytest.mark.parametrize("peer", ["sizeline"], indirect=True)
 def test_a_dripped_chunk_size_line_is_cut_at_the_deadline(peer):
-    """The late read still reads as incomplete (the deadline is checked once the line
-    returns); what fails is liveness: the client holds on until the peer has sent the
-    whole line."""
+    """Review R1: ``http.client`` reads a chunk-size line in one call (measured: a
+    dripped one held ``read1`` and ``iter_content`` alike for 2.01 s), so the read loop
+    alone saw the deadline only once the line was whole. The watchdog shuts the socket
+    at the deadline: the peer cannot send the whole line."""
     assert _outcome(_core_seam, peer.url) == "incomplete (deadline)"
     assert peer.done.wait(10)
     assert peer.sent < SIZELINE_BYTES, peer.sent
+
+
+@pytest.mark.parametrize("peer", ["head"], indirect=True)
+@pytest.mark.parametrize("reader", sorted(READERS))
+def test_a_dripped_status_line_and_headers_are_cut_at_the_deadline(peer, reader):
+    """Review R1 (measured by the reviewer: 6 s against a 1 s deadline): before the
+    response exists, ``http.client`` reads the status line and headers line by line, each
+    receive inside the read timeout. One process-wide watchdog shuts the socket of a
+    bounded send still open at its deadline: incomplete (``deadline``), and the peer
+    could not send its whole head."""
+    got = _outcome(READERS[reader][0], peer.url, READERS[reader][1])
+    assert got == "incomplete (deadline)", got
+    assert peer.done.wait(10)
+    assert peer.sent < len(HEAD_DRIP), peer.sent
+
+
+@pytest.mark.parametrize("peer", ["head"], indirect=True)
+def test_the_contract_runner_cuts_a_dripped_head_at_its_deadline(peer):
+    """The runner streams and reads itself; its session is watched, so the same
+    watchdog cuts a dripped head at ``timeout_ms`` (a ``deadline`` timeout)."""
+    [res] = _run_contract(peer)
+    assert res["verdict"] == "error" and "timed out" in res["reason"], res
+    assert peer.done.wait(10)
+    assert peer.sent < len(HEAD_DRIP), peer.sent
+
+
+@pytest.mark.parametrize("peer", ["silent"], indirect=True)
+def test_a_send_with_no_timeout_is_still_cut_at_its_deadline(peer, monkeypatch):
+    """Review 4(d): with ``timeout=None`` the socket has no timeout at all; the deadline
+    (`DEFAULT_SECONDS`, narrowed here) is enforced by the watchdog alone."""
+    from fuzzlab.core import bodyread
+    from fuzzlab.core.http import Request
+    monkeypatch.setattr(bodyread, "DEFAULT_SECONDS", 1.0)
+    with _smoke_alarm(30):
+        with pytest.raises(requests.RequestException) as info:
+            _client(None).send(Request("GET", peer.url))
+    assert _incomplete(info.value) == "deadline", repr(info.value)
+    assert peer.done.wait(10)
 
 
 @pytest.mark.xfail(strict=True, reason=(
@@ -398,6 +524,84 @@ def test_the_session_managers_login_fetch_is_bounded(peer):
     assert _incomplete(info.value) == "decoded"
 
 
+# --- what a caller does with an incomplete body ---------------------------------------------
+
+@pytest.mark.parametrize("peer", ["bomb"], indirect=True)
+def test_greybox_never_scores_records_or_adopts_an_incomplete_probe(peer, monkeypatch,
+                                                                    tmp_path):
+    """Review item 1 (measured by the reviewer: `_screening` gave 0.5): greybox made an
+    incomplete body a status-0 probe whose error text it then scored as a boolean
+    divergence, recorded, accepted as a mutation variant and could adopt as the point's
+    baseline. Here the baseline and every mutation variant meet the gzip bomb; the one
+    attack answers 500 bytes. Wanted: the incomplete ones are counted, never an attempt
+    or a variant, and the attack is scored with no baseline (screening 0)."""
+    from fuzzlab.core import bodyread
+    from fuzzlab.core.store import Store
+    from fuzzlab.greybox.run import (GreyboxPoint, ProbeSpec, RequestsCorrelatingSender,
+                                     mutation_variant_probes, run_greybox)
+    from fuzzlab.oracle.probe import Probe
+    monkeypatch.setattr(bodyread, "MAX_DECODED_BYTES", 1 << 20)
+    attack = ProbeSpec("sqli-error", "1' OR 1=1 -- -", "sqli")
+    probes = (ProbeSpec("baseline", "1", "baseline"), attack)
+    variants = len(mutation_variant_probes([attack], max_variants=2))
+    assert variants >= 1
+    real = RequestsCorrelatingSender(timeout=5.0, id_factory=lambda: "c")
+
+    class Sender:                    # the attack answered; everything else meets the bomb
+        def send_correlated(self, url, param, value, **kw):
+            if value == attack.value:
+                return Probe(200, "y" * 500), "attack"
+            return real.send_correlated(url, param, value, **kw)
+
+    class Nothing:
+        def lines_for(self, cid):
+            return {}
+
+        def fault_for(self, cid):
+            from fuzzlab.greybox.dbfault import DbFault
+            return DbFault(faulted=False)
+
+    with Store(tmp_path / "g.db") as store:
+        run_id = store.start_run("greybox", "h")
+        summary = run_greybox(base_url=peer.url, store=store, run_id=run_id,
+                              points=[GreyboxPoint(peer.url, "q", "GET", "query", "sqli")],
+                              sender=Sender(), coverage_source=Nothing(),
+                              dbfault_source=Nothing(), probes=probes,
+                              mutation_variants=True, max_mutation_variants=2)
+        rows = [json.loads(r[0]) for r in store.conn.execute(
+            "SELECT features_json FROM attempt WHERE run_id=?", (run_id,))]
+        accepted = store.conn.execute("SELECT COUNT(*) FROM payload_variant WHERE "
+                                      "run_id=?", (run_id,)).fetchone()[0]
+    assert summary.get("unobserved") == 1 + variants, summary
+    assert [r["payload_kind"] for r in rows] == ["sqli"], rows
+    assert rows[0]["screening"] == 0.0, rows          # no incomplete baseline adopted
+    assert summary["mutation_variants_recorded"] == 0 and accepted == 0
+
+
+def test_a_blind_sqli_payload_with_a_failed_repeat_is_never_a_row():
+    """Review 4(b): a request error on repeat 2 kept repeat 1's latency and wrote a
+    row from it (``repeats`` 1). The payload's samples are incomplete: no row."""
+    import types
+
+    from fuzzlab.core.bodyread import BodyIncomplete
+    from fuzzlab.tools.blind_sqli_fuzzer import Answer, run_fuzzing_cycle
+    answers = [Answer(5.4, 200, 100), BodyIncomplete("deadline")]
+
+    class Get:
+        def get(self, url, param, value, timeout):
+            answer = answers.pop(0)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+
+    args = types.SimpleNamespace(sigma=3.0, min_delay=2.0, repeats=2, timeout=5, pause=0)
+    base = {"avg_time": 0.3, "std_dev_time": 0.01, "avg_size": 100, "samples": 10}
+    payloads = [{"text": "1' AND SLEEP(5)-- -", "family": "time", "is_malicious": 1,
+                 "expected_delay": 5}]
+    assert run_fuzzing_cycle(Get(), "http://127.0.0.1:9/item", "id", base, payloads,
+                             args) == []
+
+
 # --- the guard: every requests session fuzzlab makes is bounded (SP-60) ---------------------
 
 _SENDS = {"request", "get", "post", "put", "patch", "delete", "head", "options"}
@@ -405,8 +609,9 @@ _SENDS = {"request", "get", "post", "put", "patch", "delete", "head", "options"}
 #: file -> (requests.Session() / requests.<verb>() calls not bounded at the call, reason).
 #: Exact counts: a new unbounded site fails, and so does a stale entry.
 UNBOUNDED_ALLOWED: dict[str, tuple[int, str]] = {
-    "fuzzlab/disco/runner.py": (1, "streams each answer and reads it through bodyread.read_body "
-                                   "with the contract's own limits (Runner.send)"),
+    "fuzzlab/disco/runner.py": (1, "its session is bodyread.watched; Runner.send streams each "
+                                   "answer inside a bodyread.watch and reads it through "
+                                   "read_body with the contract's own limits"),
     "fuzzlab/tools/fetcher.py": (1, "its one read is navguard.get_checked, which bounds the "
                                     "session it is given (AUD component: this item has no "
                                     "CC-AUD number)"),
@@ -656,17 +861,59 @@ def test_body_matches_still_match_and_miss_through_the_worker(monkeypatch):
     assert miss["verdict"] == "pass", miss
 
 
+_RE_FUNCS = {"search", "match", "fullmatch", "findall", "finditer", "sub", "subn", "split",
+             "compile"}
+
+
+def in_process_patterns(src: str) -> list[str]:
+    """Calls of ``re`` (however imported) whose pattern is not a literal: a search on a
+    pattern, or a compile -- which covers ``re.compile(rx).search(t)`` and a compiled
+    pattern kept in a name. Allowed: compiling the reviewed ``LEAK_PATTERNS``
+    constants (``[re.compile(p) for p in LEAK_PATTERNS]``)."""
+    tree = ast.parse(src)
+    modules, funcs = {"re"}, set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules |= {a.asname or a.name for a in node.names if a.name == "re"}
+        elif isinstance(node, ast.ImportFrom) and node.module == "re":
+            funcs |= {a.asname or a.name for a in node.names if a.name in _RE_FUNCS}
+    allowed = {id(elt) for comp in ast.walk(tree) if isinstance(comp, ast.ListComp)
+               and any(isinstance(g.iter, ast.Name) and g.iter.id == "LEAK_PATTERNS"
+                       for g in comp.generators) for elt in [comp.elt]}
+    out = []
+    for n in ast.walk(tree):
+        if not isinstance(n, ast.Call) or id(n) in allowed:
+            continue
+        f = n.func
+        hit = (isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name)
+               and f.value.id in modules and f.attr in _RE_FUNCS) or \
+            (isinstance(f, ast.Name) and f.id in funcs)
+        if hit and not (n.args and isinstance(n.args[0], ast.Constant)):
+            out.append(ast.unparse(n))
+    return out
+
+
 def test_the_matcher_never_runs_a_contract_pattern_in_the_runners_process():
-    """Every ``body_matches`` search goes through the bounded worker: no ``re.search``,
-    ``re.match`` or ``re.fullmatch`` with a contract pattern in `runner.py` (the runner's
-    own ``LEAK_PATTERNS`` are reviewed constants, compiled once)."""
+    """Every ``body_matches`` search goes through the bounded worker: no ``re`` search
+    or compile of a non-literal pattern in `runner.py` (the runner's own
+    ``LEAK_PATTERNS`` are reviewed constants, compiled once)."""
     src = (ROOT / "fuzzlab/disco/runner.py").read_text(encoding="utf-8")
-    calls = [n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.Call)
-             and isinstance(n.func, ast.Attribute) and isinstance(n.func.value, ast.Name)
-             and n.func.value.id == "re" and n.func.attr in ("search", "match",
-                                                              "fullmatch", "findall")
-             and not (n.args and isinstance(n.args[0], ast.Constant))]
-    assert [ast.unparse(c) for c in calls] == [], "a contract pattern matched in-process"
+    assert in_process_patterns(src) == [], "a contract pattern matched in-process"
+
+
+def test_the_matcher_guard_catches_synthetic_offenders():
+    """PA-0034(2), review 4(c): the first guard saw only ``re.<fn>(rx, ...)``."""
+    offenders = ("import re\nre.search(rx, text)\n",
+                 "import re\nre.compile(rx).search(text)\n",
+                 "import re\npat = re.compile(rule['body_matches'][0])\npat.match(t)\n",
+                 "import re as regex\nregex.fullmatch(p, t)\n",
+                 "from re import finditer as fi\nfi(p, t)\n")
+    for src in offenders:
+        assert len(in_process_patterns(src)) == 1, src
+    for src in ("import re\nre.search(r'\\{p\\d+\\}', path)\n",
+                "import re\n_LEAK = [re.compile(p) for p in LEAK_PATTERNS]\n",
+                "import re\nre.escape(x)\n"):
+        assert in_process_patterns(src) == [], src
 
 
 @pytest.mark.xfail(strict=True, raises=_SmokeAlarm, reason=(
