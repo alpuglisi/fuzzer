@@ -1341,7 +1341,12 @@ tracked in the requirements files, not here.
       senders and the M6 executor. A standalone URL gets the first occurrence of the name
       in place, every other part kept with its raw text; bound entries replace every
       occurrence (the oracle's binder's rule, until AU-REQID8). An AST guard keeps query
-      building in `core.urls` (`tests/test_query_placement.py`);
+      building in `core.urls` (`tests/test_query_placement.py`). Since CC-FUZZ-0106 part 2
+      the M6 executor loads a crawled DOM query point with its link set, bound the same
+      way (`ExecRequest.entries`, from `DomXssStrategy`), and since CC-CRAWL-0053 the
+      crawler's SPA seed builder places its route query through
+      `core.urls.place_route_query_pairs` (its own encoder keeps `/`, so a redirect-type
+      name's value stays the same-origin path);
   - **Forms phase 3, lane S — single-page apps in the crawler (CC-CRAWL-0016 /
     CC-CRAWL-0017 / CC-CORE-0047, no store migration):**
     - `tools/spa.py`: route declarations read from the page's already-loaded
