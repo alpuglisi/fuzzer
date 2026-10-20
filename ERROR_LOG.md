@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-20 — test tooling (the harness starved behind the pytest lock; BUG-0537)
+- **Symptom:** a docs-only `verify_change.py` run waited 30 minutes without starting while agent lanes ran and queued pytest sessions.
+- **Root cause:** the harness kept its "zero other pytest processes" precondition after BUG-0532 made every session queue on the host pytest lock; with continuous queueing that condition never holds.
+- **Remediation:** `pytest_lock_enforced` skips the quiet-host wait when the tree takes the lock (the child's lock wait serialises it); BUG-0537, PA-0537.
+- **Status:** Fixed
+
 ## 2026-10-20 — test tooling (ad-hoc pytest runs overlapped other runs; BUG-0532)
 - **Symptom:** agent lanes' ad-hoc `pytest` runs started while another pytest or a `verify_change.py` run was running, seven times in two days (F-092, F-093, F-095, F-097, F-098, F-102, F-104). One harness run was killed, and the extra load produced timing and ML failures that passed serially.
 - **Root cause:** only `verify_change.py` enforced one pytest at a time, through its own lock and a one-sided wait for other pytest processes. Every other pytest relied on prose and on each agent's own check-then-start.

@@ -286,6 +286,20 @@ def test_the_child_pytest_waits_for_the_pytest_lock_as_long_as_the_run(monkeypat
     assert vc.pytest_env(7200)[vc.PYTEST_LOCK_WAIT] == "5"
 
 
+def test_a_tree_whose_conftest_takes_the_pytest_lock_never_waits_for_a_quiet_host(tmp_path):
+    """BUG-0537: with the host pytest lock in the tree, the harness relies on its child's
+    lock wait; waiting for zero other pytest processes starved while agents queued
+    sessions on that lock. A tree without the lock keeps the quiet-host wait."""
+    (tmp_path / "tests").mkdir()
+    assert not vc.pytest_lock_enforced(tmp_path)
+    (tmp_path / "tests" / "conftest.py").write_text("import pytest\n")
+    (tmp_path / "tests" / "_pytest_lock.py").write_text("")
+    assert not vc.pytest_lock_enforced(tmp_path)          # the file alone is not wiring
+    (tmp_path / "tests" / "conftest.py").write_text("from tests import _pytest_lock\n")
+    assert vc.pytest_lock_enforced(tmp_path)
+    assert vc.pytest_lock_enforced(ROOT)                  # this repository takes it
+
+
 def _alive(pid: int) -> bool:
     try:
         state = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
