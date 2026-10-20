@@ -1,4 +1,4 @@
-"""AU-SESS403 revision 2: a run-time prototype of the drafted design (DRAFT-AU-SESS403.md §3).
+"""AU-SESS403 revision 3: a run-time prototype of the drafted design (DRAFT-AU-SESS403.md §3).
 
 Not part of fuzzlab, and never collected by pytest. ``install()`` patches the drafted
 behaviour onto ``fuzzlab.session.manager.SessionManager`` and ``fuzzlab.session.detect``,
@@ -12,6 +12,12 @@ Phase 2 implements the design in ``fuzzlab/`` and deletes this directory.
 
 Status literals are allowed here: SP-56's guard scans ``fuzzlab/`` only. The
 implementation decides through ``core.comparability`` exactly as the comments say.
+
+``prepare`` and ``ensure`` are re-implemented here (copies of the base bodies, with the
+design's additions), because the design puts its work inside them: the generation is
+set from the state ``prepare`` applied (F4), and the re-login token is drawn under the
+login lock (F5). The login lock is re-entrant here only so this wrapper can hold it
+around the base ``ensure``; Phase 2 draws the token inside ``ensure`` itself.
 """
 
 from __future__ import annotations
@@ -30,11 +36,14 @@ REVERT = os.environ.get("REVERT", "")
 REVERTS = {
     "403": "detect_logout reads a 403 as a loss again (the old `status in (401, 403)` line)",
     "throttle": "a throttle answer (429, 503) is a loss signal",
+    "throttle_refusal": "the resource's refusal status admits any non-2xx below 500 both refusal arms agree on, a throttle (429) or a 407 included (revision 2's admission; B1, P1)",
+    "throttle_verdict": "health_verdict matches the recorded refusal status before it reads a throttle, gateway, 407 or incomplete answer as inconclusive (revision 2's order; B1)",
     "noconfirm": "observe marks a suspected loss lost without check_health",
     "nosubmission": "the credential-submission fact is dropped (always False)",
     "submission_ignored": "a credential submission's loss shape never triggers a check",
     "nogen": "observe does not compare the request's generation with the state's",
-    "noflight": "waiters do not re-check under the lock (no coverage of signals seen before a check began)",
+    "noflight": "waiters do not re-check under the lock (no live verdict covers an earlier signal)",
+    "cover_at_record": "a live verdict's sequence number is taken when it is recorded, so it covers signals seen while its GET was in flight (revision 2; B2, P2)",
     "nocache": "no live cache",
     "cache_nogen": "the live cache is keyed without the generation",
     "cache_nourl": "the live cache is keyed without the signal's URL key",
@@ -49,10 +58,13 @@ REVERTS = {
     "nosticky": "SessionHealthUnknown is not sticky",
     "nobudget": "no per-run pause budget",
     "nobucket": "re-logins are not limited",
+    "nores_waits": "a no-resource identity whose re-login budget is spent waits for a token and then goes sticky unknown (revision 2), instead of carrying on at once (the owner's decision D)",
     "notify_pause": "a loss found by a pause re-check tells the listeners",
     "verifylive_false": "verify_live returns False on an inconclusive check",
     "verifylive_cache": "verify_live reads the live cache",
-    "nocas": "_mark_lost does not compare-and-set on the generation",
+    "verifylive_clears_sticky": "verify_live's inconclusive branch clears an existing sticky unknown (revision 2; P3)",
+    "verifylive_budget": "verify_live's waits are charged to the run's pause budget for prepare",
+    "nocas": "the health check and _mark_lost do not compare-and-set against the current state and the generation judged, and prepare waits a pause of any generation (B3, P4)",
     "inconclusive_lost": "an inconclusive check is read as LOST",
     "inconclusive_live": "an inconclusive check is read as LIVE (no pause)",
     "hop_pauses": "an unapproved hop pauses instead of failing fast",
@@ -71,6 +83,7 @@ REVERTS = {
     # re-executes the test module's `loss_decision_offenders` with that branch off).
     "guard_noassign": "T19's guard misses an assignment to `.valid`",
     "guard_nosetattr": "T19's guard misses `setattr(x, 'valid', v)`",
+    "guard_nodunder": "T19's guard misses `object.__setattr__(x, 'valid', v)` and `x.__setattr__('valid', v)`",
     "guard_nokeyword": "T19's guard misses a `valid=` keyword (dataclasses.replace)",
     "guard_nocall": "T19's guard misses a call of detect_logout outside its callers",
 }
@@ -80,6 +93,13 @@ if REVERT and REVERT not in REVERTS:
 LIVE, LOST, INCONCLUSIVE, STALE = "live", "lost", "inconclusive", "stale"
 _LOG = logging.getLogger("fuzzlab.session.health")
 _INSTALLED = False
+
+
+def skips_when_spent(state) -> bool:
+    """The owner's decision D: which identity carries on at once when its re-login budget
+    is spent -- one with no stable protected resource. A measurement may replace this
+    module attribute to price an alternative (``measure_r3.py``); the design is this."""
+    return not getattr(state, "protected_probe", None)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -94,10 +114,10 @@ class Health:
 
 @dataclasses.dataclass
 class _Rec:
-    """Per-(host, identity) health record (in memory)."""
+    """Per-(host, identity) health record of one manager (in memory)."""
     lock: threading.Lock = dataclasses.field(default_factory=threading.Lock)
     live: dict = dataclasses.field(default_factory=dict)          # (gen, urlkey) -> at
-    live_seq: dict = dataclasses.field(default_factory=dict)      # gen -> seq of the last LIVE
+    live_seq: dict = dataclasses.field(default_factory=dict)      # gen -> seq the LIVE GET was SENT at
     verdict: tuple | None = None                                  # (gen, state)
     pause: dict | None = None                                     # gen, until, step, began
     unknown: str | None = None                                    # sticky reason
@@ -105,6 +125,17 @@ class _Rec:
     refill_at: float = 0.0
     relogin_due: bool = False
     report: Counter = dataclasses.field(default_factory=Counter)
+
+
+@dataclasses.dataclass
+class _Shared:
+    """What a run's manager shares with its isolated copies (F3): the pause budgets and
+    the credential POSTs per account. A peer (another identity) has its own manager and
+    so its own `_Shared` (`make_probe_sender` per identity, `auto_cli.py:381-389`)."""
+    lock: threading.Lock = dataclasses.field(default_factory=threading.Lock)
+    prepare_s: float = 0.0           # spent by prepare's pauses and the bucket's waits
+    verify_s: float = 0.0            # spent by verify_live's own waits, never prepare's
+    credential_posts: dict = dataclasses.field(default_factory=dict)   # account -> Counter
 
 
 def request_entry_names(url, body, content_type) -> tuple[str, ...]:
@@ -159,7 +190,9 @@ def install() -> None:
     _INSTALLED = True
     import requests
 
-    from fuzzlab.core.comparability import AUTH_FAILURE, POLICY_BLOCK, response_class
+    from fuzzlab.core.comparability import (APPLICATION, AUTH_FAILURE, GATEWAY, INCOMPLETE,
+                                            POLICY_BLOCK, THROTTLE_OR_UNAVAILABLE,
+                                            response_class)
     from fuzzlab.core.urls import canonical_origin, url_key
     from fuzzlab.session import detect
     from fuzzlab.session import manager as M
@@ -175,9 +208,36 @@ def install() -> None:
     M.SessionHealthUnknown = SessionHealthUnknown
     M.IsolatedHealthUnknown = IsolatedHealthUnknown
     M.Health = Health
-    M.LIVE, M.LOST, M.INCONCLUSIVE = LIVE, LOST, INCONCLUSIVE
+    M.LIVE, M.LOST, M.INCONCLUSIVE, M.STALE = LIVE, LOST, INCONCLUSIVE, STALE
     detect.request_entry_names = request_entry_names
     net_errors = (requests.RequestException,)
+
+    def _classes(status, headers):
+        """SP-56's class of an answer to the credentialed health GET, and of the same
+        answer to an uncredentialed request (a 407 is an auth failure either way)."""
+        mine, why = response_class(status, headers, complete=True, credentialed=True,
+                                   credential_submission=False, redirect_to_login=False)
+        anyone, _w = response_class(status, headers, complete=True, credentialed=False,
+                                    credential_submission=False, redirect_to_login=False)
+        return mine, anyone, why
+
+    def not_the_applications(status, headers) -> bool:
+        """B1: a throttle, gateway, 407 or incomplete answer is never evidence about the
+        session (SP-56 first)."""
+        mine, anyone, _why = _classes(status, headers)
+        return mine in (INCOMPLETE, THROTTLE_OR_UNAVAILABLE, GATEWAY) or \
+            (mine == AUTH_FAILURE and anyone == AUTH_FAILURE)
+
+    def admitted_refusal(status) -> bool:
+        """B1: the resource's refusal status is a non-2xx below 500 that SP-56 classes as
+        the application's answer or a policy block, read as the credentialed health GET
+        will be read: never a throttle, a gateway or a 407."""
+        if isinstance(status, bool) or not isinstance(status, int) or \
+                200 <= status < 300 or status >= 500 or status <= 0:
+            return False
+        if REVERT == "throttle_refusal":
+            return True
+        return _classes(status, {})[0] in (APPLICATION, POLICY_BLOCK)
 
     # --- SP-16: the one predicate "this answer is a loss" (detect_logout) -----------
     def detect_logout(status, headers, body, login_url=None, page_url=None,
@@ -226,6 +286,11 @@ def install() -> None:
             if REVERT == "redirect_live":
                 return Health(LIVE, "", gen)
             return Health(LOST, f"a login redirect ({status})", gen)
+        # B1: SP-56 first -- a throttle, gateway, 407 or incomplete answer is
+        # inconclusive before any refusal status is matched
+        if REVERT != "throttle_verdict" and not_the_applications(status, headers):
+            return Health(INCONCLUSIVE, _classes(status, headers)[2], gen,
+                          _retry_after(headers))
         content = state.kind != "basic" or REVERT == "basic_content"
         if detect.detect_logout(status, headers, body, login_url=state.login_url,
                                 page_url=page_url, content_check=content,
@@ -240,8 +305,7 @@ def install() -> None:
                     M._digest(body) == state.probe_refusal_digest:
                 return Health(LOST, f"the resource's refusal body ({status})", gen)
             return Health(LIVE, "", gen)
-        cls, why = response_class(status, headers, complete=True, credentialed=True,
-                                  credential_submission=False, redirect_to_login=False)
+        _m, _a, why = _classes(status, headers)
         return Health(INCONCLUSIVE, why or f"another status ({status})", gen,
                       _retry_after(headers))
 
@@ -250,7 +314,8 @@ def install() -> None:
     # --- a plain (seam-like) fetcher for health GETs ------------------------------
     def plain_fetch_factory():
         """``requests.request`` per hop, as the seam sends (no Session, no browser
-        headers): its own response cookies are kept to adopt a rotation."""
+        headers), with a 15 s timeout per hop (connect and read): its own response
+        cookies are kept to adopt a rotation."""
         def factory():
             class _Plain:
                 def __init__(self):
@@ -286,26 +351,38 @@ def install() -> None:
         self._relogin_refill_s = float(relogin_refill_s)
         self._max_pause_s = float(max_pause_s)
         self._pause_budget_s = float(pause_budget_s)
-        self._pause_spent = 0.0
+        self._shared = _Shared()
         self._health_ff = health_fetch_factory or \
             (plain_fetch_factory() if ff is None else self._fetch_factory)
         self._hrecs: dict = {}
         self._gens: dict = {}
         self._tl = threading.local()
-        self._credential_posts: Counter = Counter()
         self._seq_lock = threading.Lock()
         self._seq = 0
         if REVERT == "nologinlock":
-            self._lock_for = lambda host, identity: threading.Lock()
+            self._lock_for = lambda host, identity: threading.RLock()
 
     M.SessionManager.__init__ = __init__
+
+    def _lock_for(self, host, identity):
+        """The login lock, re-entrant in this prototype only (see the module doc)."""
+        with self._locks_guard:
+            key = (host, identity)
+            lock = self._locks.get(key)
+            if lock is None:
+                lock = threading.RLock()
+                self._locks[key] = lock
+            return lock
+
+    M.SessionManager._lock_for = _lock_for
 
     orig_isolated_copy = M.SessionManager.isolated_copy
 
     def isolated_copy(self, identity, *, ordinal, max_logins=3):
         copy = orig_isolated_copy(self, identity, ordinal=ordinal, max_logins=max_logins)
         for name in ("_clock", "_sleep", "_health_ttl_s", "_relogin_burst",
-                     "_relogin_refill_s", "_max_pause_s", "_pause_budget_s", "_health_ff"):
+                     "_relogin_refill_s", "_max_pause_s", "_pause_budget_s", "_health_ff",
+                     "_shared"):                        # F3: the run's budgets, shared
             setattr(copy, name, getattr(self, name))
         return copy
 
@@ -329,12 +406,20 @@ def install() -> None:
             self._seq += 1
             return self._seq
 
+    def _charge(self, which, seconds) -> None:
+        with self._shared.lock:
+            setattr(self._shared, which, getattr(self._shared, which) + seconds)
+
     def health_report(self) -> dict:
         """Counts per (host, identity): classes seen, signals, checks and outcomes,
-        pauses, re-logins; and credential POSTs per account. No URL, value or body."""
+        pauses, re-logins (drawn and skipped); credential POSTs per account; the seconds
+        spent by prepare's and verify_live's waits. No URL, value or body."""
         out = {f"{h}/{i}": dict(r.report) for (h, i), r in self._hrecs.items()}
-        out["credential_posts"] = dict(self._credential_posts)
-        out["paused_s"] = self._pause_spent
+        with self._shared.lock:
+            out["credential_posts"] = {a: dict(c) for a, c in
+                                       self._shared.credential_posts.items()}
+            out["paused_s"] = self._shared.prepare_s
+            out["verify_paused_s"] = self._shared.verify_s
         return out
 
     M.SessionManager.health_report = health_report
@@ -351,6 +436,7 @@ def install() -> None:
     def _login(self, host, identity, base_url):
         self._tl.landing = None
         self._tl.base_redirected = False
+        self._tl.account = f"{host}/{identity}"
         state = orig_login(self, host, identity, base_url)
         state.generation = _next_gen(self, host, identity)
         rec = _hrec(self, host, identity)
@@ -364,16 +450,20 @@ def install() -> None:
     orig_adopt = M.SessionManager.adopt
 
     def adopt(self, state, *, protected_probe=None, refusal_status=None):
+        if refusal_status is not None and not admitted_refusal(refusal_status):
+            raise M.SessionAuthError("a refusal status must be the application's answer "
+                                     "or a policy block (SP-56), never a throttle, a "
+                                     "gateway or a 407")
         if protected_probe is not None:
             state.protected_probe = protected_probe
             state.probe_refusal_status = refusal_status
-        out = orig_adopt(self, state)
-        out.generation = _next_gen(self, out.host, out.identity)
-        return out
+        # numbered before it is installed: no window where the current state has none
+        state.generation = _next_gen(self, state.host, state.identity)
+        return orig_adopt(self, state)
 
     M.SessionManager.adopt = adopt
 
-    # --- credential POSTs counted per account (M10) ---------------------------------
+    # --- credential POSTs counted per account (M10, F7) -----------------------------
     orig_post = M.SessionManager._post_credentials
 
     def _post_credentials(self, fetcher, url, data, base_url, **kw):
@@ -381,7 +471,9 @@ def install() -> None:
         raw = data if isinstance(data, (bytes, bytearray)) else repr(data).encode()
         kind = "control" if M.WRONG_SUFFIX.encode() in raw else "submitted"
         if REVERT != "nocount":
-            self._credential_posts[kind] += 1
+            account = getattr(self._tl, "account", None) or "?"
+            with self._shared.lock:
+                self._shared.credential_posts.setdefault(account, Counter())[kind] += 1
         self._tl.landing = getattr(resp, "url", None)
         return resp
 
@@ -433,13 +525,13 @@ def install() -> None:
             if name in (state.cookies or {}) and value and state.cookies[name] != value:
                 state.cookies[name] = value
 
-    # --- the stable protected resource (rules 1-4; M4, M5) --------------------------
+    # --- the stable protected resource (rules 1-4; M4, M5, B1) ----------------------
     def _select_resource(self, state, base_url, candidates, *, ff=None):
         """``(url, refusal_status, refusal_digest)``: the first candidate whose
         credentialed answer is LIVE on the stop_at walk, and whose anonymous and
-        corrupted answers agree as a refusal -- both lost-shaped, both the same non-2xx
-        non-5xx status, or both the same stable 2xx body apart from the credentialed
-        one (`_spa_probe`'s byte rule)."""
+        corrupted answers agree as a refusal -- both lost-shaped, both the same admitted
+        status (`admitted_refusal`, B1), or both the same stable 2xx body apart from the
+        credentialed one (`_spa_probe`'s byte rule)."""
         ff = ff or self._fetch_factory
         floor = bool(state.secure_only) or urlparse(base_url).scheme.lower() == "https"
         good = state.apply({})
@@ -485,7 +577,7 @@ def install() -> None:
             statuses = {a[0].status for a in arms}
             if len(statuses) == 1:
                 status = statuses.pop()
-                if not 200 <= status < 300 and status < 500:
+                if admitted_refusal(status):
                     return url, (None if REVERT == "norefusal" else status), None
                 if 200 <= status < 300:
                     try:
@@ -539,7 +631,7 @@ def install() -> None:
 
     M.SessionManager._basic_login = _basic_login
 
-    # --- the health check: one owner (M7) --------------------------------------------
+    # --- the health check: one owner (M7, B2, B3) -----------------------------------
     def _health_get(self, state, base_url):
         target = getattr(state, "protected_probe", None) or base_url
         floor = bool(state.secure_only) or urlparse(target).scheme.lower() == "https"
@@ -561,12 +653,18 @@ def install() -> None:
             _adopt_rotation(state, f.cookies())
         return h
 
+    def _current(self, state, generation) -> bool:
+        """B3: ``state`` is still the current object for its key, of ``generation``."""
+        return self._state.get((state.host, state.identity)) is state and \
+            getattr(state, "generation", None) == generation
+
     def _mark_lost(self, state, generation) -> bool:
-        """The one place a session is invalidated: compare-and-set on (state,
-        generation). Returns whether this call made the transition (its caller tells
-        the listeners when its ``notify`` is set)."""
+        """The one place a session is invalidated: compare-and-set on the current state
+        and its generation (B3). Returns whether this call made the transition (its
+        caller tells the listeners when its ``notify`` is set). Never persists an object
+        that is no longer current."""
         with self._observe_guard:
-            if REVERT != "nocas" and getattr(state, "generation", None) != generation:
+            if REVERT != "nocas" and not _current(self, state, generation):
                 return False
             if not state.valid:
                 return False
@@ -583,19 +681,24 @@ def install() -> None:
                 listener(origin, identity)
 
     def check_health(self, host, identity, base_url=None, *, generation=None,
-                     signal_url=None, seen_seq=None, foreign=False, use_cache=True):
+                     signal_url=None, seen_seq=None, foreign=False, use_cache=True,
+                     pause=True):
         """Is (host, identity)'s session of ``generation`` live? Single-flight; the
         verdict is recorded before the lock is released, and a waiter re-checks under
-        the lock: (a) a live verdict recorded after a signal was seen covers it (so N
-        concurrent signals make one GET); (b) for the TTL, a live verdict also covers
-        later signals of the same (generation, URL key), unless the request carried a
-        foreign header. Returns ``(Health, transitioned)``."""
-        state = self._state.get((host, identity))
+        the lock: (a) a live verdict whose GET was sent after a signal was seen covers
+        that signal (B2), so N concurrent signals make at most two GETs; (b) for the TTL,
+        a live verdict also covers later signals of the same (generation, URL key),
+        unless the request carried a foreign header. After the GET, the verdict is STALE
+        unless the judged state is still the current one, of the generation judged (B3).
+        ``pause=False`` (verify_live) records no pause. Returns ``(Health,
+        transitioned)``."""
+        key = (host, identity)
+        state = self._state.get(key)
         if state is None:
             return Health(STALE, "no session", generation), False
         rec = _hrec(self, host, identity)
         gen = state.generation if generation is None else generation
-        key = url_key(signal_url) if signal_url else None
+        urlk = url_key(signal_url) if signal_url else None
         with rec.lock:
             if getattr(state, "generation", None) != gen:
                 return Health(STALE, "another generation", gen), False
@@ -609,13 +712,14 @@ def install() -> None:
                         and last > seen_seq:
                     _bump(self, rec, "covered")
                     return Health(LIVE, "covered", gen), False
-                if key is not None and (not foreign or REVERT == "foreign"):
+                if urlk is not None and (not foreign or REVERT == "foreign"):
                     hits = [at for (g, k), at in rec.live.items()
                             if (g == gen or REVERT == "cache_nogen")
-                            and (k == key or REVERT == "cache_nourl")]
+                            and (k == urlk or REVERT == "cache_nourl")]
                     if hits and now - max(hits) < self._health_ttl_s:
                         _bump(self, rec, "cached")
                         return Health(LIVE, "cached", gen), False
+            sent_seq = _next_seq(self)            # B2: the cover point is the send
             started = self._clock()
             h = _health_get(self, state, base_url or self._bases.get((host, identity)))
             if REVERT == "inconclusive_lost" and h.state == INCONCLUSIVE:
@@ -625,15 +729,20 @@ def install() -> None:
             h = dataclasses.replace(h, generation=gen)
             _bump(self, rec, "checks")
             _bump(self, rec, h.state)
+            if REVERT != "nocas" and not _current(self, state, gen):
+                _bump(self, rec, "stale_verdicts")     # B3: replaced while in flight
+                return Health(STALE, "replaced while its check was in flight", gen), False
             moved = False
             if h.state == LIVE:
-                rec.live_seq[gen] = _next_seq(self)
-                if key is not None:
-                    rec.live[(gen, key)] = started
+                seq = _next_seq(self) if REVERT == "cover_at_record" else sent_seq
+                rec.live_seq[gen] = max(rec.live_seq.get(gen, 0), seq)
+                if urlk is not None:
+                    rec.live[(gen, urlk)] = started
             elif h.state == LOST:
-                rec.pause = None
+                if rec.pause is not None and rec.pause["gen"] == gen:
+                    rec.pause = None
                 moved = _mark_lost(self, state, gen)
-            elif h.state == INCONCLUSIVE:
+            elif h.state == INCONCLUSIVE and pause:
                 p = rec.pause
                 if p is None or p["gen"] != gen:
                     step = 5.0
@@ -723,9 +832,7 @@ def install() -> None:
 
     M.SessionManager.observe = observe
 
-    # --- prepare: sticky unknown, the pause, the generation --------------------------
-    orig_prepare = M.SessionManager.prepare
-
+    # --- prepare: sticky unknown, the pause, the generation applied -----------------
     def _unknown(self, key, why):
         rec = _hrec(self, *key)
         if REVERT != "nosticky":
@@ -738,10 +845,10 @@ def install() -> None:
                        reason="isolated session health unknown")
         return cls(f"the session of {key[1]}@{key[0]} stayed unknown ({why})")
 
-    def _wait_out_pause(self, state, identity, *, notify):
+    def _wait_out_pause(self, state, identity):
         """Wait a paused identity's pause out, then check again, until it is live,
-        lost or unknown past the bound or the run's budget. Never holds a lock while
-        waiting. Returns the last Health."""
+        lost or unknown past the bound or the run's budget (prepare's only; verify_live
+        has its own wait). Never holds a lock while waiting. Returns the last Health."""
         key = (state.host, identity)
         rec = _hrec(self, *key)
         while True:
@@ -750,31 +857,65 @@ def install() -> None:
                              and p["gen"] != getattr(state, "generation", None)):
                 return None
             now = self._clock()
-            over_budget = REVERT != "nobudget" and self._pause_spent >= self._pause_budget_s
+            spent = self._shared.prepare_s
+            over_budget = REVERT != "nobudget" and spent >= self._pause_budget_s
             if now - p["began"] >= self._max_pause_s or over_budget:
                 raise _unknown(self, key, "pause budget" if over_budget else "pause bound")
             if now < p["until"]:
                 wait = min(p["until"] - now, p["began"] + self._max_pause_s - now)
                 if REVERT != "nobudget":
-                    wait = min(wait, max(0.0, self._pause_budget_s - self._pause_spent))
+                    wait = min(wait, max(0.0, self._pause_budget_s - spent))
                 self._sleep(wait)
-                self._pause_spent += wait
+                _charge(self, "prepare_s", wait)
                 continue
             h, moved = check_health(self, state.host, identity,
                                     self._bases.get(key), generation=p["gen"],
                                     use_cache=False)
             if h.state == STALE:
-                rec.pause = None
+                if rec.pause is p:
+                    rec.pause = None
                 return h
             if h.state == INCONCLUSIVE:
                 p["step"] = min(60.0, p["step"] * 2)
                 p["until"] = self._clock() + max(p["step"], h.retry_after_s or 0)
                 continue
-            rec.pause = None
-            if h.state == LOST and moved and (notify or REVERT == "notify_pause"):
+            if rec.pause is p:
+                rec.pause = None
+            if h.state == LOST and moved and REVERT == "notify_pause":
                 _tell(self, state, canonical_origin(state.protected_probe or ""),
                       identity, True)
             return h
+
+    def _apply(self, request, identity) -> None:
+        """The base `prepare`'s body (manager.py:321-358), plus F4: the request records
+        the generation of the state it was given, set where that state is applied --
+        never re-read from the manager afterwards."""
+        host = urlparse(request.url).hostname or ""
+        identity = self._own_identity(identity)
+        if identity == M.ANONYMOUS or host not in self._scope:
+            return
+        origin = canonical_origin(request.url)
+        state = self._state_for(request.url, identity)
+        if state is None:
+            existing = self._state.get((host, identity))
+            if existing is not None:
+                M._check_transport(existing, request.url)
+                self._withhold(origin, identity, request)
+                return
+            state = self.ensure(host, identity,
+                                self._bases.get((host, identity))
+                                or M._directory(request.url))
+        elif not state.valid or state.is_time_expired():
+            state = self.ensure(state.host, identity,
+                                self._bases.get((state.host, identity))
+                                or M._directory(request.url))
+        M._check_transport(state, request.url)
+        if origin is None or origin not in state.origins:
+            self._withhold(origin, identity, request)
+            return
+        request.headers = state.apply(request.headers)
+        if REVERT != "nogenrecord":
+            request.session_generation = getattr(state, "generation", None)
 
     def prepare(self, request, identity):
         host = urlparse(request.url).hostname or ""
@@ -789,26 +930,24 @@ def install() -> None:
                 if rec.pause is not None and (REVERT == "nocas" or
                                               rec.pause["gen"] ==
                                               getattr(state, "generation", None)):
-                    _wait_out_pause(self, state, own, notify=False)
-        orig_prepare(self, request, identity)
-        if own != M.ANONYMOUS and REVERT != "nogenrecord" and \
-                getattr(request, "session_decision", None) is None:
-            state = self._state_for(request.url, own)
-            if state is not None:
-                request.session_generation = getattr(state, "generation", None)
+                    _wait_out_pause(self, state, own)
+        _apply(self, request, identity)
 
     M.SessionManager.prepare = prepare
 
-    # --- ensure: the re-login token bucket (M10) -------------------------------------
+    # --- ensure: the re-login token bucket, drawn under the login lock (M10, D, F5) --
     orig_ensure = M.SessionManager.ensure
 
     def ensure(self, host, identity, base_url, *, operator=False):
         key = (host, identity)
-        state = self._state.get(key)
-        if identity != M.ANONYMOUS and state is not None and not state.valid and \
-                REVERT != "nobucket":
-            rec = _hrec(self, *key)
-            if rec.relogin_due:
+        if identity == M.ANONYMOUS or REVERT == "nobucket":
+            return orig_ensure(self, host, identity, base_url, operator=operator)
+        while True:
+            with self._lock_for(host, identity):
+                state = self._state.get(key)
+                rec = _hrec(self, *key)
+                if state is None or state.valid or not rec.relogin_due:
+                    return orig_ensure(self, host, identity, base_url, operator=operator)
                 now = self._clock()
                 if rec.tokens is None:
                     rec.tokens, rec.refill_at = float(self._relogin_burst), now
@@ -816,22 +955,31 @@ def install() -> None:
                 if gained > 0:
                     rec.tokens = min(float(self._relogin_burst), rec.tokens + gained)
                     rec.refill_at = now
-                if rec.tokens < 1.0:
-                    wait = (1.0 - rec.tokens) * self._relogin_refill_s
-                    budget_left = self._pause_budget_s - self._pause_spent
-                    if wait > self._max_pause_s or wait > budget_left:
-                        raise _unknown(self, key, "re-login budget")
-                    self._sleep(wait)
-                    self._pause_spent += wait
-                    rec.tokens, rec.refill_at = 1.0, self._clock()
-                rec.tokens -= 1.0
-                rec.relogin_due = False
-                _bump(self, rec, "relogins")
-        return orig_ensure(self, host, identity, base_url, operator=operator)
+                if rec.tokens >= 1.0:
+                    rec.tokens -= 1.0
+                    rec.relogin_due = False
+                    _bump(self, rec, "relogins")
+                    # the login in the same critical section as the draw
+                    return orig_ensure(self, host, identity, base_url, operator=operator)
+                if REVERT != "nores_waits" and skips_when_spent(state):
+                    # D: no resource and no token -- no login, no wait, no raise: the
+                    # send carries on at once with the session it has (believed lost)
+                    self._check_base(host, identity, base_url, operator=operator)
+                    if operator:
+                        self._operator_bases.add(url_key(base_url))
+                        self._bases[key] = base_url
+                    _bump(self, rec, "relogins_skipped")
+                    return state
+                wait = (1.0 - rec.tokens) * self._relogin_refill_s
+                budget_left = self._pause_budget_s - self._shared.prepare_s
+                if wait > self._max_pause_s or wait > budget_left:
+                    raise _unknown(self, key, "re-login budget")
+            self._sleep(wait)                     # no lock held while waiting
+            _charge(self, "prepare_s", wait)
 
     M.SessionManager.ensure = ensure
 
-    # --- verify_live (M9) ------------------------------------------------------------
+    # --- verify_live (M9): its own wait, never the identity's pause or sticky -------
     def verify_live(self, host, identity, base_url):
         state = self._state.get((host, identity))
         if state is None or not state.valid:
@@ -839,23 +987,33 @@ def install() -> None:
         rec = _hrec(self, host, identity)
         if REVERT == "verifylive_cache" and rec.verdict == (state.generation, LIVE):
             return True
-        h, _moved = check_health(self, host, identity, base_url, use_cache=False)
-        if h.state == INCONCLUSIVE:
+        gen = getattr(state, "generation", None)
+        began, step = self._clock(), 5.0
+        which = "prepare_s" if REVERT == "verifylive_budget" else "verify_s"
+        while True:
+            h, _moved = check_health(self, host, identity, base_url, generation=gen,
+                                     use_cache=False, pause=False)
+            if h.state != INCONCLUSIVE:
+                break
             if REVERT == "verifylive_false":
                 return False
-            try:
-                h = _wait_out_pause(self, state, identity, notify=False) or h
-            except SessionHealthUnknown:
-                rec.unknown = None                   # verify_live never goes sticky
-                _LOG.warning("verify_live: session health unknown; read as live")
-                return True
+            left = self._max_pause_s - (self._clock() - began)
+            budget_left = self._pause_budget_s - getattr(self._shared, which)
+            wait = min(max(step, h.retry_after_s or 0), left, budget_left)
+            if wait <= 0:
+                break
+            self._sleep(wait)
+            _charge(self, which, wait)
+            step = min(60.0, step * 2)
         if h.state == LIVE:
-            rec.unknown = None
+            rec.unknown = None                    # a check succeeded
             return True
         if h.state == LOST:
-            rec.unknown = None
+            rec.unknown = None                    # check_health marked it lost (no notify)
             return False
-        _LOG.warning("verify_live: session health unknown; read as live")
+        if h.state == INCONCLUSIVE and REVERT == "verifylive_clears_sticky":
+            rec.unknown = None
+        _LOG.warning("verify_live: session health %s; read as live", h.state)
         return True
 
     M.SessionManager.verify_live = verify_live

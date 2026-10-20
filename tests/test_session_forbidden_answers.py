@@ -25,14 +25,15 @@ The app modes (`_App`) are the shapes the design must tell apart:
 - `forbid`: a lost session gets 403;
 - `basic`: HTTP Basic;
 - `json`: a JSON/bearer login;
-- `rotate` / `rotate_all`: a rotating session id.
+- `rotate` / `rotate_all`: a rotating session id;
+- `ratelimit`: `/` answers anyone without a live session 429 (an anonymous rate limit).
 
 Every new-API keyword (`clock`, `sleep`, the bounds) is passed only when
 `SessionManager` accepts it, so every test also runs against today's code.
 
 A test marked ``_BUG_0533`` fails on the base (15a8a27 + 7ebf48a). It is a strict
 xfail until CC-SESS-0029 lands and removes the marker. Every test passes with the
-revision-2 prototype patched in
+revision-3 prototype patched in
 (`docs/components/03-session-manager/au-sess403-prototype/`, ``-p proto_plugin``).
 Every test also fails against its named revert (``REVERT=<name>``; `run_reverts.sh`;
 DRAFT-AU-SESS403 §6).
@@ -77,9 +78,11 @@ _BUG_0533 = pytest.mark.xfail(
                         "again (defect 6); CC-SESS-0029 removes this marker")
 
 #: The stable protected resource each mode's login should record (None: none can be).
+#: `rotate_all` records none: the login's own verification already rotates the id away
+#: from the state's copy, so every candidate's credentialed arm carries a dead id.
 RESOURCE = {"redirect": "/", "static": "/dashboard", "presence": "/home.php",
-            "forbid": "/", "basic": "/", "rotate": "/", "rotate_all": "/",
-            "none": None, "json": None}
+            "forbid": "/", "basic": "/", "rotate": "/", "rotate_all": None,
+            "ratelimit": "/home.php", "none": None, "json": None}
 
 
 def _login_page(token: str, action: str = "/login.php") -> bytes:
@@ -122,6 +125,8 @@ class _App:
     - ``rotate_health``: a live health GET rotates the session id.
     - ``offorigin_login``: `/` sends an anonymous visitor to this login URL on another
       origin (an IdP).
+    - ``throttle_root`` (`ratelimit`): a GET of `/` carrying a live session, sent
+      without the login fetcher's browser headers, is throttled (429) too.
 
     Other controls:
     - ``referer_bound``: a request that carries a live session and a ``Referer`` ends
@@ -153,6 +158,7 @@ class _App:
         self.rotate_health = False
         self.referer_bound = False
         self.offorigin_login: str | None = None
+        self.throttle_root = False
         self.server = self._serve()
         self.base = f"http://{HOST}:{self.server.server_address[1]}/"
 
@@ -405,6 +411,12 @@ class _App:
                         if who else self._send(403, b"<h1>Forbidden</h1>")
                 if app.mode == "none":
                     return self._send(200, b"<h1>Home</h1>")
+                if app.mode == "ratelimit":            # an anonymous rate limit on `/`
+                    browser = (self.headers.get("User-Agent") or "").startswith("Mozilla")
+                    if who and not (app.throttle_root and not browser):
+                        return self._send(200, f"<h1>Welcome {ACCOUNTS[who][0]}</h1>"
+                                          .encode())
+                    return self._send(429, b"<h1>slow down</h1>", [("Retry-After", "1")])
                 if who is None and app.offorigin_login:     # an IdP's login, elsewhere
                     return self._send(302, b"", [("Location", app.offorigin_login)])
                 if app.mode == "rotate" and who:
@@ -521,10 +533,13 @@ def _creds() -> CredentialStore:
 def _manager(**kw):
     """The real manager with its default requests fetcher (no browser), and the list a
     logout listener appends each valid -> invalid transition to (FR-SESS-16). Only the
-    keywords this `SessionManager` accepts are passed (today's has none of revision 2's)."""
+    keywords this `SessionManager` accepts are passed (today's has none of the design's);
+    a constructor that takes ``**kwargs`` (the prototype's, which passes `store` on to
+    today's) is given all of them."""
     params = inspect.signature(SessionManager.__init__).parameters
+    takes_any = any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
     mgr = SessionManager(_creds(), scope_hosts=[HOST], browser_login=False,
-                         **{k: v for k, v in kw.items() if k in params})
+                         **{k: v for k, v in kw.items() if takes_any or k in params})
     losses: list[str] = []
     mgr.add_logout_listener(lambda origin, identity: losses.append(identity))
     return mgr, losses
@@ -559,6 +574,34 @@ def _get(client, app, path, identity="user"):
 def _report(mgr) -> dict:
     report = getattr(mgr, "health_report", None)
     return report().get(f"{HOST}/user", {}) if report else {}
+
+
+def _until(predicate, timeout: float = 5.0) -> bool:
+    """Poll ``predicate`` (real time, bounded) until it holds; whether it did."""
+    import time
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.01)
+    return bool(predicate())
+
+
+class _RecordingStore:
+    """A store double for the manager's non-secret persistence (FR-SESS-3, T1.7): it
+    starts empty and records every row `SessionManager._persist` upserts."""
+
+    def __init__(self):
+        self.rows: list[dict] = []
+
+    def all_session_states(self) -> list:
+        return []
+
+    def get_session_state(self, host, identity):
+        return None
+
+    def upsert_session_state(self, row) -> None:
+        self.rows.append(dict(row))
 
 
 #: One probe of each scenario, as the oracle's seam sends it: ``(path, send)``.
@@ -708,6 +751,54 @@ def test_a_throttled_answer_never_triggers_anything(mode):
     got = run_scenario("throttle-429", mode=mode)
     assert got["statuses"] == [429], got
     assert (got["logins"], got["invalidations"], got["checks"]) == (1, 0, 0), got
+
+
+@_BUG_0533
+def test_a_throttle_is_never_a_resources_refusal_status_nor_a_loss():
+    """T2b (B1; the reviewer's P1). On the `ratelimit` app, `/` answers a live session
+    200 and everyone else 429, so its anonymous and corrupted arms agree on a throttle.
+    - The login never records 429 as a refusal status: `/` is not the resource, the
+      landing `/home.php` is (both its refusal arms are login redirects).
+    - Then `/` throttles the tool's own GETs too, and a scope 401 is checked: nothing
+      logs the session out.
+
+    Revert: `throttle_refusal` (revision 2's admission: `/` is recorded with refusal
+    status 429, so a throttled health GET of `/` read LOST)."""
+    app = _App(mode="ratelimit")
+    try:
+        _clock, kw = _fake()
+        mgr, losses, client = _logged_in(app, **kw)
+        state = mgr._state[(HOST, "user")]
+        url = state.protected_probe
+        recorded = (url.replace(app.base, "/") if url else None,
+                    getattr(state, "probe_refusal_status", None))
+        assert recorded == ("/home.php", None), recorded
+        assert _get(client, app, "home.php")[0].status == 200
+        app.throttle_root = True
+        assert _get(client, app, "api/reports")[0].status == 401   # a suspicion: checked
+        assert (losses, app.logins) == ([], 1)
+    finally:
+        app.close()
+
+
+@_BUG_0533
+@pytest.mark.parametrize("status", [0, 429, 503, 502, 504, 407])
+def test_health_verdict_never_matches_a_throttle_gateway_407_or_incomplete_answer(status):
+    """T2c (B1). SP-56 classifies before any refusal status is matched: an incomplete
+    answer, a throttle, a gateway or a 407 is INCONCLUSIVE, even when it equals the
+    state's recorded refusal status. `health_verdict` is public (disco may build on it,
+    §5.7, and `adopt` takes a resource), so it is total over any state it is handed,
+    not only over the states the login records (T2b proves the login never records
+    one). Revert: `throttle_verdict` (revision 2's order: the refusal status first)."""
+    from fuzzlab.session import manager as M
+    state = SessionState(HOST, "user", kind="cookie", cookies={"SID": "s"},
+                         login_url=LOGIN, protected_probe=PAGE,
+                         origins=frozenset({"http://127.0.0.1:8080"}), valid=True)
+    state.probe_refusal_status = status
+    state.generation = 1
+    got = M.health_verdict(state, status, {"Retry-After": "1"}, "<h1>busy</h1>", PAGE,
+                           stopped_at_login=False)
+    assert got.state == M.INCONCLUSIVE, got
 
 
 @_BUG_0533
@@ -971,9 +1062,11 @@ def test_an_expiry_that_redirects_to_another_origins_login_is_lost_at_its_hop():
 
 @_BUG_0533
 def test_n_concurrent_signals_make_one_health_get():
-    """M7. Six concurrent 401s on six URLs. The resource answers only after all six
-    signals are seen, so the one verdict covers them all: one GET, recorded before the
-    lock is released. Revert: `noflight` (six GETs)."""
+    """M7 (B2). Six concurrent 401s on six URLs. The first GET is answered only after
+    all six signals are seen. A live verdict covers only the signals seen before its
+    GET was sent, so the signals seen while it was in flight make one more GET, whose
+    verdict covers them all: at most two GETs, recorded before the lock is released.
+    Revert: `noflight` (six GETs)."""
     app = _App(round_size=6)
     try:
         _clock, kw = _fake()
@@ -986,7 +1079,8 @@ def test_n_concurrent_signals_make_one_health_get():
             t.start()
         for t in threads:
             t.join(20)
-        assert (app.health_gets(), app.logins, len(losses)) == (1, 1, 0)
+        assert 1 <= app.health_gets() <= 2, app.health_gets()
+        assert (app.logins, len(losses)) == (1, 0)
     finally:
         app.close()
 
@@ -997,7 +1091,8 @@ def test_a_pause_found_for_an_older_generation_never_pauses_the_new_one():
     1. A check of session 1 is in flight.
     2. Session 2 is adopted meanwhile.
     3. The check then answers 503, which is inconclusive for session 1.
-    4. The next send on session 2 neither waits nor rechecks.
+    4. The verdict is stale (B3): no pause is recorded, and the next send on session 2
+       neither waits nor rechecks.
 
     Revert: `nocas` (it waits)."""
     app = _App()
@@ -1019,6 +1114,88 @@ def test_a_pause_found_for_an_older_generation_never_pauses_the_new_one():
         first.join(10)
         resp, _req = _get(client, app, "home.php")
         assert resp.status == 200 and clock.sleeps == []
+    finally:
+        app.close()
+
+
+@_BUG_0533
+def test_a_lost_verdict_for_a_replaced_session_tells_no_listener_and_writes_no_row():
+    """M7 / B3 (the compare-and-set against the current state, LOST branch; the
+    reviewer's P4).
+    1. A check of session 1 is in flight.
+    2. Session 2 is adopted meanwhile.
+    3. The check then answers 401: LOST, for session 1.
+    4. Session 1 is no longer the current state, so the verdict is stale: no listener
+       is told, no row is written over session 2's, and session 2 stays current and
+       valid.
+
+    Revert: `nocas` (session 1 is marked lost, its row is persisted, and the listener
+    hears a loss of the session that replaced it)."""
+    app = _App()
+    store = _RecordingStore()
+    try:
+        _clock, kw = _fake()
+        mgr, losses, client = _logged_in(app, store=store, **kw)
+        _get(client, app, "home.php")                                # login: session 1
+        arrived, release = threading.Event(), threading.Event()
+        app.hold_health = (arrived, release, 401)
+        first = threading.Thread(target=_get, args=(client, app, "api/reports"),
+                                 daemon=True)
+        first.start()
+        assert arrived.wait(10)                                      # session 1's check
+        old = mgr._state[(HOST, "user")]
+        new = mgr.adopt(SessionState(HOST, "user", kind="cookie",
+                                     cookies={"SID": app.issue_session("user")},
+                                     origins=frozenset(old.origins),
+                                     login_url=old.login_url))
+        rows = len(store.rows)
+        assert rows >= 2, store.rows           # the channel is live: login, then adopt
+        release.set()
+        first.join(10)
+        assert not first.is_alive()
+        assert (losses, len(store.rows)) == ([], rows), store.rows[rows:]
+        assert mgr._state[(HOST, "user")] is new and new.valid
+    finally:
+        app.close()
+
+
+@_BUG_0533
+def test_a_loss_seen_while_a_check_is_in_flight_is_still_acted_on():
+    """M7 / B2 (a live verdict covers only the signals seen before its GET was sent;
+    the reviewer's P2).
+    1. A scope 401's check of `/` is in flight: the server has judged the session live
+       and holds its answer.
+    2. Meanwhile `/bounce.php` ends the session, and its login redirect is seen.
+    3. The held answer (live) arrives.
+    Its GET was sent before the second signal was seen, so it does not cover it: the
+    second signal makes its own check, which finds the session lost, and the listener
+    is told once.
+
+    The `forbid` app is the one whose server judges `/` before the hold. (On `redirect`,
+    `/` redirects to `/home.php`, which is judged after the hold, so the held check
+    itself reads LOST and proves nothing about the cover.)
+
+    Revert: `cover_at_record` (the live verdict, recorded after the second signal was
+    seen, covers it: the session stays valid here while the server has ended it)."""
+    app = _App(mode="forbid")
+    try:
+        _clock, kw = _fake()
+        mgr, losses, client = _logged_in(app, **kw)
+        _get(client, app, "home.php")
+        arrived, release = threading.Event(), threading.Event()
+        app.hold_health = (arrived, release, None)                   # judged live, held
+        a = threading.Thread(target=_get, args=(client, app, "api/reports"), daemon=True)
+        a.start()
+        assert arrived.wait(10)                                      # the GET in flight
+        b = threading.Thread(target=_get, args=(client, app, "bounce.php"), daemon=True)
+        b.start()
+        assert _until(lambda: _report(mgr).get("suspected", 0) >= 2), _report(mgr)
+        release.set()
+        a.join(10)
+        b.join(10)
+        state = mgr._state[(HOST, "user")]
+        assert (state.valid, losses) == (False, ["user"]), (state.valid, losses)
+        assert state.cookies.get("SID") not in app.sessions
     finally:
         app.close()
 
@@ -1177,23 +1354,54 @@ def test_relogins_draw_on_a_refilling_budget(max_pause_s, last):
 
 
 @_BUG_0533
+def test_a_no_resource_identity_whose_budget_is_spent_carries_on_at_once():
+    """T15b (the owner's decision D). The `json` app's login records no resource, and
+    its `/api/reports` answers the low-privilege bearer 401 (scope): an unconfirmed loss
+    on every probe.
+    - The burst (5) re-logs in five times. Then each probe goes out at once on the
+      session it has: no login, no sleep, no `SessionHealthUnknown`, nothing aborted.
+    - 120 s later one token has refilled, and the next probe logs in once.
+
+    Reverts: `nores_waits` (revision 2: it sleeps 120 s per token, then raises),
+    `nobucket` (30 logins)."""
+    app = _App(mode="json")
+    try:
+        clock, kw = _fake()
+        mgr, losses = _manager(**kw)
+        sender = _sender(app, mgr)
+        statuses = [sender.send(app.base + "api/reports", "id", "1").status
+                    for _ in range(30)]
+        assert statuses == [401] * 30
+        assert (app.logins, len(losses), clock.sleeps) == (6, 6, []), \
+            (app.logins, len(losses), clock.sleeps)
+        clock.t += 120.0
+        sender.send(app.base + "api/reports", "id", "1")
+        assert (app.logins, clock.sleeps) == (7, [])
+    finally:
+        app.close()
+
+
+@_BUG_0533
 def test_credential_posts_are_counted_and_the_json_control_too():
-    """M10. Each account's credential POSTs are counted. A JSON login's wrong-password
-    control is counted too, apart: the lockout residual's numbers. Revert: `nocount`."""
+    """M10. Credential POSTs are counted per account (the credential store's
+    `(host, identity)`), each kind apart: a JSON login's wrong-password control too.
+    These are the lockout residual's numbers. An isolated copy of the same identity
+    counts into the same account. Revert: `nocount`."""
     app = _App(mode="json")
     try:
         mgr, _losses = _manager()
         mgr.ensure(HOST, "user", app.base, operator=True)
-        assert mgr.health_report()["credential_posts"] == {"control": 1, "submitted": 1}
+        assert mgr.health_report()["credential_posts"] == {
+            f"{HOST}/user": {"control": 1, "submitted": 1}}
     finally:
         app.close()
 
 
 @_BUG_0533
 def test_verify_live_waits_out_an_unknown_and_then_reads_live():
-    """T21 (M9). The resource answers 503. `verify_live` waits out the bounded pause and
-    checks again. Still inconclusive, it keeps today's answer (live), changes nothing,
-    and never goes sticky. Revert: `verifylive_false`."""
+    """T21 (M9). The resource answers 503. `verify_live` waits on its own bounded wait
+    (never the identity's pause) and checks again. Still inconclusive, it keeps today's
+    answer (live), changes nothing, and never goes sticky. Revert: `verifylive_false`."""
     app = _App()
     try:
         clock, kw = _fake(max_pause_s=60.0)
@@ -1219,6 +1427,60 @@ def test_verify_live_never_reads_the_cache():
         _get(client, app, "api/reports")                          # a live check, cached
         app.expire_all()
         assert mgr.verify_live(HOST, "user", app.base) is False
+    finally:
+        app.close()
+
+
+@_BUG_0533
+def test_an_inconclusive_verify_live_never_clears_a_sticky_unknown():
+    """M9 (the reviewer's P3). The resource answers 503 until the identity is sticky
+    unknown. `verify_live` (an isolated copy's `_verify_main`, the crawler) then
+    checks: still inconclusive, it returns True (today's answer), but the sticky
+    unknown stays. The next send raises at once, and nothing reaches the server.
+    Revert: `verifylive_clears_sticky` (the next send goes out)."""
+    app = _App()
+    try:
+        _clock, kw = _fake(max_pause_s=60.0)
+        mgr, _losses = _manager(**kw)
+        sender = _sender(app, mgr)
+        sender.send(app.base + "home.php", "id", "1")
+        app.health_status = 503
+        sender.send(app.base + "api/reports", "id", "1")          # suspected: paused
+        with pytest.raises(SessionAuthError):
+            sender.send(app.base + "home.php", "id", "1")         # waits, then unknown
+        assert mgr.verify_live(HOST, "user", app.base) is True
+        n0 = app.count()
+        with pytest.raises(SessionAuthError):
+            sender.send(app.base + "home.php", "id", "1")
+        assert app.count() == n0
+    finally:
+        app.close()
+
+
+@_BUG_0533
+def test_verify_lives_waits_never_spend_the_runs_pause_budget():
+    """M9 (a follow-up of review round 3). `verify_live`'s waits draw on their own
+    budget, never on the one `prepare`'s pauses share.
+    1. The resource answers 503: `verify_live` waits out its 40 s bound and reads live.
+    2. A suspicion then pauses the identity, and the pause resolves after 15 s: inside
+       the run's 50 s budget, which `verify_live` did not touch.
+
+    Revert: `verifylive_budget` (40 of the 50 s are already spent: the pause ends
+    early and the send raises)."""
+    app = _App()
+    try:
+        clock, kw = _fake(max_pause_s=40.0, pause_budget_s=50.0)
+        mgr, _losses, client = _logged_in(app, **kw)
+        _get(client, app, "home.php")
+        app.health_status = 503
+        assert mgr.verify_live(HOST, "user", app.base) is True
+        waited = sum(clock.sleeps)
+        assert waited == 40.0, clock.sleeps
+        app.health_status = None
+        app.health_queue = [503, 503, None]
+        _get(client, app, "api/reports")                          # pause: 5 s, then 10 s
+        assert _get(client, app, "home.php")[0].status == 200
+        assert sum(clock.sleeps) - waited == 15.0, clock.sleeps
     finally:
         app.close()
 
@@ -1364,7 +1626,8 @@ LOSS_PREDICATE_CALLERS = {("fuzzlab/session/manager.py", "SessionManager.observe
 
 def loss_decision_offenders(source: str, rel: str) -> list[str]:
     """Each write of a `valid` attribute (assignment, augmented or annotated,
-    `setattr(x, "valid", v)`, a `valid=` keyword in any call such as
+    `setattr(x, "valid", v)`, `object.__setattr__(x, "valid", v)` or
+    `x.__setattr__("valid", v)`, a `valid=` keyword in any call such as
     `dataclasses.replace` or `SessionState`) that is not a constant written by its
     listed writer, and each call of `detect_logout` outside its listed callers."""
     out: list[str] = []
@@ -1387,6 +1650,13 @@ def loss_decision_offenders(source: str, rel: str) -> list[str]:
             if name == "setattr" and len(node.args) >= 3 and \
                     isinstance(node.args[1], ast.Constant) and node.args[1].value == "valid":
                 writes.append(node.args[2])
+            if name == "__setattr__":
+                # object.__setattr__(x, "valid", v) and x.__setattr__("valid", v)
+                for i, arg in enumerate(node.args[:2]):
+                    if isinstance(arg, ast.Constant) and arg.value == "valid" and \
+                            len(node.args) > i + 1:
+                        writes.append(node.args[i + 1])
+                        break
             for kw in node.keywords:
                 if kw.arg == "valid":
                     writes.append(kw.value)
@@ -1420,11 +1690,12 @@ def test_only_the_owner_decides_a_session_loss():
 def test_the_loss_decision_guard_catches_synthetic_offenders():
     """T19's guard, proven on each write form (PA-0034(2)). Each of these must be
     found: `state.valid = ok`, `setattr`, `dataclasses.replace(valid=…)`,
-    `.valid = False` outside `_mark_lost`, `True` written by a non-writer, and
-    `detect_logout` called elsewhere. The owner's own write is not.
+    `object.__setattr__` and a bound `__setattr__`, `.valid = False` outside
+    `_mark_lost`, `True` written by a non-writer, and `detect_logout` called elsewhere.
+    The owner's own write is not.
 
     Reverts (the guard weakened, by `proto_plugin`): `guard_noassign`,
-    `guard_nosetattr`, `guard_nokeyword`, `guard_nocall`."""
+    `guard_nosetattr`, `guard_nodunder`, `guard_nokeyword`, `guard_nocall`."""
     rel = "fuzzlab/session/manager.py"
     src = ("import dataclasses\n"
            "class SessionManager:\n"
@@ -1439,6 +1710,9 @@ def test_the_loss_decision_guard_catches_synthetic_offenders():
            "    def other(self, state):\n"
            "        setattr(state, 'valid', False)\n"
            "        return dataclasses.replace(state, valid=False)\n"
+           "    def dunder(self, state):\n"
+           "        object.__setattr__(state, 'valid', False)\n"
+           "        state.__setattr__('valid', True)\n"
            "    def _login(self, state):\n"
            "        state.valid = True\n"
            "def elsewhere(detect, r):\n"
@@ -1448,6 +1722,8 @@ def test_the_loss_decision_guard_catches_synthetic_offenders():
         f"{rel}::SessionManager.observe writes valid=False",
         f"{rel}::SessionManager.other writes valid=False",
         f"{rel}::SessionManager.other writes valid=False",
+        f"{rel}::SessionManager.dunder writes valid=False",
+        f"{rel}::SessionManager.dunder writes valid=True",
         f"{rel}::SessionManager._login writes valid=True",
         f"{rel}::elsewhere calls detect_logout",
     ]
@@ -1467,6 +1743,32 @@ def run_rotating_ids(n: int = N) -> dict:
         statuses = [sender.send(app.base + "home.php", "id", "1").status for _ in range(n)]
         return {"logins": app.logins, "invalidations": len(losses),
                 "checks": app.health_gets(), "statuses": statuses}
+    finally:
+        app.close()
+
+
+def run_relogin_window(mode: str, path: str, n: int = 30) -> dict:
+    """The owner's decision D, measured (the reviewer's P5/P6 fixtures): ``n`` probes of
+    ``path`` by the low-privilege identity on ``mode``, with the default bounds, on a
+    fake clock. A `SessionAuthError` ends the run there, as it would end a real one."""
+    app = _App(mode=mode)
+    try:
+        clock, kw = _fake()
+        mgr, losses = _manager(**kw)
+        sender = _sender(app, mgr)
+        out: list = []
+        for _ in range(n):
+            try:
+                out.append(sender.send(app.base + path, "id", "1").status)
+            except SessionAuthError as exc:
+                out.append(type(exc).__name__)
+                break
+        state = mgr._state.get((HOST, "user"))
+        url = state.protected_probe if state is not None else None
+        return {"resource": url.replace(app.base, "/") if url else None,
+                "sends": len(out), "last": out[-1], "logins": app.logins,
+                "invalidations": len(losses), "asleep_s": sum(clock.sleeps),
+                "checks": app.health_gets()}
     finally:
         app.close()
 
@@ -1499,6 +1801,10 @@ def measure() -> None:
             continue
         print(f"protected resource ({mode}):", run_protected_resource(mode))
     print("rotating ids on every request:", run_rotating_ids())
+    for mode, path in (("json", "api/reports"), ("json", "api/me"),
+                       ("rotate_all", "home.php")):
+        print(f"30 probes, default bounds ({mode}, /{path}):",
+              run_relogin_window(mode, path))
 
 
 if __name__ == "__main__":

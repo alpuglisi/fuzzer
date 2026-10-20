@@ -1,4 +1,4 @@
-"""pytest plugin: install the AU-SESS403 revision-2 prototype before any test runs
+"""pytest plugin: install the AU-SESS403 revision-3 prototype before any test runs
 (``-p proto_plugin`` with this directory on ``PYTHONPATH``). ``REVERT=<name>`` undoes one
 decision of the design (``proto.REVERTS``).
 
@@ -18,6 +18,7 @@ _GUARD = {
     "guard_noassign": ("if isinstance(node, (ast.Assign, ast.AugAssign, ast.AnnAssign)):",
                        "if False:"),
     "guard_nosetattr": ('if name == "setattr"', 'if False and name == "setattr"'),
+    "guard_nodunder": ('if name == "__setattr__":', "if False:"),
     "guard_nokeyword": ('if kw.arg == "valid":', "if False:"),
     "guard_nocall": ('if name == "detect_logout" and where not in LOSS_PREDICATE_CALLERS:',
                      "if False:"),
