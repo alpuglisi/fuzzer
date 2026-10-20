@@ -760,6 +760,19 @@ def acquire_host_lock(wait: float):
             time.sleep(5)
 
 
+def pytest_lock_enforced(tree: Path) -> bool:
+    """Does ``tree``'s root conftest take the host pytest lock (BUG-0532)? Then the
+    child's own lock wait serialises it with every other session, and waiting for zero
+    other pytest processes is redundant: with agents queueing sessions on that lock there
+    is always one, so the wait starves until ``--wait-other`` (BUG-0537)."""
+    conftest = tree / "tests" / "conftest.py"
+    try:
+        text = conftest.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return (tree / "tests" / "_pytest_lock.py").is_file() and "_pytest_lock" in text
+
+
 def wait_for_quiet_host(wait: float, own: set[int]) -> bool:
     deadline = time.monotonic() + wait
     announced = False
@@ -879,7 +892,10 @@ def main(argv: list[str] | None = None) -> int:
             if lock is None:
                 print("refusing: another verify_change run holds the host lock")
                 return 3
-            if not wait_for_quiet_host(args.wait_other, {p.pid for p in runner.children}):
+            if pytest_lock_enforced(wt):
+                # the child takes the host pytest lock and waits for it (BUG-0532/0537)
+                print("one pytest at a time: the child waits for the host pytest lock")
+            elif not wait_for_quiet_host(args.wait_other, {p.pid for p in runner.children}):
                 print("refusing: other pytest processes are still running (one pytest at a time)")
                 return 3
 
