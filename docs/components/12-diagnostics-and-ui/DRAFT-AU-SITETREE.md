@@ -730,7 +730,7 @@ whose cost grows quadratically with the page under test, invisible on an idle ho
 turned every fixed timeout in the site-map browser tests into a load-dependent race.**
 The product code is not involved (the same profile on `7ebf48a`).
 
-**Fix** (the commit after `e55379d`): `Tab.item` matches the label elements (one pass)
+**Fix** (`3fb76bb`): `Tab.item` matches the label elements (one pass)
 and steps up to each label's row's item (`xpath=../..`); same structure, same document
 order. Guard G5 (`tests/test_web_live_focus.py::test_no_browser_test_locates_by_a_descendant_filter`,
 proven on the old helper) makes any `has=`/`has_not=` filter in a browser test a reviewed
@@ -1055,7 +1055,15 @@ supersedes PA-0518(1) for live views; amends PA-0023.
 > - **What:** (1) revision 2's text, BUG-0534's draft and its ERROR_LOG draft attributed `test_a_refresh_keeps_focus_selection_and_loaded_pages`'s one failure on `7ebf48a` to the product's E8/E2, and the harness failure that opened the item to E3 meeting an E1 refresh, without measuring either run. At implementation the first recurred under `-n 4` load and was measured to be the tests' own `Tab.item` locator, quadratic in the tree (~1.9 s of renderer CPU per resolution), which also produced the second symptom with no refresh at all (DRAFT §5.6). (2) The revert proofs against `e55379d` found two named tests passing with their defect re-created: B9 claimed "restoring never scrolls" but measured the window, which the site map never scrolls; B1 claimed "the same element" but checked a locator that a re-created button restored by its key also satisfies (§11.4). Both were listed in FR-UI-514's Enforced-by line.
 > - **Evidence:** `scratchpad/au-sitetree/impl/loop_*.out`, `dump_*.txt`, `cpu_steps_old_item.out`, `cpu_steps_new_item.out`; `impl/mut/mutants.out` (two NOT CAUGHT); DRAFT-AU-SITETREE §1.6, §5.6, §11.4.
 > - **Impact:** none landed. E8, E3 and E1 are each real and tested; but three intermittent failures would have reached the harness as "flaky", the bug record named a cause it had not shown, and FR-UI-514's `preventScroll` and in-place clauses had no test that could fail.
-> - **Status:** fixed in the commit after `e55379d`: `Tab.item` locates the label and steps up, guard G5; B9a scrolls its own container; B1 asserts element identity; both mutants re-run (§11.4); the attributions corrected (§1.6, BUG-0534, the ERROR_LOG text).
+> - **Status:** fixed in `3fb76bb`: `Tab.item` locates the label and steps up, guard G5; B9a scrolls its own container; B1 asserts element identity; both mutants re-run (§11.4); the attributions corrected (§1.6, BUG-0534, the ERROR_LOG text).
+
+- **`docs/claude_juicelab_failures.md`**, a third entry (F-number from the coordinator):
+
+> ### F-NNN — AU-SITETREE stopped its own harness run at 96% without checking whether it was still waiting
+> - **What:** told to merge `01192c3` and restart a harness run "already waiting", the lane stopped its run on `3fb76bb` by its recorded PID on the strength of an earlier "waiting for other pytest processes" line, without reading the log's current state: the run was past its wait, at 96% of its 408-file parallel pass with no failure.
+> - **Evidence:** `scratchpad/au-sitetree/impl/vc_3fb76bb/console.out`, `parallel.log` (last progress line `[ 96%]`, "interrupted (signal 15)"); DRAFT-AU-SITETREE §11.6.
+> - **Impact:** about 28 minutes of the host's shared pytest lock spent for nothing while two other lanes queued on it; the restarted run on `eb95cd4` took another 29 minutes. No result was lost or misreported.
+> - **Status:** recorded; the restarted run is the one reported (§11.6).
 
 ### 9.4 A new test defect found by blocker 6 (number from the coordinator)
 
@@ -1066,7 +1074,7 @@ coordinator to number (`BUG-NNNN`, `PA-NNNN`) and file.
 
 > # BUG-NNNN — The site-map browser tests' item locator was quadratic and starved the page under parallel load
 > - Date: 2026-10-20
-> - Status: fixed (AU-SITETREE, the commit after `e55379d`)
+> - Status: fixed (AU-SITETREE, `3fb76bb`)
 > - Severity: medium (tests only). Three live-view browser tests failed intermittently under the harness's parallel load; one failure on `7ebf48a` had been put down to the product.
 >
 > ## Description
