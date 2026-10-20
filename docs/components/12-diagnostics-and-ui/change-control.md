@@ -98,8 +98,16 @@ Newest first.
   - [x] L1-6, L1-8, L1-9, L1-15, B9, the autouse fixtures; every named revert re-proved (§11.4) — done
   - [x] FR-UI-505, FR-UI-510 edited; FR-UI-514 added; NFR-UI-live, NFR-UI-read-only amended — done
   - [x] BUG-0534; texts for PA-0534, SP-58, ERROR_LOG, CHANGELOG, ARCHITECTURE to the coordinator — done
-  - [ ] `scripts/verify_change.py --base 4ee8007` on the committed tree; counts quoted — in-progress
-- Effectiveness: pending (the harness run on the committed tree).
+  - [x] `scripts/verify_change.py --base 4ee8007` on the committed tree; counts quoted — done
+- Effectiveness (assessed 2026-10-20): `scripts/verify_change.py --base 4ee8007` on the committed tree `eb95cd4` (`3fb76bb` plus the merge of `01192c3`; the whole suite, since `tests/conftest.py` changed): **408 files, 8248 passed, 0 failed, 0 errors, 42 skipped, 36 xfailed**, one parallel pass, 1729 s (`scratchpad/au-sitetree/impl/vc_eb95cd4/`). The 42 skips are sandboxes, optional extras and tools absent here; none is a web, store or browser test. The browser files, under
+  `FUZZLAB_REQUIRE_BROWSER=1`: `test_web_sitetree_browser.py` 36 passed,
+  `test_web_diagrams.py` 21, `test_web_pages_browser.py` 10, `test_web_projects_browser.py` 2,
+  `test_web_launcher_browser.py` 1; `test_web_live_focus.py` 12, `test_web_sitetree.py` 136
+  (2 xfailed), `test_web_store_locks.py` 8. Each named revert re-proved against the
+  implementation: 33 mutants, all caught (DRAFT §11.4); two were not caught on `e55379d`
+  until their tests were fixed in `3fb76bb` (B9a measured the wrong scroll, B1 checked a
+  locator, not the element). The four browser files in one `-n 4` pass after the locator
+  fix: 8 of 8 runs passed, ~50 s each (before: 4 of 11 failed, ~270 s; §11.5).
 
 ### CC-UI-0066 — A run that does not decide its candidate is drawn as such and not counted as evaluated (FR-UI-510/511, BUG-0523) (2026-10-19)
 - Change (`fuzzlab/report/diagram.py`):

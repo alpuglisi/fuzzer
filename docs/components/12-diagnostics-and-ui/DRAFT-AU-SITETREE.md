@@ -9,7 +9,8 @@
   sound; six blockers, all in this text or the tests, fixed first: §11). Revision 2's
   text below is kept as the reviewed record; where implementation diverged, §11.3 says
   so and the change-control entries (CC-UI-0068, CC-CORE-0071, CC-FUZZ-0108) describe
-  what landed. The probes are scratch files (§1.9, §11.2).
+  what landed. The probes are scratch files (§1.9, §11.2). Verified: the harness on the
+  committed tree is green (§11.6), every named revert caught (§11.4).
 
 ## R. Revision 2 at a glance
 
@@ -1243,3 +1244,17 @@ tests each, in 49.8-54.0 s**. Before the fix (`impl/loop_1.out`..`loop_11.out`, 
 failing steps fell from 1.35-2.73 s to 0.02-0.06 s (§5.6). With a 4-in-11 failure rate,
 eight clean runs in a row would happen by chance with probability about 0.03 ((7/11)^8); the
 measured CPU drop is the causal evidence, the runs corroborate it.
+
+### 11.6 The harness on the committed tree
+
+`scripts/verify_change.py --base 4ee8007 --wait-other 7200` on `eb95cd4` (`3fb76bb` plus
+the merge of `01192c3`, BUG-0537's harness fix, merged on the coordinator's instruction;
+a first run on `3fb76bb` was stopped by its own PID to restart on the merged harness;
+it was past its wait, at 96% of its parallel pass with no failure, which was not checked
+before stopping it: about 28 minutes of the host's pytest lock lost, `impl/vc_3fb76bb/`). `tests/conftest.py` changed, so the whole suite was selected: **408
+files in one parallel pass, 8248 passed, 0 failed, 0 errors, 42 skipped, 36 xfailed**,
+1729 s (`impl/vc_eb95cd4/`). The skips are sandboxes, optional extras and tools absent
+here, none a web, store or browser test. Browser files (`FUZZLAB_REQUIRE_BROWSER=1`):
+`test_web_sitetree_browser.py` 36 passed, `test_web_diagrams.py` 21,
+`test_web_pages_browser.py` 10, `test_web_projects_browser.py` 2,
+`test_web_launcher_browser.py` 1.

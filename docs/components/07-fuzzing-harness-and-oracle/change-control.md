@@ -23,8 +23,11 @@ Newest first.
 - Deliverables:
   - [x] the open through `open_read_only` — done
   - [x] `tests/test_auto.py::test_the_header_point_estimate_reads_the_spider_db_through_the_read_only_opener` (new: the opener is used, the estimate, no create, no write, a non-SQLite file) and `tests/test_core_store_read_only.py` (C4, the guard) — done
-  - [ ] verified with CC-UI-0068 and CC-CORE-0071 (one harness run) — in-progress
-- Effectiveness: pending (the harness run on the committed tree).
+  - [x] verified with CC-UI-0068 and CC-CORE-0071 (one harness run) — done
+- Effectiveness (assessed 2026-10-20): `scripts/verify_change.py --base 4ee8007` on the committed tree `eb95cd4` (`3fb76bb` plus the merge of `01192c3`; the whole suite, since `tests/conftest.py` changed): **408 files, 8248 passed, 0 failed, 0 errors, 42 skipped, 36 xfailed**, one parallel pass, 1729 s (`scratchpad/au-sitetree/impl/vc_eb95cd4/`). The 42 skips are sandboxes, optional extras and tools absent here; none is a web, store or browser test. `test_auto.py` 17 passed. Re-proved
+  (DRAFT-AU-SITETREE §11.4): `header_point_estimate` with its own read-only URI again fails
+  `test_every_read_only_open_goes_through_the_opener` and
+  `test_the_header_point_estimate_reads_the_spider_db_through_the_read_only_opener`.
 
 ### CC-FUZZ-0106 — Every sender places a query value through one owner (BUG-0531) (2026-10-20)
 - Placement: pre-assigned to AU-REQID14 (audit defect 14); CC-FUZZ-0105 is another

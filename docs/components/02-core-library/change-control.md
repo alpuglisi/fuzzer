@@ -45,8 +45,13 @@ Newest first.
   - [x] measurements (§1.4 N, the backup API; §1.7; the opener on non-SQLite files, §11) and failing tests (§5.2, L1-12) — done
   - [x] the opener, `is_sqlite`, the `inspect`/`summary`/`copy_to` changes, the age bound — done
   - [x] FR-CORE-508 added; BUG-0535; texts for PA-0535, SP-59, ERROR_LOG and CHANGELOG to the coordinator — done
-  - [ ] verified with CC-UI-0068 and CC-FUZZ-0108 (one harness run) — in-progress
-- Effectiveness: pending (the harness run on the committed tree).
+  - [x] verified with CC-UI-0068 and CC-FUZZ-0108 (one harness run) — done
+- Effectiveness (assessed 2026-10-20): `scripts/verify_change.py --base 4ee8007` on the committed tree `eb95cd4` (`3fb76bb` plus the merge of `01192c3`; the whole suite, since `tests/conftest.py` changed): **408 files, 8248 passed, 0 failed, 0 errors, 42 skipped, 36 xfailed**, one parallel pass, 1729 s (`scratchpad/au-sitetree/impl/vc_eb95cd4/`). The 42 skips are sandboxes, optional extras and tools absent here; none is a web, store or browser test. `test_core_store_read_only.py` 5 passed,
+  `test_web_store_locks.py` 8, `test_core_project.py` 90, `test_web_projects.py` 123,
+  `test_query_placement.py` 118 (8 xfailed). Re-proved against the implementation
+  (DRAFT-AU-SITETREE §11.4): the magic read with `open()` again, the same through
+  `core/secretfile.py` (the old guard scope's miss), the opener without `query_only`, with a
+  shared cache, and `summary` without its age bound are each caught by their named tests.
 
 ### CC-CORE-0069 — One classification of an HTTP answer (SP-56, FR-CORE-507, BUG-0528, BUG-0529) (2026-10-20)
 - Change: new `fuzzlab/core/comparability.py` (90 lines).
