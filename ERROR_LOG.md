@@ -18,6 +18,18 @@ Format per entry:
 
 ---
 
+## 2026-10-20 — oracle and consumers (a non-comparable control was evidence; BUG-0529, recurrence of BUG-0117's class)
+- **Symptom:** a quote's SQL error with `429 rate limited` on the benign control confirmed SQLi; 401/403/502/504/timeout/login-redirect controls confirmed path traversal, CRLF, the boolean and NoSQL differentials and ReDoS; an unobserved PRG follow-up, a throttled peer replay or probe was a negative; the live WAF filter recorded a 429 as a bypass; the blind-SQLi builder averaged non-application samples; the runner judged a 429 by its status class.
+- **Root cause:** no shared classification of whether an HTTP answer is the application's own, and the facts it needs (credential carried, credential submission, login redirect) never reached the consumers.
+- **Remediation:** SP-56 `core/comparability.response_class` with SP-16 `login_facts`; the oracle's layer 1 (`_ObservedOnly`) and layer 2 (`_compared`, declared admits), `not-comparable`, scheduler `charge`; blind SQLi, live filter, runner (CC-CORE-0069, CC-SESS-0028, CC-FUZZ-0105, CC-MUT-0403, CC-SCHED-0007); PA-0529, SP-56.
+- **Status:** Fixed
+
+## 2026-10-20 — contract runner (incomplete exchanges and unobserved state checks passed; BUG-0528)
+- **Symptom:** a 200 whose body was cut, stalled or arrived after the deadline passed and became the endpoint's baseline (hiding later matches); a state check that could not be evaluated, or read a 401/429/5xx body, never stopped a pass; a cut or login-redirected setup step counted; the response was not closed on a raise.
+- **Root cause:** the runner read "observed" off `status is None` and "satisfied" off "not False": no completeness or evaluation requirement on the observations behind a pass.
+- **Remediation:** `Exchange.incomplete`, close in `finally`, classify-first `judge`, three-valued state checks, setup checks, omitted evidence (CC-FUZZ-0105, FR-FUZZ-52 in place); PA-0528.
+- **Status:** Fixed
+
 ## 2026-10-20 — senders (each sender placed a query value differently; BUG-0531, a recurrence of BUG-0115's class)
 - **Symptom:** for `?id=1&tag=a&tag=b`, point `id`, the anonymous senders sent `id=1&tag=a&tag=b&id=M` (a first-value server read `1`), the authenticated seam sent `id=M&tag=b` (and turned `%20` into `+`, dropped empty parts, turned `%E9` into `%EF%BF%BD`), M6 appended, and a bound query point's PRG follow-up re-sent the payload; on 8100959, 45 of 48 sender × case rows and all 8 M6 rows failed.
 - **Root cause:** no owner for query placement (each sender built it: `params=`, a `dict(parse_qsl)` rebuild, string appends), and the conformance check read the query as a `dict` on a query-less URL, so it could not see an occurrence.

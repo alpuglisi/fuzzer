@@ -1010,3 +1010,21 @@ Juice Shop lab is complete.
 - **Evidence:** the round-3 review (2026-10-20); `scratchpad/rev14/guard_ext.py`.
 - **Impact:** none on code (caught at the design gate); one more revision.
 - **Status:** fixed: the shapes are flagged, proven on 50 offenders and 10 near-misses, and PA-0531(1) states the guard's limits.
+
+### F-100 — AU-OUTCOME's revision-2 design would have lost true positives; PA-0507(2) not followed
+- **What:** revision 2 read a credentialed 401 or login redirect to any control as a lost session, with a new credential test drafted while `core.redaction.is_credential_name` and SP-16's login decisions existed. Reviewer A measured that `/j_security_check` (302 -> `/login?error`) and `/register` (302 -> `/login`), both true positives at 8100959, would become inconclusive.
+- **Evidence:** reviewer A, `scratchpad/review_a/tp_loss.py`; DRAFT-AU-OUTCOME §1.2.
+- **Impact:** none landed; caught in review. Fixed by the credential-submission fact (SP-16 reuse).
+- **Status:** closed (CC-SESS-0028).
+
+### F-101 — AU-OUTCOME's revision-3 design over-matched credential submissions and over-raised on unobserved follow-ups
+- **What:** revision 3 reused `browserlogin.account_endpoint_reason` for "a credential submission" without measuring it on non-credential URLs (it matches `/api/users/42`, `/api/account/billing`, `/rest/user/whoami`, `/api/orders/42/change-status`, hiding lost sessions), and made every `PRG_UNOBSERVED` follow-up non-comparable, which would have lost SqliError's, PathTraversal's and FsPathRead's direct-signature true positives. My merged must-fix list (M4) asked for that broad form; the round-1 reviewer who proposed it corrected it in round 3.
+- **Evidence:** review round 3 (B1, B2), measured; the B1 and B2 pins in tests/test_oracle_comparable_controls.py and tests/test_disco_runner_outcomes.py.
+- **Impact:** none landed; caught in review and fixed as specified, with the owner's approval to skip a fourth round.
+- **Status:** closed (CC-FUZZ-0105, CC-SESS-0028).
+
+### F-102 — The AU-OUTCOME lane started an ad-hoc pytest while a harness run was finishing
+- **What:** after merging AU-REQID14, the lane's ad-hoc pytest (8 files) started when its 600 s wait loop ran out instead of refusing to start, overlapping the last ~1-4 s of my `verify_change --base 8117855` run (the one-pytest rule, BUG-0143; same class as F-092, F-095, F-097, F-098).
+- **Evidence:** the lane's AU-OUTCOME implementation report (2026-10-20); `scratchpad/v14/parallel.log`.
+- **Impact:** the other run finished green (4121 passed, 5 skipped, 25 xfailed); the lane stopped its own run; no result affected.
+- **Status:** open until the owner-approved host-wide pytest lock lands; the lane's waits now refuse to start unless the host is idle.

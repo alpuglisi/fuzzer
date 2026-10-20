@@ -1184,6 +1184,15 @@ tracked in the requirements files, not here.
   origin `canonical_origin(base_url)`; ML, the report, the run page, finding detail, the
   Repeater pivot and the site tree read through it (guard test). `core.evidence.
   method_key` is the one method normalisation for joins.
+- **One classification of an HTTP answer** `[built]` (CC-CORE-0069, FR-CORE-507, SP-56):
+  `core/comparability.py::response_class` names an answer application /
+  throttle-or-unavailable / gateway / auth-failure / policy-block / incomplete from its
+  status, headers and the exchange's facts (complete; credentialed, per probe; credential
+  submission and login redirect from SP-16's `session.detect.login_facts`, FR-SESS-22).
+  Pure and total; it imports nothing above core. Read by the contract runner, the oracle
+  (`oracle/probe.py::require_observed` / `require_comparable`), the blind-SQLi builder and
+  the live WAF filter; a status guard keeps every other status classification on a
+  reviewed allowance list.
 - **Process trees** `[built]` (CC-CORE-0048, FR-CORE-38, BUG-0125): `fuzzlab/procutil.py`,
   a stdlib-only leaf (the one module `fuzzlab.labgen` may import beyond itself and the
   label contract). Every long-lived child the toolkit or its tests start -- the five
@@ -1309,7 +1318,12 @@ tracked in the requirements files, not here.
       any other candidate no mechanism could place is `inconclusive` (mechanism
       `unplaceable`, counted separately as `oracle_unplaceable`), never a negative; a `fragment` point draws
       only client-side rules (`location_not_in`), and its finding keeps its route
-      (`oracle.finding_url` → `to_route_path`);
+      (`oracle.finding_url` → `to_route_path`). Every response a mechanism reads is
+      checked (layer 1, `_ObservedOnly`), and every control, baseline sample, compared
+      slot and replay must be an application answer its strategy admits (layer 2,
+      `ConfirmationStrategy._compared`; SP-56); otherwise the candidate is inconclusive
+      `not-comparable` and the scheduler is charged without a reward (FR-FUZZ-63,
+      CC-FUZZ-0105, CC-SCHED-0007). `Probe` carries `credentialed` and `timeout`;
     - since FR-FUZZ-56 (CC-FUZZ-0095) the ground-truth contract also admits PUT and
       PATCH (never DELETE), probed only with `--fuzz-json-writes` (one method set,
       `store_adapter.WRITE_METHODS`, SP-41); a stored-XSS case plants through its
@@ -1550,8 +1564,12 @@ tracked in the requirements files, not here.
   endpoints from a disco inventory, test cases with setup dependencies and oracles) is
   validated by one reader, then executed: setup steps in order with JSONPath
   extraction, every send gated at the send (scope, `check_send_url`, no redirects, byte
-  cap, rps), no-response classified by SP-34, oracles (case rules, 5xx, stack-trace and
-  database-error patterns against the endpoint's baseline, schema drift, state checks),
+  cap, rps), no-response classified by SP-34; only a complete exchange judged, every
+  answer classified once by SP-56 with SP-16's login facts (a throttle, a refused
+  credential or an unexpected policy block is an `error`, CC-FUZZ-0105); case query values
+  placed by SP-42; oracles (case rules, 5xx, stack-trace and database-error patterns
+  against the endpoint's baseline of complete application answers, schema drift,
+  three-valued state checks),
   a JSONL results ledger and redacted evidence. Independent of the store and of the
   oracle pipeline below.
 - **Fuzzing harness** `[built]`: the generalized `template + injection_point +
@@ -2139,7 +2157,8 @@ mutation engine's hill climbing depend on grey-box signals.
 
 `fuzzlab/disco` (D70) sits beside the crawler layer and talks through files, not the
 store: `capture.jsonl` -> inventory -> contract -> results. It imports `core/`
-(urls, redaction, net, credentials, http headers), the session layer's login-URL and
+(urls, redaction, net, credentials, http headers, comparability (SP-56)), the session
+layer's login-URL, login-facts (SP-16) and
 storage-state predicates, `tools/navguard.py` (every browser owner),
 `tools/store_adapter.credential_change_rule` (SP-19), `tools/probesender._unobserved`
 (SP-34) and `procutil` -- and nothing from the legacy spider (`tools/spider.py`,
