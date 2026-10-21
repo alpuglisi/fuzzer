@@ -182,7 +182,15 @@ Newest first.
     replaces `test_an_answer_the_manager_sent_without_the_session_is_never_extracted`
     (it asserted the withheld row, not what the site received). Pre-fix proof, one
     pytest invocation (`scratchpad/lanes/SPIDER/r1/proof.log`): 5 failed in 4.87 s, each on its own assertion -- on 9071440's `spider.py`, the resume test ("B's crawl loaded A's row": `A/logout` 6 GETs, 3 expected) and the unserved-host test (`GET /deeper?via=alias` with no cookie); on c483dc1's `spider.py`, loaded in place of the tests' module, the redirect test (B got `GET /land`), the selector-form test (`/pick?bug=1`, `?bug=2` with no cookie) and the unserved-host test (the alias got a GET with no cookie). Targeted
-    run: pending (recorded by the follow-up docs commit).
+    run on a83cb93, one pytest invocation of 13 files (`-n 3 --dist loadfile`, the
+    harness's `FUZZLAB_REQUIRE_BROWSER/LINT/NETNS=1`; the two changed files, the
+    spider suites whose loads pass `_visit` -- `test_spa_query`, `test_spa_routes`,
+    `test_navigation_aborts`, `test_spider_links`, `test_spider_scope`,
+    `test_forms_phase1/2` -- and the guards that read `spider.py` or the requirements:
+    `test_session_origin_scope`, `test_logout_redirect`, `test_browser_scope`,
+    `test_requirements_traceability`): 796 passed, 0 failed, 0 skipped, in 430.62 s
+    (`scratchpad/lanes/SPIDER/r1/targeted.log`). `verify_change.py` was not run by the
+    lane (the orchestrator verifies at merge).
   - Impact: `crawl_stats` gains `loads_refused[<reason>]` (when one refused) and
     `session_host_unserved`; its readers are the spider itself and two tests
     (`test_spa_routes.py` takes `CRAWL_COUNTS` out first; searched `crawl_stats` across
