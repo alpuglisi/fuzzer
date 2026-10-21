@@ -118,11 +118,16 @@ def test_discos_reads_and_the_spiders_form_read_are_built_on_the_owner():
     from fuzzlab.disco import compose
     from fuzzlab.tools import spa
     from fuzzlab.tools.composed import COMPOSED_JS
+    # what FORMS_JS may hold besides the owner: `_LABELS_FN` (its own allowance: a
+    # detached clone's query) and the reviewed legacy read of a container holding a
+    # shadow-root password control (ALLOWED["...::FORMS_JS"])
+    allowed = (COMPOSED_JS, spa._LABELS_FN, "Array.from(c.querySelectorAll(sel))")
     for script in (compose.READ_JS, compose.FIELDS_JS, spa.FORMS_JS):
         assert COMPOSED_JS in script
-        assert not QUERY.findall(script.replace(COMPOSED_JS, "")
-                                 .replace("Array.from(c.querySelectorAll(sel))", "")), \
-            "a light-tree query in a composed read"
+        rest = script
+        for fragment in allowed:
+            rest = rest.replace(fragment, "")
+        assert not QUERY.findall(rest), "a light-tree query in a composed read"
 
 
 def test_the_composed_tree_guard_catches_synthetic_offenders():
