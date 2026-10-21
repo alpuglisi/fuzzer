@@ -175,6 +175,18 @@ def test_a_recorded_core_is_never_accepted_by_a_proper_subset_nor_shrunk():
     assert contract_mismatch(state, _reading(f"{BASE}/shop?step=2", [PAY, TERMS])) == "route"
 
 
+def test_a_state_under_a_sub_path_keeps_its_whole_entry_url():
+    """PA-0113 / PA-0300: a state recorded in an app under a sub-path keeps its whole
+    entry URL (path and query), and the same page at the origin's root is another
+    route, never the recorded state."""
+    url = "http://127.0.0.1:8080/shop/app/cart?step=2"
+    state = State.read(_reading(url, [PAY, TERMS]), entry_url=url)
+    assert state.entry_url == url and state.url == url
+    assert contract_mismatch(state, _reading(url, [PAY, TERMS, NEXT])) is None
+    assert contract_mismatch(state, _reading("http://127.0.0.1:8080/cart?step=2",
+                                             [PAY, TERMS])) == "route"
+
+
 def test_only_a_declared_optional_feature_or_marker_may_be_missing():
     url = f"{BASE}/shop"
     state = State.read(_reading(url, [PAY, TERMS], ["hidden:step=2"]), entry_url=url)

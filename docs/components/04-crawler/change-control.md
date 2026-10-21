@@ -80,8 +80,9 @@ Newest first.
     `transient_dropped`, Theme once, no unrestorable state, per-route step uniqueness;
     the module run's safety deadline 240 -> 480 s, with an assertion that the deadline
     did not end it: the run is bounded by its 80 actions, which each state's own work
-    now uses up, measured 229 s unloaded) and `tests/test_disco_harvest.py` (the alias
-    reads `structures` and a `Reading`).
+    now uses up, measured 229 s unloaded), `tests/test_disco_harvest.py` (the alias
+    reads `structures` and a `Reading`) and `tests/test_base_url_subpath_registry.py`
+    (`State.read`'s `entry_url` registered with its sub-path test).
 - Impact (other components / project):
   - Store and file contracts: no store table changes. `actions.jsonl` gains a key and
     `explore.json` gains and loses report keys; their readers
@@ -112,7 +113,27 @@ Newest first.
     done
   - [x] FR-CRAWL-19 amended in place; FR-CRAWL-31..33 added; section 5's file
     contracts — done
-- Effectiveness (assessed <date> or pending): pending.
+- Effectiveness (assessed 2026-10-21, on e274706):
+  - **On the pre-fix code** (08e3eaa's `explore.py` and `fingerprint.py` in a scratch
+    copy, `FUZZLAB_REQUIRE_BROWSER=1`): all five real-browser tests fail on their
+    behavioural assertion, and the pure module cannot import (`EQUIVALENT`, the new
+    names). Measured:
+    - wizard: `/api/wizard/finish` requested 0 times (three loads of `/wizard`);
+    - dialog: the confirmation POST 0 times;
+    - transient error: `/api/flaky/load` 0 times;
+    - cart: the restore was accepted and the core shrank from
+      `{start, pay, terms}` to `{start, pay}`;
+    - order: `POST /api/order` 3 times (two replays).
+  - **On the fix:** the 14 pure tests, the 5 real-browser tests and the 14 e2e tests
+    pass (the e2e module run ends on its 80 actions, 229 s unloaded, every endpoint
+    of the fixture reached, the hidden report's button acted on after its harvest
+    load).
+  - **verify_change** `--base 08e3eaa`: on e274706, 75 files, 3016 passed, 2 failed
+    (the query-builder guard on `execution_route`'s `"?" + "&".join`, and the
+    base-URL registry on `State.read`), 1 skipped, 20 xfailed; both fixed in the
+    follow-up commit (the key is a JSON list; a sub-path test and a registry entry).
+    The run on the follow-up commit: in the lane report.
+  - Not measured on a third-party app (PA-0501(1)): this lane had no lab; residual R2.
 
 ### CC-CRAWL-0054 — The JSONL tail caps a line while reading it; the contract runner reads bounded and matches contract patterns in a killable worker (BUG-0536) (2026-10-20)
 - Placement: pre-assigned to AU-BOUNDED (audit defects 23 and 27, with the disco and

@@ -156,19 +156,13 @@ def execution_route(url: str) -> str:
     served (numeric segments kept: ``/users/17`` and ``/users/42`` are two routes), every
     query pair with its value, and a SPA route fragment with its own query pairs. A
     sensitive name's value is replaced (a token selects no workflow and changes per
-    session)."""
+    session). A key (a JSON list), never a URL: nothing sends it."""
     parts = urlsplit(url or "")
-    route = f"{canonical_origin(url) or ''}{parts.path or '/'}"
-    pairs = _query_pairs(parts.query)
-    if pairs:
-        route += "?" + "&".join(pairs)
+    key = [canonical_origin(url) or "", parts.path or "/", _query_pairs(parts.query)]
     spa = spa_route(url)                     # (route path, route query)
     if spa:
-        route += "#" + (spa[0] or "/")
-        spa_pairs = _query_pairs(spa[1])
-        if spa_pairs:
-            route += "?" + "&".join(spa_pairs)
-    return route
+        key += [spa[0] or "/", _query_pairs(spa[1])]
+    return json.dumps(key, separators=(",", ":"))
 
 
 def element_multiset(elements: list[dict]) -> tuple[tuple[str, int], ...]:

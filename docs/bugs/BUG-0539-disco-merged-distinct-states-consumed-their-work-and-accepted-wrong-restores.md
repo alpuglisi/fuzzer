@@ -41,19 +41,24 @@ shrunk). Reproduced at 08e3eaa by `tests/test_disco_state_identity.py` and
 Measured at 08e3eaa on loopback pages the browser tests serve (one guarded Chromium, no
 capture proxy, no harvest; no target contacted):
 - **Wizard** (three steps, one layout, Next navigates by script): the finish request was
-  never made; step 2 hashed like step 1.
+  made 0 times; step 2 hashed like step 1.
 - **Two-stage dialog** (the same Next, the second stage adds Back): the confirmation POST
-  was never sent; the second stage's Next was "seen" on the route.
+  was sent 0 times; the second stage's Next was "seen" on the route.
 - **Transient error** (the first attempt of the only action raises a Playwright error):
-  the action's request was never made.
+  the action's request was made 0 times.
 - **Consumed control** (a cart recorded with pay and terms, terms gone on the second
-  load): the restore was accepted, the core shrank to `{start, pay}`, and pay was acted
-  on as that state.
-- **POST transition** (Begin POSTs and reveals Confirm and Details): every restore of
-  the revealed state replayed Begin; the server received the order several times.
+  load): the restore was accepted and the core shrank from `{start, pay, terms}` to
+  `{start, pay}`.
+- **POST transition** (Begin POSTs and reveals Confirm and Details): the server
+  received the order 3 times (two replays).
 
-The figures for each are in CC-CRAWL-0055's effectiveness (the pre-fix run of each new
-test).
+These are the pre-fix runs of the new tests (CC-CRAWL-0055's effectiveness).
+
+The fix met two more defects of the same class on the e2e fixture, both fixed here:
+the explorer's first-visit reading made every step on the restored start page look
+like a transition to a new state; and `_gather` marked a script or stylesheet body read
+before reading it, so the second load of the start URL (the first-visit check) left the
+first load's bodies unreadable and no script route was ever found.
 
 ## What the bug was identified to be
 Each identity decision -- "this state was visited", "this step's work is done", "this
@@ -160,7 +165,9 @@ of what it must not merge.
   - `max_same_signature`: kept, now reported (`same_signature_capped`);
   - `denied` (a step denied run-wide after a lost session): audit defect 4's area, not
     in scope, not changed;
-  - harvest queues by exact URL: kept.
+  - harvest queues by exact URL: kept;
+  - `_gather`'s `bodies_read` marked a body read before reading it, so a failed read
+    consumed it for the run: **fixed** (marked after the read).
 - `disco/synth.py` endpoint keys (origin, method, template, content type): an inventory
   of observed requests, not a work decision; the audit's synthesizer findings (defect 9
   for the spider's capture) are their own items.
