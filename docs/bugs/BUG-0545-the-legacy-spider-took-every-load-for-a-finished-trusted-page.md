@@ -369,3 +369,165 @@ read back by a resumed run is a producer -- and its test asserts what an out-of-
 and a destructive target received; new (6): a regression test's pre-fix proof records
 the failing assertion of each test, and a fixture serves the pre-fix path what the
 test needs to reach its own behaviour.
+
+## Review round 2 (added in review round 2, 2026-10-21)
+An adversarial check of 8c2fa86; each finding below was confirmed by a skeptic
+(`scratchpad/lanes/SPIDER/review_round2.md`). Fixed on `lane/SPIDER-r2` (CC-CRAWL-0056,
+review round 2). This section supersedes the paragraphs above where they disagree.
+
+### What the fix still let through, or claimed without measuring
+- **S2-1: R6 on the other engine -- the Playwright engine loaded a loopback alias of the
+  session's origin without the session and filed its anonymous landing as the
+  identity's page.** Same setup as R6 (an identity crawl of `_IdSite` on `127.0.0.1`,
+  its home linking `http://localhost:PORT/deeper?via=alias`) with `engine="playwright"`.
+  The reviewer measured on 8c2fa86 (and 9071440: the same), with the manager's scope
+  `['127.0.0.1']` and with the CLI's default `['localhost', '127.0.0.1']`: the site
+  recorded `GET /deeper?via=alias` with Cookie `''` and an anonymous `GET /login`; the
+  alias was stored `(200, visited)` (final, never resumed); nothing in
+  `skipped_other_origin` or `failed_pages`. The cause: `browserauth._cookies_of` adds the
+  session cookie by the start URL, host-only for `127.0.0.1`, which Chromium sends to
+  that host only (measured here too: `scratchpad/lanes/SPIDER/r2/cookie_domains.out`);
+  `browser_launch_args` resolves every loopback spelling on the port; and the route's
+  `cookie_scope` (`header_scope_for` -> `in_origin_scope`, aliases folded) counts the
+  alias as the session's own origin, so it neither withheld nor isolated it. The round-1
+  fix had put R6's refusal in the static seam only, and its sweep gave the browser path
+  "withholds by route (FR-SESS-20)" without measuring what an alias received.
+- **S2-2: a fourth test failed on c483dc1 only because the crawl was anonymous.**
+  `test_a_session_lost_on_a_send_is_never_extracted_and_the_page_is_retried` failed on
+  c483dc1 with `KeyError: '/expiring'`: the site got `/`, `/robots.txt` and
+  `/sitemap.xml` only, since `_IdSite` linked `/secret` and `/expiring` from the live
+  session's home alone (round 1 moved `home_extra`, not those links). FR-CRAWL-34's
+  enforcement line ("each test fails on c483dc1 on its own assertion") was false for it,
+  and this doc's list kept "a session lost on a send never reached `/expiring`". Round
+  1's proof ran only the three tests the review named, so PA-0545(6) was not applied to
+  this one.
+- *Minor, recorded, not changed (outside this round's scope):* the cannot-carry and
+  failed-login tests fail on c483dc1 on their own behaviour ("DID NOT RAISE": the old
+  code crawled instead of refusing); the resume test fails on 9071440 at its scope
+  assertion first, so its destructive half is never shown failing on the pre-fix code.
+
+### Correction of "What it caused to fail" (added in review round 2)
+"A session lost on a send never reached `/expiring`" above was the anonymous crawl's
+doing, not the session-loss behaviour. With the anonymous home linking `/secret` and
+`/expiring` too, every test of `tests/test_spider_static_identity.py` was run on
+c483dc1 (a driver with the real fixtures, pytest imported as a library only,
+`fuzzlab.__file__` checked to be c483dc1's export; `scratchpad/lanes/SPIDER/r2/
+direct_c483dc1.out`). Each failing assertion, measured:
+
+| Test | Fails on c483dc1 at | What the old code did |
+|---|---|---|
+| static crawl carries the identity | `"welcome alice" in rows["/"]` | stored `/` as `home`; `/secret`, `/expiring` and `/login` as `(200, '')` |
+| session lost on a send | `"EXPIRING-PAGE" in rows["/expiring"]` | loaded `/expiring` anonymously, followed its 302 and filed `/login`'s answer as the page `(200, '')`; `/login` stored too |
+| identity the static engine cannot carry | `pytest.raises(..., match="cannot carry")`: DID NOT RAISE | crawled instead of refusing |
+| failed login stops the crawl | `pytest.raises(SessionAuthError)`: DID NOT RAISE | crawled instead of failing |
+| redirect to another origin | `other.requests == []` | followed A's `/go` to B |
+| host the manager does not serve | `sent == []` | `GET /deeper?via=alias` with no cookie |
+| selector form with the session | its `sid=` check | `/pick?bug=1`, `/pick?bug=2` with no cookie |
+| browser load the cookie does not reach (new) | `to_alias == []` | `GET /deeper?via=alias`, `GET /login` twice, all to `localhost` |
+
+The new browser test also fails on 8c2fa86, at the same assertion with the same three
+requests (pytest, below); the other seven pass there.
+
+### Root cause of the review findings (added in review round 2)
+Five Whys, S2-1:
+1. *Why did the browser send to the alias without the session?* The alias is in the
+   crawl's scope and on the session's canonical origin, so no rule refused it, and the
+   context's session cookie is host-only for the start's host.
+2. *Why did no rule see that?* The browser's session rule (`cookie_scope`) compares
+   canonical origins, which fold loopback aliases; the browser's carrier of the session
+   (its cookie jar) works by exact host. One engine held two notions of where the
+   session goes.
+3. *Why did round 1's fix not cover it?* R6's refusal was put where R6 was found -- the
+   static seam's addon -- not at the one point every load passes.
+4. *Why was the browser's disposition wrong in the sweep?* It was read from the route's
+   origin rule, not measured against what an alias received.
+5. *Why did the rule allow that?* PA-0545(1) asks for a disposition per send path, not
+   for each disposition to be measured; and PA-0545(5) put scope and the destructive rule
+   at the one gate, leaving "never without the session" to each engine's send path.
+
+S2-2: round 1 fixed the fixture for the links the review named and proved the tests the
+review named; PA-0545(6)'s "each test" was read as "each named test".
+
+**Root cause:** "a load never goes where the session does not reach" was enforced in one
+engine's send path, where it was found, instead of at the one gate every load passes; the
+decision of where the session reaches was taken from an origin rule, which is not how
+the browser's carrier (a host-scoped cookie jar) works; and the proofs measured the paths
+and tests a review named, not every path and test of their own lists.
+
+### Corrective action (added in review round 2)
+CC-CRAWL-0056, review round 2 (`fuzzlab/tools/spider.py`):
+- **S2-1.** `_visit` asks `_session_host_refusal` for every load of an identity crawl,
+  after the scope, destructive and other-origin checks, before any navigation or send. It
+  compares the host the load goes to with the hosts the engine's carrier of the session
+  reaches: the static engine asks the manager's own `prepare` through `_SessionAddon` on a
+  request that is never sent; the browser requires each of the session's credential
+  cookies, as its context holds them, to reach the host (`_cookie_reaches`, RFC 6265
+  domain match: host-only reaches that exact host). A refused load raises `HostNotServed`
+  with the cause: stored `failed` (unresolved, resumed), counted `session_host_unserved`,
+  never visited, never reported as another origin. No alias list: a loopback alias is
+  refused because the cookie does not reach it, and would be loaded if it did.
+- **S2-2.** `_IdSite` links its `protected` pages (`/secret`, `/expiring`) from the
+  anonymous home too; FR-CRAWL-34's enforcement text and the table above record each
+  test's measured failing assertion.
+- Tests: `tests/test_spider_static_identity.py::test_a_browser_load_the_session_cookie_does_not_reach_is_refused_never_sent`
+  (new, real Chromium; the CLI-default manager scope, so the cookie alone decides).
+  Pre-fix proof: one pytest invocation with 8c2fa86's `spider.py` in place, then
+  restored (`scratchpad/lanes/SPIDER/r2/proof.log`): 1 failed, 7 passed in 14.13 s; the
+  new test failed at `to_alias == []`. All 8 pass on the fix.
+
+**PA-0002 sweep (added in review round 2), by the carrier -- every send path of an
+identity crawl to a host the session might not reach:**
+- *Static page load:* the gate (the manager's `prepare`), then the seam: refused before
+  the send.
+- *Static redirect hop, static selector form:* the seam's `_SessionAddon`: refused before
+  the transport (measured by the reviewer on 8c2fa86: `/go` -> `localhost/land` never
+  requested; a form on `localhost` not submitted).
+- *Browser page load (a link, a seed, a probe, a resumed row) and its static fallback:*
+  the gate (cookie reach), then the seam for the fallback: refused before the navigation
+  (the new test).
+- *Browser redirect hop inside a load, and a browser selector form's submission:* **not
+  covered** -- residual R8 (CC-CRAWL-0056), measured on this fix
+  (`scratchpad/lanes/SPIDER/r2/browser_hops.out`): `localhost` received
+  `GET /pick?bug=1`, `?bug=2` and `GET /land` twice with no Cookie, and `/go` was stored
+  visited with the landing's answer. Flagged for the orchestrator (the hop walk is
+  `navguard`'s, a shared primitive's owner; this round's scope is the load gate).
+- *A page's own subresource and fetch requests to such a host:* sent by the route
+  without the cookie, as in a user's browser; their answers are never filed as pages
+  (their URLs are queued and refused at the gate). Code read, not measured.
+- *Other tools with the same carrier:* the auditor's browser fetcher
+  (`tools/fetcher.py::_start_browser`: the cookie by URL, scope by `in_origin_scope`, so
+  a loopback alias of its base would go without the cookie) and disco's adopted
+  `storage_state` (`disco/cli.py`, `disco/explore.py`). Code read, not measured, not
+  changed (other components); flagged.
+
+### Recurrence review (added in review round 2)
+- **S2-1** is R6 again (this bug's own PA-0545(1)), on the other engine, and BUG-0134's
+  class (where a session goes, decided by one predicate at every send path). **Match:
+  a recurrence after round 1's fix.**
+- **S2-2** is round 1's B2 again (a test failing on the old code for another test's
+  reason) and PA-0545(6). **Match: a recurrence after round 1's fix.**
+
+### Prior-preventive-action failure analysis (added in review round 2)
+- **PA-0545(1) (round 1): followed for the path the finding named, not enforced for the
+  others.** It asks the sweep for a disposition per send path, and round 1 gave the
+  browser "withholds by route" from the route's rule; nothing required the disposition
+  to be measured, and its tests covered the static engine only.
+- **PA-0545(5) (round 1): too narrow.** It put scope and the destructive rule at the one
+  gate every load passes, and left "never without the session" to each engine's send
+  path, where R6 was patched one engine at a time.
+- **PA-0134(1): one predicate, the wrong unit for one carrier.** "Every send path checks
+  membership through one predicate (`SessionState.origins`)" holds for headers and the
+  manager; a browser's cookie jar carries by host, so an origin that folds loopback
+  aliases admitted a host the cookie never reaches.
+- **PA-0545(6) (round 1): not applied to every test.** The proof recorded the failing
+  assertion of each test the review named, not of each test in the file.
+
+### Preventive action (added in review round 2)
+PA-0545 is strengthened again (no new number; text in the lane's doc_texts): (1) now
+also says a sweep's disposition for each send path is measured (what the target received
+for each host the crawl's scope admits), never read from the path's rule; new (7): a
+load goes only where the session's carrier in that engine reaches -- the manager for a
+static send, the cookie jar for a browser -- decided at the one gate every load passes
+by comparing the host the load goes to with the hosts that carrier reaches, never by an
+origin rule alone and never by an alias list; (6) now says *every* test of a regression
+test file, not only those a review names. Enforced by the new browser test as well.

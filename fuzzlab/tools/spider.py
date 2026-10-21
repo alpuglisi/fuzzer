@@ -727,13 +727,17 @@ class IdentityUnavailable(RuntimeError):
 
 
 class HostNotServed(RuntimeError):
-    """A static send of the crawl's identity went to a host the session manager does not
-    serve (outside its own scope, such as a loopback alias of the start it was not
-    given): its ``prepare`` applied no session and decided nothing, so the request would
-    have gone out without the identity to what the crawl takes for the session's own
-    origin (FR-CRAWL-34; BUG-0545 review, R6). Raised before the transport: nothing is
-    sent. The page is unresolved (``failed``), never ``withheld``. The message names the
-    host and the cause, never a URL."""
+    """A load or send of the crawl's identity would go to a host its session does not
+    reach, so it would go out without the identity to what the crawl takes for the
+    session's own origin (FR-CRAWL-34; BUG-0545 review, R6): the session manager does
+    not serve the host (its ``prepare`` would apply no session and decide nothing: a
+    static send), or the browser holds the session's cookies for another host (a
+    loopback alias of a host-only cookie's host: a browser load). Raised before any
+    navigation or transport, at `LocalSpider._visit`'s gate for every load
+    (`LocalSpider._session_host_refusal`; review round 2) and at the static seam for a
+    redirect hop or a selector form's submission (`_SessionAddon`): nothing is sent. The
+    page is unresolved (``failed``), never ``withheld``. The message names the host and
+    the cause, never a URL."""
 
 
 class _SessionAddon:
@@ -763,6 +767,35 @@ class _SessionAddon:
 
     def observe(self, request, response, identity):
         self._manager.observe(request, response, identity)
+
+
+def _cookie_reaches(cookie, host) -> bool:
+    """Does the browser send ``cookie`` (as a context holds it: a Playwright cookie with
+    a ``url``, or with a ``domain``) to a request for ``host``? A cookie added by URL,
+    or with a domain without a leading dot, is host-only: that exact host (measured:
+    Chromium sends a ``127.0.0.1`` cookie to ``127.0.0.1`` and not to ``localhost`` on
+    the same port, BUG-0545 review round 2). A dotted domain also reaches the hosts
+    under it, never an IP address (RFC 6265 §5.1.3). A deny-only check: where the
+    session goes is still decided by origin (``cookie_scope``)."""
+    import ipaddress
+    url = cookie.get("url")
+    if url:
+        domain, host_only = (urlparse(url).hostname or "").lower(), True
+    else:
+        raw = str(cookie.get("domain") or "").lower()
+        domain, host_only = raw.lstrip("."), not raw.startswith(".")
+    host = str(host or "").lower()
+    if not domain or not host:
+        return False
+    if host == domain:
+        return True
+    if host_only or not host.endswith("." + domain):
+        return False
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return True
+    return False
 
 
 class _Transient(Exception):
@@ -1330,6 +1363,57 @@ class LocalSpider:
         if self._destructive(url):
             return "destructive"
         return None
+
+    def _session_host_refusal(self, url):
+        """Why an identity crawl's load of ``url`` would go without the session -- the
+        session does not reach ``url``'s host in the engine that loads it -- or None
+        (FR-CRAWL-34; BUG-0545 review round 2, R6 on both engines). `_visit` asks it for
+        every load, before any navigation or send, whichever producer queued it:
+
+        - **the static engine** carries the session through the session manager: its
+          own ``prepare`` is asked (`_SessionAddon`, on a request that is never sent)
+          and a host it does not serve -- it would apply no session and decide nothing
+          -- is refused (`HostNotServed`'s message). A manager that cannot give the
+          session at all is `IdentityUnavailable`, as on a send;
+        - **the browser** carries it in its context's cookie jar: a host that one of the
+          session's cookies, as the context holds them (`_cookie_reaches`), does not
+          reach is refused -- a loopback alias of a host-only cookie's host among them.
+          A session without cookies goes by its headers, by origin (``cookie_scope``).
+
+        Generic: the host a request goes to is compared with the hosts the session
+        reaches, never with a list of aliases. A refusal never widens where the session
+        goes; an origin outside the session's is FR-SESS-20's (`_other_origin`)."""
+        if not self._authenticated:
+            return None
+        host = urlparse(url).hostname or ""
+        if self.engine != "playwright":
+            from fuzzlab.core.http import Request
+            from fuzzlab.session.manager import SessionAuthError
+            probe = Request("GET", url, identity=self._identity, component="crawler")
+            try:
+                _SessionAddon(self._session_manager).prepare(probe, self._identity)
+            except HostNotServed as exc:
+                return str(exc)
+            except SessionAuthError as exc:
+                raise IdentityUnavailable(f"{self._identity}'s session is unavailable: "
+                                          f"{exc}") from exc
+            return None
+        sess = self._browser_session
+        if sess is None:
+            return (f"the browser holds no session for host {host!r}: not loaded, since "
+                    f"it would go without the session (FR-CRAWL-34)")
+        held = [*sess.cookies, *((sess.storage_state or {}).get("cookies") or [])]
+        names = {name for name, _value in sess.checked_cookies}
+        unreached = [n for n in sorted(names)
+                     if not any(c.get("name") == n and _cookie_reaches(c, host)
+                                for c in held)]
+        if not unreached:
+            return None
+        return (f"the session's cookies do not reach host {host!r} in the browser "
+                f"({len(unreached)} of {len(names)} scoped to another host; a host-only "
+                f"cookie reaches its own host only): not loaded, since it would go "
+                f"without the session; start the crawl on that host if it is this "
+                f"app's (FR-CRAWL-34)")
 
     # ----- browser lifecycle (Playwright engine only) -----
     def _start_browser(self):
@@ -3856,7 +3940,7 @@ class LocalSpider:
         """FR-CRAWL-36: a load of ``entry`` failed. Its row is stored ``failed`` (with
         the answer's status when it had one, the load count, and the failure's class --
         an answer class or an exception class, never a URL or a body; a host the session
-        manager does not serve, `HostNotServed`, with that cause), never visited.
+        does not reach, `HostNotServed`, with that cause), never visited.
         A failure a later load may not have (`_is_transient`) is retried, after
         `_backoff_s`, while ``retry`` (not a seed or probe), loads remain and ``queue``
         can (the frontier); otherwise the page is unresolved: reported, and loaded again
@@ -3910,7 +3994,14 @@ class LocalSpider:
         BUG-0545 review (B1): every load first passes `_load_refusal` -- the crawl's
         scope and destructive rules, whichever producer queued it (a resumed crawl's
         stored rows included). A refused URL is never requested and nothing is stored
-        for it; the refusal is counted (``loads_refused[<reason>]``) and reported."""
+        for it; the refusal is counted (``loads_refused[<reason>]``) and reported.
+
+        BUG-0545 review round 2 (R6): in an identity crawl, a load whose host the
+        session would not reach in the engine that loads it (`_session_host_refusal`)
+        is refused next, before any navigation or send, whatever queued it: stored
+        ``failed`` with that cause (unresolved, resumed), counted
+        (``session_host_unserved``), never visited and never filed as another
+        origin's."""
         why = self._load_refusal(current_url)
         if why is not None:
             self._bump_shared(f"loads_refused[{why}]")
@@ -3948,6 +4039,14 @@ class LocalSpider:
         win, visited, bare_refused = None, False, False
         try:
             self._current_url = current_url
+            # BUG-0545 review round 2 (R6, both engines): a load the session would not
+            # reach -- its host unserved by the session manager (static), or not one
+            # the browser's session cookies reach -- is refused here, before any
+            # navigation or send; stored failed (unresolved), counted, never visited
+            unreached = self._session_host_refusal(current_url)
+            if unreached is not None:
+                self._bump_shared("session_host_unserved")
+                raise HostNotServed(unreached)
             if source in (spa.SEED_SOURCE, spa.PROBE_SOURCE):
                 # a query load starts from a fresh document (M7): the page
                 # before it is left first, outside the window, as any crawl
@@ -4230,11 +4329,12 @@ class LocalSpider:
                          f"({why}): outside this crawl's scope or destructive, never "
                          f"loaded (BUG-0123, NFR-CRAWL-safe).")
         if counts["session_host_unserved"]:
-            lines.append(f"{counts['session_host_unserved']} request(s) not sent: the "
-                         f"session manager does not serve their host (not in its "
-                         f"scope_hosts), so they would have gone without the session "
-                         f"(FR-CRAWL-34); their pages are unresolved and a selector "
-                         f"form there is not submitted.")
+            lines.append(f"{counts['session_host_unserved']} load(s) or request(s) not "
+                         f"sent: the session does not reach their host (the session "
+                         f"manager does not serve it, or the browser holds the session's "
+                         f"cookies for another host), so they would have gone without "
+                         f"the session (FR-CRAWL-34); their pages are unresolved, and the "
+                         f"static engine submits no selector form there.")
         if counts["pages_failed"]:
             lines.append(f"{counts['pages_failed']} page(s) unresolved after their last "
                          f"load (FR-CRAWL-36), kept as failed and never visited: partial "

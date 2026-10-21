@@ -199,6 +199,86 @@ Newest first.
   - Residual R7 (new): a stored row refused at its load was admitted by the frontier
     first, so it counts in `frontier_admitted` and against that crawl's total and
     pending budgets (one admission per stored unresolved row).
+- Review round 2 of 8c2fa86 (2026-10-21; an adversarial fix check, each finding
+  confirmed by a skeptic; branch `lane/SPIDER-r2`; BUG-0545's review round 2 section):
+  - **S2-1 (R6 on the other engine): the Playwright engine loaded a loopback alias of the
+    session's origin without the session and filed its anonymous landing as the
+    identity's page.** The context holds the session cookie host-only for the start's
+    host (`browserauth._cookies_of`, by URL); Chromium sends it to that host only
+    (measured: `scratchpad/lanes/SPIDER/r2/cookie_domains.out`, a `127.0.0.1` cookie
+    reached `127.0.0.1` and not `localhost` on the same port); the launch resolves every
+    loopback spelling on the port; the route's `cookie_scope` compares canonical origins
+    (aliases folded), so it neither withheld nor isolated the alias. The reviewer
+    measured on 8c2fa86 and 9071440, with the manager's scope `['127.0.0.1']` and with
+    the CLI's default `['localhost', '127.0.0.1']`: `GET /deeper?via=alias` with no
+    cookie, an anonymous `/login`, the alias stored `(200, visited)`. Round 1's sweep had
+    given the browser "withholds by route" without measuring it. Now `_visit` asks
+    `_session_host_refusal` for every load of an identity crawl, after the scope,
+    destructive and other-origin checks and before any navigation or send (the top of
+    its `try`, ahead of a seed's or probe's window): the static engine asks the session
+    manager's own `prepare` through `_SessionAddon` on a request that is never sent (a
+    host it would leave alone: `HostNotServed`'s cause; a `SessionAuthError` is
+    `IdentityUnavailable`, as on a send); the browser requires each of the session's
+    credential cookies (`checked_cookies`), as its context holds them (`cookies` by
+    URL, a browser login's `storage_state` cookies by domain), to reach the load's host
+    (`_cookie_reaches`: host-only reaches that exact host; a dotted domain also its
+    subdomains, never an IP address; RFC 6265 §5.1.3). A refused load raises
+    `HostNotServed` with its cause: stored `failed` (unresolved, resumed) through
+    `_page_failed`, counted `session_host_unserved`, logged, never visited, never
+    `withheld`, never reported as another origin. A session without cookies goes by its
+    headers, by origin, as before. The seam keeps its own refusal for a static redirect
+    hop and a selector form. Generic: the host a load goes to is compared with the hosts
+    the session's carrier reaches; there is no alias list. One new host compare
+    (`_cookie_reaches`, deny only), a reasoned allowance in `HOST_COMPARE_ALLOWED`
+    (PA-0134(3)). The crawl summary's line names both causes.
+  - **S2-2: `test_a_session_lost_on_a_send_is_never_extracted_and_the_page_is_retried`
+    failed on c483dc1 only because the crawl was anonymous** (`_IdSite` linked `/secret`
+    and `/expiring` from the live session's home only; round 1 moved `home_extra` alone),
+    and FR-CRAWL-34's enforcement line said every test failed on c483dc1 on its own
+    assertion. `_IdSite` now links its `protected` pages (default `/secret`,
+    `/expiring`) from the anonymous home too, and records the `Host` of each request.
+    Each test of the file measured on c483dc1 (a driver with real fixtures, pytest
+    imported as a library only, `fuzzlab.__file__` checked to be c483dc1's export:
+    `scratchpad/lanes/SPIDER/r2/direct_c483dc1.out`), its failing assertion: identity
+    test `"welcome alice" in rows["/"]` (`/` stored as `home`); session-loss test
+    `"EXPIRING-PAGE" in rows["/expiring"]` (`/expiring` filed as its login redirect's
+    answer `(200, '')`, `/login` stored); cannot-carry and failed-login tests
+    `pytest.raises` "DID NOT RAISE"; redirect test `other.requests == []`; unserved-host
+    test `sent == []` (`GET /deeper?via=alias` with no cookie); selector-form test its
+    `sid=` check (`/pick?bug=1`, `?bug=2` with no cookie); browser test `to_alias == []`
+    (`GET /deeper?via=alias`, `GET /login` twice). FR-CRAWL-34's enforcement text and
+    BUG-0545's failure list now say this.
+  - Tests: `tests/test_spider_static_identity.py::test_a_browser_load_the_session_cookie_does_not_reach_is_refused_never_sent`
+    (new, real Chromium, `FUZZLAB_REQUIRE_BROWSER` applies: the CLI-default manager
+    scope, so only the browser's cookie decides; the alias host receives no request,
+    the alias is `(0, None, failed)` with the cause, counted, no `/login` row, not
+    another origin, and `/`, `/secret`, `/deeper` crawled with the session); `_IdSite`
+    as above; the static tests unchanged and green. Pre-fix proof, one pytest
+    invocation with 8c2fa86's `spider.py` in place, then restored
+    (`scratchpad/lanes/SPIDER/r2/proof.log`): 1 failed, 7 passed in 14.13 s -- the
+    browser test at `to_alias == []` (`GET /deeper?via=alias`, `GET /login` twice, all
+    to `localhost`); the 7 static tests pass on 8c2fa86, as they should (its static
+    refusal sat at the seam). The 8 tests pass on the fix (driver run,
+    `r2/direct_fix.out`). Targeted run: below (added when it finished).
+  - Impact: a browser crawl with a cookie session no longer loads a host its cookies do
+    not reach (a loopback alias of its start among them): unresolved and reported,
+    where it was crawled anonymously. A static crawl now asks the manager's `prepare`
+    twice per load (the gate, then the send): no extra login or pause (the send's own
+    `prepare` would make the same one first). `crawl_stats` names unchanged
+    (`session_host_unserved` now counts browser refusals too; readers: the spider and
+    `test_spa_routes.py`, which takes `CRAWL_COUNTS` out first). FR-CRAWL-34 and
+    FR-CRAWL-36 edited in place. No SESS, navguard or browserauth change.
+  - Residual R8 (new, measured, flagged; not fixed in this round, whose scope is the
+    gate every load passes): inside a browser load, a same-origin redirect hop to a host
+    the session's cookies do not reach (the route's walk, `navguard`'s `api.fetch`) and
+    a selector form whose action is on such a host (`_isolated_submit`'s
+    `storage_state` copy) are still sent without the cookie. Measured on this fix
+    (`scratchpad/lanes/SPIDER/r2/browser_hops.out`): `localhost` received
+    `GET /pick?bug=1`, `GET /pick?bug=2` and `GET /land` twice with no Cookie, and `/go`
+    and `localhost/land` were stored visited (404). PA-0545(1) does not admit "sends
+    anonymously" as a disposition: this needs the same predicate at the route's hop walk
+    (a shared primitive's owner) and at the browser branch of `_isolated_submit` --
+    flagged for the orchestrator.
 
 ### CC-CRAWL-0054 — The JSONL tail caps a line while reading it; the contract runner reads bounded and matches contract patterns in a killable worker (BUG-0536) (2026-10-20)
 - Placement: pre-assigned to AU-BOUNDED (audit defects 23 and 27, with the disco and

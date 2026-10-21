@@ -12,7 +12,9 @@ redirect, a hop to another origin than the session's is never followed, the sess
 validated (`verify_live`, SP-61) before any page is crawled, a loss the manager sees on a
 send makes that page's answer no evidence (retried after the re-login), and an identity
 the engine cannot carry, or a login that fails, stops the crawl with an explicit error --
-never an anonymous crawl.
+never an anonymous crawl. In either engine, a load whose host the session does not
+reach (the manager does not serve it; the browser's session cookie is host-only for
+another host) is refused before it is sent (BUG-0545 review R6, round 2).
 
 Every site here is a loopback server this test starts; it records each request with its
 Cookie. The session manager fetches ``/`` and ``/login`` itself (login discovery, the
@@ -37,25 +39,30 @@ from tests.test_session_origin_scope import LOGIN_FORM, PASSWORD, USER, _creds
 
 class _IdSite:
     """A loopback app: ``/login`` (a form; a right POST sets a fresh ``sid``), ``/`` (with
-    a live ``sid``: a welcome page linking the protected pages; else an anonymous page;
-    both carry ``home_extra``), ``/secret`` and ``/deeper`` (200 with a live ``sid``,
-    else a 302 to ``/login``), ``/expiring`` (its first credentialed GET drops every
-    session, as an expiry, and answers the 302; then as ``/secret``), ``/go`` (a 302 to
-    ``other``), ``/pick`` (a selector form's GET target: 302 to ``/secret``). Every
-    request is recorded as ``(method, path, Cookie, User-Agent)``.
+    a live ``sid``: a welcome page; else an anonymous ``home`` page; both link the
+    ``protected`` pages and carry ``home_extra``), ``/secret`` and ``/deeper`` (200 with
+    a live ``sid``, else a 302 to ``/login``), ``/expiring`` (its first credentialed GET
+    drops every session, as an expiry, and answers the 302; then as ``/secret``),
+    ``/go`` (a 302 to ``other``), ``/pick`` (a selector form's GET target: 302 to
+    ``/secret``). Every request is recorded as ``(method, path, Cookie, User-Agent)``,
+    and the ``Host`` it was sent to in ``hosts``.
 
-    ``home_extra`` is on the anonymous page too (BUG-0545 review, B2), so a crawl that
-    dropped the identity (c483dc1's anonymous static engine) still reaches ``/go``,
-    ``/pick`` and an alias link, and each test that uses it fails there on its own
-    behaviour, not only on the first test's."""
+    The anonymous page carries the same links and ``home_extra`` (BUG-0545 review B2,
+    and round 2 S2-2 for ``/secret`` and ``/expiring``), so a crawl that dropped the
+    identity (c483dc1's anonymous static engine) still reaches every page a test is
+    about, and each test fails there on its own behaviour, not only on the first
+    test's."""
 
-    def __init__(self, host="127.0.0.1", other=None, home_extra=""):
+    def __init__(self, host="127.0.0.1", other=None, home_extra="",
+                 protected=("/secret", "/expiring")):
         self.sessions: set[str] = set()
         self.requests: list[tuple[str, str, str, str]] = []
+        self.hosts: list[str] = []
         self.logins = 0
         self.expired: set[str] = set()
         self.other = other
         self.home_extra = home_extra
+        self.links = "".join(f"<a href='{p}'>{p.strip('/')[:1]}</a>" for p in protected)
         self._lock = threading.Lock()
         require_loopback(host)                   # PA-0130: a loopback listener only
         site = self
@@ -84,6 +91,7 @@ class _IdSite:
                 with site._lock:
                     site.requests.append((method, self.path, self.headers.get("Cookie") or "",
                                           self.headers.get("User-Agent") or ""))
+                    site.hosts.append(self.headers.get("Host") or "")
 
             def do_GET(self):  # noqa: N802 - http.server API
                 self._record("GET")
@@ -92,13 +100,9 @@ class _IdSite:
                 if path == "/login":
                     return self._send(200, LOGIN_FORM.encode())
                 if path == "/":
-                    if not live:
-                        return self._send(200, ("<html><body><p>home</p>" + site.home_extra
-                                                + "</body></html>").encode())
-                    body = ("<html><body><p>welcome alice</p><a href='/secret'>s</a>"
-                            "<a href='/expiring'>e</a>" + site.home_extra +
-                            "</body></html>")
-                    return self._send(200, body.encode())
+                    who = "welcome alice" if live else "home"
+                    return self._send(200, (f"<html><body><p>{who}</p>" + site.links +
+                                            site.home_extra + "</body></html>").encode())
                 if path == "/expiring" and live and path not in site.expired:
                     with site._lock:
                         site.expired.add(path)
@@ -204,7 +208,10 @@ def test_a_session_lost_on_a_send_is_never_extracted_and_the_page_is_retried(
     """``/expiring`` drops the session on its first credentialed GET and answers the
     login redirect: that answer is no evidence (the crawler neither follows it to the
     login page nor files it as the page); the page is retried after the session
-    manager's re-login and extracted with the new session."""
+    manager's re-login and extracted with the new session. Before (c483dc1, measured
+    with the anonymous home linking ``/expiring`` too, BUG-0545 review round 2 S2-2):
+    the anonymous crawl loaded ``/expiring``, followed its 302 to ``/login`` and filed
+    that as the page ``(200, '')``, ``/login`` stored as well."""
     monkeypatch.setattr(sp, "RETRY_BASE_S", 0.01, raising=False)
     _spider, db = _crawl(site, tmp_path, _manager())
     rows = _rows(db)
@@ -314,3 +321,56 @@ def test_a_selector_form_is_submitted_with_the_session(site, tmp_path):
     picks = [c for p, c in site.crawler_gets() if p.startswith("/pick")]
     assert picks and all("sid=sid-" in c for c in picks), site.crawler_gets()
     assert "SECRET-PAGE" in _rows(db)["/secret"][1]
+
+
+def test_a_browser_load_the_session_cookie_does_not_reach_is_refused_never_sent(
+        monkeypatch, tmp_path):
+    """The browser engine (BUG-0545 review round 2, S2-1: R6 on the other engine). The
+    context holds the session cookie host-only for ``127.0.0.1`` (added by the start
+    URL), and Chromium sends it to that host only (measured). A loopback alias
+    (``localhost``) of the start on the same port is in the crawl's scope, on the
+    session's own canonical origin, and served by this session manager (the CLI's
+    default scope, so its ``prepare`` would carry the session: the browser alone would
+    not). ``_visit``'s gate refuses the alias before any navigation: the site receives
+    no request of any kind for that host, the alias is stored ``failed`` (unresolved)
+    with the cause and counted, it is not reported as another origin, and no anonymous
+    landing (its login redirect) is filed as the identity's page; the identity's own
+    pages are crawled with the session. Before (8c2fa86, and since c483dc1): the
+    browser sent ``GET /deeper?via=alias`` with no cookie, followed its redirect to an
+    anonymous ``/login`` and stored the alias as a visited page."""
+    from tests._spa_fixture import chromium_or_skip, run_crawl
+    chromium_or_skip(monkeypatch)
+    site = _IdSite(protected=("/secret",))      # no expiry: one session for the crawl
+    port = site.base.rsplit(":", 1)[1].strip("/")
+    alias = f"http://localhost:{port}/deeper?via=alias"
+    site.home_extra = f"<a href='{alias}'>alias</a>"
+    mgr = SessionManager(_creds("127.0.0.1"), scope_hosts=["localhost", "127.0.0.1"],
+                         browser_login=False)
+    db = str(tmp_path / "s.db")
+    try:
+        spider = sp.LocalSpider(site.base, max_depth=2, db_name=db, engine="playwright",
+                                session_manager=mgr, identity="user", timeout_ms=8000)
+        run_crawl(spider)
+    finally:
+        site.close()
+    with site._lock:
+        to_alias = [(h, p) for h, (_m, p, _c, _ua) in zip(site.hosts, site.requests)
+                    if h.split(":")[0] == "localhost"]
+    assert to_alias == [], to_alias            # nothing reached the alias, of any kind
+    con = sqlite3.connect(db)
+    try:
+        pages = {u: (s, c, o, e) for u, s, c, o, e in con.execute(
+            "SELECT url, status_code, content, outcome, error FROM discovered_pages")}
+        stats = dict(con.execute("SELECT name, value FROM crawl_stats"))
+    finally:
+        con.close()
+    assert pages[alias][:3] == (0, None, "failed"), pages[alias]
+    assert "cookies do not reach host 'localhost' in the browser" in pages[alias][3]
+    assert "do not reach host 'localhost'" in spider.failed_pages[alias]
+    assert not [u for u in pages if urlsplit(u).path == "/login"], sorted(pages)
+    assert alias not in spider.skipped_other_origin
+    assert stats["session_host_unserved"] == 1
+    own = {u: c or "" for u, (_s, c, o, _e) in pages.items() if o == "visited"}
+    assert "welcome alice" in own[site.base], own
+    assert "SECRET-PAGE" in own[site.base + "secret"]
+    assert "DEEPER-PAGE" in own[site.base + "deeper"]

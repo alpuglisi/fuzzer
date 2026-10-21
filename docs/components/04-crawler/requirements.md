@@ -932,8 +932,9 @@ fuzzer.
     `script_segments.json`), before any side effect and with `--dry-run` too. Order:
     scope URLs, run files, storage state, store, `--dry-run` (which names the trace),
     `--authorized`, workers.
-- **FR-CRAWL-34 (the legacy spider's static engine carries its identity, CC-CRAWL-0056,
-  BUG-0545)** In a crawl with `--identity`, every request the `requests` engine sends --
+- **FR-CRAWL-34 (the legacy spider's static engine carries its identity, and no load of
+  either engine goes where the session does not reach, CC-CRAWL-0056, BUG-0545)** In a
+  crawl with `--identity`, every request the `requests` engine sends --
   the engine chosen, the engine Playwright's absence selects, the browser's fallback for
   a page it cannot render, and a selector form's submission (FR-CRAWL-8) -- goes through
   the core seam (`core.http.HttpClient`) with the session manager as its addon, on a
@@ -949,25 +950,49 @@ fuzzer.
     a hop to another origin than the session's is not followed and the load extracts
     nothing (`withheld`, FR-SESS-20). An answer the manager withheld the session from
     (another origin) is never extracted (`withheld`).
-  - **A host the session manager does not serve is never sent to** *(BUG-0545 review,
-    R6)*. The seam's addon (`_SessionAddon`) runs the manager's `prepare`; a request it
-    left alone -- no session applied (`session_generation` unset) and no decision
-    recorded: its host is outside the manager's own scope, such as a loopback alias of
-    the start the config does not list -- raises `HostNotServed` before the transport.
-    Nothing is sent. The page is stored `failed` (unresolved, resumed) with that cause,
-    counted `session_host_unserved` in `crawl_stats` and reported; a selector form whose
-    action is on such a host is not submitted (logged; the page holding it is kept).
-    Adding the host to `scope_hosts` makes the manager serve it (measured for a loopback
-    alias); `--auth-origin` does not.
+  - **A host the session does not reach is never loaded or sent to, in either engine**
+    *(BUG-0545 review, R6; review round 2 for the browser)*. Every load of an identity
+    crawl -- whatever queued it -- passes one gate in `_visit`
+    (`_session_host_refusal`), after the scope, destructive and other-origin checks and
+    before any navigation or send. It compares the host the load goes to with the hosts
+    the engine's carrier of the session reaches: the **static** engine asks the session
+    manager's own `prepare` (through `_SessionAddon`, on a request that is never sent),
+    and a host it leaves alone -- no session applied (`session_generation` unset) and no
+    decision recorded: outside the manager's own scope, such as a loopback alias of the
+    start the config does not list -- is refused; the **browser** refuses a host that
+    one of the session's credential cookies, as its context holds them (by URL, or a
+    browser login's cookies by domain), does not reach (`_cookie_reaches`: a host-only
+    cookie reaches its own host only, so a loopback alias of the start is refused even
+    when the manager serves it; a dotted domain also reaches its subdomains, never an IP
+    address). A session without cookies goes by its headers, by origin (FR-SESS-20).
+    Never a list of aliases. A refused load raises `HostNotServed` with the cause:
+    nothing is sent; the page is stored `failed` (unresolved, resumed) with that cause,
+    counted `session_host_unserved` in `crawl_stats` and reported, never `withheld`.
+    Inside a static load the seam keeps the same refusal before the transport for a
+    redirect hop and a selector form's submission (logged; the page holding the form is
+    kept). Adding the host to `scope_hosts` makes the manager serve it (measured for a
+    loopback alias); `--auth-origin` does not; a browser crawl of such a host starts
+    there. *Not yet enforced (residual R8, CC-CRAWL-0056):* inside a browser load, a
+    redirect hop (the route's walk) and a selector form's submission to a host the
+    cookies do not reach are still sent without the cookie (measured).
   - **Losses:** an answer on a session the manager knows lost, or sent while the manager
     saw a loss on any send (its logout listener), is no evidence: the page is retried
     (FR-CRAWL-36) after the manager's re-login. A `SessionAuthError` on a send (a re-auth
     cap, an unknown health) stops the crawl (`IdentityUnavailable`).
-  - Enforced by: `tests/test_spider_static_identity.py`. Each test fails on c483dc1 on
-    its own assertion: the test site serves its extra links and forms to an anonymous
-    visitor too, so c483dc1's anonymous crawl reaches them (BUG-0545 review, B2).
-    `test_a_host_the_session_manager_does_not_serve_is_never_sent_without_the_session`
-    also fails on 9071440 (the alias was sent with no cookie).
+  - Enforced by: `tests/test_spider_static_identity.py` (8 tests). The test site serves
+    an anonymous visitor the same links and forms as the identity (`/secret`,
+    `/expiring` and each test's extra ones; BUG-0545 review B2 and round 2 S2-2), so
+    c483dc1's anonymous crawl reaches every page a test is about. Measured on c483dc1,
+    each test's failing assertion (BUG-0545, review round 2): the identity test, `/`
+    stored as `home`; the session-loss test, `/expiring` filed as the login redirect's
+    answer `(200, '')`; the cannot-carry and failed-login tests, "DID NOT RAISE" (the
+    old code crawled instead of refusing); the redirect test, B received a request; the
+    unserved-host test, `GET /deeper?via=alias` with no cookie; the selector-form test,
+    `/pick?bug=1` and `?bug=2` with no cookie; the browser test, the alias received
+    `GET /deeper?via=alias` and two `GET /login`. The unserved-host test also fails on
+    9071440 (the alias was sent with no cookie), and
+    `test_a_browser_load_the_session_cookie_does_not_reach_is_refused_never_sent` on
+    8c2fa86 (the same three requests to the alias).
 - **FR-CRAWL-35 (the legacy spider's frontier: one admission per key, budgets,
   CC-CRAWL-0056, BUG-0545)** Every URL the crawl would load enters through one frontier
   (`_Frontier`), shared by every worker:
@@ -1020,8 +1045,9 @@ fuzzer.
     unresolved row again (not a seed or a probe); each is loaded only through the crawl's
     scope and destructive rules (FR-CRAWL-35's load gate), so a row another target's or
     another start URL's crawl left is never requested and stays unresolved for a crawl
-    whose scope it is in. `pages_retried` counts retries. A host the session manager
-    does not serve (FR-CRAWL-34) is unresolved too, with that cause, never `withheld`.
+    whose scope it is in. `pages_retried` counts retries. A host the session does not
+    reach (FR-CRAWL-34: the manager does not serve it, or the browser's session cookies
+    do not reach it) is unresolved too, with that cause, never `withheld`.
   - **The writer.** Recording a page never touches the store: rows are queued in memory
     and one writer thread commits them in order when they hold 64 rows or 1 MiB, or the
     oldest waited 1 s, and at close; reads of page rows flush first. A crawl thread waits
