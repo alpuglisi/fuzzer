@@ -74,7 +74,13 @@ Newest first.
     unresolved pages as partial coverage.
   - Tests: `tests/test_spider_static_identity.py` (7), `tests/test_spider_frontier.py`
     (8), all failing on c483dc1; `tests/test_spa_routes.py`'s exact `crawl_stats` check
-    takes the new counts out first.
+    takes the new counts out first; `tests/test_spa_query.py`'s U2 seed test, which
+    times its injected stop by reading the newest page row from the store mid-crawl,
+    flushes the queued rows first, under the store's lock (the guarantee it pins is
+    unchanged: a stop before the promotion leaves the seed a write seed, written at
+    close). `spider_kwargs` passes `limits=None` (the one CLI builder passes every
+    keyword, U9). The writer executes on a cursor of its own (`conn.execute`), so the
+    shared `cursor` is never used by two threads.
 - Impact (other components / project):
   - **Spider DB contract (additive):** `discovered_pages.outcome TEXT`, `attempts INTEGER`,
     `error TEXT`; new `crawl_stats` names. Readers (`store_adapter.import_spider`,

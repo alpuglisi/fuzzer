@@ -586,7 +586,8 @@ class StorageManager:
             try:
                 for sql, params in ops:
                     try:
-                        self.cursor.execute(sql, params)
+                        # a cursor of its own: `cursor` is never shared across threads
+                        self.conn.execute(sql, params)
                     except sqlite3.IntegrityError:
                         self.write_conflicts += 1
                 self.conn.commit()
@@ -4234,6 +4235,9 @@ def spider_kwargs(args, session_manager=None) -> dict:
         dry_submit=not args.no_dry_submit,
         spa_query=not args.no_spa_query,
         workers=args.workers,
+        # FR-CRAWL-35: the frontier's default budgets (no CLI flag; every refusal is
+        # counted and reported)
+        limits=None,
     )
 
 
