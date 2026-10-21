@@ -1543,8 +1543,26 @@ tracked in the requirements files, not here.
       out-of-scope frames, bounds).
 
     The explorer fills forms valid-first (the browser's `checkValidity()` decides),
-    waits for network quiescence, recovers a lost session, and never acts on a
-    destructive control.
+    waits for network quiescence, and never acts on a destructive control.
+    *(FR-CRAWL-41, CC-CRAWL-0060, BUG-0552)* An authenticated run starts from a storage
+    state or a session provider (`ExploreSession`: the session manager, identity and
+    base URL; the context adopts its session through `browserauth.browser_session`) and
+    holds one session generation at a time, shared by its workers. Its loss is decided
+    through the session layer's owners only: each answer a context gets is classed by
+    SP-56 with SP-16's facts, and the page is read whatever the answers were (a login
+    URL, this session's login form, or a password form where the page was known without
+    one); SP-61 decides for the context's generation -- `check_health` with a provider;
+    without one, `health_verdict` on the start page, the run's protected resource when
+    it is live with the context's cookies and refused without (else PA-0533(1)'s
+    unconfirmed loss). A generation found lost is recorded for every worker at the
+    verdict, before any recovery, and no worker acts, restores or loads on it again. A
+    lost session is replaced by a fresh login, revalidated, in a new context made after
+    the old one was released and closed; a loss nothing resolves ends the run's
+    exploration with its reason (`auth_ended`). The action ids of a known-lost window
+    are marked (`actions.jsonl` `session` lines, `session_lost_actions`; D′) and read
+    through `disco.capture.lost_action_ids` (SP-71): `disco ede` skips them; `disco
+    synth` and the importer are pinned. *(At the merge with CC-CRAWL-0055.)* A replaced
+    context reads its states in the execution key's next session generation (SP-62).
   - `synth.py`: the captures become an OpenAPI 3.1 inventory (templated paths, merged
     schemas, header classes, auth, response-only fields, dependency edges, JS
     candidates) -- the input of Phase 2 (component 9) and the contract (component 7).

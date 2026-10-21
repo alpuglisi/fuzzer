@@ -72,6 +72,221 @@ Newest first.
   (count 0 on 43231dc, 1 after). The writer's helper named in the placement line was
   folded back into `record_request` (43231dc).
 
+### CC-CRAWL-0060 — Disco decides a lost session through the session layer's owners, installs only a fresh revalidated one, and closes the context it replaces (BUG-0552, FR-CRAWL-41) (2026-10-21)
+- Placement: pre-assigned to lane DISCO4 (audit defect 4); merged after AU-DISCO
+  (defects 1-3) and DISCO13. No session-layer file changed (the manager is used through
+  its public API: `ensure`, `check_health`; SP-16's and SP-56's public functions).
+- Change (`fuzzlab/disco/explore.py`; new functions, the loop calling them):
+  - **A session provider.** `ExploreSession(manager, identity, base_url)` and
+    `Explorer(session=)` (with `storage_state=`, one source; both is a `ValueError`).
+    `_current_session` makes the run's first `_SessionMaterial` (the provider's through
+    `_provider_session`: `ensure(..., operator=True)`, then
+    `browserauth.browser_session`; a header-only session raises `SessionUnavailable`;
+    or the storage state, filtered as before, generation 0). `_new_context` builds every
+    context from the current material (storage state, cookies through
+    `browserauth.apply_to_context`, the session's origins as the guard's
+    `cookie_scope` with more than one scope origin) and records its generation.
+  - **Suspicion** (`_note_window_tag`, `_note_answer`: two handlers on authenticated
+    contexts only; `_loss_signal`, `_answer_class`, `_shows_login`): SP-56 classes each
+    whole answer on the session's origins with SP-16's facts; the page at a login URL or
+    showing this session's login form (SP-16) is a sign unless the step asked for a
+    login URL or the state already showed the form; without a known login form, a
+    password form counts only in place (same URL, after an action).
+  - **Decision** (`_confirm_loss`): SP-61's `check_health` for the context's generation
+    (``policy``, ``signal_url``, ``pause=False``): live (an authorization denial; after
+    an action, a login page on a live session re-gives the context its session:
+    `reinstall`), lost, stale, unknown. Without a provider: PA-0533(1)'s unconfirmed
+    loss for a loss shape; a policy block never.
+  - **Recovery** (`_recover_session` under `_Shared.auth_lock`; `_replace_context`;
+    `_end_authenticated`): adopt a newer generation, or a fresh provider session that
+    is another generation and passes its own protected check (``use_cache=False``),
+    at most `ExploreOptions.max_session_recoveries` (new, 3); the old context released
+    and closed first, its in-flight tracker, pending answers and responses dropped; an
+    unresolved loss sets `ExploreReport.auth_ended` and stops the run.
+  - **Checkpoints** (`_session_checkpoint`) after each action (replacing the
+    `looks_like_login_url(page.url)` branch in `_process`), each restore
+    (`_restore_checked`, used at both restore sites of `_process`: a restore on a lost
+    session is retried once on the recovered one), each harvest load (`_load`) and the
+    seed (`_seed_session`); `_session_current` gives a worker the current generation
+    and a live page before each state and load.
+  - **D′ for captures** (`_log_session_event`, `_lost_action`): the window's action ids
+    to `session_lost_actions` and one `actions.jsonl` `session` line (no `seq`); the
+    action logged with no new state and no URL and denied unless the window was stale.
+  - **Report:** `session_suspected`, `authorization_denials`, `session_recovered`,
+    `session_reinstalled`, `session_lost_actions`, `auth_ended` (new);
+    `session_lost` now counts confirmed losses (or unconfirmed ones without a provider).
+  - Tests: `tests/test_disco_session_loss.py` (new): real Chromium through the real
+    capture proxy against a loopback board whose session dies after N API answers --
+    a 401 with the route unchanged (provider: confirmed, a fresh login, revalidated,
+    the dead sid never sent again, every 401 on a marked action id, one `session`
+    line, `[1, 1]` contexts), a login form in place (provider), repeated losses (`[1,
+    1, 1]` contexts, three logins, the cap's reason), no provider in three modes (an
+    unconfirmed loss ends the run, one context); offline: a 403 on a live session is a
+    denial (and never a loss without a provider), a credential submission's 401, a
+    407, another origin's 401, a 429 and a 502 are no suspicion, a credentialed 401 is
+    checked for the context's generation; and a strict xfail naming `disco synth`
+    (the window's mark is not read yet).
+- Impact (other components / project):
+  - **SESS:** none changed. The explorer becomes a consumer of SP-56
+    (`response_class`), SP-16 (`login_facts`, `request_entry_names`,
+    `shows_login_form`, `looks_like_login_url`) and SP-61 (`check_health`, `ensure`);
+    the SP rows' reader lists grow (`docs/SHARED_PRIMITIVES.md`, this lane's
+    `doc_texts.md`). A loss the explorer confirms is the manager's (`check_health` marks
+    it, its re-login bucket and caps apply).
+  - **File contracts:** `actions.jsonl` gains `session` lines (no `seq`; the importer,
+    `observe.DiscoActionLines` and the live trace pass over them); `explore.json` gains
+    the counters above. No store table and no capture record changed.
+  - **CLI:** `fuzzlab disco capture` is unchanged (a storage state only); with it a
+    lost session now ends the run with its reason in `explore.json` instead of
+    continuing on the dead session or re-installing the storage state.
+  - **Concurrent lanes:** AU-DISCO adds an auth/session generation slot to the
+    execution-state key; it reads `_Shared.auth.generation` (the generation the
+    contexts carry; `Explorer._ctx_generation` per worker). Their work-state tracking
+    must not count an action in a known-lost window as succeeded (`_lost_action`).
+- Risk (level; mitigation or accepted-risk justification): **medium.** A loss decision
+  ends or reshapes a run. Mitigations: the decision is the session layer's (no new
+  detector); a policy block or an answer on a live session never changes anything;
+  page signs are skipped where the step asked for a login page or the state shows its
+  own login form; recoveries are capped; every end says why. Accepted: without a
+  provider, a page that newly shows any password form at the same URL after an action
+  ends the run (the session layer's coarse rule, stated in FR-CRAWL-41); an
+  inconclusive check ends rather than pauses.
+- Deliverables:
+  - [x] Provider, generation, suspicion, decision, recovery, lifecycle, D′ marking in
+    `explore.py` — done
+  - [x] `tests/test_disco_session_loss.py` (real browser and offline; each new test
+    shown failing on the base) — done
+  - [x] FR-CRAWL-41 and FR-CRAWL-19's authenticated-runs bullet amended in place;
+    the file contracts — done
+  - [x] BUG-0552 (RCA, recurrence review, prior-PA failure analysis, sweep) — done
+  - [x] Shared-doc texts (CHANGELOG, ERROR_LOG, PA-0552, SP rows, ARCHITECTURE,
+    failure record) in the lane's `doc_texts.md` — done
+  - [ ] `fuzzlab disco capture --identity` (a provider from the CLI) — todo (residual)
+  - [ ] `disco synth` reads the window's mark (the strict xfail's owner) — todo
+- Effectiveness (assessed 2026-10-21): on the base c483dc1 (the product file swapped in,
+  one run) the no-provider tests fail on the defect itself -- `[stay]` and `[form]`:
+  `session_lost == 0` (the loss unseen; `[form]` also two states unrestorable),
+  `[redirect]`: two contexts open (the storage state re-installed, the old context left
+  open); the provider and offline tests fail on the API the base lacks. After: the
+  file's 13 tests pass and the synth pin xfails (28.6 s, real Chromium and mitmdump).
+  The harness result is in the lane's report.
+- Review round 1 of a1a93b1 (2026-10-21; DISCO4-B1, B2, R1, R2, R3; branch
+  `lane/DISCO4-r1`):
+  - Change:
+    - **B1 (one generation for every worker).** `_Shared.lost_generations`: a lost,
+      stale or unresolved verdict records the context's generation at the verdict,
+      under `auth_lock`, before `_recover_session` (`_note_gone`); a worker that reads
+      the record waits on that lock for the decision and adopts or stops.
+      `_generation_gone` (a newer generation installed, or the context's recorded
+      lost) is checked by `_session_checkpoint` (a clean window on a gone generation is
+      marked stale), by `_session_current` (the pending window marked stale before the
+      context is replaced; nothing more when the run stopped), before every action
+      (`_ready`, new: once more right before the act), restore (`_restore_checked`
+      begins with `_session_current`) and harvest load (`_load` returns when stopped).
+      `_replace_context(page, verdict, reason)` releases and closes the old context and
+      then marks what it sent after its window was marked; `_mark_leftover` does the
+      same at a worker's end. `_mark_window` is the one marking path.
+    - **B2 (consumers read the mark).** `disco.capture.lost_action_ids(run_dir)`: the
+      one reader of the mark (bounded, `JsonlTail`). `ede.replayable` and
+      `ede.page_urls` take ``lost`` and `EdeRunner(lost_actions=)`; `fuzzlab disco ede`
+      passes the run's mark. `store_adapter.import_disco` (AUD) is pinned by a strict
+      xfail naming its owner (a fix needs a CC-AUD entry this lane holds no number
+      for). A whole-package guard (`tests/test_lost_window_mark.py`) requires every
+      capture reader to read the mark or be listed with its pin or reason.
+    - **R1 (in place without a known login form).** `State.login_shown` (new): whether
+      a state showed a password form when found (seed, action, harvest). The
+      checkpoint takes ``places``: a password form at the URL before an action, at the
+      restored state's URL or entry URL (unless the state showed one), or at the seed's
+      start page is a strong sign; at a harvest load or a navigation, a weak sign,
+      raised only when a protected check decides it (`_checkable`). `login_shown` now
+      suppresses only the form sign, not a login URL.
+    - **R2 (a page sign whatever the answers).** `_loss_signs` returns the primary sign
+      (answer, else page, else policy) and the page's own sign with its strength;
+      `_confirm_loss` no longer returns ``reinstall``: the checkpoint makes a provider's
+      live verdict after an action with a strong page sign a ``reinstall``.
+    - **R3 (a protected check without a provider).** `_find_protected_resource` (at the
+      seed of a storage-state run): the start page's URL is the run's protected
+      resource (`_Shared.protected`) when `session.manager.health_verdict` reads a GET
+      of it with the context's cookies (`ctx.storage_state()`) as live and one with no
+      credential as refused. `_protected_get`: one GET from a request context of its
+      own (`pw.request.new_context`, gated at the send by `checked_api_request` and
+      `check_send_url`, ``max_redirects=0``, TLS verified, never through the capture
+      proxy), judged by `health_verdict(refusal=False)`; disco's second send path of
+      its own, which `tests/test_disco_isolation.py`'s send guard now sees (a
+      ``.fetch(`` on a client the function made) and lists beside `Runner.send`. `_confirm_loss` without a provider checks every
+      suspicion (a policy block too) against it with the suspected context's cookies
+      (`_context_check`); with none, as before. `_recover_session` reports an
+      unresolved verdict as such before the no-provider reason.
+  - Impact (other components / project): **SESS:** none changed; the explorer becomes
+    a consumer of SP-61's public `health_verdict` and `session.state.SessionState`
+    (SP-61's reader list grows; this lane's `doc_texts.md`). **AUD:**
+    `store_adapter.import_disco` is not changed; it is pinned (owner AUD). **File
+    contracts:** none changed (`actions.jsonl`'s `session` lines as before; more of
+    them in multi-worker runs). **New shared primitive SP-71** (the mark's one reader,
+    `disco.capture.lost_action_ids`; row text in `doc_texts.md`). **Traffic:** a
+    storage-state run sends two GETs of the start page at the seed and one per
+    suspicion, straight to the target (lab-only, in scope; no new host).
+  - Risk (level; mitigation or accepted-risk justification): **medium.** A gone
+    generation now stops every worker's next step until the recovery decision
+    (bounded by the recovery's own bounds; no new wait). A storage-state run whose
+    start page is a protected resource now continues past a denial instead of ending;
+    one whose start page is public keeps PA-0533(1)'s unconfirmed loss. Accepted: a
+    seed that shows a password form ends a no-resource run (the identity's start page
+    with a password form of its own is unusual; the reason says why).
+  - Deliverables:
+    - [x] B1, R1, R2, R3 in `explore.py`; B2 in `capture.py`, `ede.py`, `cli.py` — done
+    - [x] tests: `tests/test_disco_session_loss.py` (four real-browser, five offline,
+      the ede test, the import_disco pin), `tests/test_lost_window_mark.py` (the guard
+      and its synthetic offenders), `tests/test_disco_isolation.py` (the send guard
+      sees an API-request client's ``fetch``; `Explorer._protected_get` listed) — done
+    - [x] FR-CRAWL-41 and FR-CRAWL-25 amended in place — done
+    - [x] BUG-0552 "Review round 1"; shared-doc texts (PA-0552, SP-71, SP-61 readers,
+      CHANGELOG, ERROR_LOG, F-1XX) in the lane's `doc_texts.md` — done
+    - [ ] `store_adapter.import_disco` reads the mark (owner AUD; needs a CC-AUD number)
+      — todo
+    - [ ] a real two-worker run with an anonymous-200 API — todo (the race is covered
+      offline, deterministically)
+  - Effectiveness (assessed 2026-10-21): the targeted files passed (34 passed, the two
+    pins xfailed). On a1a93b1 (its four product files swapped in, one run) nine of the
+    ten new tests failed on their defect -- the no-provider restore and seed cases
+    (`session_lost` 0; the seed's login form explored as the root state), the
+    role-gated 401 (the run ended, `session_lost` 1), the offline R2 case (no
+    reinstall), the three B1 cases (B's window unmarked; B acted on generation 7 three
+    times; `act-5` dropped), the ede test (no `lost_action_ids`) and the guard (`_ede`
+    unlisted). The tenth, the real-browser R2 test, passed there: its board left for
+    `/login` before the 401 arrived whole, so the window held the page sign alone. Its
+    board now reads each answer whole before reacting (as a client's interceptor does);
+    run alone on a1a93b1 it fails (`session_reinstalled` 0, two states unrestorable).
+    The harness result is in the lane's report.
+- *(Merge integration, 2026-10-21, onto AU-DISCO (BUG-0539, CC-CRAWL-0055) and DISCO13
+  (BUG-0551, CC-CRAWL-0059).)* `explore.py` (11 conflicting blocks) resolved so both
+  hold:
+  - **One page-before-the-step owner.** DISCO4's `_ready` (restore when dirty or the
+    generation is gone, on a current session, re-checked after the read) is folded
+    into AU-DISCO's `_bring_to` (the contract accepts the page, never a subset or a
+    superset), which now returns ``(page, reading)``; its restores go through
+    `_restore_checked`. `_process` restores through `_restore_checked` and hands the
+    state to `_explore_here`. A restore lost twice is unresolved `session-lost`.
+  - **The loss branch keeps both.** After an action, DISCO4's checkpoint decides
+    (`_session_checkpoint`); a known-lost window's action is denied unless stale and
+    logged with no new state (`_lost_action`), and its work item is finished, its
+    effect a lost session (AU-DISCO's FR-CRAWL-32 rule; `_lost_window`). AU-DISCO's
+    execution-key generation bump moved into `_replace_context`, the one place a
+    context is rebuilt, so every worker that adopts a newer session reads its states
+    in the next generation. AU-DISCO's own `session_lost` count in the branch is gone:
+    DISCO4's checkpoint counts a confirmed loss once.
+  - **Evidence only from a live window.** The first-visit reload (`_first_visit`)
+    and a dismissal's reload (`_dismissal`) are session-checked before anything is
+    declared from them; a delegated trial decided inert in a window later found lost
+    is reopened (`compose.Trials.reopen`; `tests/test_disco_compose.py::test_an_inert_verdict_from_a_lost_session_window_is_reopened`)
+    and its action treated as above.
+  - `State` keeps AU-DISCO's contract and gains DISCO4's `login_shown`
+    (`State.read(..., login_shown=)`, `_child(..., login_shown=)`); a child's is read
+    before a dismissal's reload.
+  - DISCO4's offline `_process` fakes (`tests/test_disco_session_loss.py::_stepper`)
+    return a `Reading` and `ACTED`: the merged explorer's API, the tests' intent
+    unchanged.
+
 ### CC-CRAWL-0059 — Discovery reads the composed UI tree: open shadow roots, same-origin frames, delegated actions; what it cannot read is counted (BUG-0551) (2026-10-21)
 - Placement: pre-assigned to lane DISCO13 (audit defect 13), branch `lane/DISCO13` from
   c483dc1. Planned merge order: AU-DISCO, then DISCO13, then DISCO4. This lane's

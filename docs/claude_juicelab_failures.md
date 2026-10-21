@@ -1430,3 +1430,75 @@ Juice Shop lab is complete.
 - **Evidence:** reviewer probes and refutation runs on c219266 (DISCO13-B1..B4). `tests/test_disco_compose.py`'s review-round tests fail on c219266 (CC-CRAWL-0059 review-round effectiveness). BUG-0551's review-round section.
 - **Impact:** none merged. Had it merged, disco on most real pages (Bootstrap, jQuery, React roots) would have multiplied states on data changes, logged inert clicks wherever a page polls, missed form-less component forms, and reported no closed roots where they hid forms.
 - **Status:** fixed in CC-CRAWL-0059's review round 1 (`lane/DISCO13-r1`). PA-0551 strengthened ((2) variants, (3) counted remainder, new (4) and (5)). Residuals R8 (slow background traffic, measured) and R9 stated.
+
+### F-169 — The AI agent built disco's explorer with a URL-only session-loss rule and a snapshot "recovery" that leaked a context per loss
+- **What:** CC-CRAWL-0031 (D70) gave `fuzzlab/disco/explore.py` one loss signal, `looks_like_login_url(page.url)`, and a recovery that rebuilt the context from the storage state the run started with, after `navguard.release` but without closing the context. An SPA's 401s at an unchanged route and an in-place login form were invisible; a server-invalidated session was re-installed as if fresh; each loss left a context open until browser shutdown. The rule was copied from the session layer's oldest logout rule, not derived from how a browser-held session is lost.
+- **Evidence:** audit defect 4 (2026-10-19); `tests/test_disco_session_loss.py` on c483dc1 (`[stay]` and `[form]`: `session_lost == 0`; `[redirect]`: two contexts open); BUG-0552.
+- **Impact:** every authenticated disco capture since CC-CRAWL-0031 could have recorded answers on a dead session under the identity's profile (D′ broken for captures) and explored a logged-out app as the identity.
+- **Status:** fixed in CC-CRAWL-0060 (lane DISCO4) and its review round 1; residuals stated in FR-CRAWL-41.
+
+### F-170 — BUG-0533's sweep excluded disco from the session-loss rule because it held no session manager
+- **What:** the AU-SESS403 lane's PA-0002 sweep for PA-0533 enumerated the callers of the session manager and wrote disco as "not consumers (R9)", deferring its loss decision to "defect 4", although disco held a session and decided its loss itself. The sweep's criterion (who calls the owner) excluded exactly the components that decide a loss without it.
+- **Evidence:** `docs/bugs/BUG-0533-a-forbidden-answer-logged-the-session-in-again.md`, §"The sweep", last row; BUG-0552 §"Prior-preventive-action failure analysis".
+- **Impact:** disco's explorer kept its URL-only rule and its stale recovery for another day after PA-0533 landed; no other holder was missed (BUG-0552's sweep by holder).
+- **Status:** PA-0552(5) makes a session rule's sweep enumerate the holders of a session; BUG-0552's sweep is the first one done that way.
+
+### F-171 — Lane DISCO4 wrapped its targeted pytest in a 900 s outer timeout that killed it while it queued for the host lock
+- **What:** the lane's first targeted run (`timeout 900 python -m pytest tests/test_disco_session_loss.py`) was started while five other lanes' sessions held or queued on the host pytest lock (`/tmp/fuzzlab-pytest.lock`, waits up to 1800 s by default). The outer `timeout` killed it (exit 143) at 900 s, still queued, before it had run a test; the lane had to queue again from the back.
+- **Evidence:** the run's output (`Terminated`, exit 143, no test line); `pgrep -af pytest` at 01:21 and 01:31 UTC showing the queue.
+- **Impact:** about 15 minutes of the lane's wall time lost; no other lane's run was disturbed (a queued session holds nothing).
+- **Status:** the rerun queues with `FUZZLAB_PYTEST_LOCK_WAIT=7200` and no outer timeout. A process rule, not code: a wrapper's time bound must exceed the lock's wait plus the run (BUG-0532/PA-0532's queue is the bound).
+
+### F-172 — Lane DISCO4's first pre-fix proof failed every real-browser test on an import, not on the defect
+- **What:** the test helper `_explore` imported the new `ExploreSession` for every test, so on the pre-fix explorer the three no-provider tests (which the old `Explorer` accepts) failed with `ImportError` before exploring anything: "13 failed" proved nothing about their defect. The lane read the failure reasons before reporting, moved the import under `provider=True` and put the context count first, and ran the pre-fix proof once more.
+- **Evidence:** `scratchpad/lanes/DISCO4/prefix.out` (each real test: `ImportError: cannot import name 'ExploreSession'`, 13 failed in 3.41 s), then `prefix2.out`.
+- **Impact:** one more queued pytest session on the shared host; no wrong claim reported.
+- **Status:** fixed in the lane's commit; the reported pre-fix failures are `prefix2.out`'s.
+
+### F-173 — Lane DISCO4 published a lost session generation only through its recovery's install, so a second worker kept acting on it
+- **What:** in a1a93b1 the explorer recorded that a generation was gone only by moving `_Shared.auth` once a fresh session was installed. During the recovery, and for ever after `_end_authenticated`, another worker on the lost generation saw no generation change and (with an anonymous-200 API) no sign: it cleared its window, logged its action with a new state and URL and pushed what it found as the identity's coverage. `_session_current` dropped a pending window unmarked on a replacement. The lane's tests drove one worker only, though `--workers N>1` is a CLI option.
+- **Evidence:** review finding DISCO4-B1 (reproduced on a1a93b1: B's window `{act-2}` returned `(page, None)`, `session_lost_actions == ['act-1']`; B's real `_process` logged `{'new_state': 'fpB', 'url': ...}` after A's session line); `tests/test_disco_session_loss.py::test_a_loss_another_worker_finds_mid_action_is_never_this_workers_coverage`, `::test_no_worker_acts_on_a_generation_another_worker_found_lost`, `::test_a_newer_session_never_drops_a_pending_window_unmarked` fail on a1a93b1.
+- **Impact:** a multi-worker authenticated capture could record answers and states found on a session known lost as the identity's coverage (D′, PA-0533(5)); caught in review, never merged.
+- **Status:** fixed in CC-CRAWL-0060 review round 1 (`_Shared.lost_generations` recorded at the verdict under the recovery lock; a check before every action, restore and load); PA-0552(6).
+
+### F-174 — Lane DISCO4's sweep for its own rule missed two consumers of the lost-window mark and misdescribed one
+- **What:** PA-0552(4) (the lane's own text) required every consumer that takes a capture's answers as evidence to read the mark or be pinned. The lane's sweep listed `disco/ede.py` only as "not a holder" and `store_adapter.import_disco` as reading "requests and their URLs, not answers"; `ede.replayable` served the last 2xx answer per URL and `import_disco` took an answer's status and media type as page, header-point and path-template evidence. The list was written from what the modules are for, not from who reads the records.
+- **Evidence:** review finding DISCO4-B2 (reproduced on a1a93b1: `replayable(...)[GET /api/me].action_id == 'act-2'`; the page table held `('/settings', 200)`); `tests/test_lost_window_mark.py::test_every_capture_reader_reads_the_lost_window_mark` fails on a1a93b1.
+- **Impact:** `disco ede` would test a lost window's answer as the page's, and `fuzzlab auto` would build injection points from it; caught in review, never merged.
+- **Status:** `ede` fixed and `import_disco` pinned (owner AUD) in CC-CRAWL-0060 review round 1; a whole-package guard over the capture readers replaces the hand-written list (PA-0552(4)); SP-71.
+
+### F-175 — Lane DISCO4 narrowed the in-place login-form sign to "right after an action", so the CLI's runs missed a loss on a restore or at the seed, while its report called the in-place form fixed
+- **What:** without a known login form (every storage-state run, the CLI's only mode) a password form counted only when the URL equalled the URL before an action. A loss that landed on a restore, at the seed or on a harvest load was unseen. The lane's `[form]` test passed only because its budget put the loss right after a click; BUG-0552 said defect 1's in-place form and login shell were fixed.
+- **Evidence:** review finding DISCO4-R1 (measured on a1a93b1: `form`, budget 1, `sid in app.dead`, `session_lost=0`, harvest on the dead session); `tests/test_disco_session_loss.py::test_without_a_provider_a_login_form_rendered_on_a_restore_is_a_lost_session` and `::test_without_a_provider_a_login_form_at_the_seed_ends_before_anything_is_explored` fail on a1a93b1.
+- **Impact:** a storage-state capture whose session expired during a restore ended silently with every state unrestorable, or explored a login page as the identity; a status that overstated the fix.
+- **Status:** fixed in CC-CRAWL-0060 review round 1 (`places`, `State.login_shown`, weak signs only where a check decides them); PA-0552(8).
+
+### F-176 — Lane DISCO4 read only the first sign of a window, so a 401 hid the login page its script went to
+- **What:** `_loss_signal` returned the first auth-failure answer before reading the page; `_confirm_loss('answer')` on a live session gave an authorization denial, so a context whose script dropped its session on a 401 and went to `/login` explored on without it -- the usual SPA interceptor flow, and the case FR-CRAWL-41 itself said was reinstalled.
+- **Evidence:** review finding DISCO4-R2 (on a1a93b1: outcome None, `authorization_denials == 1`, `recovered == []`); `tests/test_disco_session_loss.py::test_a_login_page_after_a_401_on_a_live_session_reinstalls_it` and `::test_a_401_whose_script_drops_the_session_and_goes_to_login_reinstalls_it` fail on a1a93b1.
+- **Impact:** a provider run would explore a logged-out context and record its login page and later states as the identity's coverage; caught in review.
+- **Status:** fixed in CC-CRAWL-0060 review round 1 (`_loss_signs` returns the page's sign whatever the answers); PA-0552(1).
+
+### F-177 — Lane DISCO4 gave the CLI's only path no protected check, so a role-gated 401 ended every storage-state run
+- **What:** the only production caller passes a storage state, never a provider; without one, `_confirm_loss` called every loss shape an unconfirmed loss and the run ended, so a role-gated 401 or a login redirect for a live session's role ended every `fuzzlab disco capture`. The base had ignored 401s. The lane's only no-provider test covered sessions really dead; it never tried to establish a protected resource, which PA-0533(1)'s fallback presupposes.
+- **Evidence:** review finding DISCO4-R3 (an offline probe on a1a93b1: a 401 from `/api/admin/stats` and a 302 from `/admin.php` each gave `('lost', ...unconfirmed...)`, `auth_ended` set, `authorization_denials` 0); `tests/test_disco_session_loss.py::test_without_a_provider_a_role_gated_401_on_a_live_session_is_a_denial` fails on a1a93b1.
+- **Impact:** a regression against the base on the production path: any role-gated answer would end authenticated exploration; caught in review.
+- **Status:** fixed in CC-CRAWL-0060 review round 1 (the start page as a storage-state run's protected resource, judged by SP-61's `health_verdict`); PA-0552(7).
+
+### F-178 — Lane DISCO4's review-round R2 real-browser test passed on the pre-fix code: its fixture never put the 401 in the window
+- **What:** `test_a_401_whose_script_drops_the_session_and_goes_to_login_reinstalls_it` was written to reproduce DISCO4-R2 (a 401 and a login page in one window). Its board left for `/login` as soon as the 401's headers arrived, so the XHR never finished (`requestfinished` did not fire) and the window held the page sign alone, which a1a93b1 already reinstalled: the test passed on the pre-fix code (the one pass among the ten new tests in the proof run). It reproduced the scenario's outcome, not the finding's precondition.
+- **Evidence:** `scratchpad/lanes/DISCO4/r1/prefix.out` ("9 failed, 1 passed"; the pass is this test); the corrected board reads each answer whole before reacting (as an HTTP client's interceptor does), then `scratchpad/lanes/DISCO4/r1/prefix2.out` (the test on a1a93b1 alone).
+- **Impact:** one more queued pytest session on the shared host; the offline R2 test (`test_a_login_page_after_a_401_on_a_live_session_reinstalls_it`) did fail on a1a93b1, so the finding was covered; no wrong claim reported.
+- **Status:** fixed in the lane's review-round commit; the pre-fix proof of every new test is read per test, not by its count.
+
+### F-179 — The orchestrated session filled the host disk, and lane DISCO4's review-round harness run died of ENOSPC
+- **What:** the session's lanes kept their artifacts on the one host disk (the shared scratchpad held 9.2 GB at 06:15 UTC on 2026-10-21: `juice` 3.7 GB, `lanes` 2.1 GB of which `DISCO22` 1.6 GB, `secdevlabs` 0.7 GB, `au-sitetree` 0.4 GB; `/tmp/pytest-of-root` 1.3 GB; `/root/.cache` 2.4 GB) with no cleanup step, until `/` had 350 MB, then 4 MB, free. DISCO4's harness run (`verify_change.py --base a1a93b1`, 86 files, on 033a8e4) ran its tests and then could not write its junit report (`OSError: [Errno 28] No space left on device`); `parse_junit` raised on the truncated 2 MiB file, so the run gave no verdict. Its in-run errors were the same cause (`could not create numbered dir ... after 10 tries`, `database or disk is full`, a Chromium that could not launch). Space did not come back in 25 minutes of waiting.
+- **Evidence:** `scratchpad/lanes/DISCO4/r1/vc_console.out` (the `ParseError` traceback), `scratchpad/lanes/DISCO4/vc_r1/parallel.log` (the `OSError: [Errno 28]` in `pytest_sessionfinish`), `df -h /` (`39G` used, `350M`/`4.2M`/`6.2M` available).
+- **Impact:** no lane can be verified until space is freed; DISCO4's review round is committed (033a8e4) but unverified by the harness.
+- **Status:** open: the orchestrator frees space (each lane's finished harness worktrees and scratch copies, stale `pytest-of-root` dirs) and re-runs DISCO4's harness; a process rule: a lane deletes its own scratch copies and its harness output once reported, and the orchestrator checks free disk before dispatching a harness run.
+
+### F-180 — A reviewing agent of lane DISCO4 overwrote a shared scratchpad file with an archived product file
+- **What:** while refuting DISCO4-B1, the reviewing agent's first command overwrote the shared scratchpad file `scratchpad/explore.py` with a1a93b1's `fuzzlab/disco/explore.py`; its earlier contents (another session's) are lost.
+- **Evidence:** the reviewer's own housekeeping note in the DISCO4 review round 1 task text.
+- **Impact:** whatever that file held for another session is gone; no product file or worktree was touched.
+- **Status:** reported; a process rule, not code: a scratch extraction goes to a new directory of its own (the review's later runs did), never to an existing shared file name.

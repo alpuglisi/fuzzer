@@ -7,10 +7,14 @@
    the script-route scanner both crawlers share (SP-47, `SHARED_SPA`), imported as
    ``from fuzzlab.tools.spa import <names>`` -- never the module, never another name
    (the spider's form, reveal and window policy stays its own).
-2. **One send path.** The package issues HTTP in exactly one place,
-   `fuzzlab.disco.runner.Runner.send`, where the scope and destructive gates sit
-   (PA-0083(1)). Any other ``.request(`` / ``requests.<verb>(`` / ``urlopen(`` call in
-   the package fails here.
+2. **Known send paths.** The package issues HTTP of its own in exactly two places,
+   each with the scope and destructive gates at the send (PA-0083(1)):
+   `fuzzlab.disco.runner.Runner.send`, and the explorer's protected check of its
+   session without a provider (`Explorer._protected_get`, FR-CRAWL-41, BUG-0552 review
+   R3: one GET of the run's start page, ``checked_api_request`` and ``check_send_url``
+   first). Any other ``.request(`` / ``requests.<verb>(`` / ``urlopen(`` call, or a
+   ``.fetch(`` on a Playwright API-request client the function made
+   (``.request.new_context(``), in the package fails here.
 
 Both are proven on synthetic offenders (PA-0034(2)).
 """
@@ -33,8 +37,8 @@ SHARED_SPA = frozenset({"scan_script", "classify_route", "ROUTE_OK", "route_url"
                         "spa_fragment", "seed_url", "query_url_refusal"})
 _SEND_CALLS = {"request", "urlopen", "get", "post", "put", "patch", "delete", "head",
                "options", "send"}
-#: The one place disco sends HTTP: (file, class.function).
-SEND_SITES = {("runner.py", "Runner.send")}
+#: The places disco sends HTTP of its own: (file, class.function).
+SEND_SITES = {("runner.py", "Runner.send"), ("explore.py", "Explorer._protected_get")}
 
 
 def legacy_imports(source: str) -> list[str]:
@@ -57,19 +61,26 @@ def legacy_imports(source: str) -> list[str]:
 
 def http_send_sites(source: str, name: str) -> set[tuple[str, str]]:
     """``(file, Class.func)`` of each call that may issue HTTP: a ``requests``/``httpx``
-    verb, any ``.request(`` / ``urlopen(``."""
+    verb, any ``.request(`` / ``urlopen(``, and a ``.fetch(`` in a function that makes
+    a Playwright API-request client (``<x>.request.new_context(``)."""
     tree = ast.parse(source)
     sites = set()
     for cls in [n for n in ast.walk(tree) if isinstance(n, (ast.ClassDef, ast.Module))]:
         owner = cls.name if isinstance(cls, ast.ClassDef) else "<module>"
         for fn in [n for n in cls.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:
-            for call in [c for c in ast.walk(fn) if isinstance(c, ast.Call)]:
+            calls = [c for c in ast.walk(fn) if isinstance(c, ast.Call)]
+            made_client = any(isinstance(c.func, ast.Attribute)
+                              and c.func.attr == "new_context"
+                              and isinstance(c.func.value, ast.Attribute)
+                              and c.func.value.attr == "request" for c in calls)
+            for call in calls:
                 f = call.func
                 attr = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", "")
                 base = f.value.id if isinstance(f, ast.Attribute) and \
                     isinstance(f.value, ast.Name) else ""
                 if attr in ("request", "urlopen") or (
-                        base in ("requests", "httpx", "urllib3") and attr in _SEND_CALLS):
+                        base in ("requests", "httpx", "urllib3") and attr in _SEND_CALLS) \
+                        or (made_client and attr == "fetch"):
                     sites.add((name, f"{owner}.{fn.name}"))
     return sites
 
@@ -104,6 +115,13 @@ def test_the_send_guard_catches_synthetic_offenders():
            "    def fire(self, url):\n"
            "        return requests.post(url)\n"
            "def helper(session, url):\n"
-           "    return session.request('GET', url)\n")
+           "    return session.request('GET', url)\n"
+           "class Api:\n"
+           "    def get(self, pw, url):\n"
+           "        api = pw.request.new_context()\n"
+           "        return api.fetch(url, max_redirects=0)\n"
+           "    def made_only(self, pw):\n"
+           "        return pw.request.new_context()\n")
     assert http_send_sites(src, "x.py") == {("x.py", "Probe.fire"),
-                                            ("x.py", "<module>.helper")}
+                                            ("x.py", "<module>.helper"),
+                                            ("x.py", "Api.get")}

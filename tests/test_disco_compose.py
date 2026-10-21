@@ -700,6 +700,21 @@ def test_a_delegated_candidate_is_tried_once_within_the_runs_budget():
     assert t.claim("c") == "spent" and t.unexplored == {"c"}
 
 
+def test_an_inert_verdict_from_a_lost_session_window_is_reopened():
+    """At the merge with BUG-0552: a trial decided in a window later found to be on a
+    lost session decides nothing (D') -- untried again, its budget back. A live
+    verdict, or a candidate never tried, is not reopened."""
+    from fuzzlab.disco.compose import Trials
+    t = Trials(budget=1)
+    assert t.claim("a") == "trial"
+    t.decide("a", False)
+    assert t.spent() and t.reopen("a") and not t.spent()
+    assert t.verdict("a") is None and t.claim("a") == "trial"
+    t.decide("a", True)
+    assert not t.reopen("a") and t.verdict("a") == "live"
+    assert not t.reopen("b")
+
+
 @pytest.mark.xfail(strict=True, reason=(
     "FR-CRAWL-40 known gap, owner: the spider's G1 read (spa.G1_READ_JS) finds a "
     "FORMS_JS control by document.querySelector, which no shadow root answers; a shadow "

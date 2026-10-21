@@ -717,3 +717,13 @@ class Trials:
         if self.verdicts.get(sig) == "trying":
             del self.verdicts[sig]
             self.started -= 1
+
+    def reopen(self, sig: str) -> bool:
+        """An ``inert`` verdict observed in a window later found to be on a lost session
+        (FR-CRAWL-41, D'): no verdict -- untried again, its budget back. Whether one was
+        reopened."""
+        if self.verdicts.get(sig) != "inert":
+            return False
+        del self.verdicts[sig]
+        self.started -= 1
+        return True
