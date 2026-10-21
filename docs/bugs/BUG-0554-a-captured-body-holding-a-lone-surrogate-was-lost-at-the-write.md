@@ -110,9 +110,10 @@ exception went to a guard that logs instead of counting.
     over the token cap and `_selector_value` use it.
   - `operation_key` returns `storable_json(...)`, so `signature_prefix` and every
     signature are text SQLite can bind.
-- **`tools/spider.py::StorageManager.record_request`** is total. It calls
-  `_record_request` (the work, unchanged but for the two texts below) and turns any
-  exception into a rollback and the reason `write failed (<error class>)`, which its
+- **`tools/spider.py::StorageManager.record_request`** is total. Its work (unchanged
+  but for the two texts below) runs inside one `try`, which keeps the `IntegrityError`
+  answer (`duplicate`) and turns any other exception into a rollback and the reason
+  `write failed (<error class>)`, which its
   callers count (`_observe`: `requests_not_recorded` and the log line; `_record_dry`: not
   counted as captured). `body_json` is `apiop.storable_json(doc)`. The probe-marker
   scrub still runs on the raw `ensure_ascii=False` text: in the escaped text the hex

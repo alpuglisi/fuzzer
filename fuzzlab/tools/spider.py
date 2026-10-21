@@ -243,58 +243,51 @@ class StorageManager:
         for any other text). A write the store still refuses is rolled back and returned
         as its reason, which the caller counts (``requests_not_recorded``), never lost
         to an exception guard that only logs."""
-        try:
-            return self._record_request(page_url, method, url, content_type, body,
-                                        source, seen_at)
-        except Exception as exc:  # noqa: BLE001 - total: the caller counts the reason
-            try:
-                self.conn.rollback()
-            except sqlite3.Error:
-                pass
-            return f"write failed ({type(exc).__name__})"
-
-    def _record_request(self, page_url, method, url, content_type, body, source,
-                        seen_at):
-        """`record_request`'s work, under its lock; may raise (the caller contains it)."""
         import json
 
         from fuzzlab.core.redaction import redact_captured_body, redact_url_identifiers
         from fuzzlab.tools import apiop
-        doc, why = redact_captured_body(body, content_type)
-        if why is not None:
-            return why
-        # a probe marker an app replays never reaches a row (FR-CRAWL-17, A-S4). Scrubbed
-        # in the raw text, never the stored one: an escape's hex digits (``\ud800``)
-        # would end the token before a marker and hide it from the scrub (BUG-0554).
-        doc = json.loads(spa.scrub_markers(json.dumps(doc, ensure_ascii=False)))
-        safe_url = spa.scrub_markers(redact_url_identifiers(url))
-        method = (method or "").upper()
-        media = (content_type or "").split(";", 1)[0].strip().lower()
-        op = apiop.operation_key(method, safe_url, media, doc)
-        prefix = apiop.signature_prefix(op)
-        stored = self.cursor.execute(
-            "SELECT signature, url, body_json FROM discovered_requests "
-            "WHERE substr(signature, 1, ?) = ?", (len(prefix), prefix)).fetchall()
-        shape = apiop.request_shape(doc, safe_url)
-        sig = apiop.row_signature(op, shape)
-        if any(row[0] == sig for row in stored):
-            return "duplicate"
-        if len(stored) >= apiop.MAX_CONTEXT_ROWS and shape <= apiop.operation_schema(
-                [(u, b) for _s, u, b in stored]):
-            return "operation over its context cap"
         try:
+            doc, why = redact_captured_body(body, content_type)
+            if why is not None:
+                return why
+            # a probe marker an app replays never reaches a row (FR-CRAWL-17, A-S4).
+            # Scrubbed in the raw text, never the stored one: an escape's hex digits
+            # (``\ud800``) would end the token before a marker and hide it (BUG-0554).
+            doc = json.loads(spa.scrub_markers(json.dumps(doc, ensure_ascii=False)))
+            safe_url = spa.scrub_markers(redact_url_identifiers(url))
+            method = (method or "").upper()
+            media = (content_type or "").split(";", 1)[0].strip().lower()
+            op = apiop.operation_key(method, safe_url, media, doc)
+            prefix = apiop.signature_prefix(op)
+            stored = self.cursor.execute(
+                "SELECT signature, url, body_json FROM discovered_requests "
+                "WHERE substr(signature, 1, ?) = ?", (len(prefix), prefix)).fetchall()
+            shape = apiop.request_shape(doc, safe_url)
+            sig = apiop.row_signature(op, shape)
+            if any(row[0] == sig for row in stored):
+                return "duplicate"
+            if len(stored) >= apiop.MAX_CONTEXT_ROWS and shape <= apiop.operation_schema(
+                    [(u, b) for _s, u, b in stored]):
+                return "operation over its context cap"
             self.cursor.execute('''
                 INSERT INTO discovered_requests
                     (page_url, method, url, content_type, body_json, source, signature,
                      seen_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (spa.scrub_markers(redact_url_identifiers(page_url)), method, safe_url, media,
-                  apiop.storable_json(doc), source, sig,
+            ''', (spa.scrub_markers(redact_url_identifiers(page_url)), method, safe_url,
+                  media, apiop.storable_json(doc), source, sig,
                   time.time() if seen_at is None else float(seen_at)))
             self.conn.commit()
             return None
         except sqlite3.IntegrityError:
             return "duplicate"
+        except Exception as exc:  # noqa: BLE001 - total (BUG-0554): the caller counts it
+            try:
+                self.conn.rollback()
+            except sqlite3.Error:
+                pass
+            return f"write failed ({type(exc).__name__})"
 
     @_locked
     def record_script_segments(self, segments):

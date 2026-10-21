@@ -356,9 +356,10 @@ def test_the_capture_keying_never_encodes_strictly():
             if _unsafe_text_call(n) and _callee(n) == "encode"] == []
     spider = (REPO / "fuzzlab" / "tools" / "spider.py").read_text(encoding="utf-8")
     writer = [fn for fn in ast.walk(ast.parse(spider))
-              if isinstance(fn, ast.FunctionDef)
-              and fn.name in ("record_request", "_record_request")]
-    assert len(writer) == 2
+              if isinstance(fn, ast.FunctionDef) and fn.name == "record_request"]
+    assert len(writer) == 1
+    assert any(isinstance(n, ast.Constant) and isinstance(n.value, str)
+               and "INSERT INTO discovered_requests" in n.value for n in ast.walk(writer[0]))
     assert not any(_unsafe_text_call(n) and _callee(n) == "encode"
                    for fn in writer for n in ast.walk(fn))
 

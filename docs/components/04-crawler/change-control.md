@@ -16,8 +16,10 @@ Newest first.
     `json.loads` returns the value. `_digest(text)`: SHA-256 with `surrogatepass`.
     `operation_key` returns `storable_json(...)`; `row_signature`, the over-cap GraphQL
     digest and `_selector_value` use `_digest`. The module docstring states the rule.
-  - **`tools/spider.py::StorageManager.record_request`** wraps the work (now
-    `_record_request`, under the same lock): any exception is rolled back and returned
+  - **`tools/spider.py::StorageManager.record_request`** runs its work inside one
+    `try` (still one function, so the PA-0100 and PA-0546 writer guards see the
+    redactors and the keying beside the `INSERT`): `IntegrityError` is still
+    `duplicate`; any other exception is rolled back and returned
     as `write failed (<error class>)`, so `_observe` counts it in
     `requests_not_recorded` and logs it; `_record_dry` does not count it as captured.
     `body_json` is `apiop.storable_json(doc)`. The marker scrub keeps the raw
@@ -49,8 +51,8 @@ Newest first.
 - Deliverables:
   - [x] `apiop.storable_json`, `_digest`, `operation_key`, `row_signature`, GraphQL and
     selector digests — done
-  - [x] `record_request` total (`_record_request`), `body_json` escaped, scrub on raw
-    text — done
+  - [x] `record_request` total (one `try` around its work), `body_json` escaped, scrub
+    on raw text — done
   - [x] `store_adapter.captured_request` refusal (AUD entry text in the lane's doc
     texts, number requested) — done
   - [x] tests: `tests/test_capture_surrogates.py` (new): 7 defect and regression tests,
