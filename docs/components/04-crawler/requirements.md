@@ -679,10 +679,13 @@ fuzzer.
     none new, narrows the core (one-time or dismissed UI, `transient_dropped`). A
     fallback path covers a page only a POST shows.
   - **Actionable elements:** native controls and ARIA roles; elements with a JS
-    click / pointer / key listener from Chrome DevTools
-    (`DOMDebugger.getEventListeners`, at most 200 candidates per enumeration);
-    `cursor: pointer` as a fallback; re-enumerated after every action. Text-like
-    controls are filled through their form, never clicked alone.
+    click / pointer / key listener from Chrome DevTools (*(amended in place,
+    CC-CRAWL-0059)* the Command Line API's `getEventListeners`, run inside the read, at
+    most 200 candidates per document; was: `DOMDebugger.getEventListeners` per
+    candidate); `cursor: pointer` as a fallback; *(CC-CRAWL-0059)* delegated candidates
+    (FR-CRAWL-40); re-enumerated after every action, *(CC-CRAWL-0059)* across the
+    page's composed tree (FR-CRAWL-39; was: the top document's light tree only).
+    Text-like controls are filled through their form, never clicked alone.
   - *(Amended in place, CC-CRAWL-0032.)* **A form** is a `<form>` or, without one, the
     nearest ancestor (six levels) holding typed inputs; a button there is its submitter,
     a disabled one included (filling enables it).
@@ -930,6 +933,77 @@ fuzzer.
     `script_segments.json`), before any side effect and with `--dry-run` too. Order:
     scope URLs, run files, storage state, store, `--dry-run` (which names the trace),
     `--authorized`, workers.
+- **FR-CRAWL-39 (the composed UI tree, CC-CRAWL-0059, BUG-0551)** Discovery reads what a
+  page offers across its composed tree, not only its top document's light tree.
+  - **One walk** (SP-70, `tools/composed.py::COMPOSED_JS`): a document and every open
+    shadow root under it, each shadow tree right after its host. On a page without a
+    shadow root, its order and result are `querySelectorAll`'s. Every crawler page
+    script that discovers or locates UI builds on it. A light-tree-only query is a
+    reviewed allowance with its count and its reason
+    (`tests/test_composed_tree_guard.py`).
+  - **disco** (`disco/compose.py::read_page`, from `Explorer.enumerate`):
+    - It reads the page's document and each **visible, same-origin, in-scope frame**,
+      each in its own main-world context, breadth first, at most 8 frames, 3 deep.
+    - It runs through DevTools' `Runtime.evaluate` with the Command Line API when the
+      browser has it, else through Playwright (no listeners then).
+    - An element's ancestry goes on past each shadow root (`^shadow<host`) and each frame
+      (`^frame<iframe#id<@/path`). Its signature, the identity of its steps and of the
+      states it is in, says which component and frame it is in; on a page without
+      shadow roots or frames, signatures are unchanged.
+    - A step is located through the frame markers (`compose.frame_scope`) and a
+      selector that pierces open shadow roots, so a state reached through a shadow root
+      or a frame is restored by replaying there.
+    - A form's controls are read, and earlier `data-disco-field` markers cleared, across
+      the document's composed tree.
+    - The described elements are bounded at 400 per read across the page and its
+      frames, as before.
+  - **What is not read is counted in `explore.json`, never claimed.** Per route; a page
+    read again adds nothing; written while the run is live.
+    - **Read:** `shadow_roots` (open shadow roots) and `frames` (same-origin frames).
+    - **Not read:**
+      - `closed_shadow_roots`, confirmed through `DOM.describeNode` on a custom element
+        whose light tree renders nothing, at most 16 checked per document;
+      - `frames_cross_origin`;
+      - `frames_out_of_scope` (by its `src` or its document; the guard never loads it).
+    - **`budget_limited`:** per bound (`elements`, `candidates`, `delegated`, `nodes` (a
+      walk past 30 000 elements), `frames` (past the frame bounds, or navigating under
+      the read), `census` (closed-root checks not made)), what it left out.
+  - **The spider's form read** (`spa.FORMS_JS`, also the session manager's browser login)
+    finds forms, buttons and controls across open shadow roots.
+  - **Not covered:**
+    - A closed shadow root on a non-custom host, or one that slots rendered light
+      children, is neither read nor counted.
+    - A cross-origin frame is not read in the page; its URL is explored as a top-level
+      page when the harvest reaches it.
+    - The harvest's link extraction reads the top document's serialised light tree;
+      links inside shadow roots and frames are reached by acting on them.
+- **FR-CRAWL-40 (delegated actions, and the composed tree's known gaps, CC-CRAWL-0059,
+  BUG-0551)**
+  - **A delegated candidate** is a labelled, non-semantic element with no action
+    listener of its own and no pointer cursor, whose composed event path (an ancestor
+    element, a shadow root, its document or its window) listens for `click`,
+    `dblclick`, `mouseup` or `pointerup`. It must hold no other candidate and no
+    described element, and must cover less than a quarter of the viewport. Only the
+    first of each shape is kept, at most 16 per read (`budget_limited.delegated` counts
+    the rest). It is described `how: "delegated"`.
+  - **Each is tried once per run**, at most 48 trials (`compose.Trials`). A trial clicks
+    it and waits for quiet. It is **live** when a request was made, the URL changed, a
+    page opened or the explorer's own state fingerprint changed: a performed, logged
+    action, clicked like any other from then on. Otherwise it is **inert**: never
+    logged, never counted an action, and described `disabled` from then on. A candidate
+    still untried once the trials are spent is described `disabled` and counted
+    `delegated_unexplored`.
+  - **Counters** (`explore.json`): `delegated_trials` = `delegated_live` +
+    `delegated_inert`, and `delegated_unexplored`.
+  - **Known gaps (pinned or allowed):**
+    - The spider's G1 read (`spa.G1_READ_JS`) and the browser login's X3 password clear
+      (`session/browserlogin.py::_CLEAR_IF_PRESENT`) resolve a FORMS_JS id with
+      `document.querySelector`. Until both go through SP-70, FORMS_JS never describes
+      a password control inside a shadow root: its container is read by its light tree
+      only, and left out when it is in a shadow root itself. Both are pinned by strict
+      xfails.
+    - The legacy spider's reveal, option and menu scripts read the light tree only, and
+      the spider reads no frame and no delegated action (deprecated, FR-CRAWL-21).
 
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default
@@ -1124,7 +1198,10 @@ An old spider DB has no such table (the importer treats it as none).
   `ws_direction`. Redacted at the write; written only by `disco.capture.make_record`,
   read only by `disco.capture.read_capture`.
 - `<run>/capture.jsonl.stats.json` (refusals per host, recorded, dropped),
-  `<run>/actions.jsonl` (one line per UI action), `<run>/explore.json` (the report).
+  `<run>/actions.jsonl` (one line per UI action), `<run>/explore.json` (the report;
+  *(CC-CRAWL-0059, additive)* with FR-CRAWL-39's and FR-CRAWL-40's counters). An action's
+  `signature` is opaque to every reader; *(CC-CRAWL-0059)* inside a shadow root or a frame
+  its ancestry part names the hosts and frames (`^shadow<...`, `^frame<...`).
 - The inventory: an OpenAPI 3.1 document whose operations carry `x-disco`
   (`origin`, `method`, `content_type_family`, `observed`, `samples`, `actions`,
   `profiles`, `statuses`, `headers` {name: {class, value?}}, `auth`, `dependencies`

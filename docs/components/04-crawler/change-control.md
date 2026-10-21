@@ -3,6 +3,116 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0059 — Discovery reads the composed UI tree: open shadow roots, same-origin frames, delegated actions; what it cannot read is counted (BUG-0551) (2026-10-21)
+- Placement: pre-assigned to lane DISCO13 (audit defect 13), branch `lane/DISCO13` from
+  c483dc1. Planned merge order: AU-DISCO, then DISCO13, then DISCO4. This lane's
+  `explore.py` changes are in the enumeration, candidate and acting regions (the
+  page-reading and acting sections, the report fields, `_Shared`); none is in
+  AU-DISCO's fingerprint, dedup and replay code or in DISCO4's session-loss code.
+- Change:
+  - **SP-70, `tools/composed.py::COMPOSED_JS` (new).**
+    - The composed-tree walk: a document and every open shadow root, each shadow tree
+      right after its host; composed queries, `composedClosest`, `composedHosts`.
+    - `deepAll`/`deepFind` use the native light-tree query when no shadow host is
+      below, so a page without shadow roots reads as before.
+  - **`disco/compose.py` (new): the explorer's read** (`read_page`, `READ_JS`,
+    `FIELDS_JS`, `Reader`, `classify_frame`, `frame_scope`, `Coverage`, `Trials`).
+    - `READ_JS` describes, per document, native, pointer, listener and delegated
+      elements, bounded, and returns the document's frames, its open shadow-root count
+      and its closed-root suspects. Unchanged for the light tree: the old ancestry,
+      the old fields, the same order.
+    - `Reader` runs it through DevTools' `Runtime.evaluate` with the Command Line API
+      (`getEventListeners` inside the read). Frames run in their own main-world
+      context, found through `Runtime.enable` and a marker the parent's read writes on
+      the frame's window. Without DevTools it runs through Playwright.
+    - An element's ancestry continues `^shadow<host` past each shadow root and
+      `^frame<iframe<@/path` past each frame.
+    - Frames are read when visible, same-origin and in scope; the rest are counted.
+      Closed roots are confirmed through `DOM.describeNode` on suspects.
+    - Delegated candidates are labelled non-semantic leaves under a
+      `click`/`dblclick`/`mouseup`/`pointerup` listener in their composed path.
+  - **`disco/explore.py`:**
+    - `enumerate` calls `compose.read_page`, marks delegated candidates found inert or
+      past the trial budget `disabled`, and adds the read's notes to the report
+      (`_mark_delegated`, `_note_coverage`).
+    - `_listener_elements`, `_ENUMERATE_JS`, `_CANDIDATES_JS` and `_MARK_JS` are gone.
+      `_FIELDS_JS` is `compose.FIELDS_JS`: markers are cleared across the composed
+      tree.
+    - `_scope` and `_locate` follow the frame markers. `act` fills a form through its
+      frame's scope, and a delegated element goes to `_act_delegated`/`_trial`. The
+      click is factored into `_click`, with the same behaviour.
+    - `ExploreReport` gains `shadow_roots`, `frames`, `closed_shadow_roots`,
+      `frames_cross_origin`, `frames_out_of_scope`, `budget_limited`,
+      `delegated_trials`, `delegated_live`, `delegated_inert` and
+      `delegated_unexplored`. `_Shared` gains `trials` and `coverage`.
+  - **`tools/spa.py::FORMS_JS`:**
+    - It finds forms, buttons and controls across open shadow roots through SP-70.
+    - A password control inside a shadow root is never described. A container holding
+      one is read by its light tree (as before), and left out when it is itself in a
+      shadow root, because the browser login's X3 clear and `G1_READ_JS` resolve ids
+      with `document.querySelector` (pinned).
+- Impact (other components / project):
+  - **SESS:** the session manager's browser login reads forms with `spa.FORMS_JS`.
+    - A login form inside a shadow root is still never picked (left out, as before).
+    - A light login form whose user field is a component's shadow input is now
+      login-shaped and can be used. Its password stays in the light tree, where the X3
+      clear reaches it.
+    - No CC-SESS number was assigned to this lane; the coordinator decides whether
+      SESS records an entry.
+  - **The legacy spider** (deprecated) finds forms inside open shadow roots; G1 reads
+    their controls as missing (pinned). A light container whose shadow components hold
+    more buttons is no longer "one button" (composed semantics).
+  - **AUD:** `store_adapter.import_disco` reads `actions.jsonl` as before; a signature is
+    opaque. `explore.json` gains fields (additive). There is no store or wire
+    contract change.
+  - **The other lanes:**
+    - AU-DISCO's new state identity must not read `disabled` or other flags of
+      `how == "delegated"` elements (a trial verdict, not the DOM); BUG-0551 R7.
+    - The SPIDER lane, or anyone adding a page script with a light-tree query, must add
+      an allowance to `tests/test_composed_tree_guard.py::ALLOWED` or build on SP-70.
+- Risk (medium):
+  - **The enumeration path changed for every disco run**, from Playwright's evaluate to
+    CDP's evaluate. Mitigation: light-tree descriptions are byte-for-byte those of the
+    old script (same fields, ancestry and order). `tests/test_disco_e2e.py`, with real
+    mitmdump and Chromium, runs unchanged.
+  - **Delegated trials add clicks** where a document-level click listener exists: at
+    most 48 per run, each one click and one extra read. An inert trial is never an
+    action. The destructive and deny gates run before `act` as for every element.
+  - **The ancestry suffix** changes the signatures, and so the states, only of elements
+    inside shadow roots and frames, which were not read before.
+- Deliverables:
+  - [x] SP-70 `tools/composed.py`; `disco/compose.py`; the `explore.py` enumeration,
+    acting and report changes; `spa.FORMS_JS` — done
+  - [x] `tests/test_disco_compose.py`, real browser:
+    - an open-shadow-root form, filled and sent;
+    - the shadow `Go`'s own identity, and a replay through the shadow root;
+    - the settings frame's controls, and a replay through the frame;
+    - a document-delegated tile kept and an inert candidate dropped;
+    - the closed root, the cross-origin and out-of-scope frames and the delegated
+      bounds counted;
+    - the spider's form read across a shadow root.
+
+    The offline tests cover frame classification, coverage aggregation and the trial
+    budget, plus two strict xfail pins (G1, the browser login's X3 clear) — done
+  - [x] `tests/test_composed_tree_guard.py`: the whole-package light-tree-query guard
+    with its allowance list, the owner check, and synthetic offenders and near-misses —
+    done
+  - [x] FR-CRAWL-39 and FR-CRAWL-40 added; FR-CRAWL-19's actionable-elements bullet and
+    section 5's `explore.json` line edited in place — done
+  - [x] BUG-0551. PA-0551, SP-70, CHANGELOG, ERROR_LOG, ARCHITECTURE and F-1XX texts
+    are in the lane's `doc_texts.md` for the coordinator — done
+- Effectiveness (assessed 2026-10-21, lane evidence; the harness on the committed tree
+  is reported with the lane's result):
+  - On c483dc1 the six defect tests in `tests/test_disco_compose.py` fail. The
+    exploration never requests `/api/shadow/search`, `/api/shadow/go`,
+    `/api/shadow/apply`, `/api/frame/save`, `/api/frame/apply` or `/api/tile/7`; the
+    report has no composed-tree counters; `spa.FORMS_JS` misses the shadow form. The
+    guard fails on the old `FORMS_JS`.
+  - With the change all pass under `FUZZLAB_REQUIRE_BROWSER=1`.
+  - Measured read cost: 20-28 ms for the fixture page (one document, one frame).
+    getEventListeners inside the read costs 13 ms for 6 005 elements and 34 ms for
+    24 005, one round trip, against about 1.35 ms per candidate per CDP call before.
+
 ### CC-CRAWL-0054 — The JSONL tail caps a line while reading it; the contract runner reads bounded and matches contract patterns in a killable worker (BUG-0536) (2026-10-20)
 - Placement: pre-assigned to AU-BOUNDED (audit defects 23 and 27, with the disco and
   spider half of 21); the core reader is CC-CORE-0072, the senders CC-FUZZ-0109.
