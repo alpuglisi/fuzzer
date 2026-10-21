@@ -5,7 +5,9 @@
 # Runs the runbook Part I activities against the lab you own on loopback:
 #   1. Ensure the lab is up.
 #   2. Export the local CA (to import into your browser for HTTPS interception).
-#   3. Start `fuzzlab proxy` (real upstream SocketSender + flow recording + CONNECT/TLS).
+#   3. Start `fuzzlab proxy` (real upstream SocketSender + flow recording + CONNECT/TLS),
+#      in its explicit raw mode (`--raw-framing`), which step 5 needs: by default the
+#      listener answers a request with conflicting Content-Length values 400 (CC-PROXY-0028).
 #   4. Prove the real upstream: curl the lab THROUGH the proxy -> 200.
 #   5. Prove byte-exact forwarding of a MALFORMED request (duplicate Content-Length):
 #      send it through the proxy, then read it back from the recorded store and confirm
@@ -65,7 +67,8 @@ fi
 say "3/6  Starting the proxy on 127.0.0.1:${PROXY_PORT} (recording to ${STORE})"
 rm -f "${STORE}"
 "${FUZZLAB[@]}" proxy --host 127.0.0.1 --port "${PROXY_PORT}" --scope 127.0.0.1 \
-  --ca-dir "${CA_DIR}" --store "${STORE}" --authorized >/tmp/fzl-proxy.log 2>&1 &
+  --ca-dir "${CA_DIR}" --store "${STORE}" --raw-framing --authorized \
+  >/tmp/fzl-proxy.log 2>&1 &
 PROXY_PID=$!
 for _ in $(seq 1 40); do
   (exec 3<>"/dev/tcp/127.0.0.1/${PROXY_PORT}") 2>/dev/null && { exec 3>&- 3<&-; break; }
@@ -88,7 +91,8 @@ import socket, sys
 proxy_port, lab_port = int(sys.argv[1]), int(sys.argv[2])
 # Two CONFLICTING Content-Length values: duplicate *identical* CL is valid per RFC 7230
 # (a parser may accept it), so only conflicting values are guaranteed to be rejected by
-# the parsed path. The proxy reads the first (0 -> no body) and forwards byte-exact.
+# the parsed path. In raw mode (--raw-framing) the proxy frames by the first (0 -> no
+# body) and forwards byte-exact; without it, the listener answers 400.
 req = (f"POST http://127.0.0.1:{lab_port}/product.php?id=1 HTTP/1.1\r\n"
        f"Host: 127.0.0.1:{lab_port}\r\n"
        f"Content-Length: 0\r\n"

@@ -20,7 +20,7 @@ import os
 from fuzzlab.core import storepath
 from fuzzlab.proxy.ca import LocalCA
 from fuzzlab.proxy.scope import Scope
-from fuzzlab.proxy.server import AsyncProxyServer, ProxyEngine
+from fuzzlab.proxy.server import AsyncProxyServer, InboundLimits, ProxyEngine
 from fuzzlab.proxy.socketsender import SocketSender
 
 
@@ -51,6 +51,23 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--response-deadline", type=float, default=None,
                    help="Overall seconds for one upstream response (default 4x the idle "
                         "timeout; long-lived streams are cut off by design)")
+    bounds = InboundLimits()
+    p.add_argument("--max-connections", type=int, default=None,
+                   help=f"Client connections at once; more are answered 503 (default "
+                        f"{bounds.max_connections}; FR-PROXY-403)")
+    p.add_argument("--max-request-bytes", type=int, default=None,
+                   help=f"Cap on one request body as it arrives; more is answered 413 "
+                        f"(default {bounds.max_body_bytes})")
+    p.add_argument("--max-header-bytes", type=int, default=None,
+                   help=f"Cap on one request head; more is answered 431 (default "
+                        f"{bounds.max_header_bytes})")
+    p.add_argument("--request-deadline", type=float, default=None,
+                   help=f"Seconds for one whole request to arrive; later is answered 408 "
+                        f"(default {bounds.request_deadline:g})")
+    p.add_argument("--raw-framing", action="store_true",
+                   help="Raw mode (D4, malformed-traffic study): a request with "
+                        "conflicting Content-Length values is framed by the first and "
+                        "forwarded byte-exact instead of answered 400")
     p.add_argument("--no-verify-tls", action="store_true",
                    help="Do not verify upstream TLS certs (self-signed lab origins)")
     p.add_argument("--export-ca", action="store_true",
@@ -103,6 +120,11 @@ def main(argv: list[str]) -> int:
         except storepath.StorePathError as exc:
             p.error(str(exc))
 
+    try:
+        limits = inbound_limits(args)
+    except ValueError as exc:
+        p.error(str(exc))
+
     from fuzzlab.proxy.socketsender import MAX_BODY_BYTES
     sender = SocketSender(verify_tls=not args.no_verify_tls,
                           max_body=args.max_response_bytes or MAX_BODY_BYTES,
@@ -123,7 +145,8 @@ def main(argv: list[str]) -> int:
     engine = ProxyEngine(scope=scope, sender=sender, history=history,
                          identity=args.identity)
     server = AsyncProxyServer(engine, host=args.host, port=args.port,
-                              ca=None if args.no_tls else ca)
+                              ca=None if args.no_tls else ca, limits=limits,
+                              raw_framing=args.raw_framing)
 
     async def _serve() -> None:
         await server.start()
@@ -140,6 +163,9 @@ def main(argv: list[str]) -> int:
             await asyncio.Event().wait()          # run until interrupted
         finally:
             await server.stop()
+            refused = {k: v for k, v in server.counts.items() if v}
+            if refused:
+                print(f"  refused by the listener's bounds: {refused}")
 
     ended = "complete"                    # Ctrl-C: the operator's stop
     try:
@@ -155,6 +181,16 @@ def main(argv: list[str]) -> int:
         if store is not None:
             store.close()
     return 0
+
+
+def inbound_limits(args) -> InboundLimits:
+    """The listener's bounds from the flags; a flag left out keeps its default
+    (`InboundLimits`). Raises ``ValueError`` for a bound that is not positive."""
+    given = {"max_connections": args.max_connections,
+             "max_body_bytes": args.max_request_bytes,
+             "max_header_bytes": args.max_header_bytes,
+             "request_deadline": args.request_deadline}
+    return InboundLimits(**{k: v for k, v in given.items() if v is not None})
 
 
 def _recording(p, args):

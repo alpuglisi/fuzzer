@@ -234,6 +234,8 @@ FLAG_CLASSES: dict[str, dict[str, str]] = {
                           "print:base_url", "print:auth_origin"]),
     "proxy": _all("B", ["host", "port", "scope", "ca_dir", "store", "record", "identity",
                         "max_response_bytes", "response_deadline", "no_verify_tls",
+                        "max_connections", "max_request_bytes", "max_header_bytes",
+                        "request_deadline", "raw_framing",
                         "export_ca", "no_tls", "authorized", "dry_run"]),
     "report": _all("B", ["store", "run", "json"]),
     "diagram": _all("B", ["store", "run", "format", "scope", "overlay", "out",

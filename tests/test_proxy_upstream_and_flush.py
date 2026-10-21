@@ -35,17 +35,59 @@ def _response(total, chunk=65536):
 
 # --- BUG-0101 -----------------------------------------------------------------------
 
+def _read_8mib_through(monkeypatch, cls):
+    """``recv_http_response`` of an 8 MiB body in 64 KiB receives through reader class
+    ``cls``; returns the reader and, per receive, whether its body buffer is still the
+    same object (identity, not ``id``: a freed buffer's id can be reused)."""
+    made, same = [], []
+
+    class Watched(cls):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            made.append(self)
+
+        def feed(self, data):
+            before = self.body
+            super().feed(data)
+            same.append(self.body is before)
+    monkeypatch.setattr(ss.framing, "MessageReader", Watched)
+    out = ss.recv_http_response(_Sock(_response(8 << 20)), 5)
+    assert len(out) > 8 << 20
+    (reader,) = made
+    return reader, same
+
+
+def _linear(reader) -> bool:
+    """The copy oracle (PA-0135(2)): each received byte copied a bounded number of times."""
+    return reader.copied <= 2 * reader.received
+
+
 def test_the_body_is_never_recopied_per_chunk(monkeypatch):
     """The audit measured 541 MB copied for an 8 MiB body: `bytes(body)` per chunk.
-    Now the completeness check sees the same growing bytearray every time."""
-    seen = []
-    real = ss._body_complete
-    monkeypatch.setattr(ss, "_body_complete",
-                        lambda head, body: seen.append(body) or real(head, body))
-    out = ss.recv_http_response(_Sock(_response(8 << 20)), 5)
-    assert len(out) > 8 << 20 and seen
-    assert all(type(b) is bytearray for b in seen)
-    assert len({id(b) for b in seen}) == 1                  # one buffer, no copies
+    The framing reader (SP-63, BUG-0543) keeps one body buffer for the whole read
+    (structural: the same object after every receive) and counts the bytes it copies
+    (`copied`, PA-0135(2)), which stays linear in what was received."""
+    from fuzzlab.proxy import framing
+    reader, same = _read_8mib_through(monkeypatch, framing.MessageReader)
+    assert reader.received > 8 << 20 and len(same) > 100
+    assert type(reader.body) is bytearray and all(same)
+    assert _linear(reader)
+
+
+def test_the_copy_oracle_flags_a_quadratic_reader(monkeypatch):
+    """PA-0135(3): the oracle above is proven on a deliberately quadratic reader that
+    re-copies its body per receive and counts honestly: the count is over 60 times what
+    was received, and the body is a new object after every receive."""
+    from fuzzlab.proxy import framing
+
+    class Quadratic(framing.MessageReader):
+        def _keep(self, piece, payload):
+            if payload or not self.dechunk:
+                self.body = bytearray(bytes(self.body) + bytes(piece))
+                self.copied += len(self.body)
+    reader, same = _read_8mib_through(monkeypatch, Quadratic)
+    assert not _linear(reader) and reader.copied > 60 * reader.received
+    assert same.count(False) > 100
 
 
 def test_a_body_over_the_cap_raises():
