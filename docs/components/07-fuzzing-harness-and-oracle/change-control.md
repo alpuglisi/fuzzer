@@ -136,6 +136,26 @@ Newest first.
     keeps none), which is the premise of the Set-Cookie refusal above. Measured on a
     real socket by
     `tests/test_replay_bindings.py::test_the_seams_page_fetch_goes_through_its_pooled_transport_on_the_probes_identity`.
+- Review round 2 (0703688: two findings not fixed, each a neighbouring path of a round-1
+  fix; each fix proved by a test that fails on 0703688):
+  - `tools/probesender.py` (R2-2): `SeamProbeSender.fetch` records the route its GET
+    actually went out on (`_FetchRoute`: the client and identity label) as
+    `probe.carry`; `_send` refuses a send whose entries carry one when the send would
+    leave on another route or identity (`PrerequisiteUnavailable`; the row is
+    `UNBOUND`). The N3 path: the copy's re-login on the fetch logged the run's session
+    out, `_on_copy`'s verify tripped the single-session breaker, and the bound send went
+    anonymous with the copy cookie's token (403, read as a negative). Also caught: the
+    copy failing to log in again for the send (the anonymous fallback). Test:
+    `tests/test_replay_bindings.py::test_a_bound_send_never_leaves_on_another_route_than_its_pages_fetch`
+    (a loopback app whose token is tied to the cookie; real sender, binder, oracle and
+    `ReflectedXssStrategy`; the copy's session and `verify_live` faked).
+  - `oracle/oracle.py`: a comment only (the carry token is the cookies or the route).
+  - The binder's fresh-value check reads FR-AUD-20's predicate, which now fails closed
+    on the tail (CC-AUD-0056): `tests/test_replay_bindings.py::test_the_binder_never_binds_a_fresh_value_that_names_a_host_beyond_loopback`.
+  - Residual (stated in FR-FUZZ-67): the route check does not compare the session's
+    generation, so a re-login of the same route between the fetch and the bound send is
+    not caught. A refused send is still counted in the isolation report's `sends` or
+    `anonymous_sends`: the route is chosen, and counted, before the check.
 - Effectiveness (assessed <date> or pending): pending.
 
 ### CC-FUZZ-0110 — The blind-SQLi builder never admits an answer sent on a session known to be lost (FR-FUZZ-65, FR-FUZZ-63, BUG-0533; decision D′) (2026-10-20)

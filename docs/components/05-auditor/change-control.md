@@ -50,6 +50,31 @@ Newest first.
   `found_from` stored secrets and identifiers); `audit/value_shape.names_outside_lab`
   fails closed (`_names_only_lab`; B3: `@`, `\`, embedded-URL bypasses). Tests in
   `tests/test_replay_bindings.py` fail on 85e7ab2.
+- Review round 2 (0703688, R2-1): `_names_only_lab` failed closed on the authority but
+  not on the tail. Its tail was cut on a fixed separator list without `:`, and a token
+  counted as a host only when `value_shape` read it as a URL, IP or host name. So
+  `?next=evil.example:8080`, `?next=8.8.8.8:53`, `?next=https:evil.example` and
+  `#evil.example:8080` on a loopback URL were sent as given, and the binder bound them
+  fresh. Now:
+  - the tail is cut at every character a host, port, scheme or IPv6 literal is not
+    spelled with (`_tail_tokens`);
+  - the value is the lab only when no run reads as a host (`_reads_as_host`): a
+    `value_shape` URL, IP or host name (one trailing dot off), a dotted quad in any
+    radix, a scheme and `:`, or a host and a port. A loopback host in the tail now
+    counts too;
+  - non-ASCII is refused anywhere, like `%`.
+
+  Measured in node 22: `new URL("https:evil.example", "http://127.0.0.1/")` is
+  `https://evil.example/`. With `http://` put before the token, `evil.example:8080`,
+  `8.8.8.8:53`, `0x8.8.8.8`, `a_b.evil.example` and fullwidth `evil` all read as hosts.
+  Tests (all fail on 0703688 for the review's spellings):
+  - `tests/test_replay_bindings.py::test_a_value_that_names_a_host_beyond_loopback_to_any_reader_is_outside_the_lab`;
+  - `tests/test_replay_bindings.py::test_the_binder_never_binds_a_fresh_value_that_names_a_host_beyond_loopback`
+    (the same spellings through `_FormBoundSender._bind_fresh`);
+  - `tests/test_replay_bindings.py::test_a_value_naming_only_loopback_is_the_lab`
+    (the loopback values that must still pass).
+
+  Accepted false positive: a time or a `word:` in a loopback value's tail (FR-AUD-20).
 - Effectiveness (assessed <date> or pending): pending.
 
 ### CC-AUD-0053 — The auditor ends a failed load through SP-01's owner (BUG-0522) (2026-10-19)

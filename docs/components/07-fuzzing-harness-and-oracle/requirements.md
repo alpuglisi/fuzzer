@@ -2028,6 +2028,13 @@ rewards) derives from it.
     - it is gated on its own URL -- the send gate; on the authenticated seam an auth
       endpoint or another isolated path is never fetched with the run's session;
     - it is made on the session the bound send carries: same origin, no session note;
+      *(review round 2:)* the seam records the route its GET actually went out on (the
+      client and identity label: the run's session, the path's isolated copy, or
+      anonymous) as the fetch's carry token, and the bound send carrying it is refused
+      (`PrerequisiteUnavailable`, so `UNBOUND`) when it would leave on another route or
+      identity -- e.g. when the copy's re-login on that fetch logged the run's session
+      out and the single-session breaker sent the path anonymous, or the copy could not
+      log in again for the send;
     - the anonymous `RequestsProbeSender` holds the page's cookies in memory under a
       one-time token and loads them only into the send whose bound entries carry it
       (every other send discards them first, BUG-0112); the authenticated seam carries
@@ -2040,7 +2047,9 @@ rewards) derives from it.
     answer, a non-2xx, lost-session or session-noted answer, a cookie the route cannot
     carry, no matching form or link, a captured JSON body (no page holds its leaves; such
     a candidate is unbound before any strategy runs), a fresh value naming a host outside
-    the lab -- nothing is sent and the test is inconclusive (`UNBOUND`) with the reason,
+    the lab (the FR-AUD-20 predicate, failing closed on the value's tail too), a bound
+    send whose route is not its page fetch's -- nothing is sent and the test is
+    inconclusive (`UNBOUND`) with the reason,
     never a negative. A sibling naming a host outside the lab is never sent and never
     replaced by loopback (FR-AUD-20, which fails closed: `value_shape.names_outside_lab`):
     its point carries a `replay_refusal` and is inconclusive before any strategy runs.
@@ -2051,7 +2060,10 @@ rewards) derives from it.
     response cookie, and its pooled transport's jar keeps none, FR-CORE-509; the page
     fetch is a bodiless GET pooled under the probe route's own key), and so is a CSRF-protected login form whose page is an auth
     endpoint fetched on a session route; a captured JSON body's redacted leaf is never
-    rebuilt; a store row from before migration 25 has no recipe.
+    rebuilt; a store row from before migration 25 has no recipe; the route check compares
+    the route and identity, not the session's generation, so a re-login of the same
+    route's session between the fetch and the bound send (or during that send) is not
+    caught (review round 2 residual).
 - **FR-FUZZ-68 (the template stage folds only true duplicates, `CC-FUZZ-0112`,
   `CC-CORE-0074`, 2026-10-21, BUG-0547)** When a caller gives `run_pipeline` the pages'
   HTML (`pages_html`), the stage before the audit folds injection points through
