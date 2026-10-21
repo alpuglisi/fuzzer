@@ -27,7 +27,8 @@ fuzzer.
 - **FR-CRAWL-5** Crawl per identity, using the session manager; detect logout and
   re-authenticate. The login is discovered from the start URL itself, path and all,
   never its bare origin; injected cookies are scoped to the origin root (CC-CRAWL-0012,
-  BUG-0113).
+  BUG-0113). Every engine carries the identity or refuses: the static engine too
+  (FR-CRAWL-34, CC-CRAWL-0056).
 - **FR-CRAWL-6** Respect a crawl budget and deadline via the shared budget
   manager; never overlap headless work with timing-sensitive fuzzing.
 - **FR-CRAWL-7** Link-following scope is the **start URL's own host** (loopback
@@ -761,8 +762,9 @@ fuzzer.
   default 1) loads and renders N queued pages at once, one browser (or HTTP session)
   per worker. The first worker runs on the calling thread and starts its browser first
   (the session is ensured once; the others adopt it); each other worker starts and
-  stops its own browser on its own thread. A URL is claimed under the crawl lock before
-  it is loaded, so no page is loaded twice. Whatever can write -- reveals, SPA form
+  stops its own browser on its own thread. *(Amended in place, CC-CRAWL-0056.)* A URL's
+  key is reserved when the frontier admits it (FR-CRAWL-35), so no page is queued or
+  loaded twice; one worker runs the same loop. Whatever can write -- reveals, SPA form
   submissions, selector-form enumeration (`_after_fetch`) and every seed or probe load
   (FR-CRAWL-17) -- runs under one crawl-wide lock (`_interact`), one worker at a time,
   so the submission, reveal and probe caps and the write windows keep their one-worker
@@ -930,6 +932,77 @@ fuzzer.
     `script_segments.json`), before any side effect and with `--dry-run` too. Order:
     scope URLs, run files, storage state, store, `--dry-run` (which names the trace),
     `--authorized`, workers.
+- **FR-CRAWL-34 (the legacy spider's static engine carries its identity, CC-CRAWL-0056,
+  BUG-0545)** In a crawl with `--identity`, every request the `requests` engine sends --
+  the engine chosen, the engine Playwright's absence selects, the browser's fallback for
+  a page it cannot render, and a selector form's submission (FR-CRAWL-8) -- goes through
+  the core seam (`core.http.HttpClient`) with the session manager as its addon, on a
+  persistent bounded session (SP-60) whose cookie jar keeps nothing: the manager is the
+  one source of the session.
+  - **Before any page** (`_static_identity`): the manager logs in from the start URL
+    (operator base); the session must cover the start URL's origin over its transport
+    (`session_headers`); it must hold a cookie or a header a request can send, else the
+    crawl fails with `StaticIdentityUnsupported` ("cannot carry": a session in browser
+    storage needs `--engine playwright`); and it must be live (`verify_live`, SP-61). A
+    failed login fails the crawl. Nothing is crawled anonymously in its place.
+  - **Each hop:** the crawl's scope and destructive rules decide a redirect hop as before;
+    a hop to another origin than the session's is not followed and the load extracts
+    nothing (`withheld`, FR-SESS-20). An answer the manager sent without the session --
+    withheld (another origin), or with none applied (no `session_generation`: a host
+    outside the manager's own scope) -- is never extracted (`withheld`).
+  - **Losses:** an answer on a session the manager knows lost, or sent while the manager
+    saw a loss on any send (its logout listener), is no evidence: the page is retried
+    (FR-CRAWL-36) after the manager's re-login. A `SessionAuthError` on a send (a re-auth
+    cap, an unknown health) stops the crawl (`IdentityUnavailable`).
+  - Enforced by: `tests/test_spider_static_identity.py` (each test fails on c483dc1).
+- **FR-CRAWL-35 (the legacy spider's frontier: one admission per key, budgets,
+  CC-CRAWL-0056, BUG-0545)** Every URL the crawl would load enters through one frontier
+  (`_Frontier`), shared by every worker:
+  - **One admission per key.** A URL is admitted once per scheduling key
+    (`spa.visit_key`: canonical origin, path, exact query, SPA route); a key already
+    admitted or stored final is a duplicate (counted, dropped). The entry keeps its exact
+    URL. A probe (FR-CRAWL-17) is never deduplicated.
+  - **Budgets** (`FrontierLimits`; defaults are bounds, not tuning): `max_url_length`
+    4096 characters, `max_pages` 20000 admissions, `max_per_origin` 10000,
+    `max_route_variants` 100 per route shape (`spa.route_shape`: origin, path with
+    id-shaped segments as `{}` through `core.pathtemplate.id_shaped`, sorted query names,
+    the SPA route's own shape -- values never count), `max_pending` 10000 queued, checked
+    in that order. A refusal is counted by reason in `crawl_stats`
+    (`frontier_rejected[<reason>]`) and logged as partial coverage; it is never queued or
+    stored.
+  - **Order.** Two queues (ordinary; seeds and probes, the first worker's) and a retry
+    heap; a worker takes a due retry first, then the older head: one worker crawls in
+    admission order, as before. A pending retry keeps the crawl going; probes are planned
+    once every worker is idle and no retry waits.
+  - Enforced by: `tests/test_spider_frontier.py::test_a_destination_many_parents_link_is_queued_once`,
+    `tests/test_spider_frontier.py::test_a_fan_out_trap_is_bounded_by_the_route_budget_and_reported`,
+    `tests/test_spider_frontier.py::test_the_frontier_admits_each_key_once_and_counts_every_budget`.
+- **FR-CRAWL-36 (the legacy spider's page record: a load's outcome, retries, the
+  batched writer, CC-CRAWL-0056, BUG-0545)**
+  - **Outcomes.** `discovered_pages.outcome` is `pending` once the page answered,
+    `visited` only when its extraction finished (links queued), `withheld` for another
+    origin than the session's (FR-SESS-20), `failed` for a load that did not give the
+    page. Only `visited` and `withheld` (and a row from before this requirement with a
+    status) are visited: skipped by the run and by a resumed crawl.
+  - **Transient failures.** A load whose answer SP-56 classes incomplete,
+    throttle-or-unavailable or gateway, another 5xx, a transport failure (connection,
+    timeout, a broken or undecodable body), SP-60's `BodyIncomplete`, or a session lost on
+    the send (FR-CRAWL-34) is stored `failed` (its status, `attempts`, `error`: an answer
+    or exception class, never a URL or a body) and loaded again after a backoff (1 s
+    doubling, a `Retry-After` honoured, at most 30 s), up to 3 loads; seeds and probes are
+    never retried (their windows, FR-CRAWL-17). A page still failing is unresolved:
+    `failed_pages`, `pages_failed`, a warning. A `--resume` crawl admits every stored
+    unresolved row again (not a seed or a probe). `pages_retried` counts retries.
+  - **The writer.** Recording a page never touches the store: rows are queued in memory
+    and one writer thread commits them in order when they hold 64 rows or 1 MiB, or the
+    oldest waited 1 s, and at close; reads of page rows flush first. A crawl thread waits
+    only when the unwritten rows pass 16 MiB (`store_writer_waits`). A failed write is
+    raised at the next record, flush or close, never dropped. `is_visited` reads memory.
+  - Enforced by: `tests/test_spider_frontier.py::test_a_transient_failure_is_retried_and_never_recorded_visited`,
+    `tests/test_spider_frontier.py::test_an_incomplete_body_is_retried_never_taken_for_a_page`,
+    `tests/test_spider_frontier.py::test_a_page_that_keeps_failing_is_unresolved_reported_and_resumed`,
+    `tests/test_spider_frontier.py::test_recording_a_page_never_waits_for_the_stores_lock`,
+    `tests/test_spider_frontier.py::test_page_rows_are_committed_by_count_bytes_and_age_and_flushed_at_close`.
 
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default
@@ -1077,7 +1150,9 @@ fuzzer.
   - Enforced by (the explorer, end to end in a real browser): `disco.explore.refusal` / `form_refusal` — `tests/test_disco_e2e.py::test_destructive_controls_and_other_origins_are_never_reached`, `tests/test_disco_e2e.py::test_every_exchange_is_recorded_with_its_cause_and_the_tag_never_reaches_the_app`, `tests/test_disco_synth.py::test_a_captcha_form_is_submitted_and_a_credential_change_is_not`
   - Enforced by (the capture is redacted at the write): `disco.capture.make_record` — `tests/test_disco_capture.py::test_no_secret_reaches_the_capture_file_and_benign_content_stays`, `tests/test_disco_capture.py::test_a_secret_straddling_the_body_cut_is_still_removed`, `tests/test_disco_capture.py::test_an_unparseable_json_body_with_a_secret_is_omitted`
 - **NFR-CRAWL-bounded** Cap per-template instance counts to avoid infinite crawl
-  spaces.
+  spaces. *(Built for the legacy spider, CC-CRAWL-0056: FR-CRAWL-35's per-route-shape,
+  per-origin, total, pending and URL-length budgets, each refusal counted and reported;
+  disco's explorer bounds itself by states and actions, FR-CRAWL-19.)*
 - **NFR-CRAWL-reproducible** Record a crawl manifest (URL → template →
   discovered-from) so runs can be diffed.
 - **NFR-CRAWL-dry-run** `fuzzlab crawl` accepts `--dry-run`: plans and prints the
@@ -1097,11 +1172,17 @@ Spider DB (the spider's own schema, `StorageManager`; no store migration):
 `discovered_pages` (`source` is `link`, `xhr`, `redirect`, `form`, since FR-CRAWL-12
 `spa-route`, since FR-CRAWL-16 `reveal`, or since FR-CRAWL-17 `spa-query` (a query
 seed); a SPA route page's `url` keeps its `#/…` fragment, a seed's with its query;
-since FR-CRAWL-29 `found_from TEXT` and `seen_at REAL`, NULL when unknown),
+since FR-CRAWL-29 `found_from TEXT` and `seen_at REAL`, NULL when unknown; since
+FR-CRAWL-36 `outcome TEXT` (`pending` | `visited` | `withheld` | `failed`), `attempts
+INTEGER` and `error TEXT` (an answer or exception class), NULL in an older row, whose
+status 0 reads unresolved; a failed load is still a row with its status, 0 when there was
+no answer),
 `discovered_forms`, `selector_verdicts`, `crawl_stats (name TEXT PRIMARY KEY,
 value INTEGER)` (the last crawl's SPA, reveal and, since FR-CRAWL-17, `spa_query_*`
 counts -- refusals by reason as `spa_query_refused[<reason>]` -- `submit_stopped` and
-`reveals_stopped`), since FR-CRAWL-16 **`revealed_forms`** `(id, page_url, route,
+`reveals_stopped`; since FR-CRAWL-35/36 `frontier_admitted`, `frontier_duplicates`,
+`frontier_rejected[<reason>]`, `pages_retried`, `pages_failed`, `store_writer_waits`),
+since FR-CRAWL-16 **`revealed_forms`** `(id, page_url, route,
 signature, submitted INTEGER, UNIQUE (route, signature))` — the forms a reveal showed,
 for a later opt-in (`page_url` redacted by `redact_url_identifiers`; never values) —
 and, since FR-CRAWL-13,

@@ -989,6 +989,10 @@ HOST_COMPARE_ALLOWED = {
            "(cookie_scope / header_scope by origin)"),
     "fuzzlab/tools/spider.py:_start_browser": (
         1, "a loopback start chooses the launch's resolver rules (scope), not a session"),
+    "fuzzlab/tools/spider.py:_identity_client": (
+        1, "the static seam's host gate mirrors the crawl's request scope (deny only); the "
+           "session goes by origin (prepare), and an answer prepare sent without it is "
+           "never extracted (CC-CRAWL-0056)"),
 }
 #: Calls whose result is a host (``canonical_host`` and the crawler's ``_norm_host``).
 _HOST_CALLS = {"canonical_host", "_norm_host", "_canonical_host"}
