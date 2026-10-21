@@ -170,9 +170,21 @@ that shares the store, never a mandatory pipeline (D5).
     with that failure in `AsyncProxyServer.errors`; `fuzzlab proxy` prints the count
     when it stops. Enforced by:
     `tests/test_proxy_rules_and_scope.py::test_a_history_failure_never_changes_the_clients_answer`.
-    Not yet enforced for the Repeater: its synchronous `record` raises a store error in
-    place of the response it got, pinned by the strict xfail
-    `tests/test_proxy_repeater.py::test_a_history_failure_never_loses_the_repeaters_response`.
+    **The Repeater too** *(review round 2, P2-2; BUG-0543)*: `Repeater.send` contains
+    whatever building or recording the flow raises (a store error such as `database is
+    locked`, which the synchronous `record`'s flush re-raises). It returns the
+    upstream's response, counts the failure in `Repeater.history_failures` by error
+    class, names it in `Repeater.last_history_error` (None when recorded), and logs the
+    class only. The flow stays in the writer's buffer, so a later successful write
+    stores it. The web UI's `RepeaterController.send` returns `history_error` and
+    `history_failures` (the controller's count) in the JSON beside `response`, where the
+    operator reads the Repeater's result. A failure is never a 500 for a request the
+    target answered, and nothing is resent. Before, the store error replaced the
+    response and the route answered 500. Enforced by:
+    `tests/test_proxy_repeater.py::test_a_history_failure_never_loses_the_repeaters_response`,
+    `tests/test_web_repeater.py::test_a_history_failure_answers_the_repeaters_response_and_says_so`.
+    Not yet built: the Proxy page's script does not show `history_error` beside the
+    response (a UI change, PA-0065).
   - **One writer thread per writer**, started by the first `submit`, opens its own
     `Store` on the writer's file (`create=False`) and does every redaction, hash,
     insert, commit and trace event, in submission order (flow ids follow it).
@@ -192,7 +204,15 @@ that shares the store, never a mandatory pipeline (D5).
     **`close(run_end)`** writes everything pending, then the run's end and the
     counters, within 60 s; what is still pending then is counted `unwritten` and
     logged. Idempotent. A writer dropped without `close`, or open at interpreter exit,
-    is still drained. A store the thread cannot open counts every flow and logs an
+    is still drained. *(Review round 2, P2-3; BUG-0550:)* the exit drain covers every
+    writer whose thread started. A writer joins it only once its thread has started, so
+    a thread that cannot start ("can't start new thread", which `submit` raises to its
+    caller) leaves nothing for the drain to join. One writer whose close fails is
+    reported, and the drain goes on to the others. Before, that writer stopped the drain
+    ("cannot join thread before it is started") and the writers after it were never
+    drained. Enforced by:
+    `tests/test_proxy_history_writer_thread.py::test_a_writer_thread_that_cannot_start_never_stops_the_exit_drain`.
+    A store the thread cannot open counts every flow and logs an
     error. A caller on an event loop closes with **`aclose(run_end)`**: the drain is
     awaited on a worker thread while the loop runs; a writer with a file store and
     nothing of its own on the caller's connection starts its thread for the close, so
@@ -239,7 +259,11 @@ that shares the store, never a mandatory pipeline (D5).
     before: a close-delimited, over-long, short, doubly framed or HTTP/1.0 answer, one
     followed by any byte (a desynchronised upstream answering twice; merge
     integration, BUG-0549), one SP-63 cannot frame (`UpstreamFramingError`), and every
-    deliberately malformed request.
+    deliberately malformed request. *(Review round 2:)* the same exact-end rule holds
+    for the urllib3 pools of every `requests` session fuzzlab makes for a target,
+    the core seam's included. It is decided in SP-60 (FR-CORE-509), because the seam's
+    pooling had kept a connection with a stray answer behind it (P2-1, BUG-0549 round
+    2).
   - **A body is never kept** *(review round 1)*. A request that carries body bytes, of
     any method, goes on a fresh socket and its connection is closed after it. Whether
     the upstream read the body cannot be observed: one that answers without reading it

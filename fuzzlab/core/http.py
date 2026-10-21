@@ -249,6 +249,11 @@ class PooledTransport:
       made and recorded (FR-FUZZ-61, PA-0510). urllib3 drops a pooled connection it
       finds closed before reusing it, and the idle retirement keeps a reuse under the
       usual 5 s server idle close.
+    - **A connection is kept only after an exactly framed exchange** (BUG-0549 review
+      round 2). The sessions' pools are SP-60's: a connection whose answer was followed
+      by any byte, buffered with the answer, waiting in the TLS layer or on the socket,
+      is closed when it is returned, never reused (`bodyread.exact_end`). Before, urllib3
+      kept it, and a stray answer could be read as the next send's.
 
     Thread-safe: the bookkeeping is under one lock, and ``requests`` sessions with no
     cookie state are shared by concurrent sends (urllib3's pools are thread-safe).

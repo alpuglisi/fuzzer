@@ -16,6 +16,9 @@ and reads which connection each request came on there; nothing is timed (PA-0135
 from __future__ import annotations
 
 import gc
+import select
+import socket
+import ssl
 import threading
 
 import pytest
@@ -237,29 +240,163 @@ def test_closing_the_client_closes_its_pooled_connections():
         assert peer.wait(lambda p: c in p.closed)
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "Merge-integration sweep of BUG-0549's I2 (a connection is kept only when nothing "
-    "follows its framed answer), known and not fixed in this change: the seam's pooled "
-    "session (requests over urllib3) reads a second answer that came in the same segment "
-    "into the first response's buffer, drops it unseen and keeps the connection; one "
-    "arriving after urllib3's checkout check would be read as the next send's answer. "
-    "Measured on 18cdf9f: the next GET rode the same connection. Owner: CORE "
-    "(`core/http.py::PooledTransport`; every `requests` session shares the mechanism)."))
-def test_an_answer_followed_by_another_never_leaves_its_pooled_connection():
-    """The target answers ``/case`` twice in one segment (a desynchronised upstream).
-    Wanted: the send gets the first answer and the next send another connection."""
+#: Answers to ``/case`` followed by bytes past their framed end, in one segment, each
+#: measured on urllib3 2.8.0 to leave the connection kept with the bytes dropped
+#: (`scratchpad/lanes/INTEG/measure_seam_r2.py`): (the answer, what it carries).
+STRAYS = {
+    "a second answer": (ok(b"/case") + ok(b"stray"), b"/case"),
+    "a chunked answer, then another": (
+        b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\n/case\r\n0\r\n\r\n"
+        + ok(b"stray"), b"/case"),
+    "an empty answer, then another": (ok(b"") + ok(b"stray"), b""),
+    "a 204, then bytes": (b"HTTP/1.1 204 No Content\r\n\r\n" + ok(b"stray"), b""),
+    "a lone CRLF after the answer": (ok(b"/case") + b"\r\n", b"/case"),
+}
+
+
+def _stray_reply(answer: bytes):
+    """``/case`` gets ``answer``; were the next request sent on that connection, a
+    second stray answer would reach the client before the real one (the checker's late
+    stray: written after the first while the next answer is held), so a kept
+    connection shows as the next send getting ``stray2``."""
+    case: list[int] = []
+
     def reply(conn, k, req):
         if req.path == "/case":
-            return ok(b"/case") + ok(b"stray")
+            case.append(conn)
+            return answer
+        if req.path == "/after" and conn in case:
+            return ok(b"stray2") + ok(b"/after")
         return echo(conn, k, req)
+    return reply
 
-    with KeepAlivePeer(reply) as peer:
+
+@pytest.mark.parametrize("answer,body", STRAYS.values(), ids=STRAYS.keys())
+def test_an_answer_followed_by_another_never_leaves_its_pooled_connection(answer, body):
+    """Review round 2 (P2-1, a security regression of this bug's pooling): the target
+    answers ``/case`` and sends more bytes past that answer's framed end in the same
+    segment (a desynchronised upstream). urllib3 read them into the first response's
+    buffer, http.client dropped them with its reader at the framed end, and the
+    connection was kept: the next send rode it, and a stray answer arriving later was
+    read as that send's answer (measured: ``after=b'stray2'``). Wanted: the send gets
+    its own answer, the connection is closed at once and never reused, and the next send
+    gets its own answer on another connection."""
+    with KeepAlivePeer(_stray_reply(answer)) as peer:
         client = _client()
         try:
             assert _get(client, peer, "/p1").body == b"/p1"
-            assert _get(client, peer, "/case").body == b"/case"
+            assert _get(client, peer, "/case").body == body
             case_conn = peer.conn_of("/case")[0]
+            assert case_conn == peer.conn_of("/p1")[0]          # it rode the kept one
+            assert peer.wait(lambda p: case_conn in p.closed)
             assert _get(client, peer, "/after").body == b"/after"
-            assert peer.conn_of("/after")[0] != case_conn
+            assert peer.conn_of("/after") != [case_conn]
+            assert _get(client, peer, "/next").body == b"/next"   # and that one is kept
+            assert peer.conn_of("/next") == peer.conn_of("/after")
+            assert [s.path for s in peer.seen] == ["/p1", "/case", "/after", "/next"]
         finally:
             client.close()
+
+
+class _TlsTunnel:
+    """A loopback HTTPS proxy: TLS to the client, ``CONNECT``, then a byte relay to the
+    target, so the client's TLS to the target runs inside the proxy's (urllib3's
+    ``SSLTransport``). Counts the tunnels it opened."""
+
+    def __init__(self, ctx):
+        self._ctx = ctx
+        self.tunnels = 0
+        self._srv = socket.socket()
+        self._srv.bind(("127.0.0.1", 0))
+        self._srv.listen(16)
+        self.url = f"https://127.0.0.1:{self._srv.getsockname()[1]}"
+        threading.Thread(target=self._accept, daemon=True).start()
+
+    def _accept(self) -> None:
+        while True:
+            try:
+                raw, _ = self._srv.accept()
+            except OSError:
+                return                                   # closed
+            threading.Thread(target=self._relay, args=(raw,), daemon=True).start()
+
+    def _relay(self, raw) -> None:
+        conn = up = None
+        try:
+            conn = self._ctx.wrap_socket(raw, server_side=True)
+            head = b""
+            while b"\r\n\r\n" not in head:
+                chunk = conn.recv(4096)
+                if not chunk:
+                    return
+                head += chunk
+            host, port = head.split(b" ")[1].decode().rsplit(":", 1)
+            up = socket.create_connection((host, int(port)))
+            self.tunnels += 1
+            conn.sendall(b"HTTP/1.1 200 Connection established\r\n\r\n")
+            while True:
+                ready = [conn] if conn.pending() else \
+                    select.select([conn, up], [], [], 5)[0]
+                for s in ready:
+                    data = s.recv(65536)
+                    if not data:
+                        return
+                    (up if s is conn else conn).sendall(data)
+        except (OSError, ValueError):
+            return
+        finally:
+            for s in (conn, up, raw):
+                if s is not None:
+                    s.close()
+
+    def close(self) -> None:
+        self._srv.close()
+
+
+@pytest.mark.parametrize("tunnel", [False, True], ids=["direct", "inside a proxy's TLS"])
+@pytest.mark.parametrize("size", [5, 10_000], ids=["in the reader", "in the TLS layer"])
+def test_a_stray_answer_held_by_tls_never_leaves_its_pooled_connection(
+        size, tunnel, tmp_path, monkeypatch):
+    """Review round 2 (P2-1) over TLS: a stray answer in the same TLS record as the
+    answer is buffered by the response's reader (a small answer), or stays in the TLS
+    layer when the reader asked for exactly the answer's last bytes (a 10000-byte
+    answer: measured 43 bytes pending in the SSL object, the socket not readable). On
+    4e0c2c6 the connection was kept and, for the second, the next send was answered
+    with the stray. Through an HTTPS proxy the bytes wait in urllib3's ``SSLTransport``.
+    Wanted: closed at once, the next send's own answer on another connection; clean
+    exchanges keep one connection (one handshake, one tunnel) as before. Verification
+    stays on, against the test's own CA."""
+    pytest.importorskip("cryptography")
+    from fuzzlab.proxy.ca import LocalCA
+    ca = LocalCA(tmp_path / "ca")
+    cert, key = ca.leaf_cert_files("127.0.0.1")
+    server = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    server.load_cert_chain(str(cert), str(key))
+    monkeypatch.setenv("REQUESTS_CA_BUNDLE", str(ca.ca_cert_path))
+    proxy = _TlsTunnel(server) if tunnel else None
+    for name in ("no_proxy", "NO_PROXY", "https_proxy", "HTTPS_PROXY", "all_proxy",
+                 "ALL_PROXY"):
+        monkeypatch.delenv(name, raising=False)
+    if proxy is not None:
+        monkeypatch.setenv("HTTPS_PROXY", proxy.url)
+    answer = ok(b"x" * size)
+    try:
+        with KeepAlivePeer(_stray_reply(answer + ok(b"stray")), tls=server) as peer:
+            client = _client()
+            try:
+                https = f"https://127.0.0.1:{peer.port}"
+                for path in ("/p1", "/p2"):
+                    assert client.send(Request("GET", https + path)).body == path.encode()
+                assert (peer.connections, peer.handshakes) == (1, 1)
+                assert proxy is None or proxy.tunnels == 1
+                assert client.send(Request("GET", https + "/case")).body == b"x" * size
+                case_conn = peer.conn_of("/case")[0]
+                assert case_conn == peer.conn_of("/p1")[0]
+                assert peer.wait(lambda p: case_conn in p.closed)
+                assert client.send(Request("GET", https + "/after")).body == b"/after"
+                assert peer.conn_of("/after") != [case_conn]
+            finally:
+                client.close()
+    finally:
+        if proxy is not None:
+            proxy.close()

@@ -490,14 +490,23 @@ def _report(level: str, msg: str, **fields) -> None:
         getattr(get_logger("proxy.history"), level)(msg, extra=fields)
 
 
-#: Writer threads still running, drained (bounded) at interpreter exit.
+#: Writer threads running, drained (bounded) at interpreter exit. A pump joins it only
+#: once its thread has started (BUG-0550 review round 2).
 _LIVE: "weakref.WeakSet[_Pump]" = weakref.WeakSet()
 
 
 @atexit.register
 def _close_live_pumps() -> None:
+    """Drain every live writer at interpreter exit, each within 10 s. One that fails to
+    close is reported and the others are still drained (BUG-0550 review round 2: an
+    unstarted thread's "cannot join thread before it is started" stopped this loop, so
+    the writers after it in `_LIVE` were never drained)."""
     for pump in list(_LIVE):
-        pump.close(None, timeout=10.0)
+        try:
+            pump.close(None, timeout=10.0)
+        except Exception as exc:  # noqa: BLE001 - one writer's failure, the rest drain
+            _report("error", "proxy history writer could not be drained at exit",
+                    run_id=pump.run_id, error=type(exc).__name__)
 
 
 class _Pump:
@@ -539,8 +548,8 @@ class _Pump:
             self.broken = "the store has no file another thread can open"
         self.thread = threading.Thread(target=self._run, daemon=True,
                                        name=f"fuzzlab-proxy-history-{run_id}")
+        self.thread.start()               # raises when it cannot start: never live then
         _LIVE.add(self)
-        self.thread.start()
 
     # --- the submitting side (bounded work, never the store) --------------------------
     def submit(self, rec: FlowRecord) -> bool:

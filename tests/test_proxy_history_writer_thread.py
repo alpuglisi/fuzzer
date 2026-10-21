@@ -22,6 +22,7 @@ import subprocess
 import sys
 import threading
 import time
+import weakref
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -396,6 +397,51 @@ def test_a_failed_commit_is_rolled_back_and_the_retry_writes_once(tmp_path, monk
             "SELECT key FROM trace_event WHERE run_id=? AND kind='observe.exchange' "
             "ORDER BY seq", (run_id,))]
         assert keys == [f"{TRACE_KEY}{i}" for i in ids]               # one event per flow
+
+
+def test_a_writer_thread_that_cannot_start_never_stops_the_exit_drain(tmp_path,
+                                                                      monkeypatch):
+    """Review round 2 (P2-3): `_Pump` joined `_LIVE` before its thread started, so a
+    thread that could not start ("can't start new thread") left a pump in `_LIVE`
+    whose `close` raised "cannot join thread before it is started" at interpreter exit;
+    that stopped `_close_live_pumps`, and the writers after it were never drained.
+    Wanted: such a pump is never live, the failed `submit` raises to its caller (the
+    engine counts it, BUG-0543 I1), and the exit drain writes every other writer's
+    pending flows even when one writer's close fails."""
+    live: weakref.WeakSet = weakref.WeakSet()        # this test's writers only
+    monkeypatch.setattr(hist, "_LIVE", live)
+    real_start = threading.Thread.start
+    refused: list[threading.Thread] = []             # keeps the refused pump reachable
+
+    def start(thread):
+        if thread.name.startswith("fuzzlab-proxy-history-"):
+            refused.append(thread)
+            raise RuntimeError("can't start new thread")
+        return real_start(thread)
+
+    with Store(tmp_path / "s.db") as store:
+        good_id, bad_id = store.start_run("proxy", "good"), store.start_run("proxy", "bad")
+        good = HistoryWriter(store, good_id, batch_size=10_000, flush_bytes=1 << 30,
+                             flush_seconds=3600)
+        for i in range(3):
+            assert good.submit(_flow(i))             # pending: written only by a drain
+        bad = HistoryWriter(store, bad_id)
+        monkeypatch.setattr(threading.Thread, "start", start)
+        with pytest.raises(RuntimeError, match="can't start new thread"):
+            bad.submit(_flow(9))
+        monkeypatch.setattr(threading.Thread, "start", real_start)
+        assert refused and [p for p in live if p.thread in refused] == []
+
+        class _Unclosable:                           # a live writer whose close fails
+            run_id = None
+
+            def close(self, run_end, timeout=None):
+                raise RuntimeError("cannot join thread before it is started")
+        stuck = _Unclosable()
+        live.add(stuck)
+        hist._close_live_pumps()                     # never raises; drains the others
+        assert _urls(store, good_id) == [f"http://127.0.0.1:9/p{i}" for i in range(3)]
+        good.close()
 
 
 def test_a_writer_that_cannot_open_its_store_counts_every_flow(monkeypatch):

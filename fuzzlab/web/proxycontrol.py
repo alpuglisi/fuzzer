@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
@@ -267,6 +268,9 @@ class RepeaterController:
         self._run_ids: dict[tuple, int] = {}
         self._run_lock = threading.Lock()
         self._local = threading.local()
+        #: sends whose exchange the history failed to take, by error class, across
+        #: every thread's Repeater (under ``_run_lock``)
+        self.history_failures: Counter = Counter()
 
     def _path(self) -> str | None:
         return self.cfg.get("store_path")
@@ -430,9 +434,19 @@ class RepeaterController:
         return self.create_tab(f"finding #{finding_id}", host, port, raw, use_tls=use_tls)
 
     def send(self, tab_id: int, raw: str | None = None) -> dict[str, Any] | None:
-        """Replay a tab (optionally edited); returns the raw response as text."""
+        """Replay a tab (optionally edited); returns the raw response as text, with
+        ``history_error`` (the class of the error that kept this exchange out of the
+        history, else None) and ``history_failures`` (how many sends this controller's
+        history failed to take). A history failure never replaces the response
+        (PA-0550(8), BUG-0543 review round 2): the target already answered."""
         rep = self._writer()
         if rep.get_tab(tab_id) is None:
             return None
         resp = rep.send(tab_id, raw.encode("latin-1") if raw is not None else None)
-        return {"response": resp.decode("latin-1", "replace")}
+        error = rep.last_history_error         # this thread's Repeater: this send's
+        with self._run_lock:
+            if error is not None:
+                self.history_failures[error] += 1
+            failures = sum(self.history_failures.values())
+        return {"response": resp.decode("latin-1", "replace"), "history_error": error,
+                "history_failures": failures}

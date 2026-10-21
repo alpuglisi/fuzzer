@@ -66,6 +66,24 @@ Newest first.
     `test_no_event_loop_path_blocks_on_a_history_writer` with
     `test_the_history_loop_guard_on_synthetic_code` (four offenders, the pre-fix line
     among them, and four near-misses).
+  - *(Review round 2 of the merge integration, 2026-10-21; lane INTEG, branch
+    `integ/proxy-r2` from the local merge stack 4e0c2c6; finding P2-3, owner-approved.)*
+    **The exit drain covers every started writer and is not stopped by one**
+    (BUG-0550 "Review round 2"). `_Pump.__init__` added the pump to `_LIVE` before
+    `thread.start()`. A thread that could not start ("can't start new thread") left a
+    pump in `_LIVE` whose `close` raised "cannot join thread before it is started" in
+    `_close_live_pumps` at exit, and that ended the loop, so the writers after it were
+    never drained.
+    - Now `_Pump.__init__` starts the thread first and joins `_LIVE` only once it has
+      started; `submit` still raises the start failure to its caller (the engine counts
+      it, BUG-0543 I1).
+    - `_close_live_pumps` closes each live pump in its own `try`, and reports one that
+      fails (`_report`: error class and run id) before going on.
+    - Test: `tests/test_proxy_history_writer_thread.py::test_a_writer_thread_that_cannot_start_never_stops_the_exit_drain`.
+      The writer thread's start is refused; the refused pump must not be live; a live
+      writer whose close fails is added; `_close_live_pumps` must return and drain
+      another writer's three pending flows. The test's own `_LIVE` keeps it from
+      draining other tests' writers.
 - Impact (other components / project):
   - **Callers swept** (`grep HistoryWriter` over `fuzzlab/`): `proxy/cli.py` and
     `web/proxycontrol.py::ProxyController` build `HistoryWriter(batch_size=1)` and pass
@@ -92,6 +110,10 @@ Newest first.
     schema change). The Diagnostics page lists them with the other keys. No wire change.
   - **A history failure no longer reaches the client:** before, a store error in
     `_record` answered the client 502 although its response had arrived.
+  - *(Review round 2:)* every process that records (`fuzzlab proxy`, the web proxy)
+    drains every started writer at interpreter exit, even when one writer's close
+    fails. A writer whose thread never started holds no flows (its `submit` raised), so
+    there is nothing of it to drain. No contract change.
 - Risk (level; mitigation or accepted-risk justification): medium. A second store
   connection per proxy run, owned by one thread (PA-0023), on the same WAL store; the
   outer connection is not touched by the thread. Durability window (corrected in review
@@ -105,7 +127,10 @@ Newest first.
   the store). A requested stop (Ctrl-C, SIGTERM, the web proxy's stop) drains, within
   `CLOSE_TIMEOUT`. Overflow drops history, never traffic, and is counted and reported;
   the bounds are generous. Since review round 1 the web proxy's stop drains off the web
-  loop.
+  loop. *(Review round 2:)* low for the change itself: a pump is registered a moment
+  later, after its thread started. A thread that finishes first (a store it cannot
+  open) is then a live entry whose `close` joins a finished thread, which returns at
+  once. The exit drain still waits up to 10 s per stuck writer, as before.
 - Deliverables:
   - [x] `proxy/history.py` writer thread, batching, bounds, counters; `proxy/server.py`
     `_record` — done
@@ -123,6 +148,11 @@ Newest first.
   - [ ] the UI component's change-control entry for `ProxyController.stop`: its text is
     in `doc_texts.md` §8; a CC-UI number was not pre-assigned to this lane — todo (the
     orchestrator, at merge)
+  - [x] *(Review round 2 of the merge integration, P2-3)* `_Pump` registered only once
+    its thread started; `_close_live_pumps` contains each writer's failure. A test fails
+    on 4e0c2c6's `history.py` (one run) and passes now. FR-PROXY-404 was edited in
+    place, BUG-0550 has a "Review round 2" section, and the PA-0550(9) text is in lane
+    INTEG's doc texts — done
 - Effectiveness (assessed 2026-10-21): verified offline. Latency through the real proxy
   under a slow store (+50 ms per write): p50/p95 433/726 ms → 20/42 ms, the loop's
   longest stall 437 → 23 ms; with the store's write lock held 2.0 s elsewhere, the
@@ -150,6 +180,16 @@ Newest first.
   `web/proxycontrol.py:stop:102:close`. The 8 passing are the guard's synthetic cases,
   which do not read the product code. The commit test passes on `7fdd869` itself, whose
   `_write` is unchanged here: that code was right, its test was missing.
+  *(Review round 2 of the merge integration, 2026-10-21; P2-3:)*
+  - Proof on the pre-fix code: one pytest invocation on a scratch copy of 4e0c2c6's
+    product files with the round's test files (`scratchpad/lanes/INTEG/proof_r2.log`).
+    `test_a_writer_thread_that_cannot_start_never_stops_the_exit_drain` failed for its
+    stated reason: the pump whose thread start was refused was in `_LIVE`. That run
+    covered all 12 of the round's tests: 12 failed, 0 passed.
+  - Targeted run on d897885 (one invocation, 67 files, `targeted_r2b.log`): 2 341
+    passed, 10 xfailed, 0 failed, 0 skipped. The 10 xfailed include this file's
+    pre-existing web-repeater pin.
+  - The harness run is the orchestrator's, at merge.
 
 ### CC-PROXY-0029 — The upstream sender keeps exactly framed connections (FR-PROXY-405, BUG-0549) (2026-10-21)
 - Placement: pre-assigned to POOL24 (audit defect 24). CC-PROXY-0028 is AU-PROXY's, which
@@ -258,6 +298,35 @@ Newest first.
       (a history store error replaces the Repeater's response; owner PROXY, with the UI
       for where it is shown). BUG-0549 and BUG-0543 hold the sweeps. No CC-CORE number was
       pre-assigned for the test-only pin in a CORE test file; it is recorded here.
+  - *(Review round 2 of the merge integration, 2026-10-21; lane INTEG, branch
+    `integ/proxy-r2` from the local merge stack 4e0c2c6; owner-approved single fix
+    round.)* Both of round 1's sweep pins are now fixes. The core seam's (P2-1) is under
+    CC-CORE-0075 and BUG-0549 "Review round 2". This entry holds the Repeater's:
+    - **P2-2: a history failure never replaces the Repeater's response** (BUG-0543
+      "Review round 2").
+      - `proxy/repeater.py::Repeater.send` contains whatever building or recording the
+        flow raises after the upstream answered. A real case is the synchronous
+        `record`'s flush re-raising `database is locked` while another connection holds
+        the store. The method returns the response and counts the failure in the new
+        `Repeater.history_failures` (a `Counter` by error class). It names the failure in
+        `Repeater.last_history_error` (None when recorded) and logs the error class
+        only.
+      - The flow stays in the writer's buffer (BUG-0106), so a later successful write
+        stores it. The upstream is asked once.
+      - Before, the error replaced the response, and the web route answered 500 for a
+        request the target had answered.
+    - `web/proxycontrol.py::RepeaterController.send` (a UI-component file, as in round 1;
+      no CC-UI number was pre-assigned, and the coordinator's text is in the lane's doc
+      texts) returns `history_error` and `history_failures` beside `response`. The
+      count is the controller's, across its per-thread Repeaters, under its lock. The
+      route in `web/app.py` is unchanged.
+    - Tests: `tests/test_proxy_repeater.py::test_a_history_failure_never_loses_the_repeaters_response`
+      is no longer a strict xfail. The real `HistoryWriter`'s `_write` raises
+      `database is locked`, and the test asserts the response, one upstream send, the
+      count, the name, and that a later successful send stores both flows. New
+      `tests/test_web_repeater.py::test_a_history_failure_answers_the_repeaters_response_and_says_so`
+      drives the real route against a loopback upstream and asserts 200, the answer,
+      `history_error`, `history_failures` and one upstream request.
 - Impact (other components / project):
   - The proxy engine, `fuzzlab proxy` and the web proxy's Repeater forward well-framed
     traffic on kept connections; bytes on the wire and the answers returned are
@@ -284,6 +353,14 @@ Newest first.
     has a new public counter, `history_failures`, which `fuzzlab proxy` prints at stop.
     The web proxy's status shows neither it nor the listener's `counts`, as before. No
     store or wire contract change.
+  - *(Review round 2:)*
+    - UI: the Repeater send route's JSON gains `history_error` and `history_failures`
+      (additive; `response` unchanged). The Proxy page's script still shows only the
+      response. Showing the error beside it is a UI change that needs a real-browser
+      test (PA-0065), not built here and noted for the owner.
+    - A store error during a Repeater send now gives 200 with the answer instead of
+      500. Nothing else changes for a send whose history write succeeds.
+    - No store or wire contract change.
 - Risk (medium):
   - A misbehaving upstream that sends bytes after a fully framed answer could have them
     read as the next request's answer if they arrive between the check and the next
@@ -311,6 +388,13 @@ Newest first.
     TLS 1.3 session ticket after its first answer would lose reuse. Measured: Python's
     `ssl` server (OpenSSL) does not; 300 calls kept one connection over TLS 1.2 and 1.3.
     A history that raises loses that flow from the history (counted), never the traffic.
+  - *(Review round 2:)* a Repeater send whose history write keeps failing (a store held
+    by another writer) still waits for the write's busy timeout (measured by the
+    checker: 10.1 s) before the operator gets the response, and the unwritten flows
+    accumulate in that thread's writer buffer, one per send, until a write succeeds.
+    Accepted: they are bounded by the operator's own sends, and moving the Repeater's
+    record off the request (the writer thread) is a separate change to its durability
+    contract.
 - Deliverables:
   - [x] `SocketSender` kept connections, one SSL context, `close`, helpers — done
   - [x] `tests/test_socketsender_pooling.py`: well-framed (Content-Length and chunked)
@@ -333,6 +417,14 @@ Newest first.
     354 passed, 3 xfailed (the two sweep pins and the history writer's pre-existing
     web-repeater pin), 0 failed, 0 skipped); FR-PROXY-402, 404 and 405 edited in place
     — done
+  - [x] *(Review round 2)* P2-2 fixed (`Repeater.send` contained and counted; the web
+    Repeater's JSON carries it). Round 1's Repeater pin is a passing test, and there is
+    a new route test; both fail on 4e0c2c6's product files (one run) and pass now.
+    FR-PROXY-404 and 405 were edited in place, and BUG-0543 has a "Review round 2"
+    section. The CC-UI text for `RepeaterController.send` is in the lane's doc texts —
+    done
+  - [ ] *(Review round 2)* the Proxy page's script showing `history_error` beside the
+    response (needs a real-browser test, PA-0065) — not in this round, for the owner
 - Effectiveness (assessed 2026-10-21): on loopback, 2 000 plain calls used 8 connections
   instead of 2 000; sequential calls/s 1 489 -> 10 271 (an earlier pair: 1 781 -> 4 650),
   8-thread 1 205 -> 3 140; over TLS 20 -> 3 826 sequential; a fresh TLS call built a
@@ -348,6 +440,18 @@ Newest first.
   (`scratchpad/lanes/INTEG/measure_tls_keep.py`, one run each, same host). An upstream
   that answers twice in one segment now costs one connection per such answer; the
   earlier numbers stand.
+  *(Review round 2, 2026-10-21:)*
+  - **Proof on the pre-fix code:** one pytest invocation on a scratch copy of 4e0c2c6's
+    product files with the round's test files (`scratchpad/lanes/INTEG/proof_r2.log`):
+    12 failed, 0 passed.
+    - The Repeater test failed with `sqlite3.OperationalError: database is locked`
+      raised out of `Repeater.send`.
+    - The route test failed with the same error raised through the route, the 500 the
+      operator saw.
+  - **Targeted run** on d897885 (one invocation, 67 files; `targeted_r2b.log`): 2 341
+    passed, 10 xfailed, 0 failed, 0 skipped. The run on 5078fc5 before it failed one
+    guard, recorded in CC-CORE-0075.
+  - The harness run is the orchestrator's, at merge.
 
 ### CC-PROXY-0028 — HTTP/1 framed by the protocol on both sides; the listener's reads bounded (BUG-0543; audit defects 18-20) (2026-10-21)
 - Change:

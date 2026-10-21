@@ -13,8 +13,6 @@ from __future__ import annotations
 
 import sqlite3
 
-import pytest
-
 from fuzzlab.core.store import Store
 from fuzzlab.proxy.history import HistoryWriter
 from fuzzlab.proxy.repeater import Repeater
@@ -101,23 +99,40 @@ def test_send_unknown_tab_raises_keyerror(tmp_path):
             raise AssertionError("expected KeyError for an unknown tab id")
 
 
-@pytest.mark.xfail(strict=True, raises=sqlite3.OperationalError, reason=(
-    "Merge-integration sweep of BUG-0543's I1 (a history failure never changes the "
-    "answer), known and not fixed in this change: `Repeater.send` records on the "
-    "synchronous path after the upstream answered, and a store error there (the flush "
-    "re-raises, BUG-0106) reaches the operator instead of the response, who may send the "
-    "request again. Owner: PROXY (`proxy/repeater.py`), with the UI's repeater routes for "
-    "where a count of such failures is shown."))
-def test_a_history_failure_never_loses_the_repeaters_response(tmp_path):
-    """The upstream answered; the history's store is locked. Wanted: the operator gets
-    the response (the failure counted where they read it), never the store's error."""
-    class _Locked:
-        def record(self, rec):
-            raise sqlite3.OperationalError("database is locked")
-
+def test_a_history_failure_never_loses_the_repeaters_response(tmp_path, monkeypatch):
+    """Review round 2 (P2-2; the merge integration's I1 on the Repeater path): the
+    upstream answered, then the history's synchronous write failed (``database is
+    locked``: the flush re-raises, BUG-0106) and the error replaced the response, so the
+    operator, never shown the answer, may send the request again. Wanted: the response
+    returned, the failure counted and named where the operator reads the result, the
+    upstream asked once, and the flow kept for the next write (it is stored once the
+    store takes writes again)."""
     ok = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
+    sent: list[bytes] = []
+
+    def sender(host, port, tls, raw):
+        sent.append(raw)
+        return ok
+
+    real_write = HistoryWriter._write
+    locked = {"on": True}
+
+    def write(self, prepared):
+        if locked["on"]:
+            raise sqlite3.OperationalError("database is locked")
+        return real_write(self, prepared)
+    monkeypatch.setattr(HistoryWriter, "_write", write)
     with _store(tmp_path / "r.db") as store:
         run_id = store.start_run("repeater", "127.0.0.1")
-        rep = Repeater(store, run_id, lambda *a: ok, history=_Locked())
+        rep = Repeater(store, run_id, sender,
+                       history=HistoryWriter(store, run_id, batch_size=1))
         tab = rep.create_tab("t", "127.0.0.1", 80, b"GET /a HTTP/1.1\r\nHost: h\r\n\r\n")
         assert rep.send(tab.id) == ok
+        assert len(sent) == 1
+        assert rep.history_failures == {"OperationalError": 1}
+        assert rep.last_history_error == "OperationalError"
+        locked["on"] = False
+        assert rep.send(tab.id, b"GET /b HTTP/1.1\r\nHost: h\r\n\r\n") == ok
+        assert rep.last_history_error is None and rep.history_failures.total() == 1
+        urls = [r[0] for r in store.conn.execute("SELECT url FROM flow ORDER BY id")]
+        assert urls == ["http://127.0.0.1:80/a", "http://127.0.0.1:80/b"]
