@@ -235,3 +235,31 @@ def test_closing_the_client_closes_its_pooled_connections():
         del dropped
         gc.collect()
         assert peer.wait(lambda p: c in p.closed)
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "Merge-integration sweep of BUG-0549's I2 (a connection is kept only when nothing "
+    "follows its framed answer), known and not fixed in this change: the seam's pooled "
+    "session (requests over urllib3) reads a second answer that came in the same segment "
+    "into the first response's buffer, drops it unseen and keeps the connection; one "
+    "arriving after urllib3's checkout check would be read as the next send's answer. "
+    "Measured on 18cdf9f: the next GET rode the same connection. Owner: CORE "
+    "(`core/http.py::PooledTransport`; every `requests` session shares the mechanism)."))
+def test_an_answer_followed_by_another_never_leaves_its_pooled_connection():
+    """The target answers ``/case`` twice in one segment (a desynchronised upstream).
+    Wanted: the send gets the first answer and the next send another connection."""
+    def reply(conn, k, req):
+        if req.path == "/case":
+            return ok(b"/case") + ok(b"stray")
+        return echo(conn, k, req)
+
+    with KeepAlivePeer(reply) as peer:
+        client = _client()
+        try:
+            assert _get(client, peer, "/p1").body == b"/p1"
+            assert _get(client, peer, "/case").body == b"/case"
+            case_conn = peer.conn_of("/case")[0]
+            assert _get(client, peer, "/after").body == b"/after"
+            assert peer.conn_of("/after")[0] != case_conn
+        finally:
+            client.close()

@@ -205,6 +205,59 @@ Newest first.
       the stale-connection test now asserts the POST's connection is closed after it.
       `tests/_keepalive_peer.py` gains `Reset` (part of an answer, then a reset) and
       `unread_body` (a CL.0 peer).
+  - *(Merge integration, 2026-10-21; lane INTEG on d83876f, branch `integ/proxy-r1`.)*
+    AU-PROXY (CC-PROXY-0028), POOL24 (this entry) and HIST25 (CC-PROXY-0030) were each
+    green on its own base; merged (3cfd912, then d83876f) the harness counted 8
+    failures in 135 files. Three findings, each confirmed by a skeptic:
+    - **I2 (security): nothing may follow a kept connection's framed answer.** Before
+      SP-63, `recv_http_response` returned bytes past an answer's `Content-Length` as
+      part of the answer, so `reusable_response` refused it. SP-63 returns the framed
+      answer only; bytes read past it stayed in the reader's `leftover` (dropped) and
+      bytes not yet read stayed on the socket, so the connection was kept: a stray
+      answer was dropped unseen or, arriving later, read as the next request's answer.
+      New `socketsender.read_http_response` returns ``(response, past)``, ``past`` being
+      SP-63's `leftover` (`recv_http_response` is its first element, unchanged for its
+      callers). `SocketSender._finish` keeps a connection only when ``past`` is empty,
+      `reusable_response` holds and nothing waits on the socket (`_quiet`, the check
+      `take` already made before reuse). The end decision is SP-63's alone;
+      `reusable_response` and `_chunked_exact` stay as a stricter grammar filter (one
+      `Content-Length` header, `chunked` alone, no whitespace in a chunk-size line,
+      token trailer names), which can only refuse what SP-63 accepted (BUG-0549 R1
+      closed for the end decision; the stricter grammar kept by choice).
+    - **I1: a history failure never changes the client's answer.**
+      `server.ProxyEngine._record` (CC-PROXY-0030's hand-over) now contains any
+      exception raised while building or submitting the flow. It counts it in the new
+      `ProxyEngine.history_failures` (a `Counter` by error class) and never raises it
+      into the flow, so the client gets the upstream's answer, or the 502 of the
+      upstream's own failure with that failure in `AsyncProxyServer.errors`.
+      `fuzzlab proxy` prints the count at stop, beside the listener's refusals
+      (`proxy/cli.py`). The trigger: AU-PROXY's `tests/test_proxy_framing.py` fake
+      history had `record` only, so `_record` raised after the upstream answered and
+      four tests got a 502 for a relayed 200. That fake gains `submit`. The two other
+      fakes handed to the engine (`test_proxy_rules_and_scope.py`,
+      `test_proxy_history_writer_thread.py`) already had it.
+    - **I3 (test-side): SP-63's exceptions in POOL24's tests.** An answer SP-63 cannot
+      frame (a non-hex chunk size; chunked with `Content-Length`) raises
+      `UpstreamFramingError`, and its kept connection is still closed (the kept path's
+      `except BaseException` closes it, as the fresh path does). A stall on a kept
+      connection raises `UpstreamIncomplete("idle")`, is never resent and its connection
+      is never kept. A clean close after part of an answer raises
+      `UpstreamIncomplete("eof")`, never resent. A close before any byte still returns
+      `b""` and is resent once, as is a reset before any byte (`_PEER_CLOSED`, counted by
+      `_Counted`): SP-63's exceptions are not `_PEER_CLOSED`, so the two stay apart.
+    - Tests: `tests/test_socketsender_pooling.py` gains
+      `test_bytes_after_a_framed_answer_never_leave_its_connection_kept` (the stray
+      answer read with the first, or left on the socket by a receive that stopped at
+      the end), `UNFRAMEABLE` in the not-exactly-framed test, the `UpstreamIncomplete`
+      expectations and a `/cut` case. `tests/test_proxy_rules_and_scope.py` gains
+      `test_a_history_failure_never_changes_the_clients_answer`.
+    - Sweep pins (strict xfail, not fixed here):
+      `tests/test_http_pooling.py::test_an_answer_followed_by_another_never_leaves_its_pooled_connection`
+      (the core seam keeps such a connection; owner CORE) and
+      `tests/test_proxy_repeater.py::test_a_history_failure_never_loses_the_repeaters_response`
+      (a history store error replaces the Repeater's response; owner PROXY, with the UI
+      for where it is shown). BUG-0549 and BUG-0543 hold the sweeps. No CC-CORE number was
+      pre-assigned for the test-only pin in a CORE test file; it is recorded here.
 - Impact (other components / project):
   - The proxy engine, `fuzzlab proxy` and the web proxy's Repeater forward well-framed
     traffic on kept connections; bytes on the wire and the answers returned are
@@ -225,6 +278,12 @@ Newest first.
     R4 closed). The proxy engine and `fuzzlab proxy` keep connections for bodiless
     requests; a reset after part of an answer now reaches the engine as an upstream
     failure instead of a silent replay.
+  - *(Merge integration:)* a connection whose answer is followed by any byte, read with
+    it or waiting on the socket, is closed after it. An upstream that sends nothing after
+    its framed answers keeps its connection as before (measured below). `ProxyEngine`
+    has a new public counter, `history_failures`, which `fuzzlab proxy` prints at stop.
+    The web proxy's status shows neither it nor the listener's `counts`, as before. No
+    store or wire contract change.
 - Risk (medium):
   - A misbehaving upstream that sends bytes after a fully framed answer could have them
     read as the next request's answer if they arrive between the check and the next
@@ -244,6 +303,14 @@ Newest first.
     holds after that merge. A bodiless request a server still reads as framed (an
     unknown spelling not covered by the underscore rule) is the residual; the classic
     CL.0 and TE.0 shapes are covered.
+  - *(Merge integration:)* bytes that arrive after `_finish`'s check (and after `take`'s)
+    and before the next answer is read are still read as that answer. This is the
+    residual of any keep-alive client, now narrowed to bytes the upstream sends late,
+    not bytes already received. `_quiet` at `_finish` also closes a connection whose
+    peer sent anything after the answer (a FIN, a TLS record): an upstream that sent a
+    TLS 1.3 session ticket after its first answer would lose reuse. Measured: Python's
+    `ssl` server (OpenSSL) does not; 300 calls kept one connection over TLS 1.2 and 1.3.
+    A history that raises loses that flow from the history (counted), never the traffic.
 - Deliverables:
   - [x] `SocketSender` kept connections, one SSL context, `close`, helpers — done
   - [x] `tests/test_socketsender_pooling.py`: well-framed (Content-Length and chunked)
@@ -257,6 +324,11 @@ Newest first.
     run) and passes now; FR-PROXY-405 corrected in place ("a POST's may be kept after
     it" removed; a body is never kept; resend only before any answer byte; the
     Repeater's fresh sockets) — done
+  - [x] *(Merge integration)* I1, I2, I3 fixed; the I1 and I2 tests fail on d83876f's
+    product files and the eight d83876f failures reproduce there (one run on d83876f's
+    `socketsender.py`, `server.py` and `cli.py` with the d83876f test files beside the
+    new ones: 12 failed, 39 passed, each failure for its stated reason);
+    the targeted run passes (@@RUN@@); FR-PROXY-402, 404 and 405 edited in place — done
 - Effectiveness (assessed 2026-10-21): on loopback, 2 000 plain calls used 8 connections
   instead of 2 000; sequential calls/s 1 489 -> 10 271 (an earlier pair: 1 781 -> 4 650),
   8-thread 1 205 -> 3 140; over TLS 20 -> 3 826 sequential; a fresh TLS call built a
@@ -266,6 +338,12 @@ Newest first.
   its own answer (was one connection, absorbed); partial answer then reset
   (`midreset_demo.py`) raises `ConnectionResetError` and the upstream saw `/2` once (was
   twice, answer swallowed). The measured numbers are for bodiless GETs and stand.
+  *(Merge integration:)* with `_finish`'s new check, 300 sequential loopback calls kept
+  one connection over plain HTTP (4 763 calls/s), TLS 1.2 (one handshake, 2 934 calls/s)
+  and TLS 1.3 (one handshake, 2 628 calls/s)
+  (`scratchpad/lanes/INTEG/measure_tls_keep.py`, one run each, same host). An upstream
+  that answers twice in one segment now costs one connection per such answer; the
+  earlier numbers stand.
 
 ### CC-PROXY-0028 — HTTP/1 framed by the protocol on both sides; the listener's reads bounded (BUG-0543; audit defects 18-20) (2026-10-21)
 - Change:

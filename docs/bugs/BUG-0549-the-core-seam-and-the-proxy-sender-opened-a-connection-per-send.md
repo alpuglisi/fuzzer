@@ -516,3 +516,140 @@ PA-0549 (3) and (4) are corrected and (5) is added. The full text is in
   `web/proxycontrol.py` and the docstring line in `tools/probesender.py`. They are
   recorded under CC-PROXY-0029 and CC-CORE-0075, and the coordinator's entry texts are in
   the lane's doc texts.
+
+## Merge integration (lane INTEG, 2026-10-21)
+AU-PROXY (BUG-0543, SP-63), this bug's fix (POOL24) and HIST25 (BUG-0550) were each
+green on its own base. Merged (3cfd912, then d83876f with SURROGATE), the harness
+(`scripts/verify_change.py --base 08fe6ee`) counted 135 files: 4139 passed, 8 failed.
+One of the three findings is a product defect of this bug's fix, found by its own
+enforcing test: I2 below. I3 (POOL24's tests expecting the pre-SP-63 reader) is recorded
+here too; I1 is in BUG-0543's integration notes.
+
+### Description, where encountered, what it caused to fail
+- **I2 (security): a kept connection could hold bytes past its framed answer.**
+  `SocketSender._finish` kept a connection when `reusable_response(resp)` held. Before
+  SP-63, `recv_http_response` returned bytes past an answer's `Content-Length` as part
+  of `resp`, so `reusable_response` saw an answer longer than its length and refused it.
+  SP-63's reader returns the framed answer only. Bytes read past it stay in
+  `MessageReader.leftover`, which `recv_http_response` dropped, and bytes not yet read
+  stay on the socket. The connection was kept. When an upstream answers once too often
+  (a desynchronised upstream, or one answering a request it parsed as two), the stray
+  answer was dropped unseen if it came with the first. If it came later, the next
+  request on the connection, possibly another tab's or another identity's, was answered
+  with it (a response desync).
+- *Where:* the merged tree's harness run:
+  `tests/test_socketsender_pooling.py::test_an_exchange_that_is_not_exactly_framed_never_leaves_its_connection[bytes past the answer's Content-Length]`
+  (the connection was not closed).
+- **I3 (test-side):** the same file's cases "a chunked answer whose chunk size is not
+  hex" and "an answer with chunked and Content-Length" expected bytes back. SP-63 raises
+  `UpstreamFramingError` for both, by design (PA-0543). `test_a_stale_pooled_connection_is_retried_once_and_a_timeout_never`
+  expected `b""` from a stalled answer; SP-63 raises `UpstreamIncomplete("idle")`.
+
+### What the defect was
+`reusable_response` decided "nothing after the answer" by parsing the bytes the reader
+returned. That held only while the reader returned trailing bytes. Once the framing
+owner (SP-63) kept them apart, nothing in the sender looked at them.
+
+### Root cause analysis
+1. *Why was the connection kept?* `_finish` asked `reusable_response` about `resp`
+   alone, and `resp` no longer held the trailing bytes.
+2. *Why did `reusable_response` read `resp` for that?* POOL24 wrote it against the
+   pre-SP-63 reader, whose return value held every byte received. It decided where the
+   answer ended with its own parse (`_chunked_exact`, `_length_is`), a second framing
+   decision beside the reader's.
+3. *Why was that second decision not replaced at the merge?* R1 of this bug named the
+   dependency ("when AU-PROXY lands, the two must agree; if it exposes an exact-end
+   decision, `reusable_response` should call it") in prose. Nothing failed until the
+   merged tree's harness ran this bug's own enforcing test.
+4. *Why could the exact-end decision not be called?* SP-63 had one (`leftover`), but
+   `recv_http_response` dropped it, so no caller could see it.
+
+**Root cause:** a safety decision about where a message ended was made from a reader's
+return value, a second derivation of a fact that the framing owner holds, while that
+owner was being changed in the same window. The dependency was recorded as a residual
+in prose, and PA-0543(1) ("decided by one framing owner") was not applied to POOL24's
+check.
+
+### Corrective action (CC-PROXY-0029, merge-integration sub-bullet; commit on `integ/proxy-r1`)
+- `socketsender.read_http_response` returns `(response, past)`, `past` being SP-63's
+  `MessageReader.leftover`. `recv_http_response` is its first element, so its callers
+  are unchanged.
+- `SocketSender._finish` keeps a connection only when `past` is empty,
+  `reusable_response` holds, and `_quiet(sock)` finds nothing waiting on the socket.
+  `_quiet` is the check `take` already made before reuse. The end decision is SP-63's
+  alone. `reusable_response` and `_chunked_exact` stay as a stricter grammar filter: one
+  `Content-Length` header, `chunked` alone, no whitespace in a chunk-size line, token
+  trailer names. They can only refuse what SP-63 accepted; the finding allowed keeping
+  the stricter rule when in doubt. R1 is closed for the end decision.
+- I3: the tests expect `UpstreamFramingError` for the two unframeable answers and still
+  assert that the connection is closed. The kept path's `except BaseException` closes it,
+  as the fresh path's does. A stall raises `UpstreamIncomplete("idle")`, is never
+  resent, and its connection is not kept. A new `/cut` case covers a clean close after
+  part of an answer: `UpstreamIncomplete("eof")`, never resent. SP-63's exceptions are
+  not `_PEER_CLOSED`, so a close or reset before any byte is still the resend case (the
+  `/2` and `/none` cases).
+- New `test_bytes_after_a_framed_answer_never_leave_its_connection_kept`, two cases. In
+  the first, the upstream answers twice in one segment and the stray answer is read with
+  the first, so it is in `leftover`. In the second, `READ_SIZE` is set to the first
+  answer's length, so the stray answer waits on the socket. Each fails on d83876f's
+  product files (the connection is kept) and passes now.
+- Measured (`scratchpad/lanes/INTEG/measure_tls_keep.py`, loopback): with the new check,
+  300 sequential calls kept one connection over plain HTTP, TLS 1.2 and TLS 1.3 (one
+  handshake each). `_quiet` at `_finish` does not cost reuse against Python's `ssl`
+  server, whose TLS 1.3 tickets come before the first answer. Other servers were not
+  measured.
+
+### Recurrence review (merge integration)
+Checked `docs/bugs/` and `docs/PREVENTIVE_ACTIONS.md` for "leftover", "past its",
+"trailing", "framed end", "second parse", "R1" and "merge".
+- **Same root cause: BUG-0543 round 1, B1.** AU-PROXY's first fix read the head's end
+  from one parser and its fields from another, and the two disagreed. PA-0543(1) answered
+  that the owner's parse is the only one. Here a consumer of the owner, POOL24's keep
+  check, made the second framing decision.
+- **Same class: BUG-0549 round 1, B1/B3.** Reuse was decided from the client's own bytes
+  and from exception classes, not from what was observed where the bytes are read.
+  PA-0549(4) fixed that for resends ("counted where the bytes are read"); the
+  keep-after-answer decision had the same flaw.
+- **Same class: BUG-0134 / PA-0134(2).** A security-relevant dependency was deferred in
+  prose (R1).
+
+### Prior-preventive-action failure analysis (merge integration)
+- **PA-0549(3) (this bug)** held in content ("one fully framed keep-alive answer, nothing
+  after it"), and its enforcing test caught the break at the merge, before anything
+  shipped. It failed **at the wrong layer**: it did not say where "nothing after it" is
+  decided, so POOL24 decided it from the reader's return value.
+- **PA-0543(1) (BUG-0543)** says a message is complete only at its framed end, decided
+  by one framing owner. It was **not applied to a consumer**: its guard checks hand
+  framing (`readuntil`, `readexactly`, a last-chunk literal), not a second end decision
+  made by parsing the owner's output.
+- **PA-0134(2) (BUG-0134)** was **not followed**: R1 left a security-relevant merge
+  dependency in prose.
+
+### Preventive action (merge integration): PA-0549(3) strengthened
+No new PA number was assigned for this round. The amendment text for PA-0549 is in the
+lane's doc texts for the coordinator:
+- *(3), added:* whether anything followed an answer is decided from the framing owner's
+  observation (SP-63's `leftover`) and the socket's state when the answer ended. It is
+  never decided by re-parsing the bytes a reader returned.
+- *(3), added:* a residual that names a dependency on another lane's change in flight is
+  a test that fails until the dependency is met, never prose.
+- Enforced additionally by
+  `tests/test_socketsender_pooling.py::test_bytes_after_a_framed_answer_never_leave_its_connection_kept`.
+
+**PA-0002 sweep (merge integration; by mechanism: every decision to keep a connection
+after an answer).**
+
+| Site | How it decides | Disposition |
+|---|---|---|
+| `proxy/socketsender.py::SocketSender._finish` | `reusable_response` on the returned bytes | fixed: SP-63's `leftover`, then `_quiet` |
+| `core/http.py::PooledTransport` (requests over urllib3) | urllib3 checks only at checkout that the socket is not readable; bytes that came with an answer are buffered with it and dropped | measured (`scratchpad/lanes/INTEG/measure_seam_stray.py`): the next GET rode the same connection. Pinned: `tests/test_http_pooling.py::test_an_answer_followed_by_another_never_leaves_its_pooled_connection` (strict xfail). Owner CORE |
+| other `requests` sessions (`RequestsProbeSender`, greybox, the contract runner, the spider, `tools/fetcher.py`, blind-SQLi, `tools/authhttp.py`) | the same urllib3 mechanism | one mechanism, one owner decision, pinned at the seam above; R7's class (pre-existing keep-alive sessions) |
+| `proxy/h2transport.py`, `proxy/h2client.py` | HTTP/2 frames each stream (`END_STREAM`) | not this class |
+| the listener's client side (`server._Inbound`) | bytes after a request are the next pipelined request (RFC 9112 §9.3, BUG-0543 B3) | not this class: a server reading pipelined requests in order |
+
+### Residuals (merge integration)
+- **R8: a stray answer that arrives late.** Bytes that arrive after `_finish`'s check
+  and after `take`'s, but before the next answer is read, are still read as that answer.
+  This is the residual of any keep-alive client, now narrowed to bytes sent late.
+- R1 is closed for the end decision. The stricter grammar filter (`_chunked_exact`) is
+  kept by choice.

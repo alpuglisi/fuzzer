@@ -163,6 +163,16 @@ that shares the store, never a mandatory pipeline (D5).
   hands each in-scope flow to `HistoryWriter.submit`, which does bounded work on the
   loop: it reads nothing past each message's first line (`server._first_line_of`) and
   only queues the flow.
+  - **A history failure never changes the flow** (merge integration, CC-PROXY-0029,
+    BUG-0543): whatever building or submitting a flow raises is counted in
+    `ProxyEngine.history_failures` by its error class and never raised into the flow.
+    The client gets the upstream's answer, or the 502 of the upstream's own failure
+    with that failure in `AsyncProxyServer.errors`; `fuzzlab proxy` prints the count
+    when it stops. Enforced by:
+    `tests/test_proxy_rules_and_scope.py::test_a_history_failure_never_changes_the_clients_answer`.
+    Not yet enforced for the Repeater: its synchronous `record` raises a store error in
+    place of the response it got, pinned by the strict xfail
+    `tests/test_proxy_repeater.py::test_a_history_failure_never_loses_the_repeaters_response`.
   - **One writer thread per writer**, started by the first `submit`, opens its own
     `Store` on the writer's file (`create=False`) and does every redaction, hash,
     insert, commit and trace event, in submission order (flow ids follow it).
@@ -221,9 +231,15 @@ that shares the store, never a mandatory pipeline (D5).
     (`reusable_response`: a final status; no `Connection: close` or upgrade; no NTLM /
     Negotiate challenge; exactly one `Content-Length` the body matches, or
     `Transfer-Encoding: chunked` alone with a body that is exactly one complete chunked
-    body, or a 204 / 304 with no body and no transfer coding). Everything else is closed
-    after its exchange, as before: a close-delimited, over-long, short, doubly framed or
-    HTTP/1.0 answer, and every deliberately malformed request.
+    body, or a 204 / 304 with no body and no transfer coding), and that answer ended
+    exactly at its framed end: nothing read past it (SP-63's leftover, from
+    `read_http_response`) and nothing waiting on the socket when it ended (`_quiet`).
+    Where the answer ends is SP-63's decision alone; `reusable_response` only narrows
+    it to the stricter grammar above. Everything else is closed after its exchange, as
+    before: a close-delimited, over-long, short, doubly framed or HTTP/1.0 answer, one
+    followed by any byte (a desynchronised upstream answering twice; merge
+    integration, BUG-0549), one SP-63 cannot frame (`UpstreamFramingError`), and every
+    deliberately malformed request.
   - **A body is never kept** *(review round 1)*. A request that carries body bytes, of
     any method, goes on a fresh socket and its connection is closed after it. Whether
     the upstream read the body cannot be observed: one that answers without reading it
@@ -242,7 +258,8 @@ that shares the store, never a mandatory pipeline (D5).
     TLS EOF with no answer byte received; `_Counted` counts them), the request is sent
     once more on a fresh connection. Once a byte of answer came, a reset reaches the
     caller (review round 1: a partial answer was discarded and the request replayed);
-    an answer that timed out is never resent.
+    an answer that stalls (SP-63's `UpstreamIncomplete`, reason `idle`) or that a close
+    cuts after a byte (reason `eof`) is never resent, and its connection is closed.
   - **The web Repeater keeps fresh sockets** *(review round 1)*. Its sender
     (`web/proxycontrol.py::RepeaterController._writer`) is `SocketSender(...,
     keep_alive=False)`: every tab send opens its own upstream connection, closed after
@@ -258,7 +275,7 @@ that shares the store, never a mandatory pipeline (D5).
   - Measured (BUG-0549, loopback, `scripts/measure_pooling.py`): connections per 2 000
     plain GET calls fell from 2 000 to 8 (a call with a body is not kept), and the call rate rose 2.6-7x sequential and
     2-2.6x with 8 threads; over TLS from 20 to 2 750-3 830 calls/s sequential.
-  - Enforced by: `tests/test_socketsender_pooling.py::test_well_framed_keep_alive_exchanges_reuse_one_upstream_connection`, `tests/test_socketsender_pooling.py::test_an_exchange_that_is_not_exactly_framed_never_leaves_its_connection`, `tests/test_socketsender_pooling.py::test_a_stale_pooled_connection_is_retried_once_and_a_timeout_never`, `tests/test_socketsender_pooling.py::test_a_body_the_upstream_leaves_unread_never_reaches_the_next_request`, `tests/test_socketsender_pooling.py::test_a_kept_connection_reset_after_part_of_its_answer_is_never_resent`, `tests/test_web_repeater.py::test_each_repeater_send_gets_a_fresh_upstream_connection`, `tests/test_socketsender_pooling.py::test_tls_upstream_connections_are_reused_and_the_context_built_once`, `tests/test_socketsender_pooling.py::test_concurrent_exchanges_each_get_their_own_answer_on_reused_connections`, `tests/test_socketsender_pooling.py::test_closing_the_sender_closes_its_idle_upstream_connections`
+  - Enforced by: `tests/test_socketsender_pooling.py::test_well_framed_keep_alive_exchanges_reuse_one_upstream_connection`, `tests/test_socketsender_pooling.py::test_an_exchange_that_is_not_exactly_framed_never_leaves_its_connection`, `tests/test_socketsender_pooling.py::test_a_stale_pooled_connection_is_retried_once_and_a_timeout_never`, `tests/test_socketsender_pooling.py::test_a_body_the_upstream_leaves_unread_never_reaches_the_next_request`, `tests/test_socketsender_pooling.py::test_a_kept_connection_reset_after_part_of_its_answer_is_never_resent`, `tests/test_socketsender_pooling.py::test_bytes_after_a_framed_answer_never_leave_its_connection_kept`, `tests/test_web_repeater.py::test_each_repeater_send_gets_a_fresh_upstream_connection`, `tests/test_socketsender_pooling.py::test_tls_upstream_connections_are_reused_and_the_context_built_once`, `tests/test_socketsender_pooling.py::test_concurrent_exchanges_each_get_their_own_answer_on_reused_connections`, `tests/test_socketsender_pooling.py::test_closing_the_sender_closes_its_idle_upstream_connections`
 - **FR-PROXY-400** *(`--record`; `CC-PROXY-0400`, 2026-10-15).* Flow recording stays
   opt-in.
   - `--record` records into the resolved store (FR-CORE-400).
@@ -307,6 +324,10 @@ that shares the store, never a mandatory pipeline (D5).
     (FR-PROXY-13) and the client gets a 502. A peer that closes before sending any byte
     returns `b""`: no response (recorded as "connection closed", as before), and the
     client gets a 502.
+  - **Bytes past the framed end are no part of the response** (merge integration,
+    BUG-0549): `read_http_response` returns them apart from it (SP-63's
+    `MessageReader.leftover`); `recv_http_response` returns the response alone. A
+    connection that had any is never kept (FR-PROXY-405).
   - **Inside the CONNECT/TLS tunnel too** (review round 1): a failed, cut or unanswered
     upstream is answered `502` with `Connection: close` in the tunnel, then the tunnel
     closes. It is never an empty close, which a browser retries on a reused connection

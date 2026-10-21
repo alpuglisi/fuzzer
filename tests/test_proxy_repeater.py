@@ -11,6 +11,10 @@ drop a duplicate `Content-Length` header; this proves fuzzlab's Repeater does no
 
 from __future__ import annotations
 
+import sqlite3
+
+import pytest
+
 from fuzzlab.core.store import Store
 from fuzzlab.proxy.history import HistoryWriter
 from fuzzlab.proxy.repeater import Repeater
@@ -95,3 +99,25 @@ def test_send_unknown_tab_raises_keyerror(tmp_path):
             pass
         else:
             raise AssertionError("expected KeyError for an unknown tab id")
+
+
+@pytest.mark.xfail(strict=True, raises=sqlite3.OperationalError, reason=(
+    "Merge-integration sweep of BUG-0543's I1 (a history failure never changes the "
+    "answer), known and not fixed in this change: `Repeater.send` records on the "
+    "synchronous path after the upstream answered, and a store error there (the flush "
+    "re-raises, BUG-0106) reaches the operator instead of the response, who may send the "
+    "request again. Owner: PROXY (`proxy/repeater.py`), with the UI's repeater routes for "
+    "where a count of such failures is shown."))
+def test_a_history_failure_never_loses_the_repeaters_response(tmp_path):
+    """The upstream answered; the history's store is locked. Wanted: the operator gets
+    the response (the failure counted where they read it), never the store's error."""
+    class _Locked:
+        def record(self, rec):
+            raise sqlite3.OperationalError("database is locked")
+
+    ok = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
+    with _store(tmp_path / "r.db") as store:
+        run_id = store.start_run("repeater", "127.0.0.1")
+        rep = Repeater(store, run_id, lambda *a: ok, history=_Locked())
+        tab = rep.create_tab("t", "127.0.0.1", 80, b"GET /a HTTP/1.1\r\nHost: h\r\n\r\n")
+        assert rep.send(tab.id) == ok
