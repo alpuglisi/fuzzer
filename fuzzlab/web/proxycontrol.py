@@ -71,7 +71,8 @@ class ProxyController:
             # require_writable); never create one here (CC-UI-0450).
             self._store = Store(self.config.store_path, create=False)
             run_id = self._store.start_run("proxy", self.config.host)
-            # batch_size=1: each flow is persisted immediately so the panel sees it live.
+            # batch_size=1: each flow is written as soon as the writer thread takes it,
+            # so the panel sees it live (FR-PROXY-404).
             self._history = history = HistoryWriter(self._store, run_id, batch_size=1)
 
         ca = None
@@ -98,8 +99,9 @@ class ProxyController:
         if self.server is not None:
             await self.server.stop()
         if self._history is not None:
-            # flush, the run's end and the trace counters (FR-PROXY-13)
-            self._history.close(run_end="complete")
+            # flush, the run's end and the trace counters (FR-PROXY-13), the writer
+            # thread's drain waited for off the web loop (BUG-0550, FR-PROXY-404)
+            await self._history.aclose(run_end="complete")
         if self._store is not None:
             self._store.close()
         self._running = False

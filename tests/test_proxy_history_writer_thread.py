@@ -6,21 +6,29 @@ the writer's own thread (its own store connection) redacts, hashes, inserts, com
 and traces it. A batch is cut by count, bytes or age; the queue is bounded by flows and
 bytes, and a flow that does not fit is dropped from the history (never from the
 traffic), counted, logged and written to ``run_metrics`` (``history_*``) while the run
-is live; ``close`` writes everything still pending, in submission order. Loopback and
-temporary stores only: no lab is contacted."""
+is live; ``close`` writes everything still pending, in submission order, also when the
+process is stopped by SIGTERM; the web proxy's stop drains off the web loop. Loopback
+and temporary stores only: no lab is contacted."""
 
 from __future__ import annotations
 
 import ast
 import asyncio
+import json
+import os
+import socket
 import sqlite3
+import subprocess
+import sys
 import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
 
 import fuzzlab.proxy.history as hist
+from fuzzlab import procutil
 from fuzzlab.core.store import Store
 from fuzzlab.proxy.history import TRACE_KEY, FlowRecord, HistoryWriter
 from fuzzlab.proxy.scope import Scope
@@ -339,6 +347,57 @@ def test_a_failing_write_is_retried_then_counted_and_later_flows_still_write(
         assert _urls(store, run_id) == ["http://127.0.0.1:9/p1"]   # never a partial p0
 
 
+def test_a_failed_commit_is_rolled_back_and_the_retry_writes_once(tmp_path, monkeypatch):
+    """Review R2 (PA-0107(1)): `_write` states that a failed write leaves nothing behind,
+    its commit included, so the writer thread's retry never duplicates a flow. The
+    committing statement is the outermost ``RELEASE history_flush``; in WAL mode a small
+    transaction's frames are written there, so a full disk or an I/O error surfaces at
+    it, not at an insert. The first one fails here. With the release and commit outside
+    the rollback, the transaction stayed open and the retry wrote p0 a second time
+    inside it: ``[p0, p0, p1]``."""
+    monkeypatch.setattr(hist, "RETRY_SECONDS", 0.0)
+    failed: list[str] = []
+
+    class _Conn:
+        """The writer thread's connection, failing its first commit."""
+
+        def __init__(self, conn):
+            self._conn = conn
+
+        def __getattr__(self, name):
+            return getattr(self._conn, name)
+
+        def execute(self, sql, *args):
+            if sql == "RELEASE history_flush" and not failed:
+                failed.append(sql)
+                raise sqlite3.OperationalError("disk I/O error")
+            return self._conn.execute(sql, *args)
+
+    class _Store(Store):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.conn = _Conn(self.conn)
+
+    monkeypatch.setattr(hist, "Store", _Store)     # the writer thread's own store only
+    with Store(tmp_path / "s.db") as store:
+        run_id = store.start_run("proxy", "x")
+        h = HistoryWriter(store, run_id, batch_size=1)
+        for i in range(2):
+            h.submit(_flow(i))
+            h.flush()
+        h.close(run_end="complete")
+        assert failed == ["RELEASE history_flush"]                   # not vacuous
+        assert _urls(store, run_id) == ["http://127.0.0.1:9/p0", "http://127.0.0.1:9/p1"]
+        s = h.stats
+        assert (s["written"], s["retries"], s["failed"]) == (2, 1, 0)
+        ids = [r[0] for r in store.conn.execute(
+            "SELECT id FROM flow WHERE run_id=? ORDER BY id", (run_id,))]
+        keys = [r[0] for r in store.conn.execute(
+            "SELECT key FROM trace_event WHERE run_id=? AND kind='observe.exchange' "
+            "ORDER BY seq", (run_id,))]
+        assert keys == [f"{TRACE_KEY}{i}" for i in ids]               # one event per flow
+
+
 def test_a_writer_that_cannot_open_its_store_counts_every_flow(monkeypatch):
     reports: list[tuple] = []
     monkeypatch.setattr(hist, "_report", lambda level, msg, **kw: reports.append(
@@ -354,6 +413,197 @@ def test_a_writer_that_cannot_open_its_store_counts_every_flow(monkeypatch):
         assert any(level == "error" for level, msg, kw in reports)
     finally:
         store.close()
+
+
+# --- a requested stop drains: SIGTERM like Ctrl-C (review R1) -----------------------------
+
+#: `fuzzlab proxy`'s own `main` on a slow store: each flow insert takes 0.2 s, so the
+#: answered flows still wait in the writer thread's queue when the stop comes.
+_SLOW_STORE_PROXY = (
+    "import sys, time\n"
+    "from fuzzlab.proxy.history import HistoryWriter\n"
+    "real = HistoryWriter._insert\n"
+    "def slow(self, *a, **k):\n"
+    "    time.sleep(0.2)\n"
+    "    return real(self, *a, **k)\n"
+    "HistoryWriter._insert = slow\n"
+    "from fuzzlab.proxy import cli\n"
+    "sys.exit(cli.main(sys.argv[1:]))\n")
+
+
+class _Ok(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-Length", "2")
+        self.end_headers()
+        self.wfile.write(b"ok")
+
+    def log_message(self, *args):
+        pass
+
+
+def _get_through(proxy_port: int, upstream_port: int, path: str) -> bytes:
+    with socket.create_connection(("127.0.0.1", proxy_port), timeout=30) as conn:
+        conn.sendall(f"GET http://127.0.0.1:{upstream_port}{path} HTTP/1.1\r\n"
+                     f"Host: 127.0.0.1:{upstream_port}\r\nConnection: close\r\n\r\n"
+                     .encode())
+        data = b""
+        while chunk := conn.recv(65536):
+            data += chunk
+    return data
+
+
+def test_a_sigterm_stops_the_recording_proxy_like_ctrl_c_and_writes_every_answered_flow(
+        tmp_path):
+    """Review R1: an answered flow waits in the writer thread's queue, and only Ctrl-C
+    (the one signal `asyncio.run` handles) reached the drain. A SIGTERM (``kill``, the
+    web UI's Stop through procutil's supervisor, which is how this test stops it, a
+    service manager) ended the process with the queue neither written nor counted: on a
+    0.2 s store, 0 of 10 answered flows were stored. Now SIGTERM stops it as Ctrl-C
+    does: every answered flow is written, in order, and the run ends ``complete``."""
+    upstream = ThreadingHTTPServer(("127.0.0.1", 0), _Ok)
+    threading.Thread(target=upstream.serve_forever, daemon=True).start()
+    up = upstream.server_address[1]
+    db, log = tmp_path / "s.db", tmp_path / "proxy.log"
+    env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1",
+           "PYTHONPATH": str(REPO) + os.pathsep + os.environ.get("PYTHONPATH", "")}
+    n = 10
+    try:
+        with open(log, "w") as out:
+            server, port = procutil.start_server_on_free_port(  # BUG-0143: our own listener
+                lambda port: [sys.executable, "-c", _SLOW_STORE_PROXY, "--host", "127.0.0.1",
+                              "--port", str(port), "--scope", "127.0.0.1", "--no-tls",
+                              "--ca-dir", str(tmp_path / "ca"), "--store", str(db),
+                              "--authorized"],
+                boot_timeout=30.0, env_for=lambda port: env, cwd=tmp_path, stdout=out,
+                stderr=subprocess.STDOUT, grace=60.0)   # the drain is never cut short here
+        try:
+            procutil.assert_loopback_only(server)  # BUG-0130: checked after boot
+            for i in range(n):
+                status_line = _get_through(port, up, f"/p{i}").split(b"\r\n", 1)[0]
+                assert status_line.endswith(b" 200 OK"), status_line
+        finally:
+            procutil.stop_server(server)           # SIGTERM, as the UI's Stop sends it
+    finally:
+        upstream.shutdown()
+        upstream.server_close()
+    with Store(db) as store:
+        run_id = store.conn.execute("SELECT MAX(id) FROM run").fetchone()[0]
+        assert _urls(store, run_id) == [f"http://127.0.0.1:{up}/p{i}" for i in range(n)], \
+            log.read_text()[-2000:]
+        m = _metrics(store, run_id)
+        assert m["history_accepted"] == m["history_written"] == float(n)
+        end = store.conn.execute("SELECT body FROM trace_event WHERE run_id=? AND "
+                                 "kind='run.end'", (run_id,)).fetchone()
+        assert end is not None and json.loads(end[0])["status"] == "complete"
+
+
+# --- the web proxy's stop drains off the web loop (review R3) ------------------------------
+
+def test_stopping_the_web_proxy_drains_its_history_off_the_web_loop(tmp_path, monkeypatch):
+    """Review R3: `ProxyController.stop` (the web app's lifespan under `fuzzlab web
+    --with-proxy`) closed the writer on the web loop, which then waited in the writer
+    thread's join for the whole backlog, up to `CLOSE_TIMEOUT`. Here the writer's first
+    insert is held while the stop drains: the loop must run meanwhile, and every flow is
+    still written. Pre-fix, the loop got control back only after the hold ended."""
+    from fuzzlab.web.proxycontrol import ProxyConfig, ProxyController
+    gate = _Gate(monkeypatch, safety=10.0)
+    path = tmp_path / "s.db"
+    Store(path).close()                      # the app makes the project file exist
+    ctrl = ProxyController(ProxyConfig(port=0, scope_hosts=("127.0.0.1",),
+                                       store_path=str(path))).build()
+
+    async def until(pred, timeout: float = 30.0) -> None:   # a presence claim (PA-0511)
+        end = time.monotonic() + timeout
+        while not pred():
+            assert time.monotonic() < end
+            await asyncio.sleep(0.01)
+
+    async def scenario() -> bool:
+        await ctrl.start()
+        for i in range(3):
+            ctrl._history.submit(_flow(i))                  # as the engine's `_record` does
+        await until(gate.entered.is_set)                    # the first write is now held
+        pump = ctrl._history._pump
+        stopping = asyncio.create_task(ctrl.stop())
+        await until(lambda: pump.closing)                   # the stop reached the drain...
+        ran_while_held = not gate.release.is_set()          # ...and the loop still runs
+        gate.release.set()
+        await stopping
+        return ran_while_held
+
+    assert asyncio.run(scenario()) is True
+    with Store(path) as store:
+        run_id = store.conn.execute("SELECT MAX(id) FROM run").fetchone()[0]
+        assert _urls(store, run_id) == [f"http://127.0.0.1:9/p{i}" for i in range(3)]
+        assert store.conn.execute("SELECT COUNT(*) FROM trace_event WHERE run_id=? AND "
+                                  "kind='run.end'", (run_id,)).fetchone()[0] == 1
+
+
+#: A history writer's methods that wait on the store or on its writer thread's drain.
+_HISTORY_BLOCKING = {"close", "flush", "record", "search"}
+
+
+def _terminal_name(expr) -> str:
+    if isinstance(expr, ast.Attribute):
+        return expr.attr
+    return getattr(expr, "id", "") or ""
+
+
+def _history_loop_offenders(src: str) -> list[str]:
+    """Calls made inline in an `async def` (not inside a nested synchronous function,
+    which runs wherever it is handed) that block on a history writer: a receiver named
+    ``*history*`` and a method in `_HISTORY_BLOCKING`. Async handlers nested in a
+    synchronous factory (the web app's) are found too."""
+    out: list[str] = []
+
+    def visit(node, fn: str | None) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.AsyncFunctionDef):
+                visit(child, child.name)
+                continue
+            if isinstance(child, (ast.FunctionDef, ast.Lambda)):
+                visit(child, None)
+                continue
+            if fn is not None and isinstance(child, ast.Call) and \
+                    isinstance(child.func, ast.Attribute) and \
+                    child.func.attr in _HISTORY_BLOCKING and \
+                    "history" in _terminal_name(child.func.value).lower():
+                out.append(f"{fn}:{child.lineno}:{child.func.attr}")
+            visit(child, fn)
+
+    visit(ast.parse(src), None)
+    return out
+
+
+def test_no_event_loop_path_blocks_on_a_history_writer():
+    """Every `async def` in `fuzzlab/` (the proxy's loop, the web app's): no inline
+    close, flush, record or search of a history writer (`aclose` is the loop's close)."""
+    found = []
+    for path in sorted((REPO / "fuzzlab").rglob("*.py")):
+        found += [f"{path.relative_to(REPO).as_posix()}:{o}"
+                  for o in _history_loop_offenders(path.read_text(encoding="utf-8"))]
+    assert found == []
+    assert "await self._history.aclose(" in (
+        REPO / "fuzzlab" / "web" / "proxycontrol.py").read_text()   # not vacuous
+
+
+@pytest.mark.parametrize("src, flagged", [
+    ("class C:\n    async def stop(self):\n        self._history.close(run_end='complete')\n",
+     True),                                                            # the pre-fix line
+    ("async def f(history):\n    history.flush()\n", True),
+    ("async def f(self, rec):\n    self.history.record(rec)\n", True),
+    (("def app(state):\n    async def h():\n        return state.history.search('x')\n"
+      "    return h\n"), True),                                         # a factory's handler
+    ("async def stop(self):\n    await self._history.aclose(run_end='complete')\n", False),
+    ("async def stop(self):\n    await asyncio.to_thread(self._history.close, run_end='x')\n",
+     False),
+    (("async def f(history):\n    def g():\n        history.close()\n"
+      "    await asyncio.to_thread(g)\n"), False),
+    ("def main(history):\n    history.close(run_end='complete')\n", False),  # the CLI's
+])
+def test_the_history_loop_guard_on_synthetic_code(src, flagged):
+    assert bool(_history_loop_offenders(src)) is flagged
 
 
 # --- the guard: nothing on the proxy's loop does store or redaction work -------------------

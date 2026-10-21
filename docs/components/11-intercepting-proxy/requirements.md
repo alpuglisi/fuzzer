@@ -138,9 +138,10 @@ that shares the store, never a mandatory pipeline (D5).
     is counted `dropped`, logged, and the counters are written (`run_metrics`
     `trace_*`); `HistoryWriter.close()` writes them at the end.
   - **The run's end** (CC-PROXY-0026): `HistoryWriter.close(run_end=...)` records a
-    `run.end` event. `fuzzlab proxy` passes `complete` on Ctrl-C (the operator's stop)
-    and `aborted: <class>` on any other exit; the web proxy's `stop()` passes
-    `complete`. A closed proxy run's diagram status is therefore `complete`, not
+    `run.end` event. `fuzzlab proxy` passes `complete` on Ctrl-C or SIGTERM (a
+    requested stop: the operator's, the web UI's Stop of a `proxy` job, a service
+    manager's; FR-PROXY-404) and `aborted: <class>` on any other exit; the web proxy's
+    `stop()` passes `complete`. A closed proxy run's diagram status is therefore `complete`, not
     `partial` for want of an end.
   - **Measured cost** (CC-PROXY-0025): 400 flows at `batch_size=1` on the event-loop
     thread; per flow, median 0.30–0.38 ms without the trace and 1.38–1.46 ms with it,
@@ -170,7 +171,19 @@ that shares the store, never a mandatory pipeline (D5).
     counters, within 60 s; what is still pending then is counted `unwritten` and
     logged. Idempotent. A writer dropped without `close`, or open at interpreter exit,
     is still drained. A store the thread cannot open counts every flow and logs an
-    error.
+    error. A caller on an event loop closes with **`aclose(run_end)`**: the drain is
+    awaited on a worker thread while the loop runs; a writer with a file store and
+    nothing of its own on the caller's connection starts its thread for the close, so
+    the run's end and the counters are written there too. The web proxy's `stop` uses
+    it.
+  - **Stopping and durability** (review round 1): a flow's response goes back before
+    the flow is written. Every requested stop drains: `fuzzlab proxy` treats SIGTERM
+    (`kill`, the web UI's Stop of a `proxy` job through procutil's supervisor, a service
+    manager) as it treats Ctrl-C: the listener closes, then `close` writes every queued
+    flow and the run's end `complete`. A hard kill (SIGKILL, the supervisor's after its
+    grace, a crash) or a second signal during the drain loses whatever is still queued,
+    up to the queue bound; the live counters show `accepted` against `written` as of
+    their last rewrite.
   - **Counters** (`run_metrics`, rewritten live: at once on a new drop or failure,
     else at most once a second, and at close): `history_accepted`, `history_written`,
     `history_dropped`, `history_dropped_bytes`, `history_failed`, `history_unwritten`,
@@ -198,7 +211,7 @@ that shares the store, never a mandatory pipeline (D5).
 - **NFR-PROXY-nonblocking** History writes are batched and must not stall the data
   path: no store, disk or redaction work runs on the proxy's event loop (FR-PROXY-404;
   built in CC-PROXY-0030, BUG-0550; it had been a deferral since Phase 6).
-  - Enforced by: `proxy.history.HistoryWriter.submit`, `proxy.server.ProxyEngine._record` — `tests/test_proxy_history_writer_thread.py::test_a_blocked_store_write_never_stalls_proxied_traffic`, `tests/test_proxy_history_writer_thread.py::test_the_loop_parses_only_each_messages_first_line`, `tests/test_proxy_history_writer_thread.py::test_the_proxy_loop_never_calls_store_or_redaction_work`
+  - Enforced by: `proxy.history.HistoryWriter.submit`, `proxy.history.HistoryWriter.aclose`, `proxy.server.ProxyEngine._record` — `tests/test_proxy_history_writer_thread.py::test_a_blocked_store_write_never_stalls_proxied_traffic`, `tests/test_proxy_history_writer_thread.py::test_the_loop_parses_only_each_messages_first_line`, `tests/test_proxy_history_writer_thread.py::test_the_proxy_loop_never_calls_store_or_redaction_work`, `tests/test_proxy_history_writer_thread.py::test_stopping_the_web_proxy_drains_its_history_off_the_web_loop`, `tests/test_proxy_history_writer_thread.py::test_no_event_loop_path_blocks_on_a_history_writer`
   - Not yet enforced: the web app's repeater routes run a blocking upstream send and store writes on the web loop that also serves the in-process proxy (`--with-proxy`); pinned by the strict xfail `tests/test_proxy_history_writer_thread.py::test_no_web_handler_runs_a_repeater_send_or_write_on_the_event_loop` (UI component).
 - **NFR-PROXY-optional** Nothing in the core pipeline requires the proxy to run.
 - **NFR-PROXY-dry-run** `fuzzlab proxy` accepts `--dry-run`: plans and prints the

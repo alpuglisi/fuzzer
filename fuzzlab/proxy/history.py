@@ -20,8 +20,12 @@ logged, and written to ``run_metrics`` (``history_*``) while the run is live. A 
 that cannot be written is tried `WRITE_ATTEMPTS` times, then counted ``failed`` and
 logged; the writer goes on with the next. `flush` waits until everything submitted
 before it is written; `close` writes everything still pending, then ends the run, within
-`CLOSE_TIMEOUT` (what is left after that is counted ``unwritten`` and logged). A writer
-dropped without `close` is still drained, and so is one still open at interpreter exit.
+`CLOSE_TIMEOUT` (what is left after that is counted ``unwritten`` and logged); a caller
+on an event loop closes with `aclose`, which waits for that drain on a worker thread. A
+writer dropped without `close` is still drained, and so is one still open at interpreter
+exit. A hard kill (SIGKILL, a crash) loses what is still queued, up to the queue bounds:
+an owner whose process is stopped by a signal turns that signal into a requested stop
+and closes the writer (`fuzzlab proxy` does for SIGTERM as for Ctrl-C).
 `record` stays synchronous (the repeater, tests): it writes on the calling thread, also
 cut by `flush_bytes`; once a writer has a thread, `record` hands over to it too.
 
@@ -46,6 +50,7 @@ with no ``run_id``.
 
 from __future__ import annotations
 
+import asyncio
 import atexit
 import collections
 import contextlib
@@ -181,16 +186,20 @@ class HistoryWriter:
         pump = self._pump
         return pump.snapshot() if pump is not None else dict.fromkeys(STAT_NAMES, 0)
 
+    def _thread_path(self) -> Path | None:
+        """The store's file, which the writer thread opens; None when there is nothing
+        another thread could open (an in-memory store)."""
+        path = getattr(self.store, "path", None)
+        if path is None or str(path) == ":memory:":
+            return None
+        return Path(path).absolute()
+
     def _start_pump(self) -> "_Pump":
         """Start the writer thread, handing it whatever this writer still buffers, first
         (one writer of the run's flows, in order)."""
         with self._lock:
             if self._pump is None:
-                path = getattr(self.store, "path", None)
-                if path is not None and str(path) != ":memory:":
-                    path = Path(path).absolute()
-                else:
-                    path = None                   # nothing another thread could open
+                path = self._thread_path()
                 pump = _Pump(path, self.run_id, batch_size=self.batch_size,
                              redact_secrets=self.redact_secrets, trace=self.trace,
                              flush_bytes=self.flush_bytes,
@@ -403,15 +412,12 @@ class HistoryWriter:
 
         A writer with a thread: the thread writes everything still pending, records the
         run's end and the counters (``trace_*``, ``history_*``) on its own connection,
-        and stops, within `CLOSE_TIMEOUT`. Idempotent."""
+        and stops, within `CLOSE_TIMEOUT`. That blocks the caller for the whole drain:
+        on an event loop, use `aclose`. Idempotent."""
         pump = self._pump
         if pump is not None:
             pump.close(run_end)
-            with self._lock:                  # this writer's own leftovers, if any
-                self._trace([])
-                if self._recorder is not None:
-                    with contextlib.suppress(Exception):
-                        self._recorder.close()
+            self._close_own()
             return
         self.flush()
         with self._lock:
@@ -423,6 +429,35 @@ class HistoryWriter:
                         from fuzzlab.core.trace import TraceRecorder
                         self._recorder = TraceRecorder(self.store, self.run_id)
                     self._recorder.emit("run.end", {"status": run_end}, key="run.end")
+            if self._recorder is not None:
+                with contextlib.suppress(Exception):
+                    self._recorder.close()
+
+    async def aclose(self, run_end: str | None = None) -> None:
+        """`close` for a caller on an event loop (the web proxy's `stop`; BUG-0550,
+        review R3): the writer thread's drain, up to `CLOSE_TIMEOUT`, is waited for on a
+        worker thread while the loop goes on. A writer with a file store that holds
+        nothing on the caller's connection (no trace state from a synchronous `record`)
+        and has no thread yet starts one here, so the run's end and the counters are
+        written on the thread's connection too and nothing of the close runs on the
+        loop. A writer that wrote synchronously on the caller's thread (`record`), or
+        whose store no other thread can open, is closed there, as it wrote (PA-0023)."""
+        pump = self._pump
+        if pump is None and self._recorder is None and not self._unsent and \
+                self._thread_path() is not None:
+            pump = self._start_pump()
+        if pump is None:
+            self.close(run_end)
+            return
+        await asyncio.to_thread(pump.close, run_end)
+        self._close_own()
+
+    def _close_own(self) -> None:
+        """After the writer thread closed: this writer's own leftovers, if any (events
+        of flows it wrote synchronously inside a transaction it did not own; its own
+        recorder's counters), on its own connection."""
+        with self._lock:
+            self._trace([])
             if self._recorder is not None:
                 with contextlib.suppress(Exception):
                     self._recorder.close()
