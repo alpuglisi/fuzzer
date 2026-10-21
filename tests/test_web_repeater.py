@@ -68,6 +68,27 @@ def test_create_list_and_send_with_injected_sender(tmp_path):
     assert ctrl.send(99999) is None                      # unknown tab
 
 
+def test_each_repeater_send_gets_a_fresh_upstream_connection(tmp_path):
+    """BUG-0549 review round 1 (audit defect 24: "retain fresh sockets for deliberate
+    desynchronization probes and connection-sensitive experiments"). The Repeater's
+    sender is cached per server thread; with kept connections, tab "alice" and then tab
+    "bob" went on one upstream connection, so connection state crossed tabs and
+    identities. Wanted: each send on a connection of its own, closed after it."""
+    from tests._keepalive_peer import KeepAlivePeer
+    with KeepAlivePeer() as peer:
+        Store(tmp_path / "r.db").close()               # stands in for require_writable
+        ctrl = RepeaterController(_cfg(tmp_path / "r.db"))     # its own SocketSender
+        tabs = {who: ctrl.create_tab(who, "127.0.0.1", peer.port,
+                                     f"GET /{who} HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+                                     f"Cookie: sid={who}\r\n\r\n")
+                for who in ("alice", "bob")}
+        for who in ("alice", "bob", "alice"):
+            assert ctrl.send(tabs[who]["id"])["response"].endswith(f"/{who}")
+        assert peer.connections == 3
+        assert peer.conn_of("/alice") == [1, 3] and peer.conn_of("/bob") == [2]
+        assert peer.wait(lambda p: p.closed >= {1, 2, 3})
+
+
 def test_create_from_flow(tmp_path):
     path = tmp_path / "r.db"
     with Store(path) as store:

@@ -1153,7 +1153,12 @@ tracked in the requirements files, not here.
 
 ### 2. `core/` shared library `[built]` (plugin registry: component 13)
 - **HTTP client** `[built]`: one send helper behind an injectable seam; requires a
-  session context; records raw bytes (`core/http.py`).
+  session context; records raw bytes (`core/http.py`). Its default transport
+  (`PooledTransport`, FR-CORE-509, BUG-0549) keeps one bounded `requests` session per
+  (origin, identity, session generation), with no cookie jar; a newer generation retires
+  the older one's, `HttpClient.close()` (or collection) closes them, a send with a body
+  gets a session of its own, and the transport never re-sends (each try is the sender's
+  to make and record, FR-FUZZ-61).
 - **Store** `[built]`: SQLite access, schema, and numbered forward-only migrations
   (`core/store.py`, `core/migrations.py`; head = migration 24 -- the last, the trace
   model's tables, FR-CORE-505). One read-only opener, `core.store.open_read_only` (with
@@ -1894,7 +1899,10 @@ tracked in the requirements files, not here.
     (CC-PROXY-0021). A flush is all-or-nothing (savepoint, BUG-0106);
   - upstream reads are bounded (64 KiB headers, a configurable 64 MiB body and overall
     deadline) and never re-copied, and the blocking sender runs off the event loop
-    (FR-PROXY-12, BUG-0101); a response is framed by SP-63 and never returned short (FR-PROXY-402).
+    (FR-PROXY-12, BUG-0101); a response is framed by SP-63 and never returned short (FR-PROXY-402). The sender builds one SSL context and keeps an upstream
+    connection only after an exactly framed, bodiless HTTP/1.1 exchange; a desync probe
+    (a malformed request, or one with a body) never rides a kept one, and the web
+    Repeater's sender keeps none (FR-PROXY-405, BUG-0549).
 - **HTTP/1 framing and inbound bounds** `[built]` (FR-PROXY-401..403, CC-PROXY-0028,
   SP-63): one sans-I/O framing owner (`framing.py`: `parse_head`, strict, and
   `MessageReader`) for the listener's requests and the sender's responses. A head with a

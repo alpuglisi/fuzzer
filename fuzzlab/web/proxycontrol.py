@@ -307,7 +307,10 @@ class RepeaterController:
             sender = self._sender
             if sender is None:
                 from fuzzlab.proxy.socketsender import SocketSender
-                sender = SocketSender(verify_tls=False)
+                # A fresh upstream connection per send, closed after it: the Repeater
+                # is where deliberate desync and connection-sensitive probes are sent,
+                # and its tabs switch identities (FR-PROXY-405, BUG-0549 round 1).
+                sender = SocketSender(verify_tls=False, keep_alive=False)
             path = self._path()
             if path is None:
                 raise NoProject("no project is open")

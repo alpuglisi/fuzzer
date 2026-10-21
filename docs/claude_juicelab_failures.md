@@ -1244,3 +1244,39 @@ Juice Shop lab is complete.
 - **Evidence:** `scratchpad/vpush5.log` (selected, then "interrupted (signal 15)" with no parallel log); the holder side file showing successive lane sessions during that wait; `_acquire`'s `LOCK_NB` poll loop.
 - **Impact:** one merge verification lost (about 35 minutes) and pushes delayed; no wrong result.
 - **Status:** open: worked around by batching merges into one verification with a two-hour wait; a FIFO ticket queue in the lock is queued as a process fix after the current wave (all lanes run the old lock code until they merge the tip).
+
+### F-139 — The seam's transport and the proxy's sender opened a connection per send, and a later agent change carried it forward unmeasured
+- **What:** `core/http.py`'s default transport made a `requests` session per send and `proxy/socketsender.py` a socket and an SSL context per call ("Stateless between calls (one socket per call)"). CC-CORE-0072 (BUG-0536) rewrote the transport and kept "a fresh session per send, as `requests.request` made" on purpose, without measuring what it cost; PA-0148(2) (measure a slow step before calling it inherent) was not applied because the step was per send, not "several seconds".
+- **Evidence:** audit defect 24; `fuzzlab/core/http.py` at c483dc1 (lines 153-166); BUG-0549's measurement (2 000 connections per 2 000 loopback sends; a 21 ms system-CA context per proxied TLS call; 20 sends/s over TLS before, about 960 after, sequential, on the seam).
+- **Impact:** every authenticated probe and every proxied call paid a connection (and over TLS a context and a handshake); timing-sensitive probes carried a changing handshake cost. No wrong answer resulted.
+- **Status:** fixed in POOL24 (CC-CORE-0075, CC-PROXY-0029, BUG-0549, PA-0549).
+
+### F-140 — POOL24 wrapped its pre-fix proof run in a 900 s `timeout`, which killed it while it was still queued for the host pytest lock
+- **What:** the lane started its one pre-fix proof run (`tests/test_http_pooling.py`, `tests/test_socketsender_pooling.py` on c483dc1) under `timeout 900`; the run queued on the host pytest lock (BUG-0532) behind other lanes and was killed (exit 143) before it ran anything. The rerun was started without a wrapper, with `FUZZLAB_PYTEST_LOCK_WAIT=7000`.
+- **Evidence:** the background task's exit 143 with only "waiting for the pytest lock" lines in its output; `scratchpad/lanes/POOL24/prefix_proof.txt` (the rerun).
+- **Impact:** none on other lanes (it held no lock and ran no test); this lane lost its place in the queue and about 15 minutes.
+- **Status:** recorded; the rerun is the proof reported.
+
+### F-141 — POOL24 kept the proxy sender's connection after a request with a body (CL.0) while its own docs said a desync probe always got a fresh socket
+- **What:** `reusable_request` (093685e) accepted any well-formed request whose body matched its `Content-Length`, so a CL.0 probe's connection was kept and the next request on it, another Repeater tab's or another browser identity's, was absorbed into the smuggled request with its cookie. FR-PROXY-405 even said "a POST's may be kept after it", while the class docstring, CC-PROXY-0029, BUG-0549 and PA-0549(3) claimed every desync probe got a fresh connection. Its "not framed" tests covered client-malformed requests only.
+- **Evidence:** review round 1 finding B1 (reported twice); `scratchpad/review_pool24/cl0.py` and `scratchpad/lanes/POOL24/revscripts/cl0_demo.py` on 093685e (one connection, the victim's request line and `Cookie: sid=VICTIM-alice` absorbed, the victim given `/smuggled`).
+- **Impact:** a regression from one socket per call: connection state could cross identities through the proxy, and history recorded the smuggled answer against the next request. Caught in review, never merged.
+- **Status:** fixed in POOL24 round 1 (a request with a body is never kept; CC-PROXY-0029, BUG-0549, PA-0549(3)).
+
+### F-142 — POOL24 put a silent re-send into the core seam's transport, below the sender that records each try
+- **What:** `PooledTransport` (093685e) resent an idempotent request when a reused connection was closed unanswered. `SeamProbeSender` records one try per dispatch (FR-FUZZ-61), so the target got a request no evidence recorded and the probe's `elapsed_ms` included the failed try. This repeats the BUG-0510 class (PA-0510(1)) and is the silent retry-on-error PA-0046 forbids; CC-CORE-0075 even said "a stale-connection resend is the same send". No test counted the server's requests through the default transport (PA-0510(2)).
+- **Evidence:** review round 1 finding B2 (core); `scratchpad/lanes/POOL24/revscripts/attempts_demo.py` on 093685e (3 requests received, 2 tries recorded).
+- **Impact:** a payload that reset a connection was delivered twice and the reset lost as evidence. Caught in review, never merged.
+- **Status:** fixed in POOL24 round 1 (one try per send; CC-CORE-0075, BUG-0549, PA-0549(4)).
+
+### F-143 — POOL24's proxy sender replayed a request after part of its answer had arrived, contrary to its own stated rule
+- **What:** the kept-connection path caught a reset from the whole exchange, but the reader raises a reset after buffering bytes; the partial answer was discarded and the request sent again, though FR-PROXY-405 and the docstring said "before a byte of answer". The rule was inferred from the exception class, not observed, and no test reset a connection after a partial answer.
+- **Evidence:** review round 1 finding B3; `scratchpad/lanes/POOL24/revscripts/midreset_demo.py` on 093685e (the upstream saw `/2` twice, the caller got `200 ... /2`, the partial 500 swallowed).
+- **Impact:** an upstream crash signal hidden and the request processed twice. Caught in review, never merged.
+- **Status:** fixed in POOL24 round 1 (answer bytes counted by `_Counted`; CC-PROXY-0029, BUG-0549, PA-0549(4)).
+
+### F-144 — POOL24 left the Repeater on kept connections as a prose residual
+- **What:** the Repeater's per-thread sender took the new keep-alive default, so tabs with different identities' cookies shared one upstream connection, against audit defect 24's "retain fresh sockets for deliberate desynchronization probes and connection-sensitive experiments". The lane wrote it as residual R4 with no switch instead of fixing or flagging it for a planned merge (PA-0134(2)).
+- **Evidence:** review round 1 finding B2; at 093685e two Repeater sends from one thread arrived on one upstream connection (c483dc1: two).
+- **Impact:** connection-sensitive experiments in the Repeater lost their fresh-connection baseline. Caught in review, never merged.
+- **Status:** fixed in POOL24 round 1 (`keep_alive=False`; CC-PROXY-0029, BUG-0549, PA-0549(5)).
