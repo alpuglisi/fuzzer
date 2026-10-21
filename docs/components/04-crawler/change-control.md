@@ -259,7 +259,13 @@ Newest first.
     browser test at `to_alias == []` (`GET /deeper?via=alias`, `GET /login` twice, all
     to `localhost`); the 7 static tests pass on 8c2fa86, as they should (its static
     refusal sat at the seam). The 8 tests pass on the fix (driver run,
-    `r2/direct_fix.out`). Targeted run: below (added when it finished).
+    `r2/direct_fix.out`). Targeted run on 6ccef90's tree, one pytest invocation of 17
+    files (`-n 3 --dist loadfile`, `FUZZLAB_REQUIRE_BROWSER/LINT/NETNS=1`: round 1's 13
+    files plus the authenticated browser crawls the new gate reads --
+    `test_session_browser_login`, `test_spa_capture`, `test_forms_phase4`,
+    `test_spider_workers`): 1236 passed, 0 failed, 0 skipped, in 498.43 s
+    (`scratchpad/lanes/SPIDER/r2/targeted.log`). `verify_change.py` was not run by the
+    lane (the orchestrator verifies at merge).
   - Impact: a browser crawl with a cookie session no longer loads a host its cookies do
     not reach (a loopback alias of its start among them): unresolved and reported,
     where it was crawled anonymously. A static crawl now asks the manager's `prepare`
