@@ -9,7 +9,10 @@ request, or a well-formed one with a body an upstream may leave unread: CL.0) ne
 rides a pooled connection and its connection is closed after it. Only an idempotent
 request takes a pooled connection; one whose peer closed it before any byte of answer
 is retried once on a fresh connection, and one that got part of an answer, or timed
-out, never is (review round 1).
+out, never is (review round 1). Where an answer ends is SP-63's decision
+(BUG-0543): an answer it cannot frame raises, a stalled one raises `UpstreamIncomplete`,
+and bytes after a framed answer, read with it or still on the socket, close the
+connection (merge integration of AU-PROXY and POOL24).
 
 Every test drives the real sender against a loopback keep-alive peer
 (`_keepalive_peer`) and reads which connection each request came on there; nothing is
@@ -24,7 +27,9 @@ import threading
 
 import pytest
 
-from fuzzlab.proxy.socketsender import SocketSender
+from fuzzlab.proxy import socketsender
+from fuzzlab.proxy.socketsender import (SocketSender, UpstreamFramingError,
+                                        UpstreamIncomplete)
 from tests._keepalive_peer import KeepAlivePeer, Reset, echo, ok
 
 
@@ -98,13 +103,21 @@ NOT_FRAMED = [
 ]
 
 
+#: Answers SP-63 cannot frame (PA-0543): the call raises `UpstreamFramingError`, a 502 at
+#: the engine, and the connection is closed all the same (merge integration: POOL24's
+#: cases expected bytes back, from the reader before SP-63).
+UNFRAMEABLE = {"a chunked answer whose chunk size is not hex",
+               "an answer with chunked and Content-Length"}
+
+
 @pytest.mark.parametrize("case,request_,answer,rides_pool", NOT_FRAMED,
                          ids=[c[0] for c in NOT_FRAMED])
 def test_an_exchange_that_is_not_exactly_framed_never_leaves_its_connection(
         case, request_, answer, rides_pool):
     """Two well-framed exchanges share a connection; then the case's exchange. A
     malformed or ambiguous request never takes the pooled connection; whatever went
-    wrong, the case's connection is closed by the sender and never used again."""
+    wrong, the case's connection is closed by the sender and never used again, an
+    answer SP-63 refuses included (the kept connection's ``except`` path closes it)."""
     def reply(conn, k, req):
         return answer if req.path == "/case" else echo(conn, k, req)
 
@@ -115,7 +128,11 @@ def test_an_exchange_that_is_not_exactly_framed_never_leaves_its_connection(
             _send(sender, peer, _get("/p2"))
             pooled = peer.conn_of("/p1")
             assert peer.conn_of("/p2") == pooled and len(pooled) == 1
-            _send(sender, peer, request_)
+            if case in UNFRAMEABLE:
+                with pytest.raises(UpstreamFramingError):
+                    _send(sender, peer, request_)
+            else:
+                _send(sender, peer, request_)
             case_conn = peer.conn_of("/case")[0]
             assert (case_conn == pooled[0]) is rides_pool, case
             assert peer.wait(lambda p: case_conn in p.closed), case
@@ -129,8 +146,9 @@ def test_a_stale_pooled_connection_is_retried_once_and_a_timeout_never():
     """The peer closes a connection when its second request arrives, with no answer
     (an idle close racing a reuse): the GET is retried once on a fresh connection. A
     POST never takes a pooled connection, and one with a body never leaves its own
-    either (review round 1). An answer that times out on a reused connection is never
-    resent."""
+    either (review round 1). An answer that stalls on a reused connection raises
+    `UpstreamIncomplete` ("idle", SP-63; it returned ``b""`` before SP-63), is never
+    resent, and its connection is never kept."""
     hold = threading.Event()
 
     def reply(conn, k, req):
@@ -150,9 +168,13 @@ def test_a_stale_pooled_connection_is_retried_once_and_a_timeout_never():
             post = peer.conn_of("/3")[0]
             assert post not in (first, retried)
             assert peer.wait(lambda p: post in p.closed)     # a body: never kept
-            assert _send(sender, peer, _get("/silent")) == b""
+            with pytest.raises(UpstreamIncomplete) as stalled:
+                _send(sender, peer, _get("/silent"))
+            assert stalled.value.reason == "idle"
             assert peer.conn_of("/silent") == [retried]
             assert [s.path for s in peer.seen] == ["/1", "/2", "/2", "/3", "/silent"]
+            assert _send(sender, peer, _get("/4")) == ok(b"/4")
+            assert peer.conn_of("/4")[0] not in (first, retried, post)
         finally:
             hold.set()
             sender.close()
@@ -187,12 +209,16 @@ def test_a_kept_connection_reset_after_part_of_its_answer_is_never_resent():
     """Review round 1: the stale-connection rule resends only when no byte of answer
     came. The upstream writes part of a status line for the second request on a kept
     connection and resets: the call raises, the upstream saw that request once, and the
-    connection is not used again. A reset before any byte is still resent once."""
+    connection is not used again. A reset before any byte is still resent once. A clean
+    close after part of an answer is SP-63's `UpstreamIncomplete` ("eof"), never resent
+    either (merge integration)."""
     def reply(conn, k, req):
         if req.path == "/partial" and k == 1:
             return Reset(b"HTTP/1.1 500 Internal Server Er")
         if req.path == "/none" and k == 1:
             return Reset()
+        if req.path == "/cut" and k == 1:
+            return (b"HTTP/1.1 200 OK\r\nContent-Length: 9\r\n\r\npar",)
         return echo(conn, k, req)
 
     with KeepAlivePeer(reply) as peer:
@@ -208,6 +234,44 @@ def test_a_kept_connection_reset_after_part_of_its_answer_is_never_resent():
             assert fresh != kept
             assert _send(sender, peer, _get("/none")) == ok(b"/none")
             assert peer.conn_of("/none")[0] == fresh and len(peer.conn_of("/none")) == 2
+            kept = peer.conn_of("/none")[1]
+            with pytest.raises(UpstreamIncomplete) as cut:
+                _send(sender, peer, _get("/cut"))
+            assert cut.value.reason == "eof" and peer.conn_of("/cut") == [kept]
+        finally:
+            sender.close()
+
+
+@pytest.mark.parametrize("read_size", [None, len(ok(b"/case"))],
+                         ids=["read with the answer", "left on the socket"])
+def test_bytes_after_a_framed_answer_never_leave_its_connection_kept(read_size,
+                                                                     monkeypatch):
+    """Merge integration (AU-PROXY with POOL24, BUG-0549): the upstream answers one
+    request with two responses in one segment, as a desynchronised upstream does. SP-63
+    returns the first, framed one; the second was read past its end (the reader's
+    leftover) or, when the receive stopped at that end, waits on the socket. On d83876f
+    the connection was kept, the stray answer dropped unseen or, arriving later, read
+    as the next request's answer. Wanted: the call returns the first answer, the sender
+    closes the connection at once (never kept), and the next request gets its own
+    answer on another connection."""
+    if read_size is not None:
+        monkeypatch.setattr(socketsender, "READ_SIZE", read_size)
+
+    def reply(conn, k, req):
+        if req.path == "/case":
+            return ok(b"/case") + ok(b"stray")
+        return echo(conn, k, req)
+
+    with KeepAlivePeer(reply) as peer:
+        sender = SocketSender(timeout=5)
+        try:
+            assert _send(sender, peer, _get("/p1")) == ok(b"/p1")
+            assert _send(sender, peer, _get("/case")) == ok(b"/case")
+            case_conn = peer.conn_of("/case")[0]
+            assert case_conn == peer.conn_of("/p1")[0]       # it rode the kept one
+            assert peer.wait(lambda p: case_conn in p.closed)
+            assert _send(sender, peer, _get("/after")) == ok(b"/after")
+            assert peer.conn_of("/after")[0] != case_conn
         finally:
             sender.close()
 
