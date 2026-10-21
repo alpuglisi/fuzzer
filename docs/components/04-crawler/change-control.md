@@ -3,6 +3,105 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0060 — Disco decides a lost session through the session layer's owners, installs only a fresh revalidated one, and closes the context it replaces (BUG-0552, FR-CRAWL-41) (2026-10-21)
+- Placement: pre-assigned to lane DISCO4 (audit defect 4); merged after AU-DISCO
+  (defects 1-3) and DISCO13. No session-layer file changed (the manager is used through
+  its public API: `ensure`, `check_health`; SP-16's and SP-56's public functions).
+- Change (`fuzzlab/disco/explore.py`; new functions, the loop calling them):
+  - **A session provider.** `ExploreSession(manager, identity, base_url)` and
+    `Explorer(session=)` (with `storage_state=`, one source; both is a `ValueError`).
+    `_current_session` makes the run's first `_SessionMaterial` (the provider's through
+    `_provider_session`: `ensure(..., operator=True)`, then
+    `browserauth.browser_session`; a header-only session raises `SessionUnavailable`;
+    or the storage state, filtered as before, generation 0). `_new_context` builds every
+    context from the current material (storage state, cookies through
+    `browserauth.apply_to_context`, the session's origins as the guard's
+    `cookie_scope` with more than one scope origin) and records its generation.
+  - **Suspicion** (`_note_window_tag`, `_note_answer`: two handlers on authenticated
+    contexts only; `_loss_signal`, `_answer_class`, `_shows_login`): SP-56 classes each
+    whole answer on the session's origins with SP-16's facts; the page at a login URL or
+    showing this session's login form (SP-16) is a sign unless the step asked for a
+    login URL or the state already showed the form; without a known login form, a
+    password form counts only in place (same URL, after an action).
+  - **Decision** (`_confirm_loss`): SP-61's `check_health` for the context's generation
+    (``policy``, ``signal_url``, ``pause=False``): live (an authorization denial; after
+    an action, a login page on a live session re-gives the context its session:
+    `reinstall`), lost, stale, unknown. Without a provider: PA-0533(1)'s unconfirmed
+    loss for a loss shape; a policy block never.
+  - **Recovery** (`_recover_session` under `_Shared.auth_lock`; `_replace_context`;
+    `_end_authenticated`): adopt a newer generation, or a fresh provider session that
+    is another generation and passes its own protected check (``use_cache=False``),
+    at most `ExploreOptions.max_session_recoveries` (new, 3); the old context released
+    and closed first, its in-flight tracker, pending answers and responses dropped; an
+    unresolved loss sets `ExploreReport.auth_ended` and stops the run.
+  - **Checkpoints** (`_session_checkpoint`) after each action (replacing the
+    `looks_like_login_url(page.url)` branch in `_process`), each restore
+    (`_restore_checked`, used at both restore sites of `_process`: a restore on a lost
+    session is retried once on the recovered one), each harvest load (`_load`) and the
+    seed (`_seed_session`); `_session_current` gives a worker the current generation
+    and a live page before each state and load.
+  - **D′ for captures** (`_log_session_event`, `_lost_action`): the window's action ids
+    to `session_lost_actions` and one `actions.jsonl` `session` line (no `seq`); the
+    action logged with no new state and no URL and denied unless the window was stale.
+  - **Report:** `session_suspected`, `authorization_denials`, `session_recovered`,
+    `session_reinstalled`, `session_lost_actions`, `auth_ended` (new);
+    `session_lost` now counts confirmed losses (or unconfirmed ones without a provider).
+  - Tests: `tests/test_disco_session_loss.py` (new): real Chromium through the real
+    capture proxy against a loopback board whose session dies after N API answers --
+    a 401 with the route unchanged (provider: confirmed, a fresh login, revalidated,
+    the dead sid never sent again, every 401 on a marked action id, one `session`
+    line, `[1, 1]` contexts), a login form in place (provider), repeated losses (`[1,
+    1, 1]` contexts, three logins, the cap's reason), no provider in three modes (an
+    unconfirmed loss ends the run, one context); offline: a 403 on a live session is a
+    denial (and never a loss without a provider), a credential submission's 401, a
+    407, another origin's 401, a 429 and a 502 are no suspicion, a credentialed 401 is
+    checked for the context's generation; and a strict xfail naming `disco synth`
+    (the window's mark is not read yet).
+- Impact (other components / project):
+  - **SESS:** none changed. The explorer becomes a consumer of SP-56
+    (`response_class`), SP-16 (`login_facts`, `request_entry_names`,
+    `shows_login_form`, `looks_like_login_url`) and SP-61 (`check_health`, `ensure`);
+    the SP rows' reader lists grow (`docs/SHARED_PRIMITIVES.md`, this lane's
+    `doc_texts.md`). A loss the explorer confirms is the manager's (`check_health` marks
+    it, its re-login bucket and caps apply).
+  - **File contracts:** `actions.jsonl` gains `session` lines (no `seq`; the importer,
+    `observe.DiscoActionLines` and the live trace pass over them); `explore.json` gains
+    the counters above. No store table and no capture record changed.
+  - **CLI:** `fuzzlab disco capture` is unchanged (a storage state only); with it a
+    lost session now ends the run with its reason in `explore.json` instead of
+    continuing on the dead session or re-installing the storage state.
+  - **Concurrent lanes:** AU-DISCO adds an auth/session generation slot to the
+    execution-state key; it reads `_Shared.auth.generation` (the generation the
+    contexts carry; `Explorer._ctx_generation` per worker). Their work-state tracking
+    must not count an action in a known-lost window as succeeded (`_lost_action`).
+- Risk (level; mitigation or accepted-risk justification): **medium.** A loss decision
+  ends or reshapes a run. Mitigations: the decision is the session layer's (no new
+  detector); a policy block or an answer on a live session never changes anything;
+  page signs are skipped where the step asked for a login page or the state shows its
+  own login form; recoveries are capped; every end says why. Accepted: without a
+  provider, a page that newly shows any password form at the same URL after an action
+  ends the run (the session layer's coarse rule, stated in FR-CRAWL-41); an
+  inconclusive check ends rather than pauses.
+- Deliverables:
+  - [x] Provider, generation, suspicion, decision, recovery, lifecycle, D′ marking in
+    `explore.py` — done
+  - [x] `tests/test_disco_session_loss.py` (real browser and offline; each new test
+    shown failing on the base) — done
+  - [x] FR-CRAWL-41 and FR-CRAWL-19's authenticated-runs bullet amended in place;
+    the file contracts — done
+  - [x] BUG-0552 (RCA, recurrence review, prior-PA failure analysis, sweep) — done
+  - [x] Shared-doc texts (CHANGELOG, ERROR_LOG, PA-0552, SP rows, ARCHITECTURE,
+    failure record) in the lane's `doc_texts.md` — done
+  - [ ] `fuzzlab disco capture --identity` (a provider from the CLI) — todo (residual)
+  - [ ] `disco synth` reads the window's mark (the strict xfail's owner) — todo
+- Effectiveness (assessed 2026-10-21): on the base c483dc1 (the product file swapped in,
+  one run) the no-provider tests fail on the defect itself -- `[stay]` and `[form]`:
+  `session_lost == 0` (the loss unseen; `[form]` also two states unrestorable),
+  `[redirect]`: two contexts open (the storage state re-installed, the old context left
+  open); the provider and offline tests fail on the API the base lacks. After: the
+  file's 13 tests pass and the synth pin xfails (28.6 s, real Chromium and mitmdump).
+  The harness result is in the lane's report.
+
 ### CC-CRAWL-0054 — The JSONL tail caps a line while reading it; the contract runner reads bounded and matches contract patterns in a killable worker (BUG-0536) (2026-10-20)
 - Placement: pre-assigned to AU-BOUNDED (audit defects 23 and 27, with the disco and
   spider half of 21); the core reader is CC-CORE-0072, the senders CC-FUZZ-0109.

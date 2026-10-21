@@ -722,10 +722,12 @@ fuzzer.
     which state is not deterministic, and one worker's submissions change the server
     state the others see.
   - **Authenticated runs** start from a Playwright storage state kept to in-scope
-    origins (`browserlogin.filter_storage_state`); with more than one scope origin the
-    guard's `cookie_scope` keeps the session to the start URL's origin (FR-SESS-20). A
-    landing on a login URL (`session.detect.looks_like_login_url`) is a lost session:
-    the action is denied for the rest of the run and the context rebuilt.
+    origins (`browserlogin.filter_storage_state`), *(CC-CRAWL-0060)* or from a session
+    provider (`ExploreSession`, FR-CRAWL-41); with more than one scope origin the
+    guard's `cookie_scope` keeps the session to its origins (FR-SESS-20). *(Superseded
+    in place by FR-CRAWL-41, CC-CRAWL-0060, BUG-0552; was: a landing on a login URL is a
+    lost session, the action is denied and the context rebuilt from the storage
+    state.)* A lost session is FR-CRAWL-41's.
   - Each action is logged to `actions.jsonl` (state, route, signature, kind, a 60-char
     label, the new state, *(CC-CRAWL-0036)* the element's occurrence;
     *(CC-CRAWL-0035)* the page URL after it, redacted
@@ -930,6 +932,69 @@ fuzzer.
     `script_segments.json`), before any side effect and with `--dry-run` too. Order:
     scope URLs, run files, storage state, store, `--dry-run` (which names the trace),
     `--authorized`, workers.
+- **FR-CRAWL-41 (disco: a lost session, CC-CRAWL-0060, BUG-0552)** An authenticated
+  exploration (FR-CRAWL-19) decides that the session its contexts carry was lost only
+  through the session layer's owners, replaces it only with a fresh, revalidated one,
+  and never takes an answer on a session known lost as the identity's coverage (D′).
+  - **The session.** `Explorer(storage_state=)` or `Explorer(session=ExploreSession(
+    manager, identity, base_url))` -- one, not both. With a provider the context adopts
+    the manager's session (`ensure(..., operator=True)`) through
+    `browserauth.browser_session`: its cookies and a browser login's storage state; a
+    session carried only in headers is refused (`SessionUnavailable`, raised at the
+    start). The run holds one session **generation** at a time (the manager's; 0 for a
+    storage state) and every worker's context carries the current one: a worker whose
+    context is older replaces it before its next state or load.
+  - **Suspicion.** After every action, restore, harvest load and the seed, each request
+    the context sent on the session's origins whose answer arrived whole
+    (`requestfinished`) is classed by SP-56 (`core.comparability.response_class`,
+    credentialed, with SP-16's `login_facts` and `request_entry_names`): an auth failure
+    (a 401 or a login redirect that is not a credential submission; never a 407, which
+    is an auth failure to anyone) is a suspected loss, a policy block (403, 451) a
+    suspected denial; a throttle, a gateway, an incomplete answer or another origin's
+    answer is no sign. The page at a login URL (`looks_like_login_url`) or showing this
+    session's login form (`shows_login_form` with the session's login page and fields;
+    with none known, any password form, and only where it replaced the page at the same
+    URL after an action) is a suspected loss -- unless the step asked for a login URL
+    (a link, a harvest URL, the state's own URL) or the state already showed the form.
+  - **Decision.** With a provider: SP-61, `SessionManager.check_health` for the
+    context's generation (``signal_url`` the answer's or page's URL, ``policy`` for a
+    policy block, ``pause=False``). Live: an answer or a policy block was an
+    authorization denial (`authorization_denials`) and nothing changes; a login page
+    after an action on a live session means the context no longer carries it -- the
+    context is given the live session again (`session_reinstalled`); a login page a
+    restore or load shows is that state's own. Lost: confirmed. Stale (another
+    generation): the context is replaced with the current one. Inconclusive, or a check
+    that cannot run: unresolved. Without a provider there is no check: a loss shape is
+    an unconfirmed loss and a policy block never is one (PA-0533(1)).
+  - **Recovery** (single flight across workers): a newer generation another worker
+    installed is adopted; else the provider's session is taken (`ensure`, which logs in
+    again on a lost one), must be another generation, and must pass its own protected
+    check (`check_health`, ``use_cache=False``) before use. The old context is released
+    (SP-38) and **closed** before the new one is made. At most
+    `ExploreOptions.max_session_recoveries` (3) fresh sessions or re-gives a run. A loss
+    nothing resolves -- no provider, an unresolved check, no fresh session, the cap --
+    **ends the run's exploration** (the identity is the run's only one: an anonymous
+    continuation would be recorded under its profile), the reason in
+    `ExploreReport.auth_ended` and a warning; it never re-installs the storage state
+    the run started from.
+  - **The known-lost window (D′).** The action ids requests went out under since the
+    last checkpoint without a sign are marked on a loss: appended to
+    `ExploreReport.session_lost_actions` and written as one `actions.jsonl` line
+    `{"kind": "session", "session": <lost|stale|reinstall|unknown>, "reason",
+    "generation", "action_ids"}` (no `seq`: `observe.DiscoActionLines` and the importer
+    pass over it). The action whose answers fell in it is logged with no new state and
+    no URL and denied for the rest of the run (it may have ended the session), unless
+    the window was stale; nothing a lost window showed becomes a state, a harvest URL's
+    document or a gathered link. Reasons name a class and a status, never a URL.
+  - **Counters** (`explore.json`): `session_lost` (confirmed, or unconfirmed without a
+    provider), `session_suspected`, `authorization_denials`, `session_recovered`,
+    `session_reinstalled`, `session_lost_actions`, `auth_ended`.
+  - **Not covered (residuals, BUG-0552):** `fuzzlab disco capture` offers a storage
+    state only (no provider flag yet); `disco synth` does not read the window's mark
+    (pinned by a strict xfail naming it); a context that lost its copy of a live
+    session is caught only through a login page, not through a 401 the check finds live
+    (an authorization answer); without a provider, a page that newly shows any password
+    form at the same URL reads as a loss.
 
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default
@@ -1124,7 +1189,9 @@ An old spider DB has no such table (the importer treats it as none).
   `ws_direction`. Redacted at the write; written only by `disco.capture.make_record`,
   read only by `disco.capture.read_capture`.
 - `<run>/capture.jsonl.stats.json` (refusals per host, recorded, dropped),
-  `<run>/actions.jsonl` (one line per UI action), `<run>/explore.json` (the report).
+  `<run>/actions.jsonl` (one line per UI action; *(CC-CRAWL-0060, FR-CRAWL-41)* plus one
+  `{"kind": "session", ...}` line, with no `seq`, per known-lost window, naming its
+  action ids), `<run>/explore.json` (the report; FR-CRAWL-41's session counters).
 - The inventory: an OpenAPI 3.1 document whose operations carry `x-disco`
   (`origin`, `method`, `content_type_family`, `observed`, `samples`, `actions`,
   `profiles`, `statuses`, `headers` {name: {class, value?}}, `auth`, `dependencies`
