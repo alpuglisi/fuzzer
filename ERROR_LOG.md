@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-21 — fuzzing harness and core (DOM-template dedup deleted unrelated attack surfaces; BUG-0547)
+- **Symptom:** `run_pipeline(pages_html=...)` audited only the points on the first URL of each DOM-skeleton template: equal skeletons at `/safe?q=` and `/admin?cmd=` left `q` alone; another form action, parameter, location or sibling set on a look-alike page was never evaluated; every page without HTML was one template. Nothing reported the drop.
+- **Root cause:** a deduplication step decided two units of work were the same by a similarity of their page (tag names only: no action, input name or handler) instead of by what they send and observe, defaulted an unknown page to one shared value, and was tested only where page and request coincide (BUG-0075's and BUG-0507's class; PA-0076 was worded for joins, PA-0507 for route classification).
+- **Remediation:** `core.dedup.fold_points` folds only on the page template plus `wire_request_key` (every field of the point; a standalone query slot as placed by SP-42); an absent or structureless page is unknown; the pipeline reports `dedup_points_in`, `dedup_folded`, `dedup_unknown_pages` and `dedup_key` (CC-CORE-0074, CC-FUZZ-0112, FR-FUZZ-68, BUG-0547, PA-0547).
+- **Status:** Fixed
+
 ## 2026-10-21 — disco capture proxy (records built on mitmproxy's event loop; queue bounded by count only; BUG-0548)
 - **Symptom:** under a burst of large responses every browser request through the capture proxy stalled. Measured on a loopback page through a real mitmdump and Chromium: the response hook took a median 104 ms per 1 MiB JSON answer (7.44 ms per 64 KiB), the loop lagged up to 626 ms, and the page ran at 8.4 requests/s. The queue was bounded at 10 000 records of up to two 200 000-character bodies each, and a full queue dropped observations. A stats refresh on a full queue was counted as a dropped record.
 - **Root cause:** only the file append was off the loop. `make_record` decoded (mitmproxy's `get_content`, unbounded), redacted and built each record in the hook. PA-0102(3) was worded for blocking I/O and enforced on the native proxy only, and PA-0536's body-read sweep covered `requests` readers only.

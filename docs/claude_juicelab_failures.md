@@ -1184,3 +1184,15 @@ Juice Shop lab is complete.
 - **Evidence:** `scratchpad/lanes/DISCO22/measure/A2-*-result.json`, `B-after-result.json`.
 - **Impact:** none landed (measured before commit). Without the measurement, the lane would have shipped a fix that kept the loop lagged and lost records under load.
 - **Status:** fixed before commit: a 1 ms switch interval, backpressure through an awaitable hook, a 30 s drain and a 45 s stop grace (BUG-0548, CC-CRAWL-0058).
+
+### F-129 — The T2.6 template dedup dropped every injection point on all but the first page of a DOM template, and its one test checked only the case where page and request coincide
+- **What:** `harness/pipeline.py::_dedup` (wired in CC-FUZZ-0008, T2.8) kept a point only when its URL was the first URL of its DOM-skeleton cluster (`core/dedup.py`: tag names only), so a look-alike page's other endpoint, parameter, form action, location or sibling set was never audited, and a missing page defaulted to `""`, one shared template. The key never grew as forms phases 1-3 widened the point (siblings, body/JSON/header locations, store steps). Its only test, `test_pipeline_dedup_collapses_same_template`, fed two points that are one request on one template.
+- **Evidence:** audit defect 10; `tests/test_dom_dedup_folding.py` fails on c483dc1, 27 of 27 (`scratchpad/lanes/DEDUP10/prefix_run.out`, `why_prefix.out`: equal skeletons at `/safe?q=1` and `/admin?cmd=ls` leave only `q`; `/c?y=1` is dropped as the same "empty template" as a page given as `""`); BUG-0547.
+- **Impact:** a library caller supplying `pages_html` silently lost attack surfaces with no count reported; no production caller supplies it (`auto_cli`, `multitarget`), so no recorded run is known to be affected.
+- **Status:** fixed on lane/DEDUP10 (CC-CORE-0074, CC-FUZZ-0112, FR-FUZZ-68, PA-0547).
+
+### F-130 — DEDUP10 killed its own first targeted pytest while it was still queued on the host lock
+- **What:** the lane started its targeted run under `timeout 1200`; with seven sessions queued on the host pytest lock (BUG-0532) it was still waiting at 20 minutes and the timeout killed it (exit 143) before it ran a test. The lane had not checked the lock's queue before choosing a bound shorter than the lock's own 1800 s wait.
+- **Evidence:** `tasks/b7u31c8qc.output` ("Terminated"); the rerun `tasks/bbwfuml8o.output` (queued, then 40 passed).
+- **Impact:** about 20 minutes of the lane's time and its place in the queue; no test ran, no lock was held, no result was lost or misreported.
+- **Status:** recorded; later runs were queued in the background with no shorter bound than the lock's wait.

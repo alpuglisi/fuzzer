@@ -1180,7 +1180,9 @@ tracked in the requirements files, not here.
   so timing measurements run at concurrency 1 (`core/budget.py`).
 - **Logging** (structured, `core/obs.py`) and **config** (layered, hashed onto the
   run, `core/config.py`) `[built]`. Also `core/urls.py` (single home of path
-  normalization), `core/dedup.py`, `core/fingerprint.py`, `core/hybrid.py`, and
+  normalization), `core/dedup.py` (DOM-template clustering, and the pipeline's point
+  folding: a point folds only with one on the same template that sends the same request,
+  `wire_request_key`, FR-FUZZ-68), `core/fingerprint.py`, `core/hybrid.py`, and
   `core/runmode.py` (the D14/D15 run-mode + no-ground-truth fail-safe).
 - **A run's recorded target** `[built]` (CC-CORE-0500, FR-CORE-500): `core/runtarget.py`
   is the one reader of the `target` table -- a run's target is its first row by id, its
@@ -1609,7 +1611,11 @@ tracked in the requirements files, not here.
 - **Fuzzing harness** `[built]`: the generalized `template + injection_point +
   payload_source + oracle` pipeline (`harness/pipeline.py`, `harness/auto.py`,
   `harness/scoring.py`, `harness/integration.py`), so one harness serves multiple
-  vulnerability classes. Driven end-to-end by `fuzzlab auto` (`harness/auto_cli.py`),
+  vulnerability classes.
+  Given the pages' HTML, the pipeline first folds injection points that are the same
+  request on pages of one DOM template (never on the template alone; an absent page is
+  unknown) and reports the count and key (FR-FUZZ-68, BUG-0547).
+  Driven end-to-end by `fuzzlab auto` (`harness/auto_cli.py`),
   which consolidates a crawl, runs scoped rules + oracle confirmation, and — with a
   ground-truth contract — scores TP/FP. The legacy `tools/blind_sqli_fuzzer.py`
   remains as the original single-class fuzzer.
