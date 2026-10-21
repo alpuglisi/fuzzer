@@ -2048,7 +2048,8 @@ rewards) derives from it.
     and the M6 browser refuses a query point needing a binding.
   - **Stated gaps:** a password field stays empty by policy (FR-FUZZ-44, D12); on the
     authenticated seam a form page that sets a cookie is unbound (the seam adopts no
-    response cookie), and so is a CSRF-protected login form whose page is an auth
+    response cookie, and its pooled transport's jar keeps none, FR-CORE-509; the page
+    fetch is a bodiless GET pooled under the probe route's own key), and so is a CSRF-protected login form whose page is an auth
     endpoint fetched on a session route; a captured JSON body's redacted leaf is never
     rebuilt; a store row from before migration 25 has no recipe.
 - **FR-FUZZ-68 (the template stage folds only true duplicates, `CC-FUZZ-0112`,

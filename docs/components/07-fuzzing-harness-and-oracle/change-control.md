@@ -129,6 +129,13 @@ Newest first.
     path; B5) and refuses a page that sets a cookie, which no seam route carries (R2-B1).
   - `harness/auto.py` `_bindings`: the page is kept only on the point's own origin (B6).
   - `greybox/run.py` `points_from_store`: one point per greybox request (B7, R2-B3).
+  - Merged with 2053f22 (POOL24, FR-CORE-509), no conflict. The seam's page fetch is a
+    `client.send` of a bodiless GET, so the pooled transport keys it like a probe of
+    that route: (origin, identity, generation). The bound send carries a body, so it
+    goes on a session of its own. Neither carries a response cookie (the pool's jar
+    keeps none), which is the premise of the Set-Cookie refusal above. Measured on a
+    real socket by
+    `tests/test_replay_bindings.py::test_the_seams_page_fetch_goes_through_its_pooled_transport_on_the_probes_identity`.
 - Effectiveness (assessed <date> or pending): pending.
 
 ### CC-FUZZ-0110 — The blind-SQLi builder never admits an answer sent on a session known to be lost (FR-FUZZ-65, FR-FUZZ-63, BUG-0533; decision D′) (2026-10-20)

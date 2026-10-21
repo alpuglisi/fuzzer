@@ -257,7 +257,8 @@ def test_a_sibling_naming_a_host_is_sent_as_given_on_loopback_and_never_off_it(
 class _SessionForm:
     """A loopback app whose CSRF token is tied to an anonymous session cookie set by the
     form page: ``/do`` answers 200 only with the cookie and that session's token.
-    ``/noform`` sets a cookie and offers no form. Every request's cookie is logged."""
+    ``/noform`` sets a cookie and offers no form. ``/once`` sets no cookie; its token is
+    accepted once. Every request's cookie is logged."""
 
     def __init__(self):
         from fuzzlab.core.net import require_loopback
@@ -265,6 +266,7 @@ class _SessionForm:
         self.tokens: dict[str, str] = {}
         self.answers: list[int] = []
         self.seen: list[tuple[str, str, str | None]] = []   # (method, target, cookie)
+        self.once: set[str] = set()       # `/once` tokens: single-use, tied to no cookie
         counter = itertools.count(1)
         app = self
 
@@ -277,9 +279,12 @@ class _SessionForm:
                 n = next(counter)
                 sid, token = f"s{n}", f"t{n}"
                 app.tokens[sid] = token
+                if self.path.startswith("/once"):
+                    app.once.add(token)
                 form = (f"<form method=post action='/do'><input type=hidden "
                         f"name=csrf_token value={token}><input name=q></form>")
-                body = (form if self.path.startswith("/form") else "<p>ok</p>").encode()
+                body = (form if self.path.startswith(("/form", "/once"))
+                        else "<p>ok</p>").encode()
                 self.send_response(200)
                 if self.path.startswith(("/form", "/noform")):
                     self.send_header("Set-Cookie", f"sid={sid}; Path=/")
@@ -295,6 +300,9 @@ class _SessionForm:
                                       keep_blank_values=True))
                 cookie = (self.headers.get("Cookie") or "").removeprefix("sid=")
                 ok = cookie in app.tokens and form.get("csrf_token") == app.tokens[cookie]
+                if form.get("csrf_token") in app.once:          # single use
+                    app.once.discard(form["csrf_token"])
+                    ok = True
                 status = 200 if ok else 403
                 app.answers.append(status)
                 self.send_response(status)
@@ -375,6 +383,31 @@ def test_a_refused_binding_never_lends_its_pages_cookie_to_another_probe():
         site.close()
     assert [(m, t.split("?")[0], c) for m, t, c in site.seen] == [
         ("GET", "/noform", None), ("GET", "/other", None), ("POST", "/do", None)]
+
+
+def test_the_seams_page_fetch_goes_through_its_pooled_transport_on_the_probes_identity():
+    """After POOL24 (FR-CORE-509), measured on a real socket: the seam's page fetch is a
+    GET on the default pooled transport under the probe route's own pool key (origin,
+    identity, generation), and the bound send (a body, so a session of its own) carries
+    each fresh single-use token. No cookie reaches the target: the pool's jar keeps none."""
+    from fuzzlab.core.http import PooledTransport
+    from fuzzlab.core.urls import canonical_origin
+    from fuzzlab.oracle.oracle import _FormBoundSender
+    site = _SessionForm()
+    try:
+        sender = _anonymous_sender("seam")
+        transport = sender._client._transport
+        assert isinstance(transport, PooledTransport)
+        bound = _FormBoundSender(sender, _csrf_candidate(site.base, "/once"))
+        for _ in range(2):
+            bound.send(site.base + "/do", "q", "M", method="POST", location="body")
+        keys = list(transport._entries)
+    finally:
+        site.close()
+    assert site.answers == [200, 200]
+    assert [(m, t, c) for m, t, c in site.seen] == [
+        ("GET", "/once", None), ("POST", "/do", None)] * 2
+    assert keys == [(canonical_origin(site.base), "anonymous", None)]
 
 
 # --- the source page never stores, nor puts on the wire, a target's value (review B1) ---
