@@ -265,7 +265,10 @@ def test_a_password_control_is_never_a_point_whatever_its_name(tmp_path):
         skipped: list = []
         pts = injection_points_from_store(store, run, BASE, skipped=skipped,
                                           isolated=set())
-        row = store.conn.execute("SELECT password_fields FROM form").fetchone()
+        # the crawled form's row (a link set, `enctype` NULL, is written at its page's
+        # turn since CC-AUD-0056, so it may come first)
+        row = store.conn.execute("SELECT password_fields FROM form "
+                                 "WHERE enctype IS NOT NULL").fetchone()
         form_params = {r[0] for r in store.conn.execute(
             "SELECT name FROM parameter WHERE form_id IS NOT NULL")}
     assert json.loads(row["password_fields"]) == ["answer"]

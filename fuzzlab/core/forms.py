@@ -111,18 +111,23 @@ def is_link_set(row) -> bool:
     return row["enctype"] is LINK_SET_ENCTYPE
 
 
-def first_link_set(conn, run_id: int, path: str) -> list[tuple[str, str]] | None:
+def first_link_set(conn, run_id: int, path: str, accept=None) -> list[tuple[str, str]] | None:
     """The first crawled link query recorded for ``GET path`` in a run (already
-    redacted by the importer), or None. The one store reader of ``form.enctype``
-    (a guard test keeps it that way)."""
+    redacted by the importer) that can be sent as it is stored, or None: never one
+    holding a placeholder (a value redaction blanked, ``form.fresh``; FR-FUZZ-67), nor
+    one ``accept(entries)`` refuses. The one store reader of ``form.enctype`` (a guard
+    test keeps it that way)."""
     import json
     for row in conn.execute(
-            "SELECT f.enctype AS enctype, f.entries AS entries FROM form f "
+            "SELECT f.enctype AS enctype, f.entries AS entries, f.fresh AS fresh FROM form f "
             "JOIN endpoint e ON e.id = f.endpoint_id "
             "WHERE f.run_id = ? AND e.url = ? AND e.method = 'GET' ORDER BY f.id",
             (run_id, path)).fetchall():
-        if is_link_set(row):
-            return [(str(n), str(v)) for n, v in json.loads(row["entries"])]
+        if not is_link_set(row) or row["fresh"] not in (None, "", "[]"):
+            continue
+        entries = [(str(n), str(v)) for n, v in json.loads(row["entries"])]
+        if accept is None or accept(entries):
+            return entries
     return None
 
 
@@ -348,6 +353,47 @@ def form_record(form, page_url: str) -> dict:
         "selector": is_selector_form(form),
         "options": _selector_options(form) if is_selector_form(form) else [],
     }
+
+
+def page_template_entries(html: str, page_url: str, url: str, method: str,
+                          location: str, entries) -> FormEntries | None:
+    """The entry list a page offers *now* for the request a stored context names
+    (FR-FUZZ-67, BUG-0544): among the page's forms (each as a browser builds it on an
+    unmodified submit, `form_entries`) whose resolved action has ``url``'s origin and
+    path (`core.urls.url_key`) and whose method is ``method`` -- and, for a ``query``
+    send, the page's links to that origin and path -- the ones whose entry names are
+    ``entries``' names in order; of those, the one whose values agree with the most of
+    ``entries``' values (the first on a tie). None when the page offers none.
+
+    The fresh values it holds (a CSRF token, an object selector) live in memory only:
+    the caller binds them into one send and never stores them (D12)."""
+    from urllib.parse import parse_qsl, urljoin, urlsplit
+
+    from bs4 import BeautifulSoup
+
+    from fuzzlab.core.linkextract import html_urls
+    from fuzzlab.core.urls import url_key
+    want_key, want_method = url_key(url), (method or "GET").upper()
+    names = [n for n, _v in entries]
+    found: list[FormEntries] = []
+    for form in BeautifulSoup(html or "", "html.parser").find_all("form"):
+        action = (form.get("action") or "").strip()
+        target = urljoin(page_url, action) if action else page_url
+        if url_key(target) == want_key and form_method(form) == want_method:
+            found.append(form_entries(form))
+    if location == "query" and want_method == "GET":
+        for link in html_urls(html or "", page_url):
+            if url_key(link) == want_key:
+                found.append(FormEntries(parse_qsl(urlsplit(link).query,
+                                                   keep_blank_values=True)))
+    best, best_score = None, -1
+    for candidate in found:
+        if [n for n, _v in candidate] != names:
+            continue
+        score = sum(1 for (_n, have), (_m, want) in zip(candidate, entries) if have == want)
+        if score > best_score:
+            best, best_score = candidate, score
+    return best
 
 
 def _selector_options(form) -> list[list[str]]:

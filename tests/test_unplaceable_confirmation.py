@@ -252,23 +252,39 @@ def _shared_key_run(tmp_path, stored_first: bool, budget: bool, monkeypatch):
         rec.close()
         statuses = [r[0] for r in store.conn.execute(
             "SELECT oracle_status FROM candidate WHERE run_id=?", (run,))]
-        decides = {json.loads(r[0])["strategy"]: json.loads(r[0]).get("decides")
-                   for r in store.conn.execute("SELECT body FROM trace_event WHERE "
-                                               "run_id=? AND kind='test.strategy'", (run,))}
+        decides: dict[str, set] = {}                 # strategy -> what each run said
+        for (body,) in store.conn.execute("SELECT body FROM trace_event WHERE "
+                                          "run_id=? AND kind='test.strategy'", (run,)):
+            event = json.loads(body)
+            decides.setdefault(event["strategy"], set()).add(event.get("decides"))
     return statuses, decides
 
 
 @pytest.mark.parametrize("stored_first", [True, False])
 @pytest.mark.parametrize("budget", [False, True])
-def test_a_key_shared_with_an_ordinary_point_keeps_every_mechanism_deciding(
+def test_a_stored_case_and_an_ordinary_point_at_one_url_are_two_tests(
         tmp_path, monkeypatch, stored_first, budget):
-    """The rows of one key disagree (a stored case's observe point is also an ordinary
-    point): the pipeline drops ``decided_by`` (never composes one), every mechanism
-    decides, and the reflected not_confirmed is a negative -- the stated gap -- on the
-    budgeted and the unbudgeted path, whichever row comes first."""
+    """Before BUG-0530 the rows of a stored case's observe point and an ordinary point at
+    one URL shared a confirmation key: the pipeline dropped ``decided_by`` and the
+    reflected not_confirmed was a negative for both (FR-AUD-30's stated gap). Their
+    request contexts differ -- the store step is setup (SP-57, FR-FUZZ-66) -- so they are
+    two tests, each decided by its own mechanisms: the stored one by M6 alone
+    (inconclusive here, it cannot place a header store), the ordinary one by every
+    mechanism. With a budget of one test the other row is skipped, never labelled;
+    whichever row comes first."""
     statuses, decides = _shared_key_run(tmp_path, stored_first, budget, monkeypatch)
-    assert statuses == ["checked", "checked"]
-    assert decides["xss-reflected:reflected-context"] is True
+    want = {"stored": "inconclusive", "plain": "checked"}
+    order = ["stored", "plain"] if stored_first else ["plain", "stored"]
+    if budget:
+        assert statuses == [want[order[0]], "skipped_budget"]
+    else:
+        assert statuses == [want[k] for k in order]
+    # the ordinary point's test, when it runs, is decided by every mechanism; the stored
+    # one's never by the reflected arm
+    reflected = decides.get("xss-reflected:reflected-context", set())
+    tested = {"plain", "stored"} if not budget else {order[0]}
+    assert (True in reflected) == ("plain" in tested)
+    assert (False in reflected) == ("stored" in tested)
 
 
 # --- 4, 6, 10: through run_auto, every category ------------------------------------------

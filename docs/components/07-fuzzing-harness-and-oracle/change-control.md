@@ -161,6 +161,162 @@ Newest first.
 
 - Effectiveness (assessed <date> or pending): pending.
 
+### CC-FUZZ-0111 — One test per request context; a stored placeholder is never replayed (FR-FUZZ-66, FR-FUZZ-67; BUG-0530, BUG-0544) (2026-10-21)
+- Placement: AU-REQID78 (audit defects 8 and 7), implemented first under PA-0541; the
+  parked design `DRAFT-AU-REQID8.md` was input. Owners: SP-57 is CC-CORE-0073; the
+  importer and the engine are CC-AUD-0056; the label join is CC-ML-0501.
+- Change (defect 8, FR-FUZZ-66):
+  - `harness/pipeline.py`: `_confirmation_key` is `core.reqctx.confirmation_key` (the
+    request context's id and the category, plus the seed for `SEED_CATEGORIES`), never
+    the 5-tuple. `_candidate_of` carries `context_id` and `context_key`; `test.start`
+    carries `request_context`; `run_pipeline(identity=)` reaches `evaluate`. The
+    header-breaker metric keeps each stopped key's own (url, param, method) instead of
+    unpacking the old key's positions.
+  - `harness/auto.py`: the point builder's `seen` is `reqctx.point_key` (context and
+    seed), never (path, method, name); `run_auto` passes the run's identity scope.
+  - `oracle/oracle.py`: `_write_finding` records `context_id` and `context_key` in the
+    finding's evidence; the `finding` trace event carries `request_context`.
+  - `oracle/probe.py`: `Candidate` gains `context_id`, `context_key`.
+- Change (defect 7, FR-FUZZ-67):
+  - `oracle/oracle.py` `_FormBoundSender`: an entry named in `candidate.bindings["fresh"]`
+    is bound before each own send to the value the context's page offers now
+    (`fetch` on the probe's route, `core.forms.page_template_entries`), in memory; when
+    that fails it raises `PrerequisiteUnavailable` (kept for the candidate). The oracle
+    returns `UNBOUND` (inconclusive, with the reason) for `replay_refusal` before any
+    strategy, and when no mechanism could send for an unbound reason.
+  - `oracle/probe.py`: `PrerequisiteUnavailable(UnplaceableLocation)`, `accepts_fetch`;
+    `Candidate` gains `bindings`, `replay_refusal`.
+  - `tools/probesender.py`: `SeamProbeSender.fetch` (the probe's route: main, isolated
+    copy, anonymous; the send gate; transport failures mapped) and
+    `RequestsProbeSender.fetch` (jar cleared first; the next send only keeps what the
+    page set); both `fetch_capable`.
+  - Wrappers report and forward the capability: `_CountingSender` (counted),
+    `_FragmentGuard`, `TracingSender` (an exchange with role `bind`, no value),
+    `_CostCounter` (cost), `_PrgRun`, `_FormBoundSender`.
+  - `harness/auto.py`: `_send_value` keeps a value naming loopback as given and replaces
+    only a value naming a host outside the lab; `_outside_lab` makes such a sibling a
+    `replay_refusal` (crawl, ground-truth JSON and store bodies); `_bindings` reads the
+    recipe (migration 25); header points take the first link set holding no placeholder
+    and no off-lab host. `harness/pipeline.py`: the fingerprint baseline skips a point
+    needing a binding or refused; `UNBOUND` reasons reach `inconclusive`.
+  - `oracle/strategies.py` `DomXssStrategy._observe`: a query point needing a fresh
+    binding is refused (`PrerequisiteUnavailable`); the browser has no fetch.
+- Impact (other components / project): AUD (CC-AUD-0056), CORE (CC-CORE-0073), ML
+  (CC-ML-0501). Contract changes: candidate evidence gains `identity_scope`,
+  `context_id`, and (when present) `bindings`, `replay_refusal`; finding evidence gains
+  `context_id`, `context_key`; `Candidate` gains four fields; the `Sender` protocol gains
+  the optional `fetch`/`fetch_capable` capability (a sender without it keeps working:
+  a candidate needing a binding is then inconclusive). Consumers found by search
+  (PA-0152): `_confirmation_key` (pipeline only), `header_breaker_skipped` (pipeline,
+  `auto.run_auto`), `_FormBoundSender` (oracle, `CrossAccountReplayStrategy`, which now
+  binds fresh values in the peer's own session), `first_link_set` (header points, two
+  tests), finding evidence (ML join; the UI shows evidence as JSON).
+- Risk (medium): more tests on crawl runs (every distinct context, no cap: the owner's
+  decision); tests that used to send a placeholder or a stand-in are now inconclusive (a
+  coverage loss on paper, a false-negative source removed). Ground-truth runs: no change
+  in points (15 JSON leaves measured, none changed by the host rule) or keys beyond the
+  stored-case/ordinary-point split FR-AUD-30 asked for.
+- Deliverables:
+  - [x] pipeline key, builder dedup, candidate/finding/trace carriage — done
+  - [x] binder fresh binding, `UNBOUND`, sender `fetch`, wrappers — done
+  - [x] tests: `tests/test_request_contexts.py`, `tests/test_replay_bindings.py`, the fetch
+    guards in `tests/test_sender_conformance.py`; amended with before/after stated
+    (PA-0073(3)): `test_forms_phase2` (five), `test_json_points` (two),
+    `test_unplaceable_confirmation` (the shared-key test) — done
+  - [x] BUG-0530, BUG-0544; PA, ERROR_LOG, CHANGELOG, SHARED_PRIMITIVES texts handed to
+    the orchestrator — done
+- Review round 1 (85e7ab2: REVISE, 11 findings, 8 issues; each fix proved by a test that
+  fails on 85e7ab2):
+  - `oracle/oracle.py`: the binder never fetches an unclean page
+    (`core.redaction.page_url_is_clean`) or one on another origin, refuses a page fetched
+    with a session note, carries the fetch's one-time cookie token on the bound entries,
+    and binds or refuses **every** send to the candidate's own (url, method) -- a raw or
+    JSON body, strategy-built entries (B4); a JSON candidate needing a fresh leaf is
+    `UNBOUND` before any strategy runs.
+  - `tools/probesender.py`: `RequestsProbeSender.fetch` holds the page's cookies in memory
+    under a token; only the send carrying it loads them, every send discards them first
+    (B2, R2-B4). `SeamProbeSender.fetch` gates the page's own URL (auth endpoint, isolated
+    path; B5) and refuses a page that sets a cookie, which no seam route carries (R2-B1).
+  - `harness/auto.py` `_bindings`: the page is kept only on the point's own origin (B6).
+  - `greybox/run.py` `points_from_store`: one point per greybox request (B7, R2-B3).
+  - Merged with 2053f22 (POOL24, FR-CORE-509), no conflict. The seam's page fetch is a
+    `client.send` of a bodiless GET, so the pooled transport keys it like a probe of
+    that route: (origin, identity, generation). The bound send carries a body, so it
+    goes on a session of its own. Neither carries a response cookie (the pool's jar
+    keeps none), which is the premise of the Set-Cookie refusal above. Measured on a
+    real socket by
+    `tests/test_replay_bindings.py::test_the_seams_page_fetch_goes_through_its_pooled_transport_on_the_probes_identity`.
+- Review round 2 (0703688: two findings not fixed, each a neighbouring path of a round-1
+  fix; each fix proved by a test that fails on 0703688):
+  - `tools/probesender.py` (R2-2): `SeamProbeSender.fetch` records the route its GET
+    actually went out on (`_FetchRoute`: the client and identity label) as
+    `probe.carry`; `_send` refuses a send whose entries carry one when the send would
+    leave on another route or identity (`PrerequisiteUnavailable`; the row is
+    `UNBOUND`). The N3 path: the copy's re-login on the fetch logged the run's session
+    out, `_on_copy`'s verify tripped the single-session breaker, and the bound send went
+    anonymous with the copy cookie's token (403, read as a negative). Also caught: the
+    copy failing to log in again for the send (the anonymous fallback). Test:
+    `tests/test_replay_bindings.py::test_a_bound_send_never_leaves_on_another_route_than_its_pages_fetch`
+    (a loopback app whose token is tied to the cookie; real sender, binder, oracle and
+    `ReflectedXssStrategy`; the copy's session and `verify_live` faked).
+  - `oracle/oracle.py`: a comment only (the carry token is the cookies or the route).
+  - The binder's fresh-value check reads FR-AUD-20's predicate, which now fails closed
+    on the tail (CC-AUD-0056): `tests/test_replay_bindings.py::test_the_binder_never_binds_a_fresh_value_that_names_a_host_beyond_loopback`.
+  - Residual (stated in FR-FUZZ-67): the route check does not compare the session's
+    generation, so a re-login of the same route between the fetch and the bound send is
+    not caught. A refused send is still counted in the isolation report's `sends` or
+    `anonymous_sends`: the route is chosen, and counted, before the check.
+- Review round 3 (3959dfc, R3-2; the final round): every route switch was fixed, but a
+  re-login on the **same** route between the page fetch and the bound send was not
+  (round 2's stated residual). On the real `SessionManager` (requests login) and a
+  PHP-like app that keeps a logged-out id: the page's own answer showed the login box,
+  so `observe` marked the session lost; the bound send's `prepare` logged in again (a
+  new id) and posted the old id's token: 403, read as a negative. Each fix proved by a
+  test that fails on 3959dfc (the same one invocation as CC-AUD-0056's round 3):
+  - `tools/probesender.py`: `_FetchRoute` also records the session generation the
+    fetch's `prepare` applied and whether the session was lost on the page's own answer
+    (`lost`: a loss of the identity the run's manager or the copy's told its listeners
+    while the GET was in flight, counted by `_on_session_loss`, registered on the run's
+    manager and on each copy; or `prepare`'s own flag). `_FetchRoute.refusal` refuses
+    the bound send before anything is sent on another route or identity or after such a
+    loss; `_send_on` refuses the answer of a bound send whose `prepare` applied another
+    generation; `_on_copy` verifies a copy's re-login on a refused send too.
+  - `oracle/probe.py`: `PrerequisiteUnavailable`'s docstring states that one exception
+    (the send has gone out; its answer is not read). Docstring only.
+  - Tests:
+    - `tests/test_replay_bindings.py::test_a_page_whose_own_answer_lost_the_session_is_never_bound_on_the_next_login`
+      (the checker's path; after the page, no re-login and no POST; `UNBOUND`);
+    - `::test_a_bound_send_on_a_session_relogged_in_after_its_fetch_is_unbound` (real
+      manager; another send sees the loss after the fetch; `UNBOUND`, and the one send
+      that went out is on the new id);
+    - `::test_a_bound_send_on_a_copy_relogged_in_after_its_fetch_is_unbound_and_verified`
+      (an isolated copy logged out after the fetch; `UNBOUND`, and the single-session
+      breaker still trips on the copy's re-login).
+  - Residual (FR-FUZZ-67): `prepare` runs inside the client's send, so a bound send on
+    another generation has gone out (to the lab) before it is refused; its answer is
+    never read. Nothing in the session layer (SESS) or `core.http` was changed.
+- Residuals after the final round (8fee220; recorded at the AU-REQID78 merge -- the owner
+  ruled out a further fix round, so no product change): one neighbouring path of R3-2 is
+  open. N-R3-2: a health check that answers LIVE adopts a rotated session cookie in
+  place (`session.manager._adopt_rotation`) without a new generation, and `_FetchRoute`
+  compares only route, identity, generation and loss, so a bound send after such a
+  check (`verify_live`, which `_verify_main` runs after any copy login or re-login; a
+  policy block's `check_health`; a pause's LIVE re-check in `prepare`) carries the old
+  cookie's token on the new cookie, and its 403 is read as a negative. Per PA-0530(4)
+  and PA-0531(4) it is pinned, not only stated:
+  - `tests/test_replay_bindings.py::test_a_live_health_check_that_adopts_a_rotated_cookie_after_the_fetch_unbinds_the_send`:
+    a strict xfail on the real `SessionManager`, `HttpClient`, seam, binder and oracle;
+    the test app (`_PhpLikeApp.rotate_on_root`, test-only) rotates its id once on a
+    logged-in `GET /`. On the merged code the wire is `[GET /form s2] [GET / s2 ->
+    rotated] [POST /do <new id> <s2's token> -> 403]` and the verdict is a negative;
+    the reason names the owner (FUZZ with SESS, an FR-FUZZ-67 follow-up).
+  - FR-FUZZ-67 states the gap in place (and its "no response cookie on any route" is
+    narrowed to probe and page answers); BUG-0544 gains "Residuals after the final round".
+- Merge integration (AU-REQID78 onto the merge stack): FR-FUZZ-68's SP-57
+  bullet is edited in place -- `core.dedup.wire_request_key` now holds SP-57's
+  `point_key` as a member (CC-CORE-0073's merge sub-bullet).
+- Effectiveness (assessed <date> or pending): pending.
+
 ### CC-FUZZ-0110 — The blind-SQLi builder never admits an answer sent on a session known to be lost (FR-FUZZ-65, FR-FUZZ-63, BUG-0533; decision D′) (2026-10-20)
 - Placement: AU-SESS403 (audit defect 6), review round 5; the owner's decision D′ covers
   every consumer, so BUG-0533's sweep pin for this builder was closed instead of queued.

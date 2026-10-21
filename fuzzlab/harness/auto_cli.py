@@ -650,6 +650,9 @@ def _print_summary(args, counts, result, plugins=None) -> int:
             elif item["mechanism"] == "not-comparable":         # FR-FUZZ-63
                 print(f"{where} (a response was not the application's own answer: "
                       f"{item.get('reason') or '-'})")
+            elif item["mechanism"] == "unbound":                # FR-FUZZ-67
+                print(f"{where} (the request's prerequisites could not be rebuilt, "
+                      f"nothing was sent: {item.get('reason') or '-'})")
             else:                                               # a cost cap, FR-FUZZ-45
                 print(f"{where}; not started: "
                       f"{', '.join(item['families_not_started']) or '-'}")

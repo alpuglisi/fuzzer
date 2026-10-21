@@ -85,6 +85,22 @@ Format per entry:
   uncounted (one DevTools census per page shape now counts every one).
 - **Status:** Fixed (residuals R2-R9 in BUG-0551; R1 closed in review round 1)
 
+## 2026-10-21 — fuzzing harness, importer (stored evidence replayed as the request; BUG-0544)
+- **Symptom:** `csrf_token=one-time` was stored blank (correctly) and then sent blank with every probe of its form, so each fuzzed POST was refused before its handler and read as a negative; blanked identifier siblings and loopback stand-ins for the app's host values were sent the same way.
+- **Root cause:** persisted, redacted evidence was used as the replay template; nothing recorded which values were placeholders, re-obtained them, or refused a send that could not be rebuilt.
+- **Remediation:** each sibling set records its replay recipe (migration 25); the oracle's binder fetches the page on the probe's session route and binds fresh values in memory; otherwise the test is inconclusive (`unbound`) with the reason; off-lab host siblings are refused, loopback ones sent as given (BUG-0544, PA-0544; CC-FUZZ-0111, CC-AUD-0056, CC-CORE-0073).
+  Review round 1 (85e7ab2): the setup fetch had been treated as a value lookup instead of a request. It stored a raw query, leaked a sender-wide cookie flag, gated the seam on the route rather than the page, accepted a cross-origin page and let off-recipe sends go out unbound. The loopback predicate was bypassable. All eight are fixed with tests that fail on 85e7ab2 (PA-0544 items 5-7).
+  Review round 2 (0703688): two neighbouring paths were still open. First, the loopback predicate failed closed on the authority but deny-listed the tail, so host:port and scheme-colon spellings passed. Second, the seam's bound send could leave on another route than its page fetch after the breaker tripped during that fetch. Both are fixed with tests that fail on 0703688; PA-0544 items 5 and 7 are strengthened in place.
+  Review round 3 (3959dfc, final): one neighbouring path of each was still open. First, the tail rule was a recogniser of hosts, so a gTLD outside `GENERIC_TLDS` or a one- to three-part or integer IPv4 address in a loopback URL's tail was sent as given. Second, the route check did not compare the session, so a re-login on the same route between the page fetch and the bound send posted the old session's token, and the 403 was read as a negative. The tail rule is now an allow-list of a stated grammar (the owner's design). The bound send keeps its fetch's session generation, and it is refused when the page's own answer lost the session. Both are fixed with tests that fail on 3959dfc; PA-0544 items 5 and 7 are strengthened in place again.
+- **Status:** Fixed, with two neighbouring residuals after the final round pinned by strict xfails (no further round, the owner's decision): N-R3-1 (a loopback authority `neutral_value`'s recogniser misses skips FR-AUD-20's allow-list) and N-R3-2 (a LIVE health check adopts a rotated session cookie in the same generation); see BUG-0544's "Residuals after the final round".
+
+## 2026-10-21 — fuzzing harness, importer, ML (distinct request contexts merged into one test; BUG-0530)
+- **Symptom:** POST `/api` with `q` in query and body gave one point; `op=safe&q=` and `op=search&q=` shared one confirmation key, so the `op=search` sink was never probed and its rows were marked checked and labelled positive from the `op=safe` finding; a second captured body, link set or store request of one endpoint was dropped.
+- **Root cause:** "which rows are one test" was decided at four places (importer, point builder, pipeline, ML join) by hand-written tuples that omitted fields of the request.
+- **Remediation:** one versioned request-context identity (SP-57, `core.reqctx`) used by all four; the importer keeps every context (BUG-0530, PA-0530; CC-CORE-0073, CC-AUD-0056, CC-FUZZ-0111, CC-ML-0501).
+  Review round 1: greybox, a caller of the builder, sent each probe once per context; it now deduplicates on its own request (PA-0530 item 5).
+- **Status:** Fixed.
+
 ## 2026-10-21 — crawl (disco merged distinct states, consumed work and accepted wrong restores; BUG-0539)
 - **Symptom:** the external audit's defects 1-3, reproduced at 08e3eaa in a real browser on loopback pages:
   - a three-step wizard with one layout stopped at step 1 (the finish request never made);

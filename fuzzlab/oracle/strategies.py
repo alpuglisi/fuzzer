@@ -2648,6 +2648,13 @@ class DomXssStrategy(_BrowserXssStrategy):
         # (FR-FUZZ-64); the browser load is an observation, not a comparison control
         # (`_compared` is not involved)
         entries = candidate.base_entries if candidate.location == "query" else None
+        if entries and candidate.bindings:
+            # FR-FUZZ-67 (BUG-0544): a stored placeholder is never loaded as a value, and
+            # the executor has no fetch of the page to bind a fresh one from
+            from fuzzlab.oracle.probe import PrerequisiteUnavailable
+            raise PrerequisiteUnavailable("the browser cannot bind fresh values for "
+                                          + ", ".join(candidate.bindings.get("fresh")
+                                                      or ()))
         return self._executor.run(
             ExecRequest(url=candidate.url, param=candidate.param, value=payload,
                         location=candidate.location,

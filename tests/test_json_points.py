@@ -382,13 +382,17 @@ def test_object_selectors_sensitive_and_identifier_leaves_are_pinned(tmp_path):
 
 
 def test_the_json_producer_goes_through_redaction():
-    """PA-0100: the function that INSERTs a captured request's form row calls
-    `redact_leaf` (the link-set producer's guard, for this producer)."""
+    """PA-0100: the function that writes a captured request's form row calls
+    `redact_leaf` (the link-set producer's guard, for this producer). It writes the row
+    through the one sibling-set writer (`_insert_sibling_set`, FR-FUZZ-67) or an INSERT
+    of its own."""
     tree = ast.parse((ROOT / "fuzzlab/tools/store_adapter.py").read_text())
     for fn in [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]:
         consts = [n.value for n in ast.walk(fn) if isinstance(n, ast.Constant)
                   and isinstance(n.value, str)]
-        if any("INSERT INTO form" in c for c in consts) and any(
+        writes = any("INSERT INTO form" in c for c in consts) or any(
+            isinstance(n, ast.Name) and n.id == "_insert_sibling_set" for n in ast.walk(fn))
+        if writes and any(
                 isinstance(n, ast.Attribute) and n.attr == "ENCTYPE" for n in ast.walk(fn)):
             called = {getattr(c.func, "id", getattr(c.func, "attr", None))
                       for c in ast.walk(fn) if isinstance(c, ast.Call)}
@@ -493,8 +497,32 @@ def test_a_json_url_leaf_gets_the_seed_only_without_an_identifier_in_host_or_pat
 # =========================================================================================
 # FR-FUZZ-47: binding and sending
 # =========================================================================================
-def test_json_siblings_are_redacted_and_neutral_when_a_third_leaf_is_probed(tmp_path):
+def test_json_siblings_are_never_sent_as_placeholders_or_stand_ins(tmp_path):
+    """Before BUG-0544 a third leaf's probes carried the redacted ``ref`` as ``""`` and the
+    off-lab ``returnUrl`` as ``http://127.0.0.1/``: a body the app never sent. A captured
+    JSON body has no page to bind a fresh value from, and an off-lab host is never sent
+    (FR-AUD-20), so neither request is rebuilt: both tests are inconclusive with their
+    reasons and nothing is sent (FR-FUZZ-67)."""
     body = {"returnUrl": "http://lab.example.com/next", "ref": HEX32, "comment": "hello"}
+    store, run, _c = _import(tmp_path, [_req(BASE + "api/Feedbacks", body)])
+    wire = _JsonWire()
+    with store:
+        result = run_auto(base_url=BASE, store=store, run_id=run,
+                          sender=RequestsProbeSender(session=wire), mode="manual",
+                          selected_categories=["sql-injection"], points_source="crawl")
+        statuses = {r[0] for r in store.conn.execute(
+            "SELECT oracle_status FROM candidate WHERE run_id=?", (run,))}
+    assert wire.sent == []
+    assert statuses == {"inconclusive"}
+    reasons = {i["param"]: i["reason"] for i in result.inconclusive}
+    assert "outside the lab" in reasons["comment"]
+    assert "captured JSON body" in reasons["returnUrl"]
+
+
+def test_json_siblings_naming_loopback_are_sent_as_the_app_gave_them(tmp_path):
+    """FR-AUD-20 as amended by FR-FUZZ-67: a value naming the lab itself (loopback) is
+    sent as given, never replaced by a stand-in."""
+    body = {"returnUrl": "http://127.0.0.1:3000/next", "comment": "hello"}
     store, run, _c = _import(tmp_path, [_req(BASE + "api/Feedbacks", body)])
     wire = _JsonWire()
     with store:
@@ -503,12 +531,9 @@ def test_json_siblings_are_redacted_and_neutral_when_a_third_leaf_is_probed(tmp_
             points_source="crawl")
     probing_comment = [s["body"] for s in wire.sent if s["body"].get("comment") != "hello"]
     assert probing_comment
-    for sent in probing_comment:
-        assert sent["returnUrl"] == "http://127.0.0.1/" and sent["ref"] == ""
+    assert {s["returnUrl"] for s in probing_comment} == {"http://127.0.0.1:3000/next"}
     assert all(s["headers"]["Content-Type"] == "application/json" and s["query"] == {}
                for s in wire.sent)
-    assert HEX32 not in json.dumps(wire.sent) and "lab.example.com" not in json.dumps(
-        wire.sent)
 
 
 def test_the_bound_sender_sets_exactly_the_probed_leaf_and_keeps_types():

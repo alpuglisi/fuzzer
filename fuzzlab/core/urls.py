@@ -238,16 +238,20 @@ def in_origin_scope(url: str, origins: frozenset[str]) -> bool:
     return origin is not None and origin in origins
 
 
-def store_url(url: str, main_origin: str | None, *, route: bool = False) -> str:
+def store_url(url: str, main_origin: str | None, *, route: bool = False,
+              keep_query: bool = False) -> str:
     """How an importer stores a crawled URL (FR-CORE-504): its path (`to_route_path`
     with ``route``) when it is on the run's main origin, or when either origin is
     unknown; otherwise its canonical origin followed by that path, so a page's API on
-    another origin keeps it. ``main_origin`` is a `canonical_origin`."""
+    another origin keeps it. ``main_origin`` is a `canonical_origin`. ``keep_query``
+    keeps the URL's own query text after the path (a page a fresh form value is fetched
+    from, FR-FUZZ-67, is that exact page)."""
     path = to_route_path(url) if route else to_path(url)
     origin = canonical_origin(url)
-    if main_origin is None or origin is None or origin == main_origin:
-        return path
-    return origin + path
+    stored = path if main_origin is None or origin is None or origin == main_origin \
+        else origin + path
+    query = urlsplit(url or "").query if keep_query else ""
+    return urlunsplit(("", "", stored, query, "")) if query else stored
 
 
 def stored_absolute(stored: str, base_origin: str) -> str:

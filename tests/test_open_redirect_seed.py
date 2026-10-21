@@ -209,6 +209,10 @@ _ALLOWED = {
     ("harness/pipeline.py", "_candidate_of"),
     ("oracle/probe.py", "Candidate"),
     ("oracle/strategies.py", "OpenRedirectStrategy"),
+    # SP-57 (BUG-0530): the request context's seed is a SHA-256 digest of what the target
+    # starts from, the seed included; the value itself is never sent or stored by it
+    ("core/reqctx.py", "AnnAssign"),          # the Candidate field classification table
+    ("core/reqctx.py", "seed"), ("core/reqctx.py", "point_key"),
 }
 
 

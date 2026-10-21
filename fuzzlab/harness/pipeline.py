@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
 from fuzzlab.audit import InjectionPoint, evaluate
-from fuzzlab.core import trace
+from fuzzlab.core import reqctx, trace
 from fuzzlab.core.dedup import fold_points
 from fuzzlab.core.fingerprint import fingerprint
 from fuzzlab.core.oracle_status import (CHECKED, INCONCLUSIVE,  # migration 13
@@ -35,7 +35,7 @@ from fuzzlab.core.runmode import RunPlan
 from fuzzlab.harness import integration
 from fuzzlab.harness.scoring import ScoreReport, score
 from fuzzlab.oracle import Candidate, Oracle, category_to_oracle_class
-from fuzzlab.oracle.oracle import UNPLACEABLE
+from fuzzlab.oracle.oracle import UNBOUND, UNPLACEABLE
 from fuzzlab.oracle.probe import HeaderPointsStopped, ProbeUnobserved
 
 
@@ -71,6 +71,9 @@ def _candidate_of(ev: dict) -> Candidate:
     # coarse ground-truth label (`html`, `sql`, …), no confirmation strategy reads it
     # (an AST guard enforces that), and leaving it out keeps one confirmation per
     # `_confirmation_key` sound (BUG-0072). The bandit context facet is the location.
+    # Every field read here is in the request context or excluded from it (SP-57's
+    # table, `core.reqctx.CANDIDATE_FIELDS_*`; PA-0530(2)).
+    bindings = ev.get("bindings") if isinstance(ev.get("bindings"), dict) else None
     return Candidate(url=ev["url"], param=ev["param"], method=ev.get("method", "GET"),
                      location=ev.get("location", "query"), category=ev.get("category", ""),
                      store_url=ev.get("store_url"), store_param=ev.get("store_param"),
@@ -82,7 +85,11 @@ def _candidate_of(ev: dict) -> Candidate:
                      base_entries=(tuple(tuple(e) for e in ev["entries"])
                                    if ev.get("entries") else None),
                      base_value=ev.get("base_value"),
-                     redirect_seed=ev.get("redirect_seed"))
+                     redirect_seed=ev.get("redirect_seed"),
+                     context_id=reqctx.context_id(ev),
+                     context_key=_confirmation_key(ev),
+                     bindings=bindings,
+                     replay_refusal=ev.get("replay_refusal"))
 
 
 def _origin_of(url: str) -> str | None:
@@ -92,10 +99,13 @@ def _origin_of(url: str) -> str | None:
 
 def _fingerprint_point(points: list[InjectionPoint]) -> InjectionPoint | None:
     """The point the baseline probe goes through: the first query point, else the
-    first form-encoded body point; never a header, fragment or raw-body point."""
+    first form-encoded body point; never a header, fragment or raw-body point, and
+    never one whose request needs a fresh binding or can never be rebuilt (FR-FUZZ-67:
+    a stored placeholder is never sent)."""
     for location in ("query", "body"):
         for p in points:
-            if p.location == location and not p.body_content_type:
+            if p.location == location and not p.body_content_type \
+                    and not p.bindings and not p.replay_refusal:
                 return p
     return None
 
@@ -126,9 +136,10 @@ def _header_stop_reason(sender) -> str | None:
 
 def _confirmation_key(ev: dict) -> tuple:
     """Rows that would send the oracle the identical confirmation (several rules firing
-    on one point) share one key, one budget slot and one status."""
-    return (ev.get("url"), ev.get("param"), ev.get("method", "GET"),
-            ev.get("location", "query"), ev.get("category", ""))
+    on one point) share one key, one budget slot and one status: the request context's
+    key (`core.reqctx.confirmation_key`, SP-57, FR-FUZZ-66; BUG-0530), never a
+    hand-written tuple. A row of an older run gets its context on read."""
+    return reqctx.confirmation_key(ev)
 
 
 def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
@@ -136,10 +147,11 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
                  pages_html: dict[str, str] | None = None, budget=None,
                  browser=None, oob=None, coverage=None, dbfault=None,
                  scheduler=None, plugins=None, confirm_budget: int | None = None,
-                 prioritizer=None, peer=None) -> PipelineResult:
+                 prioritizer=None, peer=None, identity: str | None = None) -> PipelineResult:
     """``budget`` counts requests (``used()``); ``confirm_budget`` caps how many distinct
     candidates are sent to the oracle, in ``prioritizer(store, run_id, ids)`` order (an
-    object with ``.order`` or ``None`` = no usable model → confirm everything)."""
+    object with ``.order`` or ``None`` = no usable model → confirm everything).
+    ``identity`` is the run's identity scope, part of every request context (SP-57)."""
     if confirm_budget is not None and confirm_budget < 1:
         raise ValueError(f"confirm_budget must be >= 1, got {confirm_budget}")
     dedup_report: dict = {}                              # FR-FUZZ-68: only when it ran
@@ -179,7 +191,8 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
         store.conn.commit()
 
     # Audit: rules-as-data, scoped to the plan's categories (T2.3 / D14 / D15).
-    counts = evaluate(points, store, run_id, categories=plan.categories, plugins=plugins)
+    counts = evaluate(points, store, run_id, categories=plan.categories, plugins=plugins,
+                      identity=identity)
 
     # Confirm each candidate with the oracle (sole finding-writer).
     oracle = Oracle(store=store, run_id=run_id, browser=browser, oob=oob,
@@ -246,6 +259,7 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
     # was logged out right after one), every remaining header key is left unconfirmed:
     # its rows keep `pending` (unlabelled) and the reason goes to the metrics.
     stopped_keys: set[tuple] = set()
+    stopped_points: dict[tuple, tuple] = {}              # key -> (url, param, method)
     breaker: list[str] = []
 
     tests = {"n": 0}
@@ -253,6 +267,7 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
     def _confirm(key: tuple, ev: dict) -> None:
         if breaker and ev.get("location") == "header":
             stopped_keys.add(key)
+            stopped_points[key] = (ev.get("url"), ev.get("param"), ev.get("method", "GET"))
             return
         candidate = _candidate_of(ev)
         # FR-AUD-30 (BUG-0523): the deciding mechanism only when every row of the key
@@ -269,6 +284,7 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
             "origin": _origin_of(candidate.url), "method": candidate.method,
             "param": candidate.param, "location": candidate.location,
             "category": candidate.category, "rule": ev.get("rule_id"),
+            "request_context": candidate.context_id,                # SP-57
             "candidates": [cid for cid, _ev in keyed.get(key, [])]},
             key=f"test.start:{test_id}", scope=f"test:{test_id}")
         outcome, mechanism = "error", None
@@ -282,6 +298,7 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
             outcome = "stopped"
             breaker.append(str(exc))
             stopped_keys.add(key)
+            stopped_points[key] = (ev.get("url"), ev.get("param"), ev.get("method", "GET"))
             return
         finally:
             trace.emit("test.end", {"test": test_id, "outcome": outcome,
@@ -296,7 +313,7 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
                     "location": candidate.location, "mechanism": unsure.mechanism,
                     "families_not_started": list(
                         unsure.evidence.get("families_not_started", []))}
-            if unsure.mechanism == UNPLACEABLE:          # FR-FUZZ-47: why, no values
+            if unsure.mechanism in (UNPLACEABLE, UNBOUND):   # FR-FUZZ-47/67: why, no values
                 item["reason"] = str(unsure.evidence.get("reason", ""))[:200]
             elif "not_observed" in unsure.evidence:      # BUG-0137: M6 saw no page
                 item["reason"] = str(unsure.evidence["not_observed"])[:200]
@@ -393,7 +410,8 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
         # one entry per header point left unconfirmed, for `skipped_points`
         metrics["header_breaker"] = breaker[0]
         metrics["header_breaker_skipped"] = sorted(
-            {(urlparse(k[0]).path or "/", k[2], k[1], breaker[0]) for k in stopped_keys})
+            {(urlparse(url).path or "/", method, param, breaker[0])
+             for url, param, method in stopped_points.values()})
     if budget is not None:
         used = budget.used()
         metrics["requests"] = used
