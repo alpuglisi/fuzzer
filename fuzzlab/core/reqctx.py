@@ -123,11 +123,28 @@ def _entries(entries, param: str, location):
     return out
 
 
+def _split(url: str):
+    """``urlsplit(url)``, or None for a URL it cannot parse (an unclosed IPv6 bracket):
+    the identity is total, such a URL is then its own opaque text."""
+    try:
+        return urlsplit(url)
+    except ValueError:
+        return None
+
+
+def _origin(url: str):
+    try:
+        return canonical_origin(url)
+    except ValueError:
+        return None
+
+
 def _query(url: str, param: str, standalone_query: bool) -> list[str]:
     """The URL's raw query parts in order; under the standalone rule
     (`core.urls.place_query_param`) the first part named ``param`` is the target's slot,
     appended once when there is none."""
-    parts = list(QueryEntries.parse(urlsplit(url).query).parts)
+    split = _split(url)
+    parts = list(QueryEntries.parse(split.query).parts) if split is not None else []
     if standalone_query:
         for i, part in enumerate(parts):
             if QueryEntries.name_of(part) == param:
@@ -149,10 +166,12 @@ def _setup(ev: Mapping) -> list:
         store_location = ev.get("store_location") or "body"
         store_param = ev.get("store_param") or ev.get("param") or ""
         store_entries = ev.get("store_entries")
+        store = str(ev["store_url"])
+        split = _split(store)
         steps.append({"step": "store",
-                      "origin": canonical_origin(ev["store_url"]),
-                      "path": urlsplit(ev["store_url"]).path or "/",
-                      "query": list(QueryEntries.parse(urlsplit(ev["store_url"]).query).parts),
+                      "origin": _origin(store),
+                      "path": (split.path or "/") if split is not None else store,
+                      "query": _query(store, "", False),
                       "method": str(ev.get("store_method") or "POST").upper(),
                       "location": store_location, "param": store_param,
                       "entries": (_entries(store_entries, store_param, store_location)
@@ -164,7 +183,7 @@ def request_context(ev: Mapping) -> dict:
     """The request context of a candidate's evidence (or of `point_evidence`): a
     canonical, JSON-able dict. Total and deterministic."""
     url = str(ev.get("url") or "")
-    parts = urlsplit(url)
+    parts = _split(url)
     param = str(ev.get("param") or "")
     location = str(ev.get("location") or "query")
     entries = ev.get("entries")
@@ -175,10 +194,10 @@ def request_context(ev: Mapping) -> dict:
         _JSON if _is_json(location) else FORM_URLENCODED if location == "body" else None)
     return {
         "v": CONTEXT_VERSION,
-        "origin": canonical_origin(url),
-        "path": parts.path or "/",
+        "origin": _origin(url),
+        "path": (parts.path or "/") if parts is not None else url,   # opaque if unparsable
         "query": _query(url, param, location == "query" and not bound),
-        "fragment": parts.fragment or None,
+        "fragment": (parts.fragment or None) if parts is not None else None,
         "method": str(ev.get("method") or "GET").upper(),
         "location": location,
         "target": param.lower() if location == "header" else param,

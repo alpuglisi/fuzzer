@@ -124,6 +124,8 @@ the builder's `seen`, `_confirmation_key`, the ML label join -- fixed. Kept, wit
 design), `harness.scoring`'s case key (ground truth's own key; a set), PA-0048's
 `sink_contexts_by_point` (those duplicates are one context), `pipeline._dedup` (template
 clusters: defect 10's item), `ml.dataset.candidate_keys` (a coarse cross-run metric, not a
-label). Pinned to their owners: the crawler's form and request signatures (CRAWL), POST
+label), and `core.dedup.wire_request_key` (FR-FUZZ-68, merged at dcc7091: a stricter
+local key -- every point field as given -- that must also keep apart what changes rule
+evaluation, which SP-57 leaves out; one key owner for both is a follow-up). Pinned to their owners: the crawler's form and request signatures (CRAWL), POST
 action query points (AU-REQID-POSTQ), per-occurrence binding and raw link-set text
 (follow-ups of AU-REQID8, R1/R2).

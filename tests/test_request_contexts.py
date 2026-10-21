@@ -456,6 +456,15 @@ def test_a_row_without_a_context_gets_the_same_one_on_read():
     assert _reqctx().context_id(legacy) == _reqctx().context_id(stamped) == stamped["context_id"]
 
 
+def test_the_identity_is_total_on_an_unparsable_url():
+    """PA-0096: a URL `urlsplit` refuses (an unclosed IPv6 bracket) is its own opaque
+    context, never a crash of the engine or the pipeline."""
+    bad = "http://[::1/item?id=1"
+    one = _reqctx().context_id(_ev(url=bad, store_url=bad))
+    assert one == _reqctx().context_id(_ev(url=bad, store_url=bad))
+    assert one != _reqctx().context_id(_ev(url="http://[::1/other?id=1", store_url=bad))
+
+
 def test_two_identities_never_share_a_context():
     assert _reqctx().context_id(_ev(identity_scope="alice")) != \
         _reqctx().context_id(_ev(identity_scope="bob"))
