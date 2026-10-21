@@ -46,6 +46,15 @@ Everything here is total on its input and bounded by the capture boundary's own 
 `MAX_SELECTORS`, `MAX_GRAPHQL_TOKENS`, `MAX_OPERATIONS`, `MAX_ROOT_FIELDS` and
 `MAX_CONTEXT_ROWS`. A GraphQL document is read by a linear scanner, never by a
 backtracking pattern.
+
+**Lone surrogates (BUG-0554).** A captured JSON body may carry a ``\\udXXX`` escape
+with no partner (``{"q":"\\ud800"}`` is valid JSON; a script that slices an emoji in
+half sends one), and `json.loads` decodes it to a lone surrogate code point, which no
+UTF-8 sink accepts: SQLite's bind and a strict ``.encode("utf-8")`` raise. So every text
+this module returns for storage (`operation_key`, `signature_prefix`, `row_signature`,
+`storable_json`) writes each surrogate as its JSON escape, and every digest encodes with
+``surrogatepass``; both are byte-identical to the plain forms for any other text, so no
+stored signature changes.
 """
 
 from __future__ import annotations
@@ -91,6 +100,26 @@ MAX_CONTEXT_ROWS = 32
 _ELEMENT = 0
 
 
+# --- text SQLite can store ------------------------------------------------------------
+
+def storable_json(value) -> str:
+    """``value`` as JSON text that SQLite can bind (BUG-0554):
+    ``json.dumps(value, ensure_ascii=False)`` with every surrogate code point written as
+    its ``\\uXXXX`` escape. A surrogate can only stand inside a JSON string there, so the
+    escape is the JSON spelling of the same code point: `json.loads` of the result equals
+    ``value`` for every value `json.loads` produces (it never yields a high surrogate
+    followed by a low one; it joins that pair). For a value without a surrogate the text
+    is byte-identical to ``json.dumps(value, ensure_ascii=False)``."""
+    text = json.dumps(value, ensure_ascii=False)
+    return text.encode("utf-8", "backslashreplace").decode("utf-8")
+
+
+def _digest(text: str) -> str:
+    """The SHA-256 hex digest of ``text``'s UTF-8, surrogates passed through (total;
+    byte-identical to the strict encoding for any other text)."""
+    return hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
+
+
 # --- the operation ------------------------------------------------------------------
 
 def _query_pairs(url: str) -> list[tuple[str, str]]:
@@ -115,8 +144,7 @@ def _selector_value(value):
     folded = _WHITESPACE_RUN.sub(" ", value)
     if len(folded) <= MAX_SELECTOR_CHARS:
         return folded
-    digest = hashlib.sha256(folded.encode("utf-8", "surrogatepass")).hexdigest()
-    return "sha256:" + digest
+    return "sha256:" + _digest(folded)
 
 
 def operation_selectors(doc, query_pairs=()) -> list:
@@ -164,10 +192,11 @@ def operation_selectors(doc, query_pairs=()) -> list:
 
 
 def operation_key(method: str, url: str, media: str, doc) -> str:
-    """The identity of the API operation a captured request calls, as JSON text:
-    ``[method, url_key(url), media type, operation selectors]`` (see the module)."""
-    return json.dumps([(method or "").upper(), url_key(url), media or "",
-                       operation_selectors(doc, _query_pairs(url))], ensure_ascii=False)
+    """The identity of the API operation a captured request calls, as JSON text SQLite
+    can bind (`storable_json`): ``[method, url_key(url), media type, operation
+    selectors]`` (see the module)."""
+    return storable_json([(method or "").upper(), url_key(url), media or "",
+                          operation_selectors(doc, _query_pairs(url))])
 
 
 def signature_prefix(op_key: str) -> str:
@@ -177,11 +206,11 @@ def signature_prefix(op_key: str) -> str:
 
 def row_signature(op_key: str, shape) -> str:
     """A stored representative's signature: its operation and the digest of its
-    shape, ``[method, url_key, media type, selectors, shape digest]``."""
+    shape, ``[method, url_key, media type, selectors, shape digest]``. Total: a key path
+    holding a lone surrogate is digested with it (`_digest`)."""
     text = json.dumps(sorted(json.dumps(list(p), ensure_ascii=False) for p in shape),
                       ensure_ascii=False)
-    return signature_prefix(op_key) + json.dumps(
-        hashlib.sha256(text.encode("utf-8")).hexdigest()) + "]"
+    return signature_prefix(op_key) + json.dumps(_digest(text)) + "]"
 
 
 # --- what a request adds ------------------------------------------------------------
@@ -440,7 +469,7 @@ def graphql_operations(text, operation_name=None) -> list | None:
         return None
     if doc is _OVER:
         folded = " ".join(text.split())
-        return [["document", "", [hashlib.sha256(folded.encode("utf-8")).hexdigest()]]]
+        return [["document", "", [_digest(folded)]]]
     toks, ops, frags = doc
     chosen = [op for op in ops if op[1] == operation_name] or ops
     out = []

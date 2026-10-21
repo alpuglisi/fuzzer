@@ -1044,6 +1044,30 @@ fuzzer.
       8.4 -> 10.7 requests/s, paced to the writer (7.4 records/s). All 201 records
       written whole.
     - A repeat pair under heavier load agrees (BUG-0548's table).
+- **FR-CRAWL-42 (the capture writer is total: a lone surrogate is stored, a failed write
+  is counted; CC-CRAWL-0061, BUG-0554)** A captured JSON body may hold a `\udXXX`
+  escape with no partner (valid JSON; measured 2026-10-21, Chromium's `JSON.stringify`
+  writes half an emoji pair that way), which `json.loads` decodes to a lone surrogate
+  code point that SQLite's bind and a strict UTF-8 encode refuse.
+  - **Stored losslessly.** `StorageManager.record_request` writes `body_json` with
+    `tools.apiop.storable_json`: each surrogate as its JSON escape, so the row reads
+    back as the body the app sent. The operation key (`apiop.operation_key`, hence every
+    signature and the lookup prefix) is written the same way, and every digest
+    (`row_signature`, a GraphQL document over the token cap, a long selector value)
+    encodes with `surrogatepass`. For text without a surrogate both are byte-identical
+    to the FR-CRAWL-37 forms, so no stored row or signature changes.
+  - **The probe-marker scrub** (FR-CRAWL-17) still reads the raw text, before the
+    escape: an escape's hex digits would end the token before a marker.
+  - **Never raises.** A write the store still refuses (a lock, a full disk, anything
+    raised on the way) is rolled back and returned as `write failed (<error class>)`;
+    the passive capture counts it in `requests_not_recorded` and logs it, as every other
+    reason. Nothing reaches the browser guard's observer catch, which only logs.
+  - **Its reader.** The importer refuses such a body, counted (FR-AUD-22); a field
+    holding a lone surrogate cannot be a store row.
+  - **Known gap, pinned** (strict xfail in `tests/test_capture_surrogates.py`): a body
+    with a sensitive field and a lone surrogate is refused as "redaction failed"
+    (counted, not stored), because the storage boundary (`core.redaction.
+    redact_json_body`, CORE) re-encodes a rewritten body strictly.
 
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default
@@ -1232,7 +1256,10 @@ shape of the operation, FR-CRAWL-37's rules), and `signature` = JSON
 `[method, url_key(url), media type, operation selectors, sha256 of the row's typed key
 paths]` (`tools.apiop.row_signature`; its first four items are the operation,
 `apiop.operation_key`). Before FR-CRAWL-37 it was `[method, url_key(url), sorted
-top-level keys]`, and an older DB keeps that form. No header and no cookie is stored.
+top-level keys]`, and an older DB keeps that form. Since FR-CRAWL-42 `body_json` and
+`signature` write a lone surrogate as its JSON escape (`apiop.storable_json`; valid
+JSON and valid UTF-8, read back by `json.loads` as the body sent); any other text is
+unchanged. No header and no cookie is stored.
 An old spider DB has no such table (the importer treats it as none).
 
 **Behavioural capture (FR-CRAWL-18..20, D70) -- file contracts, not store tables:**

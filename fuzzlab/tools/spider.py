@@ -234,7 +234,28 @@ class StorageManager:
         duplicate; one that adds a key path or a type to the operation's merged schema
         is always stored with its own body; another combination of known inputs is
         stored while the operation has fewer than `apiop.MAX_CONTEXT_ROWS` rows.
-        Returns None when stored, else why not (``duplicate``, or the context cap)."""
+        Returns None when stored, else why not (``duplicate``, the context cap, the
+        redaction boundary's refusal, or ``write failed (<error class>)``).
+
+        Total (BUG-0554): it never raises. A body holding a lone surrogate (a valid JSON
+        ``\\udXXX`` escape) is stored losslessly: ``body_json`` and the signature are
+        written by `apiop.storable_json` (each surrogate as its escape; byte-identical
+        for any other text). A write the store still refuses is rolled back and returned
+        as its reason, which the caller counts (``requests_not_recorded``), never lost
+        to an exception guard that only logs."""
+        try:
+            return self._record_request(page_url, method, url, content_type, body,
+                                        source, seen_at)
+        except Exception as exc:  # noqa: BLE001 - total: the caller counts the reason
+            try:
+                self.conn.rollback()
+            except sqlite3.Error:
+                pass
+            return f"write failed ({type(exc).__name__})"
+
+    def _record_request(self, page_url, method, url, content_type, body, source,
+                        seen_at):
+        """`record_request`'s work, under its lock; may raise (the caller contains it)."""
         import json
 
         from fuzzlab.core.redaction import redact_captured_body, redact_url_identifiers
@@ -242,7 +263,9 @@ class StorageManager:
         doc, why = redact_captured_body(body, content_type)
         if why is not None:
             return why
-        # a probe marker an app replays never reaches a row (FR-CRAWL-17, A-S4)
+        # a probe marker an app replays never reaches a row (FR-CRAWL-17, A-S4). Scrubbed
+        # in the raw text, never the stored one: an escape's hex digits (``\ud800``)
+        # would end the token before a marker and hide it from the scrub (BUG-0554).
         doc = json.loads(spa.scrub_markers(json.dumps(doc, ensure_ascii=False)))
         safe_url = spa.scrub_markers(redact_url_identifiers(url))
         method = (method or "").upper()
@@ -266,7 +289,7 @@ class StorageManager:
                      seen_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ''', (spa.scrub_markers(redact_url_identifiers(page_url)), method, safe_url, media,
-                  json.dumps(doc, ensure_ascii=False), source, sig,
+                  apiop.storable_json(doc), source, sig,
                   time.time() if seen_at is None else float(seen_at)))
             self.conn.commit()
             return None
