@@ -323,4 +323,18 @@ resolution. What changed in this bug's mechanism at the merge:
 - **Residual (merge):** `_shows_login` reads `page.content()`, the top document's light
   tree, so a login form a component renders inside a shadow root or a frame is no page
   sign (BUG-0551 R5's read); an answer sign (SP-56) still reaches the check.
+- *(Coordinator, after the merge's semantic review, 2026-10-21.)* **The generation slot
+  read a per-worker counter.** The merge kept AU-DISCO's `self._generation += 1` in
+  `_replace_context` and fed it to `execution_key`, though this lane's CC note says the
+  slot reads the run-wide `_Shared.auth.generation`. A reinstall of the same session
+  bumped one worker's slot only (one session, two state spaces, its work repeated); a
+  worker adopting the session another worker recovered added 1 however many generations
+  had passed and could read under a key recorded on the lost generation (its states
+  passed `shared.known` and were never explored on the live session). Fix:
+  `Explorer.reading` keys by `_ctx_generation` (the counter only for a context with no
+  session generation). Test:
+  `tests/test_disco_session_loss.py::test_the_execution_keys_generation_is_the_session_each_worker_carries`.
+  Root cause: a conflict resolved by keeping one side's mechanism without reading the
+  other side's statement of what that mechanism must read (PA-0546(3): check a change
+  against the contract it changes for others).
 

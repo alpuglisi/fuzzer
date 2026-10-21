@@ -825,3 +825,51 @@ def test_import_disco_never_takes_a_lost_windows_answer_as_evidence(tmp_path):
         "SELECT name FROM parameter WHERE run_id = ? AND location = 'path'",
         (run_id,)).fetchall()]
     assert ("/settings", 200) not in pages and templates == [], (pages, templates)
+
+
+def test_the_execution_keys_generation_is_the_session_each_worker_carries(monkeypatch):
+    """Merge integration of AU-DISCO and DISCO4 (crawl batch): the execution key's
+    session-generation slot (FR-CRAWL-31) is the run-wide generation of the session a
+    worker's context carries (FR-CRAWL-41), never a per-worker count of its context
+    rebuilds. A reinstall of the same session keeps its states one state space; a worker
+    that adopts the fresh session another worker recovered reads the live session's
+    states under that session's generation, never under a key recorded on the lost
+    one (which would pass as known and leave the live session's states unexplored)."""
+    from fuzzlab.disco import explore as E
+
+    class _Ctx:
+        def close(self):
+            pass
+
+        def new_page(self):
+            return object()
+
+    a = E.Explorer("http://127.0.0.1:1/", scope_urls=["http://127.0.0.1:1/"],
+                   proxy="http://127.0.0.1:2", options=E.ExploreOptions(workers=2))
+    b = a._clone()
+    shared = a._shared
+    shared.auth = E._SessionMaterial(generation=1)
+
+    def contexts(ex):
+        def make(browser, pw):
+            ex._ctx_generation = shared.auth.generation
+            return _Ctx()
+        return make
+    for ex in (a, b):
+        monkeypatch.setattr(ex, "_new_context", contexts(ex))
+        monkeypatch.setattr(ex, "_mark_window", lambda *args, **kw: [])
+        ex._ctx = ex._new_context(None, None)
+    monkeypatch.setattr(E.navguard, "release", lambda ctx: None)
+    url = "http://127.0.0.1:1/home"
+    els = [{"tag": "button", "how": "native", "signature": "button", "occurrence": 0}]
+
+    def key(ex):
+        return ex.reading(url, els).key
+    first = key(a)
+    assert key(b) == first
+    a._replace_context(None, "reinstall", "the same session re-given")
+    assert key(a) == key(b) == first                 # one session, one state space
+    shared.auth = E._SessionMaterial(generation=2)  # A found a loss and recovered
+    a._replace_context(None, "lost", "a confirmed loss")
+    b._replace_context(None, "stale", "another worker's loss")   # B adopts it
+    assert key(a) == key(b) != first                 # the live session's own states

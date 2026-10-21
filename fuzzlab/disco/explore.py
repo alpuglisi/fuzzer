@@ -809,9 +809,10 @@ class Explorer:
         self._ctx = None
         self._tag_headers: dict[str, str] = {}      # the guard reads it per request
         self._responses: list = []                # in-scope responses since `_gather`
-        #: the session generation of this worker's context (FR-CRAWL-31's slot in the
-        #: execution key): bumped when the context is rebuilt after a lost session
-        #: (`_replace_context`, FR-CRAWL-41)
+        #: this worker's context rebuilds (`_replace_context`): the execution key's
+        #: generation slot (FR-CRAWL-31) only for a context that carries no run-wide
+        #: session generation; one that does is keyed by that generation
+        #: (`_ctx_generation`, FR-CRAWL-41), the same for every worker on one session
         self._generation = 0
         #: ``(method, url)`` of every request the page issues while an action or a
         #: replay is watched (None: not watching) -- what `Step.safe` is decided from
@@ -1391,7 +1392,7 @@ class Explorer:
         self._answers, self._responses, self._window_tags = [], [], set()
         self._net = Inflight(clock=self.clock)
         self._ctx = self._new_context(self._browser, self._pw)
-        self._generation += 1             # FR-CRAWL-31's session generation slot
+        self._generation += 1             # the slot only without a session generation
         return self._ctx.new_page()
 
     def _mark_leftover(self) -> None:
@@ -1599,7 +1600,11 @@ class Explorer:
         """The two keys of a page (`fingerprint` module doc) from its read elements and
         page-level markers, in this worker's session generation."""
         markers = workflow_markers(els, marks)
-        return Reading(key=execution_key(url, els, markers, self._generation),
+        # the session the context carries, run-wide (a reinstall keeps it; a worker that
+        # adopts a fresh one reads under its generation); else this worker's rebuilds
+        generation = self._ctx_generation if self._ctx_generation is not None \
+            else self._generation
+        return Reading(key=execution_key(url, els, markers, generation),
                        structure=state_fingerprint(url, els), url=url, els=els,
                        counts=element_multiset(els), markers=markers)
 

@@ -298,6 +298,17 @@ Newest first.
     unchanged.
 
 ### CC-CRAWL-0059 — Discovery reads the composed UI tree: open shadow roots, same-origin frames, delegated actions; what it cannot read is counted (BUG-0551) (2026-10-21)
+  - *(Coordinator, after the merge's semantic review.)* The generation bump moved
+    into `_replace_context` counted this worker's rebuilds, not the session it
+    carries: a reinstall split one session into two state spaces, and a worker that
+    adopted a fresh session read it under a key another worker had recorded on the
+    lost one, so the live session's states passed as known. `Explorer.reading` now
+    keys by `_ctx_generation`, the run-wide generation the context carries (the
+    worker's rebuild count only for a context with none). Test:
+    `tests/test_disco_session_loss.py::test_the_execution_keys_generation_is_the_session_each_worker_carries`
+    (fails on f025c2c at the reinstall step, passes after; plain Python call of the
+    test function). FR-CRAWL-31's slot text amended in place. BUG-0552's merge
+    section records it.
 - Placement: pre-assigned to lane DISCO13 (audit defect 13), branch `lane/DISCO13` from
   c483dc1. Planned merge order: AU-DISCO, then DISCO13, then DISCO4. This lane's
   `explore.py` changes are in the enumeration, candidate and acting regions (the

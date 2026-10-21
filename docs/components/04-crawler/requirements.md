@@ -976,8 +976,10 @@ fuzzer.
       token-like one), and a non-interactive `aria-current` element's position; typed
       text never; *(at the merge with CC-CRAWL-0059)* read in the same composed read
       as the elements (FR-CRAWL-39: across open shadow roots and the frames read);
-    - the session generation of the worker's context (0, plus one per rebuild after a
-      lost session).
+    - the session generation of the worker's context: the run-wide generation of the
+      session it carries (FR-CRAWL-41: one for every worker on that session, unchanged
+      by a reinstall of it), or, for a context that carries none, 0 plus one per
+      rebuild *(amended at the crawl batch's merge integration)*.
   - *(At the merge with CC-CRAWL-0059.)* A delegated candidate (FR-CRAWL-40) is in
     neither the multiset nor the markers (`fingerprint.counts_for_state`); its
     `aria-current`, if any, is read as a page-level marker, as it was before it was a
