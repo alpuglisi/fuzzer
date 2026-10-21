@@ -441,11 +441,18 @@ class HistoryWriter:
         and has no thread yet starts one here, so the run's end and the counters are
         written on the thread's connection too and nothing of the close runs on the
         loop. A writer that wrote synchronously on the caller's thread (`record`), or
-        whose store no other thread can open, is closed there, as it wrote (PA-0023)."""
+        whose store no other thread can open, is closed there, as it wrote (PA-0023);
+        so is one whose thread cannot start ("can't start new thread"): what it
+        buffered is written there, never lost to the stop (PA-0550(9))."""
         pump = self._pump
         if pump is None and self._recorder is None and not self._unsent and \
                 self._thread_path() is not None:
-            pump = self._start_pump()
+            try:
+                pump = self._start_pump()
+            except RuntimeError as exc:          # no thread: closed here, as it wrote
+                _report("warning", "history writer thread could not start at stop; "
+                        "closing on the caller's thread", error=type(exc).__name__,
+                        run_id=self.run_id)
         if pump is None:
             self.close(run_end)
             return

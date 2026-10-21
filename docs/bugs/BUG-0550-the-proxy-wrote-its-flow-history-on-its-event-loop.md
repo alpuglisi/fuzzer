@@ -460,3 +460,24 @@ recorded under CC-PROXY-0030's review-round-2 sub-bullet.
   drains the other writer's three pending flows. It fails on 4e0c2c6's `history.py`
   (the refused pump is live) in one pytest invocation on a scratch copy, and passes on
   the fixed tree (counts in CC-PROXY-0030).
+
+## Merge integration of review round 2 (coordinator, 2026-10-21)
+- **Found by:** the adversarial check of integ/proxy-r2 (1fdd618), finding P2-3's
+  neighbouring path: `HistoryWriter.aclose`, the web proxy's stop, calls `_start_pump`
+  for a writer with a file store that buffered flows with `record` and has no thread
+  yet. When the thread cannot start ("can't start new thread"), the `RuntimeError` left
+  `aclose`: 0 of 3 buffered flows written, no `run.end`, the flows lost to the stop.
+- **Defect:** HIST25's own, unpushed code (the writer thread is HIST25's); PA-0549(3c)
+  applies: fixed in the batch, not pinned.
+- **Root cause:** the same as round 2's (PA-0550(9)): a teardown path assumed the
+  resource it needs (a started thread) can always be made; round 2 fixed the exit
+  registry and the exit loop but did not sweep the other stop path that starts a thread.
+- **Corrective action:** `aclose` catches the start's `RuntimeError`, reports it
+  (`_report`, warning) and closes on the caller's thread as a writer with no thread does
+  (the buffered flows are flushed synchronously, the run's end recorded). Test
+  `tests/test_proxy_history_writer_thread.py::test_a_stop_whose_writer_thread_cannot_start_still_writes_what_it_buffered`
+  (fails on 910047a, passes after); added to PA-0550's Enforced-by line. CC-PROXY-0030.
+- **Sweep (every caller of `_start_pump`):** `submit` (raises to its caller, which counts
+  it: the engine and the Repeater, BUG-0543), `aclose` (fixed here); `close` and `flush`
+  never start a thread.
+

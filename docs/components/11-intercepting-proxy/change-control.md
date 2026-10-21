@@ -84,6 +84,14 @@ Newest first.
       writer whose close fails is added; `_close_live_pumps` must return and drain
       another writer's three pending flows. The test's own `_LIVE` keeps it from
       draining other tests' writers.
+  - *(Merge integration of review round 2, 2026-10-21; coordinator, at the merge of
+    integ/proxy-r2.)* The round-2 check found one more stop path a writer thread that
+    cannot start breaks: `HistoryWriter.aclose` (the web proxy's stop) starts the
+    thread for a writer that buffered flows with `record`, and the start's
+    `RuntimeError` left `aclose`, so the buffered flows and the run's end were never
+    written. `aclose` now catches it, reports it (`_report`, warning) and closes on the
+    caller's thread, as a writer with no thread does (PA-0550(9)). Test:
+    `tests/test_proxy_history_writer_thread.py::test_a_stop_whose_writer_thread_cannot_start_still_writes_what_it_buffered`.
 - Impact (other components / project):
   - **Callers swept** (`grep HistoryWriter` over `fuzzlab/`): `proxy/cli.py` and
     `web/proxycontrol.py::ProxyController` build `HistoryWriter(batch_size=1)` and pass
@@ -190,6 +198,10 @@ Newest first.
     passed, 10 xfailed, 0 failed, 0 skipped. The 10 xfailed include this file's
     pre-existing web-repeater pin.
   - The harness run is the orchestrator's, at merge.
+  *(Merge integration, coordinator:)* the `aclose` test fails on 910047a (the start's
+  `RuntimeError` escapes `aclose`; 0 of 3 buffered flows written) and passes with the
+  fix, run as plain Python calls of the test function (no pytest session); the stack's
+  harness run covers it.
 
 ### CC-PROXY-0029 — The upstream sender keeps exactly framed connections (FR-PROXY-405, BUG-0549) (2026-10-21)
 - Placement: pre-assigned to POOL24 (audit defect 24). CC-PROXY-0028 is AU-PROXY's, which

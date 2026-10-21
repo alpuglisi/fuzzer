@@ -444,6 +444,32 @@ def test_a_writer_thread_that_cannot_start_never_stops_the_exit_drain(tmp_path,
         good.close()
 
 
+
+def test_a_stop_whose_writer_thread_cannot_start_still_writes_what_it_buffered(tmp_path,
+                                                                             monkeypatch):
+    """Merge integration of review round 2 (P2-3's neighbour): `aclose` (the web proxy's
+    stop) starts the writer thread for a writer that buffered flows with `record`; when
+    that start raised ("can't start new thread"), the error left `aclose` and the
+    buffered flows and the run's end were never written. Wanted: the stop closes on
+    the caller's thread, as a writer with no thread does, and writes them."""
+    real_start = threading.Thread.start
+
+    def start(thread):
+        if thread.name.startswith("fuzzlab-proxy-history-"):
+            raise RuntimeError("can't start new thread")
+        return real_start(thread)
+
+    with Store(tmp_path / "s.db") as store:
+        run_id = store.start_run("proxy", "stop")
+        writer = HistoryWriter(store, run_id, batch_size=10, trace=False)
+        for i in range(3):
+            writer.record(_flow(i))                  # buffered: below the batch size
+        monkeypatch.setattr(threading.Thread, "start", start)
+        asyncio.run(writer.aclose(run_end="complete"))
+        monkeypatch.setattr(threading.Thread, "start", real_start)
+        assert _urls(store, run_id) == [f"http://127.0.0.1:9/p{i}" for i in range(3)]
+        assert writer._pump is None
+
 def test_a_writer_that_cannot_open_its_store_counts_every_flow(monkeypatch):
     reports: list[tuple] = []
     monkeypatch.setattr(hist, "_report", lambda level, msg, **kw: reports.append(

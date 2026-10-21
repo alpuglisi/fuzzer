@@ -18,6 +18,30 @@ Format per entry:
 
 ---
 
+## 2026-10-21 — intercepting proxy and the core seam (the AU-PROXY, POOL24 and HIST25 merge failed 8 tests; a kept connection could hold bytes past its answer, in the proxy and in the seam's urllib3 pool; a history failure became a 502 or a 500; BUG-0549, BUG-0543, BUG-0550)
+- **Symptom:** `scripts/verify_change.py --base 08fe6ee` on the merged 3cfd912 (d83876f adds SURROGATE only): 135 files, 4139 passed, 8 failed, each lane green on its own base. These were:
+  - four `tests/test_proxy_framing.py` tests got a 502 for a relayed 200, or no history record;
+  - `test_socketsender_pooling.py`: the connection was kept after an answer followed by bytes past its `Content-Length`;
+  - two unframeable answers raised instead of returning bytes;
+  - a stalled answer raised instead of returning `b""`.
+  The round-1 fix's adversarial check (96a6939) then measured the same keep defect in the core seam: urllib3 kept a connection whose answer was followed by a stray answer, and the next send was handed `b'stray2'`. It found the Repeater still answering 500 after a store error (`database is locked`) for a request the target had answered, and HIST25's exit drain stopped by a writer thread that never started.
+- **Root cause:**
+  - POOL24 decided "nothing after the answer" by parsing the reader's return value, which held trailing bytes only before SP-63. SP-63 keeps them in `MessageReader.leftover`, which `recv_http_response` dropped. The dependency was BUG-0549's prose residual R1.
+  - For the core seam, POOL24 handed the keep decision to urllib3 without measuring it. urllib3 returns a connection once http.client has read the answer to its framed end, and it checks only that the socket is not readable, when it takes a pooled connection again. http.client drops the bytes its buffered reader read past the end, and a TLS record can leave them in the SSL object.
+  - HIST25's `_record` and the Repeater's `send` let any exception from the history's hand-over reach the flow. AU-PROXY's test fake had no `submit`.
+  - HIST25's `_Pump` joined the exit registry before its thread started, and the exit loop did not contain one writer's failure.
+  - POOL24's tests were written against the pre-SP-63 reader's results.
+- **Remediation:**
+  - `read_http_response` returns `(response, past)`. `SocketSender._finish` keeps a connection only when `past` is empty, `reusable_response` holds and `_quiet` finds nothing waiting.
+  - SP-60's pools (`core/bodyread.py`): `_FramedResponse` notes at http.client's framed end the bytes its reader holds. `_ExactPool._put_conn` keeps a connection only when `exact_end` holds (those bytes 0; no TLS byte pending, also inside an HTTPS proxy's tunnel; the socket not readable). Otherwise it closes it there.
+  - `_record` and `Repeater.send` count a failed hand-over (`history_failures`) and never raise it. `fuzzlab proxy` prints the engine's count at stop, and the web Repeater returns `history_error` / `history_failures` beside the response.
+  - `_Pump` registers only once its thread started, and `_close_live_pumps` contains each writer's failure.
+  - `HistoryWriter.aclose` (the web proxy's stop) closes on the caller's thread when the writer thread cannot start, so what it buffered is still written (coordinator, at the merge; BUG-0550).
+  - The framing tests' fake gains `submit`. The pooling tests expect SP-63's exceptions and still assert that the connection is closed and never resent.
+  - New tests: `test_bytes_after_a_framed_answer_never_leave_its_connection_kept`, `test_a_history_failure_never_changes_the_clients_answer`, `test_a_stray_answer_held_by_tls_never_leaves_its_pooled_connection`, `test_a_history_failure_answers_the_repeaters_response_and_says_so`, `test_a_writer_thread_that_cannot_start_never_stops_the_exit_drain`. Round 1's two strict xfails (`test_an_answer_followed_by_another_never_leaves_its_pooled_connection`, `test_a_history_failure_never_loses_the_repeaters_response`) are plain passing tests.
+  - References: CC-PROXY-0029 (merge integration, review round 2), CC-CORE-0075 and CC-PROXY-0030 (review round 2), FR-CORE-509, FR-PROXY-402/404/405, BUG-0549, BUG-0543 and BUG-0550 integration and review-round-2 sections; PA-0549(3a)-(3c) and PA-0550(8)-(9) amendments below.
+- **Status:** Fixed, with stated residuals: a stray that arrives after every check is read as the next answer (any keep-alive client; BUG-0549 R8, R9). The Proxy page's script does not yet show the Repeater's `history_error`.
+
 ## 2026-10-21 — crawl (disco merged distinct states, consumed work and accepted wrong restores; BUG-0539)
 - **Symptom:** the external audit's defects 1-3, reproduced at 08e3eaa in a real browser on loopback pages:
   - a three-step wizard with one layout stopped at step 1 (the finish request never made);

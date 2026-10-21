@@ -3,6 +3,15 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0071 — The web Repeater returns its history failure beside the response (BUG-0543 review round 2, FR-PROXY-404) (2026-10-21)
+- Change: `web/proxycontrol.py::RepeaterController.send` returns `history_error` (the error class that kept this exchange out of the history, else null) and `history_failures` (the controller's count across its per-thread Repeaters, under its lock) beside `response`. `RepeaterController.__init__` gains `history_failures` (a `Counter`). Made in lane INTEG's review round 2 (integ/proxy-r2) and recorded there under CC-PROXY-0029.
+- Impact (other components / project): PROXY (`proxy/repeater.py::Repeater.send`, which contains the history hand-over, CC-PROXY-0029). The route `/api/proxy/repeater/tabs/{id}/send` answers 200 with the upstream's response when the history's write fails (it answered 500); its JSON gains two keys, and `response` is unchanged.
+- Risk (level; mitigation or accepted-risk justification): low. Not built: the Proxy page's script does not show `history_error` (it needs a real-browser test, PA-0065).
+- Deliverables:
+  - [x] the method -- done
+  - [x] tests: `tests/test_web_repeater.py::test_a_history_failure_answers_the_repeaters_response_and_says_so` -- done
+- Effectiveness (assessed 2026-10-21): the test fails on 4e0c2c6 (the store's `OperationalError` reaches the route) and passes after (lane INTEG round-2 proof and targeted runs).
+
 ### CC-UI-0070 — The in-process proxy's stop drains its flow history off the web loop (BUG-0550 review round 1, CC-PROXY-0030) (2026-10-21)
 - Change: `web/proxycontrol.py::ProxyController.stop` awaits `HistoryWriter.aclose(run_end="complete")` (CC-PROXY-0030) in place of `close` on the web loop. The writer thread's drain (up to `CLOSE_TIMEOUT`, 60 s) is awaited through a worker thread; with no flow ever proxied, the writer starts its thread for the close, so the run's end and the counters are written on that thread's own connection too. The build's comment on `batch_size=1` now says a flow is written as soon as the writer thread takes it.
 - Impact (other components / project): PROXY (`proxy/history.py::HistoryWriter.aclose`, its owner, CC-PROXY-0030). The web app's lifespan (`web/app.py`) still awaits `proxy.stop()`: shutdown takes as long as the drain, but the web loop runs meanwhile. No route, contract or store change; a stopped run still ends `complete` with its `trace_*` and `history_*` counters.
