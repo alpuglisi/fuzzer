@@ -115,17 +115,20 @@ class SocketSender:
 
     **Kept connections** (FR-PROXY-405, BUG-0549). One SSL context per sender. An
     upstream connection is left for reuse, per (host, port, TLS), only when the exchange
-    on it was exactly one well-framed HTTP/1.1 request and one fully framed HTTP/1.1
-    answer, and neither said ``Connection: close`` (`reusable_request`,
-    `reusable_response`); anything else is closed after its exchange, as before. Only a
-    request that is itself reusable and idempotent takes a kept connection, so a
-    deliberately malformed request (a desync probe) always goes on a fresh socket. A
-    kept connection is checked before use (no byte or close waiting on it, idle at most
-    ``idle_seconds``); when its peer closed it before a byte of answer, the request is
-    sent once more on a fresh connection; a timeout is never resent. At most
-    ``max_idle`` idle connections per upstream and `MAX_IDLE_TOTAL` in all are kept.
-    `close` (or collecting the sender) closes the idle ones. ``keep_alive=False``: one
-    socket per call.
+    on it was exactly one well-framed, bodiless HTTP/1.1 request and one fully framed
+    HTTP/1.1 answer, and neither said ``Connection: close`` (`reusable_request`,
+    `reusable_response`); anything else is closed after its exchange, as before. A
+    request that carries a body never leaves or takes a kept connection: whether the
+    upstream read the body cannot be observed, and one that did not (CL.0) would put
+    the body's bytes at the head of the connection's next request. Only a request that
+    is itself reusable and idempotent takes a kept connection, so a desync probe (a
+    malformed request, or a well-formed one with a body) always goes on a fresh socket,
+    closed after it. A kept connection is checked before use (no byte or close waiting
+    on it, idle at most ``idle_seconds``); when its peer closed it before any byte of
+    answer came, the request is sent once more on a fresh connection; once a byte came,
+    or on a timeout, it never is. At most ``max_idle`` idle connections per upstream and
+    `MAX_IDLE_TOTAL` in all are kept. `close` (or collecting the sender) closes the idle
+    ones. ``keep_alive=False``: one socket per call (the web Repeater's sender).
     """
 
     def __init__(self, timeout: float = 15.0, verify_tls: bool = True, *,
@@ -155,10 +158,14 @@ class SocketSender:
             sock = self._pool.take(key)
             if sock is not None:
                 started = time.monotonic()
+                counted = _Counted(sock)
                 try:
-                    resp = self._exchange(sock, raw)
+                    resp = self._exchange(counted, raw)
                 except _PEER_CLOSED:
-                    _close(sock)                 # closed under us: resend on a fresh one
+                    _close(sock)
+                    if counted.received:         # part of an answer came: never resent
+                        raise
+                    # closed under us before any byte of answer: resend on a fresh one
                 except BaseException:
                     _close(sock)
                     raise
@@ -226,6 +233,9 @@ _TOKEN = re.compile(rb"[!#$%&'*+.^_`|~0-9A-Za-z-]+")
 _HEX = re.compile(rb"[0-9A-Fa-f]{1,16}")
 #: Authentication schemes that authenticate the connection, not the request.
 _CONNECTION_AUTH = (b"ntlm", b"negotiate")
+#: Request headers that frame a body; spelled any other way (``Transfer_Encoding``) a
+#: server may still honour one, so such a request is never kept.
+_FRAMING = (b"transfer-encoding", b"content-length")
 
 
 def _close(sock) -> None:
@@ -233,6 +243,35 @@ def _close(sock) -> None:
         sock.close()
     except OSError:
         pass
+
+
+class _Counted:
+    """A kept connection for one exchange, counting the answer bytes received on it,
+    so a failure is resent only when no byte of answer came (FR-PROXY-405). It offers
+    only what the exchange uses (``sendall``, ``settimeout``, ``recv``, ``recv_into``):
+    a reader that needs anything else fails loudly here instead of reading uncounted."""
+
+    __slots__ = ("_sock", "received")
+
+    def __init__(self, sock):
+        self._sock = sock
+        self.received = 0
+
+    def sendall(self, data) -> None:
+        self._sock.sendall(data)
+
+    def settimeout(self, value) -> None:
+        self._sock.settimeout(value)
+
+    def recv(self, *args) -> bytes:
+        data = self._sock.recv(*args)
+        self.received += len(data)
+        return data
+
+    def recv_into(self, buffer, *args) -> int:
+        got = self._sock.recv_into(buffer, *args)
+        self.received += got
+        return got
 
 
 def _quiet(sock) -> bool:
@@ -382,21 +421,29 @@ def _chunked_exact(body: bytes) -> bool:
 
 
 def reusable_request(raw: bytes) -> bool:
-    """May the connection that carries ``raw`` be kept after its answer? Only for
-    exactly one well-formed HTTP/1.1 request: a token method other than HEAD or
-    CONNECT, no ``Transfer-Encoding``, ``Expect`` or ``Upgrade``, no ``Connection:
-    close``, no connection-bound authentication (NTLM, Negotiate), and a body exactly
-    its one ``Content-Length`` (none: no body). A desync probe is none of these."""
+    """May the connection that carries ``raw`` be kept after its answer (and may ``raw``
+    take a kept one)? Only for exactly one well-formed, bodiless HTTP/1.1 request: a
+    token method other than HEAD or CONNECT; no ``Transfer-Encoding``, ``Expect`` or
+    ``Upgrade``, nor a framing header spelled another way (``Transfer_Encoding``); no
+    ``Connection: close``; no connection-bound authentication (NTLM, Negotiate); and no
+    body: no body bytes and no ``Content-Length`` but ``0``. Whether an upstream read a
+    body cannot be observed, and one that ignored it (CL.0) leaves its bytes at the head
+    of the connection's next request (BUG-0549, review round 1). A desync probe is none
+    of these."""
     msg = _strict(raw)
     if msg is None:
         return False
     start, fields, body = msg
+    if body:
+        return False
     parts = start.split(b" ")
     if len(parts) != 3 or parts[2] != b"HTTP/1.1" or not _TOKEN.fullmatch(parts[0]) \
             or not parts[1] or parts[0] in (b"HEAD", b"CONNECT"):
         return False
     if not _keeps_alive(fields) or any(h in fields for h in (
             b"transfer-encoding", b"expect", b"upgrade")):
+        return False
+    if any(name.replace(b"_", b"-") in _FRAMING and b"_" in name for name in fields):
         return False
     if _connection_auth(fields.get(b"authorization", []) +
                         fields.get(b"proxy-authorization", [])):

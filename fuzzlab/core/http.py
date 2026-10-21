@@ -156,32 +156,12 @@ Transport = Callable[[str, str, Mapping[str, str], bytes | None, float], tuple[i
 
 
 # --- the default transport: pooled per (origin, identity, generation) (FR-CORE-509) -----
-#: The methods a send is retried for, once, on a fresh connection, when the reused
-#: connection it went on was closed by the peer before any answer (RFC 9110 §9.2.2:
-#: idempotent; a POST or PATCH is never replayed).
-IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "TRACE", "PUT", "DELETE"})
 #: A pooled session no send has used for this long is dropped before its next send, so
 #: a reuse rarely races a server's own idle close: Node's http server and Apache httpd
 #: both close an idle keep-alive connection after 5 s by default.
 POOL_IDLE_SECONDS = 4.0
 #: At most this many pooled sessions per transport; the least recently used goes first.
 MAX_POOLED_SESSIONS = 32
-
-_REUSE = threading.local()       # did this thread's last pooled send reuse a connection
-
-
-@functools.lru_cache(maxsize=None)
-def _reuse_noting(pool_cls):
-    """``pool_cls`` (a urllib3 connection pool class) noting, per thread, whether the
-    connection it hands out was already connected: a reused one (urllib3 closes one it
-    finds dropped before handing it out, so an open socket is a live reuse)."""
-    class ReuseNoting(pool_cls):
-        def _get_conn(self, timeout=None):
-            conn = super()._get_conn(timeout)
-            _REUSE.reused = getattr(conn, "sock", None) is not None
-            return conn
-    ReuseNoting.__name__ = ReuseNoting.__qualname__ = "ReuseNoting" + pool_cls.__name__
-    return ReuseNoting
 
 
 @functools.lru_cache(maxsize=1)
@@ -199,8 +179,7 @@ def _no_cookie_jar():
 
 
 def _new_session():
-    """A bounded (SP-60) ``requests`` session whose jar keeps nothing and whose direct
-    pools note a reused connection (`_reuse_noting`)."""
+    """A bounded (SP-60) ``requests`` session whose jar keeps nothing."""
     import requests  # imported lazily so core has no hard runtime import cost
 
     from fuzzlab.core import bodyread
@@ -208,12 +187,6 @@ def _new_session():
     if not isinstance(session, requests.sessions.Session):
         return session                       # a test's in-memory stand-in, as given
     session.cookies = _no_cookie_jar()()
-    for adapter in session.adapters.values():
-        manager = getattr(adapter, "poolmanager", None)
-        if manager is not None:
-            manager.pool_classes_by_scheme = {
-                scheme: _reuse_noting(cls)
-                for scheme, cls in manager.pool_classes_by_scheme.items()}
     return session
 
 
@@ -235,34 +208,6 @@ def _close_session(session) -> None:
         session.close()
     except Exception:                            # noqa: BLE001 - closing only
         pass
-
-
-def _peer_closed(exc: BaseException) -> bool:
-    """Did the peer close or reset the connection before any answer? (Never a timeout,
-    an incomplete body or a failed connect.)"""
-    import http.client
-    import ssl
-
-    import requests
-    if not isinstance(exc, requests.exceptions.ConnectionError) or \
-            isinstance(exc, requests.exceptions.Timeout):
-        return False                     # a body cut after its head is never retried
-    seen: set[int] = set()
-    todo: list[BaseException] = [exc]
-    while todo:
-        e = todo.pop()
-        if id(e) in seen:
-            continue
-        seen.add(id(e))
-        if isinstance(e, (http.client.RemoteDisconnected, ConnectionResetError,
-                          BrokenPipeError, ConnectionAbortedError, ssl.SSLEOFError,
-                          ssl.SSLZeroReturnError)):
-            return True
-        todo.extend(a for a in getattr(e, "args", ()) if isinstance(a, BaseException))
-        for nxt in (e.__cause__, e.__context__, getattr(e, "reason", None)):
-            if isinstance(nxt, BaseException):
-                todo.append(nxt)
-    return False
 
 
 class _Pooled:
@@ -288,17 +233,22 @@ class PooledTransport:
       retires the older ones' sessions; a send prepared on an older generation than
       the newest seen gets a session of its own, closed after it, and displaces
       nothing. ``None`` (no session applied) is its own key.
+    - **A body never shares a connection.** A send that carries body bytes goes on a
+      session of its own, closed after it: whether the target read the body cannot be
+      observed, and one that did not (CL.0) would put its bytes at the head of the next
+      request on that connection.
     - **No cookie state.** Each session's jar keeps nothing (`_no_cookie_jar`), and is
       cleared before each send: the seam sets ``Cookie`` explicitly.
     - **Lifecycle.** A retired session is closed when its last send in flight is done,
       never under one. A session idle past ``idle_seconds`` is retired before its next
       send; at most ``max_sessions`` are kept (the least recently used goes). `close`
       retires them all; a send after it gets a session of its own, closed after it.
-    - **A stale connection.** A send that went on a reused connection which the peer
-      closed or reset before any answer is sent once more on a fresh connection when
-      its method is idempotent (`IDEMPOTENT_METHODS`); otherwise the failure is raised
-      as any transport failure (SP-34). A timeout, an incomplete body or a failed
-      connect is never retried.
+    - **One try per send.** The transport never re-sends. A send that fails, on a
+      reused connection the peer closed before any answer too, raises as any transport
+      failure (SP-34), so every request the target receives is one the sender above
+      made and recorded (FR-FUZZ-61, PA-0510). urllib3 drops a pooled connection it
+      finds closed before reusing it, and the idle retirement keeps a reuse under the
+      usual 5 s server idle close.
 
     Thread-safe: the bookkeeping is under one lock, and ``requests`` sessions with no
     cookie state are shared by concurrent sends (urllib3's pools are thread-safe).
@@ -318,23 +268,11 @@ class PooledTransport:
     def __call__(self, method: str, url: str, headers: Mapping[str, str],
                  body: bytes | None, timeout: float, *, identity: str = "anonymous",
                  generation: int | None = None):
-        entry = self._checkout(url, identity, generation)
+        entry = self._checkout(url, identity, generation, own=bool(body))
         try:
-            _REUSE.reused = False
-            try:
-                return _exchange(entry.session, method, url, headers, body, timeout)
-            except Exception as exc:
-                reused = getattr(_REUSE, "reused", False)
-                if not (reused and str(method).upper() in IDEMPOTENT_METHODS
-                        and _peer_closed(exc)):
-                    raise
+            return _exchange(entry.session, method, url, headers, body, timeout)
         finally:
             self._checkin(entry)
-        session = _new_session()                         # one fresh connection
-        try:
-            return _exchange(session, method, url, headers, body, timeout)
-        finally:
-            _close_session(session)
 
     def close(self) -> None:
         """Retire every pooled session (each closed once its sends are done)."""
@@ -344,7 +282,7 @@ class PooledTransport:
         self._close_all(doomed)
 
     # -- bookkeeping, under the lock ------------------------------------------------
-    def _checkout(self, url: str, identity: str, generation) -> _Pooled:
+    def _checkout(self, url: str, identity: str, generation, *, own: bool) -> _Pooled:
         from fuzzlab.core.urls import canonical_origin
         origin = canonical_origin(url)
         doomed: list[_Pooled | None] = []
@@ -352,7 +290,8 @@ class PooledTransport:
             now = self._clock()
             entry = None
             if not self._closed and origin is not None:
-                entry = self._pooled_entry(origin, identity, generation, now, doomed)
+                entry = self._pooled_entry(origin, identity, generation, now, doomed,
+                                           own=own)
             if entry is not None:
                 entry.inflight += 1
         self._close_all(doomed)
@@ -361,7 +300,9 @@ class PooledTransport:
             entry.inflight = 1
         return entry
 
-    def _pooled_entry(self, origin, identity, generation, now, doomed):
+    def _pooled_entry(self, origin, identity, generation, now, doomed, *, own: bool):
+        """The pooled session for the key, after the generation bookkeeping (which a
+        send on a session of its own, ``own``, still does); None for such a send."""
         if isinstance(generation, int) and not isinstance(generation, bool):
             who = (origin, identity)
             newest = self._newest.get(who)
@@ -372,6 +313,8 @@ class PooledTransport:
                 doomed.extend(self._retire(key) for key in list(self._entries)
                               if key[:2] == who and isinstance(key[2], int)
                               and not isinstance(key[2], bool) and key[2] < generation)
+        if own:
+            return None                          # a send with a body: never pooled
         key = (origin, identity, generation)
         entry = self._entries.get(key)
         if entry is not None and entry.inflight == 0 and now - entry.last_used > self._idle:

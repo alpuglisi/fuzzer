@@ -30,6 +30,28 @@ Newest first.
     when the client is collected.
   - New `tests/test_http_pooling.py` (5 tests) and `tests/_keepalive_peer.py` (a loopback
     keep-alive peer); new `scripts/measure_pooling.py` (the throughput measurement).
+  - *(Review round 1.)*
+    - **One try per send (finding B2 of the POOL24 review).** The stale-connection
+      resend is removed, with `IDEMPOTENT_METHODS`, `_peer_closed`, `_REUSE` and
+      `_reuse_noting` (the override of urllib3's private `_get_conn`). The resend ran
+      below `SeamProbeSender`, so the target received a request no try recorded
+      (FR-FUZZ-61, PA-0510) and the probe's `elapsed_ms` included the failed try. A
+      re-send is the evidence producer's to make and record.
+    - **A send with a body goes on a session of its own (the PA-0002 sweep of finding
+      B1, CL.0).** `PooledTransport._checkout(..., own=bool(body))`: such a send still
+      counts for the generation rule (`_pooled_entry` does the bookkeeping and returns
+      None) and its session is closed after it. A target that answers without reading a
+      body leaves it at the head of the next request on that connection.
+    - `tools/probesender.py::SeamProbeSender._dispatch`: docstring only. "each request
+      has a fresh connection" was no longer true; it now says neither the seam nor its
+      transport re-sends (FR-CORE-509). FR-FUZZ-61 ("never re-sends, so at most one try
+      per dispatch") is true again and is unchanged. No CC-FUZZ number was pre-assigned:
+      the coordinator's entry text is in the lane's doc texts.
+    - Tests: `test_a_reused_connection_closed_before_any_answer_is_retried_once_if_idempotent`
+      becomes `test_a_reused_connection_closed_before_any_answer_is_never_resent_by_the_transport`;
+      new `test_a_send_with_a_body_never_leaves_or_takes_a_pooled_connection` and
+      `tests/test_trace_attempts.py::test_the_seams_default_transport_sends_exactly_the_tries_it_records`
+      (the server's count equals the recorded tries through the default transport).
 - Impact (other components / project):
   - Every `HttpClient` user (FUZZ's `SeamProbeSender`, blind-SQLi's `SeamSender`, AUD's
     seam fetch, `tools/authhttp.py`'s clients, isolated copies' clients) now reuses
@@ -43,6 +65,13 @@ Newest first.
     reads `Request.session_generation` (it never changes it).
   - `tools/authhttp.py` does not call `close()` (its clients are closed when collected);
     a caller that wants an explicit teardown can.
+  - *(Review round 1.)* "A stale-connection resend is the same send" above is superseded:
+    there is no resend. FUZZ: `SeamProbeSender` records one try per dispatch and the
+    target receives exactly that one; an unanswered reused connection is a recorded
+    unobserved try (SP-34). Blind-SQLi's `SeamSender` and AUD's seam fetch get the
+    transport failure as any other (`requests.RequestException`). A send with a body
+    (a form or JSON probe) pays a connect, as before the lane; bodiless sends keep their
+    pooled connection.
 - Risk (medium):
   - A reused connection the server closes between urllib3's liveness check and the
     send fails a non-idempotent send (SP-34 "not observed") where a fresh connection
@@ -57,6 +86,12 @@ Newest first.
     retried.
   - urllib3's default pool size (10 per host) is kept: more concurrent sends of one key
     open extra connections discarded after use (a warning in urllib3's log).
+  - *(Review round 1.)* Without the resend, a close that lands between urllib3's
+    dropped-connection check and the request fails that send (any method) as not
+    observed, where a fresh connection would have answered. Accepted: it is recorded
+    as what happened, the idle retirement (4 s) keeps reuses under the usual 5 s server
+    idle close, and urllib3 drops a connection already closed. The `_get_conn` private-API
+    risk above is gone with `_reuse_noting`.
 - Deliverables:
   - [x] `PooledTransport`, `HttpClient.close` and the keyed call in `core/http.py` — done
   - [x] `tests/test_http_pooling.py`: one connection for sequential and concurrent sends;
@@ -69,10 +104,16 @@ Newest first.
   - [x] Measurement (`scripts/measure_pooling.py`), numbers in BUG-0549 — done
   - [x] Shared-doc texts (CHANGELOG, ERROR_LOG, PA-0549, ARCHITECTURE, F-1XX) handed to the
     coordinator — done
+  - [x] *(Review round 1)* the transport's resend removed and a body never pooled, each
+    with a test that failed on 093685e (one run); FR-CORE-509 and FR-CORE-536 corrected
+    in place; the doc texts updated — done
 - Effectiveness (assessed 2026-10-21): on loopback, 2 000 plain sends used 8 connections
   instead of 2 000; sequential sends/s 549 -> 1 065, 8-thread 397 -> 722; over TLS 20 ->
   959 sequential (two measured pairs agree; BUG-0549 has both, and the TLS phase
-  breakdown). The harness result is in this lane's report.
+  breakdown). The harness result is in this lane's report. *(Review round 1:)* the
+  reviewer's `attempts_demo.py` on the fixed tree: the server received 2 requests and 2
+  tries were recorded, the unanswered one as `unobserved` (was 3 received, 2 recorded).
+  The measured numbers are for bodiless GETs and stand.
 
 ### CC-CORE-0072 — One bounded reader of a target's HTTP body (SP-60, FR-CORE-536, BUG-0536) (2026-10-20)
 - Placement: pre-assigned to AU-BOUNDED (audit defect 21); CC-CORE-0070 and CC-CORE-0071

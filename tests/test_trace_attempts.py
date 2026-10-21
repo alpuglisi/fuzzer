@@ -374,6 +374,34 @@ def test_the_seams_reset_in_its_transport_is_an_unobserved_attempt():
     assert _shape(info.value.attempts) == [(1, "unobserved", None)]
 
 
+def test_the_seams_default_transport_sends_exactly_the_tries_it_records():
+    """BUG-0549 review round 1 (PA-0510(2)): through the seam's default, pooled
+    transport against a keep-alive peer that closes a connection unanswered at its
+    second request. The transport resent that probe below the sender, so the server got
+    a request no try recorded. Wanted: the requests the server received equal the
+    recorded tries, and the unanswered one is an unobserved try."""
+    from tests._keepalive_peer import KeepAlivePeer, echo
+
+    def reply(conn, k, req):
+        return None if k == 1 else echo(conn, k, req)
+
+    with KeepAlivePeer(reply) as peer:
+        client = HttpClient(RequestBudget(100), ["127.0.0.1"], timeout=5)
+        try:
+            sender = SeamProbeSender(client)
+            tries = []
+            for value in ("a", "b", "c"):
+                try:
+                    tries += sender.send(peer.url + "/p", "q", value).attempts
+                except ProbeUnobserved as exc:
+                    tries += exc.attempts
+            assert len(peer.seen) == len(tries) == 3
+            assert _shape(tries) == [(1, "response", 200), (1, "unobserved", None),
+                                     (1, "response", 200)]
+        finally:
+            client.close()
+
+
 def test_the_seams_timeout_still_raises_and_carries_its_attempt():
     def transport(method, url, headers, body, timeout):
         raise requests.ReadTimeout()

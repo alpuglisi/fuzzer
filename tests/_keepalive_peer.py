@@ -5,9 +5,12 @@ connection on its own thread and answers every request on it until the client cl
 so a test can see which connection each request came on and when the client closed a
 connection. ``reply(conn, k, req)`` returns the bytes to answer the ``k``-th request
 (from 0) of connection ``conn`` (from 1) with, a one-tuple ``(bytes,)`` to answer and
-then close, or None to close that connection without an answer; it may block (a test
-holding an answer). ``req`` is a `Seen`. With
-``tls`` (an ``ssl.SSLContext``) the peer completes a TLS handshake per connection first.
+then close, a `Reset` to write part of an answer (or nothing) and reset the connection,
+or None to close that connection without an answer; it may block (a test holding an
+answer). ``req`` is a `Seen`. With ``tls`` (an ``ssl.SSLContext``) the peer completes a
+TLS handshake per connection first. With ``unread_body`` (a predicate on the request's
+head, a `Seen` with no body) the peer answers such a request without reading its body,
+which then stays at the head of the connection's next request: a CL.0 server.
 
 Everything recorded is the test's own traffic: the peer is started by the test and
 nothing else connects to it (PA-0150).
@@ -17,6 +20,7 @@ from __future__ import annotations
 
 import socket
 import ssl
+import struct
 import threading
 import time
 from dataclasses import dataclass, field
@@ -32,6 +36,13 @@ class Seen:
     body: bytes = b""
 
 
+@dataclass(frozen=True)
+class Reset:
+    """A reply: write ``sent`` (part of an answer, or nothing), then reset the
+    connection (``SO_LINGER`` 0), as a crashing worker does."""
+    sent: bytes = b""
+
+
 def ok(body: bytes = b"ok", *extra: str) -> bytes:
     """A well-framed HTTP/1.1 200 answer with ``Content-Length``."""
     head = ["HTTP/1.1 200 OK", f"Content-Length: {len(body)}", *extra]
@@ -44,9 +55,11 @@ def echo(conn: int, k: int, req: Seen) -> bytes:
 
 
 class KeepAlivePeer:
-    def __init__(self, reply=echo, *, tls: ssl.SSLContext | None = None):
+    def __init__(self, reply=echo, *, tls: ssl.SSLContext | None = None,
+                 unread_body=None):
         self.reply = reply
         self._tls = tls
+        self._unread_body = unread_body
         self._cond = threading.Condition()
         self.seen: list[Seen] = []
         self.connections = 0
@@ -86,7 +99,7 @@ class KeepAlivePeer:
             buf = b""
             k = 0
             while True:
-                req, buf = self._read_request(conn, buf, n, k)
+                req, buf = self._read_request(conn, buf, n, k, self._unread_body)
                 if req is None:
                     break
                 with self._cond:
@@ -99,6 +112,12 @@ class KeepAlivePeer:
                     answer = answer[0]                   # (bytes, ...): close after it
                 if answer is None:
                     break
+                if isinstance(answer, Reset):
+                    if answer.sent:
+                        conn.sendall(answer.sent)
+                    conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER,
+                                    struct.pack("ii", 1, 0))
+                    break                                # the close below resets it
                 conn.sendall(answer)
                 if close_after:
                     break
@@ -114,7 +133,7 @@ class KeepAlivePeer:
                 self._cond.notify_all()
 
     @staticmethod
-    def _read_request(conn, buf: bytes, n: int, k: int):
+    def _read_request(conn, buf: bytes, n: int, k: int, unread_body=None):
         while b"\r\n\r\n" not in buf:
             data = conn.recv(65536)
             if not data:
@@ -127,6 +146,8 @@ class KeepAlivePeer:
         for line in lines[1:]:
             name, _, value = line.partition(":")
             headers.setdefault(name.strip().lower(), value.strip())
+        if unread_body is not None and unread_body(Seen(n, k, method, path, headers)):
+            return Seen(n, k, method, path, headers), buf    # the body left unread
         if "chunked" in headers.get("transfer-encoding", "").lower():
             while b"0\r\n\r\n" not in buf:
                 data = conn.recv(65536)

@@ -5,9 +5,9 @@
 setup. It now keeps one pooled, bounded session per (origin, identity, session
 generation): never a connection or a cookie jar shared across identities or
 generations, the pool of a replaced generation dropped once its last send is done, every
-pool dropped at `HttpClient.close` (or when the client is collected), and a send that a
-reused connection's peer closed before any answer retried once on a fresh connection
-for an idempotent method only.
+pool dropped at `HttpClient.close` (or when the client is collected). Review round 1: the
+transport never re-sends (each try is the sender's to make and record, FR-FUZZ-61), and
+a send with a body never leaves or takes a pooled connection (CL.0).
 
 Every test drives the real seam against a loopback keep-alive peer (`_keepalive_peer`)
 and reads which connection each request came on there; nothing is timed (PA-0135).
@@ -164,10 +164,12 @@ def test_a_generation_change_never_closes_a_send_still_in_flight():
             client.close()
 
 
-def test_a_reused_connection_closed_before_any_answer_is_retried_once_if_idempotent():
-    """The peer closes a connection when its second request arrives, with no answer
-    (an idle connection's close racing a reuse). A GET is retried once on a fresh
-    connection; a POST is never replayed: it fails as a transport failure, sent once."""
+def test_a_reused_connection_closed_before_any_answer_is_never_resent_by_the_transport():
+    """Review round 1 (FR-FUZZ-61, PA-0510): the transport resent a GET whose reused
+    connection the peer closed unanswered, below the sender that records each try, so
+    the target got two requests for one recorded try. Wanted: one try per send. The
+    failure raises as any transport failure (SP-34); the next send goes on a new
+    connection."""
     def reply(conn, k, req):
         return None if k == 1 else echo(conn, k, req)
 
@@ -175,15 +177,38 @@ def test_a_reused_connection_closed_before_any_answer_is_retried_once_if_idempot
         client = _client()
         try:
             assert _get(client, peer, "/1").body == b"/1"
-            assert _get(client, peer, "/2").body == b"/2"
-            assert [s.path for s in peer.seen] == ["/1", "/2", "/2"]
-            first, retried = peer.conn_of("/2")
-            assert first == peer.conn_of("/1")[0] and retried != first
-            assert _get(client, peer, "/3").body == b"/3"
             with pytest.raises(requests.exceptions.ConnectionError):
-                _get(client, peer, "/4", method="POST", body=b"x=1")
-            assert peer.conn_of("/4") == peer.conn_of("/3")
-            assert [s.path for s in peer.seen] == ["/1", "/2", "/2", "/3", "/4"]
+                _get(client, peer, "/2")
+            assert [s.path for s in peer.seen] == ["/1", "/2"]
+            assert peer.conn_of("/2") == peer.conn_of("/1")
+            assert _get(client, peer, "/3").body == b"/3"
+            assert peer.conn_of("/3")[0] != peer.conn_of("/1")[0]
+            assert [s.path for s in peer.seen] == ["/1", "/2", "/3"]
+        finally:
+            client.close()
+
+
+def test_a_send_with_a_body_never_leaves_or_takes_a_pooled_connection():
+    """Review round 1 (CL.0; the PA-0002 sweep of the proxy sender's defect): a target
+    that answers without reading a request's body leaves it at the head of the next
+    request on that connection, so the next send of that identity completes a smuggled
+    request and gets its answer. Whether a target read a body cannot be observed.
+    Wanted: a send with a body goes on a connection of its own, closed after it; the
+    pooled connection of bodiless sends is untouched."""
+    smuggled = b"GET /smuggled HTTP/1.1\r\nX-Ignore: x"
+    with KeepAlivePeer(unread_body=lambda req: req.path == "/static") as peer:
+        client = _client()
+        try:
+            assert _get(client, peer, "/warm").body == b"/warm"
+            warm = peer.conn_of("/warm")[0]
+            assert _get(client, peer, "/static", method="POST",
+                        body=smuggled).body == b"/static"
+            post = peer.conn_of("/static")[0]
+            assert post != warm
+            assert _get(client, peer, "/next").body == b"/next"
+            assert peer.conn_of("/next") == [warm]
+            assert "/smuggled" not in [s.path for s in peer.seen]
+            assert peer.wait(lambda p: post in p.closed) and warm not in peer.closed
         finally:
             client.close()
 

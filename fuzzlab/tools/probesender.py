@@ -849,10 +849,10 @@ class SeamProbeSender(_ExplicitAllowance):
         breaker's bookkeeping attributes what it observes to that probe (a PRG
         follow-up is part of its probe, FR-FUZZ-49).
 
-        The seam makes one try per dispatch (it never re-sends: each request has a
-        fresh connection, BUG-0147). That try is recorded (FR-FUZZ-61) when it reached
-        the transport: an error in the session's ``prepare`` (a login on the way) is no
-        try of this request."""
+        The seam makes one try per dispatch (it never re-sends, BUG-0147, and neither
+        does its transport, FR-CORE-509). That try is recorded (FR-FUZZ-61) when it
+        reached the transport: an error in the session's ``prepare`` (a login on the
+        way) is no try of this request."""
         main = identity != "anonymous" and identity == self._identity
         if main and location == "header":
             self._copies_at_header = self._copy_logins()

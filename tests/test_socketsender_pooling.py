@@ -3,11 +3,13 @@ audit defect 24).
 
 `SocketSender` opened a socket per call, and for TLS built a fresh SSL context and did a
 full handshake per call. It now leaves an upstream connection for reuse only when the
-exchange on it was exactly one well-framed HTTP/1.1 request and one fully framed
-answer, and neither side said ``Connection: close``. A deliberately malformed request (a
-desync probe) never rides a pooled connection and its connection is closed after it.
-Only an idempotent request takes a pooled connection; one whose peer closed it before a
-byte of answer is retried once on a fresh connection, and a timeout never is.
+exchange on it was exactly one well-framed, bodiless HTTP/1.1 request and one fully
+framed answer, and neither side said ``Connection: close``. A desync probe (a malformed
+request, or a well-formed one with a body an upstream may leave unread: CL.0) never
+rides a pooled connection and its connection is closed after it. Only an idempotent
+request takes a pooled connection; one whose peer closed it before any byte of answer
+is retried once on a fresh connection, and one that got part of an answer, or timed
+out, never is (review round 1).
 
 Every test drives the real sender against a loopback keep-alive peer
 (`_keepalive_peer`) and reads which connection each request came on there; nothing is
@@ -23,7 +25,7 @@ import threading
 import pytest
 
 from fuzzlab.proxy.socketsender import SocketSender
-from tests._keepalive_peer import KeepAlivePeer, echo, ok
+from tests._keepalive_peer import KeepAlivePeer, Reset, echo, ok
 
 
 def _get(path: str, *extra: str, method: str = "GET", body: bytes = b"") -> bytes:
@@ -89,6 +91,10 @@ NOT_FRAMED = [
      b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n", False),
     ("a request with connection-bound auth", _get("/case", "Authorization: NTLM TlRM"),
      ok(), False),
+    # review round 1: whether the upstream read a body cannot be observed (CL.0)
+    ("a GET with a body", _get("/case", body=b"x=1"), ok(), False),
+    ("a framing header spelled with an underscore",
+     _get("/case", "Transfer_Encoding: chunked"), ok(), False),
 ]
 
 
@@ -122,8 +128,9 @@ def test_an_exchange_that_is_not_exactly_framed_never_leaves_its_connection(
 def test_a_stale_pooled_connection_is_retried_once_and_a_timeout_never():
     """The peer closes a connection when its second request arrives, with no answer
     (an idle close racing a reuse): the GET is retried once on a fresh connection. A
-    POST never takes a pooled connection. An answer that times out on a reused
-    connection is never resent."""
+    POST never takes a pooled connection, and one with a body never leaves its own
+    either (review round 1). An answer that times out on a reused connection is never
+    resent."""
     hold = threading.Event()
 
     def reply(conn, k, req):
@@ -142,11 +149,66 @@ def test_a_stale_pooled_connection_is_retried_once_and_a_timeout_never():
             assert _send(sender, peer, _get("/3", method="POST", body=b"x=1")) == ok(b"/3")
             post = peer.conn_of("/3")[0]
             assert post not in (first, retried)
+            assert peer.wait(lambda p: post in p.closed)     # a body: never kept
             assert _send(sender, peer, _get("/silent")) == b""
-            assert peer.conn_of("/silent") in ([post], [retried])
+            assert peer.conn_of("/silent") == [retried]
             assert [s.path for s in peer.seen] == ["/1", "/2", "/2", "/3", "/silent"]
         finally:
             hold.set()
+            sender.close()
+
+
+def test_a_body_the_upstream_leaves_unread_never_reaches_the_next_request():
+    """Review round 1 (CL.0): the upstream answers ``POST /static`` without reading its
+    body, which is a request prefix. The POST's connection was kept and the next request,
+    another identity's, completed the smuggled one: its request line and ``Cookie`` were
+    absorbed and it got the smuggled answer. Wanted: a request with a body is never kept
+    (whether the upstream read the body cannot be observed), so the next request arrives
+    on a new connection, intact, and gets its own answer."""
+    smuggled = b"GET /smuggled HTTP/1.1\r\nX-Ignore: x"
+    with KeepAlivePeer(unread_body=lambda req: req.path == "/static") as peer:
+        sender = SocketSender(timeout=5)
+        try:
+            probe = _get("/static", "Cookie: sid=attacker", method="POST", body=smuggled)
+            assert _send(sender, peer, probe) == ok(b"/static")
+            victim = _get("/me", "Cookie: sid=victim")
+            assert _send(sender, peer, victim) == ok(b"/me")
+            post = peer.conn_of("/static")[0]
+            (me,) = [s for s in peer.seen if s.path == "/me"]
+            assert me.conn != post and me.method == "GET"
+            assert me.headers.get("cookie") == "sid=victim" and "x-ignore" not in me.headers
+            assert "/smuggled" not in [s.path for s in peer.seen]
+            assert peer.wait(lambda p: post in p.closed)
+        finally:
+            sender.close()
+
+
+def test_a_kept_connection_reset_after_part_of_its_answer_is_never_resent():
+    """Review round 1: the stale-connection rule resends only when no byte of answer
+    came. The upstream writes part of a status line for the second request on a kept
+    connection and resets: the call raises, the upstream saw that request once, and the
+    connection is not used again. A reset before any byte is still resent once."""
+    def reply(conn, k, req):
+        if req.path == "/partial" and k == 1:
+            return Reset(b"HTTP/1.1 500 Internal Server Er")
+        if req.path == "/none" and k == 1:
+            return Reset()
+        return echo(conn, k, req)
+
+    with KeepAlivePeer(reply) as peer:
+        sender = SocketSender(timeout=5)
+        try:
+            assert _send(sender, peer, _get("/1")) == ok(b"/1")
+            kept = peer.conn_of("/1")[0]
+            with pytest.raises(ConnectionResetError):
+                _send(sender, peer, _get("/partial"))
+            assert peer.conn_of("/partial") == [kept]
+            assert _send(sender, peer, _get("/2")) == ok(b"/2")
+            fresh = peer.conn_of("/2")[0]
+            assert fresh != kept
+            assert _send(sender, peer, _get("/none")) == ok(b"/none")
+            assert peer.conn_of("/none")[0] == fresh and len(peer.conn_of("/none")) == 2
+        finally:
             sender.close()
 
 
