@@ -4,7 +4,11 @@ The proxy is a child process tree owned through `procutil` (SP-22, SP-31): start
 free loopback port, ready only once its own process listens there, checked loopback-only
 right after boot (PA-0130), and stopped as a group. mitmdump flushes the recorder on
 its shutdown hook, so a normal stop loses nothing; records are flushed one by one, so
-an abrupt one loses at most the record being written.
+an abrupt one loses at most the record being written. The recorder's writer builds the
+records off the proxy's loop and may be behind the browser when the stop comes
+(BUG-0548), so the stop grants mitmdump `STOP_GRACE_S` -- more than the recorder's
+drain (`recorder.DRAIN_TIMEOUT_S`) -- before a kill; what is still unwritten then is
+counted in the stats, never lost silently.
 
 **One capture per run (PA-0450).** The capture file must not exist yet: a discovery run
 never appends to, or is credited with, a file an earlier run left behind.
@@ -23,6 +27,9 @@ from fuzzlab.core.urls import origin_scope
 
 #: How long the proxy may take to listen.
 BOOT_TIMEOUT_S = 60.0
+#: How long a stop lets mitmdump shut down (the recorder's drain and its stats) before
+#: the supervisor kills it: `recorder.DRAIN_TIMEOUT_S` (30 s) and a margin.
+STOP_GRACE_S = 45.0
 
 
 class CaptureExists(FileExistsError):
@@ -71,6 +78,7 @@ class CaptureProxy:
                 lambda port: [sys.executable, "-m", "fuzzlab.disco.mitm",
                               "--listen-host", "127.0.0.1", "--port", str(port),
                               *self.options()], boot_timeout=BOOT_TIMEOUT_S,
+                grace=STOP_GRACE_S,
                 env_for=lambda port: capture_env(), stdout=self._log, stderr=self._log)
             procutil.assert_loopback_only(h)
         except BaseException:

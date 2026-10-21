@@ -631,7 +631,10 @@ fuzzer.
     (`x-disco-action`) and the auth profile -- redacted at the write through
     `core.redaction` (`redact_url`, `redact_body` failing closed, every sensitively named
     header's value replaced); identifier values are kept; a body is cut at 200 000
-    characters only after redaction, and marked truncated. `read_capture` types every
+    characters only after redaction, and marked truncated. The record is built off the
+    proxy's event loop, by the recorder's writer (`build_record`), from what a hook
+    took (`snapshot`); a body not captured whole is recorded as none, marked truncated
+    (FR-CRAWL-38). `read_capture` types every
     line and quarantines (counts) a malformed one. The line cap (`MAX_LINE_BYTES`) holds
     while a line is read (`JsonlTail`, CC-CRAWL-0054, BUG-0536).
     - Once the held part of a line passes the cap, the line is quarantined once
@@ -930,6 +933,49 @@ fuzzer.
     `script_segments.json`), before any side effect and with `--dry-run` too. Order:
     scope URLs, run files, storage state, store, `--dry-run` (which names the trace),
     `--authorized`, workers.
+- **FR-CRAWL-38 (the capture proxy's work is off its event loop: bounded, paced,
+  counted; CC-CRAWL-0058, BUG-0548)**
+  mitmproxy runs the recorder's hooks on the one loop that carries every browser
+  request.
+  - **A hook only takes the exchange** (`capture.snapshot`): the scope check, then the
+    header pairs and each body as sent (`raw_content`, content-coded), by reference, in
+    time that does not depend on the bodies. The recorder's one writer thread builds
+    the record (`capture.build_record`): each body decoded through SP-60
+    (`bodyread.read_body`) under `MAX_CAPTURE_BODY_BYTES` (8 MiB), then `make_record`,
+    the JSON, the append and flush. Records keep their order (one writer, one FIFO
+    line). A failure there is logged and counted, and the writer goes on.
+    - Enforced by an AST guard (`tests/test_capture_hook_guard.py`): no per-flow hook
+      of a `fuzzlab` mitmproxy addon reaches body or record work (decoding, redaction,
+      building, serialising, writing, or a message's decoded `.content`/`.text`).
+  - **A body is captured whole or not at all.** A body over the ceiling as sent is
+    never held (`omitted.too_large`). One over it once decoded, in a coding with no
+    bounded decoder, or corrupt is `omitted.undecodable`. Either way the record has no
+    body and says `*_truncated` (PA-0455). Each request's `Accept-Encoding` is narrowed
+    to what SP-60 can bound (`bodyread.advertise`; Chromium asks for `zstd` too,
+    measured).
+  - **The queue is bounded by records (`QUEUE_MAX`, 10 000) and bytes held
+    (`QUEUE_MAX_BYTES`, 32 MiB), with backpressure.**
+    - An exchange that does not fit waits. Its hook returns an awaitable that
+      mitmproxy awaits, so that flow -- and every exchange after it, to keep the
+      order -- is held back while the loop runs on (`waited`).
+    - After `BACKPRESSURE_WAIT_S` (30 s) it is queued without its bodies
+      (`omitted.backlog`), or dropped when even that does not fit (`dropped`).
+    - A waiting exchange whose flow is cancelled is `dropped`. At shutdown the line
+      is handed to the writer: its exchanges are complete.
+  - **Shutdown drains.** The recorder waits `DRAIN_TIMEOUT_S` (30 s) in all for its
+    writer. The capture proxy's stop grants mitmdump `proxyproc.STOP_GRACE_S` (45 s)
+    before a kill. What is still unwritten is `queued` in the final stats.
+  - **The GIL.** The writer's work holds the GIL, so mitmdump's process switches
+    threads every `SWITCH_INTERVAL_S` (1 ms), not CPython's 5 ms.
+  - **Measured (BUG-0548)** on a loopback page firing fetches through a real mitmdump
+    and Chromium, before and after back to back under the same host load:
+    - 1500 x 64 KiB gzip JSON: response hook median 7.44 -> 0.17 ms, and its total
+      time on the loop 13.1 -> 0.44 s. Loop lag p99 67.8 -> 38.9 ms. Page 71.7 -> 85.9
+      requests/s. Nothing lost.
+    - 200 x 1 MiB: hook median 104 -> 0.19 ms. Loop lag p99 467 -> 18.3 ms. Page
+      8.4 -> 10.7 requests/s, paced to the writer (7.4 records/s). All 201 records
+      written whole.
+    - A repeat pair under heavier load agrees (BUG-0548's table).
 
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default
@@ -1123,7 +1169,8 @@ An old spider DB has no such table (the importer treats it as none).
   `res_headers`, `res_ctype`, `res_body`, `res_truncated`, `latency_ms`,
   `ws_direction`. Redacted at the write; written only by `disco.capture.make_record`,
   read only by `disco.capture.read_capture`.
-- `<run>/capture.jsonl.stats.json` (refusals per host, recorded, dropped),
+- `<run>/capture.jsonl.stats.json` (refusals per host `blocked`, `recorded`, `dropped`,
+  `omitted` {`too_large`, `backlog`, `undecodable`}, `waited`, `queued`; FR-CRAWL-38),
   `<run>/actions.jsonl` (one line per UI action), `<run>/explore.json` (the report).
 - The inventory: an OpenAPI 3.1 document whose operations carry `x-disco`
   (`origin`, `method`, `content_type_family`, `observed`, `samples`, `actions`,
