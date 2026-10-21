@@ -3,6 +3,101 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0057 — Captured requests are kept per API operation: selectors in the key, nothing a request adds dropped (FR-CRAWL-37, BUG-0546, audit defect 9) (2026-10-21)
+- Placement: pre-assigned to lane SPIDER9 (item AU-REQID78), base c483dc1; this lane's
+  lines of `tools/spider.py` are `StorageManager.record_request` (plus the two-line
+  schema comment in `_init_db` that described the old signature). Implemented first
+  (PA-0541(1)); no design draft.
+- Change:
+  - **`fuzzlab/tools/apiop.py` (new, CRAWL).** The API operation of a captured request
+    and what it adds:
+    - `operation_key(method, url, media, doc)`: JSON `[method, url_key(url), media
+      type, operation selectors]`;
+    - `operation_selectors`: in the body at any depth and in the query, a GraphQL
+      operation (`graphql_operations`: type, name and root fields of the operation
+      `operationName` selects, aliases resolved, fragments expanded, a linear token
+      scanner capped at 20000 tokens and 16 operations, an over-cap document told by
+      the digest of its whitespace-folded text) and the value of a dispatcher field
+      (`SELECTOR_NAMES`: action, act, op, operation, operationName, cmd, command, do,
+      task, func, function, method, _method) when it is a token of at most 64
+      characters or an integer; at most 64 selectors;
+    - `request_shape`: typed key paths at every depth (array elements as one
+      position) plus query parameter names; `operation_schema`: the union of an
+      operation's stored rows' shapes; `row_signature`: the operation plus the sha256
+      of the row's shape; `signature_prefix`: the operation's prefix of every row
+      signature; `MAX_CONTEXT_ROWS` = 32.
+  - **`StorageManager.record_request`.** After the unchanged redaction (both
+    redactors at the write, probe markers scrubbed), it reads the operation's stored
+    rows (`substr(signature, 1, len(prefix)) = prefix`, exact and case-sensitive). It
+    returns `duplicate` when a row has the request's exact shape (its `row_signature`);
+    "operation over its context cap" when the operation has 32 rows and the shape adds
+    no key path or type to their merged schema (`operation_schema`); else it inserts the
+    request's own body. A request that adds an input is never capped. Callers are
+    unchanged (`None` = stored).
+  - **Not done as asked, and why (flagged to the orchestrator).** The task said nested
+    schemas are "MERGED". They are merged as the comparison basis (`operation_schema`);
+    bodies are not merged into one stored row, because the importer judges a body as a
+    whole (measured 2026-10-21 with `store_adapter.captured_request`: `{"q":"shoes"}`
+    imports, `{"q":"shoes","sort":"price"}` is refused as a settings field; two
+    40-leaf bodies merge to 80 leaves, over `jsonbody.MAX_LEAVES`). A merged row would
+    have refused operations that import today.
+  - **Sweep (PA-0002).** Two instances in other items' code are pinned by strict
+    xfails (PA-0531(4)) in `tests/test_captured_operations.py`: `record_form` keys a
+    form by action, method and control names (owner lane SPIDER); `disco.synth` keys an
+    endpoint without selectors (owner disco synth). Recorded as known gaps in
+    FR-CRAWL-37 (PA-0505(2)).
+- Impact (other components / project):
+  - **Store contract (spider DB, `discovered_requests`; PA-0152 consumers from the
+    code: `tools/store_adapter._import_requests`/`captured_request`,
+    `tools/observe.observe_spider`, `scripts/crawl_maze_score.requested_spider`).**
+    The columns are unchanged. `signature`'s form changes (no consumer reads it). A row
+    is now one representative of an operation (one per distinct typed shape): each is
+    still one real redacted body, so every consumer's reading of a row is unchanged.
+    The new duplicate test is strictly finer than the old one (equal shapes imply equal
+    top-level keys), so no request the old writer stored is dropped now, except one
+    that adds no input past its operation's 32nd row; there are more rows for a
+    dispatcher endpoint, a nested or type difference, a media type or a query name.
+    AUD's importer gets the added operations and inputs as form rows and points; its
+    parameters are still first-wins per endpoint and name (audit defect 8, another
+    lane).
+  - An older spider DB keeps its rows; a resumed crawl's new rows never match an old
+    signature, so they are stored beside the old ones (no loss).
+  - `tools/spider.py`: only `record_request` and the `_init_db` comment changed; the
+    callers `_observe` and `_record_dry` read the same return values.
+- Risk (level; mitigation or accepted-risk justification): medium.
+  - A data field named like a selector splits rows. Accepted: a split costs a row and
+    is imported, never an input; a value with whitespace is data.
+  - Row growth: one row per distinct typed shape of an operation, bounded by the
+    crawl's captures as before; rows that add no input are capped at 32 per operation
+    (counted and logged beyond). A request that adds an input is never refused.
+  - GraphQL parsing of target text: a linear scanner with token, operation, root-field
+    and fragment-depth caps; no backtracking regex.
+- Deliverables:
+  - [x] `tools/apiop.py` and the `record_request` change — done
+  - [x] `tests/test_captured_operations.py` (each defect test fails on c483dc1's
+    `spider.py`; the AST guard with synthetic offenders; two strict xfails) and
+    `tests/test_spa_capture.py`'s signature expectation — done
+  - [x] FR-CRAWL-37 and §5's `discovered_requests` contract edited in place — done
+  - [x] BUG-0546; PA-0546, ERROR_LOG, CHANGELOG, ARCHITECTURE and failure-record texts
+    for the orchestrator (lane doc texts) — done
+  - [x] the harness run on the committed tree (`verify_change.py --base c483dc1`) —
+    done; its counts are in the lane report to the orchestrator (this entry is
+    committed with the tree it verified)
+- Effectiveness (assessed 2026-10-21): achieved for the defect's scenarios.
+  - Pre-fix proof: the new tests run once against c483dc1's `tools/spider.py` (a scratch
+    copy of the tree, `apiop.py` present; a plain-Python driver calling the test
+    functions, not pytest, while the host's pytest lock was queued by other lanes;
+    the pytest verification is the harness run): 10 of the 11 non-xfail tests fail at the
+    asserted request (`{"data":{"cmd":"x"}}`, the second GraphQL operation, the second
+    JSON-RPC method, `?action=search`, the form body beside the JSON one, the over-cap
+    GraphQL document, the context cap, the row signature, and the guard on the real
+    writer); the guard's synthetic-offender test is test-only and passes on both; the
+    two strict xfails stay xfailed.
+  - On this tree every one of them passes, and `tests/test_spa_capture.py`'s
+    write-site tests pass with the new signature.
+  - Not measured on a live application: no lab run was in scope (the change is in the
+    write site, exercised directly).
+
 ### CC-CRAWL-0054 — The JSONL tail caps a line while reading it; the contract runner reads bounded and matches contract patterns in a killable worker (BUG-0536) (2026-10-20)
 - Placement: pre-assigned to AU-BOUNDED (audit defects 23 and 27, with the disco and
   spider half of 21); the core reader is CC-CORE-0072, the senders CC-FUZZ-0109.

@@ -1,6 +1,6 @@
 # Crawler / Spider — Requirement Specification
 
-Component code: **CRAWL** · Status: `[built; to harden]` · Last updated: 2026-10-17
+Component code: **CRAWL** · Status: `[built; to harden]` · Last updated: 2026-10-21
 
 Related: `ARCHITECTURE.md` #4; `DECISIONS_AND_ROADMAP.md` (D5, D6, Phase 2);
 `./change-control.md`.
@@ -930,6 +930,54 @@ fuzzer.
     `script_segments.json`), before any side effect and with `--dry-run` too. Order:
     scope URLs, run files, storage state, store, `--dry-run` (which names the trace),
     `--authorized`, workers.
+- **FR-CRAWL-37 (captured requests kept per API operation, CC-CRAWL-0057, BUG-0546,
+  audit defect 9)** The spider's capture writer (`StorageManager.record_request`, the
+  one writer of `discovered_requests`) keys every row through `tools/apiop.py`:
+  - **The operation** (`apiop.operation_key`): two captured requests are one API
+    operation only when their method, canonical origin and path (`core.urls.url_key`;
+    an exact path, never coarser than its template), media type and every **operation
+    selector** match. The selectors (`apiop.operation_selectors`), in the body at any
+    depth and in the query:
+    - a GraphQL document's operation (type, name and root fields, for the operation
+      `operationName` selects; aliases resolved, fragments expanded; read by a linear
+      scanner, at most 20000 tokens and 16 operations; a longer document is told by the
+      digest of its whitespace-folded text; a `query` string that is no executable
+      document, such as search text, selects nothing);
+    - the value of a dispatcher field: `action`, `act`, `op`, `operation`,
+      `operationName`, `cmd`, `command`, `do`, `task`, `func`, `function`, `method`
+      (JSON-RPC), `_method` (a method override), compared lower-cased, when the value is
+      a token (at most 64 characters, no whitespace) or an integer. A field so named
+      whose value is not one is data. Misjudging a data field costs a row, never an
+      input.
+  - **What a request adds** (`apiop.request_shape`, `apiop.operation_schema`): a
+    request's shape is its typed key paths, every position of its body at every depth
+    with the JSON type found there (array elements as one position), and each query
+    parameter name. An operation's merged schema is the union of its stored rows'
+    shapes. Every stored row is one real redacted body the application sent:
+    - a request whose exact shape a row of its operation already has is a `duplicate`;
+    - one whose shape adds a key path or a type, at any depth, to the merged schema is
+      always stored: no input a captured request carried is dropped;
+    - one that only combines known inputs differently (another context) is stored
+      while the operation has fewer than 32 rows (`apiop.MAX_CONTEXT_ROWS`), then not
+      recorded: counted in `requests_not_recorded` and logged as "operation over its
+      context cap".
+
+    Bodies are never merged into one row: the importer judges a body as a whole
+    (FR-AUD-22's refusals, `jsonbody.MAX_LEAVES`), so a merged body would be refused
+    for a field another request carried (measured 2026-10-21: `{"q"}` imports,
+    `{"q", "sort"}` is refused as a settings field, and the 80-leaf union of two
+    40-leaf bodies is over the leaf limit).
+  - **Bounds:** the context cap above; at most 64 selectors per operation. A request
+    that adds an input is never capped (bounded by the crawl's captures, as before).
+  - **Known gaps (PA-0505(2), BUG-0546 sweep), pinned by strict xfails in
+    `tests/test_captured_operations.py`:** disco's synthesizer (FR-CRAWL-20) keys an
+    endpoint by origin, method, template and content family, so a GraphQL or JSON-RPC
+    endpoint's operations are one inventory operation (their schemas are merged, not
+    lost; the disco import itself imports every exchange); and
+    `StorageManager.record_form` keys a crawled form by action, method and control
+    names, so a form told apart only by a hidden dispatcher value is dropped. A spider
+    DB written before FR-CRAWL-37 keeps its rows; a resumed crawl stores new rows beside
+    them (an old signature never matches a new one).
 
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default
@@ -1112,8 +1160,13 @@ the importer reads (lane J, forms phase 3):
 was captured; NULL in an older DB). `body_json` is the redacted body as JSON text (a
 JSON body's parsed value; a form-encoded body as an object of name → value, last wins);
 `url` and `page_url` are redacted (`core.redaction.redact_url_identifiers`);
-`content_type` is the media type only; `signature` = JSON `[method,
-url_key(url), sorted top-level keys]` (dedupe). No header and no cookie is stored.
+`content_type` is the media type only. Since FR-CRAWL-37 a row is one
+**representative of an API operation** (one real captured body per distinct typed
+shape of the operation, FR-CRAWL-37's rules), and `signature` = JSON
+`[method, url_key(url), media type, operation selectors, sha256 of the row's typed key
+paths]` (`tools.apiop.row_signature`; its first four items are the operation,
+`apiop.operation_key`). Before FR-CRAWL-37 it was `[method, url_key(url), sorted
+top-level keys]`, and an older DB keeps that form. No header and no cookie is stored.
 An old spider DB has no such table (the importer treats it as none).
 
 **Behavioural capture (FR-CRAWL-18..20, D70) -- file contracts, not store tables:**
