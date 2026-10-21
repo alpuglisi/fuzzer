@@ -23,6 +23,8 @@ class _Hist:
     def record(self, r):
         self.recs.append(r)
 
+    submit = record                     # the engine's hand-over (BUG-0550)
+
 
 # --- BUG-0085: validated at creation -------------------------------------------
 
