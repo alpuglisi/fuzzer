@@ -590,11 +590,13 @@ def _watched(base):
         #: this exchange's response; None from a request until its response is made
         framed = None
 
-        def response_class(self, sock, *args, **kwargs):
-            # http.client makes every response as ``self.response_class(sock, ...)``
+        def _framed_response(self, sock, *args, **kwargs):
             response = _FramedResponse(sock, *args, **kwargs)
             self.framed = response
             return response
+
+        #: http.client makes every response as ``self.response_class(sock, ...)``
+        response_class = _framed_response
 
         def connect(self):
             super().connect()
