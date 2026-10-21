@@ -24,6 +24,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
+from fuzzlab.core import bodyread
+from fuzzlab.proxy import framing
 from fuzzlab.proxy.authority import join_authority, split_authority
 from fuzzlab.proxy.history import FlowRecord, HistoryWriter
 from fuzzlab.proxy.intercept import Interceptor
@@ -31,9 +33,44 @@ from fuzzlab.proxy.matchreplace import MatchReplaceEngine
 from fuzzlab.proxy.message import RawMessage
 from fuzzlab.proxy.repeater import Sender
 from fuzzlab.proxy.scope import Scope
+from fuzzlab.proxy.socketsender import MAX_HEAD_BYTES
 
 if TYPE_CHECKING:
     from fuzzlab.proxy.ca import LocalCA
+
+#: What the listener answers when it will not take a request (FR-PROXY-401/403). Each
+#: closes its connection and says so (PA-0153(4)).
+_BAD_REQUEST = (b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n"
+                b"Connection: close\r\n\r\n")
+_REQUEST_TIMEOUT = (b"HTTP/1.1 408 Request Timeout\r\nContent-Length: 0\r\n"
+                    b"Connection: close\r\n\r\n")
+_TOO_LARGE = (b"HTTP/1.1 413 Content Too Large\r\nContent-Length: 0\r\n"
+              b"Connection: close\r\n\r\n")
+_HEADERS_TOO_LARGE = (b"HTTP/1.1 431 Request Header Fields Too Large\r\n"
+                      b"Content-Length: 0\r\nConnection: close\r\n\r\n")
+_UNAVAILABLE = (b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n"
+                b"Connection: close\r\n\r\n")
+
+
+@dataclass(frozen=True)
+class InboundLimits:
+    """Bounds on what clients send the listener (FR-PROXY-403), each enforced while
+    reading. Defaults: a head as large as an upstream one (`MAX_HEAD_BYTES`); a body of
+    SP-60's wire ceiling (`bodyread.MAX_WIRE_BYTES`); one request whole within SP-60's
+    default deadline (`bodyread.DEFAULT_SECONDS`); 64 connections at once. Worst-case
+    buffered bytes: connections x (head + body + one upstream response)."""
+    max_header_bytes: int = MAX_HEAD_BYTES
+    max_body_bytes: int = bodyread.MAX_WIRE_BYTES
+    request_deadline: float = bodyread.DEFAULT_SECONDS
+    max_connections: int = 64
+
+    def __post_init__(self):
+        for name in ("max_header_bytes", "max_body_bytes", "max_connections"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ValueError(f"{name} must be a positive integer")
+        if not self.request_deadline > 0:
+            raise ValueError("request_deadline must be positive")
 
 
 @dataclass
@@ -177,17 +214,35 @@ class AsyncProxyServer:
     offline default). The CONNECT path terminates TLS with a CA-minted leaf and forwards
     tunnelled requests through the same engine — on-host (needs a working ``cryptography``
     for minting and a browser that trusts the CA).
+
+    Every request is read whole before it is forwarded, framed by SP-63
+    (`framing.MessageReader`): a chunked body is de-chunked (trailer included) and sent
+    with a ``Content-Length``; an unframeable request is answered 400 and never
+    forwarded (FR-PROXY-401). Reading is bounded by `InboundLimits` (FR-PROXY-403): head
+    and body sizes while they arrive (431 / 413), a deadline for each whole request
+    (408), and a connection cap over which a client is answered 503. ``counts`` counts
+    each refusal.
     """
 
     def __init__(self, engine: ProxyEngine, host: str = "127.0.0.1", port: int = 0,
-                 ca: "LocalCA | None" = None):
+                 ca: "LocalCA | None" = None, *, limits: InboundLimits | None = None,
+                 raw_framing: bool = False):
         self.engine = engine
         self.host = host
         self.port = port
         self.ca = ca
+        self.limits = limits or InboundLimits()
+        #: the explicit raw mode (D4): conflicting Content-Length values frame by the
+        #: first and the request is forwarded byte-exact, not refused (SP-63)
+        self.raw_framing = raw_framing
         self._server: asyncio.AbstractServer | None = None
         self._conns: set[asyncio.Task] = set()
         self.errors: list[str] = []               # contained per-connection failures
+        #: what the listener refused (FR-PROXY-403): a connection over the cap (503), an
+        #: unframeable request (400), one over a size bound (413 / 431), one cut at the
+        #: request deadline (408), a connection idle at it (closed, nothing received)
+        self.counts: dict[str, int] = dict.fromkeys(
+            ("refused", "malformed", "oversized", "timed_out", "idle"), 0)
 
     async def start(self) -> "AsyncProxyServer":
         from fuzzlab.core.net import require_loopback
@@ -212,13 +267,22 @@ class AsyncProxyServer:
 
     async def _on_client(self, reader: asyncio.StreamReader,
                          writer: asyncio.StreamWriter) -> None:
+        if len(self._conns) >= self.limits.max_connections:
+            self.counts["refused"] += 1           # over the cap: refused, never queued
+            try:
+                writer.write(_UNAVAILABLE)
+                writer.close()
+            except (OSError, RuntimeError):
+                pass
+            return
         task = asyncio.current_task()
         if task is not None:
             self._conns.add(task)
         written = False
+        conn = _Inbound(reader)
         try:
-            raw = await _read_http_message(reader)
-            if not raw:
+            raw = await self._next_request(conn, writer)
+            if raw is None:
                 return
             connect = parse_connect(raw)
             if connect is not None:
@@ -229,7 +293,7 @@ class AsyncProxyServer:
                     await writer.drain()
                     return
                 written = True        # it answers 200 first: never a 502 into the tunnel
-                await self._handle_connect(reader, writer, connect)
+                await self._handle_connect(conn, writer, connect)
                 return
             tgt = target_from_request(raw)
             resp = await self.engine.handle_request(tgt.request, tgt.host, tgt.port,
@@ -259,16 +323,63 @@ class AsyncProxyServer:
             if task is not None:
                 self._conns.discard(task)
 
-    async def _handle_connect(self, reader: asyncio.StreamReader,
+    async def _next_request(self, conn: "_Inbound",
+                            writer: asyncio.StreamWriter) -> bytes | None:
+        """Read one whole request from ``conn`` within `InboundLimits` (SP-63 framing)
+        and return it as it is forwarded: byte-exact, or de-chunked with a
+        ``Content-Length``. ``None`` when there is none: the client closed, or the
+        listener answered why not (400 / 408 / 413 / 431, counted); nothing is
+        forwarded then."""
+        lim = self.limits
+        rd = framing.MessageReader(
+            "request", framing.FrameLimits(lim.max_header_bytes, lim.max_body_bytes),
+            dechunk=True, raw_length=self.raw_framing)
+        try:
+            async with asyncio.timeout(lim.request_deadline):   # the whole request
+                if conn.leftover:
+                    rd.feed(conn.take())
+                while not rd.done:
+                    data = await conn.reader.read(bodyread.READ_SIZE)
+                    if not data:
+                        if rd.received:
+                            rd.eof()        # raises: a request never ends at a close
+                        return None
+                    rd.feed(data)
+        except TimeoutError:
+            if not rd.received:
+                self.counts["idle"] += 1
+                return None
+            self.counts["timed_out"] += 1
+            await _answer(conn, writer, _REQUEST_TIMEOUT)
+            return None
+        except framing.OverLimit as exc:
+            self.counts["oversized"] += 1
+            await _answer(conn, writer,
+                          _HEADERS_TOO_LARGE if exc.part == "head" else _TOO_LARGE)
+            return None
+        except framing.FramingError:
+            self.counts["malformed"] += 1
+            await _answer(conn, writer, _BAD_REQUEST)
+            return None
+        except framing.Incomplete:
+            return None                         # cut by the client: nothing forwarded
+        conn.leftover = rd.leftover
+        return rd.message()
+
+    async def _handle_connect(self, conn: "_Inbound",
                               writer: asyncio.StreamWriter,
                               connect: tuple[str, int]) -> None:
         """Terminate CONNECT: reply 200, TLS-serve with a CA-minted leaf, forward.
 
         After the TLS upgrade the tunnelled requests are origin-form for ``host``; each
-        is forwarded through the same engine with ``use_tls=True`` (the real upstream is
-        HTTPS). On-host only — minting and the handshake need a working ``cryptography``.
+        is read whole (`_next_request`) and forwarded through the same engine with
+        ``use_tls=True`` (the real upstream is HTTPS). The tunnel ends after a response
+        that ends its connection (`framing.closes_connection`). On-host only — minting
+        and the handshake need a working ``cryptography``.
         """
         host, port = connect
+        if conn.leftover:
+            return                  # bytes sent before the tunnel existed: not TLS
         writer.write(b"HTTP/1.1 200 Connection Established\r\n\r\n")
         await writer.drain()
         try:
@@ -289,14 +400,16 @@ class AsyncProxyServer:
         # being fed decrypted bytes by the wrapped protocol.
         writer._transport = tls_transport  # noqa: SLF001 - documented start_tls-with-streams idiom
         while True:
-            raw = await _read_http_message(reader)
-            if not raw:
+            raw = await self._next_request(conn, writer)
+            if raw is None:
                 break
             resp = await self.engine.handle_request(raw, host, port, use_tls=True)
             if resp is None:
                 break
             writer.write(resp)
             await writer.drain()
+            if framing.closes_connection(raw, resp):
+                break
 
 
 def _leaf_server_context(ca: "LocalCA", host: str) -> ssl.SSLContext:
@@ -307,19 +420,39 @@ def _leaf_server_context(ca: "LocalCA", host: str) -> ssl.SSLContext:
     return ctx
 
 
-async def _read_http_message(reader: asyncio.StreamReader) -> bytes:
-    """Read one HTTP message: head up to CRLFCRLF, then any Content-Length body."""
+class _Inbound:
+    """One client connection: its reader and the bytes received past the last request
+    (a pipelined next one)."""
+
+    def __init__(self, reader: asyncio.StreamReader):
+        self.reader = reader
+        self.leftover = b""
+
+    def take(self) -> bytes:
+        data, self.leftover = self.leftover, b""
+        return data
+
+
+#: How long a refused connection is drained before it is closed (a lingering close).
+_LINGER_SECONDS = 1.0
+
+
+async def _answer(conn: _Inbound, writer: asyncio.StreamWriter, response: bytes) -> None:
+    """Write one of the listener's own refusals; its connection is closed after it.
+
+    A lingering close: the write side is shut (FIN) and what the client still sends is
+    read and discarded for at most `_LINGER_SECONDS`, so closing over unread bytes does
+    not reset the connection before the client has read the refusal."""
     try:
-        head = await reader.readuntil(b"\r\n\r\n")
-    except (asyncio.IncompleteReadError, asyncio.LimitOverrunError):
-        return b""
-    msg = RawMessage.from_bytes(head)
-    length = msg.get("Content-Length")
-    if length is not None and length.isdigit():
-        n = int(length)
-        body = await reader.readexactly(n) if n else b""
-        return head + body
-    return head
+        writer.write(response)
+        await writer.drain()
+        if writer.can_write_eof():
+            writer.write_eof()
+        async with asyncio.timeout(_LINGER_SECONDS):
+            while await conn.reader.read(bodyread.READ_SIZE):
+                pass
+    except (OSError, RuntimeError, TimeoutError):
+        pass
 
 
 def _authority(host: str, port: int) -> str:

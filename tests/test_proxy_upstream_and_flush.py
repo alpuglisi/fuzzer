@@ -37,15 +37,23 @@ def _response(total, chunk=65536):
 
 def test_the_body_is_never_recopied_per_chunk(monkeypatch):
     """The audit measured 541 MB copied for an 8 MiB body: `bytes(body)` per chunk.
-    Now the completeness check sees the same growing bytearray every time."""
-    seen = []
-    real = ss._body_complete
-    monkeypatch.setattr(ss, "_body_complete",
-                        lambda head, body: seen.append(body) or real(head, body))
+    The framing reader (SP-63, BUG-0543) counts the bytes it copies into its buffers
+    (PA-0135(2)): each received byte is copied a bounded number of times, so the count
+    stays linear in what was received; a per-chunk re-copy of an 8 MiB body in 64 KiB
+    receives would count over 60 times the body."""
+    from fuzzlab.proxy import framing
+    made = []
+
+    class Counted(framing.MessageReader):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            made.append(self)
+    monkeypatch.setattr(ss.framing, "MessageReader", Counted)
     out = ss.recv_http_response(_Sock(_response(8 << 20)), 5)
-    assert len(out) > 8 << 20 and seen
-    assert all(type(b) is bytearray for b in seen)
-    assert len({id(b) for b in seen}) == 1                  # one buffer, no copies
+    assert len(out) > 8 << 20
+    (reader,) = made
+    assert reader.received > 8 << 20
+    assert reader.copied <= 2 * reader.received
 
 
 def test_a_body_over_the_cap_raises():

@@ -1,6 +1,6 @@
 # Intercepting Proxy — Requirement Specification
 
-Component code: **PROXY** · Status: `[built — offline stack + live upstream SocketSender, CONNECT/TLS termination, the fuzzlab proxy CLI, and the live h2c H2Transport; HTTPS interception + h2c send verified on-host]` (Phase 6 + Phase 9) · Last updated: 2026-10-19 · see CC-PROXY-0010, CC-PROXY-0011, CC-PROXY-0025
+Component code: **PROXY** · Status: `[built — offline stack + live upstream SocketSender, CONNECT/TLS termination, the fuzzlab proxy CLI, and the live h2c H2Transport; HTTPS interception + h2c send verified on-host]` (Phase 6 + Phase 9) · Last updated: 2026-10-21 · see CC-PROXY-0010, CC-PROXY-0011, CC-PROXY-0025, CC-PROXY-0028
 
 Related: `ARCHITECTURE.md` #11; `DECISIONS_AND_ROADMAP.md` (D3, D4, D5);
 `./change-control.md`.
@@ -20,7 +20,13 @@ that shares the store, never a mandatory pipeline (D5).
 ## 3. Functional requirements
 - **FR-PROXY-1** Async core with two paths: a **parsed** path (`h11`/`h2`/
   `wsproto`) for normal traffic and a **raw byte** path (byte-exact, single-use
-  connections) for malformed-traffic study — the hybrid of D4.
+  connections) for malformed-traffic study — the hybrid of D4. *(Amended
+  CC-PROXY-0028, BUG-0543:)* the listener (`AsyncProxyServer`) is the browser's
+  well-formed path: it frames every request by the protocol (FR-PROXY-401). Deliberately
+  malformed requests go on the wire through the raw path: the Repeater and
+  `SocketSender` send stored bytes verbatim, and the listener's explicit raw mode
+  (`raw_framing`, `fuzzlab proxy --raw-framing`, off by default) frames a request with
+  conflicting `Content-Length` values by the first and forwards it byte-exact.
 - **FR-PROXY-2** CONNECT + TLS interception with a local CA and cached leaf certs.
 - **FR-PROXY-3** Persist history to the store (FTS5 search, batched writes,
   content-addressed bodies) as `flow` rows with raw bytes.
@@ -92,10 +98,15 @@ that shares the store, never a mandatory pipeline (D5).
   history carries placeholders, and `HistoryWriter(redact_secrets=False)` is the
   lab-local opt-out.
 - **FR-PROXY-12 (bounded upstream reads, CC-PROXY-0021, BUG-0101)**
-  - `recv_http_response` accumulates in one buffer, never re-copied.
+  - `recv_http_response` accumulates in one buffer, never re-copied. *(CC-PROXY-0028:)*
+    its buffers are SP-63's reader's, whose `copied` count stays linear in the bytes
+    received.
   - **Bounds:** headers ≤ 64 KiB; the body ≤ `max_body` (default 64 MiB); an overall
-    deadline (default the idle timeout × 4). Breaching any of them raises
-    `UpstreamResponseError`, and the connection is answered with a 502.
+    deadline (default the idle timeout × 4, SP-60's `DEADLINE_TIMEOUTS`). Breaching any
+    of them raises `UpstreamResponseError` (*CC-PROXY-0028:* its subclass
+    `UpstreamIncomplete`, reason `head`, `wire` or `deadline`), and the connection is
+    answered with a 502. The 64 MiB ceiling is the proxy's own, not SP-60's 16 MiB wire
+    ceiling: a browser's downloads are relayed byte-exact and never content-decoded.
   - **Configurable:** `SocketSender(max_body=, deadline=)` and `fuzzlab proxy
     --max-response-bytes / --response-deadline`. They cut off long-lived streams and
     very large downloads, by design.
@@ -150,8 +161,68 @@ that shares the store, never a mandatory pipeline (D5).
     before the plan is printed, so a bad `--store` prints no plan.
   - An explicit `--store ""` is now a usage error. It used to mean "do not record".
 
+- **FR-PROXY-401 (request framing, CC-PROXY-0028, BUG-0543; audit defect 18)** The
+  listener reads each request whole before it forwards anything, framed by SP-63
+  (`proxy/framing.py::MessageReader`, RFC 9112 §6):
+  - **Chunked** bodies are parsed: `1*HEXDIG` sizes (extensions after `;`, at most
+    8 KiB a line), CRLF after each chunk's data, and the trailer section to its empty
+    line. The request is forwarded **de-chunked**: its payload with a `Content-Length` in
+    place of `Transfer-Encoding`; the trailer fields are read and dropped (RFC 9110
+    §6.5.1). Nothing of it is left on the connection: the next bytes are the next
+    request (the CONNECT/TLS keep-alive loop).
+  - **Answered 400 and never forwarded:** `Transfer-Encoding` with `Content-Length`; a
+    transfer coding other than `chunked` alone; `Transfer-Encoding` on HTTP/1.0; an
+    invalid `Content-Length` or conflicting values (identical duplicates are one length;
+    `raw_framing` frames conflicting values by the first, FR-PROXY-1); a bad chunk size or
+    chunk line; a malformed request line.
+  - A request cut by the client's close is dropped, never forwarded in part. A request
+    with a body is never forwarded as its head alone.
+  - Enforced by: `tests/test_proxy_framing.py::test_a_chunked_request_reaches_the_upstream_whole_and_de_chunked`, `tests/test_proxy_framing.py::test_a_request_that_cannot_be_framed_is_answered_400_and_never_forwarded`, `tests/test_proxy_framing.py::test_raw_framing_forwards_conflicting_lengths_by_the_first_and_nothing_else`, `tests/test_proxy_framing.py::test_the_bytes_after_a_chunked_request_are_the_next_request`, `tests/test_proxy_framing.py::test_every_proxy_http1_read_goes_through_the_framing_owner`
+- **FR-PROXY-402 (response framing, CC-PROXY-0028, BUG-0543; audit defect 19)**
+  `SocketSender` reads one response framed by SP-63, given its request's method: the
+  status line, the headers, then a `Content-Length`, a parsed chunked body (trailers
+  included) or a close-delimited body; none for HEAD, 1xx, 204, 304 and a 2xx to
+  CONNECT. Interim responses (1xx but 101) are read and passed over, at most 8: the
+  proxy holds whole messages, so the final one follows at once, and it is the response
+  returned, recorded and relayed. `Transfer-Encoding` with `Content-Length`, or an
+  invalid `Content-Length`, is `UpstreamFramingError` (502).
+  - **A response is complete only at its framed end.** A close or an idle receive
+    before it raises `UpstreamIncomplete` (reason `eof` / `idle`), never returns the
+    bytes; the engine records the flow with no response and that error class
+    (FR-PROXY-13) and the client gets a 502. A peer that closes before sending any byte
+    returns `b""`: no response (recorded as "connection closed", as before).
+  - A response that ends its connection (close-delimited, a 101, or `Connection:
+    close` on either side, `framing.closes_connection`) ends the CONNECT/TLS keep-alive
+    loop after it is relayed.
+  - Enforced by: `tests/test_proxy_framing.py::test_a_chunk_whose_data_looks_like_the_last_chunk_is_not_the_end`, `tests/test_proxy_framing.py::test_a_response_cut_before_its_framed_end_is_incomplete_never_returned`, `tests/test_proxy_framing.py::test_a_framed_response_ends_at_its_end_not_at_the_idle_timeout`, `tests/test_proxy_framing.py::test_an_incomplete_upstream_response_is_a_502_recorded_as_no_response`
+- **FR-PROXY-403 (inbound bounds, CC-PROXY-0028, BUG-0543; audit defect 20)**
+  `AsyncProxyServer(limits=InboundLimits(...))` bounds what clients send while it is
+  read:
+  - a request head over `max_header_bytes` (default 64 KiB, the upstream head cap) is
+    answered 431;
+  - a body over `max_body_bytes` wire bytes (default 16 MiB, SP-60's `MAX_WIRE_BYTES`)
+    is answered 413: at once for a declared `Content-Length` or chunk size, else as soon
+    as the bytes pass it;
+  - one request must arrive whole within `request_deadline` seconds (default 60,
+    SP-60's `DEFAULT_SECONDS`), else 408; a connection that sent nothing by then (an idle
+    keep-alive) is closed;
+  - at most `max_connections` client connections (default 64) are served at once; one
+    over the cap is answered 503 and closed, never queued. So the upstream calls waiting
+    for a worker thread are at most that many.
+  - Every refusal answers with `Connection: close` and is counted in
+    `AsyncProxyServer.counts` (`refused`, `malformed`, `oversized`, `timed_out`, `idle`);
+    `fuzzlab proxy` prints the non-zero counts when it stops.
+  - **Configurable:** `fuzzlab proxy --max-connections / --max-request-bytes /
+    --max-header-bytes / --request-deadline`; a bound that is not positive is a usage
+    error. Worst-case buffered bytes: connections × (head + body + one upstream
+    response).
+  - Enforced by: `tests/test_proxy_framing.py::test_an_over_limit_request_body_is_answered_413_before_it_is_read`, `tests/test_proxy_framing.py::test_a_dripped_request_is_answered_408_at_its_deadline_and_never_forwarded`, `tests/test_proxy_framing.py::test_a_head_over_its_bound_is_answered_431_while_it_arrives`, `tests/test_proxy_framing.py::test_connections_over_the_cap_are_answered_503_and_counted`, `tests/test_proxy_framing.py::test_every_listener_bound_is_configurable_from_the_cli`
+
 ## 4. Non-functional requirements
 - **NFR-PROXY-byte-exact** The raw path preserves bytes exactly (no reserializing).
+  *(CC-PROXY-0028:)* the listener forwards a request byte-exact except a chunked one,
+  which it forwards de-chunked (FR-PROXY-401); a response is relayed byte-exact from its
+  final status line to its framed end (FR-PROXY-402).
 - **NFR-PROXY-safe** Scope-enforced and lab-only; the local CA never leaves the
   host; credentials/tokens redacted on write.
   - Enforced by: `proxy.scope`, `core.net.require_loopback`, `proxy.ca`, `proxy.history` redaction — `tests/test_proxy_server.py::test_engine_bypasses_out_of_scope_untouched`, `tests/test_proxy_rules_and_scope.py::test_scope_matches_authorities`, `tests/test_loopback_listeners.py::test_every_listener_in_fuzzlab_is_gated`, `tests/test_loopback_listeners.py::test_the_proxy_server_itself_refuses_a_non_loopback_bind`, `tests/test_proxy_ca_hardening.py::test_the_real_ca_key_is_0600_from_creation`, `tests/test_proxy_ca_hardening.py::test_the_path_backstop_holds_if_validation_were_bypassed`, `tests/test_proxy_redaction.py::test_no_secret_reaches_any_persisted_copy`, `tests/test_proxy_history.py::test_secrets_redacted_on_write`, `tests/test_proxy_trace.py::test_no_secret_reaches_the_trace_the_model_or_the_exports`, `tests/test_proxy_trace.py::test_an_out_of_scope_host_produces_no_event`

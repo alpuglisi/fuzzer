@@ -64,10 +64,12 @@ def test_socket_sender_reads_close_delimited_response():
 
 def test_async_server_forwards_duplicate_content_length_byte_exact(tmp_path):
     """The raw path forwards a malformed request (duplicate Content-Length) verbatim,
-    while the parsed path would reject it — the Part I exit property."""
+    while the parsed path would reject it — the Part I exit property. The listener does
+    so in its explicit raw mode (``raw_framing``, CC-PROXY-0028); by default it answers
+    such a request 400 and forwards nothing (`tests/test_proxy_framing.py`)."""
     async def scenario():
         store, eng, sender, _hist = _engine(tmp_path)
-        server = await AsyncProxyServer(eng, "127.0.0.1", 0).start()
+        server = await AsyncProxyServer(eng, "127.0.0.1", 0, raw_framing=True).start()
         try:
             reader, writer = await asyncio.open_connection("127.0.0.1", server.port)
             req = (b"POST http://127.0.0.1:9/echo HTTP/1.1\r\n"

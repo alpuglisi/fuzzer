@@ -1,0 +1,188 @@
+# BUG-0543 — The native proxy framed HTTP/1 by guesswork and read its clients unbounded
+
+- Date: 2026-10-21
+- Status: fixed (CC-PROXY-0028)
+- Severity: high. In the lab-only proxy, a chunked upload never reached the lab app, a
+  cut response was recorded and relayed as a whole one, and any local client could hold
+  every connection, buffer and worker of the proxy.
+
+## Description
+The native intercepting proxy (`fuzzlab proxy`, the web UI's in-process proxy) read
+HTTP/1 messages by heuristics, not by their framing, on both sides:
+
+- **Requests (audit defect 18).** `server._read_http_message` read the head to the first
+  CRLFCRLF and then a body only for a numeric `Content-Length`. A chunked request
+  returned at its head: the head (still saying `Transfer-Encoding: chunked`) was
+  forwarded with no body, and in the CONNECT/TLS keep-alive loop the unread chunk bytes
+  were parsed as the next request. A request with both `Content-Length` and
+  `Transfer-Encoding`, an invalid length or a bad chunk size was forwarded anyway.
+- **Responses (audit defect 19).** `socketsender._body_complete` took a chunked body as
+  complete when it *ended with* `0\r\n\r\n`, so chunk data such as `abc0\r\n\r\n` ended
+  it. A trailer section never matched, so a complete response waited for the idle
+  timeout. An idle timeout or a close returned whatever had arrived, so a declared
+  10-byte body with 3 bytes, or a head cut in two, was returned as a response. There
+  was no request method (a HEAD's `Content-Length` was waited for), no 204/304 rule, and
+  a `103` head was taken for the response's.
+- **Inbound bounds (audit defect 20).** `readexactly(int(Content-Length))` had no body
+  cap and no deadline; a head over the stream reader's limit was dropped without an
+  answer; nothing capped connections, so `asyncio.to_thread` queued one upstream call
+  per connection without bound.
+
+## Where encountered
+The external audit (`audit.md`, defects 18-20), reproduced at 08e3eaa with a real
+loopback client, the real `AsyncProxyServer`, the real `SocketSender` and a loopback
+upstream socket (`tests/test_proxy_framing.py`, run once on the pre-fix code; see
+"Corrective action").
+
+## What it caused to fail
+- Uploads and streaming request bodies through the proxy (the upstream got a chunked
+  head and no body, and answered or hung on it); keep-alive TLS tunnels parsed body
+  bytes as requests.
+- FR-PROXY-3 / FR-PROXY-13: history and the trace recorded a cut response as a complete
+  `200`; the browser got it as one.
+- Latency: a response with a trailer, a HEAD, a 204, a 304 or an interim response was
+  held to the upstream idle timeout (15 s by default).
+- Availability of the local proxy: a client declaring a terabyte, dripping its body or
+  opening connections without end held sockets, buffers and the upstream executor's
+  queue.
+
+## What the bug was identified to be
+No HTTP/1 framing implementation: each reader guessed where a message ended (the first
+blank line, a numeric `Content-Length`, a byte suffix, a quiet socket), and the bounds
+PA-0102 put on the upstream read were never put on the listener's reads.
+
+## Root cause analysis
+Five Whys:
+1. *Why was a chunked request forwarded without its body?* The listener's reader knew
+   only `Content-Length`; anything else ended at the head.
+2. *Why did the response reader end inside a chunk and return cut responses?* It tested
+   a suffix and treated a close or an idle receive as the end, because no code parsed
+   chunk sizes or knew which responses have no body. Its comment said so: "Good enough
+   for lab traffic; the raw bytes are preserved regardless."
+3. *Why two different guesses?* Framing had no owner. Each reader was written for its
+   path (the listener for the browser's simple requests, the sender for byte-exact
+   relay), and the byte-exact raw path (D4) was taken to excuse not parsing framing at
+   all, though byte-exact relay needs framing to know where the bytes end.
+4. *Why were the listener's reads unbounded after BUG-0101?* BUG-0101's sweep cleared
+   `server._read_http_message` as "asyncio readers, with a stated limit": the stream
+   reader's head limit was taken for a bound on the whole read. PA-0102(1) ("a network
+   read has a byte cap and an overall deadline") was enforced only by tests of the
+   upstream sender. BUG-0536 flagged the reader again and left it to this item.
+5. *Why did nothing catch it?* Every proxy test fed a `Content-Length` request and a
+   `Content-Length` or close-delimited response; none sent a chunked request, a trailer,
+   a HEAD or a cut response, and none dripped or flooded the listener.
+
+**Root cause:** the proxy's HTTP/1 reads had no single framing owner, so each reader
+guessed where a message ended and a guess passed for completion; and the read bounds
+were applied by direction (upstream only), cleared by the presence of a limit rather than
+by a test of what it bounds.
+
+## Corrective action
+CC-PROXY-0028 (FR-PROXY-401, FR-PROXY-402, FR-PROXY-403):
+
+- **One framing owner, SP-63: `fuzzlab/proxy/framing.py::MessageReader`.** It is
+  sans-I/O (`feed` / `eof`) and implements RFC 9112 §6-7. Requests: chunked parsed,
+  with trailers; `Transfer-Encoding` with `Content-Length`, a coding other than
+  `chunked` alone, an invalid or conflicting `Content-Length`, a bad chunk line and a
+  malformed request line are `FramingError`. Responses, given the request's method:
+  `Content-Length`, chunked, close-delimited; none for HEAD / 1xx / 204 / 304; interim
+  1xx passed over (at most 8). Head and body bounds are checked as bytes arrive
+  (`OverLimit`); a close before the framed end is `Incomplete`. Every byte is copied a
+  bounded number of times, counted (`copied`).
+- **The listener** (`AsyncProxyServer._next_request`) reads each request whole through
+  it and forwards a chunked one de-chunked with a `Content-Length` (trailer fields
+  dropped). It answers 400 for what cannot be framed, 431 / 413 for a head / body over
+  `InboundLimits`, 408 at the per-request deadline, and 503 for a connection over
+  `max_connections`. Each closes the connection and is counted (`counts`). Bytes after
+  a request are the next request (`_Inbound.leftover`). The TLS loop ends after a
+  response that ends its connection. The defaults are SP-60's where one applies (body:
+  `MAX_WIRE_BYTES`, deadline: `DEFAULT_SECONDS`). `fuzzlab proxy --max-connections /
+  --max-request-bytes / --max-header-bytes / --request-deadline` set them.
+- **The explicit raw mode** (`raw_framing`, `--raw-framing`, off by default) keeps D4's
+  conflicting-`Content-Length` study: such a request is framed by its first value and
+  forwarded byte-exact. `scripts/proxy_e2e.sh` (Part I step 5) runs the proxy in it.
+- **The upstream sender** (`recv_http_response`) reads through it with the request's
+  method. It returns the final response's exact bytes. It raises `UpstreamIncomplete`
+  (`eof`, `idle`, `deadline`, `head`, `wire`) or `UpstreamFramingError`. It never returns
+  a short response. A close before any byte is still `b""` (no response). The engine
+  records an incomplete flow with no response and its error class, and answers 502.
+- **Tests:** `tests/test_proxy_framing.py`, over real loopback sockets (a client, the
+  listener, `SocketSender`, an upstream socket), and the SP-63 guard proven on the
+  pre-fix shapes. `test_the_body_is_never_recopied_per_chunk` (PA-0102) now reads the
+  reader's copy count. `test_async_server_forwards_duplicate_content_length_byte_exact`
+  runs the listener in raw mode.
+- **Proof on the pre-fix code** (one run: the new test file against 08e3eaa's
+  `fuzzlab/`): see CC-PROXY-0028's deliverables for the per-test result.
+
+## Recurrence review
+Checked `docs/bugs/` and `docs/PREVENTIVE_ACTIONS.md` for read bounds, framing and
+"incomplete taken for complete":
+
+- **BUG-0101 / PA-0102** (upstream reads unbounded, quadratic, blocking). The same
+  class: a network read without a byte cap or deadline. Its sweep cleared the listener's
+  read. **A recurrence.**
+- **BUG-0536 / PA-0536** (reads bounded only after the work; one owner for target
+  bodies over `requests`). The same class on another transport. It flagged "BUG-0101's
+  cleared proxy readers (`proxy/server._read_http_message`, `h2client`, `ws`)" and
+  left them to this item. **A recurrence of its root cause** (a bound cleared by
+  presence; no owner for the read).
+- **BUG-0528 / PA-0528(1)** (an exchange is complete only when its status, headers and
+  whole body arrived): the contract runner's form of "a cut response is not a
+  response". The proxy's sender is the same rule on a raw socket. **Same root cause,
+  another reader.**
+- **BUG-0086 / PA-0087** (one policy decision, one parser): authorities had many
+  parsers. Framing had two guesses; the same shape for another mechanism.
+- **BUG-0012** (the proxy self-test's duplicate-`Content-Length` premise): not a
+  recurrence. It sets the Part I property that the explicit raw mode keeps.
+
+## Prior-preventive-action failure analysis
+- **PA-0102 (BUG-0101): applied by direction, cleared by presence.** Its rule names
+  "a network read", but its sweep judged the listener's read bounded because the stream
+  reader had "a stated limit". That limit bounds a head searched with `readuntil`, not a
+  `readexactly` body, and not time. Its three enforcing tests all drive the upstream
+  sender. Nothing tested the listener against a large or dripping client. PA-0536(2)
+  later named this exact failure for `requests` timeouts ("a sweep verdict … cites a
+  test against a dripping peer"). It was not re-applied to the proxy readers BUG-0536
+  flagged.
+- **PA-0536(1): an owner for one transport only.** It made `core.bodyread` the owner of
+  bodies read over `requests`. The proxy reads raw sockets and builds its own framing,
+  so it stayed outside the owner and its guard (`requests.Session` construction).
+- **PA-0528(1): not enforced beyond its reader.** "An exchange is complete only when its
+  … whole body arrived" was enforced on the contract runner. The proxy's sender kept
+  returning a cut body as a response. No rule said where completeness is decided for a
+  raw-socket reader.
+- **PA-0087(2): stated for authorities only.** "One parser" was applied to authority
+  strings, not to the other wire syntax the proxy parses: message framing.
+
+## Preventive action
+**PA-0543.** It strengthens PA-0102(1), PA-0528(1), PA-0536(1)/(2) and PA-0087(2):
+
+1. **A message is complete only at its framed end, decided by one framing owner.** Every
+   HTTP/1 read the proxy makes goes through SP-63 (`proxy/framing.py`), for requests and
+   responses alike. A close, an idle receive or a byte pattern in the payload never ends
+   a message. A read that stops first is typed incomplete (`UpstreamIncomplete`) and is
+   never returned, recorded or relayed as a response. A message that cannot be framed
+   is refused (400 / 502), never forwarded in part. An AST guard fails on hand framing
+   outside the owner (`readuntil` / `readexactly`, a guessed last-chunk literal). It is
+   proven on the pre-fix shapes.
+2. **A read bound covers both directions and every dimension, enforced while reading.**
+   The inbound read has its head, body and time bounds, as the upstream one does, and
+   every accept path has an admission cap whose refusals are counted. A sweep that
+   clears a reader names what each bound limits (head, body, time, count). For each it
+   cites a test against an over-limit, dripping or flooding peer, never the presence of
+   a limit.
+
+**The PA-0002 sweep** (by mechanism: every HTTP/1 or raw-socket protocol read in
+`fuzzlab/`, re-judging BUG-0101's and BUG-0536's cleared or flagged sites):
+
+| Site | Reads | Disposition |
+|---|---|---|
+| `proxy/server.py::_read_http_message` (the listener, plain and TLS loop) | client requests | fixed: SP-63 + `InboundLimits` |
+| `proxy/socketsender.py::recv_http_response` / `_body_complete` | upstream responses (engine and Repeater) | fixed: SP-63; typed incomplete |
+| `proxy/redact.py::_dechunk` | a stored chunked body, for redaction only | R2: a second, lenient chunk decoder (`int(..., 16)` takes `0x`, `+`, `_`); it fails closed (an undecodable redactable body is omitted). Routing it to SP-63 is a redaction change (two reviews, PA-0541(1)); flagged |
+| `proxy/h2transport.py::_drain` / `send_raw` | h2c responses (desync research sender) | R1: a deadline but no byte cap, and `decode_frames(bytes(buf))` per receive (the PA-0102(2) re-copy). Not on the listener's path; flagged for its own item |
+| `proxy/ws.py`, `proxy/h2client.py`, `proxy/h2frames.py` | decode / build in memory; no socket read | out of class |
+| `oracle/oob.py`, `labgen/conformance/*live_boot.py`, `procutil.py` | `http.server` handlers / port probes | out of class: the stdlib frames, or no HTTP read |
+| every `requests` reader | target bodies | SP-60 (BUG-0536) |
+
+- Enforced by: tests/test_proxy_framing.py::test_every_proxy_http1_read_goes_through_the_framing_owner, tests/test_proxy_framing.py::test_the_framing_guard_catches_synthetic_offenders, tests/test_proxy_framing.py::test_a_response_cut_before_its_framed_end_is_incomplete_never_returned, tests/test_proxy_framing.py::test_a_request_that_cannot_be_framed_is_answered_400_and_never_forwarded, tests/test_proxy_framing.py::test_a_dripped_request_is_answered_408_at_its_deadline_and_never_forwarded, tests/test_proxy_framing.py::test_connections_over_the_cap_are_answered_503_and_counted
