@@ -3,6 +3,52 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0074 — Points fold only on the request they send, never on a shared DOM template (FR-FUZZ-68, BUG-0547) (2026-10-21)
+- Placement: pre-assigned to lane DEDUP10 (audit defect 10, item AU-REQID78); CC-CORE-0073
+  is another lane's.
+- Change: `fuzzlab/core/dedup.py` (+128 / -6).
+  - `wire_request_key(point) -> tuple`: every field of the point's dataclass, by name,
+    as given (`dataclasses.fields`, so a field added later is in the key), lists frozen to
+    tuples, sets to frozensets, an unhashable value replaced by a fresh `object()` (never
+    equal: never folded). Only a **standalone query point**'s URL (`location == "query"`,
+    no `base_entries`, no `store_url`) is taken as sent: its injected slot placed by
+    `core.urls.place_query_param` (SP-42, the first occurrence in place), so
+    `/item?id=1` and `/item?id=2` probing `id` share a key. A local stand-in for SP-57,
+    replaced by it at merge (AU-REQID78).
+  - `fold_points(points, pages_html, clusterer=None) -> Folded`: drops a point only when
+    an earlier kept point has the same page template **and** the same `wire_request_key`;
+    an unknown page (absent, or no tag structure) is its own template
+    (`("unknown-page", url)`). `Folded(points, folded, unknown_pages, key=FOLD_KEY)`;
+    `FOLD_KEY = "template+wire-request-v1"`.
+  - `TemplateClusterer.known_cluster_id(html)`: `cluster_id`, or None for an absent or
+    structureless page. `cluster_id` and `minhash` keep their results (the signature is
+    factored into `_skeleton_signature`, the assignment into `_assign`).
+- Impact (other components / project):
+  - FUZZ: `harness/pipeline.py::_dedup` calls `fold_points` (CC-FUZZ-0112).
+  - Consumers searched over `fuzzlab/` and `tests/` (PA-0152): `TemplateClusterer`,
+    `minhash`, `similarity` are read only by `harness/pipeline.py` (now through
+    `fold_points`) and `tests/test_fewer_requests.py`; no other module imports
+    `core.dedup`. FR-CRAWL-3's crawler-side `template_cluster_id` column is not written
+    by any code and is unchanged.
+  - AU-REQID78 builds SP-57 (the request-context identity) concurrently: `wire_request_key`
+    is replaced by it at merge, keeping this entry's guarantees (planned merge order:
+    AU-REQID78, then DEDUP10).
+  - No shared-primitive row: the key is a lane-local stand-in, not a new owner.
+- Risk (low): the change can only keep points the old stage dropped; points it still
+  folds send the same wire request on the same template. That a standalone slot is what
+  every sender overwrites is SP-42's measured contract (FR-FUZZ-64: requests 2.34.2 and
+  Chromium, `tests/test_sender_conformance.py`, `tests/test_query_placement.py`), not
+  re-measured here. A URL `urlsplit` cannot parse is keyed as given (never a crash of
+  the stage). Residual: a PRG follow-up of a
+  fragment-only `Location` is resolved against the unplaced URL (FR-FUZZ-64), so two
+  folded standalone points could differ in that one follow-up's target.
+- Deliverables:
+  - [x] `wire_request_key`, `fold_points`, `Folded`, `FOLD_KEY`, `known_cluster_id` — done
+  - [x] `tests/test_dom_dedup_folding.py` (key guard over every dataclass field, the
+    standalone-slot cases, the unhashable case), each failing on c483dc1 — done
+  - [x] FR-FUZZ-68; the core requirements' interfaces note — done
+- Effectiveness (assessed <date> or pending): pending.
+
 ### CC-CORE-0072 — One bounded reader of a target's HTTP body (SP-60, FR-CORE-536, BUG-0536) (2026-10-20)
 - Placement: pre-assigned to AU-BOUNDED (audit defect 21); CC-CORE-0070 and CC-CORE-0071
   are other lanes'.

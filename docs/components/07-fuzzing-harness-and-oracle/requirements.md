@@ -1974,6 +1974,34 @@ rewards) derives from it.
       places each case query value through `place_query_param`; `tools/spa.query_url`'s
       by CC-CRAWL-0053.)
     - a **path** point's PRG follow-up re-requests the placed path (AU-PRGPATH, pinned).
+- **FR-FUZZ-68 (the template stage folds only true duplicates, `CC-FUZZ-0112`,
+  `CC-CORE-0074`, 2026-10-21, BUG-0547)** When a caller gives `run_pipeline` the pages'
+  HTML (`pages_html`), the stage before the audit folds injection points through
+  `core.dedup.fold_points`:
+  - **Folded only when it is the same work.** A point is dropped only when an earlier
+    kept point is on a page of the same DOM template **and** has the same
+    `core.dedup.wire_request_key`: every field of the point (endpoint URL, parameter,
+    method, location, sibling entries, content type, sink, store step, origin, value
+    shapes, base value, redirect seed, deciding mechanism, and any field added later) as
+    given. Only a standalone query point's injected slot (no siblings, no store step) is
+    taken as sent, placed by the one query placement (FR-FUZZ-64, SP-42), so
+    `/item?id=1` and `/item?id=2` probing `id` are one request.
+  - **A shared template alone never folds two points.** Another endpoint, parameter,
+    location, method, form action or sibling value keeps both.
+  - **An unknown page is never a duplicate.** A URL with no HTML, or HTML with no tag
+    structure, is its own template: its points fold only with an identical point on the
+    same URL.
+  - **Reported.** The metrics carry `dedup_points_in`, `dedup_folded`,
+    `dedup_unknown_pages` (also `pipeline_dedup_*` run metrics) and `dedup_key`
+    (`core.dedup.FOLD_KEY`); nothing is reported, and nothing folded, when no pages are
+    given.
+  - **Until AU-REQID78 merges,** `wire_request_key` is a local stand-in for the
+    request-context identity SP-57; at merge it is replaced by SP-57, keeping these
+    guarantees.
+  - **Stated gap:** a PRG follow-up of a fragment-only `Location` is resolved against the
+    point's unplaced URL (FR-FUZZ-64), so two folded standalone points could differ in that
+    one follow-up's target.
+  - **Checks:** `tests/test_dom_dedup_folding.py`.
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
   finding must reproduce.
