@@ -176,6 +176,11 @@ Newest first.
   - [x] *(Review round 1)* the transport's resend removed and a body never pooled, each
     with a test that failed on 093685e (one run); FR-CORE-509 and FR-CORE-536 corrected
     in place; the doc texts updated — done
+  - [x] *(Review round 2)* P2-1 fixed in SP-60's pools (`exact_end`), every case
+    failing on 4e0c2c6's product files (one run) and passing now: round 1's pin is a
+    passing test (five shapes) and the new TLS test has four cases. Also: FR-CORE-509
+    edited in place; BUG-0549 "Review round 2"; the lane's doc texts amended (SP-60 row,
+    PA-0549(3b)/(3c), ARCHITECTURE, CHANGELOG, ERROR_LOG, F-1XX) — done
 - Effectiveness (assessed 2026-10-21): on loopback, 2 000 plain sends used 8 connections
   instead of 2 000; sequential sends/s 549 -> 1 065, 8-thread 397 -> 722; over TLS 20 ->
   959 sequential (two measured pairs agree; BUG-0549 has both, and the TLS phase
@@ -183,6 +188,36 @@ Newest first.
   reviewer's `attempts_demo.py` on the fixed tree: the server received 2 requests and 2
   tries were recorded, the unanswered one as `unobserved` (was 3 received, 2 recorded).
   The measured numbers are for bodiless GETs and stand.
+  *(Review round 2, 2026-10-21:)*
+  - **Measured through the real seam** (`scratchpad/lanes/INTEG/measure_seam_r2.py`; logs
+    `measure_seam_r2.before.log` on an export of 4e0c2c6 and `measure_seam_r2.after.log`):
+    - Before: every stray shape kept the connection. The late stray gave the next send
+      `b'stray2'`, and the 10 000-byte TLS answer gave it `b'stray'`.
+    - After: each closes the connection at the answer (`past` 43, or 2 for the CRLF,
+      or 43 bytes pending in the SSL object), and the next send gets its own answer on
+      a new connection, direct and through an HTTPS proxy.
+    - Clean exchanges before and after: one connection for 50 GETs, one connection and
+      one handshake for 50 over TLS, one tunnel for 30 through the proxy.
+    - Sequential rate, 2 000-3 000 GETs, one connection each: before 1 080-1 162,
+      after 977-1 153 calls/s, run-to-run spread with no difference beyond it
+      (`measure_seam_rate.log`).
+  - **Proof on the pre-fix code:** one pytest invocation on a scratch copy of 4e0c2c6's
+    product files with this round's test files (`proof_r2.log`). The round's 12 new and
+    changed tests: 12 failed, 0 passed. The nine `test_http_pooling.py` cases failed at
+    `peer.wait(lambda p: case_conn in p.closed)`: the connection was never closed.
+  - **Targeted runs** (one pytest invocation each, `-n 3 --dist loadfile`, 67 files: the
+    importers of `fuzzlab.core.http`, `fuzzlab.proxy.history`, `core.bodyread`,
+    `proxy.repeater` and `web.proxycontrol`, every `tests/test_proxy*.py`,
+    `test_socketsender_pooling.py`, and eight guards over `tests/`, `fuzzlab/` or the
+    docs):
+    - On 5078fc5: 1 failed, 2 340 passed, 10 xfailed, 0 skipped. The failure was
+      `tests/test_shared_primitives.py::test_every_owner_is_defined_once`: this round
+      had defined `Watched.response_class` with `def`, the name of SP-56's owner
+      `core/comparability.py::response_class`. Fixed in d897885 (the factory is
+      `_framed_response`, bound to http.client's attribute; behaviour unchanged).
+    - On d897885: 2 341 passed, 10 xfailed (pre-existing pins in other tests), 0
+      failed, 0 skipped (`targeted_r2.log`, `targeted_r2b.log`).
+  - The harness run is the orchestrator's, at merge.
 
 ### CC-CORE-0074 — Points fold only on the request they send, never on a shared DOM template (FR-FUZZ-68, BUG-0547) (2026-10-21)
 - Placement: pre-assigned to lane DEDUP10 (audit defect 10, item AU-REQID78); CC-CORE-0073
