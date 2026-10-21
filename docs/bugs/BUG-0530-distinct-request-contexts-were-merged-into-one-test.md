@@ -146,6 +146,7 @@ design), `harness.scoring`'s case key (ground truth's own key; a set), PA-0048's
 clusters: defect 10's item), `ml.dataset.candidate_keys` (a coarse cross-run metric, not a
 label), and `core.dedup.wire_request_key` (FR-FUZZ-68, merged at dcc7091: a stricter
 local key -- every point field as given -- that must also keep apart what changes rule
-evaluation, which SP-57 leaves out; one key owner for both is a follow-up). Pinned to their owners: the crawler's form and request signatures (CRAWL), POST
+evaluation, which SP-57 leaves out; one key owner for both is a follow-up). Pinned to their owners: the crawler's form signature (CRAWL; its request signature was fixed
+by SPIDER9, BUG-0546, and that pin was removed when it passed strictly at the 2053f22 merge), POST
 action query points (AU-REQID-POSTQ), per-occurrence binding and raw link-set text
 (follow-ups of AU-REQID8, R1/R2).
