@@ -3,6 +3,47 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0112 — The pipeline's template stage folds only true duplicates and reports them (FR-FUZZ-68, BUG-0547) (2026-10-21)
+- Placement: pre-assigned to lane DEDUP10 (audit defect 10, item AU-REQID78); CC-FUZZ-0111
+  is another lane's.
+- Change: `fuzzlab/harness/pipeline.py` (+16 / -14), in three places:
+  - `_dedup(points, pages_html)` (lines 57-66) returns `(kept, report)` from
+    `core.dedup.fold_points` (CC-CORE-0074) instead of keeping only the points on the
+    first URL of each template cluster: a point is folded only when an earlier one has
+    the same template and the same `wire_request_key`; an absent or structureless page is
+    unknown and never folds with another page's.
+  - `run_pipeline` (lines 145-147) keeps the report; `metrics.update(dedup_report)` (line
+    385) adds it to the metrics: `dedup_points_in`, `dedup_folded`,
+    `dedup_unknown_pages` (numeric, so also `pipeline_dedup_*` rows in `run_metrics`) and
+    `dedup_key` (`FOLD_KEY`; in `PipelineResult.metrics` only). Only when the caller
+    supplies `pages_html`, so every other run keeps exactly its earlier metrics.
+  - The module docstring's step 1 says what the stage folds.
+- Impact (other components / project):
+  - Store: additive `run_metrics` keys `pipeline_dedup_points_in`, `pipeline_dedup_folded`,
+    `pipeline_dedup_unknown_pages`, written only when `pages_html` is given; no schema
+    change. Readers of `run_metrics` (`web/results.py`, `web/diagnostics.py`,
+    `web/mlview.py`, `report/report.py`, `report/diagram.py`, `plugins/manager.py`) read
+    key/value pairs and are unaffected.
+  - Callers of `run_pipeline(pages_html=...)`: `harness/auto.py::run_auto` passes it
+    through; no production caller supplies it (`auto_cli`, `multitarget`). A library
+    caller now audits more points (the ones the old stage dropped).
+  - AU-REQID78 edits `pipeline.py` lines ~127-131 and ~290-310 concurrently; this change
+    touches lines 4-5, 30, 57-66, 145-147 and 385 only (planned merge order: AU-REQID78,
+    then DEDUP10).
+- Risk (low): more points can only add evaluations and confirmations a library caller
+  asked for; nothing is dropped that was kept before.
+- Deliverables:
+  - [x] `_dedup` through `fold_points`, the report in the metrics — done
+  - [x] `tests/test_dom_dedup_folding.py`: one template with six different requests keeps
+    all six (the audit's `/safe?q=` and `/admin?cmd=`); one changed request field keeps
+    both (seven cases); true duplicates fold with the count and key reported; absent or
+    empty HTML is unknown -- each failing on c483dc1 (one run on a scratch copy of the
+    pre-fix `pipeline.py` and `dedup.py`: 27 of 27 failed, the pipeline-level ones on
+    `points_audited`) — done
+  - [x] `tests/test_pipeline.py::test_pipeline_dedup_collapses_same_template` unchanged
+    and passing (the same request on one template still folds) — done
+- Effectiveness (assessed <date> or pending): pending.
+
 ### CC-FUZZ-0110 — The blind-SQLi builder never admits an answer sent on a session known to be lost (FR-FUZZ-65, FR-FUZZ-63, BUG-0533; decision D′) (2026-10-20)
 - Placement: AU-SESS403 (audit defect 6), review round 5; the owner's decision D′ covers
   every consumer, so BUG-0533's sweep pin for this builder was closed instead of queued.

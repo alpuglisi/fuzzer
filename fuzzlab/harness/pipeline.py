@@ -1,7 +1,8 @@
 """Automatic-mode pipeline: compose Phase 2 into one run (T2.8 integration).
 
 Ties the pieces together for an automatic run:
-1. **dedup** injection points to one page per DOM-skeleton template cluster (T2.6),
+1. **fold** injection points that are one request on pages of one DOM-skeleton template
+   (T2.6; never on the template alone, BUG-0547 / FR-FUZZ-68),
 2. **fingerprint** the target from a baseline probe and record the `target` row (T2.5),
 3. **audit** — evaluate the rules-as-data engine scoped to the run's categories,
    logging every evaluation incl. negatives (T2.3 / D14 / D15 via the RunPlan),
@@ -26,7 +27,7 @@ from urllib.parse import urlparse
 
 from fuzzlab.audit import InjectionPoint, evaluate
 from fuzzlab.core import trace
-from fuzzlab.core.dedup import TemplateClusterer
+from fuzzlab.core.dedup import fold_points
 from fuzzlab.core.fingerprint import fingerprint
 from fuzzlab.core.oracle_status import (CHECKED, INCONCLUSIVE,  # migration 13
                                          NO_CONFIRMER, PENDING, SKIPPED_BUDGET)
@@ -53,17 +54,16 @@ class PipelineResult:
     inconclusive: list = field(default_factory=list)
 
 
-def _dedup(points: list[InjectionPoint], pages_html: dict[str, str]) -> list[InjectionPoint]:
-    """Keep only points on a representative page per template cluster (T2.6)."""
-    clusterer = TemplateClusterer()
-    keep: set[str] = set()
-    seen_clusters: set[str] = set()
-    for url in dict.fromkeys(p.url for p in points):     # first-seen order
-        cid = clusterer.cluster_id(pages_html.get(url, ""))
-        if cid not in seen_clusters:
-            seen_clusters.add(cid)
-            keep.add(url)
-    return [p for p in points if p.url in keep]
+def _dedup(points: list[InjectionPoint],
+           pages_html: dict[str, str]) -> tuple[list[InjectionPoint], dict]:
+    """Fold points that are one attack surface on pages of one template (T2.6): the same
+    request and observation (`core.dedup.wire_request_key`), never the template alone,
+    and never across a page whose HTML is unknown (BUG-0547, FR-FUZZ-68). Returns the
+    kept points and the report: points in, folded, on unknown pages, and the key."""
+    folded = fold_points(points, pages_html)
+    return folded.points, {"dedup_points_in": len(points), "dedup_folded": folded.folded,
+                           "dedup_unknown_pages": folded.unknown_pages,
+                           "dedup_key": folded.key}
 
 
 def _candidate_of(ev: dict) -> Candidate:
@@ -142,8 +142,9 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
     object with ``.order`` or ``None`` = no usable model → confirm everything)."""
     if confirm_budget is not None and confirm_budget < 1:
         raise ValueError(f"confirm_budget must be >= 1, got {confirm_budget}")
+    dedup_report: dict = {}                              # FR-FUZZ-68: only when it ran
     if pages_html:
-        points = _dedup(points, pages_html)
+        points, dedup_report = _dedup(points, pages_html)
 
     # Fingerprint from a baseline probe and record the target row (T2.5). The probe
     # goes where its point says, siblings included (BUG-0115: it used to send any
@@ -381,6 +382,7 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
     # no PRG redirect keeps exactly its earlier metrics (its follow-ups are already in
     # `requests`)
     metrics.update({k: n for k, n in oracle.prg_counts.items() if n})
+    metrics.update(dedup_report)
     if not breaker:
         # a trip on the last header probe (or the main send after it) raises nothing:
         # read the reason the sender recorded (reviewer A)

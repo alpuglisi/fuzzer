@@ -891,6 +891,13 @@ and `launch`, and (CC-CORE-0063, `core.trace` only) `trace_event`, `dg_entity`,
 `dg_flow`, `dg_evidence`. Exposes Python APIs
 consumed by every tool and ML component.
 
+`core/dedup.py` (CC-CORE-0074, BUG-0547) clusters pages by DOM skeleton
+(`TemplateClusterer`; `known_cluster_id` is None for an absent or structureless page) and
+folds injection points only on the page template plus `wire_request_key` (every field of
+the point; a standalone query point's slot as placed by SP-42), through `fold_points`,
+which reports the count and `FOLD_KEY`. Its behaviour is specified by FR-FUZZ-68;
+`wire_request_key` is replaced by SP-57 when AU-REQID78 merges.
+
 ## 6. Dependencies (components)
 None (foundational layer; it manages the project store).
 
