@@ -83,6 +83,30 @@ Newest first.
     now uses up, measured 229 s unloaded), `tests/test_disco_harvest.py` (the alias
     reads `structures` and a `Reading`) and `tests/test_base_url_subpath_registry.py`
     (`State.read`'s `entry_url` registered with its sub-path test).
+  - *(Review round 1, on d9e269e: three blocking findings, each reproduced by a
+    skeptic.)*
+    - **B1 (a dismissal from one click).** Closing a modal with its own Close declared
+      the modal's controls optional run-wide, so a restore that did not reopen the
+      modal was accepted as the modal state. `_dismissal` now declares only for a safe
+      click on an entry document as loaded (a state with no path), removing only what
+      that state's recorded contract held, and only when a fresh load of the entry URL
+      (`restore`, empty path) still shows none of it. `State.added` holds what a
+      state's last path step added (`_child`, against the page just before the step);
+      `contract_mismatch` never excuses it by a run-wide declaration.
+    - **B2 (a superset accepted).** `contract_mismatch` refuses a control present more
+      often than recorded or a marker the contract lacks (`extra`), unless declared.
+      `_bring_to` reads the page before each step and restores when the last step
+      changed it or the page no longer holds the contract; `_seen_as` is called only
+      with a reading that passed the contract.
+    - **B3 (work consumed by an unreadable result).** The work item is finished only
+      once the result page was read. A safe step whose result could not be read is a
+      failed attempt (`_attempt_failed`, retried after a restore); an unsafe one is
+      `failed`, counted `unresolved: unreadable`, and logged with no new state. A lost
+      session still finishes the item (its effect was read: the login page).
+    - Tests: five pure tests (the superset, the PA-0029 pair, `added`, the dismissal's
+      evidence on fakes, the unreadable result on fakes) and two real-browser tests
+      (the modal, the later stage). The unit assertion that accepted a superset now
+      expects `extra`.
 - Impact (other components / project):
   - Store and file contracts: no store table changes. `actions.jsonl` gains a key and
     `explore.json` gains and loses report keys; their readers
@@ -133,6 +157,19 @@ Newest first.
     base-URL registry on `State.read`), 1 skipped, 20 xfailed; both fixed in the
     follow-up commit (the key is a JSON list; a sub-path test and a registry entry).
     The run on the follow-up commit: in the lane report.
+  - *(Review round 1.)* The round's new tests on d9e269e's `explore.py` and
+    `fingerprint.py` (one invocation, `FUZZLAB_REQUIRE_BROWSER=1`): 6 failed, 21 passed.
+    - modal (B1): `unresolved == {}` where `{'core': 1}` is expected;
+    - later stage (B2): Help logged under stage 1's key (`act-9`);
+    - superset (B2): `contract_mismatch` gave None, not `extra`;
+    - `added` (B1): `State.read()` takes no `added`; the dismissal's evidence (B1):
+      `_dismissal` took the old arguments (no state, no reload);
+    - unreadable result (B3): the step acted once, never retried.
+    - The PA-0029 pair passes on d9e269e too: it pins the subset refusal d9e269e
+      already had, against a future declaration that excuses too much.
+  - On the revision, the targeted files (the two state-identity modules, the e2e,
+    harvest, workers, the query-placement, base-URL registry and shared-primitive
+    guards, lint): 320 passed, 10 xfailed.
   - Not measured on a third-party app (PA-0501(1)): this lane had no lab; residual R2.
 
 ### CC-CRAWL-0054 — The JSONL tail caps a line while reading it; the contract runner reads bounded and matches contract patterns in a killable worker (BUG-0536) (2026-10-20)

@@ -19,6 +19,8 @@ real-browser test (`tests/test_disco_state_identity_browser.py`)."""
 from __future__ import annotations
 
 import ast
+import json
+from dataclasses import replace
 from pathlib import Path
 
 from fuzzlab.disco import explore
@@ -167,8 +169,6 @@ def test_a_recorded_core_is_never_accepted_by_a_proper_subset_nor_shrunk():
     recorded = state.core
     assert contract_mismatch(state, _reading(url, [PAY])) == "core"
     assert state.core == recorded and state.unresolved is None
-    # more than the contract (a notice shown again) still reproduces it
-    assert contract_mismatch(state, _reading(url, [PAY, TERMS, NEXT])) is None
     # two of a control recorded twice: one is not enough
     two = State.read(_reading(url, [PAY, dict(PAY)]), entry_url=url)
     assert contract_mismatch(two, _reading(url, [PAY])) == "core"
@@ -182,9 +182,79 @@ def test_a_state_under_a_sub_path_keeps_its_whole_entry_url():
     url = "http://127.0.0.1:8080/shop/app/cart?step=2"
     state = State.read(_reading(url, [PAY, TERMS]), entry_url=url)
     assert state.entry_url == url and state.url == url
-    assert contract_mismatch(state, _reading(url, [PAY, TERMS, NEXT])) is None
+    assert contract_mismatch(state, _reading(url, [PAY, TERMS])) is None
     assert contract_mismatch(state, _reading("http://127.0.0.1:8080/cart?step=2",
                                              [PAY, TERMS])) == "route"
+
+
+def test_a_superset_of_the_contract_is_never_the_recorded_state():
+    """Review B2: a page holding the contract plus a control, another of a control or
+    a marker the contract lacks -- a later stage of the same workflow on the same URL
+    -- is refused, unless the extra is declared optional."""
+    url = f"{BASE}/flow"
+    stage1 = State.read(_reading(url, [PAY, TERMS]), entry_url=url)
+    assert contract_mismatch(stage1, _reading(url, [PAY, TERMS, NEXT])) == "extra"
+    assert contract_mismatch(stage1, _reading(url, [PAY, TERMS, dict(PAY)])) == "extra"
+    assert contract_mismatch(stage1, _reading(url, [PAY, TERMS], ["hidden:stage=2"])) == \
+        "extra"
+    assert contract_mismatch(stage1, _reading(url, [PAY, TERMS, NEXT]),
+                             optional=frozenset({element_signature(NEXT)})) is None
+
+
+def test_a_declared_optional_feature_never_excuses_a_missing_mandatory_one():
+    """PA-0029's pair (review B1): the declared difference alone reproduces the state;
+    the declared difference plus a missing mandatory control does not."""
+    url = f"{BASE}/shop"
+    state = State.read(_reading(url, [PAY, TERMS, NEXT]), entry_url=url)
+    declared = frozenset({element_signature(NEXT)})
+    assert contract_mismatch(state, _reading(url, [PAY, TERMS]), optional=declared) is None
+    assert contract_mismatch(state, _reading(url, [TERMS]), optional=declared) == "core"
+
+
+OPEN = {"tag": "button", "id": "open"}
+CLOSE = {"tag": "button", "id": "close"}
+
+
+def test_a_declaration_never_excuses_what_the_states_own_last_step_added():
+    """Review B1: a modal's Close and Pay, declared optional by any evidence, are still
+    mandatory in the state its Open step reached: a restore that did not reopen the
+    modal is not that state."""
+    url = f"{BASE}/modal"
+    modal = State.read(_reading(url, [OPEN, CLOSE, PAY]), entry_url=url,
+                       path=[Step(element_signature(OPEN), "click")],
+                       added=(element_signature(CLOSE), element_signature(PAY)))
+    declared = frozenset({element_signature(CLOSE), element_signature(PAY)})
+    assert contract_mismatch(modal, _reading(url, [OPEN]), optional=declared) == "core"
+
+
+def test_a_dismissal_is_declared_only_on_the_entry_document_and_confirmed_by_a_reload(
+        monkeypatch):
+    """Review B1: one click that removed its own control (a modal's Close) is no
+    evidence. Only a safe click on the entry document as loaded (no path), removing
+    what that document's contract held, and still gone on a fresh load of it, declares
+    the removed controls ``dismissed``."""
+    url = f"{BASE}/"
+    got_it = {"tag": "button", "id": "got-it"}
+    ex = explore.Explorer(url, scope_urls=[url], proxy="127.0.0.1:2")
+    fresh, reloads = {"els": [NEXT]}, []
+    monkeypatch.setattr(ex, "restore", lambda page, ctx, st: reloads.append(st) or True)
+    monkeypatch.setattr(ex, "settled_fingerprint",
+                        lambda page, ctx: _reading(url, fresh["els"]))
+    page = type("P", (), {"url": url})()
+    before, after = _reading(url, [NEXT, got_it]), _reading(url, [NEXT])
+    click = Step(element_signature(got_it), "click")
+    entry = State.read(before, entry_url=url)
+    modal = State.read(before, entry_url=url, path=[Step(element_signature(OPEN), "click")])
+    assert ex._dismissal(modal, before, after, click, url, page) is False
+    assert ex._dismissal(entry, before, after, replace(click, safe=False), url, page) is False
+    assert reloads == [] and ex._shared.optional == {}
+    fresh["els"] = [NEXT, got_it]                     # back on a fresh load: not dismissed
+    assert ex._dismissal(entry, before, after, click, url, page) is True
+    assert ex._shared.optional == {}
+    fresh["els"] = [NEXT]                             # gone for good: declared
+    assert ex._dismissal(entry, before, after, click, url, page) is True
+    assert ex._shared.optional == {element_signature(got_it): "dismissed"}
+    assert len(reloads) == 2
 
 
 def test_only_a_declared_optional_feature_or_marker_may_be_missing():
@@ -238,6 +308,48 @@ def test_a_replay_never_skips_a_missing_step_silently(monkeypatch):
     ex._declare([element_signature(NEXT)], "dismissed")
     assert ex.restore(_FakePage(), None, state) is True
     assert ex.report.replay_skipped_optional == 1
+
+
+def test_an_action_whose_result_could_not_be_read_is_retried_and_its_successor_recorded(
+        monkeypatch, tmp_path):
+    """Review B3: the result page of a performed, safe step could not be read (two
+    Playwright errors). The work item is not finished: the step is retried after a
+    restore, its successor is recorded and its action logged."""
+    log = tmp_path / "actions.jsonl"
+    url = f"{BASE}/flaky"
+    ex = explore.Explorer(f"{BASE}/", scope_urls=[f"{BASE}/"], proxy="127.0.0.1:2",
+                          actions_log=log)
+    link = {"tag": "a", "href": f"{BASE}/next", "label": "Next page", "id": "nx"}
+    back = {"tag": "a", "href": f"{BASE}/", "label": "Back", "id": "bk"}
+    here = _reading(url, [dict(link, signature=element_signature(link), occurrence=0)])
+    there = _reading(url, [dict(back, signature=element_signature(back), occurrence=0)])
+    reads = iter([here, here, None, here])   # start, before, after (unread), before again
+    monkeypatch.setattr(ex, "settled_fingerprint", lambda page, ctx: next(reads, there))
+    monkeypatch.setattr(ex, "wait_quiet", lambda page: True)
+    monkeypatch.setattr(ex, "_gather", lambda page: None)
+    monkeypatch.setattr(ex, "_close_popups", lambda ctx, page: None)
+    restores, acted = [], []
+    monkeypatch.setattr(ex, "_restore_any",
+                        lambda page, ctx, st: restores.append(st) or True)
+
+    def act(page, ctx, el, step):
+        ex._tag(ctx, "act")
+        ex._watch.append(("GET", f"{BASE}/next"))
+        acted.append(step)
+        return explore.ACTED
+
+    monkeypatch.setattr(ex, "act", act)
+    ex._shared.started = ex.clock()
+    state = State.read(here, entry_url=url)
+    ex._shared.known.add(state.fp)
+    page = type("P", (), {"url": url, "wait_for_timeout": lambda self, ms: None})()
+    ex._explore_here(state, page, None, None, depth=0)
+    assert len(acted) == 2 and len(restores) == 1        # retried, after a restore
+    assert ex.report.actions_retried == 1 and ex.report.actions_failed == 0
+    assert ex._shared.work.status[work_key(state.fp, acted[0])] == SUCCEEDED
+    lines = [json.loads(ln) for ln in log.read_text().splitlines()]
+    assert [ln["new_state"] for ln in lines] == [there.key]
+    assert there.key in ex._shared.known
 
 
 def test_a_path_that_sent_a_non_idempotent_request_is_never_replayed(monkeypatch):

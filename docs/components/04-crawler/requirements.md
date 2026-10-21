@@ -966,8 +966,8 @@ fuzzer.
     (FR-CRAWL-27). It is called only from `Explorer.reading` and
     `Explorer._alias_state` (an AST guard).
   - A step's effect and whether it changed the page are judged against the page just
-    before it. A page a restore accepted under the state's contract (FR-CRAWL-33) is
-    that state: its key is added to the known set.
+    before it. A page that passed the state's contract (FR-CRAWL-33) is that state:
+    its key is added to the known set; no other reading is.
   - **The per-route bound is reported, never claimed equivalence**: each state refused
     because its folded route holds `max_states_per_route` states is counted in
     `explore.json`'s `coverage_excluded` (per folded route) and `route_capped`; a state
@@ -983,7 +983,9 @@ fuzzer.
     `running`, `succeeded`, `refused`, `retryable` or `failed` (`equivalent` when
     skipped as below); `explore.json`'s `work` counts them at the end.
   - **A failure never consumes the work.** A Playwright error, a step that could not
-    act, or an element gone from the restored page makes the item `retryable`; it is
+    act, an element gone from the restored page, or *(CC-CRAWL-0055 review B3)* a safe
+    step whose result page could not be read makes the item `retryable` (an item is
+    `succeeded` only once its result was read); it is
     queued again after a restore, up to `max_action_attempts` (3) attempts, then
     `failed` (`actions_retried`, `actions_failed`). A refusal (the denylist, a
     credential-change form) is `refused`.
@@ -1000,7 +1002,8 @@ fuzzer.
   - Enforced by `tests/test_disco_state_identity.py`
     (`test_the_same_step_in_another_execution_state_of_one_route_is_new_work`,
     `test_a_failed_attempt_never_consumes_the_work_and_is_retried_then_failed`,
-    `test_presumed_chrome_is_deprioritised_and_skipped_only_on_equal_effects_on_two_routes`)
+    `test_presumed_chrome_is_deprioritised_and_skipped_only_on_equal_effects_on_two_routes`,
+    `test_an_action_whose_result_could_not_be_read_is_retried_and_its_successor_recorded`)
     and, in a real browser, `tests/test_disco_state_identity_browser.py`
     (`test_a_dialogs_second_stage_takes_the_same_next_again`,
     `test_a_transient_playwright_error_never_consumes_an_action`).
@@ -1008,17 +1011,32 @@ fuzzer.
   BUG-0539)**
   - **A recorded contract** is the state's element multiset and workflow markers when
     first read. It is never rewritten or narrowed. A restore reproduces the state when
-    its execution key comes back, or when the exact route matches, every mandatory
-    element is present at least as many times as recorded and every mandatory marker
-    is shown (`explore.contract_mismatch`). A page with more is accepted; a proper
-    subset never is.
-  - **Optional features are declared, with evidence, never inferred by shrinking:**
+    its execution key comes back, or when the exact route matches and every element
+    is present exactly as many times as recorded, every recorded marker is shown and
+    no other (`explore.contract_mismatch`). *(Amended in place, CC-CRAWL-0055 review
+    B2; was: a page with more was accepted.)* Neither a proper subset (`core`,
+    `markers`) nor a superset (`extra`: a control more often than recorded, or a marker
+    the contract lacks) is accepted: a server that moved on shows a later stage with
+    the earlier stage's controls and more.
+  - **A step is taken only on a page that holds its state's contract.** Before each
+    step the page is read and, when the last step changed it or it no longer holds
+    the contract (a late render, a server that moved on), the state is restored and
+    checked again; only a page that passed is taken as the state (its key added to
+    the known set).
+  - **Optional features are declared, with evidence, never inferred by shrinking;** a
+    declared feature is excused whether missing or shown again:
     - `first-visit`: what the start document's first load held and a fresh second load
       of it (made when the start state is recorded) does not (a welcome dialog); the
       start state's own optional counts and markers, and run-wide when gone altogether;
-    - `dismissed`: what a click removed, with no navigation and nothing new, when the
-      clicked element's own signature was among what it removed altogether (a notice's
-      "Got it"); run-wide.
+    - *(Amended in place, CC-CRAWL-0055 review B1; was: any click that removed its own
+      element.)* `dismissed`: what a safe click (no non-idempotent request) on an
+      entry document as loaded (a state with no path) removed altogether, with no
+      navigation and nothing new, when the clicked element's own signature was among
+      it and all of it was in that state's recorded contract, and a fresh load of the
+      entry URL still shows none of it (a notice's "Got it"); run-wide. A control a
+      step added (a modal its Open showed) is never declared.
+    - A run-wide declaration never excuses a control the state's own last path step
+      added (`State.added`).
     `explore.json`'s `optional_declared` counts them by evidence.
   - **Replay never skips a missing step silently.** A path step whose element is
     missing fails the restore (`missing-step`) unless its signature is declared
@@ -1031,20 +1049,28 @@ fuzzer.
     (`live_states`), to `max_live_depth` (3) such states one inside another; it is never
     queued for a replay.
   - **A failed restore marks the state unresolved** with its reason (`route`, `core`,
-    `markers`, `missing-step`, `unsafe-step`, `replay-mutated`, `navigation`,
+    `extra`, `markers`, `missing-step`, `unsafe-step`, `replay-mutated`, `navigation`,
     `step-refused`, `step-failed`, `replay-error`, `unreadable`, `live-depth`),
     counted in `explore.json`'s `unresolved` and `unrestorable`; the steps it still had
-    are counted in `steps_abandoned`. Its contract is kept as recorded.
+    are counted in `steps_abandoned`. Its contract is kept as recorded. A step that sent
+    a non-idempotent request and whose result page could not be read is counted
+    `unreadable` too, logged with no new state, and never taken again.
   - **Not reset by a restore** (stated limit): `about:blank` resets the document only;
     server state, cookies and storage persist. A state that depends on them either
     holds its contract or is reported unresolved.
   - Enforced by `tests/test_disco_state_identity.py`
     (`test_a_recorded_core_is_never_accepted_by_a_proper_subset_nor_shrunk`,
+    `test_a_superset_of_the_contract_is_never_the_recorded_state`,
+    `test_a_declared_optional_feature_never_excuses_a_missing_mandatory_one`,
+    `test_a_declaration_never_excuses_what_the_states_own_last_step_added`,
+    `test_a_dismissal_is_declared_only_on_the_entry_document_and_confirmed_by_a_reload`,
     `test_a_replay_never_skips_a_missing_step_silently`,
     `test_a_path_that_sent_a_non_idempotent_request_is_never_replayed`) and, in a real
     browser, `tests/test_disco_state_identity_browser.py`
     (`test_a_restore_that_lost_a_core_control_is_unresolved_and_its_contract_kept`,
-    `test_a_state_reached_by_a_post_is_explored_in_place_and_never_replayed`).
+    `test_a_state_reached_by_a_post_is_explored_in_place_and_never_replayed`,
+    `test_a_modal_closed_by_its_own_control_that_does_not_reopen_is_unresolved`,
+    `test_a_restore_that_lands_on_a_later_stage_is_unresolved_never_that_stage`).
 
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default

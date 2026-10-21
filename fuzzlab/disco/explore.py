@@ -33,11 +33,14 @@ and transition).
 
 **Restore** (FR-CRAWL-33). A state is restored by navigating to its entry URL and
 replaying the path of actions that led to it, then checking its recorded contract
-(`contract_mismatch`): the exact route, every mandatory element as many times as
-recorded, every workflow marker. The contract is never rewritten or narrowed; a
-feature is optional only when declared so with evidence (shown on the first visit only;
-dismissed for good by its own control). A path step whose element is missing fails the
-restore unless the element is declared optional. A path holding a step that sent a
+(`contract_mismatch`): the exact route, every element exactly as many times as recorded
+(neither a subset nor a superset), every workflow marker and no other. The contract is
+never rewritten or narrowed; a feature is optional only when declared so with evidence
+(shown on the first visit only; on the entry document, dismissed for good by its own
+control, confirmed by a fresh load), and never one the state's own last step added. A
+step is taken only on a page that holds its state's contract. A path step whose
+element is missing fails the restore unless the element is declared optional. A path
+holding a step that sent a
 non-idempotent request is never replayed: the state it reached is explored in place,
 when it is reached, and later restores of it are unresolved. A failed restore marks
 the state unresolved with its reason (`unresolved`).
@@ -334,8 +337,10 @@ class State:
     state and weakened it for good). ``optional`` lists ``(signature, count)`` declared
     optional for this state and ``optional_markers`` its declared optional markers:
     only the start state declares any, from a fresh second load (`Explorer._seed`).
-    Run-wide declarations (a dismissed notice) live in `_Shared.optional`.
-    ``unresolved`` is the reason a restore of it failed, once one did."""
+    Run-wide declarations (a dismissed notice) live in `_Shared.optional`. ``added``
+    lists the signatures the last step of ``path`` added: a run-wide declaration never
+    excuses them (review B1: a modal its own Close removed elsewhere is still this
+    state's modal). ``unresolved`` is the reason a restore of it failed, once one did."""
     fp: str
     url: str
     entry_url: str
@@ -347,13 +352,15 @@ class State:
     optional: tuple = ()
     optional_markers: tuple = ()
     unresolved: str | None = None
+    added: tuple = ()
 
     @classmethod
     def read(cls, got: Reading, *, entry_url: str, path=None,
-             fallback: "State | None" = None) -> "State":
+             fallback: "State | None" = None, added=()) -> "State":
         """A state recorded from ``got``: its contract is what ``got`` shows."""
         return cls(got.key, got.url, entry_url, list(path or []), fallback,
-                   core=got.counts, markers=got.markers, structure=got.structure)
+                   core=got.counts, markers=got.markers, structure=got.structure,
+                   added=tuple(added))
 
     def replayable(self) -> bool:
         """Whether ``path`` holds only steps recorded safe to repeat."""
@@ -366,29 +373,37 @@ def contract_mismatch(state: State, got: Reading, optional=frozenset()) -> str |
     * ``route``: the exact route (`fingerprint.execution_route`) differs;
     * ``core``: a mandatory element is missing, or present fewer times than recorded --
       a proper subset is never accepted;
+    * ``extra``: an element is present more times than recorded, or a workflow marker
+      the contract lacks is shown -- a superset is never accepted either (review B2: a
+      server that moved on shows a later stage, the earlier stage's controls and more);
     * ``markers``: a recorded workflow marker is not shown.
 
-    Mandatory is the recorded contract minus what is declared optional: ``optional``
-    (run-wide declared signatures) and the state's own ``optional`` counts and
-    ``optional_markers``. A page with *more* than the contract (a notice shown again in
-    another worker's context) reproduces it. Nothing here changes ``state``."""
+    What is declared optional is excused both ways: ``optional`` (run-wide declared
+    signatures, with their markers) -- never one the state's own last path step added
+    (``state.added``) -- and the state's own ``optional`` counts and
+    ``optional_markers``. A notice shown again in another worker's fresh context is
+    declared (first visit, dismissed), so it reproduces. Nothing here changes
+    ``state``."""
     if got.key == state.fp:
         return None
     if execution_route(got.url) != execution_route(state.url):
         return "route"
-    have = dict(got.counts)
-    own = dict(state.optional)
-    for sig, n in state.core:
-        if sig in optional:
-            continue
-        if have.get(sig, 0) < n - own.get(sig, 0):
+    excused = frozenset(optional) - frozenset(state.added)
+    have, core, own = dict(got.counts), dict(state.core), dict(state.optional)
+    for sig, n in core.items():
+        if sig not in excused and have.get(sig, 0) < n - own.get(sig, 0):
             return "core"
-    shown = set(got.markers)
-    skip = tuple(f"el:{sig}#" for sig in optional)
-    for mark in state.markers:
-        if mark in shown or mark in state.optional_markers or (skip and mark.startswith(skip)):
-            continue
-        return "markers"
+    for sig, n in have.items():
+        if sig not in excused and n > core.get(sig, 0):
+            return "extra"
+    shown, recorded = set(got.markers), set(state.markers)
+    skip = tuple(f"el:{sig}#" for sig in excused)
+    for mark in sorted(recorded - shown):
+        if mark not in state.optional_markers and not (skip and mark.startswith(skip)):
+            return "markers"
+    for mark in sorted(shown - recorded):
+        if mark not in state.optional_markers and not (skip and mark.startswith(skip)):
+            return "extra"
     return None
 
 
@@ -575,8 +590,8 @@ class ExploreReport:
     refused: dict[str, int] = field(default_factory=dict)
     #: states whose restore failed (each counted once, by reason in `unresolved`)
     unrestorable: int = 0
-    #: FR-CRAWL-33: unresolved states by reason -- ``route``, ``core``, ``markers`` (the
-    #: contract did not hold), ``missing-step``, ``unsafe-step`` (a path step sent a
+    #: FR-CRAWL-33: unresolved states by reason -- ``route``, ``core``, ``extra``,
+    #: ``markers`` (the contract did not hold), ``missing-step``, ``unsafe-step`` (a path step sent a
     #: non-idempotent request), ``replay-mutated``, ``navigation``, ``step-refused``,
     #: ``step-failed``, ``replay-error``, ``unreadable``, ``live-depth``
     unresolved: dict[str, int] = field(default_factory=dict)
@@ -1683,11 +1698,10 @@ class Explorer:
         shared = self._shared
         authenticated = self.storage_state is not None and \
             not looks_like_login_url(self.start_url)
-        got = self.settled_fingerprint(page, self._ctx)
+        got = self._bring_to(state, page, restore=False)
         if got is None:
-            self._unresolved(state, "unreadable")
+            self._unresolved(state, self._restore_failure or "unreadable")
             return page
-        self._seen_as(state, got)
         self._gather(page)
         route = normalise_route(state.url)
         pending = deque(self._pending(page, state, got.els))
@@ -1720,17 +1734,17 @@ class Explorer:
                 self._finish(key, REFUSED)
                 continue
             ctx = self._ctx
-            if dirty and not self._restore_any(page, ctx, state):
+            # the page just before the step, holding the state's contract (restored
+            # when the last step changed it, or when it drifted since: review B2)
+            now = self._bring_to(state, page, restore=dirty)
+            if now is None:
                 with shared.lock:
                     shared.work.release(key)
                     self.report.steps_abandoned += 1 + len(pending)
                 self._unresolved(state, self._restore_failure or "restore")
                 break
             dirty = False
-            now = self.settled_fingerprint(page, ctx)     # the page just before the step
-            if now is not None:
-                self._seen_as(state, now)
-            el = self._find(now.els, step) if now else None
+            el = self._find(now.els, step)
             before_url = page.url
             outcome = ACT_FAILED                 # the element is not there to act on
             if el is not None:
@@ -1747,9 +1761,8 @@ class Explorer:
                     self._attempt_failed(key, el_desc, step, pending)
                     dirty = True
                 continue
-            with shared.lock:
-                shared.work.finish(key, SUCCEEDED)
-                self.report.actions += 1
+            with shared.lock:            # performed; the work item finishes once its
+                self.report.actions += 1  # effect was read (review B3)
                 if step.kind in ("submit", "enter"):
                     self.report.submissions += 1
                 elif step.kind.startswith("perturb:"):
@@ -1765,6 +1778,7 @@ class Explorer:
             self._close_popups(self._ctx, page)
             if authenticated and looks_like_login_url(page.url):
                 with shared.lock:
+                    shared.work.finish(key, SUCCEEDED)    # its effect: a lost session
                     self.report.session_lost += 1
                     shared.denied.add(step.key())
                 navguard.release(self._ctx)
@@ -1775,17 +1789,30 @@ class Explorer:
                 self._log_action(self._action_seq, state, el, step, None)
                 continue
             after = self.settled_fingerprint(page, self._ctx)
-            if after is None:
-                self._bump("errors")
+            if after is None:                 # its effect could not be read (review B3)
                 dirty = True
+                if step.safe:                 # repeatable: a failed attempt, retried
+                    self._attempt_failed(key, el_desc, step, pending)
+                else:                         # a non-idempotent request went: never again
+                    with shared.lock:
+                        shared.work.finish(key, FAILED)
+                        self.report.errors += 1
+                        self.report.unresolved["unreadable"] = \
+                            self.report.unresolved.get("unreadable", 0) + 1
+                    self._log_action(self._action_seq, state, el, step, None)
                 continue
+            self._finish(key, SUCCEEDED)
             self._observe(route, step, sent, now, after)
-            self._dismissal(now, after, step, before_url, page.url)
             self._gather(page)
             self._log_action(self._action_seq, state, el, step, after.key, url=page.url)
+            after_url = page.url
+            # a dismissal's check reloads the entry document; it runs only for a safe
+            # step from a state with no path, whose child is queued, never in place
+            if self._dismissal(state, now, after, step, before_url, page):
+                dirty = True
             if after.key != now.key:          # the step changed the page it acted on
                 dirty = True
-                new = self._child(state, step, after, before_url, page.url)
+                new = self._child(state, step, now, after, before_url, after_url)
                 live = not step.safe or not new.replayable()
                 page = self._admit(new, page, browser, pw, live=live, depth=depth)
         return page
@@ -1808,10 +1835,34 @@ class Explorer:
         if retry:
             pending.append((el_desc, step))
 
+    def _bring_to(self, state: State, page, *, restore: bool) -> Reading | None:
+        """The page read as ``state``, or None (``_restore_failure`` says why). Restored
+        first when ``restore``, or when the page no longer holds the state's contract (a
+        late render, a server that moved on): a step is taken, and logged under the
+        state's key, only on a page the contract accepted (review B2). The reading is
+        then that state (`_seen_as`)."""
+        ctx = self._ctx
+        if not restore:
+            got = self.settled_fingerprint(page, ctx)
+            if got is not None and (got.key == state.fp or self.reproduces(state, got)):
+                self._seen_as(state, got)
+                return got
+        if not self._restore_any(page, ctx, state):
+            return None
+        got = self.settled_fingerprint(page, ctx)
+        if got is None:
+            self._restore_failure = "unreadable"
+            return None
+        if got.key != state.fp and not self.reproduces(state, got):
+            self._restore_failure = self._mismatch or "contract"
+            return None
+        self._seen_as(state, got)
+        return got
+
     def _seen_as(self, state: State, got: Reading) -> None:
-        """``got`` is ``state`` as the page shows it now (the state itself, or a restore
-        its recorded contract accepted, FR-CRAWL-33): its key is visited too, so a step
-        that leads back to it is no new state."""
+        """``got`` is ``state`` as the page shows it now: the state itself, or a page its
+        recorded contract accepted (`_bring_to` calls it with no other reading). Its key
+        is visited too, so a step that leads back to it is no new state."""
         if got.key != state.fp:
             with self._shared.lock:
                 self._shared.known.add(got.key)
@@ -1827,33 +1878,52 @@ class Explorer:
         with self._shared.lock:
             self._shared.work.observe(step.key(), route, effect)
 
-    def _dismissal(self, before: Reading | None, after: Reading, step: Step,
-                   before_url: str, after_url: str) -> None:
-        """Declare a dismissed feature optional (FR-CRAWL-33): a click, with no
-        navigation, that removed its own element's signature and only removed (nothing
-        new, nothing more often) -- a notice's "Got it", a banner's close. What it
-        removed altogether is declared ``dismissed`` run-wide: once gone for good, it
-        is not mandatory in any state's contract."""
-        if step.kind != "click" or before is None or after_url != before_url:
-            return
+    def _dismissal(self, state: State, before: Reading, after: Reading, step: Step,
+                   before_url: str, page) -> bool:
+        """Declare a dismissed feature optional (FR-CRAWL-33), on evidence only (review
+        B1: one click that closed a modal made the modal optional in every contract):
+
+        * the state is an entry document as loaded (no path), and what the click
+          removed was all in its recorded contract -- never a control a step added;
+        * the step is a safe click (no non-idempotent request), with no navigation,
+          that removed its own element's signature and only removed (nothing new,
+          nothing more often): a notice's "Got it", a banner's close;
+        * a fresh load of the entry URL (`restore`, empty path) still shows none of
+          it: its effect persists.
+
+        Then what it removed altogether is declared ``dismissed`` run-wide. Returns
+        whether the page was reloaded for the check (the caller restores)."""
+        if state.path or step.kind != "click" or not step.safe or page.url != before_url:
+            return False
         was, now = dict(before.counts), dict(after.counts)
         if any(n > was.get(sig, 0) for sig, n in now.items()):
-            return
+            return False
         gone = [sig for sig in was if sig not in now]
-        if step.signature in gone:
+        recorded = dict(state.core)
+        if step.signature not in gone or any(sig not in recorded for sig in gone):
+            return False
+        self.restore(page, self._ctx, state)    # a fresh entry document; its verdict
+        again = self.settled_fingerprint(page, self._ctx)   # is not the point: the read
+        if again is not None and \
+                execution_route(again.url) == execution_route(state.entry_url) and \
+                not any(sig in dict(again.counts) for sig in gone):
             self._declare(gone, "dismissed")
+        return True
 
-    def _child(self, state: State, step: Step, after: Reading, before_url: str,
-               after_url: str) -> State:
+    def _child(self, state: State, step: Step, before: Reading, after: Reading,
+               before_url: str, after_url: str) -> State:
         """The state ``step`` led to from ``state``: by its own URL when the step
         navigated (its path the fallback: a page only a POST shows), else by
-        ``state``'s path plus ``step``."""
+        ``state``'s path plus ``step``. ``added``: what the step added (more often
+        than on the page before it), which no run-wide declaration excuses."""
         path = [*state.path, step]
+        had = dict(before.counts)
+        added = tuple(sig for sig, n in after.counts if n > had.get(sig, 0))
         if after_url != before_url:
             return State.read(after, entry_url=after_url,
                               fallback=State.read(after, entry_url=state.entry_url,
-                                                  path=path))
-        return State.read(after, entry_url=state.entry_url, path=path)
+                                                  path=path, added=added))
+        return State.read(after, entry_url=state.entry_url, path=path, added=added)
 
     def _admit(self, new: State, page, browser, pw, *, live: bool, depth: int):
         """A state a step led to: known (nothing), over a budget or its route's bound

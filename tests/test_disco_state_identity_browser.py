@@ -77,18 +77,47 @@ document.getElementById('begin').addEventListener('click', () =>
     o.appendChild(c); o.appendChild(d);
   }));""")
 
+MODAL = _PAGE.format(body="<button id=open>Open</button><div id=modal></div>", script="""
+const m = document.getElementById('modal');
+document.getElementById('open').addEventListener('click', () =>
+  fetch('/api/modal').then(r => { if (!r.ok) return;     // expired: no modal opens
+    m.innerHTML = '';
+    const c = document.createElement('button'); c.id = 'close'; c.textContent = 'Close';
+    c.addEventListener('click', () => { m.innerHTML = ''; });
+    const p = document.createElement('button'); p.id = 'pay'; p.textContent = 'Pay';
+    p.addEventListener('click', () => fetch('/api/pay'));
+    m.appendChild(c); m.appendChild(p); }));""")
+
+
+def _flow(stage: int) -> str:
+    """The server's workflow stage decides the page: stage 2 adds Confirm."""
+    confirm = "<button id=confirm>Confirm</button>" if stage == 2 else ""
+    return _PAGE.format(body=f"<button id=next>Next</button><button id=help>Help</button>"
+                        f"{confirm}", script="""
+document.getElementById('next').addEventListener('click', () =>
+  fetch('/api/advance', {method: 'POST'}).then(() => location.reload()));
+document.getElementById('help').addEventListener('click', () => fetch('/api/help'));
+const c = document.getElementById('confirm');
+if (c) c.addEventListener('click', () => fetch('/api/confirm'));""")
+
+
 PAGES = {"/wizard": WIZARD, "/dialog": DIALOG, "/flaky": FLAKY, "/shop": SHOP,
-         "/order": ORDER}
+         "/order": ORDER, "/modal": MODAL}
 
 
 class _FlowSite:
-    """Loopback pages for the four flows; ``hits`` lists ``(method, path)`` received.
+    """Loopback pages for the flows; ``hits`` lists ``(method, path)`` received.
     ``/api/cart`` answers ``["pay", "terms"]`` the first time and ``["pay"]`` after:
-    the terms control is consumed, so a restore of the cart cannot show it again."""
+    the terms control is consumed, so a restore of the cart cannot show it again.
+    ``/api/modal`` answers 409 from its third call (the workflow expired: the modal no
+    longer opens). ``/flow`` shows the server's stage, which ``POST /api/advance``
+    moves to 2 for good."""
 
     def __init__(self):
         self.hits: list[tuple[str, str]] = []
         self.cart_calls = 0
+        self.modal_calls = 0
+        self.stage = 1
         site = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -110,6 +139,15 @@ class _FlowSite:
                 site.hits.append((method, path))
                 if method == "GET" and path in PAGES:
                     return self._send(200, PAGES[path].encode(), "text/html; charset=utf-8")
+                if method == "GET" and path == "/flow":
+                    return self._send(200, _flow(site.stage).encode(),
+                                      "text/html; charset=utf-8")
+                if path == "/api/advance":
+                    site.stage = 2
+                if path == "/api/modal":
+                    site.modal_calls += 1
+                    return self._send(200 if site.modal_calls <= 2 else 409, b"{}",
+                                      "application/json")
                 if path == "/api/cart":
                     site.cart_calls += 1
                     items = ["pay", "terms"] if site.cart_calls == 1 else ["pay"]
@@ -240,3 +278,30 @@ def test_a_state_reached_by_a_post_is_explored_in_place_and_never_replayed(
     assert report.live_states >= 1 and report.unresolved.get("unsafe-step", 0) >= 1
     begin = [a for a in actions if a["label"] == "Begin"]
     assert begin and begin[0]["replay_safe"] is False
+
+
+def test_a_modal_closed_by_its_own_control_that_does_not_reopen_is_unresolved(
+        site, tmp_path, monkeypatch):
+    """Review B1, in a real browser: Open shows a modal (Close, Pay); the explorer closes
+    it with its own Close, then restores the modal state to take Pay, and the modal no
+    longer opens. Pre-fix the Close click declared Close and Pay optional run-wide, the
+    restore showing no modal was accepted, and the failure surfaced only as a failed
+    action."""
+    report, actions = _explore(site, "/modal", tmp_path, monkeypatch)
+    assert any(a["label"] == "Close" for a in actions), actions
+    assert report.unresolved == {"core": 1}, report.unresolved
+    assert "dismissed" not in report.optional_declared
+    assert site.count("GET", "/api/pay") == 0, site.hits
+
+
+def test_a_restore_that_lands_on_a_later_stage_is_unresolved_never_that_stage(
+        site, tmp_path, monkeypatch):
+    """Review B2, in a real browser: Next POSTs and the server's workflow moves to stage
+    2, which shows stage 1's controls and Confirm on the same URL. Pre-fix a restore of
+    stage 1 landed on stage 2, was accepted as a superset, and stage 1's Help ran there
+    and was logged under stage 1's key."""
+    report, actions = _explore(site, "/flow", tmp_path, monkeypatch)
+    [stage1] = {a["state"] for a in actions if a["label"] == "Next" and a["replay_safe"]
+                is False and a["new_state"] != a["state"]}
+    assert not [a for a in actions if a["label"] == "Help" and a["state"] == stage1]
+    assert report.unresolved == {"extra": 1}, report.unresolved

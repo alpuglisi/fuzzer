@@ -114,6 +114,31 @@ saved.
   twice, never twice on one route), "no unrestorable state" (now none but the states a
   POST reached), "(route, element, step) never twice" (now per state).
 
+### Review round 1 (on d9e269e): three more instances inside the fix
+The implementation review found the root cause again in the fix itself, each
+reproduced by a skeptic in a real browser or on the real loop:
+- **B1:** `_dismissal` took one click as evidence. A modal closed by its own Close made
+  Close and Pay optional run-wide, so a restore that did not reopen the modal was
+  accepted as the modal state (`unresolved == {}`, Pay never taken, reported only as a
+  failed action). Fixed: a dismissal is declared only from a safe click on an entry
+  document as loaded, for what its recorded contract held, confirmed by a fresh load;
+  a run-wide declaration never excuses what a state's own last step added.
+- **B2:** the contract accepted a superset on purpose ("a page with more is
+  accepted"), although the audit names supersets in defect 3. A server that moved to
+  a later stage was taken for the earlier stage, and the earlier stage's Help was run
+  and logged there. Fixed: an `extra` control or marker is refused unless declared; a
+  step is taken only on a page that passed the contract.
+- **B3:** a work item was marked succeeded before its result page was read; an
+  unreadable result consumed it. Fixed: an item succeeds only once its result was
+  read; a safe step is retried, an unsafe one reported `unreadable`.
+
+Why the fix repeated its own root cause: B1 and B2 were designed to keep the e2e
+fixture's restores passing (the notice, another worker's fresh context), and were
+judged by those restores passing -- the work-saving side again -- with no test of what
+they must refuse (PA-0539(5) was written in the same change and not applied to its own
+declarations). B3 kept the pre-fix order (finish, then read). Each now has a test
+proven on d9e269e (CC-CRAWL-0055's effectiveness).
+
 ## Recurrence review
 Checked `docs/bugs/` (BUG-0501..0507 for disco; BUG-0026/0027, BUG-0072, BUG-0109) and
 `docs/PREVENTIVE_ACTIONS.md` (PA-0028, PA-0029, PA-0048, PA-0073, PA-0110, PA-0501,
@@ -195,3 +220,9 @@ of what it must not merge.
   fresh second load is made, of the start URL); such a state is unresolved, reported.
 - **R5 -- budget on a list that grows per submission.** The multiset makes each
   appended row a new state; the per-route bound (8) stops it and reports the rest.
+- **R6 -- strict restores cost coverage on a changing server** (review round 1): a
+  state whose page gains a control or loses one between visits (a list the server
+  grows, a stage that moved on, a modal that no longer opens) is unresolved (`extra`,
+  `core`), its remaining steps abandoned and counted, never explored as itself.
+- **R7 -- a notice on a page reached by a step** (not an entry document) is never
+  declared dismissed: a state that recorded it is unresolved once it is gone.
