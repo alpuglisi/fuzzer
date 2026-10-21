@@ -116,6 +116,43 @@ def test_points_from_ground_truth_now_includes_header_points():
     assert "X-Signature-256" not in skipped_by_param   # no longer skipped
 
 
+def test_the_header_point_estimate_reads_the_spider_db_through_the_read_only_opener(
+        tmp_path, monkeypatch):
+    """CC-FUZZ-0108 (FR-CORE-508): the estimate opens the spider DB through
+    `core.store.open_read_only` (never its own read-only URI); it counts each distinct
+    crawled 2xx page that is not destructive, never creates a missing DB, never writes
+    the file, and reads a file that is not SQLite as no pages."""
+    import os
+    import sqlite3
+
+    from fuzzlab.core import store as core_store
+    from fuzzlab.harness.auto import header_point_cost, header_point_estimate
+    db = tmp_path / "spider.db"
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE discovered_pages (url TEXT, status_code INTEGER)")
+    conn.executemany("INSERT INTO discovered_pages VALUES (?, ?)", [
+        ("http://127.0.0.1:8080/a", 200), ("http://127.0.0.1:8080/a", 200),
+        ("http://127.0.0.1:8080/b", 302), ("http://127.0.0.1:8080/c", 204),
+        ("http://127.0.0.1:8080/logout", 200)])
+    conn.commit()
+    conn.close()
+    before = os.stat(db)
+    opened = []
+    real = core_store.open_read_only
+    monkeypatch.setattr(core_store, "open_read_only",
+                        lambda p, **kw: opened.append((str(p), kw)) or real(p, **kw))
+    pages, cost = header_point_estimate(db, ["X-A", "X-B"])
+    assert (pages, cost) == (2, 2 * 2 * header_point_cost())    # /a and /c
+    assert opened == [(str(db), {"timeout": 5.0})]
+    after = os.stat(db)
+    assert (after.st_size, after.st_mtime_ns) == (before.st_size, before.st_mtime_ns)
+    missing = tmp_path / "missing.db"
+    assert header_point_estimate(missing, ["X-A"]) == (0, 0) and not missing.exists()
+    junk = tmp_path / "junk.db"
+    junk.write_text("not a database")
+    assert header_point_estimate(junk, ["X-A"]) == (0, 0)
+
+
 def test_points_from_ground_truth_sets_body_content_type_only_for_json_cases():
     # CC-FUZZ-0032/FR-FUZZ-19: a whole-body point (`param="body"`) only gets a
     # declared `body_content_type` when the ground truth marks it

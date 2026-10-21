@@ -3,6 +3,148 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0068 — The store version is SQLite's change counter on one held read-only connection; a live refresh keeps the user's place (FR-UI-505, FR-UI-510, FR-UI-514, BUG-0534, BUG-0535) (2026-10-20)
+- Placement: pre-assigned to AU-SITETREE. Design record: `DRAFT-AU-SITETREE.md`
+  (revision 2, its confirming review's six blockers fixed in §11). Depends on
+  CC-CORE-0071 (no raw open of a store file in the web process): the held watch is unsafe
+  without it (§1.4 X3).
+- Change:
+  - **`fuzzlab/web/sitetree.py`**: `store_version(path)` is `PRAGMA data_version` on one
+    held `core.store.open_read_only` connection (query-only, private cache,
+    `fold_on_close`, `any_thread`) on the store last asked about, hashed with the
+    process nonce, the store's device and inode, a reopen epoch and the count (SP-58).
+    `path` may be a callable, called under `_watch_lock`. One watch; released (moved out
+    under the lock, closed outside it, `_closing` dropping back in a `finally`) on
+    another path or `None`, an identity change of the store, `-wal` or `-shm`, a failed
+    read (named swallows: `OperationalError` and exactly `DatabaseError`, PA-0106), a
+    reaper thread's idle release (60 s unused), `release_watches()`. No new watch opens on
+    a path while its predecessor closes (X3b). A watch whose store moved (removed,
+    renamed away, replaced) runs `wal_checkpoint(TRUNCATE)` before its close (§1.10).
+    `MAX_POLL_MS` (30 s). The old file-stat body and its raw `-wal` read are gone.
+  - **`fuzzlab/web/sitetree_routes.py`**: the version and children routes pass the
+    `store_path` callable.
+  - **`fuzzlab/web/projects.py`**: `ProjectManager._leave` calls
+    `sitetree.release_watches()` after `current = None`, before any file is removed.
+  - **`fuzzlab/web/app.py`**: the lifespan releases the watch at shutdown; both poll
+    intervals clamped to `sitetree.MAX_POLL_MS`.
+  - **`fuzzlab/web/static/js/livefocus.js`** (new): `focusKeyIn`, `restoreFocus`
+    (verified landing, visible fallbacks ending at the pane, `preventScroll`, never takes
+    focus from outside its region), `rerender`, `patchInPlace`.
+  - **`fuzzlab/web/static/js/sitetree.js`**: focus keys (`item:`, `count:`, `open:`,
+    `more:`, `issue:`, `issues-more`); "Show more" reused in place; one ordering rule (a
+    token before the fetch, read by a refresh before and after its own) for "Show more"
+    and "Show more findings"; a refresh fetches the pages a group shows down to its last
+    shown item; focused rows patched in place; Issues kept on refresh (`showNode({keep})`,
+    de-duplicated by id) and awaited by `refresh()`; a version is marked seen only once
+    its refresh succeeded; one poll at a time; the baseline taken before the first read;
+    counters `data-baseline`, `data-polls`, `data-refreshes`, `data-loads`.
+  - **`fuzzlab/web/static/js/diagrams.js`**: focus keys (`origin:`, `iface:`, `export:`,
+    `step:` derived beyond the evidence key, `#n` among identical steps); every region
+    re-rendered through `rerender`; the poll skips a hidden page; a version is marked
+    seen only once its reload succeeded; counters.
+  - **Templates**: `tabindex="-1"` on `#st-tree`, `#dg-flow`, `#dg-ifaces`, `#dg-seq`,
+    `#dg-exports`; `data-focus-key="issues-more"`.
+  - **`web/diagram_routes.py`**: docstring only.
+  - **Tests**: `tests/_xproc.py` (a writer in another process); `tests/_store_audit.py`
+    (the run-time audit hook) and `tests/conftest.py` (`_store_audit_hook`,
+    `_no_raw_store_open`, `_release_store_watches`); `tests/test_web_sitetree.py`
+    (L1-1..L1-15 and the moved-store test; L1-5 and L1-7 with the writer in another
+    process); `tests/test_web_projects.py` (L1-13, L1-14);
+    `tests/test_web_store_locks.py` (K1-K6, the audit hook's proofs);
+    `tests/test_web_sitetree_browser.py` (B1-B6, B9, L1-B, the retry, the Issues
+    click-first order; "before" writes; the four sleep-synchronised tests on counters);
+    `tests/test_web_diagrams.py` (B7 with "before" writes and identity, B8);
+    `tests/test_web_live_focus.py` (G1-G3; G4, no registered live-view test sleeps; G5,
+    no browser test locates by a descendant filter).
+  - **A registered test that failed once recurred under load, root-caused** (blocker 6;
+    DRAFT §5.6): the browser tests' `Tab.item` located a tree item with a `has=`
+    descendant filter, which Chromium resolves in time quadratic in the tree's size
+    (~1.9 s of renderer CPU per resolution on the 250-item group, measured; ~5 ms for a
+    plain selector), so a click or `expect` under `-n 4` load overran its timeout. A test
+    defect, not the product's: `Tab.item` now matches the label and steps up to its item
+    (`xpath=../..`; steps 0.02-0.06 s); G5 fails any `has=`/`has_not=` locator in a browser
+    test. The B9 helper test scrolls its own container, so a restore without
+    `preventScroll` fails it (the window-scroll check could not, §11.4); the "Show more"
+    test asserts the same element, not a new one found by its key.
+- Divergences from the draft found while implementing (recorded in the draft's §11):
+  idle release by a reaper thread, never at a call (a call's release on the same path
+  gave two refreshes, against R3, and a page that stopped polling held the store for
+  ever); the moved-store checkpoint (measured: data loss and a wrong store without it);
+  a refresh's group fetch reaches its last shown item (an exact-count fetch hid an item
+  appended to a complete group); `data-loads`.
+- Revision after the review of `eb95cd4` (both reviewers REVISE, one blocking finding
+  each; the one revision round; DRAFT §11.7). Commit `5e4a48b`:
+  - **Blocking (UI):** a refresh whose Contents fetch (the selected node's
+    `/api/sitetree/children`) failed counted as a success: `loadNode` checked only the
+    summary, `showNode` drew an empty table and returned true, and the version was
+    marked seen, against this entry's own rule. Now a non-200 Contents answer is a
+    failure: the shown table stays, the status line says so, `showNode` returns false and
+    the next poll retries. `expand()` marks a group current only when its load or
+    refresh succeeded. Tests: `test_a_refresh_whose_contents_fetch_fails_keeps_the_table_and_is_retried`,
+    `test_a_group_whose_refresh_fails_on_expand_is_retried_at_the_next_expand`.
+  - **Blocking (store):** K4 (`test_a_projects_listing_never_drops_the_store_watchs_locks`)
+    passed its own assertions on the pre-fix `project.py` (the side files went, the
+    identity re-check reopened the watch, a new epoch made every version differ); only
+    the audit hook's teardown failed it. It now asserts the side files after the
+    listing, a version right after it, and one epoch across the scan.
+  - Also: unkeyed tree siblings with one label get an occurrence suffix (`#2`), as the
+    draft said (`identity` lacked it: each refresh added a duplicate); the status line is
+    written only when its text changes and cleared only by a success; `loadSeq` drops an
+    answer overtaken by a later load; the double-click test waits on `data-loads` and G4
+    follows module-level helpers; `store_version`'s docstring no longer claims that
+    nothing but a commit changes the version (a TRUNCATE checkpoint does, measured; FULL
+    and RESTART do not, now tested); the audit hook does two set lookups per open, not a
+    union; the static guard resolves opener aliases (`import shutil as sh`, `from os import
+    open as o`, `io.FileIO`); `_xproc.wal_header`'s raw `-wal` read is reasoned.
+  - Stated residuals: both poll intervals (`sitetree_poll_ms`, `diagram_poll_ms`) are
+    clamped to `sitetree.MAX_POLL_MS` (30 s); a group whose refresh fails on expand is
+    retried at the next expand or the next write, not by the poll; the occurrence suffix
+    is positional among same-label unkeyed siblings only; the static guard does not
+    follow a method call, `getattr` or a computed name, and G4 does not follow a method
+    (`tab.item`); measured consequences of the watch (`rev3/m_arch.out`): while a page
+    polls, a writer's last close does not fold the WAL (the `.fuzzlab` file is not
+    self-contained until the watch is released, as with any open reader), and another
+    process's switch out of WAL or `locking_mode=EXCLUSIVE` gets `SQLITE_BUSY` (a plain
+    `BEGIN EXCLUSIVE` does not); no fuzzlab code does either to a store.
+- Impact:
+  - The web UI, plus CORE's opener (CC-CORE-0071). No schema or API-shape change:
+    `{"version": str | null}` stays opaque.
+  - Consumers of `store_version`, from the code (PA-0152): `/api/sitetree/version`
+    (`sitetree.js`, `diagrams.js`), `sitetree_children` (the cache key, G11),
+    `ProjectManager._leave` and the lifespan (releases), `tests/test_web_sitetree_scale.py`.
+  - The server holds one read-only connection while a page watches the store
+    (NFR-UI-live amended; R4, R10) and one daemon reaper thread while it does. It
+    reverses CC-UI-0500's "a fingerprint with no SQLite at all".
+- Risk: **medium-high**: a held resource in a multi-threaded server whose correctness
+  depends on a process-wide invariant (no raw open). Mitigated by the static guard over
+  the whole web import closure and the run-time audit hook (PA-0535), the cross-process
+  regression tests (K1-K4, L1-*), the identity re-check (a partial defence, X3b), one
+  watch only, release before removal, the moved-store checkpoint, named swallows,
+  query-only and no-create, the lock with its AST guard and a many-thread test
+  (PA-0023's third pattern), and real-browser tests under `FUZZLAB_REQUIRE_BROWSER=1`.
+  Rollback: the old function body and the JS files (re-opens BUG-0534).
+- Deliverables:
+  - [x] measurements: rev 1, rev 2 and implementation (§1.10, the moved store) — done
+  - [x] failing tests committed and run on `7ebf48a` (§5.5) — done
+  - [x] the confirming review's six blockers and notes (§11) — done
+  - [x] `store_version`, `release_watches`, the reaper, the routes, `_leave`, the lifespan, the clamps — done
+  - [x] `livefocus.js`; `sitetree.js`; `diagrams.js`; templates — done
+  - [x] L1-6, L1-8, L1-9, L1-15, B9, the autouse fixtures; every named revert re-proved (§11.4) — done
+  - [x] FR-UI-505, FR-UI-510 edited; FR-UI-514 added; NFR-UI-live, NFR-UI-read-only amended — done
+  - [x] BUG-0534; texts for PA-0534, SP-58, ERROR_LOG, CHANGELOG, ARCHITECTURE to the coordinator — done
+  - [x] `scripts/verify_change.py --base 4ee8007` on the committed tree; counts quoted — done
+  - [x] the review of `eb95cd4`: both blocking findings, the eight further items, each new test failing on `eb95cd4` and each revert re-proved (DRAFT §11.7) — done
+  - [ ] `scripts/verify_change.py --base eb95cd4` on the final commit — counts in the report to the coordinator (a later commit would not be the verified one)
+- Effectiveness (assessed 2026-10-20): `scripts/verify_change.py --base 4ee8007` on the committed tree `eb95cd4` (`3fb76bb` plus the merge of `01192c3`; the whole suite, since `tests/conftest.py` changed): **408 files, 8248 passed, 0 failed, 0 errors, 42 skipped, 36 xfailed**, one parallel pass, 1729 s (`scratchpad/au-sitetree/impl/vc_eb95cd4/`). The 42 skips are sandboxes, optional extras and tools absent here; none is a web, store or browser test. The browser files, under
+  `FUZZLAB_REQUIRE_BROWSER=1`: `test_web_sitetree_browser.py` 36 passed,
+  `test_web_diagrams.py` 21, `test_web_pages_browser.py` 10, `test_web_projects_browser.py` 2,
+  `test_web_launcher_browser.py` 1; `test_web_live_focus.py` 12, `test_web_sitetree.py` 136
+  (2 xfailed), `test_web_store_locks.py` 8. Each named revert re-proved against the
+  implementation: 33 mutants, all caught (DRAFT §11.4); two were not caught on `e55379d`
+  until their tests were fixed in `3fb76bb` (B9a measured the wrong scroll, B1 checked a
+  locator, not the element). The four browser files in one `-n 4` pass after the locator
+  fix: 8 of 8 runs passed, ~50 s each (before: 4 of 11 failed, ~270 s; §11.5).
+
 ### CC-UI-0066 — A run that does not decide its candidate is drawn as such and not counted as evaluated (FR-UI-510/511, BUG-0523) (2026-10-19)
 - Change (`fuzzlab/report/diagram.py`):
   - `_test_sequence` draws a `test.strategy` with `decides: false` as "<arm>: <outcome>

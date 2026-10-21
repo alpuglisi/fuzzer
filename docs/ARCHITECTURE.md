@@ -1156,7 +1156,10 @@ tracked in the requirements files, not here.
   session context; records raw bytes (`core/http.py`).
 - **Store** `[built]`: SQLite access, schema, and numbered forward-only migrations
   (`core/store.py`, `core/migrations.py`; head = migration 24 -- the last, the trace
-  model's tables, FR-CORE-505).
+  model's tables, FR-CORE-505). One read-only opener, `core.store.open_read_only` (with
+  `is_sqlite`; FR-CORE-508, SP-59): every read-only open of a SQLite file goes through
+  it, and a process holding SQLite connections never opens a database's files outside
+  SQLite (BUG-0535).
 - **Trace (the diagrams' evidence model)** `[built]` (`core/trace.py`, SP-48/49,
   FR-CORE-505): append-only, versioned, per-run-keyed `trace_event` rows recorded at the
   real execution points -- discovery import (`tools/observe.py`, FR-AUD-28), every probe
@@ -1900,7 +1903,8 @@ tracked in the requirements files, not here.
   the testing overlay, coverage per interface) and its sequences (a test, a captured
   workflow, the spider's trace, the proxy's traffic, a finding), drawn from the trace
   model only, with evidence drill-down, a finding's deep link from the Findings page
-  (FR-UI-513, SP-52), live refresh while a run writes, and JSON / Mermaid exports
+  (FR-UI-513, SP-52), live refresh while a run writes, keeping the user's place (FR-UI-514), and JSON /
+  Mermaid exports
   (labels through `mermaid_text`, SP-50). User guide: `docs/DIAGRAMS.md`.
 - **Project files** `[built — back end, start screen and pages laid out from the UI
   research; three code-review rounds; merged 2026-10-15]` (CC-UI-0450): `web/projects.py`
@@ -2053,8 +2057,15 @@ tracked in the requirements files, not here.
   run, problem counts), filters (run, category, severity -- findings only, status, path),
   lazy keyset paging with a constant statement count per request and a version-keyed
   child-list cache (bounded by operation counts at 50 000 endpoints), polling refresh on
-  an `os.stat` store fingerprint (no SSE: a long-lived stream holds uvicorn's graceful
-  shutdown). Pure data layer `web/sitetree.py`, routes `web/sitetree_routes.py`, the UI
+  the store version (SQLite's `PRAGMA data_version` through one held, query-only
+  connection on the open store, SP-58; the web process touches a store's files only
+  through SQLite, FR-CORE-508, SP-59; a refresh keeps the user's place through one focus
+  helper, `static/js/livefocus.js`, FR-UI-514; no SSE: a long-lived stream holds
+  uvicorn's graceful shutdown). While a page polls, the held watch keeps the store's
+  shared lock: a writer's last close does not fold the WAL, so the `.fuzzlab` file is
+  self-contained only once the watch is released (idle, or the project left), and
+  another process's switch out of WAL, or a write under `locking_mode=EXCLUSIVE`, gets
+  BUSY (a plain `BEGIN EXCLUSIVE` does not). Pure data layer `web/sitetree.py`, routes `web/sitetree_routes.py`, the UI
   research's three panes (tree | contents / issues) in `sitetree.js`. Never shows a value
   column or query string. Linear terms left for the integrator's index request:
   `finding(run_id, url)`, `parameter(endpoint_id)`, a stored candidate path.

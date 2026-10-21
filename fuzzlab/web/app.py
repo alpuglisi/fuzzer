@@ -34,6 +34,7 @@ from fastapi.templating import Jinja2Templates
 from fuzzlab.core.config import Config, load_config
 from fuzzlab.web import commandspec, findingsview, labcontrol, mlview, results, savedviews
 from fuzzlab.web import projects as projects_mod
+from fuzzlab.web import sitetree as sitetree_mod
 from fuzzlab.web.projectroutes import register as _register_project_routes
 from fuzzlab.web.projects import ProjectBoundConfig, ProjectManager, open_reader
 from fuzzlab.web.proxycontrol import RepeaterController
@@ -531,6 +532,8 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
             await runner.shutdown()  # BUG-0125 D18: launched jobs are tied to the UI's life
             if proxy is not None:
                 await proxy.stop()
+            # the site map's held store watch (SP-58, CC-UI-0068): closed at shutdown
+            await asyncio.to_thread(sitetree_mod.release_watches)
 
     app = FastAPI(title="fuzzlab control panel", docs_url=None, redoc_url=None,
                   lifespan=_lifespan)
@@ -707,7 +710,9 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
         # The open project's store, or None with none open: never an implicit default
         # (FR-UI-458, PA-0452).
         store_path=lambda: cfg.get("store_path"),
-        poll_ms=int(cfg.get("sitetree_poll_ms", 5000)))
+        # clamped below the store watch's idle release (CC-UI-0068): a slower page would
+        # reopen the watch, and refresh, on every poll
+        poll_ms=min(int(cfg.get("sitetree_poll_ms", 5000)), sitetree_mod.MAX_POLL_MS))
     # --- end site tree -------------------------------------------------------------
 
     # --- diagrams (FR-UI-510): data flow and sequences over the run's trace model ----
@@ -716,7 +721,7 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
         app, templates=templates,
         shell_context=lambda: _shell_context(cfg, active="diagrams"),
         with_store=lambda fn, default: _with_store(cfg, fn, default),
-        poll_ms=int(cfg.get("diagram_poll_ms", 3000)))
+        poll_ms=min(int(cfg.get("diagram_poll_ms", 3000)), sitetree_mod.MAX_POLL_MS))
 
     # --- diagnostics API (U5/CC-UI-0032) — cross-run trends, intra-run series,
     # snapshots; all read-only, no new backend beyond these routes (R-05/R-12). ---

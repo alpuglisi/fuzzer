@@ -95,6 +95,65 @@ Newest first.
   - [ ] SP-60 row, SP-34 row note, ARCHITECTURE note, PA-0536, CHANGELOG, ERROR_LOG —
     todo (the coordinator, at merge; texts in the lane report)
 
+### CC-CORE-0071 — One read-only opener; a SQLite file is touched only through SQLite; the listing's summary has an age bound (FR-CORE-508, BUG-0535) (2026-10-20)
+- Placement: pre-assigned to AU-SITETREE (CC-CORE-0070 is another lane's). Design record:
+  `docs/components/12-diagnostics-and-ui/DRAFT-AU-SITETREE.md` §3.2.
+- Change:
+  - **`fuzzlab/core/store.py`** (+~50): `open_read_only(path, *, timeout,
+    fold_on_close=False, any_thread=False)` (an existing file only; `mode=ro`, or `mode=rw`
+    with `fold_on_close`; `cache=private`; `query_only`; `trusted_schema=OFF`; closed if
+    set-up fails) with its URI builder `_read_only_uri`; `is_sqlite(conn)` (`PRAGMA
+    schema_version`; `SQLITE_NOTADB` is `False`, anything else propagates).
+  - **`fuzzlab/core/project.py`**: `inspect` and `summary` no longer read the magic with
+    `open()`: they open through `open_read_only` and ask `is_sqlite` (the refusal text
+    is kept; the 0-byte branch kept; the length limit and the step budget are set first).
+    `copy_to`'s source opens through `open_read_only` (SQLite's backup API). `_ro_uri`
+    and the unused `SQLITE_MAGIC` removed. `summary` recomputes a cached summary older
+    than `SUMMARY_MAX_AGE_S` (2 s, `_summary_clock = time.monotonic`); the cache holds
+    `(taken_at, summary)`.
+  - **`tests/test_query_placement.py`**: `ALLOWED` follows (the `core/project.py::_ro_uri`
+    and `harness/auto.py::header_point_estimate` entries go; `core/store.py::_read_only_uri`
+    comes, a SQLite `file:` URI, not HTTP).
+  - **Tests**: `tests/test_core_store_read_only.py` (C1-C4), `tests/test_web_store_locks.py`
+    (K1-K6, the whole-closure guard, the audit hook's proofs), L1-12 in
+    `tests/test_web_sitetree.py`.
+  - The FUZZ change that reads the spider DB through the opener is CC-FUZZ-0108.
+- Impact:
+  - Every caller of `inspect`, `summary` and `copy_to` (from the code: `web/projects.py`
+    -- the listing, open, re-check, migrate, save as, snapshot, sidecar copies;
+    `core/project.migrate_with_backup`): same results, same refusal message; a cached
+    listing summary is at most 2 s old.
+  - It fixes BUG-0535 for the web process (the proxy's held `Store` under
+    `--with-proxy`, overlapping requests) and makes CC-UI-0068's watch safe.
+  - `open_read_only` is a new shared primitive (SP-59), read by `core.project`,
+    `web.sitetree` and `harness.auto`.
+- Risk: low-medium. The magic check moves from bytes to SQLite: measured on text, a bare
+  16-byte magic, random bytes, JSON (all `SQLITE_NOTADB`, no side file) and an empty file
+  (an empty database: the callers' size check stays); the refusal text is kept. Mitigated
+  by C1-C4, K1-K6 and the existing `tests/test_core_project.py` and
+  `tests/test_web_projects.py` suites. Rollback: the two magic reads (which re-open
+  BUG-0535).
+- Deliverables:
+  - [x] measurements (§1.4 N, the backup API; §1.7; the opener on non-SQLite files, §11) and failing tests (§5.2, L1-12) — done
+  - [x] the opener, `is_sqlite`, the `inspect`/`summary`/`copy_to` changes, the age bound — done
+  - [x] FR-CORE-508 added; BUG-0535; texts for PA-0535, SP-59, ERROR_LOG and CHANGELOG to the coordinator — done
+  - [x] verified with CC-UI-0068 and CC-FUZZ-0108 (one harness run) — done
+- Revision after the review of `eb95cd4` (DRAFT-AU-SITETREE §11.7; tests only, no CORE
+  code change): K4 now proves the claim the reviewer found it did not (the side files
+  after the listing, a version right after it, one watch epoch across the scan; it fails
+  at its own assertion on the pre-fix `project.py` with the audit hook disarmed); the
+  static guard of FR-CORE-508 resolves opener aliases (`import shutil as sh`, `from os
+  import open as o`, `from shutil import copyfile`, `io.FileIO`), proven on synthetic
+  offenders, with no new site in the web scope (still 60 allowances, 64 sites, 32
+  modules); the audit hook does two set lookups per open instead of a union (0.86 ms
+  per open at 20k stores, the reviewer's measurement).
+- Effectiveness (assessed 2026-10-20): `scripts/verify_change.py --base 4ee8007` on the committed tree `eb95cd4` (`3fb76bb` plus the merge of `01192c3`; the whole suite, since `tests/conftest.py` changed): **408 files, 8248 passed, 0 failed, 0 errors, 42 skipped, 36 xfailed**, one parallel pass, 1729 s (`scratchpad/au-sitetree/impl/vc_eb95cd4/`). The 42 skips are sandboxes, optional extras and tools absent here; none is a web, store or browser test. `test_core_store_read_only.py` 5 passed,
+  `test_web_store_locks.py` 8, `test_core_project.py` 90, `test_web_projects.py` 123,
+  `test_query_placement.py` 118 (8 xfailed). Re-proved against the implementation
+  (DRAFT-AU-SITETREE §11.4): the magic read with `open()` again, the same through
+  `core/secretfile.py` (the old guard scope's miss), the opener without `query_only`, with a
+  shared cache, and `summary` without its age bound are each caught by their named tests.
+
 ### CC-CORE-0070 — The request records its session generation and a lost-session mark; SP-56's guard list loses three session rows (FR-SESS-23, FR-FUZZ-65, BUG-0533) (2026-10-20)
 - Change:
   - `fuzzlab/core/http.py::Request` gains `session_generation: int | None = None` and
@@ -117,6 +176,7 @@ Newest first.
     green — done
 
 - Effectiveness (assessed <date> or pending): pending.
+
 
 ### CC-CORE-0069 — One classification of an HTTP answer (SP-56, FR-CORE-507, BUG-0528, BUG-0529) (2026-10-20)
 - Change: new `fuzzlab/core/comparability.py` (90 lines).

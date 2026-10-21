@@ -10,9 +10,13 @@ target rows (`harness/pipeline.py`). API tests go through the app's routes.
 
 from __future__ import annotations
 
+import ast
 import inspect
 import json
+import os
 import re
+import sqlite3
+from pathlib import Path
 
 import pytest
 
@@ -1080,3 +1084,675 @@ def test_a_lone_surrogate_in_stored_evidence_is_unreadable_not_a_500(seed):
     assert labels(seed.conn, node(host["key"])) == ["ok.php"]
     client = _client(seed.path)
     assert client.get("/api/sitetree/node", params={"node": host["key"]}).status_code == 200
+
+
+# --- the store version (CC-UI-0068, FR-UI-505, BUG-0534; DRAFT-AU-SITETREE rev 2) -------
+# Every writer below runs in ANOTHER PROCESS (`tests/_xproc.py`, D4): the web server is one
+# process and a scan another, and SQLite's locks, shared memory and WAL fold are per
+# process. The web process's own readers are this process's connections.
+
+def _fresh_store(tmp_path, name="v.db"):
+    path = tmp_path / name
+    with Store(path) as s:
+        s.start_run("t", "h")
+    return path
+
+
+def test_a_readers_last_close_never_changes_the_version(tmp_path):
+    """E1 (M1 case 1): a writer in another process commits while a web reader is open,
+    so its close leaves the frames in the WAL; the reader's later close was the last and
+    folded the WAL, which changed the version with no write."""
+    from fuzzlab.web.projects import open_reader
+    from tests._xproc import Writer
+    path = _fresh_store(tmp_path)
+    reader = open_reader(str(path))
+    reader.conn.execute("SELECT count(*) FROM run").fetchone()
+    with Writer(path) as w:
+        w("open")
+        w("ins", 3)
+        w("close")
+    v = st.store_version(path)
+    reader.close()
+    assert st.store_version(path) == v
+
+
+def test_every_commit_of_a_held_writer_in_another_process_changes_the_version(tmp_path):
+    """E2 (M1 case 5, M4): after a WAL restart a commit lands inside the WAL's old extent
+    and the old fingerprint missed it (2782 of 3000). Asserts a restart happened, so the
+    case is not vacuous."""
+    from tests._xproc import Writer
+    path = _fresh_store(tmp_path)
+    with Writer(path) as w:
+        w("open")
+        prev, unseen = st.store_version(path), 0
+        for _ in range(3000):
+            w("ins", 1, 400)
+            cur = st.store_version(path)
+            unseen += cur == prev
+            prev = cur
+        restarts = w("wal_header")["checkpoint_seq"]
+        w("close")
+    assert restarts > 0, "no WAL restart happened: the case would prove nothing"
+    assert unseen == 0
+
+
+def _web_reader_cycle(path, _w):
+    from fuzzlab.web.projects import open_reader
+    r = open_reader(str(path))
+    try:
+        r.conn.execute("SELECT count(*) FROM endpoint").fetchone()
+    finally:
+        r.close()
+
+
+_NO_WRITE = {
+    "a web reader opens, reads and closes": _web_reader_cycle,
+    "the writer process closes with frames in the WAL": lambda path, w: w("close"),
+    "a passive checkpoint by the writer process": lambda path, w: w("checkpoint", "PASSIVE"),
+    "a FULL checkpoint by the writer process": lambda path, w: w("checkpoint", "FULL"),
+    "a RESTART checkpoint by the writer process": lambda path, w: w("checkpoint", "RESTART"),
+    "an empty write transaction": lambda path, w: w("empty"),
+    "an UPDATE that matches no row":
+        lambda path, w: w("sql", "UPDATE endpoint SET method=method WHERE 0"),
+}
+#: Leaves the content as it was, yet changes the version once: a stated residual
+#: (FR-UI-505; `store_version`'s docstring). Measured: SQLite counts the WAL's reset by a
+#: TRUNCATE checkpoint as a change (`rev3/m_ckpt.out`). One refresh with no write.
+_STATED_CHANGE = {
+    "a TRUNCATE checkpoint by the writer process (stated residual: changes it once)":
+        lambda path, w: w("checkpoint", "TRUNCATE"),
+}
+
+
+@pytest.mark.parametrize("case", sorted(_NO_WRITE) + sorted(_STATED_CHANGE))
+def test_no_read_close_or_checkpoint_changes_the_version(tmp_path, case):
+    """E1 (M1 cases 2 and 3; M2 C1-C5): nothing that leaves the content as it was
+    changes the version -- except the stated residual, an explicit TRUNCATE checkpoint,
+    which changes it exactly once (then it is stable)."""
+    from tests._xproc import Writer
+    path = _fresh_store(tmp_path)
+    with Writer(path) as w:
+        w("open")
+        w("ins", 5)                                  # frames in the WAL, the writer open
+        v = st.store_version(path)
+        if case in _STATED_CHANGE:
+            assert _STATED_CHANGE[case](path, w)[1:] == (0, 0), "the WAL was not reset"
+            after = st.store_version(path)
+            assert after is not None and after != v
+            assert st.store_version(path) == after
+        else:
+            _NO_WRITE[case](path, w)
+            assert st.store_version(path) == v
+        if "closes with frames" not in case:
+            w("close")
+
+
+def test_a_commit_hidden_by_a_wal_restart_is_never_served_from_the_cache(tmp_path):
+    """E2 through the route (G11): a child list cached after a WAL restart was served
+    again for a commit that kept the WAL's size and header."""
+    from tests._xproc import Writer
+    path = tmp_path / "c.db"
+    with Store(path) as s:
+        rid = s.start_run("auto", "h")
+        s.conn.execute("INSERT INTO target (run_id, base_url) VALUES (?,?)", (rid, ORIGIN))
+        s.conn.execute("INSERT INTO endpoint (run_id, url, method) VALUES (?, '/a', 'GET')",
+                       (rid,))
+        s.conn.commit()
+    st.child_cache.clear()
+    client = _client(path)
+    (host,) = [c["key"] for c in client.get("/api/sitetree/children").json()["children"]
+               if c["label"] == ORIGIN]
+
+    def shown():
+        return [c["label"] for c in client.get(
+            "/api/sitetree/children", params={"node": host}).json()["children"]]
+    with Writer(path) as w:
+        w("open")
+        w("ins", 1500, 400)                          # a scan: the WAL grows past 1000 pages
+        w("checkpoint", "PASSIVE")
+        w("ins", 1, 400)                             # the WAL restarts at its start
+        assert shown() == ["a"]                      # cached under this version
+        w("sql", "INSERT INTO endpoint (run_id, url, method) VALUES (?, '/b', 'GET')", rid)
+        assert shown() == ["a", "b"]
+        w("close")
+
+
+def test_a_replaced_or_removed_store_changes_the_version(tmp_path):
+    """Fact F: a store replaced at its path (a new inode) is another store -- no version
+    while its predecessor's watch closes, then a new one; a removed store has no version,
+    and asking recreates nothing (the writers in another process)."""
+    from tests._xproc import Writer
+    path = _fresh_store(tmp_path, "a.db")
+    with Writer(path) as w:
+        w("open")
+        v = st.store_version(path)
+        w("ins", 5)
+        w("close")
+    other = _fresh_store(tmp_path, "b.db")
+    os.replace(other, path)
+    after = [st.store_version(path), st.store_version(path)]
+    assert after[0] is None and after[1] is not None and v != after[1]
+    os.unlink(path)
+    assert st.store_version(path) is None
+    assert not os.path.exists(path) and not os.path.exists(str(path) + "-journal")
+    assert os.path.getsize(str(path) + "-wal") == 0     # emptied before the watch closed
+
+
+def _counts(path, *queries):
+    """What another process reads now: integrity, then each query's first value."""
+    from tests._xproc import Writer
+    with Writer(path) as r:
+        r("open_plain")
+        return tuple([r("count", "PRAGMA integrity_check")] + [r("count", q) for q in queries])
+
+
+@pytest.mark.parametrize("move", ["rename away", "replace", "remove"])
+def test_a_store_moved_under_the_watch_keeps_its_commits_and_spoils_no_other(tmp_path, move):
+    """SQLite never folds the WAL of a moved database at its last close, and leaves -wal
+    at the old path. Measured with the watch the last connection (DRAFT-AU-SITETREE
+    §1.10): a store renamed away lost its last 50 commits, and a store replaced at its
+    path showed the old store's content. The watch truncates its WAL into the store it
+    opened before it closes (CC-UI-0068)."""
+    from tests._xproc import Writer
+    path = tmp_path / "p.db"
+    with Store(path) as s:
+        s.start_run("t", "h")
+    assert st.store_version(path) is not None             # watched
+    with Writer(path) as w:                               # a scan in another process
+        w("open")
+        w("ins", 50)
+        w("close")                                        # frames stay: the watch holds
+    assert os.path.getsize(str(path) + "-wal") > 0, "no frames left: the case proves nothing"
+    if move == "rename away":
+        moved = tmp_path / "renamed.db"
+        os.rename(path, moved)
+    elif move == "replace":
+        b = tmp_path / "b.db"
+        with Store(b) as s:
+            s.start_run("b-only", "h")
+        os.replace(b, path)
+    else:
+        os.unlink(path)
+    assert st.store_version(path) is None                  # released and closed
+    if move == "rename away":
+        assert _counts(moved, "SELECT count(*) FROM endpoint") == ("ok", 50)
+    elif move == "replace":
+        assert _counts(path, "SELECT count(*) FROM endpoint",
+                       "SELECT count(*) FROM run WHERE tool='b-only'") == ("ok", 0, 1)
+    else:
+        assert not os.path.exists(path)
+        assert os.path.getsize(str(path) + "-wal") == 0
+
+
+def test_rollback_journal_commits_are_seen_under_a_coarse_clock(tmp_path):
+    """FR-UI-505's old residual, emulated: a same-size UPDATE inside one mtime tick
+    (`os.utime` restores the mtime; this host's clock is fine-grained, M6), by a writer
+    in another process (D4) on a rollback-journal store."""
+    from tests._xproc import Writer
+    path = tmp_path / "r.db"
+    unseen = 0
+    with Writer(path) as w:
+        assert w("open_plain") == "delete"                # a new file: rollback journal
+        w("sql", "CREATE TABLE t (v INTEGER)")
+        w("sql", "INSERT INTO t VALUES (0)")
+        for i in range(1, 21):
+            before = os.stat(path)
+            v = st.store_version(path)
+            w("sql", "UPDATE t SET v=?", i % 2)
+            assert os.stat(path).st_size == before.st_size
+            os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+            unseen += st.store_version(path) == v
+        assert w("count", "PRAGMA journal_mode") == "delete"
+        w("close")
+    assert unseen == 0
+
+
+def test_the_store_version_never_creates_or_migrates_a_store(tmp_path):
+    """NFR-UI-read-only: asking for a version creates nothing, and an older-schema
+    store is never migrated nor switched to WAL by it."""
+    import sqlite3
+    missing = tmp_path / "missing.db"
+    assert st.store_version(missing) is None
+    assert [s for s in ("", "-wal", "-shm", "-journal")
+            if os.path.exists(str(missing) + s)] == []
+    old = tmp_path / "old.db"
+    plain = sqlite3.connect(old)
+    plain.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)")
+    plain.execute("INSERT INTO schema_version VALUES (1)")
+    plain.commit()
+    plain.close()
+    assert st.store_version(old) is not None
+    plain = sqlite3.connect(old)
+    try:
+        assert plain.execute("SELECT version FROM schema_version").fetchall() == [(1,)]
+        assert plain.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
+    finally:
+        plain.close()
+
+
+def test_the_project_listing_never_serves_a_summary_older_than_its_bound(tmp_path,
+                                                                          monkeypatch):
+    """`core.project._stat_key` (the Projects listing's cache) missed a commit inside the
+    WAL's old extent within one coarse mtime tick, for ever. Fixed in CC-CORE-0071 by a
+    bound on a cached summary's age (`_summary_clock`); emulated with `os.utime`."""
+    from fuzzlab.core import project as core_project
+    from tests._xproc import Writer
+    now = [1000.0]
+    monkeypatch.setattr(core_project, "_summary_clock", lambda: now[0], raising=False)
+    path = _fresh_store(tmp_path, "l.fuzzlab")
+    with Writer(path) as w:
+        w("open")
+        w("ins", 1500, 400)
+        w("checkpoint", "PASSIVE")
+        w("ins", 1, 400)                             # the WAL restarts
+        core_project._SUMMARY_CACHE.clear()
+        main, wal = os.stat(path), os.stat(str(path) + "-wal")
+        runs = core_project.summary(path)["runs"]
+        w("sql", "INSERT INTO run (tool, config_hash) VALUES ('late', 'h')")
+        assert os.stat(str(path) + "-wal").st_size == wal.st_size     # inside the old extent
+        os.utime(path, ns=(main.st_atime_ns, main.st_mtime_ns))       # one coarse tick
+        os.utime(str(path) + "-wal", ns=(wal.st_atime_ns, wal.st_mtime_ns))
+        now[0] += 3600.0                                              # an hour later
+        assert core_project.summary(path)["runs"] == runs + 1
+        w("close")
+
+
+_CHANGE_ATTRS = {"st_size", "st_mtime", "st_mtime_ns", "st_ctime", "st_ctime_ns"}
+_CHANGE_CALLS = {"getsize", "getmtime", "getctime", "read"}
+
+
+def store_fingerprints(src: str) -> list[str]:
+    """Functions that combine a ``-wal`` name with its size, a time or a raw read: a
+    change signal inferred from SQLite's storage side effects (PA-0534(1))."""
+    out: list[str] = []
+
+    def visit(node, where):
+        for ch in ast.iter_child_nodes(node):
+            if isinstance(ch, ast.ClassDef):
+                visit(ch, f"{where}.{ch.name}" if where else ch.name)
+            elif isinstance(ch, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                name = f"{where}.{ch.name}" if where else ch.name
+                docs = {id(s.value) for s in ast.walk(ch)
+                        if isinstance(s, ast.Expr) and isinstance(s.value, ast.Constant)}
+                wal = change = False
+                for n in ast.walk(ch):
+                    if isinstance(n, ast.Constant) and isinstance(n.value, str) \
+                            and "-wal" in n.value and id(n) not in docs:
+                        wal = True
+                    if isinstance(n, ast.Attribute) and n.attr in _CHANGE_ATTRS:
+                        change = True
+                    if isinstance(n, ast.Call):
+                        f = n.func
+                        nm = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", None)
+                        change = change or nm in _CHANGE_CALLS
+                if wal and change:
+                    out.append(name)
+                visit(ch, name)
+            else:
+                visit(ch, where)
+
+    visit(ast.parse(src), "")
+    return out
+
+
+#: The reasoned allowances: none is a "has the store changed" signal a page relies on.
+_FINGERPRINT_ALLOWED = {
+    "fuzzlab/core/project.py::_stat_key": "the Projects listing's cache key; a summary is "
+        "never served older than its bound (`_summary_clock`), so a missed coarse tick "
+        "costs at most that bound",
+    "fuzzlab/core/project.py::file_facts": "a display of size and last write, not a "
+        "change signal",
+    "fuzzlab/core/project.py::copy_to": "a disk-space estimate before a copy",
+}
+
+
+def test_no_module_fingerprints_the_store_from_its_files():
+    """PA-0534(1): the store version is SQLite's own change counter (SP-58); nothing
+    infers a store change from the WAL's size, times or header -- the owner included."""
+    found = []
+    for path in sorted((Path(__file__).resolve().parents[1] / "fuzzlab").rglob("*.py")):
+        rel = path.relative_to(Path(__file__).resolve().parents[1]).as_posix()
+        found += [f"{rel}::{f}" for f in store_fingerprints(path.read_text("utf-8"))]
+    assert sorted(set(found) - set(_FINGERPRINT_ALLOWED)) == []
+    assert sorted(set(_FINGERPRINT_ALLOWED) - set(found)) == []        # no stale allowance
+
+
+def test_the_store_fingerprint_guard_catches_synthetic_offenders():
+    """PA-0034(2): the 7ebf48a body, a `Path.stat()` variant and an `os.path.getmtime`
+    variant are found; identity checks and docstrings are not."""
+    old = ('def store_version(path):\n'
+           '    st = os.stat(path)\n'
+           '    with open(path + "-wal", "rb") as fh:\n'
+           '        header = fh.read(32)\n'
+           '        size = os.fstat(fh.fileno()).st_size\n')
+    pathstat = ('def v(p):\n    return Path(str(p) + "-wal").stat().st_mtime_ns\n')
+    getm = ('def v(p):\n    return os.path.getmtime(f"{p}-wal")\n')
+    near = ('def ident(p):\n    """The -wal\'s size is not read here."""\n'
+            '    st = os.stat(str(p) + "-wal")\n    return (st.st_dev, st.st_ino)\n'
+            'def gone(p):\n    return os.path.lexists(str(p) + "-wal")\n')
+    assert store_fingerprints(old) == ["store_version"]
+    assert store_fingerprints(pathstat) == ["v"]
+    assert store_fingerprints(getm) == ["v"]
+    assert store_fingerprints(near) == []
+
+
+# --- the watch's mechanics, with an injected connection (L1-6, L1-8, L1-9, L1-15) --------
+
+class _Row:
+    def __init__(self, value):
+        self.value = value
+
+    def fetchone(self):
+        return (self.value,)
+
+    def fetchall(self):
+        return [(self.value,)]
+
+
+class _FakeConn:
+    """A watch connection: a fixed ``data_version``, a failure on demand, a shared log,
+    and an optional hook run inside ``close``."""
+
+    def __init__(self, log, dv=1, on_close=None):
+        self.log, self.dv, self.fail, self.on_close = log, dv, None, on_close
+
+    def execute(self, sql):
+        self.log.append(("execute", id(self), sql))
+        if self.fail is not None:
+            exc, self.fail = self.fail, None
+            raise exc
+        return _Row(self.dv)
+
+    def close(self):
+        if self.on_close is not None:
+            self.on_close(self)
+        self.log.append(("close", id(self)))
+
+
+@pytest.fixture
+def fake_watch(tmp_path, monkeypatch):
+    """`sitetree.open_read_only` replaced by a factory of `_FakeConn`s (``.opened``) over a
+    real file (the watch stats it); the epoch counts from 0 in this test."""
+    path = tmp_path / "f.db"
+    path.write_bytes(b"")
+    st.release_watches()
+    monkeypatch.setattr(st, "_epoch", 0)
+    ns = type("FakeWatch", (), {})()
+    ns.path, ns.log, ns.opened, ns.dv, ns.on_close = path, [], [], 1, None
+
+    def opener(p, **kw):
+        assert kw.get("any_thread") is True and kw.get("fold_on_close") is True
+        c = _FakeConn(ns.log, dv=ns.dv, on_close=ns.on_close)
+        ns.opened.append(c)
+        return c
+    monkeypatch.setattr(st, "open_read_only", opener)
+    yield ns
+    st.release_watches()
+
+
+def test_a_reopened_watch_never_repeats_a_version(fake_watch, monkeypatch):
+    """L1-6: `data_version` is not comparable across connections (fact A: a fresh one
+    reads the same value), so a reopened watch -- after a release, or in a restarted
+    server -- must still give a new version: the epoch (bumped at every open) and the
+    process nonce. Here every connection reads the same `data_version` (7)."""
+    fake_watch.dv = 7
+    v1 = st.store_version(fake_watch.path)
+    assert st.store_version(fake_watch.path) == v1          # the same watch: unchanged
+    st.release_watches()
+    v2 = st.store_version(fake_watch.path)                  # reopened: epoch 2
+    assert len(fake_watch.opened) == 2 and v2 not in (None, v1)
+    st.release_watches()
+    monkeypatch.setattr(st, "_NONCE", "a restarted server's nonce")
+    monkeypatch.setattr(st, "_epoch", 0)                    # it counts afresh: epoch 1 again
+    v3 = st.store_version(fake_watch.path)
+    assert len(fake_watch.opened) == 3 and v3 not in (None, v1, v2)
+
+
+_FAILED_READS = [
+    (sqlite3.OperationalError("database is locked"), True),
+    (sqlite3.DatabaseError("file is not a database"), True),
+    (sqlite3.ProgrammingError("Cannot operate on a closed database."), False),
+    (sqlite3.InterfaceError("bad parameter or other API misuse"), False),
+    (sqlite3.IntegrityError("constraint failed"), False),
+    (RuntimeError("a defect"), False),
+]
+
+
+@pytest.mark.parametrize("exc,no_version", _FAILED_READS,
+                         ids=[type(e).__name__ for e, _ in _FAILED_READS])
+def test_a_failed_read_is_no_version_and_any_other_error_propagates(fake_watch, exc,
+                                                                    no_version):
+    """L1-8 (PA-0106): a read that fails with `OperationalError` or exactly
+    `DatabaseError` gives no version (`None`), never the previous one; any other error is
+    a defect and propagates. Either way the watch is released and closed, and the next
+    call opens a fresh one with a new version."""
+    v = st.store_version(fake_watch.path)
+    first = fake_watch.opened[0]
+    first.fail = exc
+    if no_version:
+        assert st.store_version(fake_watch.path) is None
+    else:
+        with pytest.raises(type(exc)):
+            st.store_version(fake_watch.path)
+    assert ("close", id(first)) in fake_watch.log
+    again = st.store_version(fake_watch.path)
+    assert len(fake_watch.opened) == 2 and again not in (None, v)
+
+
+@pytest.mark.parametrize("exc,no_version", _FAILED_READS[:3],
+                         ids=[type(e).__name__ for e, _ in _FAILED_READS[:3]])
+def test_a_failed_open_is_no_version_and_any_other_error_propagates(fake_watch,
+                                                                    monkeypatch, exc,
+                                                                    no_version):
+    """L1-8, the open: the same named swallow list as a read."""
+    def failing(p, **kw):
+        raise exc
+    monkeypatch.setattr(st, "open_read_only", failing)
+    if no_version:
+        assert st.store_version(fake_watch.path) is None
+    else:
+        with pytest.raises(type(exc)):
+            st.store_version(fake_watch.path)
+    assert st._watch is None and not st._closing
+
+
+def test_a_released_watch_is_closed_outside_the_lock(fake_watch, tmp_path):
+    """L1-15 (D3): a watch's close may fold the WAL, so it never runs under `_watch_lock`
+    (every poll would wait on it). While it closes its path is in `_closing`; afterwards
+    `_closing` is empty -- for every way a watch is released."""
+    seen = []
+    fake_watch.on_close = lambda c: seen.append((st._watch_lock.locked(), dict(st._closing)))
+    other = tmp_path / "g.db"
+    other.write_bytes(b"")
+    p = os.path.abspath(fake_watch.path)
+    releases = {
+        "another path": lambda: st.store_version(other),
+        "no project": lambda: st.store_version(None),
+        "the project is left": st.release_watches,
+        "a failed read": lambda: (setattr(fake_watch.opened[-1], "fail",
+                                          sqlite3.OperationalError("busy")),
+                                  st.store_version(fake_watch.path)),
+    }
+    for why, release in releases.items():
+        assert st.store_version(fake_watch.path) is not None, why
+        n = len(seen)
+        release()
+        assert seen[n:] == [(False, {p: 1})], why
+        assert not st._closing, why
+        st.release_watches()                                 # "another path" holds g.db
+
+
+def test_a_replacement_watch_never_reads_before_its_predecessor_closed(fake_watch,
+                                                                     monkeypatch):
+    """L1-15 (X3b a2): a connection that attaches while a stale watch of its process is
+    still open shares its stale shared-memory node (measured: 200 of 200 commits missed).
+    So while a released watch closes, a call on its path opens nothing and gives `None`;
+    the replacement's first read comes after the close. `release_watches` returns only
+    after it (the project's files are removed after it)."""
+    import threading
+    ident = [((1, 1), None, None)]
+    monkeypatch.setattr(st, "_ident", lambda p: ident[0])
+    gate = threading.Event()
+    closing = threading.Event()
+
+    def slow_close(conn):
+        closing.set()
+        assert gate.wait(30)
+    fake_watch.on_close = slow_close
+    assert st.store_version(fake_watch.path) is not None
+    ident[0] = ((1, 2), None, None)                         # replaced under the watch
+    first = threading.Thread(target=st.store_version, args=(fake_watch.path,))
+    first.start()
+    assert closing.wait(30)                                  # its close is under way
+    fake_watch.on_close = None
+    assert st.store_version(fake_watch.path) is None         # nothing opened meanwhile
+    assert len(fake_watch.opened) == 1
+    waiter = threading.Thread(target=st.release_watches)
+    waiter.start()
+    waiter.join(0.5)
+    assert waiter.is_alive(), "release_watches returned while a watch was still closing"
+    gate.set()
+    first.join(30)
+    waiter.join(30)
+    assert st.store_version(fake_watch.path) is not None
+    assert len(fake_watch.opened) == 2
+    second = fake_watch.opened[1]
+    order = [e for e in fake_watch.log
+             if e[:2] in (("close", id(fake_watch.opened[0])), ("execute", id(second)))]
+    assert order[0] == ("close", id(fake_watch.opened[0]))
+
+
+def test_an_idle_watch_is_released_and_a_watched_one_is_kept(fake_watch, monkeypatch):
+    """D3, NFR-UI-live: a watch unused for `WATCH_IDLE_S` is released by the reaper (a
+    page that stopped polling frees the store); a watch in use is never released for
+    idleness, and a call never releases one for it (the count it holds stays valid)."""
+    now = [1000.0]
+    monkeypatch.setattr(st, "_clock", lambda: now[0])
+    v = st.store_version(fake_watch.path)
+    assert st._reaper is not None and st._reaper.is_alive()
+    now[0] += st.WATCH_IDLE_S - 1
+    st._reap()
+    assert st.store_version(fake_watch.path) == v            # kept, and used again
+    now[0] += st.WATCH_IDLE_S - 1
+    st._reap()
+    assert len(fake_watch.opened) == 1 and ("close", id(fake_watch.opened[0])) \
+        not in fake_watch.log
+    now[0] += st.WATCH_IDLE_S + 1
+    st._reap()
+    assert ("close", id(fake_watch.opened[0])) in fake_watch.log
+    again = st.store_version(fake_watch.path)                # reopened: a new version
+    assert len(fake_watch.opened) == 2 and again not in (None, v)
+
+
+_WATCH_STATE = {"_watch", "_closing", "_epoch", "_reaper"}
+_WATCH_LOCKS = {"_watch_lock", "_watch_closed"}
+#: functions whose callers hold the lock (each call must be under it)
+_LOCK_HELD = {"_release"}
+#: the one function that touches a connection outside the lock: a released watch's close
+_CLOSES_OUTSIDE = {"_close_released"}
+
+
+def watch_uses_outside_lock(src: str) -> list[str]:
+    """Uses of the watch's state (`_watch`, `_closing`, `_epoch`, `_reaper`), of a
+    connection (`.conn`) and of the lock-held helpers outside ``with _watch_lock`` (or
+    its condition), in any function; and an `open_read_only` without
+    ``any_thread=True`` (PA-0023's third pattern, PA-0534(4))."""
+    out: list[str] = []
+
+    def visit(node, func, locked):
+        for ch in ast.iter_child_nodes(node):
+            if isinstance(ch, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                visit(ch, ch.name, ch.name in _LOCK_HELD)
+                continue
+            if isinstance(ch, ast.With) and any(
+                    isinstance(i.context_expr, ast.Name) and i.context_expr.id in _WATCH_LOCKS
+                    for i in ch.items):
+                visit(ch, func, True)
+                continue
+            if func is not None and not locked:
+                if isinstance(ch, ast.Name) and ch.id in _WATCH_STATE:
+                    out.append(f"{func}: {ch.id} outside the lock")
+                if isinstance(ch, ast.Attribute) and ch.attr == "conn" \
+                        and func not in _CLOSES_OUTSIDE:
+                    out.append(f"{func}: .conn outside the lock")
+                if isinstance(ch, ast.Call) and isinstance(ch.func, ast.Name) \
+                        and ch.func.id in _LOCK_HELD:
+                    out.append(f"{func}: {ch.func.id}() outside the lock")
+            if isinstance(ch, ast.Call) and getattr(ch.func, "id", None) == "open_read_only" \
+                    and not any(k.arg == "any_thread" and isinstance(k.value, ast.Constant)
+                                and k.value.value is True for k in ch.keywords):
+                out.append(f"{func}: open_read_only without any_thread=True")
+            visit(ch, func, locked)
+
+    visit(ast.parse(src), None, False)
+    return out
+
+
+def test_the_store_watch_is_used_only_under_its_lock():
+    """L1-9: the watch is one connection shared by every request thread (its
+    `data_version` means something only on it), opened for any thread; every use of it
+    and of its bookkeeping is under `_watch_lock` -- but the close of a released one."""
+    src = Path(st.__file__).read_text("utf-8")
+    assert "open_read_only(" in src and watch_uses_outside_lock(src) == []
+
+
+def test_the_watch_lock_guard_catches_synthetic_offenders():
+    """PA-0034(2): a read of the watch, a `.conn` use, a lock-held helper and an opener
+    without `any_thread` outside the lock are each found; the same under the lock, and a
+    released watch's close in `_close_released`, are not."""
+    bad = ("def poll():\n    return _watch.conn.execute('PRAGMA data_version')\n"
+           "def leave():\n    stale = []\n    _release(stale)\n"
+           "def bump():\n    global _epoch\n    _epoch += 1\n"
+           "def open_it(p):\n    with _watch_lock:\n        return open_read_only(p, timeout=1)\n")
+    assert sorted(watch_uses_outside_lock(bad)) == sorted([
+        "poll: _watch outside the lock", "poll: .conn outside the lock",
+        "leave: _release() outside the lock", "bump: _epoch outside the lock",
+        "open_it: open_read_only without any_thread=True"])
+    good = ("def poll():\n    with _watch_lock:\n        w = _watch\n"
+            "        return w.conn.execute('PRAGMA data_version')\n"
+            "def _release(stale):\n    stale.append(_watch)\n"
+            "def _close_released(stale):\n    for w in stale:\n        w.conn.close()\n"
+            "        with _watch_lock:\n            _closing[w.path] -= 1\n"
+            "def open_it(p):\n    with _watch_lock:\n"
+            "        return open_read_only(p, timeout=1, any_thread=True)\n")
+    assert watch_uses_outside_lock(good) == []
+
+
+def test_concurrent_polls_from_many_threads_agree(tmp_path):
+    """L1-9, the many-thread test: between the commits of a writer in another process,
+    8 threads ask for the version at once, 20 times. The oracle ("agree"): no thread
+    raises (one connection, opened for any thread, used under its lock); within a step
+    all 8 values are equal and not `None` (one watch, one count); and each step's value
+    differs from the step before (each commit seen)."""
+    import threading
+
+    from tests._xproc import Writer
+    path = _fresh_store(tmp_path)
+    steps, threads = 20, 8
+    gate = threading.Barrier(threads + 1)
+    values = [[None] * threads for _ in range(steps)]
+    errors: list[str] = []
+
+    def poller(i):
+        for k in range(steps):
+            gate.wait()
+            try:
+                values[k][i] = st.store_version(path)
+            except BaseException as exc:            # noqa: BLE001 - reported below
+                errors.append(f"{type(exc).__name__}: {exc}")
+            gate.wait()
+    workers = [threading.Thread(target=poller, args=(i,)) for i in range(threads)]
+    for t in workers:
+        t.start()
+    with Writer(path) as w:
+        w("open")
+        for _k in range(steps):
+            w("ins", 1)
+            gate.wait()                               # the step starts: all poll at once
+            gate.wait()                               # every poll of the step returned
+        w("close")
+    for t in workers:
+        t.join(30)
+    assert errors == []
+    assert all(len(set(row)) == 1 and row[0] is not None for row in values), values
+    assert all(values[k][0] != values[k - 1][0] for k in range(1, steps))

@@ -5,7 +5,9 @@
 {% block content %}
 <!-- Diagrams (FR-UI-510): the run's data flow and its sequences, both drawn from the one
      persisted trace model (report.diagram). Filled by diagrams.js from the read-only
-     /api/diagram/* routes, as text only (never parsed HTML). -->
+     /api/diagram/* routes, as text only (never parsed HTML). The regions a live refresh
+     re-renders (#dg-flow, #dg-ifaces, #dg-seq, #dg-exports) take tabindex="-1": the pane
+     their focus ends at, never the page body (FR-UI-514). -->
 <section class="dg" aria-labelledby="dg-h1" id="diagrams-root" data-poll-ms="{{ poll_ms }}"
   {%- if link %} data-link-run="{{ link.run }}" data-link-finding="{{ link.finding }}"
   data-link-scope="{{ link.scope }}"{% endif %}>
@@ -32,7 +34,7 @@
     </label>
     <label class="dg-chip"><input type="checkbox" id="dg-overlay" name="overlay">
       Testing overlay (the tool's own traffic)</label>
-    <span class="dg-exports" id="dg-exports"></span>
+    <span class="dg-exports" id="dg-exports" tabindex="-1"></span>
   </form>
 
   <div class="card dg-status" id="dg-status" aria-live="polite">
@@ -58,10 +60,10 @@
     <div class="card dg-flow-pane">
       <h2 class="dg-pane-h" id="dg-flow-h">Data flow</h2>
       <p class="muted" id="dg-flow-empty" hidden>No flows recorded for this run.</p>
-      <div class="dg-svg-wrap" id="dg-flow" role="group" aria-labelledby="dg-flow-h"></div>
+      <div class="dg-svg-wrap" id="dg-flow" role="group" aria-labelledby="dg-flow-h" tabindex="-1"></div>
       <details class="dg-table-box" open>
         <summary>Interfaces and coverage</summary>
-        <table class="dg-table" id="dg-ifaces">
+        <table class="dg-table" id="dg-ifaces" tabindex="-1">
           <caption class="visually-hidden">Interfaces with their evidence and coverage</caption>
           <thead><tr><th scope="col">interface</th><th scope="col">evidence</th>
             <th scope="col">obs.</th><th scope="col">discovered</th><th scope="col">captured</th>
@@ -76,7 +78,7 @@
         <h2 class="dg-pane-h" id="dg-seq-h">Sequence</h2>
         <label class="dg-field">Scope <select id="dg-scope"></select></label>
         <p class="muted" id="dg-seq-notes"></p>
-        <div class="dg-svg-wrap" id="dg-seq" role="group" aria-labelledby="dg-seq-h"></div>
+        <div class="dg-svg-wrap" id="dg-seq" role="group" aria-labelledby="dg-seq-h" tabindex="-1"></div>
       </div>
       <div class="card dg-evidence" id="dg-evidence" tabindex="-1">
         <h2 class="dg-pane-h">Evidence</h2>

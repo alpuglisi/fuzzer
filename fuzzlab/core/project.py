@@ -34,6 +34,7 @@ import os
 import secrets
 import sqlite3
 import stat
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -43,7 +44,7 @@ from fuzzlab import __version__
 from fuzzlab.core import migrations
 from fuzzlab.core.redaction import redact_for_record
 from fuzzlab.core.runtarget import run_target_rows
-from fuzzlab.core.store import Store, is_aborted
+from fuzzlab.core.store import Store, is_aborted, is_sqlite, open_read_only
 
 PROJECT_EXT = ".fuzzlab"
 #: A project's own directory (`sidecar_dir`): intermediates the pinned tools write
@@ -51,7 +52,6 @@ PROJECT_EXT = ".fuzzlab"
 SIDECAR_SUFFIX = ".d"
 #: The directory inside a project's own directory that `migrate_with_backup` writes to.
 BACKUPS_DIRNAME = "backups"
-SQLITE_MAGIC = b"SQLite format 3\x00"
 #: ``quick_check`` reads the whole file; above this size it is skipped (and said so).
 QUICK_CHECK_MAX_BYTES = 512 * 1024 * 1024
 MAX_NOTES_CHARS = 10_000
@@ -113,10 +113,6 @@ def sidecar_dir(path: str | Path) -> Path:
     return p.with_name(p.name + SIDECAR_SUFFIX)
 
 
-def _ro_uri(path: Path) -> str:
-    return path.resolve().as_uri() + "?mode=ro"
-
-
 def inspect(path: str | Path) -> ProjectInfo:
     """Look at ``path`` without writing it; `ProjectError` if it is not a fuzzlab store."""
     p = Path(path)
@@ -129,14 +125,14 @@ def inspect(path: str | Path) -> ProjectInfo:
         head = migrations.head_version()
         if st.st_size == 0:
             return ProjectInfo(p, 0, 0, head, notes=["new, empty file"])
-        with open(p, "rb") as fh:
-            magic = fh.read(len(SQLITE_MAGIC))
-        if magic != SQLITE_MAGIC:
-            raise ProjectError(f"{p} is not an SQLite database")
-        conn = sqlite3.connect(_ro_uri(p), uri=True, timeout=10.0)
+        # Whether the file is SQLite is asked of SQLite (SQLITE_NOTADB), never by reading
+        # its bytes: in the web process a raw open/close of a store drops every SQLite
+        # lock the process holds on it (BUG-0535, FR-CORE-508).
+        conn = open_read_only(p, timeout=10.0)
         try:
-            conn.execute("PRAGMA trusted_schema=OFF")
             conn.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, INSPECT_LENGTH_LIMIT)
+            if not is_sqlite(conn):
+                raise ProjectError(f"{p} is not an SQLite database")
             return _inspect_open(conn, p, st.st_size, head)
         finally:
             conn.close()
@@ -631,7 +627,11 @@ def file_facts(path: str | Path) -> dict[str, Any]:
 
 #: Work a listing's summary may do per file (SQLite VM steps) before it gives up.
 SUMMARY_STEP_BUDGET = 2_000_000
-_SUMMARY_CACHE: dict[tuple, dict[str, Any]] = {}
+#: A cached summary older than this is recomputed whatever its stat key (CC-CORE-0071):
+#: a commit inside the WAL's old extent within one coarse mtime tick keeps the key.
+SUMMARY_MAX_AGE_S = 2.0
+_summary_clock = time.monotonic                 # injectable: tests never wait on wall time
+_SUMMARY_CACHE: dict[tuple, tuple[float, dict[str, Any]]] = {}
 _SUMMARY_ERRORS = (sqlite3.DatabaseError, OSError)
 
 
@@ -650,22 +650,22 @@ def summary(path: str | Path) -> dict[str, Any]:
     """Run and finding counts for a listing row, read-only and bounded: the same
     untrusted-file allowlist as `inspect` (no ``quick_check``), a near-zero lock wait,
     and a VM-step budget; anything that fails reads ``{"readable": False}``. Cached by
-    the file's and its ``-wal``'s identity, size and mtime."""
+    the file's and its ``-wal``'s identity, size and mtime, for at most
+    `SUMMARY_MAX_AGE_S` (a coarse mtime tick can hide a commit from the key).
+    Whether the file is SQLite is asked of SQLite, never read raw (BUG-0535)."""
     p = Path(path)
     try:
         key = _stat_key(p)
     except OSError:
         return {"readable": False}
-    if key in _SUMMARY_CACHE:
-        return _SUMMARY_CACHE[key]
+    now = _summary_clock()
+    cached = _SUMMARY_CACHE.get(key)
+    if cached is not None and 0 <= now - cached[0] <= SUMMARY_MAX_AGE_S:
+        return cached[1]
     out: dict[str, Any] = {"readable": False}
     try:
-        with open(p, "rb") as fh:
-            if fh.read(len(SQLITE_MAGIC)) != SQLITE_MAGIC:
-                raise sqlite3.DatabaseError("not an SQLite database")
-        conn = sqlite3.connect(_ro_uri(p), uri=True, timeout=0.05)
+        conn = open_read_only(p, timeout=0.05)
         try:
-            conn.execute("PRAGMA trusted_schema=OFF")
             steps = [0]
 
             def budget():
@@ -673,6 +673,8 @@ def summary(path: str | Path) -> dict[str, Any]:
                 return steps[0] > SUMMARY_STEP_BUDGET      # non-zero aborts
             conn.set_progress_handler(budget, 100)
             conn.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, SUMMARY_LENGTH_LIMIT)
+            if not is_sqlite(conn):                       # SQLITE_NOTADB: unreadable
+                raise sqlite3.DatabaseError("not an SQLite database")
             if not _version_table_trusted(conn):          # before any row is read
                 raise sqlite3.DatabaseError("not a fuzzlab store this build can read")
             version = conn.execute("SELECT MAX(version) FROM schema_version").fetchone()[0]
@@ -688,7 +690,7 @@ def summary(path: str | Path) -> dict[str, Any]:
         out = {"readable": False}
     if len(_SUMMARY_CACHE) > 1000:
         _SUMMARY_CACHE.clear()
-    _SUMMARY_CACHE[key] = out
+    _SUMMARY_CACHE[key] = (now, out)
     return out
 
 
@@ -715,7 +717,7 @@ def copy_to(src: str | Path, dst: str | Path, *, timeout: float = 10.0) -> None:
     fd = os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
     os.close(fd)
     try:
-        source = sqlite3.connect(_ro_uri(src), uri=True, timeout=timeout)
+        source = open_read_only(src, timeout=timeout)    # SQLite's backup API reads it
         try:
             dest = sqlite3.connect(str(tmp))
             try:

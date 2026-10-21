@@ -18,6 +18,24 @@ Format per entry:
 
 ---
 
+## 2026-10-20 — tests, site map in a real browser (a quadratic test locator starved the page under parallel load; BUG-0538)
+- **Symptom:** three live-view browser tests failed intermittently, only with the browser files in one parallel pass: a "Show more" page not shown within 5 s, a refresh's request not issued within 15 s.
+- **Root cause:** the tests' `Tab.item` filtered nested tree items with `has=`; Playwright evaluates it in every candidate's subtree, ~1.9 s of a renderer core per resolution with 250 items, re-run by every action and `expect` retry.
+- **Remediation:** `Tab.item` locates the label and steps up (~10 ms); guard G5 on `has=` in browser tests (BUG-0538, PA-0538; DRAFT-AU-SITETREE §5.6).
+- **Status:** Fixed
+
+## 2026-10-20 — web UI, site map and Diagrams (the store version missed writes and changed without one; a live refresh lost the user's place; BUG-0534)
+- **Symptom:** `test_web_sitetree_browser.py::test_show_more_from_the_keyboard_keeps_focus_in_the_tree` failed once in a full harness run (200 of 250; its own cause not proven: the same symptom also came from a test defect, BUG-0538 below). The site map and the Diagrams page refreshed with no write, missed most commits of a running scan (2783 of 3000 after WAL restarts), and a refresh dropped focus to the page body on six control kinds, dropped a "Show more" page in either order, reset Issues to its first page, and never retried a refresh that failed.
+- **Root cause:** the store version was inferred from SQLite's file side effects (the store's stat, the WAL's size and header), tested only on the states the author pictured; FR-UI-505's "keeping focus" was implemented and tested for one element kind in one order (BUG-0518's root cause recurring; PA-0518(1) neither swept nor enforced); the poll marked a version seen before its refresh.
+- **Remediation:** the version is `PRAGMA data_version` on one held query-only connection (SP-58, measured across processes); one focus helper with identity keys on every control, one ordering rule for a user's page load against a refresh, a version marked seen only once its refresh succeeded, page counters instead of sleeps (CC-UI-0068, FR-UI-505/510/514, BUG-0534, PA-0534).
+- **Status:** Fixed
+
+## 2026-10-20 — web UI and core (a Projects view dropped SQLite's locks; BUG-0535)
+- **Symptom:** under `fuzzlab web --with-proxy`, one Projects view and one short writer in another process deleted the store's `-wal`/`-shm` under the proxy's open `Store`; the project file was corrupt on disk (`vtable constructor failed: flow_fts`). With a request's reader across a listing, 100 of 100 reads were wrong and 4 of 5 UI commits were lost silently (measured on 7ebf48a).
+- **Root cause:** `core.project.inspect`/`summary` read the SQLite magic with `open()` in the web process; on POSIX the close of any descriptor of a file releases every lock the process holds on it, SQLite's WAL protection included. No rule or guard kept raw file access to a database out of a process holding connections, and no test ran store behaviour across processes.
+- **Remediation:** a SQLite file is touched only through SQLite: `core.store.open_read_only` and `is_sqlite` (FR-CORE-508, SP-59); a static guard over the web package's whole import closure, a run-time audit hook over the web tests, cross-process regression tests (CC-CORE-0071, CC-FUZZ-0108, BUG-0535, PA-0535).
+- **Status:** Fixed
+
 ## 2026-10-20 — session manager (a forbidden answer logged the session in again; BUG-0533, a recurrence of BUG-0134's and BUG-0113's class)
 - **Symptom:** a 403 (and a scope 401, a privilege-gated login redirect, a password check's 401) invalidated the session and the next send logged in again: N such probes made N logins, each probe on a new session, the peer re-logging in on each denied replay; a late answer from an earlier session logged the current one out.
 - **Root cause:** `detect_logout`'s `status in (401, 403)`, acted on by `observe` at once: a session-state change decided from one answer's surface feature, without positive evidence about that session or a binding to it.

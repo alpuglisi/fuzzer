@@ -811,6 +811,32 @@ plugin registry. It is the layer that makes the store the integration bus.
     - codings: `test_a_bounded_send_advertises_only_codings_it_can_bound`,
       `test_brotli_is_advertised_when_it_can_be_bounded`;
     - `test_a_response_already_read_is_its_kept_body_never_an_empty_one`.
+- **FR-CORE-508** *(one read-only opener; a SQLite file is touched only through
+  SQLite; `CC-CORE-0071`, 2026-10-20, BUG-0535).*
+  - `core.store.open_read_only(path, *, timeout, fold_on_close=False, any_thread=False)`
+    is the one read-only open of a SQLite file in `fuzzlab/`: an existing file only (a
+    missing one raises `sqlite3.OperationalError`; nothing is created), `cache=private`,
+    `PRAGMA query_only=1`, `trusted_schema=OFF`, never a journal-mode change, a migration
+    or a write; `mode=ro` by default (the main file is never written; `-wal`/`-shm` may
+    be left), `mode=rw` when its last close should fold the WAL like any reader's
+    (`fold_on_close`); `check_same_thread=False` only with `any_thread` (its caller then
+    serialises every use). The connection is closed if its set-up fails. No other module
+    builds a read-only SQLite open (`mode=ro`, `mode=rw`, `query_only`).
+  - `core.store.is_sqlite(conn)` answers whether the file is SQLite, asked of SQLite
+    (`PRAGMA schema_version`: `False` on `SQLITE_NOTADB`, any other error propagates); a
+    0-byte file is an empty database to SQLite, so callers that refuse one check its size
+    first.
+  - A process that holds, or may hold, SQLite connections never opens, reads, writes or
+    copies a database's main file, `-wal` or `-shm` outside SQLite: on POSIX the close of
+    any descriptor of a file releases every lock the process holds on it, SQLite's WAL
+    protection included (BUG-0535). `core.project.inspect` and `summary` ask SQLite
+    (the refusal still reads "is not an SQLite database"); `copy_to` reads its source
+    through the opener (SQLite's backup API); `harness.auto.header_point_estimate` reads
+    the spider DB through it.
+  - `core.project.summary` never serves a cached summary older than `SUMMARY_MAX_AGE_S`
+    (2 s, `_summary_clock`): its stat key can miss a commit inside the WAL's old extent
+    within one coarse mtime tick.
+  - Enforced by: `tests/test_core_store_read_only.py::test_the_read_only_opener_never_creates_writes_or_migrates`, `tests/test_core_store_read_only.py::test_the_read_only_opener_pins_a_private_cache`, `tests/test_core_store_read_only.py::test_whether_a_file_is_sqlite_is_asked_of_sqlite_never_read_raw`, `tests/test_core_store_read_only.py::test_every_read_only_open_goes_through_the_opener`, `tests/test_core_store_read_only.py::test_the_read_only_open_guard_catches_synthetic_offenders`, `tests/test_web_store_locks.py::test_no_web_process_module_opens_a_store_file_except_through_sqlite`, `tests/test_web_store_locks.py::test_the_store_file_guard_catches_synthetic_offenders`, `tests/test_web_store_locks.py::test_the_store_open_audit_catches_synthetic_offenders`, `tests/test_web_store_locks.py::test_a_projects_listing_never_drops_the_in_process_proxys_store_locks`, `tests/test_web_store_locks.py::test_a_projects_listing_never_drops_a_request_readers_locks`, `tests/test_web_store_locks.py::test_opening_a_project_never_drops_a_held_connections_locks`, `tests/test_web_sitetree.py::test_the_project_listing_never_serves_a_summary_older_than_its_bound`
 - **FR-CORE-500** *(one reader for a run's target; one method key; `CC-CORE-0500`,
   2026-10-15).*
   - `fuzzlab/core/runtarget.py` is the one reader of the `target` table (PA-0063(1)): a

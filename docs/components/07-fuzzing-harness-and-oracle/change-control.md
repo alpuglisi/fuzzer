@@ -84,6 +84,32 @@ Newest first.
     and variants, and the blind-SQLi failed repeat — done
   - [x] FR-FUZZ-50 and FR-FUZZ-8 edited in place — done
 
+### CC-FUZZ-0108 — `header_point_estimate` reads the spider DB through the one read-only opener (FR-CORE-508, BUG-0535 sweep) (2026-10-20)
+- Placement: pre-assigned to AU-SITETREE (CC-FUZZ-0107 is another lane's); part of the
+  BUG-0535 sweep (PA-0002): every read-only open of a SQLite file goes through
+  `core.store.open_read_only` (CC-CORE-0071).
+- Change: **`fuzzlab/harness/auto.py::header_point_estimate`** opens the spider DB with
+  `open_read_only(path, timeout=5.0)` (`mode=ro`, private cache, query-only) instead of
+  its own `sqlite3.connect("file:...?mode=ro", uri=True)`; the existence check, the
+  query, the `sqlite3.Error` fallback to no rows and the result are unchanged (the
+  driver's default busy timeout, 5 s, kept). The `urllib.parse.quote` import it needed is
+  gone.
+- Impact: `fuzzlab auto --header-names` (`harness/auto_cli.py:265`, the CLI's own
+  process): the same `(pages, requests)` estimate; the spider DB is never created or
+  written (as before). `tests/test_query_placement.py::ALLOWED` loses its entry (in
+  CC-CORE-0071). No other FUZZ module builds a read-only SQLite open
+  (`tests/test_core_store_read_only.py::test_every_read_only_open_goes_through_the_opener`).
+- Risk: low: one open, same mode; `query_only` and `trusted_schema=OFF` only refuse
+  writes and schema functions the estimate never uses. Rollback: the old line.
+- Deliverables:
+  - [x] the open through `open_read_only` — done
+  - [x] `tests/test_auto.py::test_the_header_point_estimate_reads_the_spider_db_through_the_read_only_opener` (new: the opener is used, the estimate, no create, no write, a non-SQLite file) and `tests/test_core_store_read_only.py` (C4, the guard) — done
+  - [x] verified with CC-UI-0068 and CC-CORE-0071 (one harness run) — done
+- Effectiveness (assessed 2026-10-20): `scripts/verify_change.py --base 4ee8007` on the committed tree `eb95cd4` (`3fb76bb` plus the merge of `01192c3`; the whole suite, since `tests/conftest.py` changed): **408 files, 8248 passed, 0 failed, 0 errors, 42 skipped, 36 xfailed**, one parallel pass, 1729 s (`scratchpad/au-sitetree/impl/vc_eb95cd4/`). The 42 skips are sandboxes, optional extras and tools absent here; none is a web, store or browser test. `test_auto.py` 17 passed. Re-proved
+  (DRAFT-AU-SITETREE §11.4): `header_point_estimate` with its own read-only URI again fails
+  `test_every_read_only_open_goes_through_the_opener` and
+  `test_the_header_point_estimate_reads_the_spider_db_through_the_read_only_opener`.
+
 ### CC-FUZZ-0107 — An answer on a session known to be lost is never evidence (FR-FUZZ-65, BUG-0533; decision D′) (2026-10-20)
 - Placement: AU-SESS403 (audit defect 6), the oracle part of the owner's decision D′
   after review round 4's probe Q1. Design record: `docs/components/03-session-manager/
@@ -130,6 +156,7 @@ Newest first.
     marked (`d_for_all`) — done
 
 - Effectiveness (assessed <date> or pending): pending.
+
 
 ### CC-FUZZ-0106 — Every sender places a query value through one owner (BUG-0531) (2026-10-20)
 - Placement: pre-assigned to AU-REQID14 (audit defect 14); CC-FUZZ-0105 is another

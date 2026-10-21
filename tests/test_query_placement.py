@@ -915,10 +915,11 @@ _HARNESS = "a harness client of generated cells, on query-less paths: no query t
 #: The scan must equal this exactly: a new builder (or a second one in a listed function)
 #: and a stale entry both fail.
 ALLOWED: dict[tuple[str, str, str], tuple[int, str]] = {
-    ("fuzzlab/core/project.py", "_ro_uri", "S4b a ?name= literal"):
-        (1, "a SQLite file: URI (?mode=ro), not HTTP"),
     ("fuzzlab/core/store.py", "_no_create_uri", "S4b a ?name= literal"):
         (1, "a SQLite file: URI (?mode=rw), not HTTP"),
+    ("fuzzlab/core/store.py", "_read_only_uri", "S4b a ?name= literal"):
+        (1, "a SQLite file: URI (?mode=ro|rw&cache=private), not HTTP: the one read-only "
+            "opener's (FR-CORE-508, CC-CORE-0071)"),
     ("fuzzlab/core/redaction.py", "redact_query", 'S5 "&".join'):
         (1, "storage redaction of a recorded URL, never sent (AU-REDACT's file)"),
     ("fuzzlab/core/redaction.py", "_redact_query_identifiers", 'S5 "&".join'):
@@ -935,8 +936,6 @@ ALLOWED: dict[tuple[str, str, str], tuple[int, str]] = {
         (2, "a route key of parameter names, never sent"),
     ("fuzzlab/disco/synth.py", "parse_body", "S3 dict(parse_qsl/parse_qs)"):
         (1, "defect 9's item: a schema from captured bodies, never sent"),
-    ("fuzzlab/harness/auto.py", "header_point_estimate", "S4 string built onto a query"):
-        (1, "a SQLite file: URI (?mode=ro), not HTTP"),
     ("fuzzlab/lab_fixtures/external.py", "_bwapp_install", "S1 params= on a send"):
         (1, "lab provisioning with constant parameters, not probing"),
     ("fuzzlab/lab_fixtures/external.py", "_ecommerce_login", "S1 params= on a send"):

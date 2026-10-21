@@ -153,8 +153,9 @@ def test_the_page_renders_labels_as_text_navigates_evidence_and_updates_live(tmp
                 rec.close()
             page.locator(f"#dg-origin option[value='{other}']").wait_for(
                 state="attached", timeout=10000)
+            polls = _dg_count(page, "polls")
             page.select_option("#dg-origin", O)
-            page.wait_for_timeout(1200)                       # two polls
+            _dg_reach(page, "polls", polls + 2)               # two polls (D8: no sleep)
             values = page.eval_on_selector_all("#dg-origin option",
                                                "els => els.map(e => e.value)")
             assert values == ["", O, other]
@@ -334,3 +335,190 @@ def test_the_page_never_counts_a_capped_attribute():
     assert _capped_reads((STATIC / "diagrams.js").read_text()) == []
     assert _capped_reads("const finds = (k.attrs.finding || []).length;") != []
 
+
+
+# --- a live refresh keeps the user's place (FR-UI-514, CC-UI-0068, BUG-0534) ------------
+# Synchronised by the page's counters (`#diagrams-root` data-baseline, -polls, -refreshes:
+# D8), never by sleeping; each test asserts its refresh happened.
+
+@pytest.fixture(scope="module")
+def live(tmp_path_factory):
+    from playwright.sync_api import sync_playwright
+
+    from tests._browser import Server, free_port, launch_browser_or_skip
+    path = tmp_path_factory.mktemp("dglive") / "s.db"
+    run = _seed(path)
+    port = free_port()
+    cfg = load_config(overrides={"store_path": str(path), "web_port": port,
+                                 "diagram_poll_ms": 400}, environ={})
+    server = Server(create_app(cfg), port)
+    server.start()
+    try:
+        with sync_playwright() as pw:
+            browser = launch_browser_or_skip(pw)
+            yield {"base": f"http://127.0.0.1:{port}", "browser": browser, "path": path,
+                   "run": run, "n": [0]}
+            browser.close()
+    finally:
+        server.stop()
+
+
+def _dg_count(page, name: str) -> int:
+    return page.eval_on_selector("#diagrams-root",
+                                 f"r => parseInt(r.dataset.{name} || '0', 10)")
+
+
+def _dg_reach(page, name: str, n: int) -> None:
+    page.wait_for_function(
+        "([k, n]) => parseInt(document.querySelector('#diagrams-root').dataset[k] || '0', "
+        "10) >= n", arg=[name, n], timeout=15000)
+
+
+def _dg_page(live):
+    ctx = live["browser"].new_context()
+    page = ctx.new_page()
+    page.set_default_timeout(15000)
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(live["base"] + "/diagrams")
+    page.wait_for_function("() => document.querySelector('#diagrams-root')"
+                           ".dataset.baseline === '1'")
+    page.select_option("#dg-scope", "workflow:act-1")   # a capture: request, forward,
+    page.locator("#dg-seq g.dg-step").nth(3).wait_for()  # two responses on one key
+    page.wait_for_selector("#dg-flow svg", state="attached")
+    return ctx, page, errors
+
+
+def _dg_write(live, before: bool = False) -> str:
+    """A capture record in the run (another connection of the server's process); its
+    interface's label. ``before``: on a new origin, at a path and in act-1 at a time that
+    sort before everything already there (entity ids sort by origin, then method and
+    path; ``http://127.0.0.1:9000`` < ``:9001``... as text) -- a new origin group,
+    interface row and first step, ahead of whatever is focused."""
+    live["n"][0] += 1
+    n = live["n"][0]
+    with Store(live["path"]) as store:
+        rec = trace.TraceRecorder(store, live["run"])
+        if before:
+            early = f"http://127.0.0.1:{9001 - n}"
+            rec.emit("observe.exchange", {"src": "capture", "ref": f"record {100 + n}",
+                                          "method": "GET", "url": early + f"/0early{n}",
+                                          "origin": early, "status": 200,
+                                          "action": "act-1"},
+                     key=f"early{n}", scope="workflow:act-1", t=0.5 - n / 1000)
+        else:
+            rec.emit("observe.exchange", {"src": "capture", "ref": f"record {100 + n}",
+                                          "method": "POST", "url": O + f"/late{n}",
+                                          "origin": O, "status": 201}, t=5.0 + n)
+        rec.close()
+    return f"GET /0early{n}" if before else f"POST /late{n}"
+
+
+#: the focused control's identity: its focus key and what it shows (a row's first cell,
+#: a box's or step's title, a link's text, a select's id), never its position
+_DG_IDENTITY = """() => { const a = document.activeElement;
+  const title = a.querySelector && a.querySelector('title');
+  const label = a.tagName === 'SELECT' ? a.id : a.tagName === 'TR' ? a.cells[0].textContent
+    : title ? title.textContent.split('\\n')[0] : a.textContent;
+  return [a.tagName, a.getAttribute('data-focus-key') || a.id, label]; }"""
+
+
+_DG_TARGETS = {
+    "interface row": "#dg-ifaces tbody tr[tabindex]",
+    "origin group": "#dg-flow g[role=button]",
+    "response step": "#dg-seq g.dg-step >> nth=2",
+    "export link": "#dg-exports a >> nth=0",
+    "run select": "#dg-run",
+    "scope select": "#dg-scope",
+}
+
+
+@pytest.mark.parametrize("where", ["after", "before"])
+@pytest.mark.parametrize("kind", list(_DG_TARGETS))
+def test_a_live_refresh_keeps_focus_on_every_kind_of_control(live, kind, where):
+    """E6: the Diagrams page's refresh re-renders its regions; focus fell from 4 of 6
+    control kinds to <body> (the selects kept it). Each kind keeps focus on the same
+    control. The write sorts after the focused control, or before it -- a new origin
+    group, interface row and first step ahead of the focused one (blocker 3): the
+    control is matched by identity (its key and what it shows), never by position."""
+    ctx, page, errors = _dg_page(live)
+    try:
+        target = page.locator(_DG_TARGETS[kind]).first
+        target.focus()
+        before = page.evaluate(_DG_IDENTITY)
+        r0 = _dg_count(page, "refreshes")
+        label = _dg_write(live, before=(where == "before"))
+        _dg_reach(page, "refreshes", r0 + 1)
+        page.locator("#dg-ifaces").get_by_text(label).wait_for()
+        after = page.evaluate(_DG_IDENTITY)
+        assert after[0] != "BODY" and after == before, (before, after)
+        if where == "before" and kind in ("interface row", "origin group", "response step"):
+            assert page.locator(_DG_TARGETS[kind]).first.evaluate(
+                "e => e !== document.activeElement"), "nothing was inserted before it"
+    finally:
+        ctx.close()
+    assert errors == []
+
+
+def test_a_sequence_answer_overtaken_by_a_scope_change_is_never_drawn(live):
+    """Review of `eb95cd4`: a poll's refresh asked for the shown scope's sequence, and the
+    user chose another scope before the answer came. The later choice is drawn and stays;
+    the overtaken answer is dropped (`loadSeq`'s generation). Before, the older scope's
+    sequence was drawn over the one the select shows."""
+    ctx, page, errors = _dg_page(live)
+    try:
+        held = []
+
+        def route(r):
+            if not held and "scope=workflow%3Aact-1" in r.request.url:
+                held.append(r)                               # the refresh's request
+            else:
+                r.continue_()
+        page.route("**/api/diagram/*/sequence?*", route)
+        with page.expect_request(lambda r: "scope=workflow%3Aact-1" in r.url):
+            _dg_write(live)                                  # a poll's refresh asks
+        for _ in range(400):                                 # its route handler runs
+            if held:
+                break
+            page.evaluate("0")
+        assert held, "the refresh's sequence request was not held: the case proves nothing"
+        page.select_option("#dg-scope", "test:t1")           # the user's later choice
+        page.locator('#dg-exports a[data-focus-key="export:seq"][href*="test%3At1"]').wait_for()
+        steps = page.locator("#dg-seq g.dg-step title")
+        drawn = steps.all_text_contents()
+        assert drawn, "the chosen scope drew no step"
+        polls = _dg_count(page, "polls")
+        held[0].continue_()                                  # the overtaken answer arrives
+        _dg_reach(page, "polls", polls + 1)                  # and its poll is over
+        assert page.input_value("#dg-scope") == "test:t1"
+        assert steps.all_text_contents() == drawn
+    finally:
+        ctx.close()
+    assert errors == []
+
+
+def test_every_focusable_control_in_the_diagrams_live_regions_has_a_focus_key(live):
+    """FR-UI-514 (D5): every focusable control the refresh re-renders carries a focus key,
+    unique in its region; the request, forward and response steps of one capture record
+    share their evidence key, so a step's key is derived from more than its evidence."""
+    ctx, page, errors = _dg_page(live)
+    try:
+        found = page.evaluate("""() => {
+          const sel = 'a[href], button, input, select, textarea, [tabindex]';
+          const out = [];
+          for (const r of ['#dg-flow', '#dg-ifaces', '#dg-seq', '#dg-exports']) {
+            for (const e of document.querySelector(r).querySelectorAll(sel)) {
+              if (e.closest('[hidden]') || e.getAttribute('tabindex') === '-1') continue;
+              out.push({region: r, tag: e.tagName, key: e.getAttribute('data-focus-key')});
+            }
+          }
+          return out;
+        }""")
+        regions = {f["region"] for f in found}
+        assert regions == {"#dg-flow", "#dg-ifaces", "#dg-seq", "#dg-exports"}
+        assert [f for f in found if not f["key"]] == []
+        keys = [(f["region"], f["key"]) for f in found]
+        assert len(keys) == len(set(keys))
+    finally:
+        ctx.close()
+    assert errors == []

@@ -4,6 +4,15 @@
 // Safety: every label comes from a live target or a capture (paths, parameter names,
 // host names, UI labels). Everything is rendered with textContent / createElementNS --
 // this module never parses HTML or SVG strings (tests/test_web_diagrams.py checks).
+//
+// Live (FR-UI-510, FR-UI-514, CC-UI-0068): the page polls the store version while visible
+// and reloads the run when it changes, keeping the user's place: every focusable control
+// a region re-renders carries a focus key (`data-focus-key`: its identity, never its
+// position) and each region is re-rendered through `livefocus.js`. A version is marked
+// seen only once its reload succeeded. `#diagrams-root` counts for tests:
+// `data-baseline`, `data-polls`, `data-refreshes`.
+
+import { rerender } from "/static/js/livefocus.js";
 
 const NS = "http://www.w3.org/2000/svg";
 const ROW = 22;          // an interface row
@@ -68,8 +77,11 @@ function initDiagrams() {
   const runSel = $("dg-run"), originSel = $("dg-origin"), knowSel = $("dg-knowledge");
   const findingSel = $("dg-finding"), overlayBox = $("dg-overlay"), scopeSel = $("dg-scope");
   const pollMs = Math.max(500, parseInt(root.dataset.pollMs || "3000", 10) || 3000);
+  const bump = (name) => {
+    root.dataset[name] = String((parseInt(root.dataset[name] || "0", 10) || 0) + 1);
+  };
   const state = { run: null, expanded: new Set(), expandedInit: false, version: undefined,
-                  evRef: null, evNext: null, selected: null, gen: 0,
+                  evRef: null, evNext: null, selected: null, gen: 0, seqGen: 0,
                   keepRun: null, pin: null };
   // A finding's deep link (FR-UI-513), validated by the server (`parse_deep_link`), which
   // renders these attributes only for a link that holds; the URL itself is never read.
@@ -148,6 +160,11 @@ function initDiagrams() {
   // --- data flow -------------------------------------------------------------------
   function renderFlow(model) {
     const host = $("dg-flow");
+    rerender(host, () => drawFlow(host, model));
+    renderIfaceTable(model.nodes.filter((n) => n.kind === "interface" || n.kind === "page"));
+  }
+
+  function drawFlow(host, model) {
     host.replaceChildren();
     const nodes = Object.fromEntries(model.nodes.map((n) => [n.id, n]));
     const origins = model.nodes.filter((n) => n.kind === "origin");
@@ -179,7 +196,7 @@ function initDiagrams() {
       const head = svg("text", { x: xA + 22, y: top + 17, class: "dg-text head" },
         `${open ? "▾" : "▸"} ${clip(o.label, 38)}  (${kids.length} interface(s))`);
       const grp = svg("g", { class: "dg-hit", tabindex: 0, role: "button",
-                             "aria-expanded": open });
+                             "aria-expanded": open, "data-focus-key": `origin:${o.id}` });
       grp.append(box, head);
       grp.addEventListener("click", () => {
         if (state.expanded.has(o.id)) state.expanded.delete(o.id);
@@ -301,15 +318,18 @@ function initDiagrams() {
     defs.append(marker);
     s.append(defs, body);
     host.append(s);
-    renderIfaceTable(ifaces);
   }
 
   function renderIfaceTable(ifaces) {
-    const tbody = $("dg-ifaces").querySelector("tbody");
+    const table = $("dg-ifaces");
+    rerender(table, () => drawIfaceTable(table.querySelector("tbody"), ifaces));
+  }
+
+  function drawIfaceTable(tbody, ifaces) {
     tbody.replaceChildren();
     for (const k of ifaces) {
       const c = k.coverage || {};
-      const tr = el("tr", { tabindex: 0 },
+      const tr = el("tr", { tabindex: 0, "data-focus-key": `iface:${k.id}` },
         el("td", { text: k.label }), el("td", { text: k.knowledge }),
         el("td", { class: "num", text: k.observations }),
         ...["discovered", "captured", "scheduled", "executed", "evaluated", "finding"]
@@ -322,8 +342,25 @@ function initDiagrams() {
   }
 
   // --- sequences -------------------------------------------------------------------
+  // A step's identity: one capture record's request, forward and responses share their
+  // first evidence key (report/diagram.py), and a tool exchange's request and response
+  // too, so the key also names the step's type, kind and endpoints; identical steps are
+  // told apart by occurrence (#2, #3: the one positional tie-break, R7).
+  function stepKey(st, seen) {
+    const ends = st.type === "note" || st.type === "group"
+      ? (st.over || []).join(",") : `${st.src ?? ""}>${st.dst ?? ""}`;
+    const base = `step:${(st.evidence || [])[0] ?? "-"}:${st.type}:${st.kind ?? ""}:${ends}`;
+    const n = (seen.get(base) || 0) + 1;
+    seen.set(base, n);
+    return n > 1 ? `${base}#${n}` : base;
+  }
+
   function renderSeq(seq) {
     const host = $("dg-seq");
+    rerender(host, () => drawSeq(host, seq));
+  }
+
+  function drawSeq(host, seq) {
     host.replaceChildren();
     $("dg-seq-notes").textContent = (seq.notes || []).join(" · ") || "";
     if (seq.error) {
@@ -356,8 +393,9 @@ function initDiagrams() {
     }
     let y = top + STEP;
     let groupLeft = 0, groupTop = 0, groupLabel = null;
+    const seen = new Map();
     seq.steps.forEach((st) => {
-      const g = svg("g", { class: "dg-step", tabindex: 0 });
+      const g = svg("g", { class: "dg-step", tabindex: 0, "data-focus-key": stepKey(st, seen) });
       g.addEventListener("click", () => showKeys(st.evidence || [], st.label));
       if (st.type === "group") {
         groupLeft = 2; groupTop = y - 16; groupLabel = st.label;
@@ -399,35 +437,47 @@ function initDiagrams() {
     host.append(s);
   }
 
+  // true once the scope's sequence is drawn (or there is none to draw)
   async function loadSeq() {
     const scope = scopeSel.value;
+    const host = $("dg-seq");
+    const mine = ++state.seqGen;      // a later load (a scope change, a poll) draws, not this
     if (!scope || state.run === null) {
-      $("dg-seq").replaceChildren();
-      return;
+      rerender(host, () => host.replaceChildren());
+      return true;
     }
+    let ok = true;
     try {
-      renderSeq(await api(`/api/diagram/${state.run}/sequence?scope=`
-                          + encodeURIComponent(scope)));
+      const seq = await api(`/api/diagram/${state.run}/sequence?scope=`
+                            + encodeURIComponent(scope));
+      if (mine !== state.seqGen) return false;
+      renderSeq(seq);
     } catch (e) {
-      $("dg-seq").replaceChildren(el("p", { class: "muted", text: `not loaded: ${e.message}` }));
+      if (mine !== state.seqGen) return false;
+      rerender(host, () => host.replaceChildren(el("p", { class: "muted", text: `not loaded: ${e.message}` })));
+      ok = false;
     }
     exportLinks();
+    return ok;
   }
   scopeSel.addEventListener("change", () => { state.pin = null; loadSeq(); });
 
   // --- status, filters, exports ------------------------------------------------------
   function exportLinks() {
     const box = $("dg-exports");
-    box.replaceChildren();
-    if (state.run === null) return;
-    const base = `/api/diagram/${encodeURIComponent(state.run)}`;
-    box.append(el("a", { href: `${base}/export.json`, text: "JSON" }), " ",
-      el("a", { href: `${base}/export/flow.mmd?overlay=${overlayBox.checked}`,
-                text: "Mermaid data flow" }));
-    if (scopeSel.value) {
-      box.append(" ", el("a", { href: `${base}/export/sequence.mmd?scope=`
-        + encodeURIComponent(scopeSel.value), text: "Mermaid sequence" }));
-    }
+    rerender(box, () => {
+      box.replaceChildren();
+      if (state.run === null) return;
+      const base = `/api/diagram/${encodeURIComponent(state.run)}`;
+      box.append(el("a", { href: `${base}/export.json`, "data-focus-key": "export:json", text: "JSON" }), " ",
+        el("a", { href: `${base}/export/flow.mmd?overlay=${overlayBox.checked}`,
+                  "data-focus-key": "export:flow", text: "Mermaid data flow" }));
+      if (scopeSel.value) {
+        box.append(" ", el("a", { href: `${base}/export/sequence.mmd?scope=`
+          + encodeURIComponent(scopeSel.value), "data-focus-key": "export:seq",
+          text: "Mermaid sequence" }));
+      }
+    });
   }
 
   function renderStatus(st) {
@@ -442,9 +492,10 @@ function initDiagrams() {
     w.replaceChildren(...(st.warnings || []).map((t) => el("li", { text: t })));
   }
 
+  // reload the run's diagrams; true once all of it is drawn for this generation
   async function refresh() {
     const gen = ++state.gen;
-    if (state.run === null) return;
+    if (state.run === null) return true;
     const params = new URLSearchParams();
     if (overlayBox.checked) params.set("overlay", "true");
     if (originSel.value) params.set("origin", originSel.value);
@@ -457,14 +508,16 @@ function initDiagrams() {
         api(`/api/diagram/${state.run}/status`),
         api(`/api/diagram/${state.run}/dataflow?${params}`),
         api(`/api/diagram/${state.run}/scopes`)]);
-      if (gen !== state.gen) return;
+      if (gen !== state.gen) return false;
       renderStatus(st);
       fillOrigins(model);
       fillScopes(scopes.scopes);
       renderFlow(model);
-      await loadSeq();
+      const ok = await loadSeq();
+      return ok && gen === state.gen;
     } catch (e) {
       $("dg-status-text").textContent = `Could not load the run's diagrams: ${e.message}`;
+      return false;
     }
   }
 
@@ -514,6 +567,7 @@ function initDiagrams() {
     refresh();
   });
 
+  // true once the run list and the chosen run are drawn
   async function loadRuns() {
     const doc = await api("/api/diagram/runs");
     runSel.replaceChildren(...doc.runs.map((r) => el("option", { value: r.id,
@@ -525,20 +579,32 @@ function initDiagrams() {
     if (!doc.runs.length && !kept) {
       $("dg-status-text").textContent = "No run has a trace yet. Run `fuzzlab auto` "
         + "(the trace is on by default); this page fills in while it runs.";
-      return;
+      return true;
     }
     if (!kept && (state.run === null || !doc.runs.some((r) => r.id === state.run))) {
       state.run = doc.runs[0].id;
     }
     runSel.value = String(state.run);
-    await refresh();
+    return refresh();
   }
 
+  // One poll at a time (a chain of timeouts), only while the page is visible (a hidden
+  // tab lets the server's store watch idle out). A version is marked seen only once its
+  // reload succeeded, so a failed reload is retried at the next poll. A poll that skips
+  // (hidden page, failed fetch) is not counted.
   async function poll() {
     try {
-      const v = (await api("/api/sitetree/version")).version;
-      if (state.version !== undefined && v !== state.version) await loadRuns();
-      state.version = v;
+      if (document.visibilityState === "visible") {
+        const v = (await api("/api/sitetree/version")).version;
+        if (state.version === undefined) {
+          state.version = v;
+          root.dataset.baseline = "1";
+        } else if (v !== state.version && await loadRuns()) {
+          state.version = v;
+          bump("refreshes");
+        }
+        bump("polls");
+      }
     } catch (e) { /* the next poll retries */ }
     setTimeout(poll, pollMs);
   }
@@ -546,7 +612,7 @@ function initDiagrams() {
   // the store's version is taken before the first read, so a write that lands while
   // the page loads is seen by the first poll (never folded into the baseline)
   api("/api/sitetree/version")
-    .then((v) => { state.version = v.version; })
+    .then((v) => { state.version = v.version; root.dataset.baseline = "1"; })
     .catch(() => {})
     .finally(() => {
       loadRuns().catch((e) => {

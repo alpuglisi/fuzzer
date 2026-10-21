@@ -95,6 +95,60 @@ def connect(path: str | Path, *, create: bool = True) -> sqlite3.Connection:
     return open_store(path, create=create)
 
 
+def _read_only_uri(path: str | Path, mode: str) -> str:
+    """A SQLite ``file:`` URI for an existing file, opened ``mode=ro`` or ``mode=rw``, with
+    a private cache (`open_read_only`)."""
+    return Path(path).resolve().as_uri() + f"?mode={mode}&cache=private"
+
+
+def open_read_only(path: str | Path, *, timeout: float, fold_on_close: bool = False,
+                   any_thread: bool = False) -> sqlite3.Connection:
+    """The one read-only open of a SQLite file in fuzzlab (FR-CORE-508, CC-CORE-0071).
+
+    - An existing file only: a missing one raises ``sqlite3.OperationalError`` and
+      nothing is created. Never a journal-mode change, a migration or a write
+      (``PRAGMA query_only=1``); ``trusted_schema=OFF`` (the file may be someone else's).
+    - ``cache=private``, always: in shared-cache mode a read meets a same-process
+      writer's table lock at once (``SQLITE_LOCKED_SHAREDCACHE``, no busy wait;
+      DRAFT-AU-SITETREE §1.4 C9).
+    - ``mode=ro`` by default: the main file is never written (a WAL file's ``-wal`` and
+      ``-shm`` may be left behind). ``fold_on_close=True`` opens ``mode=rw`` instead, so
+      the connection's last close folds the WAL and removes the side files like any
+      reader's -- still query-only.
+    - ``any_thread``: opened with ``check_same_thread=False``; the caller then serialises
+      every use itself (PA-0023's third pattern, ``web.sitetree``'s store watch).
+    - ``timeout``: the busy wait, in seconds.
+
+    The connection is closed if setting it up fails. Whether the file is SQLite at all
+    is asked of SQLite (`is_sqlite`): a process that holds SQLite connections never opens
+    a database's files outside SQLite, because on POSIX the close of any descriptor of a
+    file releases every lock the process holds on it (BUG-0535)."""
+    conn = sqlite3.connect(_read_only_uri(path, "rw" if fold_on_close else "ro"), uri=True,
+                           timeout=timeout, check_same_thread=not any_thread)
+    try:
+        conn.execute("PRAGMA query_only=1")
+        conn.execute("PRAGMA trusted_schema=OFF")
+    except BaseException:
+        conn.close()
+        raise
+    return conn
+
+
+def is_sqlite(conn: sqlite3.Connection) -> bool:
+    """Whether ``conn``'s file is an SQLite database, asked of SQLite: ``False`` on
+    ``SQLITE_NOTADB`` (text, a bare 16-byte magic, random bytes, JSON: measured,
+    DRAFT-AU-SITETREE §1.4 N); any other error propagates. A 0-byte file is an empty
+    database to SQLite (``True``): callers that refuse one check its size first. Never a
+    raw read of the file's bytes (BUG-0535, FR-CORE-508)."""
+    try:
+        conn.execute("PRAGMA schema_version").fetchone()
+    except sqlite3.DatabaseError as exc:
+        if getattr(exc, "sqlite_errorname", "") == "SQLITE_NOTADB":
+            return False
+        raise
+    return True
+
+
 def _is_launch_token(value: str) -> bool:
     """A launch token is 32 lowercase hex characters (``secrets.token_hex(16)``)."""
     return len(value) == 32 and all(c in "0123456789abcdef" for c in value)
