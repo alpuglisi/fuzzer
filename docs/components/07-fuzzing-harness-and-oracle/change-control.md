@@ -156,6 +156,35 @@ Newest first.
     generation, so a re-login of the same route between the fetch and the bound send is
     not caught. A refused send is still counted in the isolation report's `sends` or
     `anonymous_sends`: the route is chosen, and counted, before the check.
+- Review round 3 (3959dfc, R3-2; the final round): every route switch was fixed, but a
+  re-login on the **same** route between the page fetch and the bound send was not
+  (round 2's stated residual). On the real `SessionManager` (requests login) and a
+  PHP-like app that keeps a logged-out id: the page's own answer showed the login box,
+  so `observe` marked the session lost; the bound send's `prepare` logged in again (a
+  new id) and posted the old id's token: 403, read as a negative. Each fix proved by a
+  test that fails on 3959dfc (the same one invocation as CC-AUD-0056's round 3):
+  - `tools/probesender.py`: `_FetchRoute` also records the session generation the
+    fetch's `prepare` applied and whether the session was lost on the page's own answer
+    (`lost`: a loss of the identity the run's manager or the copy's told its listeners
+    while the GET was in flight, counted by `_on_session_loss`, registered on the run's
+    manager and on each copy; or `prepare`'s own flag). `_FetchRoute.refusal` refuses
+    the bound send before anything is sent on another route or identity or after such a
+    loss; `_send_on` refuses the answer of a bound send whose `prepare` applied another
+    generation; `_on_copy` verifies a copy's re-login on a refused send too.
+  - `oracle/probe.py`: `PrerequisiteUnavailable`'s docstring states that one exception
+    (the send has gone out; its answer is not read). Docstring only.
+  - Tests:
+    - `tests/test_replay_bindings.py::test_a_page_whose_own_answer_lost_the_session_is_never_bound_on_the_next_login`
+      (the checker's path; after the page, no re-login and no POST; `UNBOUND`);
+    - `::test_a_bound_send_on_a_session_relogged_in_after_its_fetch_is_unbound` (real
+      manager; another send sees the loss after the fetch; `UNBOUND`, and the one send
+      that went out is on the new id);
+    - `::test_a_bound_send_on_a_copy_relogged_in_after_its_fetch_is_unbound_and_verified`
+      (an isolated copy logged out after the fetch; `UNBOUND`, and the single-session
+      breaker still trips on the copy's re-login).
+  - Residual (FR-FUZZ-67): `prepare` runs inside the client's send, so a bound send on
+    another generation has gone out (to the lab) before it is refused; its answer is
+    never read. Nothing in the session layer (SESS) or `core.http` was changed.
 - Effectiveness (assessed <date> or pending): pending.
 
 ### CC-FUZZ-0110 — The blind-SQLi builder never admits an answer sent on a session known to be lost (FR-FUZZ-65, FR-FUZZ-63, BUG-0533; decision D′) (2026-10-20)

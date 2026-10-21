@@ -223,22 +223,30 @@ budget where a vulnerability is plausible.
     its point carries a `replay_refusal` and is inconclusive
     (`value_shape.names_outside_lab`, the one predicate). A point's own value and the
     command-injection base value are the payload's slot and keep loopback. *(Review
-    rounds 1 and 2, BUG-0544: the predicate fails closed, on the authority and on the
-    tail.)* A value is the lab only when it holds no `@`, `\`, `%`, control or
-    non-ASCII character, names no scheme but http(s), its whole authority is a loopback
-    host with a numeric port under both a manual split and `urlsplit`, and nothing
-    after the authority reads as a host to any reader: no `//`, and no run of host
-    characters (letters, digits, `-.:[]`; the tail is cut at every other character)
-    that `value_shape` reads as a URL, IP or host name (one trailing dot off), that is
-    a dotted quad in any radix, that starts with a scheme and `:` with or without `//`,
-    or that is a host and a port -- a loopback host in the tail included. Anything else
+    rounds 1 to 3, BUG-0544: the predicate fails closed, on the authority and on the
+    tail; the tail rule is an allow-list, the owner's decision of 2026-10-21.)* A value
+    is the lab only when it holds no `@`, `\`, `%`, control or non-ASCII character,
+    names no scheme but http(s), its whole authority is a loopback host with a numeric
+    port under both a manual split and `urlsplit`, and its path, query and fragment are
+    wholly in the **safe tail grammar** (`value_shape._tail_in_grammar`): the separators
+    `/`, `?`, `#`, `&`, `=` (never `/` twice in a row) between words of ASCII letters,
+    digits, `_`, `-`, `~` whose first character is not a digit. So no tail token holds
+    a `.` or a `:` (or any other character), and none is a number in any radix or of
+    any length. The rule never asks whether a token reads as a host: no shape
+    classifier, TLD list or address parser reads the tail. Anything else
     `neutral_value` would change is outside the lab (`127.0.0.1:80@evil.example/`,
     `localhost:1@evil.example`, `http://evil.example\@127.0.0.1/`,
     `http://127.0.0.1/r?next=http://evil.example/`, `http://127.0.0.1/?next=evil.example:8080`,
-    `?next=8.8.8.8:53`, `?next=https:evil.example`, `#evil.example:8080` are outside).
+    `?next=8.8.8.8:53`, `?next=https:evil.example`, `#evil.example:8080`, `?next=evil.top`,
+    `#evil.zip`, `?next=134744072`, `?next=8.8.2056`, `?next=0x8080808` are outside).
     The same predicate gates a fresh value the binder reads from a page (FR-FUZZ-67).
-    Accepted false positive: a loopback value whose tail holds a time (`?at=10:30`) or
-    a `word:` is outside (its request is unbound). Stated residual: an e-mail default
+    Accepted false positives (the owner's decision): a loopback value whose tail holds a
+    number, a dotted or colon-separated token or any other character outside the
+    grammar (`?page=2`, `/app.js?v=1.2.3`, `?at=10:30`, `?q=a+b`, `/2fa`) is outside --
+    wherever a stand-in is sent, plain loopback stands in for it, as at dcc7091, and a
+    request needing it as a sibling or a fresh value is unbound (FR-FUZZ-67). Stated
+    residual: a dotless word (`?next=intranet`) is in the grammar; only a resolver that
+    completes it from a search list reads it as a host. Stated residual: an e-mail default
     (`user@mail.example.com`) is sent as is and may trigger mail. **Stated exception (FR-AUD-21, BUG-0124,
     operator-approved 2026-10-14):** the open-redirect retry probe.
 - **FR-AUD-21** *(open redirect and SSRF by value; `CC-AUD-0034`, 2026-10-14,

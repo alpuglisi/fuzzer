@@ -202,6 +202,114 @@ Residuals (stated in FR-FUZZ-67 and CC-FUZZ-0111):
   `neutral_value` replaces, so FR-AUD-20 does not reach it. That is unchanged from
   dcc7091 and out of this round's scope.
 
+## Review round 3 (3959dfc): the final round, on the owner's chosen design
+
+A third adversarial check (`review_round3.md`; plain Python on `git archive` exports of
+3959dfc, dcc7091 and 0703688, WHATWG measured in node 22) found every round-2 repro fixed
+and one neighbouring path of each finding still open. The owner then chose the design
+(2026-10-21, "final round, allow-list"): a loopback value keeps its path, query and
+fragment only when no tail token holds a `.` or a `:` or is a number (any radix, any
+length); anything else is replaced by plain loopback as at dcc7091; false positives
+(`?page=2`) are accepted; nothing may leave the lab. The bound send is also refused when
+the session changed after the page fetch. There is no round after this one. Each fix has
+a test that fails on 3959dfc for its stated reason (one invocation on 3959dfc's product
+files: 45 failed, 71 passed; `tests/test_replay_bindings.py`):
+
+1. **The tail rule was still a recogniser of hosts (R3-1).** Round 2's `_reads_as_host`
+   flagged a portless token only when `value_shape` read it as a URL, IP or host name,
+   or `_ipv4_like` read four dotted parts. `value_shape`'s host name needs a two-letter
+   TLD or one in the closed `GENERIC_TLDS` set, so a real gTLD outside it passed, and so
+   did a one- to three-part or integer IPv4 address. Each of these was sent verbatim and
+   bound fresh at 3959dfc (dcc7091 replaced every one with `http://127.0.0.1/`):
+   - `http://127.0.0.1/?next=evil.top`, `?next=evil.shop`, `?next=attacker.tech/x`,
+     `?next=evil.mov`, `/go/evil.top`, `127.0.0.1/?u=evil.store`,
+     `localhost:3000/r?u=evil.live`, `#evil.zip` (a `filename` to `value_shape`);
+   - `?next=134744072`, `8.8.2056`, `8.526344`, `0x8080808`, `0x08.0x08.0x0808` (each
+     8.8.8.8 to `new URL("http://" + t)` in node 22).
+
+   Fix: the tail rule is an allow-list of a stated grammar, never a recogniser
+   (`value_shape._tail_in_grammar`; FR-AUD-20 states the grammar): the separators
+   `/ ? # & =` (never `//`) between words of ASCII letters, digits, `_`, `-`, `~` whose
+   first character is not a digit. `_tail_tokens`, `_ipv4_like` and `_reads_as_host`
+   are gone. The binder's fresh values pass through the same predicate.
+
+   Tests:
+   - the thirteen spellings above (`_OUTSIDE_LAB_R3`) in
+     `test_a_value_that_names_a_host_beyond_loopback_to_any_reader_is_outside_the_lab`
+     and `test_the_binder_never_binds_a_fresh_value_that_names_a_host_beyond_loopback`,
+     with the round-1 and round-2 spellings kept;
+   - `test_every_spelling_of_the_generated_sweep_is_outside_the_lab`: 1,414 values, every
+     token in seven tail positions (path, query, fragment; `http://127.0.0.1`,
+     `127.0.0.1`, `localhost:3000`, `http://[::1]:8080`, `https://localhost`). The
+     tokens: gTLDs not in `GENERIC_TLDS` (bare, nested, trailing dot, with a path); every
+     one- to four-part decimal, `0x`, `0X` and octal spelling of 8.8.8.8, 1.2.3.4 and
+     127.0.0.1; scheme-colon; host:port; bracketed literals; `//`; `%`; fullwidth and
+     other non-ASCII spellings;
+   - `test_the_tail_rule_is_an_allow_list_never_a_recogniser_of_hosts` (AST: the tail
+     predicate names no shape classifier, TLD or extension list or address parser);
+   - `test_a_value_naming_only_loopback_is_the_lab`: the loopback controls still keep
+     their tail (`http://127.0.0.1/`, `http://127.0.0.1:3000/login?next=/account`,
+     localhost paths of plain word segments, `[::1]`, `~alice`).
+
+   Accepted false positives (asserted as outside): `?page=2&sort=name`, `app.js?v=1.2.3`,
+   `?a=1`, `?at=10:30`, `?q=a+b`, `/2fa`, `/a;b`, `?ids=a,b`. Stated residual: a dotless
+   word (`?next=intranet`) is in the grammar; only a resolver completing it from a search
+   list reads it as a host.
+2. **The route check did not compare the session (R3-2).** Round 2 recorded the fetch's
+   client and identity label and refused the bound send only on another route or
+   identity, and stated the rest as a residual. On the real `SessionManager` (requests
+   login, credentials in memory) with a PHP-like app that keeps a logged-out id and shows
+   the login box next to the form:
+   - the session was logged out server-side;
+   - the page fetch went out on it (`sid=s2`), and its answer showed the login box, so
+     `observe` marked the session lost (its listeners were told), while `prepare`'s own
+     `session_lost` on the fetch was still False;
+   - the bound send's `prepare` logged in again (`GET /`, `POST /login`, `GET /`: `s7`)
+     and posted `s2`'s token on `s7`: 403, and the row was a negative.
+
+   0703688 behaved the same: round 2 had not touched this path.
+
+   Fix (`tools/probesender.py`): `_FetchRoute` also records the session generation the
+   fetch's `prepare` applied (`Request.session_generation`, read, never recomputed) and
+   `lost`: the run's manager or the copy's told a loss of the identity while the fetch's
+   GET was in flight (`_on_session_loss`, a FR-SESS-16 listener counting losses), or
+   `prepare` flagged the session lost. Then:
+   - `_FetchRoute.refusal` refuses the bound send before anything is sent when it would
+     leave on another route or identity, or when the page's own answer lost the session;
+   - `_send_on` refuses the bound send's answer when its `prepare` applied another
+     generation than the fetch's (a re-login in between that no listener was told of:
+     a time expiry, a loss found while a pause was waited out, another send's loss);
+   - `_on_copy` still verifies a copy's re-login when the send is refused.
+   Each raises `PrerequisiteUnavailable`, so the row is `UNBOUND`, never a negative.
+   Nothing in the session layer or `core.http` changed.
+
+   Tests:
+   - `test_a_page_whose_own_answer_lost_the_session_is_never_bound_on_the_next_login`
+     (the checker's path, real manager: after the page, no re-login and no POST);
+   - `test_a_bound_send_on_a_session_relogged_in_after_its_fetch_is_unbound` (real
+     manager; another send sees the loss after the fetch);
+   - `test_a_bound_send_on_a_copy_relogged_in_after_its_fetch_is_unbound_and_verified`
+     (an isolated copy logged out after the fetch; the single-session breaker still
+     trips).
+
+   Stated residual: `prepare` runs inside the client's send, so a bound send whose own
+   `prepare` logged in again has gone out (to the lab, on the new session, with the old
+   token) before its generation is known. Its answer is never read.
+
+**Why round 2 missed them; why PA-0544(5) and (7) did not prevent it (recurrence).**
+- *Item 7 was followed in name, not in substance.* It said the predicate admits only
+  what it proves, "never by denying the shapes found so far". Round 2 wrote "proves" as
+  "no recogniser of a host fires on the tail", which is a deny-list of the shapes its
+  recognisers know: `GENERIC_TLDS` and four-part quads. The rule did not say what proof
+  is, and its test covered named spellings, not a generated class.
+- *Item 5 stopped at the route.* It required the send to be checked against the setup
+  request's route at the send, but a route is not a session: one route can carry two
+  sessions in a row. Round 2 saw the gap and wrote it down as a residual, which hid a
+  false-negative source (PA-0530(4) names that failure mode for merged inputs).
+
+PA-0544 items 5 and 7 are strengthened in place (marked *Review round 3*). There is no
+new PA: same bug, same rules, made exact.
+
 ## Recurrence review
 
 Checked `docs/bugs/` and `PREVENTIVE_ACTIONS.md` for a stored or redacted value reused as
@@ -241,7 +349,12 @@ Not required (no same-root-cause match). PA-0100 is not weakened: storage stays 
    unbound. *(Review round 2:)* the route the setup request actually went out on is
    recorded, and the send that uses its result is checked against it **at the send**
    (the route can change during or after the setup request); a different route or
-   identity makes the test unbound.
+   identity makes the test unbound. *(Review round 3:)* what is recorded and checked is
+   the **session**, not only the route: its route, identity and generation, and a loss
+   the session layer saw on the setup request's own answer. A loss known before the send
+   refuses it before anything is sent; a generation that changed inside the send makes
+   its answer unread. A gap in this check is never a stated residual: it is a
+   false-negative source, fixed or pinned (PA-0530(4)).
 6. *(Review round 1.)* **State a setup request leaves for one send is bound to that send**
    (a token the send carries), never a sender-wide flag; every other send discards it.
 7. *(Review round 1.)* **A recipe is a stored value**: what it records passes the strongest
@@ -250,8 +363,14 @@ Not required (no same-root-cause match). PA-0100 is not weakened: storage stays 
    parse, proven on the bypass shapes. *(Review round 2:)* it admits only what it proves
    for **every part** of the value (authority and tail), never by denying the shapes
    found so far; its test covers each bypass class with more than the reported spelling.
+   *(Review round 3:)* "proves" means **an allow-list of a stated grammar**: the
+   predicate asks whether every part is in the grammar it states, never whether a part
+   reads as the forbidden thing (no recogniser, classifier, closed list or parser of the
+   forbidden thing decides admission). It is enforced by a guard that the predicate
+   reads no recogniser, and by a generated sweep of each bypass class, not a list of
+   reported spellings.
 
-- Enforced by: tests/test_replay_bindings.py::test_a_blanked_csrf_token_is_bound_fresh_before_each_send, tests/test_replay_bindings.py::test_a_token_that_cannot_be_fetched_is_inconclusive_never_negative, tests/test_replay_bindings.py::test_no_fresh_value_reaches_the_store, tests/test_replay_bindings.py::test_a_sibling_naming_a_host_is_sent_as_given_on_loopback_and_never_off_it, tests/test_sender_conformance.py::test_every_wrapper_reports_and_forwards_its_inner_senders_fetch, tests/test_sender_conformance.py::test_the_fetch_guard_catches_a_wrapper_that_hides_it, tests/test_replay_bindings.py::test_the_seam_never_fetches_a_login_page_with_the_runs_session, tests/test_replay_bindings.py::test_a_source_page_on_another_origin_is_never_bound, tests/test_replay_bindings.py::test_the_pages_session_is_carried_into_the_bound_send_only_or_the_test_is_unbound, tests/test_replay_bindings.py::test_a_refused_binding_never_lends_its_pages_cookie_to_another_probe, tests/test_replay_bindings.py::test_a_source_page_holding_a_secret_or_an_identifier_is_never_stored, tests/test_replay_bindings.py::test_a_value_that_names_a_host_beyond_loopback_to_any_reader_is_outside_the_lab, tests/test_replay_bindings.py::test_the_binder_refuses_a_raw_or_built_send_to_its_own_request, tests/test_replay_bindings.py::test_the_binder_never_binds_a_fresh_value_that_names_a_host_beyond_loopback, tests/test_replay_bindings.py::test_a_bound_send_never_leaves_on_another_route_than_its_pages_fetch
+- Enforced by: tests/test_replay_bindings.py::test_a_blanked_csrf_token_is_bound_fresh_before_each_send, tests/test_replay_bindings.py::test_a_token_that_cannot_be_fetched_is_inconclusive_never_negative, tests/test_replay_bindings.py::test_no_fresh_value_reaches_the_store, tests/test_replay_bindings.py::test_a_sibling_naming_a_host_is_sent_as_given_on_loopback_and_never_off_it, tests/test_sender_conformance.py::test_every_wrapper_reports_and_forwards_its_inner_senders_fetch, tests/test_sender_conformance.py::test_the_fetch_guard_catches_a_wrapper_that_hides_it, tests/test_replay_bindings.py::test_the_seam_never_fetches_a_login_page_with_the_runs_session, tests/test_replay_bindings.py::test_a_source_page_on_another_origin_is_never_bound, tests/test_replay_bindings.py::test_the_pages_session_is_carried_into_the_bound_send_only_or_the_test_is_unbound, tests/test_replay_bindings.py::test_a_refused_binding_never_lends_its_pages_cookie_to_another_probe, tests/test_replay_bindings.py::test_a_source_page_holding_a_secret_or_an_identifier_is_never_stored, tests/test_replay_bindings.py::test_a_value_that_names_a_host_beyond_loopback_to_any_reader_is_outside_the_lab, tests/test_replay_bindings.py::test_the_binder_refuses_a_raw_or_built_send_to_its_own_request, tests/test_replay_bindings.py::test_the_binder_never_binds_a_fresh_value_that_names_a_host_beyond_loopback, tests/test_replay_bindings.py::test_a_bound_send_never_leaves_on_another_route_than_its_pages_fetch, tests/test_replay_bindings.py::test_every_spelling_of_the_generated_sweep_is_outside_the_lab, tests/test_replay_bindings.py::test_the_tail_rule_is_an_allow_list_never_a_recogniser_of_hosts, tests/test_replay_bindings.py::test_a_page_whose_own_answer_lost_the_session_is_never_bound_on_the_next_login, tests/test_replay_bindings.py::test_a_bound_send_on_a_session_relogged_in_after_its_fetch_is_unbound, tests/test_replay_bindings.py::test_a_bound_send_on_a_copy_relogged_in_after_its_fetch_is_unbound_and_verified
 
 PA-0002 sweep (by mechanism: every path that sends stored siblings): the oracle binder
 (every strategy, the PRG restore, the access-control peer replay, which now binds in the

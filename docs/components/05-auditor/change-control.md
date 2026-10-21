@@ -75,6 +75,40 @@ Newest first.
     (the loopback values that must still pass).
 
   Accepted false positive: a time or a `word:` in a loopback value's tail (FR-AUD-20).
+- Review round 3 (3959dfc, R3-1; the final round, on the owner's chosen design of
+  2026-10-21): round 2 fixed its six spellings, but its tail rule was still a
+  recogniser of hosts (`_reads_as_host`: `value_shape`'s closed `GENERIC_TLDS` set and a
+  four-part-only `_ipv4_like`), so a gTLD outside that list (`?next=evil.top`,
+  `#evil.zip`, `/go/evil.top`) and a one- to three-part or integer IPv4 address
+  (`?next=134744072`, `8.8.2056`, `0x8080808`) in a loopback URL's tail were sent as
+  given and bound fresh (dcc7091 replaced each with loopback). Now:
+  - `audit/value_shape.py`: `_tail_tokens`, `_ipv4_like`, `_reads_as_host` and their
+    character sets are removed. The tail must be wholly in the safe grammar
+    (`_tail_in_grammar`, an allow-list stated in its docstring and in FR-AUD-20):
+    separators `/ ? # & =` (never `//`) between words of ASCII letters, digits, `_`,
+    `-`, `~` whose first character is not a digit. No token with a `.` or a `:`, no
+    number in any radix or length; nothing reads the tail as a host. The binder's
+    fresh values go through the same predicate.
+  - Tests (in one invocation on 3959dfc's product files, 45 fail and 71 pass; each fails
+    for its stated reason):
+    - `tests/test_replay_bindings.py::test_a_value_that_names_a_host_beyond_loopback_to_any_reader_is_outside_the_lab`
+      and `::test_the_binder_never_binds_a_fresh_value_that_names_a_host_beyond_loopback`:
+      review R3-1's thirteen spellings (`_OUTSIDE_LAB_R3`) and the accepted false
+      positives, with the round-1 and round-2 spellings kept;
+    - `::test_every_spelling_of_the_generated_sweep_is_outside_the_lab`: 1,414 values
+      (gTLDs not in `GENERIC_TLDS`; every one- to four-part decimal, hex and octal
+      spelling of 8.8.8.8, 1.2.3.4 and 127.0.0.1; scheme-colon; host:port; bracketed;
+      `//`; `%`; fullwidth and other non-ASCII) in seven tail positions;
+    - `::test_the_tail_rule_is_an_allow_list_never_a_recogniser_of_hosts` (AST: the
+      tail predicate names no classifier, TLD or extension list or address parser);
+    - `::test_a_value_naming_only_loopback_is_the_lab`: the loopback controls
+      (`http://127.0.0.1/`, `http://127.0.0.1:3000/login?next=/account`, localhost
+      paths of plain word segments) still keep their tail.
+
+  Accepted false positives (the owner's decision): a number, a dotted or
+  colon-separated token or any character outside the grammar in a loopback value's
+  tail (`?page=2`, `/app.js?v=1.2.3`, `?at=10:30`, `?q=a+b`, `/2fa`). Stated residual:
+  a dotless word (`?next=intranet`) is in the grammar.
 - Effectiveness (assessed <date> or pending): pending.
 
 ### CC-AUD-0053 — The auditor ends a failed load through SP-01's owner (BUG-0522) (2026-10-19)
