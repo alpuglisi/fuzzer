@@ -229,6 +229,32 @@ def visit_key(url: str) -> str:
     return (origin or "") + tail + (f"#{frag}" if frag is not None else "")
 
 
+def route_shape(url: str) -> tuple:
+    """What the crawl frontier budgets variants by (FR-CRAWL-35, BUG-0545): the URL's
+    canonical origin, its path with every id-shaped segment (`core.pathtemplate.id_shaped`,
+    the one owner of that decision) as ``{}``, its sorted distinct query names, and the
+    same shape of a SPA route fragment. Values never count: ``/cal?d=1`` and ``/cal?d=2``,
+    or ``/item/7`` and ``/item/8``, are one shape. Only the per-shape admission count reads
+    it -- each URL keeps its own `visit_key` and is loaded as written. A tuple, never a
+    URL: nothing is built from it."""
+    from urllib.parse import unquote
+
+    from fuzzlab.core.pathtemplate import id_shaped
+
+    def shape(path: str, query: str) -> tuple:
+        segments = tuple("{}" if seg and id_shaped(unquote(seg)) else seg
+                         for seg in (path or "/").split("/"))
+        names = tuple(sorted({part.partition("=")[0] for part in query.split("&")
+                              if part}))
+        return segments, names
+
+    parts = urlsplit(url or "")
+    origin = canonical_origin(url) if parts.netloc else None
+    frag = spa_fragment(url)
+    route = shape(*frag.partition("?")[::2]) if frag is not None else None
+    return origin or "", shape(parts.path, parts.query), route
+
+
 def route_destructive_reason(url: str) -> str | None:
     """`core.urls.destructive_reason` on the URL, and on its SPA-route fragment (path
     and query), which that rule never sees: ``/#/logout`` is destructive. The fragment

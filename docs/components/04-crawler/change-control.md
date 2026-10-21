@@ -730,6 +730,291 @@ Newest first.
   - Not measured on a live application: no lab run was in scope (the change is in the
     write site, exercised directly).
 
+### CC-CRAWL-0056 — The legacy spider carries its identity on the static engine, admits URLs through a budgeted frontier, retries a transient failure and never files it visited, and batches its page rows (BUG-0545) (2026-10-21)
+- Placement: pre-assigned to lane SPIDER (audit defects 5, 11, 12 and 25's spider part);
+  FR-CRAWL-34..36; BUG-0545 / PA-0545. Implemented first (PA-0541): no design draft.
+  Lane SPIDER9 owns `StorageManager.record_request` (the captured-API dedup); this entry
+  does not touch it.
+- Change:
+  - **Identity on the static engine (FR-CRAWL-34, defect 5).** `tools/spider.py`:
+    - `_fetch_static`, in an authenticated crawl (the `requests` engine, the engine chosen
+      when Playwright is absent, and the browser's fallback), walks redirects with
+      `navguard.get_checked` over `_SeamGet`: each hop is one send through
+      `core.http.HttpClient` with the session manager as its addon (`prepare` applies,
+      withholds or re-logs in; `observe` reads the answer), on the worker's own
+      persistent `bodyread.bound(requests.Session())` whose jar keeps nothing
+      (`_NoCookies`). The per-hop scope and destructive rules are unchanged; a hop to
+      another origin than the session's is not followed and the load raises
+      `SessionWithheld` (recorded `withheld`, FR-SESS-20), as the browser's route does.
+    - `_static_identity` runs once per crawl before any page: `ensure` from the start URL
+      (operator base), `session_headers` (origin and transport checks), a cookie or header
+      a request can send (else `StaticIdentityUnsupported`), `verify_live` (SP-61; else
+      `IdentityUnavailable`); then the session scope is `browserauth.header_scope_for`'s
+      and a logout listener counts losses. A failure is cached and raised again.
+    - `_seam_send`: an answer on a session the manager knows lost (`session_lost`) or
+      sent while it saw a loss on any send is `_Transient` (retried after the re-login,
+      never extracted); a `SessionAuthError` is `IdentityUnavailable`, which stops the
+      crawl. `_sent_without_session`: an answer the manager withheld the session from
+      (`OUT_OF_ORIGIN`) or applied none to (`session_generation` unset: a host outside
+      its own scope) is never extracted (`SessionWithheld`). `_isolated_submit`
+      (selector forms, FR-CRAWL-8) sends through the same seam in an authenticated
+      static crawl (`_seam_submit`, `core.urls.with_query`).
+    - The seam's host gate is the crawl's request scope (loopback aliases for a loopback
+      start, else the host and its `www.`): one new host compare, a reasoned allowance in
+      `tests/test_session_origin_scope.py::HOST_COMPARE_ALLOWED` (PA-0134(3)), deny only.
+    - `--identity`'s help says the requests engine carries cookie and header sessions and
+      refuses a browser-storage one.
+  - **The frontier (FR-CRAWL-35, defect 11).** `_Frontier` replaces `_CrawlQueue`
+    (`list`) and the one-worker `pop(0)` loop; every crawl, one worker included, runs
+    `_crawl_parallel`. Admission reserves `spa.visit_key` (exact URL kept in the entry;
+    a probe is never deduplicated); `FrontierLimits` (`max_pages` 20000, `max_pending`
+    10000, `max_per_origin` 10000, `max_route_variants` 100, `max_url_length` 4096)
+    refuse in `FRONTIER_REASONS` order, counted. Two deques (ordinary; seeds and probes,
+    first worker only) and a retry heap; `take` is O(1). `_take` waits for a pending
+    retry before planning probes or ending. `_claimed` is gone (the reservation replaces
+    it). `tools/spa.py::route_shape` (new): canonical origin, path with
+    `core.pathtemplate.id_shaped` segments as `{}`, sorted query names, the SPA
+    fragment's shape -- a tuple, never a URL. `LocalSpider(..., limits=FrontierLimits)`.
+  - **Transient failures (FR-CRAWL-36, defect 12).** `_visit` stores the row `pending`
+    after the answer and `visited` (`set_outcome`) after extraction. `_check_answer`
+    raises `_Transient` for SP-56 `incomplete`, `throttle-or-unavailable`, `gateway`, or
+    another 5xx (no status literal outside SP-56's owner). `_page_failed` stores
+    `failed` (status kept, `attempts`, `error`: an answer or exception class, never a URL
+    or body) and retries `_is_transient` failures (`_Transient`, `BodyIncomplete`,
+    connection, timeout, chunked and decoding errors) after `_backoff_s` (1 s doubling,
+    `Retry-After` honoured, at most 30 s) up to `FETCH_ATTEMPTS` (3) loads; seeds and
+    probes are never retried. The last failure is reported (`failed_pages`, a warning,
+    `pages_failed`). `StorageManager`: `discovered_pages.outcome`, `attempts`, `error`
+    (added in place); only `visited`/`withheld` (and an older row with a status) are
+    "visited"; `unresolved()` feeds a `--resume` crawl every other row except seeds and
+    probes.
+  - **The page writer (FR-CRAWL-36, defect 25).** `mark_visited` / `set_outcome` decide
+    from memory and queue the row; the `spider-store-writer` thread takes the queue and
+    the store's lock together and commits by `WRITE_BATCH_ROWS` (64), `WRITE_BATCH_BYTES`
+    (1 MiB) or `WRITE_BATCH_SECONDS` (1 s); `flush`, `count`, `set_source`,
+    `unresolved` and `close` write what is queued first. A crawl thread waits only past
+    `WRITE_BACKLOG_BYTES` (16 MiB, `writer_waits`); a failed write is raised at the next
+    record, flush or close. `is_visited` reads memory only.
+  - **Counts (PA-0110).** `crawl_stats` gains `frontier_admitted`, `frontier_duplicates`,
+    `frontier_rejected[<reason>]`, `pages_retried`, `pages_failed`, `store_writer_waits`
+    (`LocalSpider.CRAWL_COUNTS`, `crawl_counts`); `crawl_summary` logs refusals and
+    unresolved pages as partial coverage.
+  - Tests: `tests/test_spider_static_identity.py` (7), `tests/test_spider_frontier.py`
+    (8), all failing on c483dc1; `tests/test_spa_routes.py`'s exact `crawl_stats` check
+    takes the new counts out first; `tests/test_spa_query.py`'s U2 seed test, which
+    times its injected stop by reading the newest page row from the store mid-crawl,
+    flushes the queued rows first, under the store's lock (the guarantee it pins is
+    unchanged: a stop before the promotion leaves the seed a write seed, written at
+    close). `spider_kwargs` passes `limits=None` (the one CLI builder passes every
+    keyword, U9). The writer executes on a cursor of its own (`conn.execute`), so the
+    shared `cursor` is never used by two threads.
+- Impact (other components / project):
+  - **Spider DB contract (additive):** `discovered_pages.outcome TEXT`, `attempts INTEGER`,
+    `error TEXT`; new `crawl_stats` names. Readers (`store_adapter.import_spider`,
+    `observe.observe_spider`, `harness.auto`, `fetcher`) read named columns and are
+    unchanged: a failed load is still a row with its status (0 when no answer), as
+    before; a throttled one now keeps its 429/5xx status. An older DB is upgraded in
+    place; its status-0 rows are loaded again by a resumed crawl.
+  - **SESS:** the spider is a new caller of `ensure`, `session_headers`, `verify_live`,
+    `add_logout_listener` and, through the seam, `prepare`/`observe`; nothing in the
+    manager changes. **CORE:** a new caller of `HttpClient` (its own transport) and of
+    SP-56's `response_class`; SP-60's `bound`; `core.pathtemplate.id_shaped`.
+  - Crawl order is unchanged for one worker (FIFO by admission); the single-worker loop
+    now runs through `_work`/`_take` (a `KeyboardInterrupt` still ends the crawl
+    cleanly). A link to a URL already admitted is now dropped at admission instead of at
+    `_take`/`_visit`.
+  - `docs/SHARED_PRIMITIVES.md` SP-56's reader list gains the spider (text in the lane's
+    doc_texts); no new primitive (SP-64 not used).
+- Risk (level; mitigation or accepted-risk justification): medium.
+  - Default budgets could cut a large real site, and the route budget cuts a page that
+    lists more than 100 records of one route (`/item/1`..`/item/150`): they are bounds,
+    not tuning; every refusal is counted and logged as partial coverage, and
+    `LocalSpider(limits=...)` raises them. Not measured against the labgen labs (their
+    live-boot crawls need the lab runtime, absent here).
+  - A retry re-sends a GET (the crawl's only method for pages); a selector form's
+    submission is never retried on its own (a page retry finds the form's signature
+    enumerated already).
+  - An authenticated static crawl now fails where it used to go on anonymously (a failed
+    login, an unknown health, a browser-storage session): intended (FR-CRAWL-34).
+  - The writer keeps up to one second (or 64 rows) of page rows in memory: a `SIGKILL`
+    loses them; `KeyboardInterrupt` and normal ends flush (`crawl`'s `finally` closes the
+    store).
+- Deliverables:
+  - [x] Identity on the static engine, fallback and selector forms — done
+  - [x] Frontier with reserved keys and budgets, counted and reported — done
+  - [x] Retry with backoff; failed rows never visited; resume loads unresolved rows — done
+  - [x] Batched page writer, flush at close — done
+  - [x] FR-CRAWL-34..36, NFR-CRAWL-bounded, FR-CRAWL-22 and §5 updated in place — done
+  - [x] BUG-0545; PA-0545 and the shared-doc texts handed to the coordinator — done
+  - [ ] Residuals R1-R6 below — todo (not this lane)
+- Residuals:
+  - R1: a status-0 load in the browser engine without an exception (no response object)
+    is now retried as incomplete; not seen in any fixture -- a page Chromium can show
+    without a response would be reported unresolved.
+  - R2: a failed query seed is recorded `failed` but not resumed (it loads only inside
+    its route's window, which a resumed crawl does not reopen for a visited route).
+  - R3: the spider's other tables still commit per write under the store's lock
+    (forms, verdicts, captured requests -- SPIDER9's region -- revealed forms, segments).
+  - R4: the per-shape budget counts admissions, not loads: a refused variant is never
+    re-admitted later in the run even if a sibling failed.
+  - R5: a server that rotates its session cookie on every answer costs a re-login per
+    rotation in the static engine (the seam does not adopt rotations; SESS's
+    `observe`), bounded by the manager's re-login budget.
+  - R6 (flag for SESS): `SessionManager.prepare` returns early, applying nothing and
+    recording no decision, for a host outside its own scope; the crawl's scope can admit
+    one (a loopback alias the config does not list). The spider never extracts that
+    answer, but the request has already gone out without the session. A decision
+    recorded on the request (as `OUT_OF_ORIGIN` is), or a refusal, belongs to SESS.
+- Effectiveness (assessed pending): the 15 tests above fail on c483dc1 and pass here;
+  measured on loopback (`scratchpad/lanes/SPIDER/measure/`): queue peak 1599 -> 78,
+  trap loads 931 -> 100, a once-503 hub's child found, 1000 page rows 1000 commits /
+  11.0 s -> 3 commits / 0.07 s on the recording thread. The harness result is in the
+  lane report.
+- Review round 1 of 9071440 (2026-10-21; two reviewers, each finding confirmed by a
+  skeptic on both commits; branch `lane/SPIDER-r1`; BUG-0545's review section):
+  - **B1 (both reviewers; a regression of this entry): a resumed crawl loaded stored
+    rows around the scope and destructive rules.** `crawl()` fed every unresolved row
+    to the frontier, and neither the frontier nor `_visit` asked `_in_scope` or
+    `_destructive` (every other producer does, before it queues; `get_checked` sends
+    the first hop unasked). Measured on 9071440: a `--resume` crawl of another loopback
+    port sent 3 GETs to the first port's failed `/down` (BUG-0123), and a crawl started
+    at `A/` loaded `A/logout`, which only an earlier crawl's start-URL exemption had let
+    through. Now `_visit` asks `_load_refusal` (`LOAD_REFUSALS`: `out_of_scope`,
+    `destructive`) first for every load, whatever queued it: never requested, nothing
+    stored, counted `loads_refused[<reason>]` in `crawl_stats` and in the crawl
+    summary; the rows stay unresolved. At the load, where the request is made
+    (PA-0123(1)), not at the frontier: one place every load passes, retries and
+    plain-list callers included.
+  - **R6 (reviewer A; was residual R6, flagged to SESS): a host the session manager
+    does not serve was sent to without the session**, then stored `withheld` with the
+    false "another origin ... pass --auth-origin" reason. `_identity_client`'s seam now
+    takes `_SessionAddon(manager)`: the manager's `prepare`, `authorize` and `observe`,
+    and after `prepare` a request with no `session_generation` and no
+    `session_decision` raises `HostNotServed` before the transport. Nothing is sent;
+    `_seam_send` counts it (`session_host_unserved`, in `CRAWL_COUNTS`); the page is
+    stored `failed` with the cause (`_page_failed` keeps `HostNotServed`'s text, which
+    names the host, never a URL) and resumed; `_after_fetch` stops a selector form whose
+    action is on such a host (logged; the page is kept). The manager's own decision is
+    read, not its scope: no SESS change. The named remedy (add the host to
+    `scope_hosts`) was measured: the alias then goes with the session
+    (`scratchpad/lanes/SPIDER/r1/alias_scope.py`). Residual R6 is closed.
+  - **B2 (reviewer B): three tests failed on c483dc1 only for the first test's
+    reason** (the test site's anonymous `/` linked nothing). `_IdSite` serves
+    `home_extra` to an anonymous visitor too; each now fails on c483dc1 on its own
+    assertion. BUG-0545's "What it caused to fail" claims for these three are corrected
+    in its review section (append-only).
+  - Tests: `tests/test_spider_frontier.py::test_a_resumed_crawl_never_loads_a_stored_row_out_of_its_scope_or_destructive`
+    (new: an out-of-scope and a destructive unresolved row; neither target receives a
+    request); `tests/test_spider_static_identity.py::test_a_host_the_session_manager_does_not_serve_is_never_sent_without_the_session`
+    replaces `test_an_answer_the_manager_sent_without_the_session_is_never_extracted`
+    (it asserted the withheld row, not what the site received). Pre-fix proof, one
+    pytest invocation (`scratchpad/lanes/SPIDER/r1/proof.log`): 5 failed in 4.87 s, each on its own assertion -- on 9071440's `spider.py`, the resume test ("B's crawl loaded A's row": `A/logout` 6 GETs, 3 expected) and the unserved-host test (`GET /deeper?via=alias` with no cookie); on c483dc1's `spider.py`, loaded in place of the tests' module, the redirect test (B got `GET /land`), the selector-form test (`/pick?bug=1`, `?bug=2` with no cookie) and the unserved-host test (the alias got a GET with no cookie). Targeted
+    run on a83cb93, one pytest invocation of 13 files (`-n 3 --dist loadfile`, the
+    harness's `FUZZLAB_REQUIRE_BROWSER/LINT/NETNS=1`; the two changed files, the
+    spider suites whose loads pass `_visit` -- `test_spa_query`, `test_spa_routes`,
+    `test_navigation_aborts`, `test_spider_links`, `test_spider_scope`,
+    `test_forms_phase1/2` -- and the guards that read `spider.py` or the requirements:
+    `test_session_origin_scope`, `test_logout_redirect`, `test_browser_scope`,
+    `test_requirements_traceability`): 796 passed, 0 failed, 0 skipped, in 430.62 s
+    (`scratchpad/lanes/SPIDER/r1/targeted.log`). `verify_change.py` was not run by the
+    lane (the orchestrator verifies at merge).
+  - Impact: `crawl_stats` gains `loads_refused[<reason>]` (when one refused) and
+    `session_host_unserved`; its readers are the spider itself and two tests
+    (`test_spa_routes.py` takes `CRAWL_COUNTS` out first; searched `crawl_stats` across
+    `fuzzlab/`: no other reader). FR-CRAWL-34, FR-CRAWL-35, FR-CRAWL-36, the spider DB
+    contract and NFR-CRAWL-safe edited in place.
+  - Residual R7 (new): a stored row refused at its load was admitted by the frontier
+    first, so it counts in `frontier_admitted` and against that crawl's total and
+    pending budgets (one admission per stored unresolved row).
+- Review round 2 of 8c2fa86 (2026-10-21; an adversarial fix check, each finding
+  confirmed by a skeptic; branch `lane/SPIDER-r2`; BUG-0545's review round 2 section):
+  - **S2-1 (R6 on the other engine): the Playwright engine loaded a loopback alias of the
+    session's origin without the session and filed its anonymous landing as the
+    identity's page.** The context holds the session cookie host-only for the start's
+    host (`browserauth._cookies_of`, by URL); Chromium sends it to that host only
+    (measured: `scratchpad/lanes/SPIDER/r2/cookie_domains.out`, a `127.0.0.1` cookie
+    reached `127.0.0.1` and not `localhost` on the same port); the launch resolves every
+    loopback spelling on the port; the route's `cookie_scope` compares canonical origins
+    (aliases folded), so it neither withheld nor isolated the alias. The reviewer
+    measured on 8c2fa86 and 9071440, with the manager's scope `['127.0.0.1']` and with
+    the CLI's default `['localhost', '127.0.0.1']`: `GET /deeper?via=alias` with no
+    cookie, an anonymous `/login`, the alias stored `(200, visited)`. Round 1's sweep had
+    given the browser "withholds by route" without measuring it. Now `_visit` asks
+    `_session_host_refusal` for every load of an identity crawl, after the scope,
+    destructive and other-origin checks and before any navigation or send (the top of
+    its `try`, ahead of a seed's or probe's window): the static engine asks the session
+    manager's own `prepare` through `_SessionAddon` on a request that is never sent (a
+    host it would leave alone: `HostNotServed`'s cause; a `SessionAuthError` is
+    `IdentityUnavailable`, as on a send); the browser requires each of the session's
+    credential cookies (`checked_cookies`), as its context holds them (`cookies` by
+    URL, a browser login's `storage_state` cookies by domain), to reach the load's host
+    (`_cookie_reaches`: host-only reaches that exact host; a dotted domain also its
+    subdomains, never an IP address; RFC 6265 §5.1.3). A refused load raises
+    `HostNotServed` with its cause: stored `failed` (unresolved, resumed) through
+    `_page_failed`, counted `session_host_unserved`, logged, never visited, never
+    `withheld`, never reported as another origin. A session without cookies goes by its
+    headers, by origin, as before. The seam keeps its own refusal for a static redirect
+    hop and a selector form. Generic: the host a load goes to is compared with the hosts
+    the session's carrier reaches; there is no alias list. One new host compare
+    (`_cookie_reaches`, deny only), a reasoned allowance in `HOST_COMPARE_ALLOWED`
+    (PA-0134(3)). The crawl summary's line names both causes.
+  - **S2-2: `test_a_session_lost_on_a_send_is_never_extracted_and_the_page_is_retried`
+    failed on c483dc1 only because the crawl was anonymous** (`_IdSite` linked `/secret`
+    and `/expiring` from the live session's home only; round 1 moved `home_extra` alone),
+    and FR-CRAWL-34's enforcement line said every test failed on c483dc1 on its own
+    assertion. `_IdSite` now links its `protected` pages (default `/secret`,
+    `/expiring`) from the anonymous home too, and records the `Host` of each request.
+    Each test of the file measured on c483dc1 (a driver with real fixtures, pytest
+    imported as a library only, `fuzzlab.__file__` checked to be c483dc1's export:
+    `scratchpad/lanes/SPIDER/r2/direct_c483dc1.out`), its failing assertion: identity
+    test `"welcome alice" in rows["/"]` (`/` stored as `home`); session-loss test
+    `"EXPIRING-PAGE" in rows["/expiring"]` (`/expiring` filed as its login redirect's
+    answer `(200, '')`, `/login` stored); cannot-carry and failed-login tests
+    `pytest.raises` "DID NOT RAISE"; redirect test `other.requests == []`; unserved-host
+    test `sent == []` (`GET /deeper?via=alias` with no cookie); selector-form test its
+    `sid=` check (`/pick?bug=1`, `?bug=2` with no cookie); browser test `to_alias == []`
+    (`GET /deeper?via=alias`, `GET /login` twice). FR-CRAWL-34's enforcement text and
+    BUG-0545's failure list now say this.
+  - Tests: `tests/test_spider_static_identity.py::test_a_browser_load_the_session_cookie_does_not_reach_is_refused_never_sent`
+    (new, real Chromium, `FUZZLAB_REQUIRE_BROWSER` applies: the CLI-default manager
+    scope, so only the browser's cookie decides; the alias host receives no request,
+    the alias is `(0, None, failed)` with the cause, counted, no `/login` row, not
+    another origin, and `/`, `/secret`, `/deeper` crawled with the session); `_IdSite`
+    as above; the static tests unchanged and green. Pre-fix proof, one pytest
+    invocation with 8c2fa86's `spider.py` in place, then restored
+    (`scratchpad/lanes/SPIDER/r2/proof.log`): 1 failed, 7 passed in 14.13 s -- the
+    browser test at `to_alias == []` (`GET /deeper?via=alias`, `GET /login` twice, all
+    to `localhost`); the 7 static tests pass on 8c2fa86, as they should (its static
+    refusal sat at the seam). The 8 tests pass on the fix (driver run,
+    `r2/direct_fix.out`). Targeted run on 6ccef90's tree, one pytest invocation of 17
+    files (`-n 3 --dist loadfile`, `FUZZLAB_REQUIRE_BROWSER/LINT/NETNS=1`: round 1's 13
+    files plus the authenticated browser crawls the new gate reads --
+    `test_session_browser_login`, `test_spa_capture`, `test_forms_phase4`,
+    `test_spider_workers`): 1236 passed, 0 failed, 0 skipped, in 498.43 s
+    (`scratchpad/lanes/SPIDER/r2/targeted.log`). `verify_change.py` was not run by the
+    lane (the orchestrator verifies at merge).
+  - Impact: a browser crawl with a cookie session no longer loads a host its cookies do
+    not reach (a loopback alias of its start among them): unresolved and reported,
+    where it was crawled anonymously. A static crawl now asks the manager's `prepare`
+    twice per load (the gate, then the send): no extra login or pause (the send's own
+    `prepare` would make the same one first). `crawl_stats` names unchanged
+    (`session_host_unserved` now counts browser refusals too; readers: the spider and
+    `test_spa_routes.py`, which takes `CRAWL_COUNTS` out first). FR-CRAWL-34 and
+    FR-CRAWL-36 edited in place. No SESS, navguard or browserauth change.
+  - Residual R8 (new, measured, flagged; not fixed in this round, whose scope is the
+    gate every load passes): inside a browser load, a same-origin redirect hop to a host
+    the session's cookies do not reach (the route's walk, `navguard`'s `api.fetch`) and
+    a selector form whose action is on such a host (`_isolated_submit`'s
+    `storage_state` copy) are still sent without the cookie. Measured on this fix
+    (`scratchpad/lanes/SPIDER/r2/browser_hops.out`): `localhost` received
+    `GET /pick?bug=1`, `GET /pick?bug=2` and `GET /land` twice with no Cookie, and `/go`
+    and `localhost/land` were stored visited (404). PA-0545(1) does not admit "sends
+    anonymously" as a disposition: this needs the same predicate at the route's hop walk
+    (a shared primitive's owner) and at the browser branch of `_isolated_submit` --
+    flagged for the orchestrator.
+    - *(Added at the merge, 2026-10-21.)* Residual R8 as measured by the round-2
+      check: in the browser engine a redirect hop inside a load, a selector form's submission, and a client-side navigation (JS location / meta refresh) to a host the session's cookies do not reach are still sent without the cookie (pre-existing at c483dc1; the gate checks only where a load starts; the owner is navguard, a shared primitive; reported to the owner as a follow-up).
+
 ### CC-CRAWL-0055 — Disco: a state is its execution key, work is per state and survives a failure, and a restore never accepts or weakens a wrong state (BUG-0539) (2026-10-21)
 - Placement: pre-assigned to AU-DISCO (audit defects 1, 2 and 3), with FR-CRAWL-31..33
   and SP-62; base 08e3eaa.

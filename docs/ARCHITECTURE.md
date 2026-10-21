@@ -1588,6 +1588,25 @@ tracked in the requirements files, not here.
   (`--disco-run`, `store_adapter.import_disco`, FR-AUD-23) as well as a spider DB; its
   removal waits for the owner's decision on the held-out comparison of the two. Its browser primitives (`tools/navguard.py`) are shared and
   current.
+- **The legacy spider's loads (CC-CRAWL-0056, BUG-0545, FR-CRAWL-34..36).** Its static
+  engine (the `requests` engine, the browser's fallback, a selector form's submission)
+  carries a crawl's identity through the core seam (`core.http.HttpClient`, the session
+  manager as its addon), validated before any page (`ensure`, `session_headers`,
+  `verify_live`, SP-61); an identity it cannot carry, or a failed login, fails the crawl,
+  and a request to a host the session manager does not serve is refused before the
+  send (`_SessionAddon`, `HostNotServed`). Every URL enters through one frontier
+  (`_Frontier`): a key reserved at admission and budgets on total, pending, per origin,
+  per route shape (`spa.route_shape`) and URL length, refusals counted in `crawl_stats`;
+  every load then passes the crawl's scope and destructive rules first
+  (`_load_refusal`, at `_visit`), whatever queued it, a resumed crawl's stored rows
+  included, and in an identity crawl a gate that refuses, before any navigation or
+  send, a load whose host the session's carrier does not reach in that engine
+  (`_session_host_refusal`: the manager's `prepare` for a static load, the browser
+  context's session cookies by domain match for a browser load). A page row is `pending` once answered,
+  `visited` once extracted, `failed` (retried with backoff, then unresolved, resumed by
+  `--resume`) for a throttle, gateway, 5xx, incomplete answer (SP-56), transport failure,
+  `BodyIncomplete` (SP-60), lost session or a host the session does not reach; page
+  rows are committed by one writer thread by count, bytes and age.
 - **Subcomponents (legacy spider):** hybrid fetch (HTTP first, headless on demand), XHR/fetch
   capture, JS endpoint extraction, DOM-skeleton template dedup, state-aware
   navigation, URL normalization, crawl budget. Built for single-page apps (forms
@@ -1634,11 +1653,14 @@ tracked in the requirements files, not here.
   `core.urls.REDIRECT_PARAMS`, FR-CORE-39, which the auditor's redirect rule shares),
   session manager, target lab.
 - **Writes:** `page`, `endpoint`, discovered `parameter` rows (through the importer,
-  from its own spider DB: `discovered_pages`, `discovered_forms`, `selector_verdicts`,
+  from its own spider DB: `discovered_pages` (since CC-CRAWL-0056 with `outcome`, `attempts` and `error`: an additive change, readers unchanged), `discovered_forms`, `selector_verdicts`,
   `discovered_requests`, `revealed_forms` (the forms a reveal showed, route and
   signature, for a later opt-in; forms phase 4), and `crawl_stats`, the last crawl's
   SPA, reveal and query-parameter counts (`spa_query_*`, refusals by reason as
-  `spa_query_refused[<reason>]`; FR-CRAWL-17)).
+  `spa_query_refused[<reason>]`; FR-CRAWL-17; since CC-CRAWL-0056 the frontier's, the retries' and the page writer's counts:
+  `frontier_admitted`, `frontier_duplicates`, `frontier_rejected[<reason>]`,
+  `pages_retried`, `pages_failed`, `store_writer_waits`, and since its review
+  `loads_refused[<reason>]` and `session_host_unserved`)).
 
 ### 5. Auditor / fetcher `[built; to harden]`
 - **Subcomponents:** rules-as-data registry (`audit/rules_data/default_rules.json`,

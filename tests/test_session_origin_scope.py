@@ -989,6 +989,14 @@ HOST_COMPARE_ALLOWED = {
            "(cookie_scope / header_scope by origin)"),
     "fuzzlab/tools/spider.py:_start_browser": (
         1, "a loopback start chooses the launch's resolver rules (scope), not a session"),
+    "fuzzlab/tools/spider.py:_identity_client": (
+        1, "the static seam's host gate mirrors the crawl's request scope (deny only); the "
+           "session goes by origin (prepare), and an answer prepare sent without it is "
+           "never extracted (CC-CRAWL-0056)"),
+    "fuzzlab/tools/spider.py:_cookie_reaches": (
+        1, "whether the browser sends a session cookie to a load's host (RFC 6265 domain "
+           "match): a load it would not is refused (deny only, BUG-0545 review round "
+           "2); where the session goes stays by origin (cookie_scope)"),
 }
 #: Calls whose result is a host (``canonical_host`` and the crawler's ``_norm_host``).
 _HOST_CALLS = {"canonical_host", "_norm_host", "_canonical_host"}

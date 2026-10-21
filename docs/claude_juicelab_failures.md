@@ -1502,3 +1502,69 @@ Juice Shop lab is complete.
 - **Evidence:** the reviewer's own housekeeping note in the DISCO4 review round 1 task text.
 - **Impact:** whatever that file held for another session is gone; no product file or worktree was touched.
 - **Status:** reported; a process rule, not code: a scratch extraction goes to a new directory of its own (the review's later runs did), never to an existing shared file name.
+
+### F-181 — Lane SPIDER ran its pre-fix proof twice, the second piped into `head`, and stopped it while it queued
+- **What:** after the one pre-fix run of the 14 new tests on c483dc1 (14 failed, 9.6 s), the lane started the same invocation again to read the failure lines, piped into `grep | head` (PA-0151: no pipe into a reader that can stop early). It queued on the host pytest lock behind another lane's harness run for over 10 minutes; the lane stopped it before it had run anything.
+- **Evidence:** the lane's session log; `scratchpad/lanes/SPIDER/` (the first run's output is in the session; the second produced no test output).
+- **Impact:** no lock time used (it never held the lock); a second, unneeded proof run against PA-0541(2)'s budget was attempted, and a PA-0151 pipe was written.
+- **Status:** recorded; the first run is the proof reported.
+
+### F-182 — Lane SPIDER's first pre-fix proof could not tell its own test defects from the product's
+- **What:** the lane's 14 new tests all failed on c483dc1 in its one pre-fix run, but four would have failed on correct code too: three identity tests attributed requests by the browser User-Agent, which the session manager's login fetcher also sends (assumed, not measured), and the transient-failure test used a `/reset` path the destructive rule rightly refuses. Five more failed on the base only because a new name (`FrontierLimits`, `FETCH_ATTEMPTS`, `WRITE_BATCH_ROWS`, the `outcome` column, `StaticIdentityUnsupported`) did not exist, not on the behaviour. Running the tests' bodies directly against the fix (no pytest) exposed the four; the lane fixed the tests, reordered the assertions so the behaviour is checked first, and proved them again on the base: 13 of 14 now fail on the behaviour (the frontier's unit test needs the class by nature).
+- **Evidence:** `scratchpad/lanes/SPIDER/measure/direct.out` (the four failures on the fix), `direct_old2.out` (the behavioural failures on the base).
+- **Impact:** none landed: caught before the targeted run and the commit; a "fails on the pre-fix code" claim for those tests would otherwise have rested on a failure that proved nothing about the defect (PA-0034(2)).
+- **Status:** corrected before the commit.
+
+### F-183 — Lane SPIDER's first static-identity design trusted every answer the seam returned
+- **What:** the lane's first `_seam_page` treated only `OUT_OF_ORIGIN` as "sent without the session". `SessionManager.prepare` also returns early, applying nothing and recording nothing, for a host outside its own scope, and the crawl's scope can admit one (a loopback alias the config does not list): such an answer would have been extracted as the identity's page. Found while answering the host-compare guard (PA-0134(3)) the targeted run failed on; the backstop (`_sent_without_session`: no `session_generation`) and a test that fails on c483dc1 were added before the commit. The request itself still goes out without the session (CC-CRAWL-0056 R6, flagged to SESS).
+- **Evidence:** `scratchpad/lanes/SPIDER/targeted3.log` (the guard failure), `measure/direct_old3.out`; `tests/test_spider_static_identity.py::test_an_answer_the_manager_sent_without_the_session_is_never_extracted`.
+- **Impact:** none landed.
+- **Status:** corrected before the commit; R6 open for SESS.
+
+### F-184 — Lane SPIDER left two consumers of its own change to the selection run
+- **What:** the lane added `LocalSpider(limits=...)` without passing it through the CLI's one builder (`spider_kwargs`), which `tests/test_spa_query.py::test_the_cli_flags_reach_the_spider_through_one_builder` pins (U9), and batched the page rows without sweeping the tests that read the store mid-crawl: the U2 seed test timed its injected stop by the newest row on disk, which the writer had not written yet, so the stop fired after the promotion. Neither file was in the lane's targeted set; both failed in the run of the harness's 96-file selection (2 failed, 3751 passed). PA-0152 (name a shared contract's consumers from the code) applied to both and was not followed.
+- **Evidence:** `scratchpad/lanes/SPIDER/selection_run.log`.
+- **Impact:** none landed; fixed in the lane's second commit (`limits=None` in the builder; the test flushes the store under its lock before reading), and the selection run again.
+- **Status:** corrected before the report.
+
+### F-185 — Lane SPIDER's harness run never ran; its evidence is a direct run of the harness's selection
+- **What:** `scripts/verify_change.py --base c483dc1 --wait-other 7200` on `7098d66` waited 2 h for the host verification lock (about eight lanes' harnesses queued) and was stopped by the session's background-task limit before it ran a test; the tool's note said not to restart a task that already had the longest limit. The lane instead ran the harness's own selection (`vc/selection.json`: 96 files, all parallel) directly, once per commit, with the harness's `FUZZLAB_REQUIRE_BROWSER/LINT/NETNS=1`, `-n 3 --dist loadfile`, in the clean lane worktree: on `7098d66` 2 failed, 3751 passed (fixed in `5b8660e`); on `5b8660e` 3753 passed, 5 skipped, 29 xfailed, 0 failed, 0 errors.
+- **Evidence:** `scratchpad/lanes/SPIDER/vc_console.out` (the queued harness, "interrupted (signal 15)"), `selection_run.log`, `selection_run2.log`, `selection_run2.xml`.
+- **Impact:** the lane's report carries no `verify_change` TOTAL line: the run that covers the selection did not go through the harness's detached worktree or its lock; the coordinator's merge verification is the harness proof.
+- **Status:** open for the coordinator (run the harness on `5b8660e` or the merge).
+
+### F-186 — Lane SPIDER named its frontier FR-CRAWL-33, a number not pre-assigned to it
+- **What:** the lane wrote FR-CRAWL-33 for the frontier in code, tests and its draft docs, though it was pre-assigned FR-CRAWL-34..36 only (PA-0031). It noticed before committing and remapped: the frontier is FR-CRAWL-35, the page record (outcomes, retries, writer) FR-CRAWL-36.
+- **Evidence:** the lane's session log; the committed tree has no FR-CRAWL-33 reference of the lane's.
+- **Impact:** none landed.
+- **Status:** corrected before the commit.
+
+### F-187 — Lane SPIDER's resume let stored rows around the crawl's scope and destructive rules
+- **What:** FR-CRAWL-36's resume fed every stored unresolved row to the frontier without the `_in_scope` and `_destructive` checks every other producer applies, and the static engine sends a load's first hop unasked. A `--resume` crawl of one loopback port requested another port's failed page (another service, BUG-0123), and a destructive URL that only an earlier crawl's start-URL exemption had let through was loaded by a crawl started elsewhere: a lab-only scope rule (D11) broken by `--resume` with the default database. The lane's sweep listed the queue's producers from pages, not the store it had just made one; its resume test resumed the same target.
+- **Evidence:** `scratchpad/lanes/SPIDER/review_round1.md` (B1, both reviewers; the skeptics measured 3 GETs to the out-of-scope port on 9071440, none on c483dc1); `scratchpad/lanes/SPIDER/r1/proof.log`.
+- **Impact:** none landed (found in review before the merge).
+- **Status:** fixed in review round 1: `_visit` asks `_load_refusal` first for every load; a test resumes an out-of-scope and a destructive row and asserts neither target received a request.
+
+### F-188 — Lane SPIDER left a send without the session as a residual, against its own new rule, and its test pinned it
+- **What:** the lane found that the session manager's `prepare` sends a request to a host outside its scope without the session (a loopback alias the config does not list) and recorded it as residual R6 "for SESS", though its own PA-0545(1) says "sends anonymously" is never a disposition and the spider could refuse before the transport (the seam calls the addon's `prepare` first). The page was then stored `withheld` with a false "another origin ... pass --auth-origin" reason, and the test asserted that row, not what the site received.
+- **Evidence:** CC-CRAWL-0056's residual R6 at 9071440; `review_round1.md` (B2-R6, reviewer A, skeptic's runs incl. `::1`); `scratchpad/lanes/SPIDER/r1/alias_scope.py` (the remedy measured).
+- **Impact:** none landed.
+- **Status:** fixed in review round 1 (`_SessionAddon`, `HostNotServed`; the test asserts nothing reached the alias).
+
+### F-189 — Lane SPIDER's bug doc stated three pre-fix behaviours it had not measured
+- **What:** BUG-0545 said that on c483dc1 a loopback alias "was crawled anonymously and filed as a page", "B's landing was followed" and "`/pick` was submitted with no cookie", citing outputs that show the old crawl loading only `/`, `robots.txt` and `sitemap.xml`: the test site gave an anonymous visitor no link, so the three tests failed on c483dc1 only because the crawl was anonymous. The lane's earlier F-record on its proof was closed by reordering assertions, without checking that each test reached its own behaviour.
+- **Evidence:** `review_round1.md` (B2, reviewer B); `measure/direct_old2.out`, `direct_old3.out`; `r1/proof.log` (each now fails on c483dc1 on its own assertion).
+- **Impact:** none landed; FR-CRAWL-34's "each test fails on c483dc1" was true and misleading.
+- **Status:** corrected in review round 1 (the test site; BUG-0545's review section).
+
+### F-190 — Lane SPIDER fixed R6 in one engine and gave the other a disposition it never measured
+- **What:** in review round 1 the lane refused a host the session manager does not serve in the static seam only, where R6 was found, and its PA-0002 sweep recorded the browser path as "withholds by route (FR-SESS-20)" from the route's origin rule. The browser carries a cookie session in a host-scoped jar: its cookie is host-only for the start's host, and the route's origin rule folds loopback aliases, so a browser crawl loaded `localhost` of a `127.0.0.1` start with no cookie, followed its redirect to an anonymous `/login` and stored the alias as a visited page -- R6 again, against the lane's own PA-0545(1), in the round that claimed it closed.
+- **Evidence:** `scratchpad/lanes/SPIDER/review_round2.md` (S2-1, measured on 8c2fa86 and 9071440 with two manager scopes); `scratchpad/lanes/SPIDER/r2/proof.log` (the new browser test fails on 8c2fa86 at `to_alias == []`).
+- **Impact:** none landed (found in review before the merge); a "closed" status for R6 was overstated for one engine.
+- **Status:** fixed in review round 2 (one gate at `_visit` for both engines, `_session_host_refusal`); in-load browser paths (a redirect hop, a selector form) measured still sending without the cookie and flagged as residual R8.
+
+### F-191 — Lane SPIDER's round-1 fixture fix and proof covered only the tests the review named
+- **What:** round 1 made `_IdSite` serve `home_extra` to an anonymous visitor, for the three tests the review named, but left `/secret` and `/expiring` linked from the live session's home only; its pre-fix proof ran only those three tests on c483dc1. `test_a_session_lost_on_a_send_is_never_extracted_and_the_page_is_retried` therefore still failed on c483dc1 only because the crawl was anonymous (`KeyError: '/expiring'`), while the lane's new FR-CRAWL-34 text said each test failed on its own assertion and BUG-0545 kept "a session lost on a send never reached `/expiring`". PA-0545(6), written in the same round, was not applied to every test.
+- **Evidence:** `scratchpad/lanes/SPIDER/review_round2.md` (S2-2); `scratchpad/lanes/SPIDER/r1/proof.log` (three c483dc1 tests only); `scratchpad/lanes/SPIDER/r2/direct_c483dc1.out` (all eight measured).
+- **Impact:** none landed; a requirement's enforcement text stated a measurement that had not been made.
+- **Status:** corrected in review round 2 (the anonymous home links the protected pages; every test's failing assertion on c483dc1 recorded in BUG-0545 and FR-CRAWL-34).

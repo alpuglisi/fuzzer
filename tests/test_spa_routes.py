@@ -405,6 +405,10 @@ def test_hash_routes_are_read_from_the_bundle_and_crawled_as_pages(hash_lab, tmp
     assert not any("socket.io" in u or "cdn.example" in u for u in urls)
     # the counts are stored too, not only logged (PA-0110, lane S review)
     stats = dict(db_rows(db, "SELECT name, value FROM crawl_stats"))
+    # + FR-CRAWL-35/36: the frontier's, the retries' and the page writer's counts
+    crawl = {k: stats.pop(k) for k in list(stats) if k in sp.CRAWL_COUNTS
+             or k.startswith("frontier_rejected[")}
+    assert crawl == sp.crawl_counts() and crawl["pages_failed"] == 0
     assert stats == {**c, "submit_stopped": 0, "reveals_stopped": 0,   # + FR-CRAWL-16
                      "spa_query_stopped": 0}                          # + FR-CRAWL-17
     # the bundle was read from the guard's own fetch: main.js requested once per document
