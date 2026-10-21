@@ -1482,11 +1482,19 @@ tracked in the requirements files, not here.
     directory at the end; `capture.py`'s `CaptureTail`/`JsonlTail` is the one
     incremental reader (SP-35).
   - `recorder.py` + `mitm.py` + `proxyproc.py`: mitmdump (this interpreter, a
-    procutil-owned child on a free loopback port) with the recorder addon: the scope
-    firewall (each request and each CONNECT tunnel), the `x-disco-action` tag read and
-    stripped, records queued to one writer thread.
+    procutil-owned child on a free loopback port) with the recorder addon.
+    - Each hook is the scope firewall (each request and each CONNECT tunnel). It reads
+      and strips the `x-disco-action` tag and narrows `Accept-Encoding` to what SP-60
+      bounds.
+    - A hook then only takes the exchange (`capture.snapshot`, by reference). One
+      writer thread decodes, redacts, builds and appends each record
+      (`capture.build_record`, FR-CRAWL-38, BUG-0548).
+    - The queue is bounded in records and bytes. Past that bound the browser is paced
+      (an awaitable hook, order kept), and every loss is counted in the stats.
+    - The stop's grace (45 s) exceeds the writer's drain (30 s).
   - `capture.py` (SP-35): `capture.jsonl`, written only by `make_record` (redacted at
-    the write) and read only by `read_capture` (typed, quarantining).
+    the write, off the proxy's loop) and read only by `read_capture` (typed,
+    quarantining).
   - `explore.py` + `fingerprint.py` + `formfill.py`: a guarded Chromium (navguard
     launch, route, navigation and release owners; `proxy=` the recorder) explores a
     state graph keyed by layout fingerprint, finds listener-only elements through

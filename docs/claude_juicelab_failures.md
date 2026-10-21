@@ -1166,3 +1166,21 @@ Juice Shop lab is complete.
 - **Evidence:** `scratchpad/au-sitetree/rev3/m_arch.py` (with the comment on the first version), `m_arch.out`, `m_arch2.out`.
 - **Impact:** none: caught before it was reported; it would have told the coordinator one of the two ARCHITECTURE consequences was wrong.
 - **Status:** corrected; DRAFT §11.7 states the measured result.
+
+### F-126 — DISCO22 edited `recorder.py` while its own targeted pytest ran the real capture proxy
+- **What:** during the lane's first full targeted run, `fuzzlab/disco/recorder.py` was edited (the backpressure rewrite) about 2 s after `test_disco_e2e`'s mitmdump had started. mitmproxy's script watcher reloads an addon whose file's mtime changes (1 s interval), so a second `Recorder` with fresh counters took over mid-run. The final stats said `recorded` 97 against 104 lines in the file, and `test_every_exchange_is_recorded_with_its_cause_and_the_tag_never_reaches_the_app` failed.
+- **Evidence:** `scratchpad/lanes/DISCO22/targeted1.log`; `/tmp/pytest-of-root/pytest-1917/disco0/` (stats file at 01:29:26 with `recorded` 97 and 104 lines; `recorder.py` mtime 01:28:18.28; the proxy's conf dir created at 01:28:15.9); mitmproxy `addons/script.py` `ReloadInterval = 1`.
+- **Impact:** one targeted run (about 3.5 min of the shared pytest lock) was spent on a half-edited tree. No wrong result was reported: the failure was root-caused before the next run, not called flaky.
+- **Status:** recorded. Product files were not edited while a run was in progress after that; the re-run on the finished tree is the one reported.
+
+### F-127 — DISCO22 wrapped a lock-waiting pytest in a 900 s timeout
+- **What:** the lane's first targeted pytest ran under `timeout 900`, but the host pytest lock (BUG-0532) waits up to 1800 s by default and was held by other lanes. The run was killed while still queued (exit 143) and ran nothing.
+- **Evidence:** the lane's task output for that run (empty log, exit 143).
+- **Impact:** about 15 minutes lost; no result affected.
+- **Status:** recorded; later runs set `FUZZLAB_PYTEST_LOCK_WAIT` and an outer timeout above it.
+
+### F-128 — DISCO22's first fix moved the work to a thread and was taken as done before the loop was measured
+- **What:** the first implementation moved decoding, redaction and serialisation to the writer thread and counted body drops past a byte budget. Measured end to end on 1500 x 64 KiB answers, the hook fell from 6.8 to 0.11 ms, but the loop's lag barely moved (median 8.65 -> 6.1 ms, p99 59 -> 59 ms): the writer held the GIL for up to the 5 ms switch interval at each loop wake-up. On 200 x 1 MiB answers, 92 bodies were omitted and 94 records were never written within the 10 s drain. Under procutil's 5 s stop grace the final stats would also have been killed.
+- **Evidence:** `scratchpad/lanes/DISCO22/measure/A2-*-result.json`, `B-after-result.json`.
+- **Impact:** none landed (measured before commit). Without the measurement, the lane would have shipped a fix that kept the loop lagged and lost records under load.
+- **Status:** fixed before commit: a 1 ms switch interval, backpressure through an awaitable hook, a 30 s drain and a 45 s stop grace (BUG-0548, CC-CRAWL-0058).

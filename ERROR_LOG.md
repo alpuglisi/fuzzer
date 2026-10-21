@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-21 — disco capture proxy (records built on mitmproxy's event loop; queue bounded by count only; BUG-0548)
+- **Symptom:** under a burst of large responses every browser request through the capture proxy stalled. Measured on a loopback page through a real mitmdump and Chromium: the response hook took a median 104 ms per 1 MiB JSON answer (7.44 ms per 64 KiB), the loop lagged up to 626 ms, and the page ran at 8.4 requests/s. The queue was bounded at 10 000 records of up to two 200 000-character bodies each, and a full queue dropped observations. A stats refresh on a full queue was counted as a dropped record.
+- **Root cause:** only the file append was off the loop. `make_record` decoded (mitmproxy's `get_content`, unbounded), redacted and built each record in the hook. PA-0102(3) was worded for blocking I/O and enforced on the native proxy only, and PA-0536's body-read sweep covered `requests` readers only.
+- **Remediation:** the hook takes the exchange by reference (`capture.snapshot`). The writer decodes through SP-60 under 8 MiB, then redacts, builds and appends (`capture.build_record`). The queue is bounded in records and bytes, with order-keeping backpressure through an awaitable hook, a 30 s bound and counted losses. `Accept-Encoding` is narrowed per request, the GIL switch interval is 1 ms, and the stop's grace (45 s) exceeds the drain (30 s). An AST guard covers every proxy hook in the package (CC-CRAWL-0058, FR-CRAWL-38, BUG-0548, PA-0548).
+- **Status:** Fixed (residuals R1-R4 in BUG-0548)
+
 ## 2026-10-20 — tests, site map in a real browser (a quadratic test locator starved the page under parallel load; BUG-0538)
 - **Symptom:** three live-view browser tests failed intermittently, only with the browser files in one parallel pass: a "Show more" page not shown within 5 s, a refresh's request not issued within 15 s.
 - **Root cause:** the tests' `Tab.item` filtered nested tree items with `has=`; Playwright evaluates it in every candidate's subtree, ~1.9 s of a renderer core per resolution with 250 items, re-run by every action and `expect` retry.
