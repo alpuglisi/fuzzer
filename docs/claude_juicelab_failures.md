@@ -1238,3 +1238,9 @@ Juice Shop lab is complete.
 - **Evidence:** the AU-PROXY review of d84f97e (2026-10-21; two reviewers and a skeptic, each finding reproduced); `tests/test_proxy_framing.py` cases `bare-lf-pipeline`, `ws-in-te-name`, `ws-before-colon`, `obs-folded-te`, `bare-cr` and `test_a_cut_response_in_a_tunnel_is_a_502_never_an_empty_close`, failing on d84f97e (the lane report).
 - **Impact:** none shipped beyond the lead's merge of d84f97e. The B1 inputs are smuggling primitives on the browser's default path. One revision round.
 - **Status:** fixed in the revision (`framing.parse_head`; the tunnel's contained 502; listener-level tunnel tests; the quadratic oracle proof; PA-0543(2) scoped, with R9 and R10).
+
+### F-138 — The host pytest lock I had built (AU-TESTLOCK) has no queue order, so a waiting verification can starve
+- **What:** `tests/_pytest_lock.py` waits by polling a non-blocking `flock` every 0.5 s; whichever waiter polls first after a release wins. With a dozen lanes queueing sessions, the orchestrator's merge verification (dcc7091, 101 files) waited past its 30-minute background limit and was killed without running, while lane sessions that queued later took the lock. AU-TESTLOCK (BUG-0532) was specified and approved for mutual exclusion only; its fairness under many waiters was never measured.
+- **Evidence:** `scratchpad/vpush5.log` (selected, then "interrupted (signal 15)" with no parallel log); the holder side file showing successive lane sessions during that wait; `_acquire`'s `LOCK_NB` poll loop.
+- **Impact:** one merge verification lost (about 35 minutes) and pushes delayed; no wrong result.
+- **Status:** open: worked around by batching merges into one verification with a two-hour wait; a FIFO ticket queue in the lock is queued as a process fix after the current wave (all lanes run the old lock code until they merge the tip).
