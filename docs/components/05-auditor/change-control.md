@@ -158,6 +158,21 @@ Newest first.
   - `docs/SHARED_PRIMITIVES.md` gains SP-73 at the merge: FR-AUD-20's lab predicate, owner
     `audit/value_shape.py::names_outside_lab`, read by `harness.auto._send_value`,
     `harness.auto._outside_lab` and `oracle._FormBoundSender._bind_fresh`.
+- Merge integration (the targeted run of the AU-REQID78 merge, 1 failed of 2,195): this
+  lane moved the importer's `form` insert out of `_store_request` into
+  `_insert_sibling_set(..., entries, ...)`, so SURROGATE's bind guard
+  (`tests/test_capture_surrogates.py::test_no_sqlite_bind_takes_text_a_lone_surrogate_makes_raise`,
+  PA-0554) no longer saw `jsonbody.encode_entries` text (`ensure_ascii=False`) reach a
+  bind: the bind is one call down, past the guard's stated limit, and its "no stale
+  allowance" check failed. The product is unchanged and safe (`captured_request` still
+  refuses a lone-surrogate leaf before `_store_request`). Resolved by keeping both: the
+  guard now also follows unsafe text passed to a parameter a function of the same module
+  binds at `execute`/`executemany` (`_binders`; per module, since across modules a name
+  collides: `request.body()` is not the session manager's `body`), so `_store_request`
+  is flagged again and its allowance holds. Proven on two new synthetic offenders (by
+  position and by keyword) that the pre-merge guard misses, and a clean case (unsafe
+  text to an unbound parameter, safe text to a bound one) in
+  `::test_the_guards_catch_synthetic_offenders`.
 - Effectiveness (assessed <date> or pending): pending.
 
 ### CC-AUD-0053 — The auditor ends a failed load through SP-01's owner (BUG-0522) (2026-10-19)

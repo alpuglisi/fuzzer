@@ -325,16 +325,51 @@ def _text_nodes(node):
         yield from _text_nodes(child)
 
 
+def _binders(tree) -> dict[str, tuple[list[str], set[str]]]:
+    """A module's functions that bind one of their own parameters at a SQLite
+    ``execute`` / ``executemany`` (by name: ``(positional parameter names, the bound
+    ones)``), so text passed to that parameter is bound one call down (the AU-REQID78
+    merge: the importer's `form` insert moved from `_store_request` into
+    `_insert_sibling_set`). Per module: a call is followed only into its own module,
+    where a name means one function (across modules a name collides: ``request.body()``
+    is not the session manager's ``body``)."""
+    out = {}
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        names = [a.arg for a in fn.args.posonlyargs + fn.args.args]
+        own = set(names) | {a.arg for a in fn.args.kwonlyargs}
+        bound = {n.id for call in ast.walk(fn) if isinstance(call, ast.Call)
+                 and _callee(call) in ("execute", "executemany")
+                 for a in call.args[1:] + [k.value for k in call.keywords]
+                 for n in _text_nodes(a) if isinstance(n, ast.Name) and n.id in own}
+        if bound:
+            out[fn.name] = (names, bound)
+    return out
+
+
 def unsafe_text_binds(sources: dict[str, str]) -> list[tuple[str, str, int]]:
     """``(path, function, line)`` of each SQLite ``execute``/``executemany`` whose
     parameters hold, directly or through a name the function assigned, text a lone
-    surrogate makes raise: `_unsafe_text_call`, or a call to a function returning one."""
+    surrogate makes raise: `_unsafe_text_call`, or a call to a function returning one;
+    and of each call that passes such text to a parameter its callee binds that way
+    (`_binders`: one call down, by name, within the module)."""
     trees = {path: ast.parse(src) for path, src in sources.items()}
     producers = _producers(trees.values())
+    binders = {path: _binders(tree) for path, tree in trees.items()}
 
     def unsafe(node) -> bool:
         return _unsafe_text_call(node) or (
             isinstance(node, ast.Call) and _callee(node) in producers)
+
+    def passed_to_a_bind(path, call) -> list:
+        """The argument nodes ``call`` passes to parameters its callee binds."""
+        names, bound = binders[path].get(_callee(call), ([], set()))
+        skip = 1 if isinstance(call.func, ast.Attribute) and names[:1] in (["self"],
+                                                                           ["cls"]) else 0
+        args = [a for i, a in enumerate(call.args)
+                if i + skip < len(names) and names[i + skip] in bound]
+        return args + [k.value for k in call.keywords if k.arg in bound]
 
     out = []
     for path, tree in trees.items():
@@ -345,11 +380,13 @@ def unsafe_text_binds(sources: dict[str, str]) -> list[tuple[str, str, int]]:
                        and any(unsafe(v) for v in _text_nodes(n.value))
                        for t in n.targets if isinstance(t, ast.Name)}
             for call in ast.walk(fn):
-                if not (isinstance(call, ast.Call)
-                        and _callee(call) in ("execute", "executemany")):
+                if not isinstance(call, ast.Call):
                     continue
-                params = [n for a in call.args[1:] + [k.value for k in call.keywords]
-                          for n in _text_nodes(a)]
+                if _callee(call) in ("execute", "executemany"):
+                    args = call.args[1:] + [k.value for k in call.keywords]
+                else:
+                    args = passed_to_a_bind(path, call)
+                params = [n for a in args for n in _text_nodes(a)]
                 if any(unsafe(n) or (isinstance(n, ast.Name) and n.id in tainted)
                        for n in params):
                     out.append((path, fn.name, call.lineno))
@@ -358,7 +395,8 @@ def unsafe_text_binds(sources: dict[str, str]) -> list[tuple[str, str, int]]:
 
 #: Binds the guard flags whose text cannot hold a lone surrogate, with why.
 _ALLOWED = {
-    # its leaves passed `captured_request`'s storable-text refusal first (BUG-0554)
+    # its leaves passed `captured_request`'s storable-text refusal first (BUG-0554); the
+    # text is bound one call down, in `_insert_sibling_set` (AU-REQID78)
     ("fuzzlab/tools/store_adapter.py", "_store_request"),
     # a lab's own constant seed password (`SEED_PASSWORD`), never a target's text
     ("fuzzlab/labgen/conformance/django_live_boot.py", "_seed_db"),
@@ -404,6 +442,14 @@ def test_the_guards_catch_synthetic_offenders():
         f"def w(cur, t):\n    cur.execute({sql}, "
         f"(hashlib.sha256(t.encode('utf-8')).hexdigest(),))\n",
         f"def w(cur, t):\n    k = t.encode()\n    cur.execute({sql}, (k,))\n",
+        # one call down: passed to a parameter its callee binds (the AU-REQID78 merge's
+        # `_store_request` -> `_insert_sibling_set(..., entries, ...)` shape), by
+        # position and by keyword
+        f"def ins(cur, x, entries):\n    cur.execute({sql}, (x, entries))\n"
+        f"def w(cur, doc):\n    t = json.dumps(doc, ensure_ascii=False)\n"
+        f"    ins(cur, 1, t)\n",
+        f"def ins(cur, x, *, entries):\n    cur.execute({sql}, (x, entries))\n"
+        f"def w(cur, doc):\n    ins(cur, 1, entries=json.dumps(doc, ensure_ascii=False))\n",
     ]
     for src in offenders:
         assert [fn for _p, fn, _l in unsafe_text_binds({"x.py": src})] == ["w"], src
@@ -413,7 +459,12 @@ def test_the_guards_catch_synthetic_offenders():
              f"    cur.execute({sql}, (t.encode('latin-1'),))\n"
              # the scrub's round trip: a value again, then stored through the escape
              f"    d = json.loads(json.dumps(doc, ensure_ascii=False))\n"
-             f"    cur.execute({sql}, (storable_json(d),))\n")
+             f"    cur.execute({sql}, (storable_json(d),))\n"
+             # unsafe text passed to a parameter the callee does not bind, and safe
+             # text to one it does
+             f"    ins(cur, json.dumps(doc, ensure_ascii=False), storable_json(doc))\n"
+             f"def ins(cur, label, entries):\n    log(label)\n"
+             f"    cur.execute({sql}, (entries,))\n")
     assert unsafe_text_binds({"x.py": clean}) == []
     # the keying-module check: BUG-0554's two strict encodes
     for line in ("hashlib.sha256(text.encode('utf-8')).hexdigest()",
