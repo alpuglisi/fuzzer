@@ -107,6 +107,20 @@ Newest first.
     `test_unplaceable_confirmation` (the shared-key test) — done
   - [x] BUG-0530, BUG-0544; PA, ERROR_LOG, CHANGELOG, SHARED_PRIMITIVES texts handed to
     the orchestrator — done
+- Review round 1 (85e7ab2: REVISE, 11 findings, 8 issues; each fix proved by a test that
+  fails on 85e7ab2):
+  - `oracle/oracle.py`: the binder never fetches an unclean page
+    (`core.redaction.page_url_is_clean`) or one on another origin, refuses a page fetched
+    with a session note, carries the fetch's one-time cookie token on the bound entries,
+    and binds or refuses **every** send to the candidate's own (url, method) -- a raw or
+    JSON body, strategy-built entries (B4); a JSON candidate needing a fresh leaf is
+    `UNBOUND` before any strategy runs.
+  - `tools/probesender.py`: `RequestsProbeSender.fetch` holds the page's cookies in memory
+    under a token; only the send carrying it loads them, every send discards them first
+    (B2, R2-B4). `SeamProbeSender.fetch` gates the page's own URL (auth endpoint, isolated
+    path; B5) and refuses a page that sets a cookie, which no seam route carries (R2-B1).
+  - `harness/auto.py` `_bindings`: the page is kept only on the point's own origin (B6).
+  - `greybox/run.py` `points_from_store`: one point per greybox request (B7, R2-B3).
 - Effectiveness (assessed <date> or pending): pending.
 
 ### CC-FUZZ-0110 — The blind-SQLi builder never admits an answer sent on a session known to be lost (FR-FUZZ-65, FR-FUZZ-63, BUG-0533; decision D′) (2026-10-20)

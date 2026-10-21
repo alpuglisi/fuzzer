@@ -76,6 +76,8 @@ Newest first.
   - [x] guards: `tests/test_request_contexts.py` (field classification and its offender,
     every identity field moves the id and no excluded one does, seed categories by AST
     and its offender) — done
+- Review round 1 (85e7ab2): `core/redaction.py` gains `page_url_is_clean`, the one test of
+  whether a page URL may be stored as `source_page` or fetched (B1, R2-B2).
 - Effectiveness (assessed <date> or pending): pending.
 
 ### CC-CORE-0072 — One bounded reader of a target's HTTP body (SP-60, FR-CORE-536, BUG-0536) (2026-10-20)

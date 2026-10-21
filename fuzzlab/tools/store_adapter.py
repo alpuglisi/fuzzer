@@ -219,8 +219,13 @@ def _import_page_url(store: Store, run_id: int, raw: str, status, source: str,
 
 def _source_page(url, main: str | None) -> str | None:
     """A sibling set's source page as stored (FR-FUZZ-67): an absolute crawled URL kept
-    with its query (`core.urls.store_url`), None when there is none."""
-    if not isinstance(url, str) or "://" not in url:
+    with its query (`core.urls.store_url`), only when the strongest URL redactor
+    (`core.redaction.redact_url_identifiers`: sensitive names, identifier-like values, an
+    SPA route's query; PA-0514(1)) leaves it unchanged. A page whose URL holds such a
+    value is never stored (PA-0100, D12) and never fetched with a placeholder in it: None,
+    so its sibling set has no page and a test needing it is inconclusive."""
+    from fuzzlab.core.redaction import page_url_is_clean
+    if not isinstance(url, str) or "://" not in url or not page_url_is_clean(url):
         return None
     return store_url(url, main, keep_query=True)
 

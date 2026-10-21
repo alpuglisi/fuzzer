@@ -337,7 +337,11 @@ plugin registry. It is the layer that makes the store the integration bus.
     off-lab host). `core.forms.page_template_entries` reads a fetched page's forms (and,
     for a GET query, its links) and returns the entry list it offers now for a stored
     context: same origin, path, method and entry names in order, best value agreement
-    first; the binder binds the placeholders from it in memory.
+    first; the binder binds the placeholders from it in memory. *(Review round 1,
+    BUG-0544:)* `core.redaction.page_url_is_clean` is the one test of whether a page URL
+    may be stored as `source_page` or fetched: the strongest URL redactor
+    (`redact_url_identifiers`) leaves it unchanged, it holds no redaction placeholder and
+    no empty query value.
   - **Header-point names:** `core.http.header_point_refusal` is the one rule
     (framing, routing, method-override and credential headers, and any name
     `is_sensitive_name` flags; whole names, case-insensitive). `check_send_header`

@@ -73,6 +73,19 @@ evidence and the `Candidate` over time, and to none of the keys.
   SP-57's guards); amended with before/after: `test_forms_phase2` (two link/form context
   tests), `test_unplaceable_confirmation` (the stored-case/ordinary-point key).
 
+## Review round 1 (85e7ab2): a caller of the changed builder was missed
+
+Review finding B7 / R2-B3, reproduced by a skeptic: `injection_points_from_store` now
+returns one point per request context, and `greybox.run.points_from_store` projects each
+point to (url, param, method, location), dropping its siblings. Twenty link sets on one
+path became twenty identical greybox points: every greybox probe sent twenty times and
+twenty duplicate attempt rows (training data) written. Neither sweep listed this caller:
+the sweep was done by *dedup key* (mechanism), not also by *every caller of the producer
+whose output changed* (PA-0138(3)). Fix: greybox keeps one point per request it actually
+sends (it sends no siblings, FR-FUZZ-8). Test:
+`tests/test_request_contexts.py::test_greybox_sends_each_of_its_requests_once` (fails on
+85e7ab2). PA-0530 gains item 5.
+
 ## Recurrence review
 
 Checked `docs/bugs/` and `PREVENTIVE_ACTIONS.md` for identity keys that omit a
@@ -114,12 +127,19 @@ Same root cause: yes (an identity key omitting a field that distinguishes the un
 3. A row is marked done only by its own unit's work.
 4. A stated residual that merges distinct inputs ("first wins") is a defect to pin with a
    strict xfail naming its owner, never a residual.
+5. *(Review round 1.)* When a producer's output changes shape or cardinality, the sweep
+   covers **every caller of that producer** (grep its name), not only the keys of the
+   mechanism changed; each caller that projects the output away from the identity
+   deduplicates on what it actually sends, with a test.
 
-- Enforced by: tests/test_request_contexts.py::test_every_candidate_field_is_in_the_identity_or_excluded, tests/test_request_contexts.py::test_the_field_guard_catches_a_synthetic_offender, tests/test_request_contexts.py::test_every_identity_field_moves_the_context, tests/test_request_contexts.py::test_no_excluded_field_moves_the_context, tests/test_request_contexts.py::test_the_seed_categories_are_the_strategies_that_read_the_original_value, tests/test_request_contexts.py::test_the_seed_guard_catches_a_synthetic_offender, tests/test_request_contexts.py::test_the_pipeline_tests_a_context_that_only_its_siblings_reach
+- Enforced by: tests/test_request_contexts.py::test_every_candidate_field_is_in_the_identity_or_excluded, tests/test_request_contexts.py::test_the_field_guard_catches_a_synthetic_offender, tests/test_request_contexts.py::test_every_identity_field_moves_the_context, tests/test_request_contexts.py::test_no_excluded_field_moves_the_context, tests/test_request_contexts.py::test_the_seed_categories_are_the_strategies_that_read_the_original_value, tests/test_request_contexts.py::test_the_seed_guard_catches_a_synthetic_offender, tests/test_request_contexts.py::test_the_pipeline_tests_a_context_that_only_its_siblings_reach, tests/test_request_contexts.py::test_greybox_sends_each_of_its_requests_once
 
 PA-0002 sweep (by mechanism: every dedup key over requests): `_get_parameter` (all callers),
 `_import_link_sets`, `_import_forms`, `_store_request`, `import_disco`'s form-body `dict`,
-the builder's `seen`, `_confirmation_key`, the ML label join -- fixed. Kept, with reason:
+the builder's `seen`, `_confirmation_key`, the ML label join -- fixed. By caller of the
+builder (review round 1): `run_auto` (the pipeline keys on contexts) and
+`greybox.run.points_from_store` (deduplicates on its own request) -- the only two.
+Kept, with reason:
 `header_points_from_store`'s per-page `seen` (one header point per page and name, by
 design), `harness.scoring`'s case key (ground truth's own key; a set), PA-0048's
 `sink_contexts_by_point` (those duplicates are one context), `pipeline._dedup` (template

@@ -182,9 +182,10 @@ class _FormBoundSender:
     def fetch(self, url, *, route_url):
         return self._inner.fetch(url, route_url=route_url)
 
-    def _fresh_base(self) -> FormEntries:
-        """The base entries for one send, each fresh entry bound to the value the
-        context's page offers now (FR-FUZZ-67). Raises `PrerequisiteUnavailable`."""
+    def _fresh_base(self):
+        """``(the base entries for one send, the fetch's carry token)``: each fresh entry
+        bound to the value the context's page offers now (FR-FUZZ-67). Raises
+        `PrerequisiteUnavailable`, and keeps the reason for every later send."""
         if self._unbound is not None:
             raise PrerequisiteUnavailable(self._unbound)
         try:
@@ -193,18 +194,31 @@ class _FormBoundSender:
             self._unbound = str(exc)
             raise
 
-    def _bind_fresh(self) -> FormEntries:
+    def _bind_fresh(self):
         from fuzzlab.audit.value_shape import names_outside_lab
         from fuzzlab.core.forms import page_template_entries
+        from fuzzlab.core.redaction import page_url_is_clean
+        from fuzzlab.core.urls import DestructiveUrlRefused, canonical_origin
         what = "fresh " + ", ".join(sorted(self._fresh))
         if self._base is None:
             raise PrerequisiteUnavailable(f"{what}: a captured JSON body has no page to "
                                           "bind them from")
         if not self._page:
             raise PrerequisiteUnavailable(f"{what}: no page to fetch them from")
+        if not page_url_is_clean(self._page):
+            # never a placeholder on the wire (PA-0100, D12; BUG-0544 review B1)
+            raise PrerequisiteUnavailable(f"{what}: their page's URL carries a redacted "
+                                          "value")
+        try:
+            same_origin = canonical_origin(self._page) == canonical_origin(self._url)
+        except ValueError:
+            same_origin = False
+        if not same_origin:
+            # a value fetched on another origin is another session's (SP-13, SP-16)
+            raise PrerequisiteUnavailable(f"{what}: their page is on another origin than "
+                                          "the request")
         if not accepts_fetch(self._inner):
             raise PrerequisiteUnavailable(f"{what}: the sender cannot fetch their page")
-        from fuzzlab.core.urls import DestructiveUrlRefused
         try:
             with trace.role("bind"):
                 page = self._inner.fetch(self._page, route_url=self._url)
@@ -219,6 +233,12 @@ class _FormBoundSender:
                                           + (" on a lost session"
                                              if getattr(page, "session_lost", False) is True
                                              else ""))
+        note = getattr(page, "session", None)
+        if isinstance(note, str) and note:
+            # fetched without the session the probe carries (FR-SESS-20): its value is
+            # not the probe's
+            raise PrerequisiteUnavailable(f"{what}: their page was fetched without the "
+                                          f"probe's session ({note})")
         method, location = self._key[1], self._key[2]
         template = page_template_entries(page.text or "", self._page, self._url, method,
                                          location, self._base)
@@ -233,17 +253,23 @@ class _FormBoundSender:
                                                   "the lab (FR-AUD-20)")
                 value = now
             bound.append((name, value))
-        return FormEntries(bound)
+        return FormEntries(bound), getattr(page, "carry", None)
 
     def send(self, url, param, value, timing: bool = False,
              method: str = "GET", location: str = "query",
              content_type: str | None = None, entries=None, prg: bool = False):
         own = (entries is None and not content_type
                and (url_key(url), method.upper(), location) == self._key)
-        if own and self._fresh:
-            base = self._fresh_base()            # FR-FUZZ-67: before each own send
-        else:
-            base = self._base
+        base, carry = self._base, None
+        if self._fresh and (url_key(url), method.upper()) == self._key[:2]:
+            # FR-FUZZ-67 (BUG-0544 review B4): every send to the candidate's own request
+            # carries the fresh values, or is never made -- a raw or JSON body, entries a
+            # strategy built itself, another location: refused, whatever its shape
+            if not (own and location in ("query", "body")):
+                raise PrerequisiteUnavailable(
+                    self._unbound or "fresh " + ", ".join(sorted(self._fresh))
+                    + f": a {location} send of its own entries cannot carry them")
+            base, carry = self._fresh_base()     # before each own send
         if own and location == jsonbody.LOCATION:
             try:
                 if self._json_base is None:
@@ -254,6 +280,9 @@ class _FormBoundSender:
                     from exc
         elif own and location in ("query", "body"):
             entries = base.replace(param, value)
+            if carry is not None:
+                # the page's cookies ride on this one send only (`RequestsProbeSender`)
+                entries.carry = carry
         if prg:
             # FR-FUZZ-49: the sender's PRG follow-up is a plain GET it builds itself, so
             # no sibling is ever bound into it (P3)
@@ -479,10 +508,18 @@ class Oracle:
         A candidate whose request can never be rebuilt (``replay_refusal``, FR-FUZZ-67)
         is inconclusive (`UNBOUND`) with that reason before any strategy runs: nothing
         is sent, by any mechanism, the browser's included."""
-        if candidate.replay_refusal:
+        refusal = candidate.replay_refusal
+        fresh = (candidate.bindings or {}).get("fresh") \
+            if isinstance(candidate.bindings, dict) else None
+        if not refusal and fresh and candidate.location == jsonbody.LOCATION:
+            # no page holds a captured JSON body's leaves: nothing can bind them, so no
+            # mechanism -- whatever it sends -- may run (BUG-0544 review B4)
+            refusal = (f"fresh {', '.join(sorted(map(str, fresh)))}: a captured JSON body "
+                       "has no page to bind them from")
+        if refusal:
             return None, Verdict(False, candidate.vuln_class or "", UNBOUND,
                                  {"unbound": candidate.location,
-                                  "reason": str(candidate.replay_refusal)[:200]},
+                                  "reason": str(refusal)[:200]},
                                  inconclusive=True)
         if candidate.base_entries:                       # a form point: send its siblings
             sender = _FormBoundSender(sender, candidate)

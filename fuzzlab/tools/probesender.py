@@ -666,7 +666,16 @@ class SeamProbeSender(_ExplicitAllowance):
         run's session, ``route_url``'s isolated copy (FR-FUZZ-44), or anonymous (an auth
         endpoint, FR-SESS-20). So the value it reads belongs to the session the probe
         then carries. The send gate applies; no redirect is followed; a transport failure
-        maps as a probe's does (BUG-0147)."""
+        maps as a probe's does (BUG-0147).
+
+        The page's own URL is gated as a PRG follow-up's is (`_prg_session_gate`;
+        FR-FUZZ-40/44, BUG-0544 review B5): an auth endpoint or another isolated path is
+        never fetched with the run's session -- refused (`PrerequisiteUnavailable`) unless
+        the probe's route is anonymous, or is that same path's isolated copy. And no
+        route of this seam carries a response's cookies into the next request (the
+        session manager adopts none, and an anonymous route keeps no jar): a page that
+        sets a cookie is refused, since its value may be tied to that cookie (review
+        R2-B1) -- the test is then inconclusive, never a negative."""
         from fuzzlab.core.http import Request
         from fuzzlab.oracle.probe import PrerequisiteUnavailable
         check_send_url(url, self._explicit, method="GET")
@@ -675,16 +684,28 @@ class SeamProbeSender(_ExplicitAllowance):
             client, copy = self._client, None
             if identity != "anonymous" and url_key(route_url) in self._isolated_keys:
                 client, identity, copy = self._route_isolated(route_url)
+            if identity != "anonymous":
+                if self._manager is not None and self._manager.is_auth_endpoint(url):
+                    raise PrerequisiteUnavailable("their page is an auth endpoint: never "
+                                                  "fetched with the run's session")
+                if url_key(url) in self._isolated_keys and not (
+                        copy is not None and url_key(url) == url_key(route_url)):
+                    raise PrerequisiteUnavailable("their page is an isolated path: never "
+                                                  "fetched with another route's session")
 
             def dispatch(on_client, on_identity):
                 req = Request("GET", url, identity=on_identity, component="oracle")
                 return self._dispatch(on_client, on_identity, req, "query", "", url)
             if copy is None:
-                return dispatch(client, identity)
-            page = self._on_copy(copy, route_url, dispatch)
-            if page is None:                   # the copy could not log in again
-                raise PrerequisiteUnavailable("the isolated session could not log in "
-                                              "again to fetch the form's page")
+                page = dispatch(client, identity)
+            else:
+                page = self._on_copy(copy, route_url, dispatch)
+                if page is None:                   # the copy could not log in again
+                    raise PrerequisiteUnavailable("the isolated session could not log in "
+                                                  "again to fetch the form's page")
+            if any(str(k).lower() == "set-cookie" for k in (page.headers or {})):
+                raise PrerequisiteUnavailable("their page sets a cookie this session route "
+                                              "cannot carry into the bound send")
             return page
         except PrerequisiteUnavailable:
             raise
@@ -963,31 +984,41 @@ class RequestsProbeSender(_ExplicitAllowance):
             session.headers.update(DEFAULT_BROWSER_HEADERS)
         self._session = session
         self._timeout = timeout
-        self._carry_jar = False
+        self._pending = None
 
     #: Makes PRG follow-ups (FR-FUZZ-49), anonymously like every send.
     prg_capable = True
     #: Makes the binder's page fetch (FR-FUZZ-67).
     fetch_capable = True
-    #: Whether the next send keeps the jar a binder's fetch just filled.
-    _carry_jar = False
+    #: ``(token, cookies)`` a binder's fetch left for the one send it binds, or None.
+    _pending = None
 
     def fetch(self, url: str, *, route_url: str) -> Probe:
         """A plain GET of ``url``, the page a fresh form value is bound from before a
-        send (FR-FUZZ-67), anonymous like every send: the jar is cleared first, and what
-        the page sets (an anonymous session cookie its CSRF token is tied to) is carried
-        by the **next send only** -- the probe the value is bound into -- then cleared as
-        before (BUG-0112). No redirect is followed. ``route_url`` is the probe's URL
-        (every route of this sender is anonymous)."""
+        send (FR-FUZZ-67), anonymous like every send. The jar is cleared before and after;
+        what the page set (an anonymous session cookie its CSRF token is tied to) is held
+        in memory under a one-time token, returned as ``probe.carry``. Only the send whose
+        bound entries carry that token gets those cookies; the next send of any kind
+        discards them first, so a refused binding never lends them to another probe
+        (BUG-0112, BUG-0544 review B2). No redirect is followed. ``route_url`` is the
+        probe's URL (every route of this sender is anonymous)."""
+        self._pending = None
         check_send_url(url, self._explicit, method="GET")
         if url_key(route_url) in self._isolated_keys:
             self._isolated_sends += 1
         jar = getattr(self._session, "cookies", None)
         if jar is not None:
             jar.clear()
-        probe = self._request("GET", url, {"timeout": self._timeout,
-                                           "allow_redirects": False})
-        self._carry_jar = True
+        try:
+            probe = self._request("GET", url, {"timeout": self._timeout,
+                                               "allow_redirects": False})
+        finally:
+            cookies = jar.copy() if jar is not None else None
+            if jar is not None:
+                jar.clear()
+        token = object()
+        self._pending = (token, cookies)
+        probe.carry = token
         return probe
 
     def send(self, url: str, param: str, value: str, timing: bool = False,
@@ -1010,6 +1041,9 @@ class RequestsProbeSender(_ExplicitAllowance):
         # client, which already sets this (see that module's own
         # request-building code) -- this was a real inconsistency between
         # the two `Sender` implementations, not a deliberate difference.
+        # FR-FUZZ-67: a binder's fetch left its page's cookies for one send; taken (and
+        # gone) before any gate can raise
+        pending, self._pending = self._pending, None
         # NFR-FUZZ-safe (BUG-0112); a crawl-sourced DELETE too (FR-FUZZ-47)
         check_send_url(url, self._explicit, method=method)
         if location == PATH_LOCATION:                    # FR-FUZZ-57: placed, or refused
@@ -1020,11 +1054,14 @@ class RequestsProbeSender(_ExplicitAllowance):
             self._isolated_sends += 1
         # Anonymous means anonymous: no cookie a probe response set (a payload that
         # logs in, say) rides along on later probes (BUG-0112). The one exception is the
-        # send right after a binder's fetch: it carries what that page set (FR-FUZZ-67)
+        # send a binder's fetch was made for: its bound entries carry the fetch's token,
+        # and it alone carries what that page set (FR-FUZZ-67)
         jar = getattr(self._session, "cookies", None)   # an injected session may have none
-        carry, self._carry_jar = self._carry_jar, False
-        if jar is not None and not carry:
+        if jar is not None:
             jar.clear()
+            if pending is not None and pending[1] is not None \
+                    and getattr(entries, "carry", None) is pending[0]:
+                jar.update(pending[1])
         kwargs = {"timeout": self._timeout, "allow_redirects": False}
         # where the request goes; `url` stays the probe's own URL, which a PRG follow-up
         # is resolved against, never the placed one (FR-FUZZ-49, FR-FUZZ-64)

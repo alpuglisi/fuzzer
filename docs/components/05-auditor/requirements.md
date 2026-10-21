@@ -222,7 +222,14 @@ budget where a vulnerability is plausible.
     never sent and never replaced by a stand-in -- its request cannot be rebuilt, so
     its point carries a `replay_refusal` and is inconclusive
     (`value_shape.names_outside_lab`, the one predicate). A point's own value and the
-    command-injection base value are the payload's slot and keep loopback. Stated residual: an e-mail default (`user@mail.example.com`) is sent
+    command-injection base value are the payload's slot and keep loopback. *(Review
+    round 1, BUG-0544: the predicate fails closed.)* A value is the lab only when it
+    holds no `@`, `\`, `%` or control character, names no scheme but http(s), its whole
+    authority is a loopback host with a numeric port under both a manual split and
+    `urlsplit`, and nothing after the authority names another host or URL; anything
+    else `neutral_value` would change is outside the lab (`127.0.0.1:80@evil.example/`,
+    `localhost:1@evil.example`, `http://evil.example\@127.0.0.1/` and
+    `http://127.0.0.1/r?next=http://evil.example/` are outside). Stated residual: an e-mail default (`user@mail.example.com`) is sent
     as is and may trigger mail. **Stated exception (FR-AUD-21, BUG-0124,
     operator-approved 2026-10-14):** the open-redirect retry probe.
 - **FR-AUD-21** *(open redirect and SSRF by value; `CC-AUD-0034`, 2026-10-14,
@@ -390,6 +397,9 @@ budget where a vulnerability is plausible.
     migration 25; FR-FUZZ-67): the page it came from (a form's page, a link's
     `found_from`, a captured request's page or Referer, with its query) and the names
     of the entries redaction blanked (never a password). Names and a page only (D12).
+    *(Review round 1:)* the page is stored only when `core.redaction.page_url_is_clean`
+    holds (the strongest URL redactor leaves it unchanged; no placeholder; no empty query
+    value); otherwise none (PA-0100, PA-0514(1)).
   - `audit.engine.evaluate` writes each candidate's request fields through
     `core.reqctx.point_evidence` and stamps `identity_scope` and `context_id` (SP-57,
     FR-FUZZ-66). `InjectionPoint` carries `bindings` and `replay_refusal`.

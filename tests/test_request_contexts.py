@@ -154,6 +154,20 @@ def test_rows_of_one_request_context_are_one_point(tmp_path):
         (("op", "safe"), ("q", "1")), (("q", "1"), ("op", "safe"))]
 
 
+def test_greybox_sends_each_of_its_requests_once(tmp_path):
+    """BUG-0530 review B7: greybox sends no siblings, so the builder's contexts that differ
+    only in siblings are one greybox request -- one point each, never N copies (N
+    duplicate probes and attempt rows)."""
+    from fuzzlab.greybox.run import points_from_store
+    store, run = _import(tmp_path, pages=[APP + f"s.php?op={op}&q={n}" for n, op in
+                                          enumerate(("safe", "search", "list"), 1)])
+    with store:
+        points = points_from_store(store, run, APP, skipped=[])
+    keys = [(p.url, p.param, p.method, p.location) for p in points]
+    assert sorted(keys) == sorted(set(keys))
+    assert sorted(p.param for p in points) == ["op", "q"]
+
+
 # --- the pipeline: one test per context -------------------------------------------------
 def _op_gated_echo(req):
     """Reflects ``q`` raw only in the ``op=search`` context (another handler's sink),

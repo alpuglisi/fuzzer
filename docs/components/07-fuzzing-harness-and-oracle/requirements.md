@@ -2002,6 +2002,9 @@ rewards) derives from it.
     which the ML label join reads (FR-ML-401).
   - **Older rows** get their context on read, computed from the same evidence fields
     (their identity scope reads as unrecorded); nothing is migrated.
+  - **Greybox** sends no siblings (FR-FUZZ-8), so `greybox.run.points_from_store` keeps
+    one point per request it sends (url, param, method, location), in order: contexts
+    that differ only in siblings are one greybox request (review round 1, BUG-0530).
   - **Stated gaps:** a repeated name is bound by the every-occurrence rule (R1, pinned);
     a stored link set's untouched siblings are sent from decoded values (R2, pinned); a
     POST action's query parameters are not points (AU-REQID-POSTQ, pinned); contexts the
@@ -2012,27 +2015,42 @@ rewards) derives from it.
   - **The recipe.** Each stored sibling set records the page it came from and the names
     of its entries whose stored value is a placeholder -- blanked by redaction (a CSRF
     token or any sensitive name, an identifier-like value; FR-CORE-32, migration 25).
-    Names and a page only: never a value (D12).
+    Names and a page only: never a value (D12). *(Review round 1:)* the page is stored
+    only when `core.redaction.page_url_is_clean` holds -- the strongest URL redactor
+    leaves it unchanged, it holds no redaction placeholder and no empty query value --
+    and only on the point's own origin; otherwise the set has no page.
   - **Bound before each send.** The oracle's binder fetches that page through the
-    sender's `fetch`, on the probe's own session route (the run's session, the path's
-    isolated copy, or anonymous -- the anonymous sender keeps the page's cookies for the
-    one send that follows), finds the form or link the page offers now for the same
-    origin, path, method and entry names (`core.forms.page_template_entries`), and binds
-    the named entries' current values into that send only, in memory. An object
-    selector the crawl saw blanked is resolved the same way.
+    sender's `fetch`, on the probe's own session route, finds the form or link the page
+    offers now for the same origin, path, method and entry names
+    (`core.forms.page_template_entries`), and binds the named entries' current values
+    into that send only, in memory. An object selector the crawl saw blanked is resolved
+    the same way. *(Review round 1:)* the fetch is a request like any other:
+    - it is gated on its own URL -- the send gate; on the authenticated seam an auth
+      endpoint or another isolated path is never fetched with the run's session;
+    - it is made on the session the bound send carries: same origin, no session note;
+    - the anonymous `RequestsProbeSender` holds the page's cookies in memory under a
+      one-time token and loads them only into the send whose bound entries carry it
+      (every other send discards them first, BUG-0112); the authenticated seam carries
+      no response cookie on any route, so a page that sets one is refused.
+  - **Every send of the candidate's own request** (its URL and method) is bound or
+    refused, whatever its shape: a raw or JSON body, entries a strategy built, another
+    location (review round 1).
   - **Never a placeholder, never a stand-in.** When the values cannot be rebuilt -- no
-    page, a sender that cannot fetch, no answer, a non-2xx or lost-session answer, no
-    matching form or link, a captured JSON body (no page holds its leaves), a fresh value
-    naming a host outside the lab -- nothing is sent and the test is inconclusive
-    (`UNBOUND`) with the reason, never a negative. A sibling naming a host outside the
-    lab is never sent and never replaced by loopback (FR-AUD-20): its point carries a
-    `replay_refusal` and is inconclusive before any strategy runs. The fingerprint
-    baseline skips such points, header points never carry such a query, and the M6
-    browser refuses a query point needing a binding.
-  - **Stated gaps:** a password field stays empty by policy (FR-FUZZ-44, D12); the
-    authenticated seam's anonymous route (an auth endpoint) keeps no cookie jar, so a
-    token tied to an anonymous session cookie fails there; a captured JSON body's
-    redacted leaf is never rebuilt; a store row from before migration 25 has no recipe.
+    page, an unclean or other-origin page, a sender that cannot fetch, a gated page, no
+    answer, a non-2xx, lost-session or session-noted answer, a cookie the route cannot
+    carry, no matching form or link, a captured JSON body (no page holds its leaves; such
+    a candidate is unbound before any strategy runs), a fresh value naming a host outside
+    the lab -- nothing is sent and the test is inconclusive (`UNBOUND`) with the reason,
+    never a negative. A sibling naming a host outside the lab is never sent and never
+    replaced by loopback (FR-AUD-20, which fails closed: `value_shape.names_outside_lab`):
+    its point carries a `replay_refusal` and is inconclusive before any strategy runs.
+    The fingerprint baseline skips such points, header points never carry such a query,
+    and the M6 browser refuses a query point needing a binding.
+  - **Stated gaps:** a password field stays empty by policy (FR-FUZZ-44, D12); on the
+    authenticated seam a form page that sets a cookie is unbound (the seam adopts no
+    response cookie), and so is a CSRF-protected login form whose page is an auth
+    endpoint fetched on a session route; a captured JSON body's redacted leaf is never
+    rebuilt; a store row from before migration 25 has no recipe.
 - **FR-FUZZ-68 (the template stage folds only true duplicates, `CC-FUZZ-0112`,
   `CC-CORE-0074`, 2026-10-21, BUG-0547)** When a caller gives `run_pipeline` the pages'
   HTML (`pages_html`), the stage before the audit folds injection points through

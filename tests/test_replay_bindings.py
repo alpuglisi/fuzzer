@@ -253,16 +253,18 @@ def test_a_sibling_naming_a_host_is_sent_as_given_on_loopback_and_never_off_it(
         assert q_posts and {r["body"]["next"] for r in q_posts} == {sent}
 
 
-# --- the anonymous sender carries the page's session into the bound send only ----------
+# --- the page's session: carried into the one bound send, or the test is unbound ----------
 class _SessionForm:
     """A loopback app whose CSRF token is tied to an anonymous session cookie set by the
-    form page: ``/do`` answers 200 only with the cookie and that session's token."""
+    form page: ``/do`` answers 200 only with the cookie and that session's token.
+    ``/noform`` sets a cookie and offers no form. Every request's cookie is logged."""
 
     def __init__(self):
         from fuzzlab.core.net import require_loopback
         require_loopback("127.0.0.1")                      # PA-0130
         self.tokens: dict[str, str] = {}
         self.answers: list[int] = []
+        self.seen: list[tuple[str, str, str | None]] = []   # (method, target, cookie)
         counter = itertools.count(1)
         app = self
 
@@ -271,19 +273,23 @@ class _SessionForm:
                 pass
 
             def do_GET(self):
+                app.seen.append(("GET", self.path, self.headers.get("Cookie")))
                 n = next(counter)
                 sid, token = f"s{n}", f"t{n}"
                 app.tokens[sid] = token
-                body = (f"<form method=post action='/do'><input type=hidden "
-                        f"name=csrf_token value={token}><input name=q></form>").encode()
+                form = (f"<form method=post action='/do'><input type=hidden "
+                        f"name=csrf_token value={token}><input name=q></form>")
+                body = (form if self.path.startswith("/form") else "<p>ok</p>").encode()
                 self.send_response(200)
-                self.send_header("Set-Cookie", f"sid={sid}; Path=/")
+                if self.path.startswith(("/form", "/noform")):
+                    self.send_header("Set-Cookie", f"sid={sid}; Path=/")
                 self.send_header("Content-Type", "text/html")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
 
             def do_POST(self):
+                app.seen.append(("POST", self.path, self.headers.get("Cookie")))
                 length = int(self.headers.get("Content-Length") or 0)
                 form = dict(parse_qsl(self.rfile.read(length).decode(),
                                       keep_blank_values=True))
@@ -305,25 +311,262 @@ class _SessionForm:
         self.server.server_close()
 
 
-def test_the_anonymous_sender_carries_the_pages_session_into_the_bound_send_only():
-    """Measured on a real socket: the token is valid only with the cookie its page set.
-    The binder's fetch and its send share that cookie; the next plain send does not."""
-    from fuzzlab.oracle.oracle import _FormBoundSender
+def _anonymous_sender(kind):
+    from fuzzlab.tools.probesender import RequestsProbeSender, SeamProbeSender
+    if kind == "requests":
+        return RequestsProbeSender(timeout=5)
+    from fuzzlab.core.budget import RequestBudget
+    from fuzzlab.core.http import HttpClient
+    return SeamProbeSender(HttpClient(RequestBudget(100), ["127.0.0.1"], timeout=5))
+
+
+def _csrf_candidate(base, page="/form"):
     from fuzzlab.oracle.probe import Candidate
+    return Candidate(url=base + "/do", param="q", method="POST", location="body",
+                     base_entries=(("csrf_token", ""), ("q", "x")),
+                     bindings={"page": base + page, "fresh": ["csrf_token"]})
+
+
+@pytest.mark.parametrize("kind", ["requests", "seam"])
+def test_the_pages_session_is_carried_into_the_bound_send_only_or_the_test_is_unbound(kind):
+    """Measured on a real socket: the token is valid only with the cookie its page set.
+    The anonymous `RequestsProbeSender` carries that cookie into the bound send and no
+    other. The authenticated seam's routes carry no response cookie (BUG-0544 review
+    R2-B1): its fetch refuses such a page, so nothing is sent -- unbound, never a 403
+    read as the handler's answer."""
+    from fuzzlab.oracle.oracle import _FormBoundSender
+    from fuzzlab.oracle.probe import PrerequisiteUnavailable
+    site = _SessionForm()
+    try:
+        sender = _anonymous_sender(kind)
+        bound = _FormBoundSender(sender, _csrf_candidate(site.base))
+        if kind == "requests":
+            for _ in range(2):
+                bound.send(site.base + "/do", "q", "M", method="POST", location="body")
+            sender.send(site.base + "/do", "q", "M", method="POST", location="body",
+                        entries=[("csrf_token", "t1"), ("q", "M")])
+        else:
+            with pytest.raises(PrerequisiteUnavailable, match="sets a cookie"):
+                bound.send(site.base + "/do", "q", "M", method="POST", location="body")
+    finally:
+        site.close()
+    if kind == "requests":
+        assert site.answers == [200, 200, 403]
+    else:
+        assert site.answers == [] and [m for m, _t, _c in site.seen] == ["GET"]
+
+
+def test_a_refused_binding_never_lends_its_pages_cookie_to_another_probe():
+    """BUG-0544 review B2: the page answers and sets a cookie, the binding is refused (no
+    form); the next, unrelated anonymous probe carries no cookie (BUG-0112)."""
+    from fuzzlab.oracle.oracle import _FormBoundSender
+    from fuzzlab.oracle.probe import PrerequisiteUnavailable
     from fuzzlab.tools.probesender import RequestsProbeSender
     site = _SessionForm()
     try:
         sender = RequestsProbeSender(timeout=5)
-        candidate = Candidate(url=site.base + "/do", param="q", method="POST",
-                              location="body",
-                              base_entries=(("csrf_token", ""), ("q", "x")),
-                              bindings={"page": site.base + "/form",
-                                        "fresh": ["csrf_token"]})
-        bound = _FormBoundSender(sender, candidate)
-        for _ in range(2):
+        bound = _FormBoundSender(sender, _csrf_candidate(site.base, "/noform"))
+        with pytest.raises(PrerequisiteUnavailable, match="no matching form"):
             bound.send(site.base + "/do", "q", "M", method="POST", location="body")
+        sender.send(site.base + "/other?x=1", "x", "payload")
         sender.send(site.base + "/do", "q", "M", method="POST", location="body",
                     entries=[("csrf_token", "t1"), ("q", "M")])
     finally:
         site.close()
-    assert site.answers == [200, 200, 403]
+    assert [(m, t.split("?")[0], c) for m, t, c in site.seen] == [
+        ("GET", "/noform", None), ("GET", "/other", None), ("POST", "/do", None)]
+
+
+# --- the source page never stores, nor puts on the wire, a target's value (review B1) ---
+_SECRET = "SECRETKEY123zq"
+
+
+def test_a_source_page_holding_a_secret_or_an_identifier_is_never_stored(tmp_path):
+    """A disco Referer with a sensitive-named and an identifier-like query value, and a
+    crawl's ``found_from`` with an identifier: neither value reaches any table (candidate
+    evidence included; `page` and `parameter.example` hold crawled URLs and examples by
+    design, BUG-0120); such a set has no page, so its test is inconclusive (PA-0100)."""
+    from fuzzlab.audit import evaluate
+    from fuzzlab.disco.capture import append_record, make_record
+    from fuzzlab.tools import store_adapter
+    from fuzzlab.tools.spider import StorageManager
+    referer = f"http://127.0.0.1:3000/acct?api_key={_SECRET}&ref={_UUID}"
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    append_record(run_dir / "capture.jsonl", make_record(
+        kind="http", t=1.0, action_id="act-1", method="POST",
+        url="http://127.0.0.1:3000/do",
+        req_headers={"Content-Type": store_adapter.FORM_URLENCODED, "Referer": referer},
+        req_body=b"csrf_token=one-time&q=hello", status=200,
+        res_headers={"Content-Type": "text/html"}, res_body=b"ok"))
+    (run_dir / "actions.jsonl").write_text("")
+    hexed = "0123456789abcdef0123456789abcdef"
+    db = tmp_path / "s.db"
+    _spider_db(db, requests=())
+    sm = StorageManager(str(db))
+    sm.mark_visited(APP + "item.php?op=view&id=7", 200, 1,
+                    found_from=APP + f"list.php?u=bob&t={hexed}")
+    sm.close()
+    with Store(tmp_path / "u.db") as store:
+        run = store.start_run("auto", "h")
+        store_adapter.import_disco(run_dir, store, run)
+        run2 = store.start_run("auto", "h")
+        store_adapter.import_spider(db, store, run2)
+        for r, base in ((run, "http://127.0.0.1:3000/"), (run2, APP)):
+            evaluate(injection_points_from_store(store, r, base, skipped=[]), store, r)
+        dump = json.dumps([[list(row) for row in store.conn.execute(f'SELECT * FROM "{t}"')]
+                           for (t,) in store.conn.execute(
+                               "SELECT name FROM sqlite_master WHERE type='table' AND "
+                               "name NOT IN ('page', 'parameter', 'trace_event', "
+                               "'dg_entity', 'dg_flow', 'dg_evidence')")], default=str)
+    assert _SECRET not in dump and _UUID not in dump and hexed not in dump
+
+
+def test_a_page_whose_url_holds_a_redacted_value_is_never_fetched():
+    """Defence in depth at the binder: a stored page carrying a redaction placeholder or a
+    blanked value is never put on the wire; the test is unbound."""
+    from fuzzlab.oracle.oracle import _FormBoundSender
+    from fuzzlab.oracle.probe import Candidate, PrerequisiteUnavailable
+    for page in ("http://h/app/p.php?token=__REDACTED__", "http://h/app/p.php?t=&u=bob"):
+        site = _Site({"/app/p.php": _token_page}, _token_checked_echo)
+        cand = Candidate(url="http://h/app/do.php", param="q", method="POST",
+                         location="body", base_entries=(("csrf_token", ""), ("q", "x")),
+                         bindings={"page": page, "fresh": ["csrf_token"]})
+        with pytest.raises(PrerequisiteUnavailable, match="redacted"):
+            _FormBoundSender(site, cand).send("http://h/app/do.php", "q", "M",
+                                              method="POST", location="body")
+        assert site.events == []
+
+
+# --- FR-AUD-20, fail closed (review B3) --------------------------------------------------
+@pytest.mark.parametrize("value", [
+    "127.0.0.1:80@evil.example/",
+    "localhost:1@evil.example",
+    "http://evil.example\\@127.0.0.1/",
+    "http://127.0.0.1:8080/r?next=http://evil.example/",
+])
+def test_a_value_that_names_a_host_beyond_loopback_to_any_reader_is_outside_the_lab(value):
+    from fuzzlab.audit.value_shape import names_outside_lab
+    from fuzzlab.harness.auto import _send_value
+    assert names_outside_lab(value)
+    assert _send_value(value) != value                  # never sent as given
+
+
+@pytest.mark.parametrize("value", ["http://127.0.0.1:8080/after", "http://localhost:3/x?a=1",
+                                   "http://[::1]:80/x"])
+def test_a_value_naming_only_loopback_is_the_lab(value):
+    from fuzzlab.audit.value_shape import names_outside_lab
+    assert not names_outside_lab(value)
+
+
+# --- every send of the candidate's own request is bound or refused (review B4) -----------
+def test_a_json_point_needing_a_fresh_leaf_sends_nothing_and_is_unbound(tmp_path):
+    """A captured JSON body with a redacted identifier leaf: no page holds it, so no
+    mechanism may send -- NoSqlOperatorStrategy's own-body sends included."""
+    from fuzzlab.tools.store_adapter import import_spider
+    from tests.test_json_points import _req
+    _spider_db(tmp_path / "s.db", requests=[_req(
+        APP + "api/search", {"productId": _UUID, "q": "shoes"}, page=APP + "shop")])
+    site = _Site({"/app/shop": lambda s, n: "<html></html>"},
+                 lambda req, s: Probe(200, "<html>no such product</html>"))
+    store = Store(tmp_path / "u.db")
+    run = store.start_run("auto", "h")
+    import_spider(tmp_path / "s.db", store, run)
+    with store:
+        points = injection_points_from_store(store, run, APP, skipped=[])
+        result = run_pipeline(points, store, run, site,
+                              RunPlan(mode="manual", categories=["nosql-injection"],
+                                      scored=False, source="manual"))
+        statuses = {r[0] for r in store.conn.execute(
+            "SELECT oracle_status FROM candidate WHERE run_id=?", (run,))}
+    assert site.sends("/app/api/search") == []
+    assert statuses == {"inconclusive"} and result.findings == 0
+    assert result.inconclusive and all(i["mechanism"] == "unbound"
+                                       for i in result.inconclusive)
+
+
+def test_the_binder_refuses_a_raw_or_built_send_to_its_own_request():
+    """A strategy sending the candidate's own URL and method with its own body (a
+    content type, entries it built) never bypasses the fresh binding."""
+    from fuzzlab.oracle.oracle import _FormBoundSender
+    from fuzzlab.oracle.probe import Candidate, PrerequisiteUnavailable
+    site = _Site({"/app/p.php": _token_page}, _token_checked_echo)
+    cand = Candidate(url="http://h/app/do.php", param="q", method="POST", location="body",
+                     base_entries=(("csrf_token", ""), ("q", "x")),
+                     bindings={"page": "http://h/app/p.php", "fresh": ["csrf_token"]})
+    bound = _FormBoundSender(site, cand)
+    for kw in ({"content_type": "application/json"},
+               {"entries": [("csrf_token", ""), ("q", "M")]}):
+        with pytest.raises(PrerequisiteUnavailable):
+            bound.send("http://h/app/do.php", "q", "M", method="POST", location="body",
+                       **kw)
+    assert site.sends("/app/do.php") == []
+
+
+# --- the seam fetches a page only on the session its probe carries (review B5, B6) -------
+class _FakeManager:
+    def __init__(self, auth):
+        self.auth = auth
+
+    def ensure(self, *a, **k):
+        pass
+
+    def is_auth_endpoint(self, url):
+        return urlsplit(url).path in self.auth
+
+
+class _Recording:
+    def __init__(self):
+        self.sent = []
+
+    def send(self, req):
+        self.sent.append(req.url)
+        raise AssertionError("nothing may be sent")
+
+
+@pytest.mark.parametrize("gate", ["auth endpoint", "isolated path"])
+def test_the_seam_never_fetches_a_login_page_with_the_runs_session(gate):
+    from fuzzlab.oracle.probe import PrerequisiteUnavailable
+    from fuzzlab.tools.probesender import SeamProbeSender
+    client = _Recording()
+    sender = SeamProbeSender(client, identity="alice",
+                             manager=_FakeManager({"/app/login.php"} if gate ==
+                                                  "auth endpoint" else set()))
+    if gate == "isolated path":
+        sender.isolate(["http://h/app/login.php"])
+    with pytest.raises(PrerequisiteUnavailable, match=gate):
+        sender.fetch("http://h/app/login.php", route_url="http://h/app/item.php")
+    assert client.sent == []
+
+
+def test_a_source_page_on_another_origin_is_never_bound(tmp_path):
+    """A form found on :4000 that posts to the run's :3000: the token is another
+    origin's session's, so there is no page and the test is unbound; and the binder
+    refuses a page whose fetch went without the probe's session."""
+    from fuzzlab.oracle.oracle import _FormBoundSender
+    from fuzzlab.oracle.probe import Candidate, PrerequisiteUnavailable
+    from fuzzlab.tools.store_adapter import import_spider
+    form = _rec("<form method=post action='http://127.0.0.1:3000/do'><input type=hidden "
+                "name=csrf_token value=x><input name=q></form>",
+                page="http://127.0.0.1:4000/page")
+    _spider_db(tmp_path / "s.db", requests=(), forms=[form])
+    with Store(tmp_path / "u.db") as store:
+        run = store.start_run("auto", "h")
+        import_spider(tmp_path / "s.db", store, run, base_url="http://127.0.0.1:3000/")
+        (q,) = [p for p in injection_points_from_store(store, run, "http://127.0.0.1:3000/",
+                                                       skipped=[]) if p.param == "q"]
+    assert q.bindings == (None, ("csrf_token",))
+
+    class _OutOfOrigin(_Site):
+        def fetch(self, url, *, route_url):
+            page = super().fetch(url, route_url=route_url)
+            page.session = "anonymous (out of origin)"
+            return page
+    site = _OutOfOrigin({"/app/p.php": _token_page}, _token_checked_echo)
+    cand = Candidate(url="http://h/app/do.php", param="q", method="POST", location="body",
+                     base_entries=(("csrf_token", ""), ("q", "x")),
+                     bindings={"page": "http://h/app/p.php", "fresh": ["csrf_token"]})
+    with pytest.raises(PrerequisiteUnavailable, match="without the probe's session"):
+        _FormBoundSender(site, cand).send("http://h/app/do.php", "q", "M", method="POST",
+                                          location="body")
+    assert site.sends("/app/do.php") == []

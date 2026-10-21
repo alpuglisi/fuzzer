@@ -45,6 +45,11 @@ Newest first.
   - [x] FR-AUD-31 and FR-AUD-20/22 amended in place — done
   - [x] tests (`tests/test_request_contexts.py` importer tests, the disco pin in
     `tests/test_query_placement.py` unpinned) — done
+- Review round 1 (85e7ab2): `store_adapter._source_page` stores a page only when
+  `core.redaction.page_url_is_clean` holds (B1, R2-B2: a disco Referer and a crawl's
+  `found_from` stored secrets and identifiers); `audit/value_shape.names_outside_lab`
+  fails closed (`_names_only_lab`; B3: `@`, `\`, embedded-URL bypasses). Tests in
+  `tests/test_replay_bindings.py` fail on 85e7ab2.
 - Effectiveness (assessed <date> or pending): pending.
 
 ### CC-AUD-0053 — The auditor ends a failed load through SP-01's owner (BUG-0522) (2026-10-19)

@@ -495,8 +495,16 @@ def _bindings(row, origin: str, raw, target: str):
         return None
     page = None
     if row["source_page"]:
-        page, elsewhere = _crawl_url(_stored_key(row["source_page"]), origin)
-        if elsewhere is not None:
+        from fuzzlab.core.urls import canonical_origin
+        page, _elsewhere = _crawl_url(_stored_key(row["source_page"]), origin)
+        point_url, _ = _crawl_url(_stored_key(row["path"]), origin)
+        try:
+            same = canonical_origin(page) == canonical_origin(point_url)
+        except ValueError:
+            same = False
+        if not same:
+            # a value read on another origin is another session's (SP-13; BUG-0544
+            # review B6): no page, so the test is inconclusive
             page = None
     return page, names
 

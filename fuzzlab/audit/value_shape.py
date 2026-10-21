@@ -198,20 +198,85 @@ def names_outside_lab(value) -> bool:
     ``::1`` (`core.urls.is_loopback_origin`, D11). Such a value is never sent (FR-AUD-20)
     and never replaced by a stand-in either (FR-FUZZ-67, BUG-0544): a request that needs
     it cannot be rebuilt. A value naming loopback names the lab itself and is sent as
-    the app gave it. Total: a non-string is False."""
-    from fuzzlab.core.urls import is_loopback_origin
+    the app gave it. Total: a non-string is False.
+
+    Fails closed (BUG-0544 review B3): a value is the lab only when `_names_only_lab`
+    proves it; anything else `neutral_value` would change is outside the lab."""
     if not isinstance(value, str) or neutral_value(value) == value:
         return False
-    if "://" in value:
-        named = value
-    elif value.startswith("//"):
-        named = "http:" + value
+    return not _names_only_lab(value)
+
+
+#: Separators a value's path, query or fragment is split on to look for another host.
+_TAIL_SEPARATORS = "/?#&=;,+ "
+
+
+def _loopback_authority(authority: str) -> bool:
+    """An authority that is a loopback host with at most a numeric port: no userinfo,
+    no other punctuation (``127.0.0.1:80@evil.example`` is not one)."""
+    from fuzzlab.core.urls import is_loopback_origin
+    if not authority or "@" in authority:
+        return False
+    if authority.startswith("["):
+        end = authority.find("]")
+        if end < 0:
+            return False
+        host, rest = authority[:end + 1], authority[end + 1:]
     else:
-        named = "http://" + _host_prefix(value)[0]
+        host, colon, port = authority.partition(":")
+        rest = colon + port
+    if rest and not (rest.startswith(":") and rest[1:].isdigit()):
+        return False
     try:
-        return not is_loopback_origin(named)
-    except ValueError:                         # an unparsable netloc: not provably the lab
-        return True
+        return is_loopback_origin("http://" + host)
+    except ValueError:
+        return False
+
+
+def _names_only_lab(value: str) -> bool:
+    """Whether ``value`` provably names loopback and nothing else (FR-AUD-20 as amended
+    by FR-FUZZ-67): no ``@``, ``\\``, ``%`` or control character anywhere (WHATWG and
+    other consumers read those differently from `urlsplit`); only ``http``/``https``
+    when a scheme is given; the whole authority a loopback host with a numeric port, as
+    `_loopback_authority` splits it **and** as `urlsplit` reads it; and no part of the
+    path, query or fragment naming another host or URL (``?next=http://evil.example/``
+    is outside)."""
+    from urllib.parse import urlsplit
+
+    from fuzzlab.core.urls import is_loopback_origin
+    if any(ch in value for ch in "@\\%") or any(ord(ch) < 33 or ord(ch) == 127
+                                                  for ch in value):
+        return False
+    if "://" in value:
+        scheme, rest = value.split("://", 1)
+        if scheme.lower() not in ("http", "https"):
+            return False
+    elif value.startswith("//"):
+        rest = value[2:]
+    else:
+        rest = value
+    cut = min((i for i in (rest.find(c) for c in "/?#") if i >= 0), default=len(rest))
+    authority, tail = rest[:cut], rest[cut:]
+    if not _loopback_authority(authority):
+        return False
+    try:
+        parsed = urlsplit("http://" + rest)
+        host = parsed.hostname
+        parsed.port                           # raises on a non-numeric port
+    except ValueError:
+        return False
+    if host is None or not is_loopback_origin("http://" + (f"[{host}]" if ":" in host
+                                                            else host)):
+        return False
+    if "//" in tail:
+        return False
+    for sep in _TAIL_SEPARATORS:
+        tail = tail.replace(sep, " ")
+    for token in tail.split():
+        shape = value_shape(token)
+        if shape in ("url", "ip", "hostname") and not _loopback_authority(token):
+            return False
+    return True
 
 
 def neutral_value(value):
