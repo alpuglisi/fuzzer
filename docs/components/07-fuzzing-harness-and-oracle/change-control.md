@@ -3,6 +3,64 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0113 — A path point's PRG follow-up never re-sends the payload (FR-FUZZ-69, BUG-0542) (2026-10-21)
+- Placement: AU-PRGPATH (the item BUG-0531's sweep pinned; DRAFT-AU-REQID14 item 9),
+  branch `lane/PRGPATH` on `c483dc1`. Numbers pre-assigned: CC-FUZZ-0113, FR-FUZZ-69,
+  BUG-0542, PA-0542.
+- Change: `fuzzlab/tools/probesender.py`, the PRG follow-up only.
+  - **Decision: the follow-up is resolved against the unplaced request URL** (the
+    probe's own URL; for a path point, its template), as FR-FUZZ-64 already did for a
+    query point. Both `send`s keep `own` before the path placement reassigns `url`;
+    `SeamProbeSender._send`/`_follow` and `RequestsProbeSender._follow` resolve against
+    it. The placed `url` still routes the seam's follow-up (`_on_copy`) and attributes
+    it to its probe (`_dispatch`, the header breaker), as before.
+  - `prg_target(..., own_segment=)` (new keyword, default None, so every other caller
+    and location is unchanged): a target that keeps a path point's `{param}` segment is
+    refused, `skipped: the follow-up would re-send the payload`, before any gate or
+    send. `_own_segment(location, param)` gives the segment for a path point only.
+  - Not `PRG_UNOBSERVED`: nothing is sent, and `Probe.prg_sends` counts an unobserved
+    follow-up as a request (FR-FUZZ-49 P8).
+  - `PRG_RULES`: `location-relative` now states the divergence (the probe's own URL,
+    never the placed one); new rule `own-segment-never-refetched` (a divergence), with
+    its fixture.
+  - Readers of the `url` variable the path placement reassigns, named per PA-0542(3):
+    the send itself, `_identity_for`/`url_key` isolation routing, `_on_copy`,
+    `_dispatch`, and (now no longer) the follow-up's base. Only the last changed.
+- Impact (other components / project): none outside FUZZ. A path point whose
+  application redirects relative to the payload's resource no longer gets a follow-up,
+  so its PRG-only signal is not observed (a stated residual); the oracle reads the 3xx
+  as for any refused follow-up. Every other location's wire and follow-up are
+  byte-identical (the whole-location guard). No store or wire contract changes: the
+  `Probe` fields and the `skipped:` vocabulary are unchanged. Merge order: AU-REQID78
+  (request identity, may touch `probesender.py`) first, then this lane; the hunks here
+  are the two `send` prologues, `SeamProbeSender._send`'s signature and last lines, both
+  `_follow`s, `prg_target` and `PRG_RULES`.
+- Risk (low): it can only remove a follow-up that carried the payload; a target that
+  leaves the segment resolves to the same URL as before (urljoin is structural). The
+  `{param}` match is on whole path segments of the resolved target only.
+- Deliverables:
+  - [x] the fix in `prg_target` and both senders — done
+  - [x] `tests/test_query_placement.py::test_a_path_points_prg_follow_up_never_carries_the_payload`:
+    the strict xfail (AU-PRGPATH, 4 cases) is a passing test over `#top`, `edit`,
+    `?tab=2`, `./`, `../list`, an absolute path and an absolute URL, POST and GET, both
+    senders (28 cases; the 16 keeping the segment fail on `c483dc1`) — done
+  - [x] `tests/test_query_placement.py::test_no_prg_follow_up_carries_the_payload_at_any_location`
+    (query, bound query, body, header, JSON, path × `#top`/`edit` × both senders; the
+    path rows fail on `c483dc1`) and
+    `test_the_prg_location_table_covers_every_placeable_location` — done
+  - [x] `tests/test_query_placement.py::test_a_location_the_server_wrote_with_the_payload_is_fetched_as_written`
+    (the boundary, unchanged behaviour) — done
+  - [x] `tests/test_prg_observation.py::test_a_path_points_follow_up_that_would_re_send_the_payload_never_confirms`
+    (M4 confirmed through the re-sent payload on `c483dc1`) and its control
+    `test_a_path_points_follow_up_that_leaves_its_segment_still_confirms` — done
+  - [x] the rule fixture `own-segment-never-refetched` (`test_prg_rule`,
+    `test_every_prg_rule_has_a_fixture`) — done
+  - [x] FR-FUZZ-69; FR-FUZZ-49 P3 and FR-FUZZ-64's gap edited in place; NFR-FUZZ-safe's
+    PRG clause names the whole-location guard — done
+  - [x] BUG-0542 (RCA, recurrence review, prior-PA failure analysis) — done; PA-0542,
+    CHANGELOG and ERROR_LOG texts handed to the coordinator — done
+- Effectiveness (assessed <date> or pending): pending.
+
 ### CC-FUZZ-0110 — The blind-SQLi builder never admits an answer sent on a session known to be lost (FR-FUZZ-65, FR-FUZZ-63, BUG-0533; decision D′) (2026-10-20)
 - Placement: AU-SESS403 (audit defect 6), review round 5; the owner's decision D′ covers
   every consumer, so BUG-0533's sweep pin for this builder was closed instead of queued.

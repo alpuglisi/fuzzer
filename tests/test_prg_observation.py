@@ -20,7 +20,7 @@ import json
 import re
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qsl, quote, quote_plus, urlsplit
+from urllib.parse import parse_qsl, quote, quote_plus, unquote, urlsplit
 
 import pytest
 
@@ -53,7 +53,12 @@ class PrgSite:
     * ``sqlerr-quote`` -- a SQL error when the stored username has a quote (a
       second-order SQLi).
     ``reject_plain``: a POST whose value has no quote is refused with a 400 (no
-    redirect), as an app validating its input would refuse a control."""
+    redirect), as an app validating its input would refuse a control.
+
+    A path point (FR-FUZZ-69): ``POST /p/<seg>/view`` stores ``<seg>`` as the username
+    and answers ``status`` to ``location``; ``GET /p/<seg>/<any>`` renders its **own**
+    segment with ``#{a*b}`` evaluated -- what it shows comes from the request itself,
+    never from a POST."""
 
     def __init__(self, render="evaluate", status=303, location="/profile",
                  reject_plain=False, set_cookie=False, with_location=True):
@@ -84,6 +89,12 @@ class PrgSite:
                 data = dict(parse_qsl(raw.decode(), keep_blank_values=True))
                 site.log.append(("POST", self.path, data))
                 site.headers.append(dict(self.headers))
+                segs = urlsplit(self.path).path.split("/")
+                if len(segs) == 4 and segs[1] == "p" and segs[3] == "view":
+                    site.values["username"] = unquote(segs[2])
+                    site.history.append(site.values["username"])
+                    return self._reply(site.status, b"<html>See Other</html>",
+                                       headers=[("Location", site.location)])
                 if urlsplit(self.path).path != "/profile":
                     return self._reply(404, b"no")
                 if site.reject_plain and not any("'" in v for v in data.values()):
@@ -103,6 +114,10 @@ class PrgSite:
                 site.headers.append(dict(self.headers))
                 if parts.path == "/profile":
                     return self._reply(*site.page())
+                segs = parts.path.split("/")
+                if len(segs) == 4 and segs[1] == "p":    # its own segment, evaluated
+                    own = html.escape(site._evaluate(unquote(segs[2])))
+                    return self._reply(200, f"<html><p>{own}</p></html>".encode())
                 if parts.path == "/again":               # one more hop
                     return self._reply(302, b"", headers=[("Location", "/profile")])
                 if parts.path == "/redir":               # an open redirect (M9)
@@ -368,6 +383,33 @@ def test_a_payload_that_rode_the_redirect_is_reflected_xss(site):
     assert verdict.evidence["observation"] == "prg-redirect"
     assert any(p == "/results" and q.get("q") == verdict.evidence["signature"]
                for _m, p, q in [(m, urlsplit(x).path, d) for m, x, d in app.log])
+
+
+@pytest.mark.parametrize("location", ["edit", "#top", "?tab=2"])
+def test_a_path_points_follow_up_that_would_re_send_the_payload_never_confirms(site,
+                                                                              location):
+    """FR-FUZZ-69 (BUG-0542): ``POST /p/<payload>/view`` -> ``303 <location>``. A browser
+    would fetch ``/p/<payload>/edit`` (or the placed URL again), a page that evaluates its
+    own path. On c483dc1 the sender made that request and M4 confirmed through it, as
+    if it were the page the POST led to. The follow-up is refused instead: no request
+    after the POSTs, no confirmation."""
+    app = site(location=location)
+    cand = Candidate(url=app.base + "/p/{id}/view", param="id", method="POST",
+                     location="path", category="server-side-template-injection")
+    assert Oracle(strategies=[SstiStrategy()]).confirm(cand, RequestsProbeSender()) is None
+    assert {m for m, _p, _d in app.log} == {"POST"}, app.log
+
+
+def test_a_path_points_follow_up_that_leaves_its_segment_still_confirms(site):
+    """The control: the same path point redirected to ``/profile``, which renders the
+    stored value, is confirmed through its follow-up (a PRG observation)."""
+    app = site(location="/profile")
+    cand = Candidate(url=app.base + "/p/{id}/view", param="id", method="POST",
+                     location="path", category="server-side-template-injection")
+    verdict = Oracle(strategies=[SstiStrategy()]).confirm(cand, RequestsProbeSender())
+    assert verdict is not None and verdict.confirmed
+    assert verdict.evidence["observation"] == "prg"
+    assert {p for m, p, _d in app.log if m == "GET"} == {"/profile"}
 
 
 @pytest.mark.parametrize("encode", [
@@ -908,6 +950,23 @@ def _fx_relative(site):
     assert probe.followed.url == app.base + "/profile"
 
 
+def _fx_own_segment(site):
+    """A path point's ``Location`` is resolved against its template (FR-FUZZ-69):
+    ``#done`` keeps the point's segment, where a browser would fetch the payload again,
+    so nothing follows; ``../../profile`` leaves it and is fetched where a browser goes."""
+    def send(app):
+        return RequestsProbeSender().send(app.base + "/p/{id}/view", "id", "zqpayload",
+                                          method="POST", location="path", prg=True)
+    app = site(location="#done")
+    probe = send(app)
+    assert probe.prg == "skipped: the follow-up would re-send the payload"
+    assert [m for m, _p, _d in app.log] == ["POST"] and probe.prg_sends == 0
+    app = site(location="../../profile")
+    probe = send(app)
+    assert probe.prg == PRG_OBSERVED and probe.followed.url == app.base + "/profile"
+    assert app.log[-1][:2] == ("GET", "/profile")
+
+
 def _fx_fragment(site):
     app = site(location="/profile#done")
     probe = _probe_post(app)
@@ -956,6 +1015,7 @@ PRG_RULE_FIXTURES = {
     "303-becomes-get": _fx_303, "301-302-post-becomes-get": _fx_302_post,
     "get-redirect-stays-get": _fx_get_stays_get, "307-308-keep-the-body": _fx_307_308,
     "location-relative": _fx_relative, "location-fragment-not-sent": _fx_fragment,
+    "own-segment-never-refetched": _fx_own_segment,
     "no-location-no-redirect": _fx_no_location, "no-body-no-payload": _fx_no_body,
     "one-hop": _fx_one_hop, "same-origin-only": _fx_same_origin,
     "no-response-cookie-adopted": _fx_no_cookie,
