@@ -161,6 +161,12 @@ CC-CRAWL-0056 (FR-CRAWL-34..36, `fuzzlab/tools/spider.py`, `fuzzlab/tools/spa.py
 - *Unbounded frontiers:* disco's explorer is bounded by its own state and action budgets
   (FR-CRAWL-19); the spider's was the one without. `spa.py`'s route queue
   (`_pending_routes`) feeds the frontier, which now bounds it.
+- *Readers of page rows while a crawl runs* (the batched writer's consumers, PA-0152):
+  in `fuzzlab/`, `count`, `set_source` and `unresolved` flush first, and `is_visited`
+  reads memory; in `tests/`, the U2 seed test of `test_spa_query.py` read the newest
+  row from the store mid-crawl and now flushes first (found by the selection run, not
+  the sweep: F-record). The CLI's one builder (`spider_kwargs`) passes the new `limits`
+  keyword.
 - *Per-row commits on a hot path:* the spider's other tables (forms, verdicts, captured
   requests, revealed forms, script segments) still commit per write; they return
   decisions read from the store (a duplicate) and are far fewer than page rows. Residual
