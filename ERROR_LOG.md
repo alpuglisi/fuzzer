@@ -18,6 +18,24 @@ Format per entry:
 
 ---
 
+## 2026-10-21 — crawler, captured requests (a dispatcher's operations and nested inputs were dropped as duplicates; BUG-0546)
+- **Symptom:** each of these second requests was recorded as `duplicate` and never reached the importer (audit defect 9, reproduced on c483dc1):
+  - `POST /api {"data":{"cmd":"x"}}` after `{"data":{"q":"x"}}`;
+  - a second GraphQL operation on `/graphql`;
+  - a second JSON-RPC method;
+  - a second `?action=` value;
+  - a form body after a JSON one with the same names;
+  - a request adding a query parameter.
+  - In review round 1 (on 34d4fd1, the first fix): `action=Remove+from+cart` after `action=Add+to+cart` (form, JSON or query), and two `action` values over 64 characters.
+- **Root cause:** `StorageManager.record_request` keyed `discovered_requests` by method, canonical path and sorted top-level body keys. That key was chosen from the first targets' flat bodies, and the `UNIQUE` signature dropped a later request whole. PA-0505(1) (identity by content) was scoped to disco's documents and states and was not enforced. In the first fix, the selector rule made a value with whitespace, or over 64 characters, into data, so the rule erred towards merging.
+- **Remediation:**
+  - The operation key adds the media type and every operation selector (`tools/apiop.py`). Every non-empty string value of a selector field is a selector: whitespace is folded, and a value over 64 characters is keyed by its digest.
+  - A request is a duplicate only when a row of its operation has its exact typed key paths. One that adds an input is always stored with its own body. Contexts that add nothing are capped at 32 rows per operation.
+  - An AST guard keeps every writer of the table on that key.
+  - Instances in other items' code are pinned by strict xfails: `record_form`, `disco.synth` and `store_adapter._store_request`; the pipeline's DOM-template stage was fixed by BUG-0547 (its pin is a regression test). A guard checks that every row of the bug's sweep is fixed, not an instance, or pinned.
+  - References: CC-CRAWL-0057, FR-CRAWL-37, BUG-0546, PA-0546.
+- **Status:** Fixed
+
 ## 2026-10-21 — fuzzing harness and core (DOM-template dedup deleted unrelated attack surfaces; BUG-0547)
 - **Symptom:** `run_pipeline(pages_html=...)` audited only the points on the first URL of each DOM-skeleton template: equal skeletons at `/safe?q=` and `/admin?cmd=` left `q` alone; another form action, parameter, location or sibling set on a look-alike page was never evaluated; every page without HTML was one template. Nothing reported the drop.
 - **Root cause:** a deduplication step decided two units of work were the same by a similarity of their page (tag names only: no action, input name or handler) instead of by what they send and observe, defaulted an unknown page to one shared value, and was tested only where page and request coincide (BUG-0075's and BUG-0507's class; PA-0076 was worded for joins, PA-0507 for route classification).

@@ -127,8 +127,9 @@ class StorageManager:
         ''')
         # The app's own fetch/XHR requests with a JSON or form body (forms phase 3,
         # FR-CRAWL-13), the contract lane J imports: body_json is the redacted body as
-        # JSON text; source is 'passive' or 'submit'; signature = method + canonical URL
-        # path + sorted top-level keys. Request headers and cookies are never stored.
+        # JSON text; source is 'passive' or 'submit'; signature = the API operation plus
+        # the digest of the row's typed key paths (`tools.apiop.signature`, FR-CRAWL-37).
+        # Request headers and cookies are never stored.
         self.cursor.execute('''
             CREATE TABLE IF NOT EXISTS discovered_requests (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -224,11 +225,20 @@ class StorageManager:
         `core.redaction.redact_captured_body` (64 KiB, depth 8, fail closed). Only the
         media type of the request's own Content-Type is kept; no other header and no
         cookie is ever taken. ``seen_at``: when it was captured (wall time, seconds;
-        FR-CRAWL-29), now when not given. Returns None when stored, else why not
-        (``duplicate`` for a signature already stored)."""
+        FR-CRAWL-29), now when not given.
+
+        Rows are kept per API operation (FR-CRAWL-37, `tools.apiop`): the method,
+        canonical path, media type and every operation selector (a GraphQL operation,
+        ``action``/``op``/``cmd``, a JSON-RPC ``method``). A request whose typed key
+        paths (every depth, plus query names) a row of its operation already has is a
+        duplicate; one that adds a key path or a type to the operation's merged schema
+        is always stored with its own body; another combination of known inputs is
+        stored while the operation has fewer than `apiop.MAX_CONTEXT_ROWS` rows.
+        Returns None when stored, else why not (``duplicate``, or the context cap)."""
         import json
 
         from fuzzlab.core.redaction import redact_captured_body, redact_url_identifiers
+        from fuzzlab.tools import apiop
         doc, why = redact_captured_body(body, content_type)
         if why is not None:
             return why
@@ -236,9 +246,19 @@ class StorageManager:
         doc = json.loads(spa.scrub_markers(json.dumps(doc, ensure_ascii=False)))
         safe_url = spa.scrub_markers(redact_url_identifiers(url))
         method = (method or "").upper()
-        keys = sorted(str(k) for k in doc) if isinstance(doc, dict) else []
-        sig = json.dumps([method, url_key(safe_url), keys])
         media = (content_type or "").split(";", 1)[0].strip().lower()
+        op = apiop.operation_key(method, safe_url, media, doc)
+        prefix = apiop.signature_prefix(op)
+        stored = self.cursor.execute(
+            "SELECT signature, url, body_json FROM discovered_requests "
+            "WHERE substr(signature, 1, ?) = ?", (len(prefix), prefix)).fetchall()
+        shape = apiop.request_shape(doc, safe_url)
+        sig = apiop.row_signature(op, shape)
+        if any(row[0] == sig for row in stored):
+            return "duplicate"
+        if len(stored) >= apiop.MAX_CONTEXT_ROWS and shape <= apiop.operation_schema(
+                [(u, b) for _s, u, b in stored]):
+            return "operation over its context cap"
         try:
             self.cursor.execute('''
                 INSERT INTO discovered_requests

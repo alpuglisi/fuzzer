@@ -1371,7 +1371,18 @@ tracked in the requirements files, not here.
     - the spider table `discovered_requests` (the contract lane J imports) holds the
       app's own fetch/XHR requests with a JSON or form body, redacted only by
       `core.redaction.redact_captured_body` / `redact_url_identifiers` at the one write
-      site (PA-0100 guard); no header or cookie is stored;
+      site (PA-0100 guard); no header or cookie is stored. Since FR-CRAWL-37
+      (CC-CRAWL-0057, BUG-0546) its rows are kept per API operation (`tools/apiop.py`:
+      method, canonical path, media type and every operation selector -- a GraphQL
+      operation, the non-empty value of an `action`/`op`/`cmd` field, a JSON-RPC
+      `method` -- in the body at any depth or the query); a request is a duplicate only
+      when a row of its operation has its exact typed key paths, one that adds a key
+      path or a type is always stored with its own body, and contexts that add nothing
+      are capped at 32 rows per operation. Bodies are never merged (the importer judges
+      a body whole); an AST guard keeps every writer of the table on this key
+      (PA-0546). The importer still binds a parameter name to the first captured
+      request of its endpoint (audit defect 8, pinned), so an input a second operation
+      shares by name is not its own point yet;
     - `--submit-spa-forms [ROUTE …]` (off by default) fills and clicks eligible forms
       once (`spa.form_refusal`, 50 per crawl); a password form only in a fresh
       unauthenticated context of the same guarded browser; in an authenticated crawl
@@ -1532,7 +1543,7 @@ tracked in the requirements files, not here.
   capture, JS endpoint extraction, DOM-skeleton template dedup, state-aware
   navigation, URL normalization, crawl budget. Built for single-page apps (forms
   phase 3, `tools/spa.py`): SPA route discovery from loaded scripts (hash and history
-  mode), canonical page keys, request-body capture (`discovered_requests`) and opt-in
+  mode), canonical page keys, request-body capture (`discovered_requests`, kept per API operation, FR-CRAWL-37) and opt-in
   SPA form submission (FR-CRAWL-12/13); by default each eligible SPA form is
   dry-submitted -- clicked inside the write-blocking window, its write recorded and
   aborted, the client state rolled back -- and every write a reveal window aborts is
