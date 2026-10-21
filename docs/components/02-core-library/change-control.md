@@ -52,6 +52,47 @@ Newest first.
       new `test_a_send_with_a_body_never_leaves_or_takes_a_pooled_connection` and
       `tests/test_trace_attempts.py::test_the_seams_default_transport_sends_exactly_the_tries_it_records`
       (the server's count equals the recorded tries through the default transport).
+  - *(Review round 2 of the merge integration, 2026-10-21; lane INTEG, branch
+    `integ/proxy-r2` from the local merge stack 4e0c2c6; finding P2-1, owner-approved.)*
+    - **A pooled connection is kept only after an exchange that ended exactly at its
+      framed end** (BUG-0549 "Review round 2"). This was a security regression of this
+      entry's pooling, never pushed. urllib3 kept a connection whose answer was followed
+      by bytes past its framed end: http.client's buffered reader dropped them at the
+      end, or, over TLS, they stayed in the SSL object. The next send rode the
+      connection, and a stray arriving before its answer was read as its answer (the
+      checker's `after=b'stray2'`). Behind a 10 000-byte TLS answer, the next send was
+      handed the stray at once. Round 1 had pinned this as a strict xfail "owner CORE"
+      (F-162).
+    - The fix is in SP-60's module, `fuzzlab/core/bodyread.py`, whose connection and
+      pool classes `bound` and `watched` mount (CC-CORE-0072's module; no CC number was
+      pre-assigned for it, so it is recorded here):
+      - `_FramedResponse`, the watched connections' `response_class`, reads through a
+        `BufferedReader` over `_Held`. `_Held` is the socket stream, plus a mode that
+        returns "would block" at once. At http.client's framed end (`_close_conn`) the
+        response notes `past`, the bytes its reader holds, with a `peek` that never
+        receives.
+      - `_ExactPool._put_conn` closes a returned connection unless `exact_end` holds:
+        the answer was read to its end, `past` is 0, and `_quiet` finds no TLS byte
+        received and unread (`SSLSocket.pending`; for TLS in an HTTPS proxy tunnel,
+        urllib3's `SSLTransport` SSL object and incoming buffer, then the tunnel's
+        socket) and the socket not readable.
+      - The connection classes note the exchange's response as `framed` (reset at each
+        `request` and `getresponse`, so a tunnel's CONNECT answer vouches for nothing).
+    - `core/http.py`: the `PooledTransport` docstring only (a new paragraph on the keep
+      rule). Its sessions are `bodyread.bound`, so the rule applies to them. The send
+      keeps its answer, and nothing is resent.
+    - Tests (`tests/test_http_pooling.py`):
+      - `test_an_answer_followed_by_another_never_leaves_its_pooled_connection` is no
+        longer a strict xfail. It has five shapes: a second answer, a chunked answer
+        then another, an empty answer then another, a 204 then bytes, and a lone CRLF.
+        In each, the peer sends a second stray before the real answer if the
+        connection were reused, so a kept connection shows as `stray2`.
+      - New `test_a_stray_answer_held_by_tls_never_leaves_its_pooled_connection`, four
+        cases: the stray in the reader or in the TLS layer, direct or inside a loopback
+        HTTPS proxy's TLS tunnel (`_TlsTunnel`). Clean TLS exchanges still keep one
+        connection and one handshake (one tunnel).
+    - Measurement: `scratchpad/lanes/INTEG/measure_seam_r2.py` (before and after logs)
+      and `measure_seam_rate.py` (`measure_seam_rate.log`).
 - Impact (other components / project):
   - Every `HttpClient` user (FUZZ's `SeamProbeSender`, blind-SQLi's `SeamSender`, AUD's
     seam fetch, `tools/authhttp.py`'s clients, isolated copies' clients) now reuses
@@ -72,6 +113,21 @@ Newest first.
     transport failure as any other (`requests.RequestException`). A send with a body
     (a form or JSON probe) pays a connect, as before the lane; bodiless sends keep their
     pooled connection.
+  - *(Review round 2.)*
+    - Every `requests` session fuzzlab makes for a target keeps a connection only after
+      an exactly framed exchange, not only the seam's. The sessions affected are
+      `RequestsProbeSender`, greybox, the spider's sessions, blind-SQLi's
+      `RequestsSender`, the session manager's login fetch, `navguard.get_checked` and
+      the contract runner's watched session (BUG-0549 round-2 sweep). FUZZ, CRAWL, SESS
+      and AUD code is unchanged.
+    - A target that sends bytes past an answer (a second answer, a lone CRLF) now costs a
+      new connection for the next send. Answers are unchanged, and clean exchanges keep
+      their connection (measured: one connection, one handshake, one tunnel).
+    - Not covered: a session through a SOCKS proxy (requests' own pools, SP-60's stated
+      limit), and the two reasoned unbounded LAB sessions, which never carry target
+      traffic.
+    - No store or wire contract change. The shared-doc texts (SP-60's row, PA-0549(3b),
+      (3c)) are in the lane's doc texts.
 - Risk (medium):
   - A reused connection the server closes between urllib3's liveness check and the
     send fails a non-idempotent send (SP-34 "not observed") where a fresh connection
@@ -92,6 +148,19 @@ Newest first.
     as what happened, the idle retirement (4 s) keeps reuses under the usual 5 s server
     idle close, and urllib3 drops a connection already closed. The `_get_conn` private-API
     risk above is gone with `_reuse_noting`.
+  - *(Review round 2.)*
+    - **Library internals.** The rule depends on three urllib3 2.8.0 and http.client
+      3.13 behaviours, each measured:
+      - http.client makes each response through `response_class(sock, ...)` and drops
+        its reader at the framed end in `_close_conn`;
+      - urllib3 returns a connection through the pool's `_put_conn` after that end;
+      - urllib3's `SSLTransport` names its SSL object `sslobj`.
+      If a future version changes the first, `past` stays None and nothing is kept: a
+      connection per send, safe but slower. If it changes the second, the rule is not
+      called at all, which the tests catch (the stray cases fail). For the third,
+      `_quiet` refuses a TLS tunnel it cannot inspect.
+    - **R9 (stated):** a stray that arrives after both checks is read as the next
+      answer: every keep-alive client's residual.
 - Deliverables:
   - [x] `PooledTransport`, `HttpClient.close` and the keyed call in `core/http.py` — done
   - [x] `tests/test_http_pooling.py`: one connection for sequential and concurrent sends;

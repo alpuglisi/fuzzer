@@ -2,7 +2,8 @@
 
 - Date: 2026-10-21
 - Status: fixed (CC-CORE-0075, CC-PROXY-0029), with stated residuals; review round 1
-  fixed three review findings (see "Review round 1")
+  fixed three review findings (see "Review round 1"); review round 2 fixed the core
+  seam's keep decision (P2-1, see "Review round 2")
 - Severity: medium. The audit rated defect 24 PERF_DEGRADATION. No wrong answer came of
   it, but every authenticated probe paid a TCP (and TLS) setup, the proxy built a
   system-CA SSL context per TLS call, and a run's timing measurements carried a
@@ -653,3 +654,159 @@ after an answer).**
   This is the residual of any keep-alive client, now narrowed to bytes sent late.
 - R1 is closed for the end decision. The stricter grammar filter (`_chunked_exact`) is
   kept by choice.
+
+## Review round 2 (lane INTEG, 2026-10-21; finding P2-1, owner-approved fix round)
+The adversarial check of `integ/proxy-r1` (96a6939) confirmed I2 fixed on the proxy's
+sender and found the same defect, exploitable, in the core seam. Round 1 had pinned it as
+a strict xfail "owner CORE" (F-162). Fixed on `integ/proxy-r2`, from the local merge stack
+4e0c2c6 (POOL24, HIST25, PRGPATH, SURROGATE and `integ/proxy-r1` merged; not pushed).
+
+### Description, where encountered, what it caused to fail
+- **P2-1 (security; a regression of this bug's own fix, unpushed).** `core/http.py::PooledTransport`
+  keeps one `requests` session per (origin, identity, generation), and urllib3 inside it
+  keeps the connections. When the target sent bytes past an answer's framed end with the
+  answer, urllib3 kept the connection and the bytes were dropped unseen. When a second
+  stray came before the next answer, the next send got it as its own answer: a response
+  desync across sends, and so across the probes and identities of a run. Before POOL24
+  the seam opened a session per send, so this was new with the batch.
+- *Where:* the checker's plain-Python repro against 96a6939 (`after=b'stray2'`), and
+  round 1's strict xfail `tests/test_http_pooling.py::test_an_answer_followed_by_another_never_leaves_its_pooled_connection`.
+- *Measured here before the fix* (`scratchpad/lanes/INTEG/measure_seam_r2.py`, through
+  the real seam, urllib3 2.8.0, Python 3.13 http.client, loopback; log
+  `measure_seam_r2.before.log`):
+  - A second answer in the answer's segment, after a `Content-Length`, chunked, empty or
+    204 answer, or a lone CRLF after it: the bytes sat in http.client's buffered reader
+    when it reached the framed end (43 bytes, or 2 for the CRLF). Nothing was readable on
+    the socket. urllib3 put the connection back and the next send rode it.
+  - A second stray sent before the next answer: the next send's answer was `b'stray2'`.
+  - **Over TLS, with no late timing at all:** behind a 10 000-byte answer in one TLS
+    record, the stray stayed in the SSL object (43 bytes pending, the socket not
+    readable, the reader's buffer empty), and the next send's answer was `b'stray'`.
+  - A stray written while the connection sat idle in the pool: urllib3's check when it
+    takes a pooled connection (the socket readable) dropped it. That check is the only
+    one urllib3 makes.
+  - Clean exchanges: one connection for 50 GETs (plain), one connection and one handshake
+    for 50 over TLS, one tunnel for 30 through an HTTPS proxy.
+
+### What the defect was
+The seam handed the keep decision to urllib3. urllib3 returns a connection to its pool as
+soon as http.client has read the answer to its framed end. It never asks what http.client's
+reader or the TLS layer still holds, and when it takes the connection again it looks at
+the socket only.
+
+### Root cause analysis
+1. *Why was a connection kept with a stray answer behind it?* urllib3 checks only that
+   the socket is not readable, and only when it takes a pooled connection.
+2. *Why did that check not see the stray?* http.client reads through an 8 KiB buffered
+   reader, which takes whatever a receive brings, the stray included, and drops it at the
+   framed end. Over TLS, a reader that asks for exactly the answer's last bytes leaves the
+   rest in the SSL object, and the socket is not readable either.
+3. *Why did POOL24 rely on urllib3's rule?* It moved the seam from a session per send to
+   requests' pooling and took the library's keep rule as given. Its docstring named one
+   check ("urllib3 drops a pooled connection it finds closed before reusing it").
+   PA-0549(3)'s "nothing after it" was built where the lane wrote the keep decision itself,
+   the proxy's `SocketSender`, and not where a library makes it for the lane.
+4. *Why was it not caught before the merge?* The seam's tests covered keys, jars,
+   generations, bodies and closing, not where an answer ended. Nothing measured what
+   urllib3 observes (CLAUDE.md rule 8). The merge integration found it and measured it,
+   then pinned it as another owner's instance (F-162).
+
+**Root cause:** a keep decision was delegated to a library without measuring what the
+library observes at the end of an answer. The exactness rule (PA-0549(3)) was applied
+only to code the lane wrote, not to a decision a library makes on its behalf.
+
+### Corrective action (CC-CORE-0075, review-round-2 sub-bullet; commit on `integ/proxy-r2`)
+The decision is made in SP-60's module (`core/bodyread.py`), in the urllib3 connection
+and pool classes that `bound` and `watched` mount on every session fuzzlab makes for a
+target. The seam's sessions are made with `bound`, so they get it, and so does every
+other bounded or watched session (the sweep below).
+- `_FramedResponse` (http.client's response, made by the watched connection classes'
+  `response_class`) reads through a `BufferedReader` over `_Held`, the same socket stream
+  plus a mode in which a read returns "would block" at once. At http.client's framed end
+  (`_close_conn`), before the reader is dropped, it notes `past`: the bytes the reader
+  holds, read with `peek` under `_Held`, never a receive.
+- `_ExactPool._put_conn` (the watched pools' return of a connection) keeps a connection
+  only when `exact_end` holds: the exchange's response was read to its framed end, `past`
+  is 0, and `_quiet` finds nothing waiting. `_quiet` means no TLS byte received and unread
+  (`ssl.SSLSocket.pending`; for urllib3's `SSLTransport`, TLS inside an HTTPS proxy's
+  tunnel, its SSL object, its incoming buffer, then the tunnel's socket) and the socket
+  not readable. Any other connection is closed there and never reused (a later take
+  reconnects it).
+- The send that read the answer keeps its answer. Nothing is resent: the transport still
+  makes one try per send. An answer that is not exactly framed still fails as before
+  (`BodyIncomplete`, SP-34), and urllib3 closes that connection itself.
+- urllib3's own check when it takes a pooled connection still applies (a stray that
+  arrives while the connection is idle).
+
+### Recurrence review (round 2)
+Checked `docs/bugs/` and `docs/PREVENTIVE_ACTIONS.md` for "urllib3", "kept", "keep",
+"framed end", "stray", "pool" and "measure".
+- **Same root cause, one layer over: this bug's merge integration, I2.** The proxy's
+  sender decided "nothing after the answer" from a reader's return value and kept
+  connections with bytes behind them. PA-0549(3) and its proposed (3a) answered it for
+  the sender's own decision.
+- **Same class: BUG-0536 / PA-0536(2).** "A timeout argument is not a deadline": a
+  `requests` timeout was taken for a deadline on the library's word, cleared by a sweep,
+  and measured wrong. Here urllib3's reuse was taken for an exact-end check.
+- **Same conduct: BUG-0134 / PA-0134(2), BUG-0546 / PA-0546(5).** A security-relevant
+  instance was pinned as another owner's (F-162). A strict xfail is for another item's
+  code (PA-0531(4)), not for a regression of the same unpushed batch.
+
+### Prior-preventive-action failure analysis (round 2)
+- **PA-0549(3) (this bug)** held in content ("one fully framed keep-alive answer, nothing
+  after it"). It failed **at the wrong layer**: it was read as a rule for code that
+  decides to keep a connection, and the seam's code decides nothing; urllib3 does.
+  Its enforcing tests for the seam never sent a byte past an answer.
+- **PA-0536(2) (BUG-0536)** says a sweep verdict about a library's bound cites a test
+  against the bad peer, never the library's parameter. It was **too narrow**: worded for
+  timeouts and deadlines, not for a library's other safety claims such as connection reuse.
+- **PA-0531(4) / PA-0054(3)** (pin another item's known instance) were **misapplied** in
+  round 1 to a regression of the same batch (F-162).
+
+### Preventive action (round 2): PA-0549 amended
+No new PA number. The amendment text is in the lane's doc texts:
+- *(3b)* A keep (or reuse) decision that a library makes for the code is the code's to
+  verify. Before relying on it, measure what the library observes at the end of an
+  answer: its buffered reader, the TLS layer, the socket. Then make the decision where
+  those are visible (SP-60's pools, `exact_end`), with a test whose peer sends bytes past
+  an answer, plain and over TLS.
+- *(3c)* A defect that a sweep finds in an unpushed change of the same batch is fixed in
+  that batch. It is never pinned as another owner's open instance.
+- Enforced additionally by `tests/test_http_pooling.py::test_an_answer_followed_by_another_never_leaves_its_pooled_connection`
+  and `tests/test_http_pooling.py::test_a_stray_answer_held_by_tls_never_leaves_its_pooled_connection`.
+
+**PA-0002 sweep (round 2; by mechanism: every urllib3 pool that keeps a connection for
+fuzzlab).** This replaces the merge-integration table's second and third rows.
+
+| Site | Disposition |
+|---|---|
+| `core/http.py::PooledTransport` (the seam: `HttpClient`, `SeamProbeSender`, blind-SQLi's `SeamSender`, AUD's seam fetch, `tools/authhttp.py`) | fixed: its sessions are `bodyread.bound`, whose pools decide with `exact_end` |
+| Every other session made for a target with `bodyread.bound` or `bodyread.watched` (`RequestsProbeSender`, greybox, the spider's sessions and its form `iso`, blind-SQLi's `RequestsSender`, the session manager's login fetch, `navguard.get_checked`'s session, the contract runner) | fixed by construction: the same pools. The guard `tests/test_bounded_reads.py::test_every_requests_session_fuzzlab_makes_is_bounded` keeps every target session on them |
+| A session through a SOCKS proxy | not covered: `WatchedAdapter` leaves requests' SOCKS pools unwatched (SP-60's stated limit); same as before this round |
+| `lab_fixtures/external.py`, `labgen/identifier_sqli_oracle.py` (unbounded by the guard's reasoned list) | not this class: lab provisioning and the conformance oracle of apps this project generated, never a target |
+| `proxy/socketsender.py::SocketSender._finish` | fixed in the merge integration (SP-63's leftover, then `_quiet`) |
+
+### Verification (round 2)
+- *Measured after the fix* (`measure_seam_r2.after.log`): every stray case above closes
+  the connection when the answer is returned (`past` 43, 2 for the CRLF, or 43 pending in
+  the SSL object), and the next send gets its own answer on a new connection. That
+  includes the TLS and TLS-in-TLS cases. Clean exchanges are unchanged: one connection
+  for 50 GETs plain, one connection and one handshake over TLS, one tunnel for 30
+  through an HTTPS proxy. The send rate is within run-to-run spread: before 1 080-1 162,
+  after 977-1 153 sequential calls/s, one connection each (`measure_seam_rate.log`).
+- *Tests:* `test_an_answer_followed_by_another_never_leaves_its_pooled_connection` (no
+  longer an xfail) has five shapes: a second answer, a chunked answer then another, an
+  empty answer then another, a 204 then bytes, and a lone CRLF. In each, the peer would
+  send a second stray before the next answer if the connection were reused.
+  `test_a_stray_answer_held_by_tls_never_leaves_its_pooled_connection` covers the reader
+  and the TLS layer, direct and inside an HTTPS proxy's TLS tunnel. All of them fail on
+  4e0c2c6's product files, in one pytest invocation on a scratch copy (the connection is
+  never closed), and pass on the fixed tree. The counts are in CC-CORE-0075.
+
+### Residuals (round 2)
+- **R9: a stray that arrives with no earlier sign.** Bytes that arrive after the pool's
+  check at the answer's end and after urllib3's check at the next take, before the next
+  answer is read, are still read as that answer. Every HTTP/1.1 client that keeps
+  connections has this. R8 is the same residual for the proxy's sender.
+- A lone CRLF after an answer (which some servers send) now costs a new connection. The
+  answer is unchanged. The proxy's sender has done the same since the merge integration.

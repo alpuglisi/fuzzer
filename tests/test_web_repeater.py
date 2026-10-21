@@ -141,6 +141,35 @@ def test_route_send_reaches_upstream_when_authorized(tmp_path):
         srv.close()
 
 
+def test_a_history_failure_answers_the_repeaters_response_and_says_so(tmp_path,
+                                                                       monkeypatch):
+    """Review round 2 (P2-2): with the project store locked by another writer, the
+    Repeater's history write failed after the upstream answered, and the route answered
+    500 (no handler catches it), so the operator saw an error for a request the target
+    had received and may send it again. Wanted: 200 with the upstream's response, the
+    history's failure named beside it and counted, the upstream asked once."""
+    import sqlite3
+
+    from tests._keepalive_peer import KeepAlivePeer
+    writes: list[int] = []
+
+    def write(self, prepared):                     # what a locked store's write raises
+        writes.append(len(prepared))
+        raise sqlite3.OperationalError("database is locked")
+    monkeypatch.setattr(HistoryWriter, "_write", write)
+    with KeepAlivePeer() as peer:
+        client = web_client(create_app(_cfg(tmp_path / "r.db", authorized=True)))
+        tab = client.post("/api/proxy/repeater/tabs",
+                          json={"name": "u", "host": "127.0.0.1", "port": peer.port,
+                                "raw": "GET /once HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"}).json()
+        res = client.post(f"/api/proxy/repeater/tabs/{tab['id']}/send", json={})
+        assert res.status_code == 200
+        out = res.json()
+        assert out["response"].endswith("/once")
+        assert out["history_error"] == "OperationalError" and out["history_failures"] == 1
+        assert writes and [s.path for s in peer.seen] == ["/once"]
+
+
 def test_route_from_flow_404_missing(tmp_path):
     client = web_client(create_app(_cfg(tmp_path / "r.db")))
     assert client.post("/api/proxy/repeater/from-flow/1").status_code == 404

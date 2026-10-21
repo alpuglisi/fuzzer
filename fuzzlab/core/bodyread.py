@@ -31,6 +31,13 @@ one), watched. Every session fuzzlab makes for a target is bounded where it is m
 (``tests/test_bounded_reads.py`` guard); the contract runner's session is `watched` and
 reads with `read_body` under its own limits.
 
+**Kept connections** (FR-CORE-509, BUG-0549 review round 2). The pools `bound` and
+`watched` mount keep a connection only after an exchange that ended exactly at its framed
+end (`exact_end`): http.client's reader held no byte past the answer (`_FramedResponse`
+notes it there, without a receive), no TLS byte waits unread, and the socket is not
+readable. Any other connection is closed when it is returned, and never reused. The
+send that read the answer keeps it; nothing is resent.
+
 Content codings, as urllib3 decodes them: identity; ``gzip`` / ``x-gzip`` (several
 members; bytes after a whole member ignored); ``deflate`` (zlib-wrapped or raw); ``br``
 with a Brotli that bounds its output (``Decompressor.process(..., output_buffer_limit)``,
@@ -51,8 +58,11 @@ from __future__ import annotations
 import contextlib
 import functools
 import heapq
+import http.client
+import io
 import itertools
 import socket
+import ssl
 import threading
 import time
 import zlib
@@ -63,6 +73,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.connection import HTTPConnection, HTTPSConnection
 from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
+from urllib3.util.wait import wait_for_read
 
 #: Body bytes as they crossed the wire (content-coded), at most.
 MAX_WIRE_BYTES = 16 << 20
@@ -474,30 +485,151 @@ def _arm(sock) -> None:
     w.entries.append(_WATCHDOG.arm(sock, w))
 
 
+# --- kept connections: only after an exchange that ended exactly at its framed end -------
+# (FR-CORE-509, BUG-0549 review round 2.) urllib3 returns a connection to its pool once
+# http.client has read the answer to its framed end. Measured on urllib3 2.8.0 with
+# Python 3.13's http.client (`scratchpad/lanes/INTEG/measure_seam_r2.py`, through the
+# core seam): bytes the peer sent past the framed end with the answer sit in the
+# response's buffered reader, which http.client drops at that end, and urllib3 kept the
+# connection (a second answer in the segment dropped unseen; a later one read as the next
+# request's answer). Behind a 10000-byte answer in one TLS record, a stray answer stayed
+# in the SSL object (43 bytes pending, the socket not readable) and was read as the next
+# request's answer. urllib3's own check, when a pooled connection is taken (the socket
+# not readable), sees neither.
+
+class _Held(io.RawIOBase):
+    """The raw stream under a response's reader: the socket's, except that while ``held``
+    a read returns at once with nothing ("would block"), so the reader can be asked what
+    it holds without a receive."""
+
+    def __init__(self, raw):
+        super().__init__()
+        self._raw = raw
+        self.held = False
+
+    def readable(self) -> bool:
+        return True
+
+    def readinto(self, buffer):
+        if self.held:
+            return None
+        return self._raw.readinto(buffer)
+
+    def fileno(self) -> int:
+        return self._raw.fileno()
+
+    def close(self) -> None:
+        if not self.closed:
+            try:
+                self._raw.close()
+            finally:
+                super().close()
+
+
+class _FramedResponse(http.client.HTTPResponse):
+    """http.client's response, noting at its framed end (where http.client drops its
+    reader, `_close_conn`) how many bytes the reader held past that end: ``past``. None
+    until the answer ended, or when the reader could not tell (never kept)."""
+
+    def __init__(self, sock, *args, **kwargs):
+        super().__init__(sock, *args, **kwargs)
+        self.past: int | None = None
+        detach = getattr(self.fp, "detach", None)
+        if detach is not None:            # nothing was read yet: the same raw stream
+            self.fp = io.BufferedReader(_Held(detach()))
+
+    def _close_conn(self):
+        fp = self.fp
+        raw = getattr(fp, "raw", None)
+        if isinstance(raw, _Held):
+            raw.held = True
+            try:
+                self.past = len(fp.peek(1))      # what is buffered; never a receive
+            except (OSError, ValueError):
+                self.past = None
+            finally:
+                raw.held = False
+        super()._close_conn()
+
+
+def _quiet(sock) -> bool:
+    """Nothing waits on a connection: no TLS byte received and not yet read (an
+    ``ssl.SSLSocket``'s, or urllib3's ``SSLTransport``'s for TLS inside a proxy's TLS
+    tunnel, then the tunnel's), and the socket not readable (a byte, a close, a reset).
+    A stream it cannot inspect is never quiet."""
+    try:
+        while not isinstance(sock, socket.socket):
+            inner = getattr(sock, "sslobj", None)          # urllib3's SSLTransport
+            if inner is None or inner.pending() or \
+                    getattr(getattr(sock, "incoming", None), "pending", 1):
+                return False
+            sock = getattr(sock, "socket", None)           # the tunnel's
+        if isinstance(sock, ssl.SSLSocket) and sock.pending():
+            return False
+        return not wait_for_read(sock, timeout=0.0)
+    except (OSError, ValueError):
+        return False
+
+
+def exact_end(conn) -> bool:
+    """Whether a urllib3 connection may be kept for another request (FR-CORE-509): its
+    last answer was read to its framed end, its reader held nothing past that end, and
+    nothing waits on its socket (`_quiet`). Anything else is not known to be clean."""
+    response = getattr(conn, "framed", None)
+    sock = getattr(conn, "sock", None)
+    return (isinstance(response, _FramedResponse) and response.isclosed()
+            and response.past == 0 and sock is not None and _quiet(sock))
+
+
 def _watched(base):
     """``base`` (a urllib3 connection class) arming its socket under the thread's
-    `watch`: when it connects, and before it sends and reads (a reused connection)."""
+    `watch`: when it connects, and before it sends and reads (a reused connection). Its
+    responses are `_FramedResponse`, the current one kept as ``framed`` for the pool's
+    keep decision (`exact_end`)."""
     class Watched(base):
+        #: this exchange's response; None from a request until its response is made
+        framed = None
+
+        def response_class(self, sock, *args, **kwargs):
+            # http.client makes every response as ``self.response_class(sock, ...)``
+            response = _FramedResponse(sock, *args, **kwargs)
+            self.framed = response
+            return response
+
         def connect(self):
             super().connect()
             _arm(self.sock)
 
         def request(self, *args, **kwargs):
+            self.framed = None
             _arm(self.sock)
             return super().request(*args, **kwargs)
 
         def getresponse(self, *args, **kwargs):
+            self.framed = None              # a tunnel's CONNECT answer vouches for nothing
             _arm(self.sock)
             return super().getresponse(*args, **kwargs)
     Watched.__name__ = Watched.__qualname__ = "Watched" + base.__name__
     return Watched
 
 
-class _WatchedHTTPPool(HTTPConnectionPool):
+class _ExactPool:
+    """A urllib3 pool's return of a connection: kept only after an exactly framed
+    exchange (`exact_end`); any other is closed there and never reused (a later take of
+    it opens a new connection). The send that read the answer has its answer already."""
+
+    def _put_conn(self, conn):
+        if conn is not None and getattr(conn, "sock", None) is not None \
+                and not exact_end(conn):
+            conn.close()
+        super()._put_conn(conn)
+
+
+class _WatchedHTTPPool(_ExactPool, HTTPConnectionPool):
     ConnectionCls = _watched(HTTPConnection)
 
 
-class _WatchedHTTPSPool(HTTPSConnectionPool):
+class _WatchedHTTPSPool(_ExactPool, HTTPSConnectionPool):
     ConnectionCls = _watched(HTTPSConnection)
 
 

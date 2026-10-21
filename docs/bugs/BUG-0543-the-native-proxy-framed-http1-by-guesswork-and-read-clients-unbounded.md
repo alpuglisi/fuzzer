@@ -1,7 +1,8 @@
 # BUG-0543 — The native proxy framed HTTP/1 by guesswork and read its clients unbounded
 
 - Date: 2026-10-21
-- Status: fixed (CC-PROXY-0028)
+- Status: fixed (CC-PROXY-0028); merge integration and review round 2 (the Repeater's
+  history hand-over, P2-2) under CC-PROXY-0029
 - Severity: high. In the lab-only proxy, a chunked upload never reached the lab app, a
   cut response was recorded and relayed as a whole one, and any local client could hold
   every connection, buffer and worker of the proxy.
@@ -316,3 +317,88 @@ section. The other two follow.
   answer on a kept connection is `UpstreamIncomplete("eof")`, never resent. SP-63's
   exceptions are not `_PEER_CLOSED`, so a close or reset before any byte is still the
   one resend.
+
+## Review round 2 (lane INTEG, 2026-10-21; finding P2-2, owner-approved fix round)
+The adversarial check of `integ/proxy-r1` (96a6939) confirmed I1 fixed on every
+`ProxyEngine` path. It found the same defect on the Repeater, which round 1 had pinned
+as a strict xfail (CC-PROXY-0029 "Sweep pins"). Fixed on `integ/proxy-r2`, from 4e0c2c6.
+
+- **Description:** `proxy/repeater.py::Repeater.send` calls the history's synchronous
+  `record` after the upstream has answered. When that write failed, the error replaced
+  the response. The web UI's Repeater builds `HistoryWriter(store, run_id, batch_size=1)`,
+  so `record` flushes at once, and a failed flush re-raises with the flow kept in its
+  buffer (BUG-0106).
+- **Where encountered / what it caused to fail:** in the checker's measurement, another
+  connection held `BEGIN EXCLUSIVE` on the project store. The upstream got the request
+  once and answered 200. `Repeater.send` raised `OperationalError: database is locked`
+  after 10.1 s. The route `/api/proxy/repeater/tabs/{id}/send` has no handler for it, so
+  the operator got a 500 for a request the target had received, and might send it again.
+  Round 1's pin `tests/test_proxy_repeater.py::test_a_history_failure_never_loses_the_repeaters_response`
+  showed it with a raising fake history.
+- **What the defect was:** I1's defect (a side channel that only observes a flow
+  changes the flow's answer), on the Repeater's hand-over, which round 1 did not fix.
+- **Root cause analysis:**
+  1. *Why did the operator get a 500?* `Repeater.send` let the history's exception out
+     after the send, and the route does not catch it.
+  2. *Why was the hand-over uncontained?* The Repeater predates HIST25 and has always
+     recorded synchronously. The rule that a history failure never changes the answer
+     (I1, proposed PA-0550(8)) was written in round 1 and applied at the engine only.
+  3. *Why only at the engine?* Round 1's sweep found the Repeater and pinned it as
+     "known and not fixed in this change", although the Repeater is this component's
+     own code and the fix is the same containment (the conduct F-162 records for the
+     seam).
+  **Root cause:** a containment rule was applied at the call site where the failure was
+  measured, not at every caller of the same hand-over, and the sweep pinned the lane's
+  own instance instead of fixing it.
+- **Corrective action (CC-PROXY-0029, review-round-2 sub-bullet):**
+  - `Repeater.send` contains anything raised while building or recording the flow. It
+    returns the upstream's response, counts the failure in the new
+    `Repeater.history_failures` (a `Counter` by error class), names it in
+    `last_history_error` (None when the exchange was recorded), and logs it with the
+    error class only.
+  - The flow stays in the writer's buffer (BUG-0106). The next send's successful write
+    stores it, measured in the test.
+  - `web/proxycontrol.py::RepeaterController.send` (a UI-component file; no CC-UI number
+    was pre-assigned, the coordinator's text is in the lane's doc texts) adds
+    `history_error` and `history_failures` (the controller's count across its threads)
+    to the JSON the route returns beside `response`. That JSON is where the operator
+    reads the Repeater's result.
+  - The upstream is asked once. Nothing is resent.
+- **Recurrence review:** I1 above (round 1, same root cause, the engine's hand-over).
+  BUG-0550 item 3 (a write failure raised into the proxied connection's handler). BUG-0554
+  / PA-0554(2) (a writer of target-derived rows never raises to its caller). F-162 (an
+  instance in the lane's own batch pinned as another owner's).
+- **Prior-preventive-action failure analysis:** PA-0086(2) and PA-0554(2) applied and
+  were **not followed** at the Repeater. Round 1's proposed PA-0550(8) was **too
+  narrow**: its test clause names the engine ("a test injects a raising side channel at
+  the engine"), so it did not reach the Repeater's caller. PA-0531(4) was **misapplied**:
+  a pin is for another item's code, and the Repeater is the lane's own component.
+- **Preventive action:** the PA-0550(8) amendment text in the lane's doc texts (no new
+  number). Every caller that hands a flow to a history, the engine and the Repeater
+  today, contains it and counts the failure where its operator reads the result. Each
+  such caller has a test with a raising history. A sweep instance in the lane's own
+  component is fixed in the same change.
+- **Sweep (by mechanism: every caller of `HistoryWriter.record` / `submit` after an
+  upstream answered):**
+
+  | Site | Disposition |
+  |---|---|
+  | `server.ProxyEngine._record` | fixed in round 1 |
+  | `proxy/repeater.py::Repeater.send` | fixed here |
+  | `web/proxycontrol.py::RepeaterController.send` (calls `Repeater.send`) | fixed here: the failure is in its JSON; no exception reaches the route |
+  | `proxy/cli.py`, `web/proxycontrol.py::ProxyController` | not callers of `record`/`submit` themselves: they build the writer the engine calls |
+  | tests' fake histories | not product code |
+
+- **Verification:** `tests/test_proxy_repeater.py::test_a_history_failure_never_loses_the_repeaters_response`
+  (no longer an xfail) makes the real `HistoryWriter`'s write fail with `database is
+  locked`. It asserts the response, one upstream send, the count and the name, and then
+  that a later successful send stores both flows. `tests/test_web_repeater.py::test_a_history_failure_answers_the_repeaters_response_and_says_so`
+  drives the real route against a loopback upstream and asserts 200, the upstream's
+  answer, `history_error`, `history_failures` and one request upstream. Both fail on
+  4e0c2c6's product files (the store's `OperationalError` reaches the caller and the
+  route) in one pytest invocation on a scratch copy, and pass on the fixed tree (counts
+  in CC-PROXY-0029).
+- **Stated limit:** the Proxy page's script shows the response and does not yet show
+  `history_error`. Displaying it is a UI change that needs a real-browser test
+  (PA-0065). It is not built in this round, and is listed in the lane's notes for the
+  owner.

@@ -879,12 +879,43 @@ plugin registry. It is the layer that makes the store the integration bus.
     pooled connection it finds closed before reusing it, and the idle retirement keeps a
     reuse under the usual 5 s server idle close; the remaining race (a close landing
     between that check and the request) gives a not-observed send, recorded as one.
+  - **A connection is kept only after an exchange that ended exactly at its framed end**
+    *(review round 2 of the merge integration, P2-1; BUG-0549)*. A connection goes back
+    to its pool only when its answer was read to its framed end, http.client's reader
+    held no byte past that end, and nothing waits on the socket: no TLS byte received
+    and unread (an `ssl.SSLSocket`'s, or, for TLS inside an HTTPS proxy's tunnel,
+    urllib3's `SSLTransport`'s and then the tunnel socket's), and the socket not
+    readable. Any other connection is closed there and never reused. The send that read
+    the answer keeps its answer and is never resent. An answer that is not exactly
+    framed fails as before (`BodyIncomplete`, SP-34).
+    - The decision is SP-60's (`core/bodyread.py`): `_FramedResponse` notes, at
+      http.client's framed end, the bytes its reader holds (`past`, a `peek` that never
+      receives), and `_ExactPool._put_conn` keeps a connection only when `exact_end`
+      holds. These are the pools that `bound` and `watched` mount, so every `requests`
+      session fuzzlab makes for a target gets the rule, not only the seam's (BUG-0549
+      round-2 sweep). urllib3's own check when it takes a pooled connection (the socket
+      not readable) still applies.
+    - Before, urllib3 kept such a connection. Measured on urllib3 2.8.0 with Python
+      3.13's http.client (BUG-0549 round 2, `measure_seam_r2.py`, through the seam):
+      - a second answer after a `Content-Length`, chunked, empty or 204 answer, or a
+        lone CRLF, was dropped with the reader and the next send rode the connection;
+      - a stray sent before the next answer was read as that send's answer;
+      - behind a 10 000-byte answer in one TLS record, a stray stayed in the SSL object
+        (the socket not readable) and was read as the next send's answer.
+    - After: each closes the connection, and the next send gets its own answer on a new
+      one. Clean exchanges keep one connection: 50 GETs plain; 50 over TLS with one
+      handshake; 30 through an HTTPS proxy with one tunnel. The send rate is within
+      run-to-run spread.
+    - **Stated residual:** a stray that arrives after both checks (the pool's at the
+      answer's end and urllib3's at the next take) is read as the next answer. Every
+      HTTP/1.1 client that keeps connections has this (BUG-0549 R9). A SOCKS proxy's
+      pools are not SP-60's (its stated limit) and do not get the rule.
   - Thread-safe: the bookkeeping is under one lock; concurrent sends of one key share a
     session (urllib3's pools are thread-safe; the jar holds nothing).
   - Measured (BUG-0549, loopback, `scripts/measure_pooling.py`): connections per 2 000
     plain GET sends fell from 2 000 to 8 (a send with a body is not pooled), and the send rate rose about 2x sequential and
     1.6-1.8x with 8 threads; over TLS from 20 to about 960 sends/s sequential.
-  - Enforced by: `tests/test_http_pooling.py::test_sends_of_one_identity_share_a_connection_sequentially_and_concurrently`, `tests/test_http_pooling.py::test_identities_and_generations_never_share_a_connection_or_a_cookie_jar`, `tests/test_http_pooling.py::test_a_generation_change_never_closes_a_send_still_in_flight`, `tests/test_http_pooling.py::test_a_reused_connection_closed_before_any_answer_is_never_resent_by_the_transport`, `tests/test_http_pooling.py::test_a_send_with_a_body_never_leaves_or_takes_a_pooled_connection`, `tests/test_http_pooling.py::test_closing_the_client_closes_its_pooled_connections`, `tests/test_trace_attempts.py::test_the_seams_default_transport_sends_exactly_the_tries_it_records`
+  - Enforced by: `tests/test_http_pooling.py::test_sends_of_one_identity_share_a_connection_sequentially_and_concurrently`, `tests/test_http_pooling.py::test_identities_and_generations_never_share_a_connection_or_a_cookie_jar`, `tests/test_http_pooling.py::test_a_generation_change_never_closes_a_send_still_in_flight`, `tests/test_http_pooling.py::test_a_reused_connection_closed_before_any_answer_is_never_resent_by_the_transport`, `tests/test_http_pooling.py::test_a_send_with_a_body_never_leaves_or_takes_a_pooled_connection`, `tests/test_http_pooling.py::test_closing_the_client_closes_its_pooled_connections`, `tests/test_trace_attempts.py::test_the_seams_default_transport_sends_exactly_the_tries_it_records`, `tests/test_http_pooling.py::test_an_answer_followed_by_another_never_leaves_its_pooled_connection`, `tests/test_http_pooling.py::test_a_stray_answer_held_by_tls_never_leaves_its_pooled_connection`
 - **FR-CORE-500** *(one reader for a run's target; one method key; `CC-CORE-0500`,
   2026-10-15).*
   - `fuzzlab/core/runtarget.py` is the one reader of the `target` table (PA-0063(1)): a

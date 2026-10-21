@@ -1,7 +1,8 @@
 # BUG-0550 — The proxy wrote its flow history on its event loop, in batches cut by count only
 
 - Date: 2026-10-21
-- Status: fixed (lane HIST25, CC-PROXY-0030)
+- Status: fixed (lane HIST25, CC-PROXY-0030); review round 2 of the merge integration
+  fixed the exit drain (P2-3, see "Review round 2")
 - Severity: medium. The audit rated it PERF_DEGRADATION. In the lab-only proxy, one slow
   or blocked store write stalled every proxied connection for as long as the write
   took (up to SQLite's 10 s busy timeout per statement), and a batch held its raw
@@ -393,3 +394,69 @@ xfailed: the repeater pin). The harness run is reported with the lane.
   awaits its own flow's commit off the loop, so its response waits for the store while
   other connections do not) changes the latency contract FR-PROXY-404 measured; it is
   an owner's decision, flagged, not built here.
+
+## Review round 2 (lane INTEG, 2026-10-21; finding P2-3, owner-approved fix round)
+The adversarial check of `integ/proxy-r1` (96a6939) found this in `proxy/history.py`,
+outside the finding it was checking. It is fixed on `integ/proxy-r2`, from 4e0c2c6, and
+recorded under CC-PROXY-0030's review-round-2 sub-bullet.
+
+- **Description:** `_Pump.__init__` added the pump to `_LIVE` (the writers drained at
+  interpreter exit) **before** `self.thread.start()`. When the start raised (the host
+  out of threads: "can't start new thread"), `HistoryWriter.submit` raised to its caller
+  (the engine counts it, BUG-0543 I1), but the unstarted pump stayed in `_LIVE` while
+  anything still referenced it. At exit, `_close_live_pumps` called its `close`, whose
+  `thread.join` raised "cannot join thread before it is started". The exception stopped
+  the loop, so every writer after it in `_LIVE` was never drained, and the flows it
+  still held were lost uncounted.
+- **Where encountered / what it caused to fail:** the checker's run with a real
+  `HistoryWriter` whose writer thread cannot start. In this round's test, the refused
+  pump was in `_LIVE` on 4e0c2c6, and `_close_live_pumps` raised on a writer whose close
+  fails.
+- **What the defect was:** a registration made before the action it registers could
+  fail, and a teardown loop over many owners that one owner's failure ends.
+- **Root cause analysis:**
+  1. *Why did the exit drain stop?* One pump's `close` raised, and the loop does not
+     contain a per-pump failure.
+  2. *Why did that pump's `close` raise?* Its thread had never started. A pump joined
+     `_LIVE` before `start`, so a failed start left a pump with no thread to join.
+  3. *Why was that not seen?* The writer's tests started threads that always start. R1
+     of round 1 measured every requested stop, and none of them was a thread start that
+     fails. PA-0086(2) (each per-unit handler contains its own failures) was applied to
+     flows, not to the writers that the exit hook drains.
+  **Root cause:** the exit drain, a loop over independent units, did not contain one
+  unit's failure (PA-0086(2) not applied to teardown). Membership was granted before the
+  state it promises (a started thread) existed.
+- **Corrective action (CC-PROXY-0030, review-round-2 sub-bullet):** `_Pump.__init__`
+  starts the thread first and joins `_LIVE` only once it has started, so a pump whose
+  thread could not start is never live. `_close_live_pumps` closes each live pump inside
+  its own `try` and reports one that fails (`_report`, error class and run id), and then
+  the others are still drained.
+- **Recurrence review:** PA-0012 / PA-0128 (teardown bounded and complete) and
+  PA-0125(1) (a process owns its whole tree at stop) are about stopping work. PA-0086(2)
+  (a per-unit handler contains its failures) and PA-0077 (containment at each per-plugin
+  step) are the same class, at runtime, not at exit. Round 1 of this bug (R1, a SIGTERM
+  that lost every queued flow) is a stop path that lost flows, with another cause.
+- **Prior-preventive-action failure analysis:** PA-0086(2) was **too narrow in
+  practice**: it was applied to per-connection and per-flow handlers, never to a
+  teardown loop over many owners. PA-0550(5) ("a change that moves a write behind a
+  queue re-checks every way its process stops") was followed for requested stops, but
+  did not name a failed start of the thread that a stop drains.
+- **Preventive action:** the PA-0550 amendment text in the lane's doc texts (no new
+  number). (9): a resource joins an exit or teardown registry only once it holds what
+  the teardown will act on (a started thread), and a teardown over many owners contains
+  each owner's failure and goes on, with a test that makes one owner fail.
+- **Sweep (by mechanism: registries of threads or writers that a teardown drains, and
+  thread registrations made before `start`, in `fuzzlab/`):**
+
+  | Site | Disposition |
+  |---|---|
+  | `proxy/history.py::_close_live_pumps` / `_Pump.__init__` (the one `atexit` hook in `fuzzlab/`) | fixed here |
+  | `session/browserlogin.py::run`: `_LIVE[key] = worker` before `worker.start()` | not an instance: its only reader is `previous.is_alive()`, false for a thread that never started, so a failed start blocks no later login, and nothing joins it at exit |
+  | `bodyread._Watchdog.arm`: an entry is pushed before the watchdog thread starts | not an instance: no teardown drains the heap. A failed start raises out of the send that armed it, and urllib3 closes that connection, so the entry left behind holds a closed socket. A later watchdog's shutdown of it fails with `OSError`, which `_run` ignores |
+  | `disco/explore.py` and `tools/spider.py` worker loops (`start` each, then `join` each) | not this class (no registry or exit drain): a failed start raises to the run's caller before any join, and the workers already started are left to finish on their own, daemon threads of a run that has already failed. This is a robustness gap of another component (DISCO, CRAWL), noted for the owner, not changed here |
+- **Verification:** `tests/test_proxy_history_writer_thread.py::test_a_writer_thread_that_cannot_start_never_stops_the_exit_drain`
+  makes the writer thread's start raise. It asserts that the refused pump is not live,
+  adds a live writer whose close fails, and asserts that `_close_live_pumps` returns and
+  drains the other writer's three pending flows. It fails on 4e0c2c6's `history.py`
+  (the refused pump is live) in one pytest invocation on a scratch copy, and passes on
+  the fixed tree (counts in CC-PROXY-0030).

@@ -10,6 +10,8 @@ repeater replays byte-exact requests (the raw path) — a hand-edited duplicate
 
 from __future__ import annotations
 
+import contextlib
+from collections import Counter
 from dataclasses import dataclass
 from typing import Callable
 
@@ -38,6 +40,12 @@ class Repeater:
         self.run_id = run_id
         self.sender = sender
         self.history = history
+        #: sends whose exchange the history failed to take, by error class (PA-0550(8))
+        self.history_failures: Counter = Counter()
+        #: that error's class for the last `send`; None when it was recorded or there is
+        #: no history. A Repeater serves one thread at a time (the web UI keeps one per
+        #: thread), so this is the caller's own send's.
+        self.last_history_error: str | None = None
 
     # --- tab CRUD (persisted) ----------------------------------------------
     def create_tab(self, name: str, host: str, port: int, raw_request: bytes,
@@ -75,7 +83,14 @@ class Repeater:
 
         The exact bytes of ``raw_request`` (or the saved request) go on the wire — no
         reserialization. If a ``HistoryWriter`` is attached, the exchange is recorded.
-        """
+
+        A history that raises never replaces the response (PA-0550(8), BUG-0543 review
+        round 2): the upstream already received the request, so the response is
+        returned, and the failure is counted in `history_failures` and named in
+        `last_history_error` for the caller to show beside it. A synchronous `record`
+        whose write fails keeps the flow buffered (BUG-0106), so a later send's write
+        may still store it. Before, a store error (``database is locked``) raised out
+        of here and the web UI answered 500 for a request the target had answered."""
         tab = self.get_tab(tab_id)
         if tab is None:
             raise KeyError(f"no repeater tab {tab_id}")
@@ -83,18 +98,34 @@ class Repeater:
         if raw_request is not None:
             self.update_request(tab_id, req)
         resp = self.sender(tab.host, tab.port, tab.use_tls, req)
+        self.last_history_error = None
         if self.history is not None:
-            msg = RawMessage.from_bytes(req)
-            scheme = "https" if tab.use_tls else "http"
-            self.history.record(FlowRecord(
-                method=msg.method.decode("latin-1", "replace"),
-                url=f"{scheme}://{tab.host}:{tab.port}"
-                    f"{msg.target.decode('latin-1', 'replace')}",
-                host=f"{tab.host}:{tab.port}",
-                raw_request=req, raw_response=resp,
-                source="repeater",        # an operator replay: not traced (FR-PROXY-13)
-            ))
+            try:
+                msg = RawMessage.from_bytes(req)
+                scheme = "https" if tab.use_tls else "http"
+                self.history.record(FlowRecord(
+                    method=msg.method.decode("latin-1", "replace"),
+                    url=f"{scheme}://{tab.host}:{tab.port}"
+                        f"{msg.target.decode('latin-1', 'replace')}",
+                    host=f"{tab.host}:{tab.port}",
+                    raw_request=req, raw_response=resp,
+                    source="repeater",    # an operator replay: not traced (FR-PROXY-13)
+                ))
+            except Exception as exc:  # noqa: BLE001 - counted, never replaces the answer
+                name = type(exc).__name__
+                self.history_failures[name] += 1
+                self.last_history_error = name
+                _log_history_failure(name)
         return resp
+
+
+def _log_history_failure(error: str) -> None:
+    """Log a Repeater exchange the history did not take (its error class only, never a
+    URL or a byte of the exchange); never raises (as `history._report`)."""
+    with contextlib.suppress(Exception):
+        from fuzzlab.core.obs import get_logger
+        get_logger("proxy.repeater").warning(
+            "repeater exchange not recorded in the history", extra={"error": error})
 
 
 def _row_to_tab(row) -> RepeaterTab:
