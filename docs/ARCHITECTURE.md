@@ -1871,7 +1871,8 @@ tracked in the requirements files, not here.
 - **Trace producer** `[built]` (FR-PROXY-13, CC-PROXY-0025/0026): each recorded in-scope
   flow is one `observe.exchange` event (scope `proxy`), and a closed run records its
   end, written through `core.trace.TraceRecorder` (SP-48) by `HistoryWriter` on its own
-  thread and connection; read by `report.diagram`.
+  thread and connection (for the engine's flows, the history writer thread's own:
+  FR-PROXY-404); read by `report.diagram`.
 - **Dual-path core** `[built]` (D4, `fuzzlab/proxy/`): the **raw byte path**
   (`message.py::RawMessage`) — byte-exact, round-trips received bytes and edits by byte
   surgery so untouched lines stay verbatim (NFR-PROXY-byte-exact) — and the **parsed
@@ -1902,7 +1903,7 @@ tracked in the requirements files, not here.
     (CC-PROXY-0021). A flush is all-or-nothing (savepoint, BUG-0106);
   - upstream reads are bounded (64 KiB headers, a configurable 64 MiB body and overall
     deadline) and never re-copied, and the blocking sender runs off the event loop
-    (FR-PROXY-12, BUG-0101); a response is framed by SP-63 and never returned short (FR-PROXY-402). The sender builds one SSL context and keeps an upstream
+    (FR-PROXY-12, BUG-0101); so does the history write (FR-PROXY-404, BUG-0550); a response is framed by SP-63 and never returned short (FR-PROXY-402). The sender builds one SSL context and keeps an upstream
     connection only after an exactly framed, bodiless HTTP/1.1 exchange; a desync probe
     (a malformed request, or one with a body) never rides a kept one, and the web
     Repeater's sender keeps none (FR-PROXY-405, BUG-0549).
@@ -1918,7 +1919,13 @@ tracked in the requirements files, not here.
   defaults follow SP-60 where one applies (16 MiB body, 60 s).
 - **History, repeater, interception, session capture** `[built]`: `flow` history
   (`history.py` — FTS5, batched writes, content-addressed bodies + raw bytes, secret
-  redaction on write; migration 6); repeater (`repeater.py` — DB-persisted tabs, replay
+  redaction on write; migration 6; the engine's flows are written off the event loop by
+  one writer thread per writer with its own store connection, in submission order, in
+  batches cut by count, bytes or age, from a queue bounded by flows and bytes whose
+  overflow is counted, logged and kept in `run_metrics` `history_*`; every requested
+  stop drains it: `fuzzlab proxy` on Ctrl-C or SIGTERM, the web proxy's stop through
+  `HistoryWriter.aclose`, off the web loop; a hard kill loses what is queued:
+  FR-PROXY-404, CC-PROXY-0030, BUG-0550); repeater (`repeater.py` — DB-persisted tabs, replay
   via a sender seam); interception-as-awaited-`asyncio.Future` (`intercept.py`);
   manual-login **session capture** (`session_capture.py` → `SessionManager.adopt`,
   FR-PROXY-9/FR-SESS-11 — the escape hatch for logins detection can't crack: MFA,

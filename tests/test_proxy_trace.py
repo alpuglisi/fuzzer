@@ -122,9 +122,15 @@ def proxied(upstream, tmp_path_factory):
                          f"Authorization: Bearer {SECRETS[1]}",
                          "Content-Type: application/x-www-form-urlencoded"),
                 body=f"user=alice&password={SECRETS[2]}".encode()))
-            # live: the flow's event is in the store before the proxy stops
-            live.append(store.conn.execute(
-                "SELECT COUNT(*) FROM trace_event WHERE run_id=?", (run_id,)).fetchone()[0])
+            # live: the flow's event is in the store before the proxy stops (written by
+            # the history's own thread, off this loop: BUG-0550)
+            for _ in range(3000):
+                n = store.conn.execute("SELECT COUNT(*) FROM trace_event WHERE run_id=?",
+                                       (run_id,)).fetchone()[0]
+                if n:
+                    break
+                await asyncio.sleep(0.01)
+            live.append(n)
             await _through(server.port, _request(
                 "POST", f"{base}/api/items", headers=("Content-Type: application/json",),
                 body=json.dumps({"name": "x", "api_key": SECRETS[4]}).encode()))
@@ -138,9 +144,11 @@ def proxied(upstream, tmp_path_factory):
             await server.stop()
 
     login, refused, errors = asyncio.run(scenario())
+    history.flush()                       # every flow the engine handed over is written
     yield {"store": store, "run": run_id, "history": history, "base": base,
            "dead": dead, "live": live, "login": login, "refused": refused,
            "errors": errors, "t0": t0, "t1": time.time()}
+    history.close()
     store.close()
 
 
@@ -366,6 +374,7 @@ def test_interception_decisions_are_recorded_and_drawn(upstream, tmp_path):
             return await task
         asyncio.run(scenario(True))
         asyncio.run(scenario(False))
+        h.flush()                          # written by the history's thread (BUG-0550)
         bodies = [e["body"] for e in _events(store.conn, run_id)]
         assert [b["intercept"] for b in bodies] == ["request edited", "request forwarded"]
         assert bodies[0]["url"] == f"{base}/b"

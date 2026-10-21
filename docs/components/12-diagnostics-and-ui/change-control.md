@@ -3,6 +3,15 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0070 — The in-process proxy's stop drains its flow history off the web loop (BUG-0550 review round 1, CC-PROXY-0030) (2026-10-21)
+- Change: `web/proxycontrol.py::ProxyController.stop` awaits `HistoryWriter.aclose(run_end="complete")` (CC-PROXY-0030) in place of `close` on the web loop. The writer thread's drain (up to `CLOSE_TIMEOUT`, 60 s) is awaited through a worker thread; with no flow ever proxied, the writer starts its thread for the close, so the run's end and the counters are written on that thread's own connection too. The build's comment on `batch_size=1` now says a flow is written as soon as the writer thread takes it.
+- Impact (other components / project): PROXY (`proxy/history.py::HistoryWriter.aclose`, its owner, CC-PROXY-0030). The web app's lifespan (`web/app.py`) still awaits `proxy.stop()`: shutdown takes as long as the drain, but the web loop runs meanwhile. No route, contract or store change; a stopped run still ends `complete` with its `trace_*` and `history_*` counters.
+- Risk (level; mitigation or accepted-risk justification): low. The writer's thread-affine connections stay on their threads (PA-0023): the drain runs on the writer thread, the worker thread only waits for it, and anything the outer writer did synchronously on the loop's thread is closed there.
+- Deliverables:
+  - [x] `ProxyController.stop` through `aclose` — done
+  - [x] tests: `tests/test_proxy_history_writer_thread.py::test_stopping_the_web_proxy_drains_its_history_off_the_web_loop` (fails on `7fdd869`: the loop got control back only after the held write), `::test_no_event_loop_path_blocks_on_a_history_writer` (flags `stop` on `7fdd869`), `::test_the_history_loop_guard_on_synthetic_code`; `tests/test_proxy_trace.py::test_stopping_the_web_proxy_records_its_end_and_its_counters` and `tests/test_web_store_locks.py` still pass — done
+- Effectiveness (assessed 2026-10-21): verified offline in lane/HIST25-r1 (BUG-0550 review round 1).
+
 ### CC-UI-0069 — The Repeater's upstream sender keeps no connections (FR-PROXY-405, BUG-0549 review round 1) (2026-10-21)
 - Change: `fuzzlab/web/proxycontrol.py::RepeaterController._writer` builds its sender as `SocketSender(verify_tls=False, keep_alive=False)` (only `keep_alive` added; verification unchanged).
 - Impact (other components / project): PROXY: every Repeater tab send opens its own upstream connection, closed after it (as before CC-PROXY-0029). No route, template, store or wire change.

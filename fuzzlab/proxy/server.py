@@ -192,20 +192,34 @@ class ProxyEngine:
     def _record(self, msg: RawMessage, resp: bytes, host: str, port: int,
                 use_tls: bool, *, t: float | None = None, error: str | None = None,
                 decisions: list[str] | None = None) -> None:
+        """Hand one in-scope flow to the history with bounded work on the event loop
+        (BUG-0550, FR-PROXY-404): the method, target and status come from each
+        message's first line only, and `HistoryWriter.submit` only queues the flow; the
+        writer's own thread redacts, hashes and stores it. Never store or redaction work
+        here (PA-0550)."""
         scheme = "https" if use_tls else "http"
+        req = _first_line_of(msg.raw)
         status = None
         if resp:
-            sl = RawMessage.from_bytes(resp).start_line.split(b" ")
+            sl = _first_line_of(resp).start_line.split(b" ")
             if len(sl) >= 2 and sl[1].isdigit():
                 status = int(sl[1])
-        self.history.record(FlowRecord(
-            method=msg.method.decode("latin-1", "replace"),
-            url=f"{scheme}://{_authority(host, port)}"
-                f"{msg.target.decode('latin-1', 'replace')}",
-            host=_authority(host, port), status=status, identity=self.identity,
+        authority = _authority(host, port)
+        self.history.submit(FlowRecord(
+            method=req.method.decode("latin-1", "replace"),
+            url=f"{scheme}://{authority}{req.target.decode('latin-1', 'replace')}",
+            host=authority, status=status, identity=self.identity,
             in_scope=True, raw_request=msg.raw, raw_response=resp, t=t, error=error,
             intercept="; ".join(decisions) if decisions else None,
         ))
+
+
+def _first_line_of(raw: bytes) -> RawMessage:
+    """A message holding ``raw`` up to just past its first line end: its `start_line`
+    (so `method`, `target`) equals the whole message's, read without scanning or
+    copying the rest (the body) on the event loop (BUG-0550)."""
+    end = raw.find(b"\n")
+    return RawMessage.from_bytes(raw if end < 0 else raw[:end + 2])
 
 
 class AsyncProxyServer:

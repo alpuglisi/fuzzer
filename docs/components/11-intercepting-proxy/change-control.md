@@ -3,6 +3,154 @@
 Component code: **PROXY**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PROXY-0030 — The flow history is written off the proxy's event loop (BUG-0550, FR-PROXY-404) (2026-10-21)
+- Change:
+  - **`proxy/history.py`:** `HistoryWriter.submit(rec)` (new) does bounded work on the
+    calling thread: it admits the flow into a queue and returns. The first call starts
+    the writer thread (`_Pump`), which opens its own `Store` on the writer's file
+    (`create=False`) and builds an inner `HistoryWriter` on it; that thread alone does
+    every redaction, hash, insert, commit and trace event, in submission order.
+    - Batches are cut by count (`batch_size`), bytes (`flush_bytes`, `FLUSH_BYTES` 4 MiB)
+      or age (`flush_seconds`, `FLUSH_SECONDS` 0.5 s), or at once for a `flush` or
+      `close`; a transaction holds at most `BATCH_MAX_FLOWS` (500) flows and
+      `flush_bytes` plus the flow that crosses it.
+    - The queue is bounded by `max_pending_flows` (10,000) and `max_pending_bytes`
+      (256 MiB) waiting or being written; one larger flow is admitted only into an empty
+      queue. A flow that does not fit is dropped from the history, counted
+      (`HistoryWriter.stats`), logged (`fuzzlab.proxy.history`) and written to
+      `run_metrics` (`history_*`) at once; the counters are rewritten at most once a
+      second otherwise, and at close.
+    - A batch is tried `WRITE_ATTEMPTS` (3) times, `RETRY_SECONDS` (0.2 s) doubling,
+      then counted `failed` and logged. `_write` (split out of `flush`, with
+      `_prepare_batch` and `_write_prepared`) rolls back the transaction it opened on
+      any failure, a failed commit included, so a retry never duplicates a flow.
+    - `flush()` on a writer with a thread waits until everything submitted before it is
+      written or counted. `close(run_end)` writes everything pending, then the run's
+      end and the counters on the thread's connection, within `CLOSE_TIMEOUT` (60 s;
+      the rest counted `unwritten`); idempotent. A writer dropped without `close` is
+      drained (`weakref.finalize`), and so is one open at interpreter exit (`atexit`,
+      10 s each). A store the thread cannot open (no file) counts every flow and logs.
+    - `record()` stays synchronous, now also cut by `flush_bytes`; on a writer that has
+      a thread it hands the flow to the thread (one writer of a run's flows).
+    - `aclose(run_end)` (new, review round 1, R3): `close` for a caller on an event
+      loop. The writer thread's drain is awaited through `asyncio.to_thread`; a writer
+      with a file store and nothing of its own on the caller's connection starts its
+      thread first, so the run's end and the counters are written there too. A writer
+      that wrote synchronously on the caller's thread, or whose store is in memory, is
+      closed on the caller's thread, where it wrote (PA-0023). `_close_own` and
+      `_thread_path` are split out of `close` and `_start_pump`.
+  - **`proxy/cli.py` (review round 1, R1):** a SIGTERM is a requested stop like Ctrl-C:
+    `_serve` waits on an event that `loop.add_signal_handler(SIGTERM, ...)` sets
+    (`_stop_on_sigterm`), so the loop ends, the server stops, and `main`'s `finally`
+    closes the writer, which writes every queued flow and the run's end (`complete`).
+    Before, SIGTERM's default action ended the process with the queue unwritten and
+    uncounted.
+  - **`web/proxycontrol.py::ProxyController.stop` (UI component; review round 1, R3):**
+    `await self._history.aclose(run_end="complete")` in place of a `close` on the web
+    loop. The UI component's change-control entry needs a CC-UI number that was not
+    pre-assigned to this lane; its text is in the lane's `doc_texts.md` (§8).
+  - **`proxy/server.py` (`ProxyEngine._record`, lines 148-168 at `c483dc1`):** calls
+    `history.submit`, and takes the method, target and status from each message's first
+    line (`_first_line_of`, new, right below it), never parsing or copying a body on the
+    loop.
+  - **Tests:** `tests/test_proxy_history_writer_thread.py` (new);
+    `tests/test_proxy_trace.py` waits for the writer where it read the store straight
+    after a request, and its module fixture closes its writer;
+    `tests/test_proxy_rules_and_scope.py`'s fake history gains `submit`. Review round 1
+    adds to the new file: `test_a_sigterm_stops_the_recording_proxy_like_ctrl_c_and_writes_every_answered_flow`
+    (R1: a real `fuzzlab proxy --store` process on a 0.2 s store, ten answered flows,
+    stopped by procutil's supervisor with SIGTERM), `test_a_failed_commit_is_rolled_back_and_the_retry_writes_once`
+    (R2: the writer thread's first `RELEASE history_flush` fails),
+    `test_stopping_the_web_proxy_drains_its_history_off_the_web_loop` (R3: the loop
+    runs while the stop's drain is held), and the whole-package AST guard
+    `test_no_event_loop_path_blocks_on_a_history_writer` with
+    `test_the_history_loop_guard_on_synthetic_code` (four offenders, the pre-fix line
+    among them, and four near-misses).
+- Impact (other components / project):
+  - **Callers swept** (`grep HistoryWriter` over `fuzzlab/`): `proxy/cli.py` and
+    `web/proxycontrol.py::ProxyController` build `HistoryWriter(batch_size=1)` and pass
+    it to the engine: the engine's `submit` starts the thread. The CLI closes it after
+    its loop ends, on Ctrl-C and, since review round 1, on SIGTERM (`kill`, the web
+    UI's Stop of a `proxy` job through procutil's supervisor, a service manager). The
+    web proxy's `stop` (lifespan shutdown) closes it through `aclose`, the drain off the
+    web loop (review round 1). `proxy/repeater.py` and
+    `web/proxycontrol.py::RepeaterController` use the synchronous `record`, unchanged.
+  - **Every stop path of a recording process** (review round 1, R1): Ctrl-C and SIGTERM
+    drain (`close`); interpreter exit drains (`atexit`, 10 s); a writer dropped without
+    `close` drains (`weakref.finalize`). SIGKILL, a crash, or a second signal while the
+    drain runs, end it: what is still queued is lost, up to the queue bound. The web
+    UI's `proxy` job is stopped by procutil's supervisor: SIGTERM, then SIGKILL after
+    its grace (`DEFAULT_GRACE_S`, 5 s), so a backlog that takes longer than that to
+    write is cut there (stated residual, UI component: BUG-0550).
+  - **Consumers of what changed** (PA-0138(3)): flows and their trace events appear a
+    batch later, not inside the request (with `batch_size=1`, as soon as the thread
+    takes the flow; else within `flush_seconds`). `web/proxyview.py` and the diagrams
+    read committed rows and poll; `tests/test_proxy_trace.py`'s two immediate reads now
+    wait. The UI component's `web/app.py` repeater routes are not changed; their
+    blocking sends on the web loop are pinned by a strict xfail (BUG-0550 sweep).
+  - **Store contract:** additive `run_metrics` keys `history_*` for a proxy run (no
+    schema change). The Diagnostics page lists them with the other keys. No wire change.
+  - **A history failure no longer reaches the client:** before, a store error in
+    `_record` answered the client 502 although its response had arrived.
+- Risk (level; mitigation or accepted-risk justification): medium. A second store
+  connection per proxy run, owned by one thread (PA-0023), on the same WAL store; the
+  outer connection is not touched by the thread. Durability window (corrected in review
+  round 1; it read "a crash loses at most ... one flow at `batch_size=1`"): a flow's
+  response goes back before the flow is written, so a hard kill (SIGKILL, also the
+  supervisor's after its grace) or a crash loses whatever is still queued, up to the
+  queue bound (10,000 flows, 256 MiB), uncounted at that moment; the live `history_*`
+  counters show `accepted` against `written` as of their last rewrite (at most a second
+  old while the writer is not stuck in one write). On an idle store the queue is near
+  empty; on a slow one it grows, which is the point (the traffic no longer waits for
+  the store). A requested stop (Ctrl-C, SIGTERM, the web proxy's stop) drains, within
+  `CLOSE_TIMEOUT`. Overflow drops history, never traffic, and is counted and reported;
+  the bounds are generous. Since review round 1 the web proxy's stop drains off the web
+  loop.
+- Deliverables:
+  - [x] `proxy/history.py` writer thread, batching, bounds, counters; `proxy/server.py`
+    `_record` — done
+  - [x] tests: `tests/test_proxy_history_writer_thread.py`, each new behavioural test
+    shown failing once on the pre-fix code — done
+  - [x] BUG-0550 (RCA, recurrence review, prior-PA failure analysis, sweep, latency
+    before/after); FR-PROXY-404 added, FR-PROXY-3/12/13 and NFR-PROXY-nonblocking
+    edited in place — done
+  - [x] CHANGELOG, ERROR_LOG, PA-0550, ARCHITECTURE §11 and failure-record texts in the
+    lane's `doc_texts.md` for the merge — done
+  - [x] review round 1 (R1 SIGTERM drain, R2 a test at the commit, R3 the web stop off
+    the loop with a whole-package guard): code, tests, BUG-0550 "Review round 1",
+    FR-PROXY-404/FR-PROXY-13/NFR-PROXY-nonblocking edited in place, PA-0550(5)-(7) and
+    the failure-record texts in `doc_texts.md` — done
+  - [ ] the UI component's change-control entry for `ProxyController.stop`: its text is
+    in `doc_texts.md` §8; a CC-UI number was not pre-assigned to this lane — todo (the
+    orchestrator, at merge)
+- Effectiveness (assessed 2026-10-21): verified offline. Latency through the real proxy
+  under a slow store (+50 ms per write): p50/p95 433/726 ms → 20/42 ms, the loop's
+  longest stall 437 → 23 ms; with the store's write lock held 2.0 s elsewhere, the
+  longest stall 2077 → 33 ms; 200 of 200 flows stored in every run (BUG-0550's table).
+  Targeted run (12 test files, one invocation): 227 passed, 1 xfailed (the strict pin
+  of the web repeater, BUG-0550 sweep). On the pre-fix code (`c483dc1`, a scratch copy,
+  one invocation) the new file gave 20 failed, 7 passed, 1 xfailed: the blocked-write
+  test answered both later requests only after the hold (`[False, False]`); the loop
+  guard flagged the pre-fix `history.record` call; the batching, bound, failure and
+  close tests failed on the API the pre-fix writer lacks; the 7 passing are the guards'
+  synthetic-offender cases and the repeater check's own shape test. The first-line test
+  failed there on its fake's missing `record`; with the fake given both names, a direct
+  call fails on its byte assertion on the pre-fix code and passes now
+  (`scratchpad/lanes/HIST25/prefix_firstline.out`). The harness run on the committed
+  tree is reported with the lane.
+  **Review round 1:** the writer-thread file, one invocation: 39 passed, 1 xfailed (with
+  13 other proxy, web-proxy and guard files beforehand: 265 passed, 1 xfailed, the only
+  failure then being the new SIGTERM test's own assertion on an HTTP/1.0 status line,
+  corrected). Each new test shown failing once, one invocation, on a scratch copy of
+  this commit with `proxy/cli.py` and `web/proxycontrol.py` from `7fdd869` and
+  `_write`'s release and commit moved back outside the rollback
+  (`scratchpad/lanes/HIST25/r1/prefix_proof.out`): 4 failed, 8 passed. The SIGTERM test
+  stored 0 of 10 answered flows; the commit test stored `[p0, p0, p1]`; the web-stop
+  test's loop got control back only after the held write (`False`); the guard flagged
+  `web/proxycontrol.py:stop:102:close`. The 8 passing are the guard's synthetic cases,
+  which do not read the product code. The commit test passes on `7fdd869` itself, whose
+  `_write` is unchanged here: that code was right, its test was missing.
+
 ### CC-PROXY-0029 — The upstream sender keeps exactly framed connections (FR-PROXY-405, BUG-0549) (2026-10-21)
 - Placement: pre-assigned to POOL24 (audit defect 24). CC-PROXY-0028 is AU-PROXY's, which
   rewrites the framing in lines ~35-105 of the same file; this change touches only the

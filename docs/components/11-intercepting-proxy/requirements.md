@@ -1,6 +1,6 @@
 # Intercepting Proxy — Requirement Specification
 
-Component code: **PROXY** · Status: `[built — offline stack + live upstream SocketSender, CONNECT/TLS termination, the fuzzlab proxy CLI, and the live h2c H2Transport; HTTPS interception + h2c send verified on-host]` (Phase 6 + Phase 9) · Last updated: 2026-10-21 · see CC-PROXY-0010, CC-PROXY-0011, CC-PROXY-0025, CC-PROXY-0028
+Component code: **PROXY** · Status: `[built — offline stack + live upstream SocketSender, CONNECT/TLS termination, the fuzzlab proxy CLI, and the live h2c H2Transport; HTTPS interception + h2c send verified on-host]` (Phase 6 + Phase 9) · Last updated: 2026-10-21 · see CC-PROXY-0010, CC-PROXY-0011, CC-PROXY-0025, CC-PROXY-0028, CC-PROXY-0029, CC-PROXY-0030
 
 Related: `ARCHITECTURE.md` #11; `DECISIONS_AND_ROADMAP.md` (D3, D4, D5);
 `./change-control.md`.
@@ -29,7 +29,8 @@ that shares the store, never a mandatory pipeline (D5).
   conflicting `Content-Length` values by the first and forwards it byte-exact.
 - **FR-PROXY-2** CONNECT + TLS interception with a local CA and cached leaf certs.
 - **FR-PROXY-3** Persist history to the store (FTS5 search, batched writes,
-  content-addressed bodies) as `flow` rows with raw bytes.
+  content-addressed bodies) as `flow` rows with raw bytes, written off the proxy's event
+  loop (FR-PROXY-404).
 - **FR-PROXY-4** Repeater with DB-persisted tabs; edit and replay, including via
   the raw path.
 - **FR-PROXY-5** Match-and-replace rules and a scope engine (only in-scope hosts
@@ -112,16 +113,19 @@ that shares the store, never a mandatory pipeline (D5).
     very large downloads, by design.
   - **Off the event loop:** the engine runs the (thread-safe) sender with
     `asyncio.to_thread`, with at most min(32, CPUs + 4) concurrent upstream calls.
-    History is recorded on the loop thread. *(CC-PROXY-0029:)* the sender keeps
+    History is written by the history writer's own thread; the loop only queues a flow
+    (FR-PROXY-404, CC-PROXY-0030; it was recorded on the loop thread until BUG-0550). *(CC-PROXY-0029:)* the sender keeps
     exactly framed upstream connections between calls (FR-PROXY-405).
 - **FR-PROXY-13 (proxied traffic in the trace, CC-PROXY-0025)** Every in-scope flow
   the proxy engine records is also one `observe.exchange` trace event (FR-CORE-505),
   so the Diagrams page shows proxied traffic while it happens (the `proxy` sequence,
   FR-UI-512).
   - **Where:** `HistoryWriter` owns a `core.trace.TraceRecorder`, on the writer's thread
-    and store connection, under its lock, with the writer's `run_id`. After a flush has
+    and store connection (the writer thread's own, once the engine's `submit` started
+    it: FR-PROXY-404), under its lock, with the writer's `run_id`. After a flush has
     committed its flows, it emits their events and flushes them: they are visible as
-    soon as the flow is (`batch_size=1` in `fuzzlab proxy` and the web proxy).
+    soon as the flow is (`batch_size=1` in `fuzzlab proxy` and the web proxy: written as
+    soon as the writer thread takes the flow).
   - **The event:** `src` "proxy", `ref` "flow id <n>", method, URL (`trace.safe_ref` of
     the redacted URL), origin (`core.urls.canonical_origin`), status (None when no
     response came), `error` (the upstream failure's class), `outcome`, the redacted
@@ -146,12 +150,61 @@ that shares the store, never a mandatory pipeline (D5).
     is counted `dropped`, logged, and the counters are written (`run_metrics`
     `trace_*`); `HistoryWriter.close()` writes them at the end.
   - **The run's end** (CC-PROXY-0026): `HistoryWriter.close(run_end=...)` records a
-    `run.end` event. `fuzzlab proxy` passes `complete` on Ctrl-C (the operator's stop)
-    and `aborted: <class>` on any other exit; the web proxy's `stop()` passes
-    `complete`. A closed proxy run's diagram status is therefore `complete`, not
+    `run.end` event. `fuzzlab proxy` passes `complete` on Ctrl-C or SIGTERM (a
+    requested stop: the operator's, the web UI's Stop of a `proxy` job, a service
+    manager's; FR-PROXY-404) and `aborted: <class>` on any other exit; the web proxy's
+    `stop()` passes `complete`. A closed proxy run's diagram status is therefore `complete`, not
     `partial` for want of an end.
   - **Measured cost** (CC-PROXY-0025): 400 flows at `batch_size=1` on the event-loop
     thread; per flow, median 0.30–0.38 ms without the trace and 1.38–1.46 ms with it,
+    p95 1.3–2.5 ms without and 5.8–13.4 ms with. That was an idle store; since
+    CC-PROXY-0030 this cost is paid on the writer thread, not the loop (BUG-0550).
+- **FR-PROXY-404 (history off the event loop, CC-PROXY-0030, BUG-0550)** The engine
+  hands each in-scope flow to `HistoryWriter.submit`, which does bounded work on the
+  loop: it reads nothing past each message's first line (`server._first_line_of`) and
+  only queues the flow.
+  - **One writer thread per writer**, started by the first `submit`, opens its own
+    `Store` on the writer's file (`create=False`) and does every redaction, hash,
+    insert, commit and trace event, in submission order (flow ids follow it).
+  - **Batches** are cut by count (`batch_size`), bytes (`flush_bytes`, default 4 MiB)
+    or age (`flush_seconds`, default 0.5 s), whichever comes first. One transaction
+    holds at most 500 flows and `flush_bytes` plus the flow that crosses it. The
+    synchronous `record` path (the repeater) is also cut by `flush_bytes`.
+  - **The queue** holds at most `max_pending_flows` (10,000) flows and
+    `max_pending_bytes` (256 MiB) waiting or being written; one larger flow is admitted
+    only into an empty queue. A flow that does not fit is dropped from the history,
+    never from the traffic: counted (`HistoryWriter.stats`: `dropped`, `dropped_bytes`),
+    logged, and written to `run_metrics` at once.
+  - **A batch that cannot be written** is tried 3 times, then counted `failed` and
+    logged; the writer goes on. A failed write, its commit included, leaves nothing
+    behind, so a retry never duplicates a flow.
+  - **`flush`** waits until every flow submitted before it is written or counted.
+    **`close(run_end)`** writes everything pending, then the run's end and the
+    counters, within 60 s; what is still pending then is counted `unwritten` and
+    logged. Idempotent. A writer dropped without `close`, or open at interpreter exit,
+    is still drained. A store the thread cannot open counts every flow and logs an
+    error. A caller on an event loop closes with **`aclose(run_end)`**: the drain is
+    awaited on a worker thread while the loop runs; a writer with a file store and
+    nothing of its own on the caller's connection starts its thread for the close, so
+    the run's end and the counters are written there too. The web proxy's `stop` uses
+    it.
+  - **Stopping and durability** (review round 1): a flow's response goes back before
+    the flow is written. Every requested stop drains: `fuzzlab proxy` treats SIGTERM
+    (`kill`, the web UI's Stop of a `proxy` job through procutil's supervisor, a service
+    manager) as it treats Ctrl-C: the listener closes, then `close` writes every queued
+    flow and the run's end `complete`. A hard kill (SIGKILL, the supervisor's after its
+    grace, a crash) or a second signal during the drain loses whatever is still queued,
+    up to the queue bound; the live counters show `accepted` against `written` as of
+    their last rewrite.
+  - **Counters** (`run_metrics`, rewritten live: at once on a new drop or failure,
+    else at most once a second, and at close): `history_accepted`, `history_written`,
+    `history_dropped`, `history_dropped_bytes`, `history_failed`, `history_unwritten`,
+    `history_retries`, `history_batches`, `history_max_lag_ms`,
+    `history_pending_bytes_peak`.
+  - **Measured** (BUG-0550): with +50 ms per store write, p50/p95 latency through the
+    proxy went from 433/726 ms to 20/42 ms and the loop's longest stall from 437 ms to
+    23 ms; with the store's write lock held 2.0 s elsewhere, the longest stall went from
+    2077 ms to 33 ms. No flow was lost in either.
     p95 1.3–2.5 ms without and 5.8–13.4 ms with.
 - **FR-PROXY-405** *(kept upstream connections; `CC-PROXY-0029`, 2026-10-21,
   BUG-0549).* `SocketSender` keeps upstream connections between calls, only where reuse
@@ -295,7 +348,10 @@ that shares the store, never a mandatory pipeline (D5).
   - Enforced by: `proxy.scope`, `core.net.require_loopback`, `proxy.ca`, `proxy.history` redaction — `tests/test_proxy_server.py::test_engine_bypasses_out_of_scope_untouched`, `tests/test_proxy_rules_and_scope.py::test_scope_matches_authorities`, `tests/test_loopback_listeners.py::test_every_listener_in_fuzzlab_is_gated`, `tests/test_loopback_listeners.py::test_the_proxy_server_itself_refuses_a_non_loopback_bind`, `tests/test_proxy_ca_hardening.py::test_the_real_ca_key_is_0600_from_creation`, `tests/test_proxy_ca_hardening.py::test_the_path_backstop_holds_if_validation_were_bypassed`, `tests/test_proxy_redaction.py::test_no_secret_reaches_any_persisted_copy`, `tests/test_proxy_history.py::test_secrets_redacted_on_write`, `tests/test_proxy_trace.py::test_no_secret_reaches_the_trace_the_model_or_the_exports`, `tests/test_proxy_trace.py::test_an_out_of_scope_host_produces_no_event`
   - Not yet enforced: `Repeater.send` has no scope check; out-of-scope traffic is forwarded to any upstream (scope governs interception and recording only). (BUG-0111 sweep.)
 - **NFR-PROXY-nonblocking** History writes are batched and must not stall the data
-  path.
+  path: no store, disk or redaction work runs on the proxy's event loop (FR-PROXY-404;
+  built in CC-PROXY-0030, BUG-0550; it had been a deferral since Phase 6).
+  - Enforced by: `proxy.history.HistoryWriter.submit`, `proxy.history.HistoryWriter.aclose`, `proxy.server.ProxyEngine._record` — `tests/test_proxy_history_writer_thread.py::test_a_blocked_store_write_never_stalls_proxied_traffic`, `tests/test_proxy_history_writer_thread.py::test_the_loop_parses_only_each_messages_first_line`, `tests/test_proxy_history_writer_thread.py::test_the_proxy_loop_never_calls_store_or_redaction_work`, `tests/test_proxy_history_writer_thread.py::test_stopping_the_web_proxy_drains_its_history_off_the_web_loop`, `tests/test_proxy_history_writer_thread.py::test_no_event_loop_path_blocks_on_a_history_writer`
+  - Not yet enforced: the web app's repeater routes run a blocking upstream send and store writes on the web loop that also serves the in-process proxy (`--with-proxy`); pinned by the strict xfail `tests/test_proxy_history_writer_thread.py::test_no_web_handler_runs_a_repeater_send_or_write_on_the_event_loop` (UI component).
 - **NFR-PROXY-optional** Nothing in the core pipeline requires the proxy to run.
 - **NFR-PROXY-dry-run** `fuzzlab proxy` accepts `--dry-run`: plans and prints the
   exact argv/command it would run and sends nothing (no listener is started, no
@@ -310,7 +366,8 @@ that shares the store, never a mandatory pipeline (D5).
 
 ## 5. Interfaces and data contracts
 Writes `flow` rows (+ raw bytes) to the store, read by the anomaly detector, UI,
-and analysis. Writes one `trace_event` (`observe.exchange`, scope `proxy`) per traced
+and analysis; from the proxy engine, on the history writer's own thread and
+connection (FR-PROXY-404), with its counters in `run_metrics` (`history_*`). Writes one `trace_event` (`observe.exchange`, scope `proxy`) per traced
 flow through `core.trace.TraceRecorder` (FR-PROXY-13), read by `report.diagram`. Uses the session manager as an addon. Shares `core/` config, budget,
 and logging. *(Note, U3/CC-PROXY-0018, 2026-09-22: the web UI's Proxy section was
 re-laid on a shared message-editor component and resizable panes — see

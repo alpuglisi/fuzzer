@@ -9,6 +9,11 @@ and sends nothing, so it needs no `--authorized`.
 Recording stays opt-in: ``--store PATH`` records there (as before), and ``--record`` records
 into the resolved default store (`core.storepath`: ``$FUZZLAB_STORE``,
 ``$FUZZLAB_STORE_PATH``, else ``./fuzzlab.db`` -- the store the web UI shows; FR-PROXY-400).
+
+Ctrl-C and SIGTERM (``kill``, the web UI's Stop through `procutil`'s supervisor, a service
+manager) both stop it the same way: the listener closes, then the flow history still
+queued on its writer thread is written and the run's end recorded (FR-PROXY-404). Only a
+hard kill (SIGKILL, a crash) loses what is still queued.
 """
 
 from __future__ import annotations
@@ -16,6 +21,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import signal
 
 from fuzzlab.core import storepath
 from fuzzlab.proxy.ca import LocalCA
@@ -138,8 +144,9 @@ def main(argv: list[str]) -> int:
         from fuzzlab.proxy.history import HistoryWriter
         store = Store(recording.path)
         run_id = store.start_run("proxy", args.host)
-        # batch_size=1: persist each flow immediately (WAL), so a reader can see flows
-        # while the proxy runs and shutdown timing never loses records.
+        # batch_size=1: each flow is written as soon as the writer thread takes it (WAL),
+        # so a reader sees flows while the proxy runs. A requested stop (Ctrl-C,
+        # SIGTERM) drains what is queued in `close` below; a hard kill loses it.
         history = HistoryWriter(store, run_id, batch_size=1)
 
     engine = ProxyEngine(scope=scope, sender=sender, history=history,
@@ -149,6 +156,8 @@ def main(argv: list[str]) -> int:
                               raw_framing=args.raw_framing)
 
     async def _serve() -> None:
+        stop = asyncio.Event()
+        _stop_on_sigterm(stop)
         await server.start()
         print(f"proxy listening on {args.host}:{server.port}  "
               f"(scope: {sorted(scope_hosts(scope))})")
@@ -160,14 +169,14 @@ def main(argv: list[str]) -> int:
             print(f"  recording flows to {recording.path} ({recording.source})")
         print("  Ctrl-C to stop.")
         try:
-            await asyncio.Event().wait()          # run until interrupted
+            await stop.wait()                     # run until interrupted or terminated
         finally:
             await server.stop()
             refused = {k: v for k, v in server.counts.items() if v}
             if refused:
                 print(f"  refused by the listener's bounds: {refused}")
 
-    ended = "complete"                    # Ctrl-C: the operator's stop
+    ended = "complete"                    # Ctrl-C or SIGTERM: a requested stop
     try:
         asyncio.run(_serve())
     except KeyboardInterrupt:
@@ -191,6 +200,18 @@ def inbound_limits(args) -> InboundLimits:
              "max_header_bytes": args.max_header_bytes,
              "request_deadline": args.request_deadline}
     return InboundLimits(**{k: v for k, v in given.items() if v is not None})
+
+
+def _stop_on_sigterm(stop: asyncio.Event) -> None:
+    """Make SIGTERM end the running loop as Ctrl-C does, so the server stops and `main`
+    closes the history writer, which writes every flow still queued (BUG-0550). Its
+    default action would end the process at once: no `finally`, no ``atexit``, the
+    queued flows neither written nor counted. Only possible on the main thread of a
+    platform with signals; elsewhere SIGTERM keeps its default."""
+    try:
+        asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, stop.set)
+    except (NotImplementedError, RuntimeError, ValueError):
+        pass
 
 
 def _recording(p, args):

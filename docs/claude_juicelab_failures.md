@@ -1304,3 +1304,33 @@ Juice Shop lab is complete.
 - **Evidence:** `scratchpad/lanes/PRGPATH/r1/vc_r1_stopped/vc_console.txt` (the interruption line) and `parallel.log` (43%, no failure before the stop), and the stopped run's out dir `scratchpad/lanes/PRGPATH/vc_r1_stopped_0546`.
 - **Impact:** about 20 minutes of the serialised test host were spent on a run with no result. The harness was run a second time, detached from the tool (`setsid nohup`), into `vc_r1`.
 - **Status:** recorded. Suggested rule for the coordinator: a harness run is started detached from any agent-tool time limit, and is waited for by polling its output.
+
+### F-149 — The proxy's history write was kept on its event loop by BUG-0101's fix, on an idle-store measurement, and NFR-PROXY-nonblocking stayed a deferral (BUG-0550)
+- **What:** fixing BUG-0101 (CC-PROXY-0021), the agent moved the blocking sender off the proxy's event loop and wrote "History recording stays on the loop thread" into the corrective action and FR-PROXY-12, sweeping PA-0102(3) over network reads only; CC-PROXY-0025 then measured the history write's cost on an idle store only and recorded it as acceptable; `history.py` kept "the true async offload is on-host" since Phase 6. NFR-PROXY-nonblocking had no test.
+- **Evidence:** `docs/bugs/BUG-0101-unbounded-upstream-read.md` (corrective action, sweep); FR-PROXY-12 and FR-PROXY-13 "Measured cost" in `docs/components/11-intercepting-proxy/requirements.md` at `c483dc1`; BUG-0550's measurement (`scratchpad/lanes/HIST25/measure.py`): +50 ms per write took p50 from 22 to 433 ms; a 2 s lock elsewhere froze the loop 2.08 s.
+- **Impact:** every proxied connection (in scope or not) waited for each store write; a store error answered a client 502 after its response had arrived; audit defect 25.
+- **Status:** fixed in lane HIST25 (CC-PROXY-0030, BUG-0550, PA-0550).
+
+### F-150 — HIST25's first two latency measurements were wrong and caught before they were reported
+- **What:** the first version of `scratchpad/lanes/HIST25/measure.py` ran the proxy's loop on a second thread while the store was opened on the first, so the pre-fix code answered every request 502 (`ProgrammingError`, a thread-affine connection), unlike `fuzzlab proxy`; the second showed a 1.04 s maximum in every row, before and after alike, which was the loopback upstream's `listen` backlog of 5 dropping SYNs, not the proxy.
+- **Evidence:** `scratchpad/lanes/HIST25/measure.py` (the loop now on the main thread as the CLI runs it; `request_queue_size = 128` with its comment); BUG-0550 "What it caused to fail".
+- **Impact:** none: neither was reported; the table in BUG-0550 is from the corrected script.
+- **Status:** corrected.
+
+### F-151 — HIST25's fix lost every queued flow on SIGTERM and kept saying a stop loses nothing (BUG-0550 review round 1, R1)
+- **What:** lane HIST25 moved the proxy's history write behind a queue (the response goes back before the flow is written) and checked each `async def` for store work, but not each way the process stops. Only Ctrl-C reached the drain; SIGTERM (`kill`, the web UI's Stop of a `proxy` job through procutil's supervisor) ended the process with the queue unwritten and uncounted. The CLI's comment still said "shutdown timing never loses records", and CC-PROXY-0030's risk said "a crash loses at most ... one flow at `batch_size=1`". Its recurrence review listed PA-0012 ("persist ... so a forced/abrupt stop loses nothing", BUG-0011, the same proxy) and did not apply it.
+- **Evidence:** the reviewers' runs through the real CLI: `c483dc1` stored 10 of 10 answered flows after SIGTERM; `7fdd869` stored 9 of 10 (normal store) and 0 of 10 (+0.2 s per insert), with no `history_*` counters; `scratchpad/au-proxy-hist25/sigterm.py`, `scratchpad/refute-hist25-r1/drive.py`.
+- **Impact:** a regression not merged: a recording proxy stopped by SIGTERM lost every answered flow still queued, up to 10,000, with no count or log line.
+- **Status:** fixed in lane/HIST25-r1 (`_stop_on_sigterm`; CC-PROXY-0030 round 1; PA-0550(5); `test_a_sigterm_stops_the_recording_proxy_like_ctrl_c_and_writes_every_answered_flow`). Residual stated: the UI's Stop SIGKILLs after the supervisor's 5 s grace.
+
+### F-152 — HIST25 documented "a failed commit leaves nothing behind" in five places with no test at the commit, and said every new behavioural test was shown failing (BUG-0550 review round 1, R2)
+- **What:** the lane moved `RELEASE history_flush` and the commit inside the rollback and wrote the claim into `_write`'s docstring, FR-PROXY-404, CC-PROXY-0030, BUG-0550 and PA-0550(2), while every injected failure it had fails in `_insert`, before the commit (PA-0107(1) not followed). CC-PROXY-0030's deliverable said each new behavioural test was shown failing on the pre-fix code; the commit fix had no test at all.
+- **Evidence:** the reviewer's mutant of `7fdd869` (release and commit back outside the try) stored `[p0, p0, p1]` and passed 8 HistoryWriter test files (176 passed, 1 xfailed); `scratchpad/au-proxy-hist25/commit_fail.py`, `history_mutant.py`.
+- **Impact:** none in behaviour (the code was right); a regression of the "retry never duplicates a flow" path would have gone unseen.
+- **Status:** fixed in lane/HIST25-r1 (`test_a_failed_commit_is_rolled_back_and_the_retry_writes_once`, shown failing on the mutant; PA-0550(6)).
+
+### F-153 — HIST25 left the web proxy's stop draining on the web loop as a "stated residual", against PA-0531(4) (BUG-0550 review round 1, R3)
+- **What:** the lane's own PA-0002 sweep found `web/proxycontrol.py::ProxyController.stop` closing the writer (now a drain of the whole backlog, up to 60 s) on the web loop and recorded it as a "stated residual (UI component)" and "a follow-up ... could move it to a thread"; it pinned the repeater routes with a strict xfail but not this instance, and NFR-PROXY-nonblocking's `Not yet enforced:` line named only the repeater routes.
+- **Evidence:** BUG-0550's sweep and CC-PROXY-0030's risk at `7fdd869`; the reviewer's measurement (`scratchpad/hist25r3/stop_blocks.py`): 60 flows at +50 ms, `await ctrl.stop()` 3009 ms, the loop's longest stall 3019 ms.
+- **Impact:** low in practice (lifespan shutdown, proxied connections already cancelled); a rule breach.
+- **Status:** fixed in lane/HIST25-r1 (`HistoryWriter.aclose`; `test_stopping_the_web_proxy_drains_its_history_off_the_web_loop`; the whole-package guard `test_no_event_loop_path_blocks_on_a_history_writer`; PA-0550(7)).
