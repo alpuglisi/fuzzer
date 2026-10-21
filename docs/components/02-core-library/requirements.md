@@ -907,6 +907,13 @@ one definition of which rows are one test, computed from a candidate's evidence 
 older row gets its context on read). The trace's send roles include `bind`, the
 binder's page fetch (FR-FUZZ-67).
 
+`core/dedup.py` (CC-CORE-0074, BUG-0547) clusters pages by DOM skeleton
+(`TemplateClusterer`; `known_cluster_id` is None for an absent or structureless page) and
+folds injection points only on the page template plus `wire_request_key` (every field of
+the point; a standalone query point's slot as placed by SP-42), through `fold_points`,
+which reports the count and `FOLD_KEY`. Its behaviour is specified by FR-FUZZ-68;
+`wire_request_key` is replaced by SP-57 when AU-REQID78 merges.
+
 ## 6. Dependencies (components)
 None (foundational layer; it manages the project store).
 

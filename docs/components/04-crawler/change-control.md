@@ -3,6 +3,91 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0058 — The capture proxy builds records off its event loop, bounds its queue in bytes with backpressure, and counts every loss (BUG-0548, audit defect 22) (2026-10-21)
+- Placement: pre-assigned to lane DISCO22 (audit defect 22); independent of AU-DISCO's
+  defects 1-3 (`disco/fingerprint.py`, `disco/explore.py`, not touched here).
+- Change:
+  - **`disco/capture.py`.**
+    - `snapshot(...)` -> `HeldExchange` (frozen, slotted): what a proxy hook takes. The
+      header pairs (mitmproxy's `fields` tuple, by reference) and each body as sent
+      (`raw_content`, content-coded, by reference), with its `size` in bytes. Nothing is
+      decoded, redacted or serialised. A body over `MAX_CAPTURE_BODY_BYTES` (8 MiB, =
+      `core.redaction.MAX_REDACT_BYTES`) is not held (`req_omitted`/`res_omitted`
+      `"too_large"`); only its length is read.
+    - `build_record(ex)` -> `(CaptureRecord, undecodable)`: run by the writer. Each
+      body is decoded by `decode_body` through SP-60's `bodyread.read_body` (an
+      in-memory `read1` stream) under `MAX_CAPTURE_BODY_BYTES`. A body over it once
+      decoded, in a coding SP-60 cannot bound (`zstd`, a chain) or corrupt is `None`.
+      Then `make_record`.
+    - `make_record` gains `req_omitted` / `res_omitted`: a body not captured whole is
+      recorded as none and marked `*_truncated` (fail closed, PA-0455: redaction
+      needs the whole body). `OMIT_REASONS` = `too_large`, `backlog`, `undecodable`.
+    - `_pairs` decodes latin-1 bytes pairs from any source (`fields`, a mapping, a
+      tuple of pairs), so a held tuple is read like mitmproxy's `Headers`.
+  - **`disco/recorder.py`.**
+    - The hooks (`response`, `error`, `websocket_message`) only check scope and offer
+      a `snapshot`. The writer thread (`_write`) runs `build_record`, `append_record`
+      and the counters. Every failure there is contained, logged and counted
+      `dropped` (PA-0086(2)).
+    - The queue is bounded by `QUEUE_MAX` (10 000) records and `QUEUE_MAX_BYTES`
+      (32 MiB) held.
+      - An exchange that does not fit, or arrives while one waits, joins a line
+        (`_Waiting` entries in a deque). Its hook returns an awaitable that mitmproxy
+        awaits (`_wait_in_line`): the flow waits, never the loop, and records keep
+        their order (`waited`).
+      - The line is data: every offer and every waiter moves it (`_pump`), so a
+        waiter that is never resumed holds no one back.
+      - After `BACKPRESSURE_WAIT_S` (30 s) the exchange is queued without its bodies
+        (`omitted.backlog`), or dropped when even that does not fit.
+      - A waiting exchange whose flow is cancelled is `dropped`, and the line moves
+        on. At shutdown the line is handed to the writer (`_flush_line`): its
+        exchanges are complete, and only the browser was held back.
+    - A refusal's stats refresh is a flag plus a wake-up item. It is never counted as
+      a dropped record (it was, when the queue was full).
+    - `request` narrows `Accept-Encoding` to what SP-60 can bound
+      (`bodyread.advertise`). Measured: Chromium sends `gzip, deflate, br, zstd`
+      through the proxy, even to a plain-http loopback origin.
+    - `running` sets the process's GIL switch interval to `SWITCH_INTERVAL_S` (1 ms):
+      measured, the loop waited up to CPython's 5 ms for the writer's GIL at each
+      wake-up.
+    - `stop` drains for `DRAIN_TIMEOUT_S` (30 s) in all. The stats file gains
+      `omitted` {`too_large`, `backlog`, `undecodable`}, `waited` and `queued`.
+  - **`disco/proxyproc.py`.** `STOP_GRACE_S` (45 s) is passed as procutil's `grace`:
+    the stop lets mitmdump drain before the supervisor's kill. It was 5 s, so a
+    backlog and the final stats would have been killed uncounted (PA-0138(3): the
+    consumer that waits on the drain).
+- Impact (other components / project):
+  - The `capture.jsonl` record format is unchanged (`v` 1). A body not captured whole
+    is `null` with `*_truncated: true`, which every reader already treats as "no
+    schema from this body": `synth`, `ede`, `store_adapter`.
+  - The stats file (`capture.jsonl.stats.json`) gains keys only. `cli` and
+    `tools.observe` read `blocked`/`recorded`, unchanged.
+  - The target sees a narrower `Accept-Encoding` from the capture proxy.
+  - `proxyproc.stop` may take up to 45 s when the writer is behind (measured backlog
+    drain: 8.5 s for 1 MiB JSON responses).
+  - No SP-60 change: the recorder is a new consumer of `read_body` and `advertise`.
+    The SP-35 owner gains `snapshot`, `build_record` and `decode_body`.
+- Risk (medium): the hook now returns an awaitable when the queue is full, so the
+  browser is paced to the writer (by design). The explorer's own deadlines therefore
+  see the writer's speed on body-heavy bursts.
+  - Mitigated: the wait is bounded (30 s, then the body is omitted and counted).
+  - Measured: on 200 x 1 MiB JSON the page took 18.7 s, against 24.0 s when every
+    hook blocked the loop (17.3 s against 30.6 s in a repeat pair).
+  - The writer's CPU still shares the GIL with the loop (residual R1 in BUG-0548).
+- Deliverables:
+  - [x] `capture.snapshot`, `HeldExchange`, `decode_body`, `build_record`, `make_record`
+    omission flags — done
+  - [x] the recorder's hooks, writer, byte and count bounds, the backpressure line,
+    contained failures, stats, `Accept-Encoding`, switch interval, drain — done
+  - [x] `proxyproc.STOP_GRACE_S` — done
+  - [x] tests: `tests/test_disco_capture.py`, 11 new and 1 changed; and the AST guard
+    `tests/test_capture_hook_guard.py`, proven on synthetic offenders including the
+    pre-fix shape — done
+  - [x] measurement before and after: a loopback page firing 1500 x 64 KiB and
+    200 x 1 MiB gzip JSON fetches through a real mitmdump, Chromium (BUG-0548) — done
+  - [x] FR-CRAWL-18 and §5 edited in place; FR-CRAWL-38 added — done
+- Effectiveness (assessed <date> or pending): pending.
+
 ### CC-CRAWL-0054 — The JSONL tail caps a line while reading it; the contract runner reads bounded and matches contract patterns in a killable worker (BUG-0536) (2026-10-20)
 - Placement: pre-assigned to AU-BOUNDED (audit defects 23 and 27, with the disco and
   spider half of 21); the core reader is CC-CORE-0072, the senders CC-FUZZ-0109.

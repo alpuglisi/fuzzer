@@ -2033,6 +2033,38 @@ rewards) derives from it.
     authenticated seam's anonymous route (an auth endpoint) keeps no cookie jar, so a
     token tied to an anonymous session cookie fails there; a captured JSON body's
     redacted leaf is never rebuilt; a store row from before migration 25 has no recipe.
+- **FR-FUZZ-68 (the template stage folds only true duplicates, `CC-FUZZ-0112`,
+  `CC-CORE-0074`, 2026-10-21, BUG-0547)** When a caller gives `run_pipeline` the pages'
+  HTML (`pages_html`), the stage before the audit folds injection points through
+  `core.dedup.fold_points`:
+  - **Folded only when it is the same work.** A point is dropped only when an earlier
+    kept point is on a page of the same DOM template **and** has the same
+    `core.dedup.wire_request_key`: every field of the point (endpoint URL, parameter,
+    method, location, sibling entries, content type, sink, store step, origin, value
+    shapes, base value, redirect seed, deciding mechanism, and any field added later) as
+    given. Only a standalone query point's injected slot (no siblings, no store step) is
+    taken as sent, placed by the one query placement (FR-FUZZ-64, SP-42), so
+    `/item?id=1` and `/item?id=2` probing `id` are one request.
+  - **A shared template alone never folds two points.** Another endpoint, parameter,
+    location, method, form action or sibling value keeps both.
+  - **An unknown page is never a duplicate.** A URL with no HTML, or HTML with no tag
+    structure, is its own template: its points fold only with an identical point on the
+    same URL.
+  - **Reported.** The metrics carry `dedup_points_in`, `dedup_folded`,
+    `dedup_unknown_pages` (also `pipeline_dedup_*` run metrics) and `dedup_key`
+    (`core.dedup.FOLD_KEY`); nothing is reported, and nothing folded, when no pages are
+    given.
+  - **SP-57 and this key (AU-REQID78).** `wire_request_key` stays a stricter local key,
+    not a call to SP-57: the fold must also keep apart the fields that change which
+    rules fire or which mechanism decides (sink, value shapes, origin, deciding
+    mechanism) and a store field without a store step, which the request context
+    (FR-FUZZ-66) deliberately leaves out. Both normalise a standalone query slot the
+    same way (the first occurrence, SP-42). Stated residual of BUG-0530: one key
+    owner for both is a follow-up.
+  - **Stated gap:** a PRG follow-up of a fragment-only `Location` is resolved against the
+    point's unplaced URL (FR-FUZZ-64), so two folded standalone points could differ in that
+    one follow-up's target.
+  - **Checks:** `tests/test_dom_dedup_folding.py`.
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
   finding must reproduce.

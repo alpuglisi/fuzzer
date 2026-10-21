@@ -1180,7 +1180,9 @@ tracked in the requirements files, not here.
   so timing measurements run at concurrency 1 (`core/budget.py`).
 - **Logging** (structured, `core/obs.py`) and **config** (layered, hashed onto the
   run, `core/config.py`) `[built]`. Also `core/urls.py` (single home of path
-  normalization), `core/dedup.py`, `core/fingerprint.py`, `core/hybrid.py`, and
+  normalization), `core/dedup.py` (DOM-template clustering, and the pipeline's point
+  folding: a point folds only with one on the same template that sends the same request,
+  `wire_request_key`, FR-FUZZ-68), `core/fingerprint.py`, `core/hybrid.py`, and
   `core/runmode.py` (the D14/D15 run-mode + no-ground-truth fail-safe).
 - **A run's recorded target** `[built]` (CC-CORE-0500, FR-CORE-500): `core/runtarget.py`
   is the one reader of the `target` table -- a run's target is its first row by id, its
@@ -1482,11 +1484,19 @@ tracked in the requirements files, not here.
     directory at the end; `capture.py`'s `CaptureTail`/`JsonlTail` is the one
     incremental reader (SP-35).
   - `recorder.py` + `mitm.py` + `proxyproc.py`: mitmdump (this interpreter, a
-    procutil-owned child on a free loopback port) with the recorder addon: the scope
-    firewall (each request and each CONNECT tunnel), the `x-disco-action` tag read and
-    stripped, records queued to one writer thread.
+    procutil-owned child on a free loopback port) with the recorder addon.
+    - Each hook is the scope firewall (each request and each CONNECT tunnel). It reads
+      and strips the `x-disco-action` tag and narrows `Accept-Encoding` to what SP-60
+      bounds.
+    - A hook then only takes the exchange (`capture.snapshot`, by reference). One
+      writer thread decodes, redacts, builds and appends each record
+      (`capture.build_record`, FR-CRAWL-38, BUG-0548).
+    - The queue is bounded in records and bytes. Past that bound the browser is paced
+      (an awaitable hook, order kept), and every loss is counted in the stats.
+    - The stop's grace (45 s) exceeds the writer's drain (30 s).
   - `capture.py` (SP-35): `capture.jsonl`, written only by `make_record` (redacted at
-    the write) and read only by `read_capture` (typed, quarantining).
+    the write, off the proxy's loop) and read only by `read_capture` (typed,
+    quarantining).
   - `explore.py` + `fingerprint.py` + `formfill.py`: a guarded Chromium (navguard
     launch, route, navigation and release owners; `proxy=` the recorder) explores a
     state graph keyed by layout fingerprint, finds listener-only elements through
@@ -1601,7 +1611,11 @@ tracked in the requirements files, not here.
 - **Fuzzing harness** `[built]`: the generalized `template + injection_point +
   payload_source + oracle` pipeline (`harness/pipeline.py`, `harness/auto.py`,
   `harness/scoring.py`, `harness/integration.py`), so one harness serves multiple
-  vulnerability classes. Driven end-to-end by `fuzzlab auto` (`harness/auto_cli.py`),
+  vulnerability classes.
+  Given the pages' HTML, the pipeline first folds injection points that are the same
+  request on pages of one DOM template (never on the template alone; an absent page is
+  unknown) and reports the count and key (FR-FUZZ-68, BUG-0547).
+  Driven end-to-end by `fuzzlab auto` (`harness/auto_cli.py`),
   which consolidates a crawl, runs scoped rules + oracle confirmation, and — with a
   ground-truth contract — scores TP/FP. The legacy `tools/blind_sqli_fuzzer.py`
   remains as the original single-class fuzzer.
