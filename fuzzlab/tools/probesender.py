@@ -176,21 +176,39 @@ class _Copy:
 
 
 class _FetchRoute:
-    """The session route a seam page fetch went out on (FR-FUZZ-67; BUG-0544 review
-    R2-2): the client and the identity label its GET was dispatched with -- the run's
-    session, a path's isolated copy, or anonymous. The fetch returns it as
-    ``probe.carry``; the binder puts it on the bound send's entries (``entries.carry``),
-    and that send is made only on the same route: a value bound from the page belongs to
-    that route's session."""
+    """The session a seam page fetch went out on (FR-FUZZ-67; BUG-0544 reviews R2-2,
+    R3-2): the client and the identity label its GET was dispatched with -- the run's
+    session, a path's isolated copy, or anonymous --, the session generation its
+    ``prepare`` applied (``Request.session_generation``, read, never recomputed; None
+    without a session), and whether that session was lost on the page's own answer (the
+    manager told a loss of this identity while the GET was in flight, or ``prepare``
+    flagged it lost). The fetch returns it as ``probe.carry``; the binder puts it on the
+    bound send's entries (``entries.carry``). A value bound from the page belongs to
+    that session, so the send is refused (`PrerequisiteUnavailable`: unbound, never a
+    negative) on another route or identity or after a loss on the page's answer -- before
+    anything is sent -- and its answer is not read when its ``prepare`` applied another
+    generation (a re-login in between)."""
 
-    __slots__ = ("client", "identity")
+    __slots__ = ("client", "identity", "generation", "lost")
 
-    def __init__(self, client, identity: str):
+    def __init__(self, client, identity: str, generation: int | None = None,
+                 lost: bool = False):
         self.client = client
         self.identity = identity
+        self.generation = generation
+        self.lost = lost
 
     def same(self, client, identity: str) -> bool:
         return client is self.client and identity == self.identity
+
+    def refusal(self, client, identity: str) -> str | None:
+        """Why a bound send on ``(client, identity)`` may not go out, or None."""
+        if not self.same(client, identity):
+            return "the bound send's session route is not the one its page was fetched on"
+        if self.lost:
+            return ("the session its page was fetched on was lost on that page's own "
+                    "answer")
+        return None
 
 
 def _chain(exc: BaseException) -> list[BaseException]:
@@ -387,9 +405,13 @@ class SeamProbeSender(_ExplicitAllowance):
         self._current: tuple[str, str, str] | None = None   # (location, param, url)
         self._last_main_was_header: tuple[str, str] | None = None   # (param, url)
         self._copies_at_header = 0
+        # -- session losses told (FR-FUZZ-67, BUG-0544 review R3-2) --
+        self._loss_lock = threading.Lock()           # never held across a send
+        self._losses = 0
         add = getattr(manager, "add_logout_listener", None)
         if add is not None and identity != "anonymous":
             add(self._on_logout)
+            add(self._on_session_loss)
 
 
     # -- isolation (FR-FUZZ-44) -------------------------------------------------
@@ -543,6 +565,9 @@ class SeamProbeSender(_ExplicitAllowance):
                                              _directory)
         manager = self._manager.isolated_copy(self._identity, ordinal=ordinal)
         copy = _Copy(manager, self._isolated_client(manager))
+        add = getattr(manager, "add_logout_listener", None)
+        if add is not None:                    # a copy's losses too (review R3-2)
+            add(self._on_session_loss)
         with self._iso_lock:
             self._all_copies.append(copy)
             self._labels[key] = copy.label
@@ -631,6 +656,20 @@ class SeamProbeSender(_ExplicitAllowance):
                 return seen[-1]
         return None
 
+    def _on_session_loss(self, origin: str, identity: str) -> None:
+        """Told by the run's manager or a copy's, inside the send whose answer showed a
+        valid session of this sender's identity lost (FR-SESS-16): counted, so a page
+        fetch knows the session was lost while its GET was in flight (FR-FUZZ-67, review
+        R3-2). Never raises; takes only its own lock, never held across a send."""
+        if identity != self._identity:
+            return
+        with self._loss_lock:
+            self._losses += 1
+
+    def _losses_told(self) -> int:
+        with self._loss_lock:
+            return self._losses
+
     def _on_logout(self, origin: str, identity: str) -> None:
         """Told by the main manager inside the send that observed a logout. Records
         only; never raises, so that probe's response is kept. Only a logout on one of
@@ -695,10 +734,13 @@ class SeamProbeSender(_ExplicitAllowance):
         sets a cookie is refused, since its value may be tied to that cookie (review
         R2-B1) -- the test is then inconclusive, never a negative.
 
-        The route the GET actually went out on is returned as ``probe.carry``
-        (`_FetchRoute`); the bound send carrying it is refused when it would leave on
-        another route or identity -- e.g. after the copy's re-login on this fetch logged
-        the run's session out and the breaker sent the path anonymous (review R2-2)."""
+        The session the GET actually went out on is returned as ``probe.carry``
+        (`_FetchRoute`: its route, its generation, and whether the manager saw it lost
+        on this page's own answer); the bound send carrying it is refused when it would
+        leave on another route or identity -- e.g. after the copy's re-login on this
+        fetch logged the run's session out and the breaker sent the path anonymous
+        (review R2-2) -- or when the page's own answer lost the session, and its answer
+        is not read when it went out on another generation (review R3-2)."""
         from fuzzlab.core.http import Request
         from fuzzlab.oracle.probe import PrerequisiteUnavailable
         check_send_url(url, self._explicit, method="GET")
@@ -719,8 +761,15 @@ class SeamProbeSender(_ExplicitAllowance):
 
             def dispatch(on_client, on_identity):
                 req = Request("GET", url, identity=on_identity, component="oracle")
-                went.append(_FetchRoute(on_client, on_identity))
-                return self._dispatch(on_client, on_identity, req, "query", "", url)
+                told = self._losses_told()
+                page = self._dispatch(on_client, on_identity, req, "query", "", url)
+                # review R3-2: the generation `prepare` applied, and a loss the manager
+                # saw on this answer (its `observe` marks it lost; `prepare`'s flag on
+                # this request is still False)
+                went.append(_FetchRoute(on_client, on_identity, req.session_generation,
+                                        lost=req.session_lost is True
+                                        or self._losses_told() != told))
+                return page
             if copy is None:
                 page = dispatch(client, identity)
             else:
@@ -782,14 +831,15 @@ class SeamProbeSender(_ExplicitAllowance):
         fetched = fetched if isinstance(fetched, _FetchRoute) else None
 
         def send_on(on_client, on_identity):
-            if fetched is not None and not fetched.same(on_client, on_identity):
-                # FR-FUZZ-67 (BUG-0544 review R2-2): its fresh values were fetched on
-                # another session route (the breaker or a lost copy moved the path) and
-                # are that session's: never sent, so the test is unbound, not a negative
+            why = None if fetched is None else fetched.refusal(on_client, on_identity)
+            if why is not None:
+                # FR-FUZZ-67 (BUG-0544 reviews R2-2, R3-2): its fresh values were fetched
+                # on another session route (the breaker or a lost copy moved the path),
+                # or on a session the page's own answer lost (the next `prepare` would
+                # log in again): they are that session's. Never sent, so the test is
+                # unbound, not a negative
                 from fuzzlab.oracle.probe import PrerequisiteUnavailable
-                raise PrerequisiteUnavailable(
-                    "the bound send's session route is not the one its page was fetched "
-                    "on")
+                raise PrerequisiteUnavailable(why)
             return self._send_on(on_client, on_identity, url, param, value, timing,
                                  method, location, content_type, entries)
         if copy is None:
@@ -809,11 +859,14 @@ class SeamProbeSender(_ExplicitAllowance):
         """``send_on(client, label)`` on ``copy`` (the isolated session of ``url``'s
         path), or None when the copy could not re-log in: it is then released and the
         path's later sends go anonymous (FR-FUZZ-44). A re-login is verified."""
+        from fuzzlab.oracle.probe import PrerequisiteUnavailable
         from fuzzlab.session.manager import IsolatedLoginFailed, LoginCapReached
         before = copy.manager.login_attempts()
         try:
             probe = send_on(copy.client, copy.label)
-        except ProbeUnobserved:
+        except (ProbeUnobserved, PrerequisiteUnavailable):
+            # a bound send refused after its `prepare` logged the copy in again (review
+            # R3-2) is verified too
             if copy.manager.login_attempts() > before:   # the copy re-logged in first
                 self._verify_main(url, first_only=False)
             raise
@@ -935,7 +988,18 @@ class SeamProbeSender(_ExplicitAllowance):
             # instance 4, pinned by a strict xfail, unchanged here)
             req = Request(method.upper(), place_query_param(url, param, value),
                           identity=identity, timing=timing, component="oracle")
-        return self._dispatch(client, identity, req, location, param, url)
+        probe = self._dispatch(client, identity, req, location, param, url)
+        fetched = getattr(entries, "carry", None)
+        if isinstance(fetched, _FetchRoute) and req.session_generation != fetched.generation:
+            # FR-FUZZ-67 (BUG-0544 review R3-2): `prepare` (inside the client's send)
+            # applied another session generation than the page's fetch -- a re-login in
+            # between -- so the bound values are the old session's: this answer is not
+            # read, and the test is unbound, never a negative. Stated residual: the send
+            # has gone out by the time its generation is known
+            from fuzzlab.oracle.probe import PrerequisiteUnavailable
+            raise PrerequisiteUnavailable("the bound send's session generation is not the "
+                                          "one its page was fetched on")
+        return probe
 
     def _dispatch(self, client, identity, req, location, param, url) -> Probe:
         """Send ``req`` for the probe of ``(location, param, url)``: the header

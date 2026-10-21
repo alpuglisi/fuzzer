@@ -162,8 +162,10 @@ class UnplaceableLocation(ValueError):
 class PrerequisiteUnavailable(UnplaceableLocation):
     """The request's prerequisites cannot be rebuilt (FR-FUZZ-67, BUG-0544): a fresh
     form value could not be fetched and bound in the probe's session, or a sibling may
-    never be sent. Nothing is sent; the oracle makes it no verdict from that mechanism,
-    and a candidate no mechanism could send is inconclusive with this reason
+    never be sent. Nothing is sent (one exception: a seam bound send whose ``prepare``
+    applied another session generation than its page's fetch has gone out, and its
+    answer is not read; BUG-0544 review R3-2); the oracle makes it no verdict from that
+    mechanism, and a candidate no mechanism could send is inconclusive with this reason
     (`oracle.UNBOUND`), never a negative. The message names fields and pages, never a
     value."""
 
