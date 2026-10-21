@@ -1334,3 +1334,9 @@ Juice Shop lab is complete.
 - **Evidence:** BUG-0550's sweep and CC-PROXY-0030's risk at `7fdd869`; the reviewer's measurement (`scratchpad/hist25r3/stop_blocks.py`): 60 flows at +50 ms, `await ctrl.stop()` 3009 ms, the loop's longest stall 3019 ms.
 - **Impact:** low in practice (lifespan shutdown, proxied connections already cancelled); a rule breach.
 - **Status:** fixed in lane/HIST25-r1 (`HistoryWriter.aclose`; `test_stopping_the_web_proxy_drains_its_history_off_the_web_loop`; the whole-package guard `test_no_event_loop_path_blocks_on_a_history_writer`; PA-0550(7)).
+
+### F-154 — I ran twelve lanes without watching the host's free disk, and it filled
+- **What:** after the owner asked for maximum parallelism I dispatched nine lane workflows beside three lanes, each with reviewers, all keeping scratch tree copies, captures, pytest temp and worktrees on the one host disk; I never checked free space, and from about 06:00Z the disk was full.
+- **Evidence:** `df /` at 07:30Z: 86 MB free of 252 GB (39 GB used); the POOL24 merge verification (`scratchpad/vpush7.log`: junit ParseError) and the DISCO4, HIST25 and SURROGATE lane reports (ENOSPC); ERROR_LOG 2026-10-21 host entry.
+- **Impact:** four harness runs lost (one about 25 minutes in) on a serialised test host; two lanes' revisions left without a verdict.
+- **Status:** space freed (4.9 GB); the lost verifications are re-run at merge. Practice: a dispatch of many lanes includes a disk check at each merge and a cleanup rule for lanes.
