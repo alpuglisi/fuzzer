@@ -93,6 +93,45 @@ def test_an_engine_failure_answers_502_and_the_proxy_keeps_serving():
     assert contained and "upstream exploded" in contained[0] and errors == []
 
 
+def test_a_history_failure_never_changes_the_clients_answer():
+    """BUG-0543 integration (AU-PROXY with HIST25): a history whose hand-over raised (a
+    fake with no `submit`, or a writer thread that cannot start) made `_record` raise
+    after the upstream had answered, and the client got a 502 for a relayed 200. Wanted:
+    the client gets the upstream's answer, a failing upstream is still a 502 whose
+    contained error is the upstream's own, and each flow the history could not take is
+    counted by its error's class."""
+    class _Broken:
+        def submit(self, rec):
+            raise RuntimeError("can't start new thread")
+
+    def sender(host, port, tls, raw):
+        if b" /down " in raw:
+            raise ConnectionRefusedError("upstream down")
+        return OK
+
+    async def main():
+        eng = ProxyEngine(scope=Scope.for_host("127.0.0.1:8080"), sender=sender,
+                          history=_Broken())
+        srv = await AsyncProxyServer(eng, "127.0.0.1", 0).start()
+        out = []
+        try:
+            for path in (b"/a", b"/down"):
+                r, w = await asyncio.open_connection("127.0.0.1", srv.port)
+                w.write(b"GET http://127.0.0.1:8080%s HTTP/1.1\r\n"
+                        b"Host: 127.0.0.1:8080\r\n\r\n" % path)
+                await w.drain()
+                out.append(await r.read())
+                w.close()
+        finally:
+            await srv.stop()
+        return out, srv.errors, eng
+    (relayed, down), contained, eng = asyncio.run(main())
+    assert relayed == OK                                   # not a 502
+    assert down.startswith(b"HTTP/1.1 502 ")
+    assert len(contained) == 1 and "upstream down" in contained[0]
+    assert eng.history_failures == {"RuntimeError": 2}
+
+
 # --- BUG-0086: one scope decision; IPv6 authorities -----------------------------
 
 def test_a_port_specific_exclude_is_not_bypassed_by_a_host_wide_include():

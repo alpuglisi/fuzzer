@@ -20,7 +20,8 @@ from __future__ import annotations
 import asyncio
 import ssl
 import time
-from dataclasses import dataclass
+from collections import Counter
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
@@ -130,6 +131,12 @@ class ProxyEngine:
     interceptor: Interceptor | None = None
     history: HistoryWriter | None = None
     identity: str | None = None
+    #: Flows the history could not take because handing one over raised, by the
+    #: error's class. A history failure is counted here and never reaches the flow: the
+    #: client still gets the upstream's answer, or the 502 of the upstream's own failure
+    #: (FR-PROXY-404, BUG-0543 integration). `fuzzlab proxy` prints them when it stops.
+    history_failures: Counter = field(default_factory=Counter, init=False,
+                                      compare=False)
 
     async def handle_request(self, raw: bytes, host: str, port: int,
                              use_tls: bool = False) -> bytes | None:
@@ -196,22 +203,30 @@ class ProxyEngine:
         (BUG-0550, FR-PROXY-404): the method, target and status come from each
         message's first line only, and `HistoryWriter.submit` only queues the flow; the
         writer's own thread redacts, hashes and stores it. Never store or redaction work
-        here (PA-0550)."""
-        scheme = "https" if use_tls else "http"
-        req = _first_line_of(msg.raw)
-        status = None
-        if resp:
-            sl = _first_line_of(resp).start_line.split(b" ")
-            if len(sl) >= 2 and sl[1].isdigit():
-                status = int(sl[1])
-        authority = _authority(host, port)
-        self.history.submit(FlowRecord(
-            method=req.method.decode("latin-1", "replace"),
-            url=f"{scheme}://{authority}{req.target.decode('latin-1', 'replace')}",
-            host=authority, status=status, identity=self.identity,
-            in_scope=True, raw_request=msg.raw, raw_response=resp, t=t, error=error,
-            intercept="; ".join(decisions) if decisions else None,
-        ))
+        here (PA-0550).
+
+        A history that raises never changes the flow (PA-0086(2), PA-0554(2)): the
+        failure is counted in `history_failures` by its class, and the client gets the
+        upstream's answer, or the upstream's own failure, as without a history. Before
+        this, one raise turned a relayed 200 into a 502 (BUG-0543 integration)."""
+        try:
+            scheme = "https" if use_tls else "http"
+            req = _first_line_of(msg.raw)
+            status = None
+            if resp:
+                sl = _first_line_of(resp).start_line.split(b" ")
+                if len(sl) >= 2 and sl[1].isdigit():
+                    status = int(sl[1])
+            authority = _authority(host, port)
+            self.history.submit(FlowRecord(
+                method=req.method.decode("latin-1", "replace"),
+                url=f"{scheme}://{authority}{req.target.decode('latin-1', 'replace')}",
+                host=authority, status=status, identity=self.identity,
+                in_scope=True, raw_request=msg.raw, raw_response=resp, t=t, error=error,
+                intercept="; ".join(decisions) if decisions else None,
+            ))
+        except Exception as exc:  # noqa: BLE001 - a flow's history never fails its traffic
+            self.history_failures[type(exc).__name__] += 1
 
 
 def _first_line_of(raw: bytes) -> RawMessage:

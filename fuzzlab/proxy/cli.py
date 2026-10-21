@@ -175,6 +175,9 @@ def main(argv: list[str]) -> int:
             refused = {k: v for k, v in server.counts.items() if v}
             if refused:
                 print(f"  refused by the listener's bounds: {refused}")
+            if engine.history_failures:
+                print(f"  flows the history could not take: "
+                      f"{dict(engine.history_failures)}")
 
     ended = "complete"                    # Ctrl-C or SIGTERM: a requested stop
     try:

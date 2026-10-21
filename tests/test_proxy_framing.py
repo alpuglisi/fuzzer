@@ -122,6 +122,8 @@ class _Hist:
     def record(self, rec):
         self.recs.append(rec)
 
+    submit = record                     # the engine's hand-over (BUG-0550)
+
 
 def _server(**kw):
     hist = _Hist()

@@ -60,6 +60,7 @@ def recv_http_response(sock: socket.socket, timeout: float, *,
                        deadline: float | None = None, method: bytes = b"GET") -> bytes:
     """Read one whole HTTP/1 response to a ``method`` request from ``sock``; return its
     exact bytes (the final response: interim 1xx ones are read and passed over).
+    `read_http_response` also returns the bytes read past its framed end.
 
     Framing is SP-63's (`framing.MessageReader`): status line, headers, then a
     ``Content-Length``, chunked (sizes, extensions, trailers parsed) or close-delimited
@@ -69,6 +70,20 @@ def recv_http_response(sock: socket.socket, timeout: float, *,
     or a close before the framed end raise `UpstreamIncomplete`; an unframeable response
     raises `UpstreamFramingError`. A peer that closes before sending anything returns
     ``b""`` (no response). Bytes accumulate in the reader's buffers, never re-copied."""
+    return read_http_response(sock, timeout, max_head=max_head, max_body=max_body,
+                              deadline=deadline, method=method)[0]
+
+
+def read_http_response(sock: socket.socket, timeout: float, *,
+                       max_head: int = MAX_HEAD_BYTES, max_body: int = MAX_BODY_BYTES,
+                       deadline: float | None = None,
+                       method: bytes = b"GET") -> tuple[bytes, bytes]:
+    """`recv_http_response`, returning ``(response, past)``: ``past`` holds the bytes the
+    last receive brought past the response's framed end (SP-63's
+    `MessageReader.leftover`), empty when the read stopped exactly at it. They are no
+    part of the response, never returned as it; a sender that keeps the connection reads
+    ``past`` to decide whether it may (FR-PROXY-405), never a second parse of the bytes
+    (BUG-0549 integration). A peer that closes before any byte gives ``(b"", b"")``."""
     end = time.monotonic() + (deadline if deadline is not None
                               else timeout * DEADLINE_FACTOR)
     reader = framing.MessageReader("response", framing.FrameLimits(max_head, max_body),
@@ -90,7 +105,7 @@ def recv_http_response(sock: socket.socket, timeout: float, *,
                     "idle", f"upstream response stalled for {timeout}s before its end")
             if not chunk:
                 if not reader.received:
-                    return b""                         # closed without a response
+                    return b"", b""                    # closed without a response
                 reader.eof()                           # ends a close-delimited body
                 break
             reader.feed(chunk)
@@ -101,7 +116,7 @@ def recv_http_response(sock: socket.socket, timeout: float, *,
         raise UpstreamIncomplete("eof", f"upstream response cut short: {exc}") from exc
     except framing.FramingError as exc:
         raise UpstreamFramingError(f"upstream response cannot be framed: {exc}") from exc
-    return reader.head + bytes(reader.body)
+    return reader.head + bytes(reader.body), reader.leftover
 
 
 class SocketSender:
@@ -118,7 +133,9 @@ class SocketSender:
     upstream connection is left for reuse, per (host, port, TLS), only when the exchange
     on it was exactly one well-framed, bodiless HTTP/1.1 request and one fully framed
     HTTP/1.1 answer, and neither said ``Connection: close`` (`reusable_request`,
-    `reusable_response`); anything else is closed after its exchange, as before. A
+    `reusable_response`), and the answer ended exactly at its framed end: nothing read
+    past it (SP-63's leftover, `read_http_response`) and nothing waiting on the socket
+    (`_quiet`); anything else is closed after its exchange, as before. A
     request that carries a body never leaves or takes a kept connection: whether the
     upstream read the body cannot be observed, and one that did not (CL.0) would put
     the body's bytes at the head of the connection's next request. Only a request that
@@ -161,7 +178,7 @@ class SocketSender:
                 started = time.monotonic()
                 counted = _Counted(sock)
                 try:
-                    resp = self._exchange(counted, raw)
+                    resp, past = self._exchange(counted, raw)
                 except _PEER_CLOSED:
                     _close(sock)
                     if counted.received:         # part of an answer came: never resent
@@ -172,15 +189,15 @@ class SocketSender:
                     raise
                 else:
                     if resp or time.monotonic() - started >= self._timeout:
-                        return self._finish(key, sock, resp, keep)
+                        return self._finish(key, sock, resp, past, keep)
                     _close(sock)                 # the peer closed it before a byte
         sock = self._connect(host, port, use_tls)
         try:
-            resp = self._exchange(sock, raw)
+            resp, past = self._exchange(sock, raw)
         except BaseException:
             _close(sock)
             raise
-        return self._finish(key, sock, resp, keep)
+        return self._finish(key, sock, resp, past, keep)
 
     def _context(self) -> ssl.SSLContext:
         with self._ctx_lock:
@@ -202,15 +219,20 @@ class SocketSender:
                 raise
         return sock
 
-    def _exchange(self, sock: socket.socket, raw: bytes) -> bytes:
+    def _exchange(self, sock: socket.socket, raw: bytes) -> tuple[bytes, bytes]:
         sock.sendall(raw)
         # the request's method frames its answer (HEAD: no body; SP-63, FR-PROXY-402)
-        return recv_http_response(sock, self._timeout, max_body=self._max_body,
+        return read_http_response(sock, self._timeout, max_body=self._max_body,
                                   deadline=self._deadline,
                                   method=RawMessage.from_bytes(raw).method)
 
-    def _finish(self, key, sock: socket.socket, resp: bytes, keep: bool) -> bytes:
-        if keep and reusable_response(resp):
+    def _finish(self, key, sock: socket.socket, resp: bytes, past: bytes,
+                keep: bool) -> bytes:
+        # Kept only when the answer ended exactly at its framed end: nothing read past it
+        # (SP-63's leftover, ``past``) and nothing waiting on the socket now (`_quiet`).
+        # Bytes after a framed answer mean the upstream answered more than it was asked:
+        # kept, they would be the next request's answer (BUG-0549 integration).
+        if keep and not past and reusable_response(resp) and _quiet(sock):
             self._pool.put(key, sock)
         else:
             _close(sock)
@@ -460,7 +482,15 @@ def reusable_response(resp: bytes) -> bool:
     authentication asked for, and framed by exactly one ``Content-Length`` the body
     matches, or a ``Transfer-Encoding: chunked`` alone whose body is exactly one
     complete chunked body; a 204 or 304 has no body and no transfer coding. A
-    close-delimited, over-long, short or doubly framed answer is never kept."""
+    close-delimited, over-long, short or doubly framed answer is never kept.
+
+    Where the answer ended is SP-63's decision, not this one's: ``resp`` is what
+    `read_http_response` framed, which never holds a byte past its end, so the sender
+    also requires that nothing was read past it and nothing waits on the socket
+    (`SocketSender._finish`). This check only narrows what SP-63 accepted to a stricter
+    grammar (one ``Content-Length`` header, ``chunked`` alone, `_chunked_exact`'s chunk
+    lines without whitespace and token trailer names), so it can refuse a connection
+    SP-63's framing would allow, never keep one SP-63 refused."""
     msg = _strict(resp)
     if msg is None:
         return False

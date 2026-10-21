@@ -250,3 +250,69 @@ additionally by
 `tests/test_proxy_framing.py::test_a_request_that_cannot_be_framed_is_answered_400_and_never_forwarded`
 (the four inputs) and
 `tests/test_proxy_framing.py::test_a_response_head_that_does_not_parse_strictly_is_never_relayed`.
+
+## Merge integration (lane INTEG, 2026-10-21)
+Merged with POOL24 (BUG-0549) and HIST25 (BUG-0550) (3cfd912, then d83876f), the
+harness counted 135 files: 4139 passed, 8 failed. Each lane was green on its own base.
+Three findings were confirmed by a skeptic. Their fixes are recorded under
+CC-PROXY-0029's merge-integration sub-bullet, on `integ/proxy-r1`. I2, a kept
+connection holding bytes past its framed answer, is in BUG-0549's merge-integration
+section. The other two follow.
+
+- **I1: a history failure changed the client's answer.** HIST25 made
+  `ProxyEngine._record` hand each flow to `history.submit`. AU-PROXY's
+  `tests/test_proxy_framing.py` fake history had `record` only. The engine raised after
+  the upstream had answered, the listener's containment turned that into a 502, and four
+  tests failed: a chunked request got 502 instead of the relayed 200, and so did raw
+  framing and the connection cap's admitted request; the cut-response test found no
+  record.
+  - *Test-side fix:* the fake gains `submit`, as HIST25's merge gave
+    `test_proxy_rules_and_scope.py`'s. Swept: every fake handed to `ProxyEngine` in
+    `tests/` (`test_proxy_rules_and_scope.py`, `test_proxy_history_writer_thread.py`;
+    the others use a real `HistoryWriter`). None other lacks `submit`.
+  - *Product defect, found by the finding's check:* a history that raises must never
+    change the client's answer, and it could. `_record` let any exception from building
+    or submitting the flow reach the flow. `HistoryWriter.submit` can raise (its first
+    call starts the writer thread), and so can any history passed in. A relayed 200
+    became a 502. On the upstream-failure path, the history's exception replaced the
+    upstream's in `AsyncProxyServer.errors`. This is BUG-0550's item 3 ("a write that
+    failed raised into the proxied connection's handler (a 502 for that client)") at the
+    hand-over: HIST25 moved the store write to a thread, so a store error no longer
+    reaches the handler, but the hand-over itself was left uncontained. The finding asked
+    for the fix to be recorded here, with no new number.
+  - *Fix:* `_record` contains any exception raised while building or submitting the
+    flow and counts it in `ProxyEngine.history_failures` by error class.
+    `fuzzlab proxy` prints that count at stop, beside the listener's refusals (PA-0086(2),
+    PA-0554(2): contained and reported as a count the operator reads). The client gets
+    the upstream's answer, or the 502 of the upstream's own failure with that failure in
+    `errors`. Test:
+    `tests/test_proxy_rules_and_scope.py::test_a_history_failure_never_changes_the_clients_answer`
+    fails on d83876f's `server.py` (the relayed 200 is a 502) and passes now.
+  - *Prior-preventive-action failure analysis:* PA-0086(2) (every per-unit handler
+    contains its own failures) and PA-0554(2) (a writer never raises to its caller) both
+    applied. BUG-0550 fixed the instance it measured, a store write, and **not the
+    class**: an observing side channel failing the flow. Its loop guard
+    (`test_the_proxy_loop_never_calls_store_or_redaction_work`) checks which history
+    calls the loop makes, not what happens when they fail. Amendment proposed for
+    PA-0550 (text in the lane's doc texts; no new number): a side channel that only
+    observes a flow (history, trace) never changes the flow's answer. Its hand-over is
+    contained and counted by the caller, and a test injects a raising side channel at
+    the engine.
+  - *Sweep (by mechanism: every place that records a flow after the upstream
+    answered):*
+
+    | Site | Disposition |
+    |---|---|
+    | `server.ProxyEngine._record` | fixed |
+    | `proxy/repeater.py::Repeater.send`: synchronous `history.record` after the send; a store error (the flush re-raises, BUG-0106) replaces the response, and the operator may send again | pinned: `tests/test_proxy_repeater.py::test_a_history_failure_never_loses_the_repeaters_response` (strict xfail). Owner PROXY, with the UI's repeater routes for where a count is shown |
+    | `HistoryWriter`'s trace events (FR-PROXY-13) | not this class: written on the writer's thread; failures counted `dropped` and never raised |
+
+- **I3: SP-63's exceptions in POOL24's tests (test-side).** Three of POOL24's tests
+  expected the pre-SP-63 reader: bytes back for two answers SP-63 cannot frame (a
+  non-hex chunk size; chunked with `Content-Length`), and `b""` for a stall. SP-63's
+  `UpstreamFramingError` and `UpstreamIncomplete("idle")` are by design (PA-0543(1)).
+  The tests now expect them and still assert what POOL24 asserted: the connection is
+  closed and never kept, and a stall is never resent. A clean close after part of an
+  answer on a kept connection is `UpstreamIncomplete("eof")`, never resent. SP-63's
+  exceptions are not `_PEER_CLOSED`, so a close or reset before any byte is still the
+  one resend.
