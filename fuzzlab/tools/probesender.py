@@ -657,6 +657,42 @@ class SeamProbeSender(_ExplicitAllowance):
 
     #: Makes PRG follow-ups (FR-FUZZ-49).
     prg_capable = True
+    #: Makes the binder's page fetch (FR-FUZZ-67).
+    fetch_capable = True
+
+    def fetch(self, url: str, *, route_url: str) -> Probe:
+        """A plain GET of ``url`` -- the page a fresh form value is bound from before a
+        send (FR-FUZZ-67) -- on the session route a probe of ``route_url`` takes: the
+        run's session, ``route_url``'s isolated copy (FR-FUZZ-44), or anonymous (an auth
+        endpoint, FR-SESS-20). So the value it reads belongs to the session the probe
+        then carries. The send gate applies; no redirect is followed; a transport failure
+        maps as a probe's does (BUG-0147)."""
+        from fuzzlab.core.http import Request
+        from fuzzlab.oracle.probe import PrerequisiteUnavailable
+        check_send_url(url, self._explicit, method="GET")
+        try:
+            identity = self._identity_for(route_url)
+            client, copy = self._client, None
+            if identity != "anonymous" and url_key(route_url) in self._isolated_keys:
+                client, identity, copy = self._route_isolated(route_url)
+
+            def dispatch(on_client, on_identity):
+                req = Request("GET", url, identity=on_identity, component="oracle")
+                return self._dispatch(on_client, on_identity, req, "query", "", url)
+            if copy is None:
+                return dispatch(client, identity)
+            page = self._on_copy(copy, route_url, dispatch)
+            if page is None:                   # the copy could not log in again
+                raise PrerequisiteUnavailable("the isolated session could not log in "
+                                              "again to fetch the form's page")
+            return page
+        except PrerequisiteUnavailable:
+            raise
+        except Exception as exc:
+            unobserved = _unobserved(exc)
+            if unobserved is None:
+                raise
+            raise unobserved from exc
 
     def send(self, url: str, param: str, value: str, timing: bool = False,
              method: str = "GET", location: str = "query",
@@ -927,9 +963,32 @@ class RequestsProbeSender(_ExplicitAllowance):
             session.headers.update(DEFAULT_BROWSER_HEADERS)
         self._session = session
         self._timeout = timeout
+        self._carry_jar = False
 
     #: Makes PRG follow-ups (FR-FUZZ-49), anonymously like every send.
     prg_capable = True
+    #: Makes the binder's page fetch (FR-FUZZ-67).
+    fetch_capable = True
+    #: Whether the next send keeps the jar a binder's fetch just filled.
+    _carry_jar = False
+
+    def fetch(self, url: str, *, route_url: str) -> Probe:
+        """A plain GET of ``url``, the page a fresh form value is bound from before a
+        send (FR-FUZZ-67), anonymous like every send: the jar is cleared first, and what
+        the page sets (an anonymous session cookie its CSRF token is tied to) is carried
+        by the **next send only** -- the probe the value is bound into -- then cleared as
+        before (BUG-0112). No redirect is followed. ``route_url`` is the probe's URL
+        (every route of this sender is anonymous)."""
+        check_send_url(url, self._explicit, method="GET")
+        if url_key(route_url) in self._isolated_keys:
+            self._isolated_sends += 1
+        jar = getattr(self._session, "cookies", None)
+        if jar is not None:
+            jar.clear()
+        probe = self._request("GET", url, {"timeout": self._timeout,
+                                           "allow_redirects": False})
+        self._carry_jar = True
+        return probe
 
     def send(self, url: str, param: str, value: str, timing: bool = False,
              method: str = "GET", location: str = "query",
@@ -960,9 +1019,11 @@ class RequestsProbeSender(_ExplicitAllowance):
         if url_key(url) in self._isolated_keys:
             self._isolated_sends += 1
         # Anonymous means anonymous: no cookie a probe response set (a payload that
-        # logs in, say) rides along on later probes (BUG-0112).
+        # logs in, say) rides along on later probes (BUG-0112). The one exception is the
+        # send right after a binder's fetch: it carries what that page set (FR-FUZZ-67)
         jar = getattr(self._session, "cookies", None)   # an injected session may have none
-        if jar is not None:
+        carry, self._carry_jar = self._carry_jar, False
+        if jar is not None and not carry:
             jar.clear()
         kwargs = {"timeout": self._timeout, "allow_redirects": False}
         # where the request goes; `url` stays the probe's own URL, which a PRG follow-up

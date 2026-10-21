@@ -3,6 +3,50 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0056 — The importer keeps every request context and records each sibling set's replay recipe; the engine writes the context (FR-AUD-31; BUG-0530, BUG-0544) (2026-10-21)
+- Placement: AU-REQID78 (audit defects 8 and 7). The pipeline and the oracle are
+  CC-FUZZ-0111; the identity's owner and migration 25 are CC-CORE-0073.
+- Change:
+  - `tools/store_adapter.py`:
+    - `_get_parameter` keys one context: (endpoint, name, location, sibling set); every
+      caller swept (page query, path templates, route query, forms, captured requests;
+      `import_audit` keeps a name lookup: the legacy auditor names a parameter only).
+    - Link sets (`_import_link_set`, at each page's turn so row order is kept): a set of
+      two or more names is its own `form` row and its own parameter rows, never bound to
+      another set's ("the first crawled link wins" removed); a one-name or refused set
+      gives lone rows, as before. Identical sets after redaction are one.
+    - `_import_forms`: a form's fields are that form's rows, never attached to a link's.
+    - `_store_request`: each captured body is its own context (identical stored bodies
+      are one); "the first captured request's leaf wins a name" removed.
+    - `import_disco`: a form-encoded body is kept as ordered pairs (`_captured_leaves`
+      takes them), so a repeated name survives.
+    - The replay recipe (FR-FUZZ-67, migration 25) through one writer,
+      `_insert_sibling_set`: `source_page` (a form's page, a link's `found_from`, a
+      captured request's page or Referer, kept with its query) and `fresh` (the entries
+      redaction blanked: `form_record`'s sensitive non-password fields, `redact_sibling`,
+      `redact_leaf`; never a password, sent empty by policy). Names and a page only.
+  - `audit/engine.py`: `InjectionPoint` gains `bindings` and `replay_refusal`; the
+    evidence's request fields come from `core.reqctx.point_evidence`; `evaluate(identity=)`
+    stamps `identity_scope` and `context_id` (`reqctx.stamp`) on every candidate.
+  - `audit/value_shape.py`: `names_outside_lab` (a value `neutral_value` would replace
+    whose host is not loopback), the one predicate for FR-AUD-20 as amended.
+- Impact (other components / project): FUZZ (more points on crawl runs; the builder no
+  longer merges them), CORE (migration 25's writer), CRAWL (none; its own form and request
+  signatures still merge contexts upstream: pinned by strict xfails naming CRAWL), ML
+  (more candidate rows per (path, param)). Count changes: `link_set_bound` and
+  `parameter` now count one row per context; `form` rows of identical captured bodies
+  are one.
+- Risk (medium): test counts on crawl runs grow by the number of distinct sibling sets
+  per name (every one is a real request; no cap, owner's decision). Old stores: unchanged
+  rows; a new import writes the new shape.
+- Deliverables:
+  - [x] importer per context, recipe, disco ordered pairs — done
+  - [x] engine stamping and `point_evidence` — done
+  - [x] FR-AUD-31 and FR-AUD-20/22 amended in place — done
+  - [x] tests (`tests/test_request_contexts.py` importer tests, the disco pin in
+    `tests/test_query_placement.py` unpinned) — done
+- Effectiveness (assessed <date> or pending): pending.
+
 ### CC-AUD-0053 — The auditor ends a failed load through SP-01's owner (BUG-0522) (2026-10-19)
 - Placement: pre-assigned before CC-AUD-0054 and CC-AUD-0055 were written (PA-0031), so it lands above those higher-numbered entries.
 - Change: `fuzzlab/tools/fetcher.py` `ContentFetcher.fetch`'s `except` calls

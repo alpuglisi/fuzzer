@@ -328,6 +328,16 @@ plugin registry. It is the layer that makes the store the integration bus.
     (`enctype` set, possibly `""`) or a crawled link's query (`enctype` NULL). Only
     `core.forms.is_link_set` tells them apart, and `core.forms.first_link_set` is the
     one store reader of `form.enctype` (a guard test keeps it so).
+    *(Amended by `CC-CORE-0073`, 2026-10-21, migration 25, FR-FUZZ-67:)* each row also
+    records its replay recipe: `source_page` (the page the set came from, kept with its
+    query) and `fresh` (a JSON list of the names whose stored value is a placeholder
+    redaction blanked; `[]` when none). Names and a page only, never a value (D12); NULL
+    on a row written before migration 25 means no recipe. `first_link_set` skips a set
+    holding a placeholder and takes an `accept` predicate (header points refuse an
+    off-lab host). `core.forms.page_template_entries` reads a fetched page's forms (and,
+    for a GET query, its links) and returns the entry list it offers now for a stored
+    context: same origin, path, method and entry names in order, best value agreement
+    first; the binder binds the placeholders from it in memory.
   - **Header-point names:** `core.http.header_point_refusal` is the one rule
     (framing, routing, method-override and credential headers, and any name
     `is_sensitive_name` flags; whole names, case-insensitive). `check_send_header`
@@ -658,6 +668,8 @@ plugin registry. It is the layer that makes the store the integration bus.
   `core.urls.store_url(url, main_origin, route=False)` is how an importer stores a
   crawled URL: its path (`to_route_path` with `route`) when it is on `main_origin` or
   either origin is unknown, else its canonical origin plus that path.
+  *(Amended by `CC-CORE-0073`:)* `keep_query=True` keeps the URL's own query after the
+  path (a sibling set's source page, FR-FUZZ-67).
   `stored_absolute(stored, base_origin)` reads one back: a stored `http(s)://` URL as it
   is, else the path under `base_origin` (a path always starts with `/`, so one holding
   `://` stays a path). `is_loopback_origin` holds for 127.0.0.0/8, `localhost` and `::1`
@@ -890,6 +902,10 @@ Owns the store schema and migrations. Writes `run`, `schema_version`,
 and `launch`, and (CC-CORE-0063, `core.trace` only) `trace_event`, `dg_entity`,
 `dg_flow`, `dg_evidence`. Exposes Python APIs
 consumed by every tool and ML component.
+Owns the request-context identity (SP-57, `core.reqctx`, CC-CORE-0073; FR-FUZZ-66): the
+one definition of which rows are one test, computed from a candidate's evidence (so an
+older row gets its context on read). The trace's send roles include `bind`, the
+binder's page fetch (FR-FUZZ-67).
 
 ## 6. Dependencies (components)
 None (foundational layer; it manages the project store).

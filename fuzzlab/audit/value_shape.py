@@ -192,6 +192,28 @@ def redirect_seed(value):
     return seed
 
 
+def names_outside_lab(value) -> bool:
+    """True when ``value`` names a network location that is not loopback: a value
+    `neutral_value` would replace whose host is not 127.0.0.0/8, ``localhost`` or
+    ``::1`` (`core.urls.is_loopback_origin`, D11). Such a value is never sent (FR-AUD-20)
+    and never replaced by a stand-in either (FR-FUZZ-67, BUG-0544): a request that needs
+    it cannot be rebuilt. A value naming loopback names the lab itself and is sent as
+    the app gave it. Total: a non-string is False."""
+    from fuzzlab.core.urls import is_loopback_origin
+    if not isinstance(value, str) or neutral_value(value) == value:
+        return False
+    if "://" in value:
+        named = value
+    elif value.startswith("//"):
+        named = "http:" + value
+    else:
+        named = "http://" + _host_prefix(value)[0]
+    try:
+        return not is_loopback_origin(named)
+    except ValueError:                         # an unparsable netloc: not provably the lab
+        return True
+
+
 def neutral_value(value):
     """``value``, or loopback in its place when it names a network location: what the
     fuzzer sends instead of a default the app supplied (FR-AUD-20). It errs toward

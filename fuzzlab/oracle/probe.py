@@ -123,6 +123,16 @@ class Candidate:
     # The one mechanism (an arm) that decides this candidate (FR-AUD-30, BUG-0523): from
     # the evidence when every row of its confirmation key names it. None: any decides.
     decided_by: str | None = None
+    # The request context (SP-57, FR-FUZZ-66): its id and the confirmation key the
+    # pipeline tested it under; the finding is attributed to both (BUG-0530). None when
+    # the candidate was built outside the pipeline (greybox, a hand-built test).
+    context_id: str | None = None
+    context_key: tuple | None = None
+    # FR-FUZZ-67 (BUG-0544): entries whose stored value is a placeholder, bound fresh
+    # before each send from ``{"page": url, "fresh": [names]}`` by the binder; and why the
+    # request can never be rebuilt (the test is then inconclusive, nothing is sent).
+    bindings: dict | None = None
+    replay_refusal: str | None = None
 
 
 @dataclass
@@ -147,6 +157,15 @@ class HeaderPointsStopped(RuntimeError):
 class UnplaceableLocation(ValueError):
     """A sender or executor cannot put a payload where the point says it goes. It
     refuses instead of sending it somewhere else (BUG-0115, PA-0115)."""
+
+
+class PrerequisiteUnavailable(UnplaceableLocation):
+    """The request's prerequisites cannot be rebuilt (FR-FUZZ-67, BUG-0544): a fresh
+    form value could not be fetched and bound in the probe's session, or a sibling may
+    never be sent. Nothing is sent; the oracle makes it no verdict from that mechanism,
+    and a candidate no mechanism could send is inconclusive with this reason
+    (`oracle.UNBOUND`), never a negative. The message names fields and pages, never a
+    value."""
 
 
 class ProbeUnobserved(RuntimeError):
@@ -355,6 +374,15 @@ class Sender:
         ``probe.followed``. Never on a timing send. A wrapper forwards it only when
         True, so a test double without it keeps working."""
         raise NotImplementedError
+
+
+def accepts_fetch(sender) -> bool:
+    """Can ``sender`` (through every wrapper) make the binder's page fetch
+    (``fetch(url, *, route_url)``, FR-FUZZ-67): a plain GET of a page on the session
+    route a probe of ``route_url`` takes? Its own ``fetch_capable`` declaration, which a
+    wrapper delegates to its inner sender. A sender that does not declare it never gets
+    a fetch: a candidate needing a fresh binding is then inconclusive."""
+    return getattr(sender, "fetch_capable", False) is True
 
 
 def accepts_prg(sender) -> bool:

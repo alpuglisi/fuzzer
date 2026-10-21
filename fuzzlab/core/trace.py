@@ -92,9 +92,11 @@ _EXCHANGES: contextvars.ContextVar[list | None] = contextvars.ContextVar(
 _STEPS: contextvars.ContextVar[list | None] = contextvars.ContextVar(
     "fl_trace_steps", default=None)
 
-#: Roles a send can carry. ``probe`` is a send whose code did not say what it is.
+#: Roles a send can carry. ``probe`` is a send whose code did not say what it is;
+#: ``bind`` is the fetch of the page a fresh form value is bound from before a send
+#: (FR-FUZZ-67).
 ROLES = ("baseline", "mutation", "control", "follow-up", "restore", "retry",
-         "probe")
+         "probe", "bind")
 
 
 @contextlib.contextmanager

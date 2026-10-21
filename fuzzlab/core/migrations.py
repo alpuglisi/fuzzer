@@ -610,6 +610,20 @@ CREATE TABLE IF NOT EXISTS dg_evidence (
 CREATE INDEX IF NOT EXISTS idx_dg_evidence_event ON dg_evidence(run_id, event_key);
 """
 
+# --- migration 25: a stored sibling set's replay recipe (FR-FUZZ-67, BUG-0544) ---------
+# A `form` row's entries are evidence, redacted (PA-0100): a value redaction blanked is a
+# placeholder, never a value to replay. `fresh` names those entries (a JSON list of
+# names, `[]` when none); `source_page` is the page the set was taken from (a crawled
+# form's page, a link's `found_from`, a captured request's page), stored as `store_url`
+# gives it. Before each send the oracle's binder fetches that page in the probe's
+# session and binds the named entries' current values in memory; neither column ever
+# holds a value (D12). Additive; NULL on a row written before it reads as "no recipe",
+# so such a row's placeholders are not known to be placeholders (stated residual).
+_M0025 = """
+ALTER TABLE form ADD COLUMN source_page TEXT;
+ALTER TABLE form ADD COLUMN fresh TEXT;
+"""
+
 
 def _backfill_project_uuid(conn: sqlite3.Connection) -> None:
     """Migration 23's post-step: give an existing project row its ``uuid``."""
@@ -700,6 +714,7 @@ MIGRATIONS: list[tuple[int, str]] = [
     (22, _M0022),
     (23, _M0023),
     (24, _M0024),
+    (25, _M0025),
 ]
 
 

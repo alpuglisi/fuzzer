@@ -3,6 +3,36 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0073 — The request-context identity (SP-57); a sibling set's replay recipe (migration 25); a page's request template (BUG-0530, BUG-0544) (2026-10-21)
+- Placement: AU-REQID78 (audit defects 8 and 7). Callers: CC-AUD-0056, CC-FUZZ-0111,
+  CC-ML-0501.
+- Change:
+  - New `core/reqctx.py` (SP-57): `request_context`, `context_id`, `seed`,
+    `confirmation_key`, `point_evidence`, `point_key`, `stamp`; `CONTEXT_VERSION = 1`,
+    `SEED_CATEGORIES`, and the classification of every `Candidate` field
+    (`CANDIDATE_FIELDS_IN_IDENTITY` / `_EXCLUDED`). Computed from a candidate's evidence,
+    so a row written before it gets its context on read (no backfill).
+  - `core/migrations.py`: migration 25 adds `form.source_page` and `form.fresh`
+    (additive; NULL on an older row means "no recipe").
+  - `core/forms.py`: `page_template_entries` (the entry list a fetched page offers now for
+    a stored context: its forms, and for a GET query its links, matched by origin, path,
+    method and entry names, best value agreement first); `first_link_set` skips a set
+    holding a placeholder and takes an `accept` predicate.
+  - `core/urls.py`: `store_url(keep_query=True)` keeps a page's query (the source page);
+    built by the owner, no new query builder outside it (PA-0531).
+  - `core/trace.py`: role `bind` (the binder's page fetch).
+- Impact (other components / project): the store contract (two `form` columns; new
+  evidence keys written by AUD and FUZZ). `docs/SHARED_PRIMITIVES.md` gains SP-57 and
+  amended SP-20/SP-37/SP-42 rows (text handed to the orchestrator).
+- Risk (low-medium): a migration (additive; atomic like the others,
+  `test_migrations_atomic`); the identity is new code with its own guards.
+- Deliverables:
+  - [x] owner, migration, forms and urls helpers — done
+  - [x] guards: `tests/test_request_contexts.py` (field classification and its offender,
+    every identity field moves the id and no excluded one does, seed categories by AST
+    and its offender) — done
+- Effectiveness (assessed <date> or pending): pending.
+
 ### CC-CORE-0072 — One bounded reader of a target's HTTP body (SP-60, FR-CORE-536, BUG-0536) (2026-10-20)
 - Placement: pre-assigned to AU-BOUNDED (audit defect 21); CC-CORE-0070 and CC-CORE-0071
   are other lanes'.

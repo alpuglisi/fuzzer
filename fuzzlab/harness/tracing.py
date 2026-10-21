@@ -51,6 +51,46 @@ class TracingSender:
         from fuzzlab.oracle.probe import accepts_prg
         return accepts_prg(self._inner)
 
+    @property
+    def fetch_capable(self) -> bool:
+        from fuzzlab.oracle.probe import accepts_fetch
+        return accepts_fetch(self._inner)
+
+    def fetch(self, url, *, route_url):
+        """The binder's page fetch (FR-FUZZ-67), recorded as its own exchange (role
+        ``bind``): a request the run made. It carries no value; the page's text, which
+        holds the fresh value, is never recorded (D12)."""
+        if trace.active() is None:
+            return self._inner.fetch(url, route_url=route_url)
+        from fuzzlab.oracle.probe import Probe, ProbeUnobserved, attempts_of
+        test, strategy, _role = trace.current()
+        body = {"test": test, "strategy": strategy, "role": "bind", "method": "GET",
+                "url": trace.safe_ref(url), "origin": canonical_origin(url),
+                "param": None, "location": None, "value_sha": None, "value_len": 0,
+                "value_preview": None, "timing": False, "identity": self._identity,
+                "prg_asked": False}
+        started = time.time()
+        clock = time.perf_counter()
+        probe, tries = None, []
+        try:
+            probe = self._inner.fetch(url, route_url=route_url)
+        except ProbeUnobserved as exc:
+            tries = attempts_of(exc)
+            body.update(outcome="unobserved", error=type(exc.__cause__ or exc).__name__)
+            raise
+        except Exception as exc:
+            tries = attempts_of(exc)
+            body.update(outcome="error", error=type(exc).__name__)
+            raise
+        finally:
+            body["elapsed_ms"] = round((time.perf_counter() - clock) * 1000, 1)
+            if isinstance(probe, Probe):
+                tries = attempts_of(probe)
+                body.update(outcome="timeout" if probe.status == 0 else "response",
+                            status=probe.status or None, session=probe.session)
+            self._exchange(body, tries, started)
+        return probe
+
     def send(self, url, param, value, timing: bool = False,
              method: str = "GET", location: str = "query",
              content_type: str | None = None, entries=None, prg: bool = False):

@@ -217,7 +217,12 @@ budget where a vulnerability is plausible.
     ascending digits of at most 15 digits, `fuzzlab` padded with `x` or cut to a
     prefix of 3 or more, `Fuzzlab`, `FUZZLAB`, `2000`, FR-CRAWL-15) are sent as they
     are. The fuzzer never sends a host name taken from the app's
-    own defaults. Stated residual: an e-mail default (`user@mail.example.com`) is sent
+    own defaults. *(Amended by FR-FUZZ-67, `CC-AUD-0056`, 2026-10-21:)* a sibling's default naming
+    loopback (the lab itself, D11) is sent as given; one naming any other host is
+    never sent and never replaced by a stand-in -- its request cannot be rebuilt, so
+    its point carries a `replay_refusal` and is inconclusive
+    (`value_shape.names_outside_lab`, the one predicate). A point's own value and the
+    command-injection base value are the payload's slot and keep loopback. Stated residual: an e-mail default (`user@mail.example.com`) is sent
     as is and may trigger mail. **Stated exception (FR-AUD-21, BUG-0124,
     operator-approved 2026-10-14):** the open-redirect retry probe.
 - **FR-AUD-21** *(open redirect and SSRF by value; `CC-AUD-0034`, 2026-10-14,
@@ -278,7 +283,11 @@ budget where a vulnerability is plausible.
     - an **object selector** (`_object_selector` on the last key: `UserId`,
       `BasketId`, `username`, `owner` …; pinned, sent as captured).
 
-    When two captured requests share an endpoint, the first one's leaf wins a name.
+    ~~When two captured requests share an endpoint, the first one's leaf wins a
+    name.~~ *(Superseded by FR-AUD-31: each captured body is its own context.)* A
+    pinned sensitive or identifier-like leaf is a placeholder named in the row's replay
+    recipe; a captured JSON body has no page holding it, so a point needing it is
+    inconclusive (FR-FUZZ-67).
   - **Rules on JSON leaves.** `name_regex` matches the path's last object key
     (`rules.rule_name`); credential and sensitive checks run on every key; value shapes
     apply to the leaf's example, and a url leaf's `redirect_seed` keeps FR-AUD-21's host
@@ -367,6 +376,25 @@ budget where a vulnerability is plausible.
   inside their line), and each complete line is decoded alone, never a partial read.
   A line that is not UTF-8 or not JSON is skipped and still numbered. For one run
   directory both paths give identical `(key, kind, scope, t, body)` and the same model.
+- **FR-AUD-31** *(the importer keeps every request context; the engine writes it;
+  `CC-AUD-0056`, 2026-10-21, BUG-0530, BUG-0544).* It supersedes FR-AUD-22's "the first
+  one's leaf wins a name" and FR-FUZZ-43's link binding.
+  - `import_spider` and `import_disco` write one `parameter` row per (endpoint, name,
+    location, sibling set) (`store_adapter._get_parameter`).
+  - A crawled link query with two or more names is its own sibling set with its own
+    rows; identical sets after redaction are one. A one-name or refused set gives lone
+    rows, as before. A form's fields are that form's rows, never merged into a link's.
+    Each captured body is its own context; identical stored bodies are one. A disco form
+    body keeps a repeated name in order.
+  - Every sibling set records its replay recipe (`form.source_page`, `form.fresh`,
+    migration 25; FR-FUZZ-67): the page it came from (a form's page, a link's
+    `found_from`, a captured request's page or Referer, with its query) and the names
+    of the entries redaction blanked (never a password). Names and a page only (D12).
+  - `audit.engine.evaluate` writes each candidate's request fields through
+    `core.reqctx.point_evidence` and stamps `identity_scope` and `context_id` (SP-57,
+    FR-FUZZ-66). `InjectionPoint` carries `bindings` and `replay_refusal`.
+  - Stated gap: the crawler's own form and request signatures merge contexts before
+    the store sees them (CRAWL, pinned by strict xfails).
 - **FR-AUD-30** *(a point's deciding mechanism, scoped to its category; `CC-AUD-0055`,
   2026-10-19, BUG-0523).* An `InjectionPoint` may name the one mechanism that decides
   it: `decided_by`, a `(category, arm)` pair, written by the point builder, never by

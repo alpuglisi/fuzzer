@@ -16,7 +16,8 @@ from __future__ import annotations
 import json
 
 from fuzzlab.audit import InjectionPoint, known_categories
-from fuzzlab.audit.value_shape import SAFE_HOST, neutral_value, redirect_seed, value_shape
+from fuzzlab.audit.value_shape import (SAFE_HOST, names_outside_lab, neutral_value,
+                                       redirect_seed, value_shape)
 from fuzzlab.core.redaction import is_credential_name
 from fuzzlab.core.runmode import (RunModeError, RunPlan, categories_from_vuln_classes,
                                    resolve_run)
@@ -145,13 +146,14 @@ def points_from_ground_truth(ground_truth, base_url: str, browser_available: boo
                 (path, gp.method.upper(), gp.param), {None})
             # FR-FUZZ-54: a point with the JSON body its endpoint takes is a JSON-leaf
             # point, its probes carrying the other leaves, as a crawled JSON request is
-            location, entries = gp.location, None
+            location, entries, refusal = gp.location, None, None
             if gp.json_body is not None and gp.location == "body":
                 from fuzzlab.core import jsonbody
                 location = jsonbody.LOCATION
+                leaves = jsonbody.leaves(gp.json_body) or ()
                 entries = tuple((p, own if own and jsonbody.display_name(p) == gp.param
-                                 else _send_value(v))
-                                for p, v in jsonbody.leaves(gp.json_body) or ())
+                                 else _send_value(v)) for p, v in leaves)
+                refusal = _outside_lab(leaves, gp.param)               # FR-FUZZ-67
                 body_content_type = None
             elif own:                          # the account's own value (FR-LAB-309)
                 entries = ((gp.param, own),)
@@ -162,7 +164,8 @@ def points_from_ground_truth(ground_truth, base_url: str, browser_available: boo
                                              body_content_type=body_content_type,
                                              base_entries=entries,
                                              sink_context=sink_context,
-                                             origin="ground-truth"))
+                                             origin="ground-truth",
+                                             replay_refusal=refusal))
         elif is_dom and method != "GET":
             skipped.append((path, gp.method, gp.param,
                             f"a DOM point is a GET page, not {method}"))
@@ -192,6 +195,7 @@ def points_from_ground_truth(ground_truth, base_url: str, browser_available: boo
         # FR-FUZZ-56: the store request as the ground truth enumerates it (its point at
         # the store URL: method, JSON body); a form POST when it is not enumerated
         store_method, store_location, store_entries = "POST", "body", None
+        refusal = None
         for sp in ground_truth.points:
             spath = sp.url if sp.url.startswith("/") else "/" + sp.url
             if (sp.origin or base) + spath == store_url and sp.param == case.param:
@@ -199,8 +203,9 @@ def points_from_ground_truth(ground_truth, base_url: str, browser_available: boo
                 if sp.json_body is not None and sp.location == "body":
                     from fuzzlab.core import jsonbody
                     store_location = jsonbody.LOCATION
-                    store_entries = tuple((p, _send_value(v)) for p, v in
-                                          jsonbody.leaves(sp.json_body) or ())
+                    leaves = jsonbody.leaves(sp.json_body) or ()
+                    store_entries = tuple((p, _send_value(v)) for p, v in leaves)
+                    refusal = _outside_lab(leaves, case.param)          # FR-FUZZ-67
                 break
         if store_method in WRITE_METHODS and not writes:
             skipped.append((opath, case.method, case.param,
@@ -212,7 +217,8 @@ def points_from_ground_truth(ground_truth, base_url: str, browser_available: boo
                 location=case.location, store_url=store_url, store_param=case.param,
                 store_method=store_method, store_location=store_location,
                 store_entries=store_entries, origin="ground-truth",
-                decided_by=STORED_DECIDER))                              # FR-AUD-30
+                decided_by=STORED_DECIDER,                               # FR-AUD-30
+                replay_refusal=refusal))
         else:
             skipped.append((opath, case.method, case.param,
                             "stored XSS (needs browser execution, M6)"))
@@ -225,10 +231,31 @@ _credential_name = is_credential_name
 
 
 def _send_value(value):
-    """What the fuzzer sends for an app-supplied default: loopback in place of an ip-,
-    host- or url-shaped one (FR-AUD-20), the importer's own fillers as they are."""
+    """What the fuzzer sends for an app-supplied default: the value as the app gave it
+    (the importer's own fillers, a value naming no network location, or one naming
+    loopback -- the lab itself, D11), else loopback in place of a value naming a host
+    outside the lab (FR-AUD-20). A request that needs such a sibling is never sent with
+    the stand-in either: `_outside_lab` names it and the point carries a
+    ``replay_refusal`` (FR-FUZZ-67, BUG-0544)."""
     from fuzzlab.tools.store_adapter import is_filler
-    return value if is_filler(value) else neutral_value(value)
+    return value if is_filler(value) or not names_outside_lab(value) else neutral_value(value)
+
+
+def _outside_lab(entries, target) -> str | None:
+    """Why a request whose sibling ``entries`` (as stored, before `_send_value`) name a
+    host outside the lab can never be rebuilt, or None. The target's own entry is the
+    payload's slot, never a sibling (a probe replaces it)."""
+    from fuzzlab.core import jsonbody
+    from fuzzlab.tools.store_adapter import is_filler
+    names = []
+    for name, value in entries or ():
+        own = (jsonbody.display_name(name) if isinstance(name, (list, tuple)) else name)
+        if own != target and not is_filler(value) and names_outside_lab(value):
+            names.append(own)
+    if not names:
+        return None
+    return (f"sibling {', '.join(dict.fromkeys(names))} names a host outside the lab "
+            "(FR-AUD-20): the request cannot be rebuilt without a stand-in")
 
 
 def _shapes(example) -> frozenset[str]:
@@ -296,18 +323,6 @@ def isolated_paths_from_store(store, run_id: int, base_url: str) -> frozenset[st
     return frozenset(_login_form_paths(store, run_id, base_url))
 
 
-def _json_base_entries(raw):
-    """A JSON point's siblings as sent (forms phase 3, FR-FUZZ-47): the stored leaves
-    (`core.jsonbody.decode_entries`, already passed `store_adapter.redact_leaf`), each
-    value through `_send_value` (loopback for a host/url-shaped one), types kept. None
-    when the stored list is malformed (the point is then dropped, PA-0108)."""
-    from fuzzlab.core import jsonbody
-    entries = jsonbody.decode_entries(raw) if raw else None
-    if entries is None:
-        return None
-    return tuple((path, _send_value(value)) for path, value in entries)
-
-
 def _crawl_url_refusal(url: str) -> str | None:
     """Why a crawl point's URL is never fuzzed: a destructive URL, or a destructive
     SPA hash route (``/#/logout``), which `destructive_reason` alone does not read. The
@@ -359,13 +374,15 @@ def injection_points_from_store(store, run_id: int, base_url: str,
     login_paths = _login_form_paths(store, run_id, base_url)
     if isolated is not None:
         isolated.update(login_paths)
+    from fuzzlab.core import reqctx
     from fuzzlab.tools.store_adapter import is_filler
     rows = store.conn.execute(
         "SELECT e.url AS path, e.method AS method, p.name AS name, p.location AS location, "
-        "p.example AS example, f.entries AS entries "
+        "p.example AS example, f.entries AS entries, f.source_page AS source_page, "
+        "f.fresh AS fresh "
         "FROM parameter p JOIN endpoint e ON p.endpoint_id = e.id "
         "LEFT JOIN form f ON f.id = p.form_id "
-        "WHERE p.run_id = ?",
+        "WHERE p.run_id = ? ORDER BY p.id",
         (run_id,),
     ).fetchall()
     # (c2) a field whose own example says nothing ("" or our filler) takes the shapes
@@ -374,14 +391,13 @@ def injection_points_from_store(store, run_id: int, base_url: str,
     for r in rows:
         shapes_by_name.setdefault(r["name"], set()).update(_shapes(r["example"]))
     points: list[InjectionPoint] = []
-    seen: set[tuple[str, str, str]] = set()
+    # SP-57 (FR-FUZZ-66, BUG-0530): two rows are one point only when their request
+    # contexts and seeds are equal -- never by (path, method, name), which merged a
+    # name's query and body rows and every sibling set of it
+    seen: set[tuple[str, str]] = set()
     for r in rows:
         path = _stored_key(r["path"])
         method = r["method"] or "GET"
-        key = (path, method, r["name"])
-        if key in seen:
-            continue
-        seen.add(key)
         url, elsewhere = _crawl_url(path, base)      # its own origin kept (FR-AUD-27)
         if elsewhere is not None:
             if skipped is not None:
@@ -417,34 +433,72 @@ def injection_points_from_store(store, run_id: int, base_url: str,
                 if skipped is not None:
                     skipped.append((path, method, r["name"], why))
                 continue
-        entries = None
+        raw = None                                   # the stored entries, before sending
         if location == jsonbody.LOCATION:
-            entries = _json_base_entries(r["entries"])
-            if entries is None:
+            raw = jsonbody.decode_entries(r["entries"]) if r["entries"] else None
+            if raw is None:
                 if skipped is not None:
                     skipped.append((path, method, r["name"],
                                     "malformed form row (JSON entries)"))
                 continue
         elif r["entries"]:
             try:
-                entries = tuple((n, _send_value(v)) for n, v in json.loads(r["entries"]))
+                raw = [(n, v) for n, v in json.loads(r["entries"])]
             except (ValueError, TypeError):
-                entries = None
+                raw = None
         elif location == "path" and r["example"]:
             # a crawled path segment (FR-AUD-26): its value, as a query link's is
-            entries = ((r["name"], _send_value(r["example"])),)
+            raw = [(r["name"], r["example"])]
+        entries = None if raw is None else tuple((n, _send_value(v)) for n, v in raw)
+        bindings = _bindings(r, base, raw, r["name"])
+        if bindings is False:
+            if skipped is not None:
+                skipped.append((path, method, r["name"], "malformed form row (fresh)"))
+            continue
         example = r["example"]
         shapes = _shapes(example)
         if example in (None, "") or is_filler(example):
             shapes = frozenset(shapes_by_name.get(r["name"], ()))
-        points.append(InjectionPoint(url=url, param=r["name"],
-                                     method=method, location=location,
-                                     base_entries=entries, origin="crawl",
-                                     value_shapes=shapes,
-                                     base_value=(SAFE_HOST if shapes & {"ip", "hostname"}
-                                                 else None),
-                                     redirect_seed=redirect_seed(example)))
+        point = InjectionPoint(url=url, param=r["name"],
+                               method=method, location=location,
+                               base_entries=entries, origin="crawl",
+                               value_shapes=shapes,
+                               base_value=(SAFE_HOST if shapes & {"ip", "hostname"}
+                                           else None),
+                               redirect_seed=redirect_seed(example),
+                               bindings=bindings,
+                               replay_refusal=_outside_lab(raw, r["name"]))
+        key = reqctx.point_key(point)
+        if key not in seen:
+            seen.add(key)
+            points.append(point)
     return points
+
+
+def _bindings(row, origin: str, raw, target: str):
+    """The replay recipe of a point's sibling set (FR-FUZZ-67, BUG-0544): ``(the page a
+    fresh value is bound from, or None; the names whose stored value is a placeholder)``,
+    the target excepted (a probe replaces it). None when no sibling needs one; False when
+    the stored list is malformed (the point is dropped, PA-0108). The page is never one
+    on another origin that is not loopback (D11)."""
+    from fuzzlab.core import jsonbody
+    try:
+        fresh = json.loads(row["fresh"]) if row["fresh"] else []
+    except ValueError:
+        return False
+    if not isinstance(fresh, list) or not all(isinstance(n, str) for n in fresh):
+        return False
+    have = {jsonbody.display_name(n) if isinstance(n, (list, tuple)) else n
+            for n, _v in raw or ()}
+    names = tuple(dict.fromkeys(n for n in fresh if n != target and n in have))
+    if not names:
+        return None
+    page = None
+    if row["source_page"]:
+        page, elsewhere = _crawl_url(_stored_key(row["source_page"]), origin)
+        if elsewhere is not None:
+            page = None
+    return page, names
 
 
 def _path_of(url: str) -> str:
@@ -504,7 +558,9 @@ def header_points_from_store(store, run_id: int, base_url: str, names,
             if skipped is not None:
                 skipped.extend((path, "GET", name, reason) for name in names)
             continue
-        query = first_link_set(store.conn, run_id, path)
+        # never a set holding a placeholder or a host outside the lab (FR-FUZZ-67)
+        query = first_link_set(store.conn, run_id, path,
+                               accept=lambda entries: _outside_lab(entries, None) is None)
         # its representative query through the one owner (SP-42), same bytes as before
         url = with_query(page_url, [(n, _send_value(v)) for n, v in query]) if query \
             else page_url
@@ -584,6 +640,24 @@ class _CountingSender:
             self.count += probe.follow_up_sends
         return probe
 
+    @property
+    def fetch_capable(self) -> bool:
+        from fuzzlab.oracle.probe import accepts_fetch
+        return accepts_fetch(self._inner)
+
+    def fetch(self, url, *, route_url):
+        """The binder's page fetch (FR-FUZZ-67): a request of the run, counted."""
+        from fuzzlab.oracle.probe import Probe, ProbeUnobserved
+        self.count += 1
+        try:
+            probe = self._inner.fetch(url, route_url=route_url)
+        except ProbeUnobserved as exc:
+            self.count += exc.resent
+            raise
+        if isinstance(probe, Probe):
+            self.count += probe.follow_up_sends
+        return probe
+
     def used(self, component: str | None = None) -> int:
         return self.count
 
@@ -603,6 +677,14 @@ class _FragmentGuard:
     def prg_capable(self) -> bool:
         from fuzzlab.oracle.probe import accepts_prg
         return accepts_prg(self._inner)
+
+    @property
+    def fetch_capable(self) -> bool:
+        from fuzzlab.oracle.probe import accepts_fetch
+        return accepts_fetch(self._inner)
+
+    def fetch(self, url, *, route_url):
+        return self._inner.fetch(url, route_url=route_url)
 
     def send(self, url, param, value, timing: bool = False,
              method: str = "GET", location: str = "query",
@@ -752,18 +834,19 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
     origins = sorted({o for o in [canonical_origin(base_url)]
                       + [canonical_origin(p.url) for p in points] if o})
     status = "aborted"
+    # the run's identity scope: part of every request context (SP-57, FR-FUZZ-66)
+    identity = getattr(sender, "_identity", None) or "anonymous"
     with trace.recording(recorder):
         trace.emit("run.start", {"base_url": trace.safe_ref(base_url), "origins": origins,
                                  "points": source, "mode": mode, "n_points": len(points),
-                                 "identity": getattr(sender, "_identity", None)
-                                 or "anonymous"}, key="run.start", scope="run")
+                                 "identity": identity}, key="run.start", scope="run")
         try:
             result = run_pipeline(points, store, run_id, probing, plan,
                                   ground_truth=ground_truth, pages_html=pages_html,
                                   budget=counting, browser=browser, oob=oob,
                                   coverage=coverage, dbfault=dbfault, scheduler=scheduler,
                                   plugins=plugins, confirm_budget=confirm_budget,
-                                  prioritizer=prioritizer, peer=peer)
+                                  prioritizer=prioritizer, peer=peer, identity=identity)
             status = "complete"
         except BaseException as exc:
             status = f"aborted: {type(exc).__name__}"

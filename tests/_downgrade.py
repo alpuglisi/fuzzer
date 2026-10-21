@@ -12,6 +12,9 @@ from __future__ import annotations
 def undo_after(conn, version: int) -> None:
     """Undo every migration above ``version`` that this module knows, newest first.
     The caller still undoes the older ones it deletes ``schema_version`` rows for."""
+    if version < 25:                                 # migration 25: the replay recipe
+        for col in ("fresh", "source_page"):
+            conn.execute(f"ALTER TABLE form DROP COLUMN {col}")
     if version < 24:                                 # migration 24: the trace model
         for table in ("dg_evidence", "dg_flow", "dg_entity", "trace_event"):
             conn.execute(f"DROP TABLE IF EXISTS {table}")

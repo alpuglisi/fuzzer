@@ -141,23 +141,31 @@ def test_a_three_field_link_gate_confirms_only_with_siblings(tmp_path):
     assert result.findings >= 1 and "u" in params
 
 
-def test_a_form_sibling_set_wins_over_a_link_query(tmp_path):
+def test_a_form_and_a_link_of_one_page_are_two_contexts(tmp_path):
+    """Before BUG-0530 the form's sibling set won and the link's was dropped for
+    ``title``; each is a request the crawl saw, so each is a point (FR-AUD-31)."""
     form = _rec("<form method=get action='/app/s.php'><input name=title>"
                 "<button name=action value=search>Go</button></form>")
     pts, _s, _c = _points(tmp_path, pages=["http://h/app/s.php?title=a&page=2"],
                           forms=[form])
-    title = next(p for p in pts if p.param == "title")
-    assert ("action", "search") in title.base_entries          # the form's, not the link's
+    titles = sorted(p.base_entries for p in pts if p.param == "title")
+    assert titles == [(("title", "a"), ("page", "2")),
+                      (("title", "fuzzlab"), ("action", "search"))]
     page = next(p for p in pts if p.param == "page")
     assert page.base_entries == (("title", "a"), ("page", "2"))  # no form covers it
 
 
-def test_the_first_crawled_link_wins_for_a_shared_parameter(tmp_path):
+def test_each_crawled_link_of_a_shared_parameter_is_its_own_context(tmp_path):
+    """Before BUG-0530 the first crawled link won ``a`` (FR-FUZZ-43): ``a=9&c=3`` was
+    never sent for ``a``. Each link's sibling set is its own point (FR-AUD-31)."""
     pts, _s, _c = _points(tmp_path, pages=["http://h/app/l.php?a=1&b=2",
                                            "http://h/app/l.php?a=9&c=3"])
-    by = {p.param: p.base_entries for p in pts}
-    assert by["a"] == by["b"] == (("a", "1"), ("b", "2"))
-    assert by["c"] == (("a", "9"), ("c", "3"))
+    by: dict[str, list] = {}
+    for p in pts:
+        by.setdefault(p.param, []).append(p.base_entries)
+    assert by["a"] == [(("a", "1"), ("b", "2")), (("a", "9"), ("c", "3"))]
+    assert by["b"] == [(("a", "1"), ("b", "2"))]
+    assert by["c"] == [(("a", "9"), ("c", "3"))]
 
 
 @pytest.mark.parametrize("url,refused", [
@@ -186,23 +194,27 @@ def _all_rows_text(store, exclude=()) -> str:
 
 
 def test_identifier_like_link_values_are_blanked_and_never_stored(tmp_path):
+    """The token is blanked in storage (PA-0100). Before BUG-0544 the blank was then
+    sent as ``t=`` with every probe of ``u`` and in the header point's query: a request
+    the app never made. Now it is a placeholder (FR-FUZZ-67): with no page to bind a
+    fresh one from (the link has no ``found_from``) ``u``'s test is inconclusive and
+    nothing is sent; the header point loads the page without that query."""
     app = _App(lambda req: _ok())
     store, run, _c = _import(tmp_path, pages=[f"http://h/app/p.php?u=bob&t={HEX32}"])
     with store:
         pts = injection_points_from_store(store, run, "http://h/app/")
         u = next(p for p in pts if p.param == "u")
         assert u.base_entries == (("u", "bob"), ("t", ""))
+        assert u.bindings == (None, ("t",))
         hdr = header_points_from_store(store, run, "http://h/app/", ["User-Agent"])
-        # the representative query comes only from the (already redacted) link-set row,
-        # so the token is sent blank there too -- never its value
-        assert [p.url for p in hdr] == ["http://h/app/p.php?u=bob&t="]
-        run_auto(base_url="http://h/app/", store=store, run_id=run, sender=app,
-                 mode="manual", selected_categories=["xss"], points_source="crawl",
-                 header_names=["User-Agent"])
-        # the first send is the pipeline's fingerprint probe (no siblings, by design);
-        # every oracle probe of `u` carries the token blank
-        u_probes = [r for r in app.requests if r["param"] == "u"][1:]
-        assert u_probes and all(r["query"].get("t") == "" for r in u_probes)
+        assert [p.url for p in hdr] == ["http://h/app/p.php"]
+        result = run_auto(base_url="http://h/app/", store=store, run_id=run, sender=app,
+                          mode="manual", selected_categories=["xss"],
+                          points_source="crawl", header_names=["User-Agent"])
+        assert [r for r in app.requests if r["param"] == "u"] == []
+        assert not [r for r in app.requests if r["query"].get("t") == ""]
+        assert any(i["param"] == "u" and "no page" in i["reason"]
+                   for i in result.inconclusive)
         # excluded: parameter.example, BUG-0120 (raw crawl values stored in
         # parameter.example; reserved, not fixed in this lane). Asserted still needed,
         # so this exclusion fails loudly once BUG-0120 is fixed.
@@ -307,13 +319,16 @@ def test_only_core_forms_reads_form_enctype(tmp_path):
 
 
 def test_the_link_set_producer_goes_through_redaction():
-    """PA-0100: the function that INSERTs link sets calls redact_sibling."""
+    """PA-0100: the function that writes link sets calls redact_sibling. It writes the
+    row through the one sibling-set writer (`_insert_sibling_set`, FR-FUZZ-67) or an
+    INSERT of its own."""
     tree = ast.parse((ROOT / "fuzzlab/tools/store_adapter.py").read_text())
     for fn in [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]:
         names = {getattr(n, "id", None) for n in ast.walk(fn)}
         consts = [n.value for n in ast.walk(fn) if isinstance(n, ast.Constant)
                   and isinstance(n.value, str)]
-        if "LINK_SET_ENCTYPE" in names and any("INSERT INTO form" in c for c in consts):
+        if "LINK_SET_ENCTYPE" in names and ("_insert_sibling_set" in names or any(
+                "INSERT INTO form" in c for c in consts)):
             called = {getattr(c.func, "id", getattr(c.func, "attr", None))
                       for c in ast.walk(fn) if isinstance(c, ast.Call)}
             assert "redact_sibling" in called
@@ -382,6 +397,8 @@ def test_header_points_come_after_every_other_point(tmp_path):
 
 
 def test_a_single_name_link_gives_a_header_query_but_no_binding(tmp_path):
+    """Before BUG-0544 ``k.php``'s header point sent the blanked token as ``p=``; a
+    placeholder is never sent (FR-FUZZ-67), so that page loads without the query."""
     store, run, _c = _import(tmp_path, pages=["http://h/app/e.php?date=Date()",
                                               f"http://h/app/k.php?p={HEX32}"])
     with store:
@@ -389,17 +406,23 @@ def test_a_single_name_link_gives_a_header_query_but_no_binding(tmp_path):
             store, run, "http://h/app/", ["User-Agent"])}
         pts = injection_points_from_store(store, run, "http://h/app/")
     assert hdr["/app/e.php"] == "http://h/app/e.php?date=Date%28%29"
-    assert hdr["/app/k.php"] == "http://h/app/k.php?p="            # blank, never the token
+    assert hdr["/app/k.php"] == "http://h/app/k.php"       # never the token, never a blank
     assert all(p.base_entries is None for p in pts)
 
 
 def test_a_header_point_url_never_carries_the_apps_own_host(tmp_path):
+    """Before BUG-0544 the off-lab values were sent as loopback stand-ins
+    (``h=127.0.0.1&u=http://127.0.0.1/``): a request the app never made. Neither the
+    host nor a stand-in is sent (FR-AUD-20, FR-FUZZ-67): the page loads without that
+    query; a link whose values name loopback keeps them as given."""
     store, run, _c = _import(tmp_path, pages=[
-        "http://h/app/n.php?h=www.example.com&u=http%3A%2F%2Fevil.example%2Fx&q=1"])
+        "http://h/app/n.php?h=www.example.com&u=http%3A%2F%2Fevil.example%2Fx&q=1",
+        "http://h/app/m.php?u=http%3A%2F%2F127.0.0.1%3A8080%2Fx&q=1"])
     with store:
-        (pt,) = header_points_from_store(store, run, "http://h/app/", ["User-Agent"])
-    assert pt.url == ("http://h/app/n.php?h=127.0.0.1&u=http%3A%2F%2F127.0.0.1%2F&q=1")
-    assert "example" not in pt.url
+        hdr = {urlsplit(p.url).path: p.url for p in header_points_from_store(
+            store, run, "http://h/app/", ["User-Agent"])}
+    assert hdr["/app/n.php"] == "http://h/app/n.php"
+    assert hdr["/app/m.php"] == "http://h/app/m.php?u=http%3A%2F%2F127.0.0.1%3A8080%2Fx&q=1"
 
 
 def _rules_without(*ids):
@@ -1036,21 +1059,27 @@ def test_cmdi_timing_and_lfi_confirm_end_to_end(tmp_path):
 
 
 def test_a_crawled_hostname_is_never_sent(tmp_path):
-    """FR-AUD-20 / M2: the app's own host defaults (an ip/host field, a url sibling) are
-    sent as loopback; our .invalid filler as is."""
+    """FR-AUD-20 / M2: the app's own host defaults are never sent; our .invalid filler is
+    sent as is. A point's own host value is its payload's slot (the command-injection
+    probe starts from loopback). Before BUG-0544 a *sibling* naming a host was sent as a
+    loopback stand-in (``target=127.0.0.1``, ``ref=http://127.0.0.1/``): a request the
+    app never made. Now such a request is never rebuilt (FR-FUZZ-67): its test is
+    inconclusive with the reason and nothing is sent."""
     lookups = []
     app = _App(_shell_app(lookups))
     form = _rec("<form method=post action='/app/commandi.php'>"
                 "<input name=target value='www.nsa.gov'>"
-                "<input type=hidden name=ref value='http://itsecgames.example.org/'>"
                 "<input type=url name=site><input name=note>"
                 "<button name=form value=submit>Lookup</button></form>")
-    store, run, _c = _import(tmp_path, forms=[form])
+    other = _rec("<form method=post action='/app/other.php'>"
+                 "<input type=hidden name=ref value='http://itsecgames.example.org/'>"
+                 "<input name=comment></form>")
+    store, run, _c = _import(tmp_path, forms=[form, other])
     with store:
-        run_auto(base_url="http://h/app/", store=store, run_id=run, sender=app,
-                 mode="manual", selected_categories=["command-injection", "xss",
-                                                     "sql-injection"],
-                 points_source="crawl")
+        result = run_auto(base_url="http://h/app/", store=store, run_id=run, sender=app,
+                          mode="manual", selected_categories=["command-injection", "xss",
+                                                              "sql-injection"],
+                          points_source="crawl")
         found = {(r["param"], r["vuln_class"]) for r in store.conn.execute(
             "SELECT param, vuln_class FROM finding WHERE run_id=?", (run,))}
     text = app.sent_text()
@@ -1058,13 +1087,15 @@ def test_a_crawled_hostname_is_never_sent(tmp_path):
     sleeps = [r["value"] for r in app.requests if r["param"] == "target"
               and "sleep" in r["value"]]
     assert sleeps and all(v.startswith(vs.SAFE_HOST) for v in sleeps)   # base-value prefix
+    assert all(r["body"]["site"] == "http://fuzzlab.invalid/" for r in app.requests
+               if r["param"] == "target")
     assert "www.nsa.gov" not in text and "itsecgames" not in text
     assert "www.nsa.gov" not in lookups and set(lookups) <= {vs.SAFE_HOST, "1", "zqxm"} | {
         h for h in lookups if not vs.value_shape(h)}
-    note = [r for r in app.requests if r["param"] == "note"]
-    assert note and all(r["body"]["target"] == vs.SAFE_HOST
-                        and r["body"]["ref"] == vs.SAFE_URL
-                        and r["body"]["site"] == "http://fuzzlab.invalid/" for r in note)
+    # siblings naming a host: never sent, as given or as a stand-in
+    assert [r for r in app.requests if r["param"] in ("note", "site", "comment")] == []
+    refused = {i["param"] for i in result.inconclusive if "outside the lab" in i["reason"]}
+    assert {"note", "comment"} <= refused
 
 
 def test_ground_truth_cmdi_probes_are_unchanged():

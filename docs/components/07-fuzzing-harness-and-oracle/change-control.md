@@ -3,6 +3,72 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0111 — One test per request context; a stored placeholder is never replayed (FR-FUZZ-66, FR-FUZZ-67; BUG-0530, BUG-0544) (2026-10-21)
+- Placement: AU-REQID78 (audit defects 8 and 7), implemented first under PA-0541; the
+  parked design `DRAFT-AU-REQID8.md` was input. Owners: SP-57 is CC-CORE-0073; the
+  importer and the engine are CC-AUD-0056; the label join is CC-ML-0501.
+- Change (defect 8, FR-FUZZ-66):
+  - `harness/pipeline.py`: `_confirmation_key` is `core.reqctx.confirmation_key` (the
+    request context's id and the category, plus the seed for `SEED_CATEGORIES`), never
+    the 5-tuple. `_candidate_of` carries `context_id` and `context_key`; `test.start`
+    carries `request_context`; `run_pipeline(identity=)` reaches `evaluate`. The
+    header-breaker metric keeps each stopped key's own (url, param, method) instead of
+    unpacking the old key's positions.
+  - `harness/auto.py`: the point builder's `seen` is `reqctx.point_key` (context and
+    seed), never (path, method, name); `run_auto` passes the run's identity scope.
+  - `oracle/oracle.py`: `_write_finding` records `context_id` and `context_key` in the
+    finding's evidence; the `finding` trace event carries `request_context`.
+  - `oracle/probe.py`: `Candidate` gains `context_id`, `context_key`.
+- Change (defect 7, FR-FUZZ-67):
+  - `oracle/oracle.py` `_FormBoundSender`: an entry named in `candidate.bindings["fresh"]`
+    is bound before each own send to the value the context's page offers now
+    (`fetch` on the probe's route, `core.forms.page_template_entries`), in memory; when
+    that fails it raises `PrerequisiteUnavailable` (kept for the candidate). The oracle
+    returns `UNBOUND` (inconclusive, with the reason) for `replay_refusal` before any
+    strategy, and when no mechanism could send for an unbound reason.
+  - `oracle/probe.py`: `PrerequisiteUnavailable(UnplaceableLocation)`, `accepts_fetch`;
+    `Candidate` gains `bindings`, `replay_refusal`.
+  - `tools/probesender.py`: `SeamProbeSender.fetch` (the probe's route: main, isolated
+    copy, anonymous; the send gate; transport failures mapped) and
+    `RequestsProbeSender.fetch` (jar cleared first; the next send only keeps what the
+    page set); both `fetch_capable`.
+  - Wrappers report and forward the capability: `_CountingSender` (counted),
+    `_FragmentGuard`, `TracingSender` (an exchange with role `bind`, no value),
+    `_CostCounter` (cost), `_PrgRun`, `_FormBoundSender`.
+  - `harness/auto.py`: `_send_value` keeps a value naming loopback as given and replaces
+    only a value naming a host outside the lab; `_outside_lab` makes such a sibling a
+    `replay_refusal` (crawl, ground-truth JSON and store bodies); `_bindings` reads the
+    recipe (migration 25); header points take the first link set holding no placeholder
+    and no off-lab host. `harness/pipeline.py`: the fingerprint baseline skips a point
+    needing a binding or refused; `UNBOUND` reasons reach `inconclusive`.
+  - `oracle/strategies.py` `DomXssStrategy._observe`: a query point needing a fresh
+    binding is refused (`PrerequisiteUnavailable`); the browser has no fetch.
+- Impact (other components / project): AUD (CC-AUD-0056), CORE (CC-CORE-0073), ML
+  (CC-ML-0501). Contract changes: candidate evidence gains `identity_scope`,
+  `context_id`, and (when present) `bindings`, `replay_refusal`; finding evidence gains
+  `context_id`, `context_key`; `Candidate` gains four fields; the `Sender` protocol gains
+  the optional `fetch`/`fetch_capable` capability (a sender without it keeps working:
+  a candidate needing a binding is then inconclusive). Consumers found by search
+  (PA-0152): `_confirmation_key` (pipeline only), `header_breaker_skipped` (pipeline,
+  `auto.run_auto`), `_FormBoundSender` (oracle, `CrossAccountReplayStrategy`, which now
+  binds fresh values in the peer's own session), `first_link_set` (header points, two
+  tests), finding evidence (ML join; the UI shows evidence as JSON).
+- Risk (medium): more tests on crawl runs (every distinct context, no cap: the owner's
+  decision); tests that used to send a placeholder or a stand-in are now inconclusive (a
+  coverage loss on paper, a false-negative source removed). Ground-truth runs: no change
+  in points (15 JSON leaves measured, none changed by the host rule) or keys beyond the
+  stored-case/ordinary-point split FR-AUD-30 asked for.
+- Deliverables:
+  - [x] pipeline key, builder dedup, candidate/finding/trace carriage — done
+  - [x] binder fresh binding, `UNBOUND`, sender `fetch`, wrappers — done
+  - [x] tests: `tests/test_request_contexts.py`, `tests/test_replay_bindings.py`, the fetch
+    guards in `tests/test_sender_conformance.py`; amended with before/after stated
+    (PA-0073(3)): `test_forms_phase2` (five), `test_json_points` (two),
+    `test_unplaceable_confirmation` (the shared-key test) — done
+  - [x] BUG-0530, BUG-0544; PA, ERROR_LOG, CHANGELOG, SHARED_PRIMITIVES texts handed to
+    the orchestrator — done
+- Effectiveness (assessed <date> or pending): pending.
+
 ### CC-FUZZ-0110 — The blind-SQLi builder never admits an answer sent on a session known to be lost (FR-FUZZ-65, FR-FUZZ-63, BUG-0533; decision D′) (2026-10-20)
 - Placement: AU-SESS403 (audit defect 6), review round 5; the owner's decision D′ covers
   every consumer, so BUG-0533's sweep pin for this builder was closed instead of queued.
