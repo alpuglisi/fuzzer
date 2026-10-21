@@ -191,3 +191,16 @@ def test_an_unhashable_value_is_never_folded():
     # a URL the placement cannot parse is kept as given, never a crash of the stage
     bad = "http://[::1/item?id=1"
     assert wire_request_key(InjectionPoint(bad, "id"))[0] == ("url", bad)
+
+
+def test_the_fold_key_holds_the_request_context_identity(monkeypatch):
+    """SP-57 is a member of the fold key: two points the request-context identity tells
+    apart are never folded, whatever their other fields (`core.reqctx.point_key`)."""
+    from fuzzlab.core import reqctx
+    from fuzzlab.core.dedup import fold_points, wire_request_key
+    one = InjectionPoint(f"{H}/item?id=1", "id")
+    assert dict(wire_request_key(one))["context"] == reqctx.point_key(one)
+    contexts = iter([("rc1-a", "s1-x"), ("rc1-b", "s1-x")])
+    monkeypatch.setattr(reqctx, "point_key", lambda point, identity=None: next(contexts))
+    folded = fold_points([one, one], {one.url: PAGE.format(t="x")})
+    assert (folded.folded, len(folded.points)) == (0, 2)

@@ -1,5 +1,13 @@
 # DRAFT AU-REQID: request contexts never merge, and every sender places a query value at one exact occurrence
 
+> **IMPLEMENTED (2026-10-21) by AU-REQID78** (CC-FUZZ-0111, CC-AUD-0056, CC-CORE-0073,
+> CC-ML-0501; BUG-0530, with defect 7 as BUG-0544). The owner decided Q1: every distinct
+> context is tested, with no cap. Differences from this draft: no migration of
+> `parameter.occurrence` or `finding.context_id` (the context is computed from the
+> evidence, on read for older rows, and the finding records it in its evidence);
+> per-occurrence binding and raw link-set text stay residuals R1/R2 (pinned). The text
+> below is the parked design, kept as history.
+
 > **PARKED (2026-10-19).** The coordinator accepted the split. This file keeps the
 > defect-8 material for the later item **AU-REQID8**, unchanged below this note.
 > - **Superseded parts.** Defect 14 is now its own item, AU-REQID14

@@ -529,13 +529,20 @@ def points_from_store(store, run_id: int, base_url: str,
 
     from fuzzlab.core.jsonbody import LOCATION as JSON_LOCATION
     from fuzzlab.harness.auto import injection_points_from_store
-    out = []
+    out, seen = [], set()
     for p in injection_points_from_store(store, run_id, base_url, skipped=skipped):
         if p.location == JSON_LOCATION:
             if skipped is not None:
                 skipped.append((urlsplit(p.url).path or "/", p.method, p.param,
                                 "JSON body point (greybox cannot place it)"))
             continue
+        # greybox sends no siblings (FR-FUZZ-8), so its request is (url, param, method,
+        # location): the point builder's request contexts that differ only in their
+        # siblings are one greybox request, kept once in order (BUG-0530 review B7)
+        key = (p.url, p.param, p.method, p.location)
+        if key in seen:
+            continue
+        seen.add(key)
         out.append(GreyboxPoint(url=p.url, param=p.param, method=p.method,
                                 location=p.location))
     return out

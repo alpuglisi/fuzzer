@@ -192,6 +192,132 @@ def redirect_seed(value):
     return seed
 
 
+def names_outside_lab(value) -> bool:
+    """True when ``value`` names a network location that is not loopback: a value
+    `neutral_value` would replace whose host is not 127.0.0.0/8, ``localhost`` or
+    ``::1`` (`core.urls.is_loopback_origin`, D11). Such a value is never sent (FR-AUD-20)
+    and never replaced by a stand-in either (FR-FUZZ-67, BUG-0544): a request that needs
+    it cannot be rebuilt. A value naming loopback names the lab itself and is sent as
+    the app gave it. Total: a non-string is False.
+
+    Fails closed (BUG-0544 review B3): a value is the lab only when `_names_only_lab`
+    proves it; anything else `neutral_value` would change is outside the lab."""
+    if not isinstance(value, str) or neutral_value(value) == value:
+        return False
+    return not _names_only_lab(value)
+
+
+#: The safe tail grammar (FR-AUD-20 as the owner decided it, 2026-10-21; BUG-0544 review
+#: R3-1). An allow-list of how a loopback value's path, query and fragment may be spelled,
+#: never a recogniser of hosts: a recogniser asks which tokens read as a host and misses
+#: every spelling its lists do not hold (a gTLD outside `GENERIC_TLDS`, a one- to
+#: three-part or integer IPv4 address); this asks only whether every token is in the
+#: grammar. A separator between words:
+_TAIL_SEPARATORS = frozenset("/?#&=")
+#: The characters of a word.
+_TAIL_WORD = frozenset(string.ascii_letters + string.digits + "_-~")
+
+
+def _tail_in_grammar(tail: str) -> bool:
+    """Whether a loopback value's path, query and fragment (``tail``, from the first
+    ``/``, ``?`` or ``#`` after the authority) are all in the safe grammar::
+
+        tail      := ( separator | word )*
+        separator := "/" | "?" | "#" | "&" | "="      -- never "/" twice in a row
+        word      := a maximal run of ASCII letters, digits, "_", "-", "~"
+                     whose first character is not a digit
+
+    So no token holds a ``.`` or a ``:`` (or any other character: ``%``, ``@``,
+    ``\\``, ``[``, ``+``, ``;``, ``,``, non-ASCII), and none is a number in any radix
+    or of any length (a digit-led token: ``2``, ``134744072``, ``0x8080808``, ``010``).
+    Anything else is outside the lab, and `neutral_value` stands in for it. Linear, no
+    regular expression (PA-0095).
+
+    Accepted false positives (the owner's decision): a loopback value whose tail holds
+    a number, a dotted or colon-separated token or any character outside the grammar
+    (``?page=2``, ``/app.js?v=1.2.3``, ``?at=10:30``, ``?q=a+b``, ``/2fa``) is outside.
+    Stated residual: a dotless word (``?next=intranet``) is in the grammar; only a
+    resolver that completes it from a search list reads it as a host."""
+    after_slash = False
+    word_start = True
+    for ch in tail:
+        if ch in _TAIL_SEPARATORS:
+            if ch == "/" and after_slash:
+                return False                   # '//': a network-path reference
+            after_slash = ch == "/"
+            word_start = True
+        elif ch in _TAIL_WORD:
+            if word_start and ch in string.digits:
+                return False                   # a number in some radix
+            after_slash = word_start = False
+        else:
+            return False                       # not in the grammar
+    return True
+
+
+def _loopback_authority(authority: str) -> bool:
+    """An authority that is a loopback host with at most a numeric port: no userinfo,
+    no other punctuation (``127.0.0.1:80@evil.example`` is not one)."""
+    from fuzzlab.core.urls import is_loopback_origin
+    if not authority or "@" in authority:
+        return False
+    if authority.startswith("["):
+        end = authority.find("]")
+        if end < 0:
+            return False
+        host, rest = authority[:end + 1], authority[end + 1:]
+    else:
+        host, colon, port = authority.partition(":")
+        rest = colon + port
+    if rest and not (rest.startswith(":") and rest[1:].isdigit()):
+        return False
+    try:
+        return is_loopback_origin("http://" + host)
+    except ValueError:
+        return False
+
+
+def _names_only_lab(value: str) -> bool:
+    """Whether ``value`` provably names loopback and nothing else (FR-AUD-20 as amended
+    by FR-FUZZ-67): no ``@``, ``\\``, ``%``, control or non-ASCII character anywhere
+    (WHATWG and other consumers read those differently from `urlsplit`; a reader that
+    maps a fullwidth ``evil`` and an ideographic full stop before ``example`` reads
+    evil.example, measured in node 22); only ``http``/``https`` when a scheme is given;
+    the whole authority a loopback host with a numeric port, as `_loopback_authority`
+    splits it **and** as `urlsplit` reads it; and the path, query and fragment wholly in
+    the safe tail grammar (`_tail_in_grammar`, an allow-list: ``?next=evil.top``,
+    ``?next=134744072``, ``?next=https:evil.example`` and ``#8.8.8.8:53`` are outside;
+    reviews R2-1, R3-1)."""
+    from urllib.parse import urlsplit
+
+    from fuzzlab.core.urls import is_loopback_origin
+    if any(ch in value for ch in "@\\%") or any(ord(ch) < 33 or ord(ch) >= 127
+                                                  for ch in value):
+        return False
+    if "://" in value:
+        scheme, rest = value.split("://", 1)
+        if scheme.lower() not in ("http", "https"):
+            return False
+    elif value.startswith("//"):
+        rest = value[2:]
+    else:
+        rest = value
+    cut = min((i for i in (rest.find(c) for c in "/?#") if i >= 0), default=len(rest))
+    authority, tail = rest[:cut], rest[cut:]
+    if not _loopback_authority(authority):
+        return False
+    try:
+        parsed = urlsplit("http://" + rest)
+        host = parsed.hostname
+        parsed.port                           # raises on a non-numeric port
+    except ValueError:
+        return False
+    if host is None or not is_loopback_origin("http://" + (f"[{host}]" if ":" in host
+                                                            else host)):
+        return False
+    return _tail_in_grammar(tail)
+
+
 def neutral_value(value):
     """``value``, or loopback in its place when it names a network location: what the
     fuzzer sends instead of a default the app supplied (FR-AUD-20). It errs toward

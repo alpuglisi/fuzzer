@@ -10,7 +10,8 @@ into ``%EF%BF%BD``); the M6 browser appended. Now:
   named the parameter, in place; every other part keeps its text
   (`core.urls.place_query_param`);
 - **bound** entries (a link set, a form) replace every occurrence of the name -- the
-  oracle binder's rule, unchanged until AU-REQID8 (`core.urls.bind_query`).
+  oracle binder's rule (`core.urls.bind_query`); per-occurrence binding is AU-REQID8's
+  stated residual (BUG-0530), pinned below.
 
 Every sender sends to a loopback echo server started here (`require_loopback`,
 PA-0130), which records the exact request target it received. How a wire is judged
@@ -283,7 +284,7 @@ def test_name_matching_never_merges_an_invalid_escape_with_its_replacement():
 
 
 def test_bind_query_follows_the_binders_rule_and_adds_nothing_to_bound_entries():
-    """The bound rule (until AU-REQID8): every entry called the name gets the value; on
+    """The bound rule (BUG-0530 residual R1): every entry called the name gets the value; on
     entries the binder already bound it changes nothing; an absent name is appended."""
     from fuzzlab.core.urls import bind_query
     entries = [("id", "1"), ("tag", "a"), ("tag", "b")]
@@ -434,7 +435,7 @@ def test_the_anonymous_and_authenticated_senders_send_the_same_query(echo):
 @pytest.mark.parametrize("inner", ["anonymous", "seam"])
 def test_a_bound_entry_list_is_sent_by_the_binders_rule(echo, inner):
     """The binder's rule, through `bind_query` in each sender: every ``tag`` gets the
-    value (``id=1&tag=M&tag=M``) -- the documented rule until AU-REQID8."""
+    value (``id=1&tag=M&tag=M``) -- the documented rule (BUG-0530 residual R1)."""
     from fuzzlab.oracle.oracle import _FormBoundSender
     from fuzzlab.oracle.probe import Candidate
     from fuzzlab.tools.probesender import RequestsProbeSender
@@ -446,10 +447,12 @@ def test_a_bound_entry_list_is_sent_by_the_binders_rule(echo, inner):
     assert echo.query() == _prepared(f"id=1&tag={MARK}&tag={MARK}")
 
 
-@_pin("AU-REQID8", "the binder replaces every occurrence of a repeated name")
+@_pin("a follow-up of AU-REQID8 (BUG-0530 residual R1: per-occurrence points)",
+      "the binder replaces every occurrence of a repeated name")
 def test_a_bound_duplicate_name_changes_one_occurrence_only(echo):
     """``tag=a&tag=b``'s point ``tag``: `FormEntries.replace` sets every entry called
-    ``tag``. AU-REQID8 makes the occurrence part of a point and changes `bind_query`."""
+    ``tag``. Its follow-up makes the occurrence part of a point and changes
+    `bind_query`; AU-REQID8's identity records the every-occurrence placement."""
     from fuzzlab.oracle.oracle import _FormBoundSender
     from fuzzlab.oracle.probe import Candidate
     from fuzzlab.tools.probesender import RequestsProbeSender
@@ -717,7 +720,7 @@ def test_the_browser_and_the_bound_http_sender_place_a_duplicate_name_alike(echo
     """One bound point with a repeated name (``tag=a&tag=b``, point ``tag``), sent by the
     oracle's binder over `RequestsProbeSender` and loaded by the M6 executor with the same
     entries: both go through `core.urls.bind_query`, so the two wires are equal under the
-    measured relation (FR-FUZZ-64; the binder's every-occurrence rule until AU-REQID8)."""
+    measured relation (FR-FUZZ-64; the binder's every-occurrence rule, BUG-0530 R1)."""
     from fuzzlab.oracle.browser import ExecRequest
     from fuzzlab.oracle.oracle import _FormBoundSender
     from fuzzlab.oracle.probe import Candidate
@@ -796,7 +799,8 @@ def test_the_route_query_owner_places_each_pair_by_the_standalone_rule(url, pair
     assert place_route_query_pairs(url, pairs) == want
 
 
-@_pin("AU-REQID8", "store_adapter.query_pairs drops empty parts and a missing '='")
+@_pin("a follow-up of AU-REQID8 (BUG-0530 residual R2: a stored link set's raw text)",
+      "store_adapter.query_pairs drops empty parts and a missing '='")
 def test_a_stored_link_set_round_trips_its_crawled_query():
     """A crawled link query, stored as a link set and sent back by the bound rule, keeps
     ``flag`` (no ``=``), its empty parts and ``%20``."""
@@ -807,8 +811,8 @@ def test_a_stored_link_set_round_trips_its_crawled_query():
     assert canonical_pairs(sent.query) == canonical_pairs(raw)
 
 
-@_pin("AU-REQID8", "a disco form body's repeated name collapses (store_adapter.py:274)")
 def test_a_disco_form_body_keeps_a_repeated_name_in_order(tmp_path):
+    """Fixed by AU-REQID8 (FR-AUD-31, BUG-0530): the capture's ordered pairs are kept."""
     from fuzzlab.core.store import Store
     from fuzzlab.tools import store_adapter
     from tests.test_disco_import import _rec, _run_dir
@@ -1113,9 +1117,6 @@ ALLOWED: dict[tuple[str, str, str], tuple[int, str]] = {
         (1, "a stored endpoint key keeps the POST action's query verbatim"),
     ("fuzzlab/tools/store_adapter.py", "_store_request", "S4 string built onto a query"):
         (1, "a stored endpoint key keeps the request's query verbatim"),
-    ("fuzzlab/tools/store_adapter.py", "import_disco", "S3 dict(parse_qsl/parse_qs)"):
-        (1, "AU-REQID8 (the importer); pinned by "
-            "test_a_disco_form_body_keeps_a_repeated_name_in_order"),
     ("fuzzlab/web/app.py", "create_app.repeater_from_finding_prg",
      "S3 dict(parse_qsl/parse_qs)"):
         (1, "the operator's own UI form post, not traffic to a target"),

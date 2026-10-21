@@ -400,6 +400,21 @@ def redact_spa_fragment(url: str) -> str:
     return url if new == query else f"{head}#{route}?{new}"
 
 
+def page_url_is_clean(url: str) -> bool:
+    """Whether a page URL may be stored and fetched as it is (FR-FUZZ-67, BUG-0544): the
+    strongest URL redactor (`redact_url_identifiers`) leaves it unchanged, it carries no
+    redaction placeholder (a crawl's ``found_from`` was redacted once already, and a
+    placeholder survives a second pass), and no query value is empty (a value blanked
+    upstream looks exactly like that). Fails closed: any doubt keeps the page out."""
+    if not isinstance(url, str) or redact_url_identifiers(url) != url:
+        return False
+    if PLACEHOLDER in url or "__REDACTED_KEY_" in url or USERINFO_PLACEHOLDER in url:
+        return False
+    head = url.split("#", 1)[0]
+    query = head.split("?", 1)[1] if "?" in head else ""
+    return not any(part.endswith("=") for part in query.split("&"))
+
+
 def redact_url_identifiers(url: str) -> str:
     """`redact_url`, then each query value that `looks_like_identifier` (given its raw,
     percent-decoded value) blanked to ``name=``, and a SPA-route fragment's query

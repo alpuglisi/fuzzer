@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from fuzzlab.core import reqctx
 from fuzzlab.core.evidence import method_key, parse_evidence  # noqa: F401 - method_key re-exported (CC-ML-0500)
 from fuzzlab.core.features import (CANDIDATE_FEATURE_NAMES, CANDIDATE_FEATURE_VERSION,
                                    extract_candidate_v1)
@@ -111,15 +112,25 @@ def build_dataset(store, run_id: int | None = None, *, include_unlabelled: bool 
     """
     where, args = _run_filter(store, run_id, before_run_id, target)
 
-    # Keyed on every identity field both tables record, the method included (BUG-0075:
-    # a finding confirmed only on POST used to label the GET candidate positive). A
-    # finding with no recorded method (legacy / hand-written) matches any method, as
-    # before — such rows never flip.
+    # SP-57 (FR-FUZZ-66, BUG-0530): a finding the pipeline wrote names the confirmation
+    # key of the test that confirmed it (`finding.evidence["context_key"]`); it labels
+    # exactly the candidate rows of that key in its run -- never a row of another request
+    # context that shares its path and parameter, which no probe of that test sent.
+    by_context: set[tuple[int, tuple]] = set()
+    # A finding without one (an older run, a finding written outside the pipeline) keeps
+    # the legacy join: every identity field both tables record, the method included
+    # (BUG-0075: a finding confirmed only on POST used to label the GET candidate
+    # positive). A finding with no recorded method (legacy / hand-written) matches any
+    # method, as before — such rows never flip.
     positives: set[tuple[int, str, str, str, str]] = set()
     any_method: set[tuple[int, str, str, str]] = set()
     for f in store.conn.execute(
-            f"SELECT run_id, url, param, vuln_class, method FROM finding WHERE {where}",
-            args).fetchall():
+            f"SELECT run_id, url, param, vuln_class, method, evidence FROM finding "
+            f"WHERE {where}", args).fetchall():
+        context_key = _context_key(f["evidence"])
+        if context_key is not None:
+            by_context.add((int(f["run_id"]), context_key))
+            continue
         key = (int(f["run_id"]), f["url"], f["param"], to_category(f["vuln_class"]))
         if f["method"] is None:
             any_method.add(key)
@@ -152,22 +163,40 @@ def build_dataset(store, run_id: int | None = None, *, include_unlabelled: bool 
         cat = ev.get("category", "")
         key = (rid, path, param, cat)
         mkey = (*key, method_key(ev.get("method")))
-        if mkey in positives:
-            matched.add(mkey)
-        if key in any_method:
-            matched.add(key)
+        # the row's own confirmation key, computed on read for a row that predates it
+        ckey = (rid, reqctx.confirmation_key(ev))
+        for k, found in ((ckey, by_context), (mkey, positives), (key, any_method)):
+            if k in found:
+                matched.add(k)
         unlabelled = c["oracle_status"] in UNLABELLED
         if unlabelled and not include_unlabelled:
             continue
-        label = 1 if (mkey in positives or key in any_method) else 0
+        label = 1 if (ckey in by_context or mkey in positives or key in any_method) else 0
         ds.X.append(_features(ev, c["sink_context"], fired.get((rid, path, param), 0)))
         ds.y.append(0 if unlabelled else label)
         ds.groups.append(path)
         ds.ids.append(int(c["id"]))
         ds.labelled.append(not unlabelled)
-    lost = {k[0] for k in (positives | any_method) - matched}
+    lost = {k[0] for k in (positives | any_method | by_context) - matched}
     ds.label_loss_runs = sorted(quarantined_runs & lost)
     return ds
+
+
+def _context_key(evidence) -> tuple | None:
+    """The confirmation key a finding's evidence names (SP-57), or None (a finding from
+    before it, written outside the pipeline, or unreadable). A finding's evidence is a
+    verdict's, not a candidate's, so `parse_evidence` (which requires a candidate's
+    fields) does not apply."""
+    import json
+    try:
+        ev = json.loads(evidence) if isinstance(evidence, (str, bytes)) and evidence \
+            else None
+    except (ValueError, RecursionError):
+        ev = None
+    key = ev.get("context_key") if isinstance(ev, dict) else None
+    if isinstance(key, list) and key and all(isinstance(k, str) for k in key):
+        return tuple(key)
+    return None
 
 
 #: The most of a training scope that may be quarantined before a trainer refuses.

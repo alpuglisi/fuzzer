@@ -102,8 +102,9 @@ class TemplateClusterer:
 
 # --- folding injection points (BUG-0547, FR-FUZZ-68) ----------------------------------
 #: What `fold_points` folds on, reported with its count: the page's template plus
-#: `wire_request_key`. Bumped whenever either changes.
-FOLD_KEY = "template+wire-request-v1"
+#: `wire_request_key`. Bumped whenever either changes (v2: the key holds SP-57's
+#: request-context identity as a member, AU-REQID78).
+FOLD_KEY = "template+wire-request-v2"
 
 #: The value a standalone query point's own slot holds in its key (never sent).
 _SLOT = "fuzzlab-injected-slot"
@@ -123,8 +124,10 @@ def wire_request_key(point) -> tuple:
     default or a sibling's value (the oracle sends a form's default and the value a
     crawl saw: `_restore_value`, the cross-account check) all keep two points apart.
 
-    A local stand-in for the request-context identity of SP-57 (AU-REQID78): at merge
-    this function is replaced by that identity, which must keep these guarantees."""
+    It refines the request-context identity (SP-57, `core.reqctx.point_key`), which is a
+    member of the key: a fold never joins two request contexts, and every field beyond
+    the context (an audit label, a field added later) keeps two points apart too. A URL
+    the identity cannot parse has no context member (``None``) and is keyed as given."""
     from fuzzlab.core.urls import place_query_param
     if not dataclasses.is_dataclass(point) or isinstance(point, type):
         raise TypeError(f"an injection point dataclass, not {type(point).__name__}")
@@ -135,9 +138,14 @@ def wire_request_key(point) -> tuple:
             url = place_query_param(url, point.param, _SLOT)
         except ValueError:                   # unparseable (`urlsplit`): kept as given
             url = point.url
+    from fuzzlab.core.reqctx import point_key
+    try:
+        context = point_key(point)
+    except ValueError:                       # unparseable (`urlsplit`): no context
+        context = None
     return (("url", url),) + tuple(
         (f.name, _frozen(getattr(point, f.name)))
-        for f in dataclasses.fields(point) if f.name != "url")
+        for f in dataclasses.fields(point) if f.name != "url") + (("context", context),)
 
 
 def _frozen(value):

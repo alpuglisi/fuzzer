@@ -136,6 +136,9 @@ Searched `fuzzlab/` for deduplication keys of requests, forms and endpoints
   `tests/test_captured_operations.py::test_each_captured_graphql_operation_gets_its_own_points_on_import`,
   which captures GetUser and SearchPosts through `record_request`, imports them with
   `import_spider`, and asserts that SearchPosts' form has its own `variables.n`.
+  *(2026-10-21, at AU-REQID78's merge of 2053f22: fixed by the defect-8 lane. BUG-0530,
+  CC-AUD-0056: `_store_request` keeps one row per request context, SP-57. The pin
+  passed strictly in that lane's harness run, so it is now a plain test.)*
 - `formnav.signature`, `spa.form_signature`, `revealed_forms (route, signature)`: forms
   by their controls for submission caps, not request evidence. Not instances.
 - `core/dedup.py` with `harness/pipeline.py::_dedup` (DOM templates): an instance. The

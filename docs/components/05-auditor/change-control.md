@@ -33,6 +33,133 @@ Newest first.
   - [x] FR-AUD-22 edited in place (the refusal list) — done
 - Effectiveness (assessed <date> or pending): pending.
 
+### CC-AUD-0056 — The importer keeps every request context and records each sibling set's replay recipe; the engine writes the context (FR-AUD-31; BUG-0530, BUG-0544) (2026-10-21)
+- Placement: AU-REQID78 (audit defects 8 and 7). The pipeline and the oracle are
+  CC-FUZZ-0111; the identity's owner and migration 25 are CC-CORE-0073.
+- Change:
+  - `tools/store_adapter.py`:
+    - `_get_parameter` keys one context: (endpoint, name, location, sibling set); every
+      caller swept (page query, path templates, route query, forms, captured requests;
+      `import_audit` keeps a name lookup: the legacy auditor names a parameter only).
+    - Link sets (`_import_link_set`, at each page's turn so row order is kept): a set of
+      two or more names is its own `form` row and its own parameter rows, never bound to
+      another set's ("the first crawled link wins" removed); a one-name or refused set
+      gives lone rows, as before. Identical sets after redaction are one.
+    - `_import_forms`: a form's fields are that form's rows, never attached to a link's.
+    - `_store_request`: each captured body is its own context (identical stored bodies
+      are one); "the first captured request's leaf wins a name" removed.
+    - `import_disco`: a form-encoded body is kept as ordered pairs (`_captured_leaves`
+      takes them), so a repeated name survives.
+    - The replay recipe (FR-FUZZ-67, migration 25) through one writer,
+      `_insert_sibling_set`: `source_page` (a form's page, a link's `found_from`, a
+      captured request's page or Referer, kept with its query) and `fresh` (the entries
+      redaction blanked: `form_record`'s sensitive non-password fields, `redact_sibling`,
+      `redact_leaf`; never a password, sent empty by policy). Names and a page only.
+  - `audit/engine.py`: `InjectionPoint` gains `bindings` and `replay_refusal`; the
+    evidence's request fields come from `core.reqctx.point_evidence`; `evaluate(identity=)`
+    stamps `identity_scope` and `context_id` (`reqctx.stamp`) on every candidate.
+  - `audit/value_shape.py`: `names_outside_lab` (a value `neutral_value` would replace
+    whose host is not loopback), the one predicate for FR-AUD-20 as amended.
+- Impact (other components / project): FUZZ (more points on crawl runs; the builder no
+  longer merges them), CORE (migration 25's writer), CRAWL (none; its own form and request
+  signatures still merge contexts upstream: pinned by strict xfails naming CRAWL), ML
+  (more candidate rows per (path, param)). Count changes: `link_set_bound` and
+  `parameter` now count one row per context; `form` rows of identical captured bodies
+  are one.
+- Risk (medium): test counts on crawl runs grow by the number of distinct sibling sets
+  per name (every one is a real request; no cap, owner's decision). Old stores: unchanged
+  rows; a new import writes the new shape.
+- Deliverables:
+  - [x] importer per context, recipe, disco ordered pairs — done
+  - [x] engine stamping and `point_evidence` — done
+  - [x] FR-AUD-31 and FR-AUD-20/22 amended in place — done
+  - [x] tests (`tests/test_request_contexts.py` importer tests, the disco pin in
+    `tests/test_query_placement.py` unpinned) — done
+- Review round 1 (85e7ab2): `store_adapter._source_page` stores a page only when
+  `core.redaction.page_url_is_clean` holds (B1, R2-B2: a disco Referer and a crawl's
+  `found_from` stored secrets and identifiers); `audit/value_shape.names_outside_lab`
+  fails closed (`_names_only_lab`; B3: `@`, `\`, embedded-URL bypasses). Tests in
+  `tests/test_replay_bindings.py` fail on 85e7ab2.
+- Review round 2 (0703688, R2-1): `_names_only_lab` failed closed on the authority but
+  not on the tail. Its tail was cut on a fixed separator list without `:`, and a token
+  counted as a host only when `value_shape` read it as a URL, IP or host name. So
+  `?next=evil.example:8080`, `?next=8.8.8.8:53`, `?next=https:evil.example` and
+  `#evil.example:8080` on a loopback URL were sent as given, and the binder bound them
+  fresh. Now:
+  - the tail is cut at every character a host, port, scheme or IPv6 literal is not
+    spelled with (`_tail_tokens`);
+  - the value is the lab only when no run reads as a host (`_reads_as_host`): a
+    `value_shape` URL, IP or host name (one trailing dot off), a dotted quad in any
+    radix, a scheme and `:`, or a host and a port. A loopback host in the tail now
+    counts too;
+  - non-ASCII is refused anywhere, like `%`.
+
+  Measured in node 22: `new URL("https:evil.example", "http://127.0.0.1/")` is
+  `https://evil.example/`. With `http://` put before the token, `evil.example:8080`,
+  `8.8.8.8:53`, `0x8.8.8.8`, `a_b.evil.example` and fullwidth `evil` all read as hosts.
+  Tests (all fail on 0703688 for the review's spellings):
+  - `tests/test_replay_bindings.py::test_a_value_that_names_a_host_beyond_loopback_to_any_reader_is_outside_the_lab`;
+  - `tests/test_replay_bindings.py::test_the_binder_never_binds_a_fresh_value_that_names_a_host_beyond_loopback`
+    (the same spellings through `_FormBoundSender._bind_fresh`);
+  - `tests/test_replay_bindings.py::test_a_value_naming_only_loopback_is_the_lab`
+    (the loopback values that must still pass).
+
+  Accepted false positive: a time or a `word:` in a loopback value's tail (FR-AUD-20).
+- Review round 3 (3959dfc, R3-1; the final round, on the owner's chosen design of
+  2026-10-21): round 2 fixed its six spellings, but its tail rule was still a
+  recogniser of hosts (`_reads_as_host`: `value_shape`'s closed `GENERIC_TLDS` set and a
+  four-part-only `_ipv4_like`), so a gTLD outside that list (`?next=evil.top`,
+  `#evil.zip`, `/go/evil.top`) and a one- to three-part or integer IPv4 address
+  (`?next=134744072`, `8.8.2056`, `0x8080808`) in a loopback URL's tail were sent as
+  given and bound fresh (dcc7091 replaced each with loopback). Now:
+  - `audit/value_shape.py`: `_tail_tokens`, `_ipv4_like`, `_reads_as_host` and their
+    character sets are removed. The tail must be wholly in the safe grammar
+    (`_tail_in_grammar`, an allow-list stated in its docstring and in FR-AUD-20):
+    separators `/ ? # & =` (never `//`) between words of ASCII letters, digits, `_`,
+    `-`, `~` whose first character is not a digit. No token with a `.` or a `:`, no
+    number in any radix or length; nothing reads the tail as a host. The binder's
+    fresh values go through the same predicate.
+  - Tests (in one invocation on 3959dfc's product files, 45 fail and 71 pass; each fails
+    for its stated reason):
+    - `tests/test_replay_bindings.py::test_a_value_that_names_a_host_beyond_loopback_to_any_reader_is_outside_the_lab`
+      and `::test_the_binder_never_binds_a_fresh_value_that_names_a_host_beyond_loopback`:
+      review R3-1's thirteen spellings (`_OUTSIDE_LAB_R3`) and the accepted false
+      positives, with the round-1 and round-2 spellings kept;
+    - `::test_every_spelling_of_the_generated_sweep_is_outside_the_lab`: 1,414 values
+      (gTLDs not in `GENERIC_TLDS`; every one- to four-part decimal, hex and octal
+      spelling of 8.8.8.8, 1.2.3.4 and 127.0.0.1; scheme-colon; host:port; bracketed;
+      `//`; `%`; fullwidth and other non-ASCII) in seven tail positions;
+    - `::test_the_tail_rule_is_an_allow_list_never_a_recogniser_of_hosts` (AST: the
+      tail predicate names no classifier, TLD or extension list or address parser);
+    - `::test_a_value_naming_only_loopback_is_the_lab`: the loopback controls
+      (`http://127.0.0.1/`, `http://127.0.0.1:3000/login?next=/account`, localhost
+      paths of plain word segments) still keep their tail.
+
+  Accepted false positives (the owner's decision): a number, a dotted or
+  colon-separated token or any character outside the grammar in a loopback value's
+  tail (`?page=2`, `/app.js?v=1.2.3`, `?at=10:30`, `?q=a+b`, `/2fa`). Stated residual:
+  a dotless word (`?next=intranet`) is in the grammar.
+- Residuals after the final round (8fee220; recorded at the AU-REQID78 merge -- the owner
+  ruled out a further fix round, so no product change): one neighbouring path of R3-1 is
+  open. N-R3-1: `names_outside_lab` returns False early when `neutral_value(value) ==
+  value`, and `neutral_value` recognises a loopback authority with a recogniser, so a
+  loopback value with no `/` before `?` or `#` (`127.0.0.1?next=evil.top`) or a loopback
+  authority it misses (`127.0.0.1./`, `localhost./`, `127.1/`, `2130706433/`,
+  `0x7f000001/`) never reaches the authority proof or `_tail_in_grammar`; it is sent and
+  bound verbatim (the same at dcc7091). Per PA-0530(4) and PA-0531(4) it is pinned, not
+  only stated:
+  - `tests/test_replay_bindings.py::test_a_loopback_authority_the_recogniser_misses_is_still_outside_the_lab`
+    and `::test_the_binder_never_binds_a_loopback_authority_the_recogniser_misses`:
+    strict xfails over the twelve reported spellings (`_OUTSIDE_LAB_N_R3_1`), each
+    failing on the merged code for its stated reason (the predicate says lab; the binder
+    binds); the reason names the owner (AUD, an FR-AUD-20 follow-up in
+    `audit/value_shape.py`).
+  - FR-AUD-20 states the gap in place; BUG-0544 gains "Residuals after the final round".
+  - `docs/SHARED_PRIMITIVES.md` gains SP-73 at the merge: FR-AUD-20's lab predicate, owner
+    `audit/value_shape.py::names_outside_lab`, read by `harness.auto._send_value`,
+    `harness.auto._outside_lab` and `oracle._FormBoundSender._bind_fresh`.
+- Effectiveness (assessed <date> or pending): pending.
+
 ### CC-AUD-0053 — The auditor ends a failed load through SP-01's owner (BUG-0522) (2026-10-19)
 - Placement: pre-assigned before CC-AUD-0054 and CC-AUD-0055 were written (PA-0031), so it lands above those higher-numbered entries.
 - Change: `fuzzlab/tools/fetcher.py` `ContentFetcher.fetch`'s `except` calls

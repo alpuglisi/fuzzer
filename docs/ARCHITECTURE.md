@@ -1160,8 +1160,8 @@ tracked in the requirements files, not here.
   gets a session of its own, and the transport never re-sends (each try is the sender's
   to make and record, FR-FUZZ-61).
 - **Store** `[built]`: SQLite access, schema, and numbered forward-only migrations
-  (`core/store.py`, `core/migrations.py`; head = migration 24 -- the last, the trace
-  model's tables, FR-CORE-505). One read-only opener, `core.store.open_read_only` (with
+  (`core/store.py`, `core/migrations.py`; head = migration 25 -- the last, a sibling
+  set's replay recipe (`form.source_page`, `form.fresh`), FR-FUZZ-67). One read-only opener, `core.store.open_read_only` (with
   `is_sqlite`; FR-CORE-508, SP-59): every read-only open of a SQLite file goes through
   it, and a process holding SQLite connections never opens a database's files outside
   SQLite (BUG-0535).
@@ -1187,7 +1187,8 @@ tracked in the requirements files, not here.
   run, `core/config.py`) `[built]`. Also `core/urls.py` (single home of path
   normalization), `core/dedup.py` (DOM-template clustering, and the pipeline's point
   folding: a point folds only with one on the same template that sends the same request,
-  `wire_request_key`, FR-FUZZ-68), `core/fingerprint.py`, `core/hybrid.py`, and
+  `wire_request_key`, which holds SP-57's request-context identity as a member,
+  FR-FUZZ-68), `core/fingerprint.py`, `core/hybrid.py`, and
   `core/runmode.py` (the D14/D15 run-mode + no-ground-truth fail-safe).
 - **A run's recorded target** `[built]` (CC-CORE-0500, FR-CORE-500): `core/runtarget.py`
   is the one reader of the `target` table -- a run's target is its first row by id, its
@@ -1400,6 +1401,22 @@ tracked in the requirements files, not here.
       once (`spa.form_refusal`, 50 per crawl); a password form only in a fresh
       unauthenticated context of the same guarded browser; in an authenticated crawl
       the crawl's own context only on a named route, the session re-checked after each;
+  - **Request contexts and replay bindings (CC-FUZZ-0111 / CC-AUD-0056 / CC-CORE-0073 /
+    CC-ML-0501, migration 25)** `[built]`: one versioned request-context identity
+    (SP-57, `core.reqctx`) decides which rows are one test at import, point building,
+    confirmation and the ML label join (FR-FUZZ-66, FR-AUD-31, FR-ML-401), and the
+    pipeline's DOM-template fold holds it as a member of its key
+    (`core.dedup.wire_request_key`, FR-FUZZ-68); a stored redacted value is a
+    placeholder, bound fresh before each send from its page on the probe's session
+    route, or the test is inconclusive (`unbound`) (FR-FUZZ-67); FR-AUD-20's lab
+    predicate is one owner (SP-73, `audit.value_shape.names_outside_lab`: a loopback
+    authority plus the `_tail_in_grammar` allow-list). Residuals: per-occurrence
+    binding (R1) and raw link-set text (R2) are follow-ups; POST action query points
+    (AU-REQID-POSTQ); the crawler's own form/request signatures still merge contexts
+    (CRAWL); after the final review round, a loopback authority the recogniser in
+    `neutral_value` misses skips the allow-list (N-R3-1, AUD) and a LIVE health check
+    adopts a rotated session cookie in the same generation (N-R3-2, FUZZ with SESS),
+    each pinned by strict xfails (BUG-0544);
   - `tests/test_requirements_traceability.py` (PA-0112): every NFR is classified, and
     every safety NFR names the tests that enforce it or says "Not yet enforced";
   - `core/forms.py`: the one HTML form serialiser (a browser's entry list, with a
@@ -2211,11 +2228,11 @@ detail):
 | `launch` (a job the UI started: random `token`, command, redacted argv, target, start / finish, status `running`/`succeeded`/`failed`/`stopped`/`unknown`, exit code; migration 22) | `core.project.insert_launch` / `finish_launch` (called by `web.projects`); `ensure_metadata` marks orphaned `running` rows `unknown` | web UI run history (`core.project.run_history`) |
 | `target` (fingerprint) | auditor | scheduler, fuzzer |
 | `page`, `endpoint`, `parameter` (`parameter.location`: `query`, `body`, `header`, `fragment`, `json` — a JSON body leaf, FR-CORE-36 — `path`, a crawled path segment, FR-AUD-26; `page.url` / `endpoint.url` is a path on the run's main origin, or an absolute URL on another origin, FR-AUD-27: readers resolve it with `core.urls.stored_absolute`) | crawler, auditor (`store_adapter.import_spider`; a disco run through `import_disco`, FR-AUD-23) | auditor, ranker, fuzzer |
-| `form` (a request's default sibling entries, migration 20: a crawled form's, a crawled link's query (`enctype` NULL), or a captured request's body — `enctype` `application/json` with `[[path], typed value]` entries (`core.jsonbody`), or form-encoded; `password_fields`, the names of its password controls or password leaves, migration 21 — non-empty marks an in-app login form or login API) | `store_adapter.import_spider` | `harness.auto` (points with sibling entries; the isolated paths, FR-FUZZ-44); `core.forms` (the one `enctype` reader) |
-| `candidate` (rule evidence, features, score, rank, out-of-fold `score_oof` / `rank_score_oof` (migration 16), `oracle_status`, anomaly score/flag) | auditor; pipeline (`oracle_status`: `pending` before the oracle loop, then `checked` / `skipped_budget` / `no_confirmer` — CC-CORE-0033); classifier/ranker (scores); anomaly tripwire | scheduler, fuzzer, ML (labelled rows only for training; `UNLABELLED` rows — `skipped_budget`, `no_confirmer`, `pending` — are scored, never trained on; labels join on method too, CC-ML-0023), UI |
+| `form` (a request's default sibling entries, migration 20: a crawled form's, a crawled link's query (`enctype` NULL), or a captured request's body — `enctype` `application/json` with `[[path], typed value]` entries (`core.jsonbody`), or form-encoded; `password_fields`, the names of its password controls or password leaves, migration 21 — non-empty marks an in-app login form or login API; `source_page` and `fresh` (migration 25, FR-FUZZ-67): the page the set came from -- stored only when `core.redaction.page_url_is_clean` holds, else NULL and the set is unbound -- and the names of its redacted placeholders; never a value) | `store_adapter.import_spider` (and `import_disco`), through `_insert_sibling_set` | `harness.auto` (points with sibling entries; the isolated paths, FR-FUZZ-44); `core.forms` (the one `enctype` reader; `first_link_set` skips a set holding a placeholder); `oracle._FormBoundSender` (via the candidate's `bindings`) |
+| `candidate` (rule evidence, features, score, rank, out-of-fold `score_oof` / `rank_score_oof` (migration 16), `oracle_status`, anomaly score/flag; the evidence carries `identity_scope`, `context_id` and, when present, `bindings` (`{"page", "fresh"}`) and `replay_refusal`, FR-FUZZ-66, FR-FUZZ-67) | auditor; pipeline (`oracle_status`: `pending` before the oracle loop, then `checked` / `skipped_budget` / `no_confirmer` — CC-CORE-0033); classifier/ranker (scores); anomaly tripwire | scheduler, fuzzer, ML (labelled rows only for training; `UNLABELLED` rows — `skipped_budget`, `no_confirmer`, `pending` — are scored, never trained on; labels join on method too, CC-ML-0023), UI |
 | `flow` (+ raw bytes; advisory `anomaly_score` / `anomaly_flag`, migration 18; `identity` is `<identity>#isolated:<n>` for an isolated copy's sends, FR-SESS-17) | proxy, http client; `fuzzlab flow-anomaly` (anomaly columns only) | anomaly detector, UI, analysis |
 | `attempt` (features, reward) | fuzzer | classifier, bandit, active learner |
-| `finding` (labels, evidence) | oracle only | UI, ML training, reports |
+| `finding` (labels, evidence; the evidence carries `context_id` and `context_key`, FR-FUZZ-66) | oracle only | UI, ML training (`ml.dataset` joins labels on `context_key`, FR-ML-401), reports |
 | `bandit_posteriors` | scheduler | scheduler |
 | `holdout_seal`, `holdout_seal_meta` (append-only blind-holdout seals per target, plus the backfill watermark; migration 19) | ML trainers via `holdout.write_seal` (INSERT only); migration 19's post-step (backfill, watermark) | `fuzzlab.ml.holdout` (sealing) |
 | `holdout_metric`, `holdout_reveal` (sealed blind-holdout metrics and the reveal count; migration 17) | ML trainers via `core.sealed.write_metrics`; `fuzzlab reveal-holdout` (reveal rows) | only `core.sealed.reveal` (`fuzzlab reveal-holdout`); hidden from the store browser (`SEALED_TABLES`) |

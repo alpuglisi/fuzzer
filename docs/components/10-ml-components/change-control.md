@@ -3,6 +3,28 @@
 Component code: **ML**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-ML-0501 — A finding labels only the candidate rows of the request context it confirmed (FR-ML-401, BUG-0530) (2026-10-21)
+- Placement: AU-REQID78 (audit defect 8); the number was assigned by the coordinator.
+  The key's owner is CC-CORE-0073 (SP-57); the finding records it under CC-FUZZ-0111.
+- Change: `ml/dataset.build_dataset` labels a candidate positive when a finding of its
+  run names the candidate's own confirmation key (`finding.evidence["context_key"]`,
+  compared with `core.reqctx.confirmation_key`, computed on read for an older row). A
+  finding without one (an older run, a finding written outside the pipeline) keeps the
+  legacy join (run, path, param, category, method), per finding. A finding's evidence is
+  read as JSON (`_context_key`): `parse_evidence` is the candidate parser. Label-loss
+  detection counts the context join too.
+- Impact (other components / project): training labels on crawl runs with several
+  contexts per (path, param): a context the confirming test never sent is no longer a
+  positive. `rules_fired` is unchanged (counted per (run, path, param)); no
+  `FEATURE_VERSION` change (the coordinator's decision). `candidate_keys` /
+  `seen_fraction` keep their coarse cross-run key.
+- Risk (low): old stores label exactly as before.
+- Deliverables:
+  - [x] the join — done
+  - [x] tests: `tests/test_request_contexts.py::test_a_context_never_tested_is_never_labelled_by_anothers_finding`,
+    `::test_a_finding_without_a_context_keeps_the_legacy_label_join` — done
+- Effectiveness (assessed <date> or pending): pending.
+
 ### CC-ML-0300 — NFR-ML-no-leak: runs against the external lab fixtures are not yet excluded from training (documentation) (2026-10-15)
 - Reserved range: CC-<CODE>-0300..0349 for this session (PA-0031); see CC-LAB-0300.
 - Change: NFR-ML-no-leak gains a dated `Not yet enforced` line: runs against the new

@@ -177,6 +177,69 @@ def test_every_concrete_sender_declares_prg_capable():
     assert concrete and all(_load(m, c).prg_capable is True for m, c in concrete)
 
 
+class _Fetcher(_Recorder):
+    """A sender that can make the binder's page fetch (FR-FUZZ-67)."""
+    fetch_capable = True
+
+    def fetch(self, url, *, route_url):
+        self.calls.append(dict(fetch=url, route_url=route_url))
+        return Probe(200, "<html></html>", headers={})
+
+
+def fetch_capability_problems(cls) -> list[str]:
+    """A wrapper reports its inner sender's fetch capability and forwards the fetch
+    unchanged (FR-FUZZ-67, BUG-0544): a binder below it fetches a fresh form value on
+    the probe's own session route, or the test is inconclusive -- never a blank sent."""
+    from fuzzlab.oracle.probe import accepts_fetch
+    out = []
+    capable, plain = _Fetcher(), _Recorder()
+    wrapper = _wrap(cls, capable)
+    if not accepts_fetch(wrapper):
+        out.append("hides a capable inner sender's fetch_capable")
+    elif not callable(getattr(wrapper, "fetch", None)):
+        out.append("reports fetch_capable but has no fetch")
+    else:
+        wrapper.fetch("http://h/page", route_url="http://h/form")
+        if {"fetch": "http://h/page", "route_url": "http://h/form"} not in capable.calls:
+            out.append("does not forward fetch unchanged")
+    if accepts_fetch(_wrap(cls, plain)):
+        out.append("claims fetch_capable over an incapable inner sender")
+    return out
+
+
+def test_every_wrapper_reports_and_forwards_its_inner_senders_fetch():
+    problems = {f"{m}.{c}": fetch_capability_problems(_load(m, c))
+                for m, c, w in _seam_classes() if w}
+    assert problems and {k: v for k, v in problems.items() if v} == {}
+
+
+def test_every_concrete_sender_declares_fetch_capable():
+    concrete = {(m, c) for m, c, w in _seam_classes()
+                if not w and (m, c) != ("fuzzlab.oracle.probe", "Sender")}
+    assert concrete and all(_load(m, c).fetch_capable is True
+                            and callable(_load(m, c).fetch) for m, c in concrete)
+
+
+def test_the_fetch_guard_catches_a_wrapper_that_hides_it():
+    """PA-0034(2): a wrapper written before FR-FUZZ-67 (send only) is caught."""
+    class _SendOnly:
+        def __init__(self, inner):
+            self._inner = inner
+
+        def send(self, url, param, value, timing=False, method="GET", location="query",
+                 content_type=None, entries=None, prg=False):
+            return self._inner.send(url, param, value)
+
+    class _Claims(_SendOnly):
+        fetch_capable = True
+
+    assert fetch_capability_problems(_SendOnly) == [
+        "hides a capable inner sender's fetch_capable"]
+    assert fetch_capability_problems(_Claims) == [
+        "reports fetch_capable but has no fetch",
+        "claims fetch_capable over an incapable inner sender"]
+
+
 # --- the guards themselves catch the defect (PA-0034(2)) -----------------------
 
 class _OldCostCounter:

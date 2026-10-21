@@ -44,12 +44,44 @@ def _upsert_endpoint(store: Store, run_id: int, url_path: str, method: str,
     return int(cur.lastrowid)
 
 
-def _get_parameter(store: Store, run_id: int, endpoint_id: int, name: str) -> int | None:
+def _get_parameter(store: Store, run_id: int, endpoint_id: int, name: str,
+                   location: str, form_id: int | None) -> int | None:
+    """The parameter row of one request context (FR-AUD-31, BUG-0530): a name at a
+    location of an endpoint, in one sibling set (``form_id``; None for a lone
+    parameter). A name in the query and in the body, or in two sibling sets, is two
+    rows: never one row per (endpoint, name), which kept the first context only."""
     row = store.conn.execute(
-        "SELECT id FROM parameter WHERE run_id=? AND endpoint_id=? AND name=?",
-        (run_id, endpoint_id, name),
+        "SELECT id FROM parameter WHERE run_id=? AND endpoint_id=? AND name=? AND "
+        "location=? AND form_id IS ?",
+        (run_id, endpoint_id, name, location, form_id),
     ).fetchone()
     return int(row["id"]) if row else None
+
+
+def _insert_parameter(store: Store, run_id: int, endpoint_id: int, name: str,
+                      location: str, example, form_id: int | None, counts: dict) -> bool:
+    """Write one context's parameter row unless it exists; True when written."""
+    if _get_parameter(store, run_id, endpoint_id, name, location, form_id) is not None:
+        return False
+    store.conn.execute(
+        "INSERT INTO parameter (run_id, endpoint_id, name, location, example, form_id) "
+        "VALUES (?,?,?,?,?,?)", (run_id, endpoint_id, name, location, example, form_id))
+    counts["parameter"] += 1
+    return True
+
+
+def _insert_sibling_set(store: Store, run_id: int, endpoint_id: int, enctype, entries,
+                        *, source_page: str | None, fresh, password_fields="[]") -> int:
+    """Write one stored sibling set (a `form` row) with its replay recipe (FR-FUZZ-67,
+    migration 25): ``fresh`` names the entries whose stored value is a placeholder
+    (blanked by redaction), ``source_page`` the page a fresh value is bound from. Names
+    and a page only, never a value (D12)."""
+    cur = store.conn.execute(
+        "INSERT INTO form (run_id, endpoint_id, enctype, entries, password_fields, "
+        "source_page, fresh) VALUES (?,?,?,?,?,?,?)",
+        (run_id, endpoint_id, enctype, entries, password_fields, source_page,
+         json.dumps(list(dict.fromkeys(fresh)))))
+    return int(cur.lastrowid)
 
 
 def query_pairs(raw_query: str) -> list[tuple[str, str, str]]:
@@ -111,20 +143,26 @@ def import_spider(spider_db: str | Path, store: Store, run_id: int, *,
     src.row_factory = sqlite3.Row
     counts = {"page": 0, "endpoint": 0, "parameter": 0}
     seen_pages: set[tuple[str, str]] = set()
-    link_sets: list[tuple[int, list[tuple[str, str, str]]]] = []
+    # stored link sets by (endpoint, redacted entries): one row each (FR-AUD-31)
+    link_sets: dict[tuple[int, str], int] = {}
+    for key in ("link_set", "link_set_refused", "link_set_bound"):
+        counts[key] = 0
     try:
-        # crawl order is the tie-break: the first crawled link wins (FR-FUZZ-43)
+        # crawl order: the order points are built and confirmed in
         rows = src.execute(
-            "SELECT url, status_code, source FROM discovered_pages ORDER BY rowid"
-        ).fetchall()
+            "SELECT * FROM discovered_pages ORDER BY rowid").fetchall()
     except sqlite3.Error:
         rows = []
     main = _main_origin(base_url, (r["url"] for r in rows))
     path_urls = []
     for row in rows:
-        source = row["source"] if "source" in row.keys() else "link"
+        keys = row.keys()
+        source = row["source"] if "source" in keys else "link"
+        # FR-FUZZ-67: the page the link was found on, where a fresh value of a blanked
+        # sibling is bound from (FR-CRAWL-29; absent in an older spider DB)
+        found_from = row["found_from"] if "found_from" in keys else None
         _import_page_url(store, run_id, row["url"], row["status_code"], source, counts,
-                         seen_pages, link_sets, main)
+                         seen_pages, link_sets, main, source_page=found_from)
         if source != _write_seed_source() and _answered(row["status_code"]):
             path_urls.append(row["url"])
     try:                              # FR-CRAWL-28; absent in older spider DBs
@@ -135,7 +173,6 @@ def import_spider(spider_db: str | Path, store: Store, run_id: int, *,
     _import_forms(src, store, run_id, counts, main)
     _import_requests(src, store, run_id, counts, fuzz_json_writes=fuzz_json_writes,
                      main=main)
-    _import_link_sets(store, run_id, link_sets, counts)   # after forms: forms win
     store.conn.commit()
     src.close()
     return counts
@@ -149,11 +186,13 @@ def _main_origin(base_url: str | None, urls) -> str | None:
 
 
 def _import_page_url(store: Store, run_id: int, raw: str, status, source: str,
-                     counts: dict, seen_pages: set, link_sets: list,
-                     main: str | None = None) -> None:
-    """One visited URL -> its page row, its query as ``query`` parameters and a link set,
-    its SPA hash route's query as ``fragment`` parameters (`import_spider`,
-    `import_disco`). Stored as `store_url` gives it (another origin kept)."""
+                     counts: dict, seen_pages: set, link_sets: dict,
+                     main: str | None = None, *, source_page: str | None = None) -> None:
+    """One visited URL -> its page row, its query as a link set (whose ``query``
+    parameters `_import_link_set` writes, one row per context), its SPA hash route's
+    query as ``fragment`` parameters (`import_spider`, `import_disco`). Stored as
+    `store_url` gives it (another origin kept). ``source_page``: the page the link was
+    found on (FR-FUZZ-67)."""
     path = store_url(raw, main)
     if (path, "GET") not in seen_pages:
         store.conn.execute(
@@ -169,20 +208,26 @@ def _import_page_url(store: Store, run_id: int, raw: str, status, source: str,
         counts["write_seed_skipped"] = counts.get("write_seed_skipped", 0) + 1
         return
     # blank values are parameters too (`?title=`), forms phase 1
-    query = parse_qsl(urlparse(raw).query, keep_blank_values=True)
-    if query:
+    pairs = query_pairs(urlparse(raw).query)
+    if pairs:
         endpoint_id = _upsert_endpoint(store, run_id, path, "GET", source)
         counts["endpoint"] += 1
-        for name, value in query:
-            if _get_parameter(store, run_id, endpoint_id, name) is None:
-                store.conn.execute(
-                    "INSERT INTO parameter (run_id, endpoint_id, name, location, example) "
-                    "VALUES (?,?,?,?,?)",
-                    (run_id, endpoint_id, name, "query", value),
-                )
-                counts["parameter"] += 1
-        link_sets.append((endpoint_id, query_pairs(urlparse(raw).query)))
+        _import_link_set(store, run_id, endpoint_id, pairs,
+                         _source_page(source_page, main), counts, link_sets)
     _import_route_query(store, run_id, raw, source, counts, main)
+
+
+def _source_page(url, main: str | None) -> str | None:
+    """A sibling set's source page as stored (FR-FUZZ-67): an absolute crawled URL kept
+    with its query (`core.urls.store_url`), only when the strongest URL redactor
+    (`core.redaction.redact_url_identifiers`: sensitive names, identifier-like values, an
+    SPA route's query; PA-0514(1)) leaves it unchanged. A page whose URL holds such a
+    value is never stored (PA-0100, D12) and never fetched with a placeholder in it: None,
+    so its sibling set has no page and a test needing it is inconclusive."""
+    from fuzzlab.core.redaction import page_url_is_clean
+    if not isinstance(url, str) or "://" not in url or not page_url_is_clean(url):
+        return None
+    return store_url(url, main, keep_query=True)
 
 
 def _answered(status) -> bool:
@@ -208,7 +253,7 @@ def _import_path_templates(store: Store, run_id: int, urls, source: str,
     for t in path_templates(urls, code=code):
         stored = t.path if main is None or t.origin == main else t.origin + t.path
         endpoint_id = _upsert_endpoint(store, run_id, stored, "GET", source)
-        if _get_parameter(store, run_id, endpoint_id, t.param) is not None:
+        if _get_parameter(store, run_id, endpoint_id, t.param, "path", None) is not None:
             continue
         counts["endpoint"] += 1
         example = "" if looks_like_identifier(t.example) else t.example
@@ -251,7 +296,10 @@ def import_disco(run_dir: str | Path, store: Store, run_id: int, *,
     for key in ("request", "request_json", "request_form", "request_refused"):
         counts.setdefault(key, 0)
     seen_pages: set[tuple[str, str]] = set()
-    link_sets: list[tuple[int, list[tuple[str, str, str]]]] = []
+    link_sets: dict[tuple[int, str], int] = {}       # FR-AUD-31
+    bodies: dict = {}                                # identical stored bodies are one
+    for key in ("link_set", "link_set_refused", "link_set_bound"):
+        counts[key] = 0
     page_urls, visible = _disco_actions(run_dir / "actions.jsonl", counts)
     main = _main_origin(base_url, [r.url for r in read.records if r.kind == "http"]
                         + page_urls)
@@ -259,22 +307,23 @@ def import_disco(run_dir: str | Path, store: Store, run_id: int, *,
     for rec in read.records:
         if rec.kind != "http" or rec.status is None:
             continue
+        referer = rec.req_headers.get("referer") or rec.req_headers.get("Referer")
         if rec.method == "GET":
             if _answered(rec.status):
                 path_urls.append(rec.url)      # an API GET's path too (FR-AUD-26)
             media = (rec.res_ctype or "").split(";", 1)[0].strip().lower()
             if urlparse(rec.url).query or media in _PAGE_MEDIA:
                 _import_page_url(store, run_id, rec.url, rec.status, DISCO_SOURCE,
-                                 counts, seen_pages, link_sets, main)
+                                 counts, seen_pages, link_sets, main, source_page=referer)
             continue
         counts["request"] += 1
         body = rec.req_body
         if body and _body_kind(rec.req_ctype) == "form":
-            # the spider stores a form body as a JSON object; the capture holds the wire
-            body = json.dumps(dict(parse_qsl(body, keep_blank_values=True)))
+            # the capture holds the wire: its ordered pairs, a repeated name kept in order
+            # (FR-AUD-31; a `dict` kept its last value only)
+            body = json.dumps([[n, v] for n, v in parse_qsl(body, keep_blank_values=True)])
         row = {"url": rec.url, "method": rec.method, "content_type": rec.req_ctype,
-               "body_json": body,
-               "page_url": rec.req_headers.get("referer") or rec.req_headers.get("Referer")}
+               "body_json": body, "page_url": referer}
         if rec.req_truncated:
             counts["request_refused"] += 1
             continue
@@ -283,13 +332,13 @@ def import_disco(run_dir: str | Path, store: Store, run_id: int, *,
             counts["request_refused"] += 1
             continue
         _store_request(store, run_id, counts, kind, rec.method.upper(), rec.url, leaves,
-                       visible=visible.get(rec.action_id or "", frozenset()), main=main)
+                       visible=visible.get(rec.action_id or "", frozenset()), main=main,
+                       page=row["page_url"], bodies=bodies)
     for url in page_urls:
         _import_page_url(store, run_id, url, None, DISCO_SOURCE, counts, seen_pages,
                          link_sets, main)
     _import_path_templates(store, run_id, path_urls + page_urls, DISCO_SOURCE, counts,
                            main, code=_disco_code_segments(run_dir))
-    _import_link_sets(store, run_id, link_sets, counts)
     store.conn.commit()
     return counts
 
@@ -336,38 +385,48 @@ def _write_seed_source() -> str:
     return WRITE_SEED_SOURCE
 
 
-def _import_link_sets(store: Store, run_id: int, link_sets, counts: dict) -> None:
-    """Each crawled link's query becomes a `form` row with ``enctype`` NULL
-    (`core.forms.LINK_SET_ENCTYPE`): its values pass `redact_sibling`, and a set with a
-    destructive or credential entry is refused (not stored). A set with two or more
-    names is bound to its parameters that no form already binds, the first crawled
-    link winning; a one-name set is kept only as the page's representative query for
-    header points (FR-FUZZ-43)."""
-    counts.setdefault("link_set", 0)
-    counts.setdefault("link_set_refused", 0)
-    counts.setdefault("link_set_bound", 0)
-    stored_ids: dict[tuple[int, str], int] = {}
-    for endpoint_id, pairs in link_sets:
-        if entries_refusal([(n, v) for n, _r, v in pairs], credential_names=True):
-            counts["link_set_refused"] += 1
-            continue
-        entries = [(name, redact_sibling(name, raw, value)) for name, raw, value in pairs]
-        key = (endpoint_id, json.dumps(entries))
-        form_id = stored_ids.get(key)
-        if form_id is None:
-            cur = store.conn.execute(
-                "INSERT INTO form (run_id, endpoint_id, enctype, entries) VALUES (?,?,?,?)",
-                (run_id, endpoint_id, LINK_SET_ENCTYPE, key[1]))
-            form_id = stored_ids[key] = int(cur.lastrowid)
-            counts["link_set"] += 1
-        names = list(dict.fromkeys(name for name, _v in entries))
-        if len(names) < 2:
-            continue
-        for name in names:
-            cur = store.conn.execute(
-                "UPDATE parameter SET form_id=? WHERE run_id=? AND endpoint_id=? AND "
-                "name=? AND form_id IS NULL", (form_id, run_id, endpoint_id, name))
-            counts["link_set_bound"] += cur.rowcount
+def _import_link_set(store: Store, run_id: int, endpoint_id: int, pairs, page,
+                     counts: dict, stored_ids: dict) -> None:
+    """One crawled link's query, at its page's turn in crawl order (forms phase 2,
+    FR-FUZZ-43; one context each since FR-AUD-31, BUG-0530):
+
+    - a set with a destructive or credential entry is refused (not stored), and so is
+      a set with one name: its names are lone ``query`` parameters (one row per
+      endpoint and name, the first crawled value its example). A one-name set is still
+      stored, as the page's representative query for header points;
+    - a set with two or more names is its own `form` row (``enctype`` NULL,
+      `core.forms.LINK_SET_ENCTYPE`) and its own parameter rows, one per name -- never
+      bound to another set's rows ("the first crawled link wins" merged contexts).
+      Identical sets after redaction are one. Its values pass `redact_sibling`; each
+      value that blanks is named in the row's replay recipe (``fresh``) with the page
+      the link was found on (``source_page``, FR-FUZZ-67)."""
+    for key in ("link_set", "link_set_refused", "link_set_bound"):
+        counts.setdefault(key, 0)
+    refused = entries_refusal([(n, v) for n, _r, v in pairs], credential_names=True)
+    names = list(dict.fromkeys(name for name, _r, _v in pairs))
+    if refused or len(names) < 2:
+        counts["link_set_refused"] += 1 if refused else 0
+        for name, _raw, value in pairs:                  # lone points, as crawled
+            _insert_parameter(store, run_id, endpoint_id, name, "query", value, None,
+                              counts)
+        if refused:
+            return
+    entries = [(name, redact_sibling(name, raw, value)) for name, raw, value in pairs]
+    key = (endpoint_id, json.dumps(entries))
+    form_id = stored_ids.get(key)
+    if form_id is None:
+        fresh = [name for (name, _r, value), (_n, kept) in zip(pairs, entries)
+                 if kept != value]
+        form_id = stored_ids[key] = _insert_sibling_set(
+            store, run_id, endpoint_id, LINK_SET_ENCTYPE, key[1], source_page=page,
+            fresh=fresh)
+        counts["link_set"] += 1
+    if len(names) < 2:
+        return
+    for name, _raw, value in pairs:
+        if _insert_parameter(store, run_id, endpoint_id, name, "query", value, form_id,
+                             counts):
+            counts["link_set_bound"] += 1
 
 
 #: Hidden fields that pick an object or a user (``login``, ``user_id``): never fuzzed,
@@ -590,10 +649,17 @@ def _import_forms(src, store: Store, run_id: int, counts: dict,
                   main: str | None = None) -> None:
     """Crawled forms -> endpoint, `form` row (its default entry list) and one parameter
     per fuzzable field (FR-FUZZ-42). GET forms drop the action's query (a browser
-    replaces it); POST forms keep it on the endpoint URL (reviewer A4)."""
+    replaces it); POST forms keep it on the endpoint URL (reviewer A4).
+
+    Each form is its own request context (FR-AUD-31, BUG-0530): its fields are rows of
+    that form, never attached to a link's parameter of the same name. Its replay recipe
+    (FR-FUZZ-67, BUG-0544): the page it was found on, and the fields `form_record`
+    blanked (a CSRF token, any sensitive name), which the binder fetches fresh before
+    each send; a password control stays empty by policy (FR-FUZZ-44, D12)."""
     try:
-        rows = src.execute("SELECT action_url, method, enctype, entries, controls, "
-                           "selector, options FROM discovered_forms ORDER BY rowid").fetchall()
+        rows = src.execute("SELECT page_url, action_url, method, enctype, entries, "
+                           "controls, selector, options FROM discovered_forms "
+                           "ORDER BY rowid").fetchall()
     except sqlite3.Error:
         return                                   # an older spider DB: no forms
     try:
@@ -633,12 +699,12 @@ def _import_forms(src, store: Store, run_id: int, counts: dict,
         query = urlparse(form["action_url"]).query
         url = path + ("?" + query if query and form["method"] == "POST" else "")
         endpoint_id = _upsert_endpoint(store, run_id, url, form["method"], "form")
-        cur = store.conn.execute(
-            "INSERT INTO form (run_id, endpoint_id, enctype, entries, password_fields) "
-            "VALUES (?,?,?,?,?)",
-            (run_id, endpoint_id, form["enctype"], json.dumps(form["entries"]),
-             json.dumps(password_fields(form))))
-        form_id = int(cur.lastrowid)
+        fresh = [name for name, _v in form["entries"]
+                 if kinds.get(name) != "password" and is_sensitive_name(name)]
+        form_id = _insert_sibling_set(
+            store, run_id, endpoint_id, form["enctype"], json.dumps(form["entries"]),
+            source_page=_source_page(row["page_url"], main),
+            fresh=fresh, password_fields=json.dumps(password_fields(form)))
         counts["form"] += 1
         location = "body" if form["method"] == "POST" else "query"
         for name, value in form["entries"]:
@@ -647,17 +713,8 @@ def _import_forms(src, store: Store, run_id: int, counts: dict,
                     or (kind == "hidden" and _object_selector(name))):
                 # a password control is never fuzzed, whatever its name (FR-FUZZ-44)
                 continue
-            existing = _get_parameter(store, run_id, endpoint_id, name)
-            if existing is not None:
-                # a link already gave this parameter: attach the form's siblings to it
-                store.conn.execute("UPDATE parameter SET form_id=? WHERE id=? AND "
-                                   "form_id IS NULL", (form_id, existing))
-                continue
-            store.conn.execute(
-                "INSERT INTO parameter (run_id, endpoint_id, name, location, example, "
-                "form_id) VALUES (?,?,?,?,?,?)",
-                (run_id, endpoint_id, name, location, value, form_id))
-            counts["parameter"] += 1
+            _insert_parameter(store, run_id, endpoint_id, name, location, value, form_id,
+                              counts)
 
 
 def _import_route_query(store: Store, run_id: int, raw: str, source, counts: dict,
@@ -675,11 +732,8 @@ def _import_route_query(store: Store, run_id: int, raw: str, source, counts: dic
                                    source)
     counts["endpoint"] += 1
     for name, value in parse_qsl(route[1], keep_blank_values=True):
-        if _get_parameter(store, run_id, endpoint_id, name) is None:
-            store.conn.execute(
-                "INSERT INTO parameter (run_id, endpoint_id, name, location, example) "
-                "VALUES (?,?,?,?,?)", (run_id, endpoint_id, name, "fragment", value))
-            counts["parameter"] += 1
+        if _insert_parameter(store, run_id, endpoint_id, name, "fragment", value, None,
+                             counts):
             counts["fragment_parameter"] += 1
 
 
@@ -725,11 +779,18 @@ def _captured_leaves(kind: str, body):
                     f"({jsonbody.MAX_LEAVES} leaves, depth {jsonbody.MAX_DEPTH})")
         return [(jsonbody.display_name(p), [s for s in p if isinstance(s, str)], p, v)
                 for p, v in found]
-    if not isinstance(body, dict) or not all(isinstance(v, str) for v in body.values()):
+    # a form body: the spider's object of strings, or the wire's ordered pairs (a disco
+    # capture, a repeated name kept in order; FR-AUD-31)
+    if isinstance(body, list) and all(isinstance(p, list) and len(p) == 2
+                                      and all(isinstance(x, str) for x in p) for p in body):
+        pairs = [(n, v) for n, v in body]
+    elif isinstance(body, dict) and all(isinstance(v, str) for v in body.values()):
+        pairs = list(body.items())
+    else:
         return "a form body that is not an object of strings"
-    if len(body) > jsonbody.MAX_LEAVES:
+    if len(pairs) > jsonbody.MAX_LEAVES:
         return f"over {jsonbody.MAX_LEAVES} fields"
-    return [(n, [n], None, v) for n, v in body.items()]
+    return [(n, [n], None, v) for n, v in pairs]
 
 
 def request_refusal(method: str, url: str, *, fuzz_json_writes: bool = False,
@@ -798,6 +859,7 @@ def _import_requests(src, store: Store, run_id: int, counts: dict, *,
         return                                   # a spider DB from before FR-CRAWL-13
     for key in ("request", "request_json", "request_form", "request_refused"):
         counts.setdefault(key, 0)
+    bodies: dict = {}                                # identical stored bodies are one
     for row in rows:
         counts["request"] += 1
         reason, kind, leaves = captured_request(dict(row), fuzz_json_writes=fuzz_json_writes)
@@ -805,7 +867,7 @@ def _import_requests(src, store: Store, run_id: int, counts: dict, *,
             counts["request_refused"] += 1
             continue
         _store_request(store, run_id, counts, kind, row["method"].upper(), row["url"],
-                       leaves, main=main)
+                       leaves, main=main, page=row["page_url"], bodies=bodies)
 
 
 def captured_request(row: dict, *, fuzz_json_writes: bool = False):
@@ -852,21 +914,30 @@ def _storable_text(value) -> bool:
 
 
 def _store_request(store, run_id, counts, kind, method, url, leaves, *,
-                   visible: frozenset = frozenset(), main: str | None = None) -> None:
+                   visible: frozenset = frozenset(), main: str | None = None,
+                   page: str | None = None, bodies: dict | None = None) -> None:
     """Write one accepted captured request (`_import_requests`): every value passes
     `redact_leaf` before it is stored (PA-0100). ``visible`` names the controls a user
     could see in the form that sent it (a disco form step): an object selector among
     them is a point, as a crawled form's visible field is (`_import_forms`); unseen, it
-    is pinned."""
+    is pinned.
+
+    Each captured body is its own request context (FR-AUD-31, BUG-0530): its points are
+    rows of its own `form` row -- never "the first captured request's leaf wins a name".
+    Identical stored bodies (endpoint, encoding, entries) are one (``bodies``). The
+    row's replay recipe (FR-FUZZ-67): the page that sent it, and the leaves redaction
+    blanked (never a password, sent empty by policy)."""
     from fuzzlab.core import jsonbody
     from fuzzlab.core.redaction import is_credential_name, is_sensitive_name
-    passwords, entries, points = [], [], []
+    passwords, entries, points, fresh = [], [], [], []
     for name, segs, path, value in leaves:
         if any(is_credential_name(s) for s in segs):
             passwords.append(name)
             stored = ""                          # a password is sent empty, never fuzzed
         else:
             stored = redact_leaf(segs, value)
+            if stored != value:
+                fresh.append(name)               # a placeholder (FR-FUZZ-67)
         entries.append((path if kind == "json" else name, stored))
         last = segs[-1] if segs else name
         pinned = (stored != value or any(is_sensitive_name(s) for s in segs)
@@ -877,24 +948,22 @@ def _store_request(store, run_id, counts, kind, method, url, leaves, *,
     endpoint_url = store_url(url, main) + ("?" + parts.query if parts.query else "")
     endpoint_id = _upsert_endpoint(store, run_id, endpoint_url, method, "request")
     enctype = jsonbody.ENCTYPE if kind == "json" else FORM_URLENCODED
-    cur = store.conn.execute(
-        "INSERT INTO form (run_id, endpoint_id, enctype, entries, password_fields) "
-        "VALUES (?,?,?,?,?)",
-        (run_id, endpoint_id, enctype,
-         jsonbody.encode_entries(entries) if kind == "json" else json.dumps(entries),
-         json.dumps(passwords)))
-    form_id = int(cur.lastrowid)
+    stored_entries = (jsonbody.encode_entries(entries) if kind == "json"
+                      else json.dumps(entries))
     counts["request_json" if kind == "json" else "request_form"] += 1
+    bodies = {} if bodies is None else bodies
+    key = (endpoint_id, enctype, stored_entries)
+    form_id = bodies.get(key)
+    if form_id is None:
+        form_id = bodies[key] = _insert_sibling_set(
+            store, run_id, endpoint_id, enctype, stored_entries,
+            source_page=_source_page(page, main), fresh=fresh,
+            password_fields=json.dumps(passwords))
     location = jsonbody.LOCATION if kind == "json" else "body"
     for name, value in points:
-        if _get_parameter(store, run_id, endpoint_id, name) is not None:
-            continue                             # the first captured request wins
         example = value if isinstance(value, str) else json.dumps(value)
-        store.conn.execute(
-            "INSERT INTO parameter (run_id, endpoint_id, name, location, example, "
-            "form_id) VALUES (?,?,?,?,?,?)",
-            (run_id, endpoint_id, name, location, example, form_id))
-        counts["parameter"] += 1
+        _insert_parameter(store, run_id, endpoint_id, name, location, example, form_id,
+                          counts)
 
 
 def import_audit(audit_db: str | Path, store: Store, run_id: int) -> dict[str, int]:
@@ -912,7 +981,11 @@ def import_audit(audit_db: str | Path, store: Store, run_id: int) -> dict[str, i
     for row in rows:
         path = to_path(row["page_url"])
         endpoint_id = _upsert_endpoint(store, run_id, path, "GET", "audit")
-        param_id = _get_parameter(store, run_id, endpoint_id, row["target_identifier"])
+        # the legacy auditor names a parameter only: its first row of that name
+        found = store.conn.execute(
+            "SELECT id FROM parameter WHERE run_id=? AND endpoint_id=? AND name=? "
+            "ORDER BY id", (run_id, endpoint_id, row["target_identifier"])).fetchone()
+        param_id = int(found["id"]) if found else None
         evidence = {
             "category": row["category"],
             "transaction_type": row["transaction_type"],

@@ -14,8 +14,9 @@ import json
 from fuzzlab.core import jsonbody, trace
 from fuzzlab.core.forms import FormEntries
 from fuzzlab.core.urls import to_path, to_route_path, url_key
-from fuzzlab.oracle.probe import (PRG_UNOBSERVED, Candidate, NotComparable, Probe,
-                                  ProbeUnobserved, Sender, UnplaceableLocation, Verdict,
+from fuzzlab.oracle.probe import (PRG_UNOBSERVED, Candidate, NotComparable,
+                                  PrerequisiteUnavailable, Probe, ProbeUnobserved, Sender,
+                                  UnplaceableLocation, Verdict, accepts_fetch,
                                   accepts_prg, require_observed)
 from fuzzlab.oracle.strategies import ConfirmationStrategy, default_strategies
 from fuzzlab.scheduler.context import context_for
@@ -31,6 +32,10 @@ UNOBSERVED = "unobserved"
 #: that was not comparable, a follow-up that got no observation. Its reason travels under
 #: ``evidence["unobserved"]`` like `UNOBSERVED`'s.
 NOT_COMPARABLE = "not-comparable"
+#: ... and when the request's prerequisites could not be rebuilt (FR-FUZZ-67, BUG-0544):
+#: a fresh form value could not be fetched and bound, or a sibling may never be sent. Its
+#: reason travels under ``evidence["reason"]`` like `UNPLACEABLE`'s; nothing was sent.
+UNBOUND = "unbound"
 
 
 def finding_url(candidate: Candidate) -> str:
@@ -82,6 +87,14 @@ class _CostCounter:
     def prg_capable(self) -> bool:
         return accepts_prg(self._inner)
 
+    @property
+    def fetch_capable(self) -> bool:
+        return accepts_fetch(self._inner)
+
+    def fetch(self, url, *, route_url):
+        self.count += 1                         # a binder's page fetch is its cost too
+        return self._inner.fetch(url, route_url=route_url)
+
     def send(self, url, param, value, timing: bool = False,
              method: str = "GET", location: str = "query",
              content_type: str | None = None, entries=None, prg: bool = False):
@@ -125,11 +138,25 @@ class _FormBoundSender:
     are the body's other leaves (paths and typed values, already redacted and made
     neutral by the point builder) and ``param`` names the leaf set to ``value``. A
     malformed JSON entry list or leaf name is refused (`UnplaceableLocation`), never
-    sent as a bare field."""
+    sent as a bare field.
+
+    **Fresh bindings (FR-FUZZ-67, BUG-0544).** A stored entry list is evidence, not a
+    replay template: an entry whose stored value is a placeholder (a CSRF token or an
+    identifier blanked by redaction; ``candidate.bindings["fresh"]``) is never sent as
+    stored. Before each own send the binder fetches the context's page
+    (``bindings["page"]``) through the sender's ``fetch``, on the probe's own session
+    route, finds the request template that page offers now
+    (`core.forms.page_template_entries`) and binds those entries' current values into
+    that one send, in memory only (D12). When it cannot (no page, a sender that cannot
+    fetch, no answer, a non-2xx or lost-session answer, no matching form or link, a
+    captured JSON body, a fresh value naming a host outside the lab) it raises
+    `PrerequisiteUnavailable` and remembers why: nothing is sent, and a candidate no
+    mechanism could send is inconclusive with that reason, never a negative."""
 
     def __init__(self, inner: Sender, candidate: Candidate):
         self._inner = inner
         self._key = (url_key(candidate.url), candidate.method.upper(), candidate.location)
+        self._url = candidate.url
         self._base = self._json_base = None
         if candidate.location == jsonbody.LOCATION:
             try:
@@ -138,16 +165,111 @@ class _FormBoundSender:
                 self._json_base = None           # every own send is then refused
         else:
             self._base = FormEntries(tuple(e) for e in candidate.base_entries)
+        bindings = candidate.bindings if isinstance(candidate.bindings, dict) else {}
+        self._fresh = frozenset(n for n in (bindings.get("fresh") or ())
+                                if isinstance(n, str))
+        self._page = bindings.get("page") if isinstance(bindings.get("page"), str) else None
+        self._unbound: str | None = None         # why a fresh binding failed (kept)
 
     @property
     def prg_capable(self) -> bool:
         return accepts_prg(self._inner)
+
+    @property
+    def fetch_capable(self) -> bool:
+        return accepts_fetch(self._inner)
+
+    def fetch(self, url, *, route_url):
+        return self._inner.fetch(url, route_url=route_url)
+
+    def _fresh_base(self):
+        """``(the base entries for one send, the fetch's carry token)``: each fresh entry
+        bound to the value the context's page offers now (FR-FUZZ-67). Raises
+        `PrerequisiteUnavailable`, and keeps the reason for every later send."""
+        if self._unbound is not None:
+            raise PrerequisiteUnavailable(self._unbound)
+        try:
+            return self._bind_fresh()
+        except PrerequisiteUnavailable as exc:
+            self._unbound = str(exc)
+            raise
+
+    def _bind_fresh(self):
+        from fuzzlab.audit.value_shape import names_outside_lab
+        from fuzzlab.core.forms import page_template_entries
+        from fuzzlab.core.redaction import page_url_is_clean
+        from fuzzlab.core.urls import DestructiveUrlRefused, canonical_origin
+        what = "fresh " + ", ".join(sorted(self._fresh))
+        if self._base is None:
+            raise PrerequisiteUnavailable(f"{what}: a captured JSON body has no page to "
+                                          "bind them from")
+        if not self._page:
+            raise PrerequisiteUnavailable(f"{what}: no page to fetch them from")
+        if not page_url_is_clean(self._page):
+            # never a placeholder on the wire (PA-0100, D12; BUG-0544 review B1)
+            raise PrerequisiteUnavailable(f"{what}: their page's URL carries a redacted "
+                                          "value")
+        try:
+            same_origin = canonical_origin(self._page) == canonical_origin(self._url)
+        except ValueError:
+            same_origin = False
+        if not same_origin:
+            # a value fetched on another origin is another session's (SP-13, SP-16)
+            raise PrerequisiteUnavailable(f"{what}: their page is on another origin than "
+                                          "the request")
+        if not accepts_fetch(self._inner):
+            raise PrerequisiteUnavailable(f"{what}: the sender cannot fetch their page")
+        try:
+            with trace.role("bind"):
+                page = self._inner.fetch(self._page, route_url=self._url)
+        except ProbeUnobserved as exc:
+            raise PrerequisiteUnavailable(f"{what}: their page got no response") from exc
+        except DestructiveUrlRefused as exc:     # the send gate refuses the page itself
+            raise PrerequisiteUnavailable(f"{what}: their page is refused by the send "
+                                          "gate") from exc
+        status = getattr(page, "status", 0) or 0
+        if getattr(page, "session_lost", False) is True or not 200 <= status < 300:
+            raise PrerequisiteUnavailable(f"{what}: their page answered {status}"
+                                          + (" on a lost session"
+                                             if getattr(page, "session_lost", False) is True
+                                             else ""))
+        note = getattr(page, "session", None)
+        if isinstance(note, str) and note:
+            # fetched without the session the probe carries (FR-SESS-20): its value is
+            # not the probe's
+            raise PrerequisiteUnavailable(f"{what}: their page was fetched without the "
+                                          f"probe's session ({note})")
+        method, location = self._key[1], self._key[2]
+        template = page_template_entries(page.text or "", self._page, self._url, method,
+                                         location, self._base)
+        if template is None:
+            raise PrerequisiteUnavailable(f"{what}: their page offers no matching form or "
+                                          "link")
+        bound = []
+        for (name, value), (_n, now) in zip(self._base, template):
+            if name in self._fresh:
+                if names_outside_lab(now):
+                    raise PrerequisiteUnavailable(f"{what}: {name!r} names a host outside "
+                                                  "the lab (FR-AUD-20)")
+                value = now
+            bound.append((name, value))
+        return FormEntries(bound), getattr(page, "carry", None)
 
     def send(self, url, param, value, timing: bool = False,
              method: str = "GET", location: str = "query",
              content_type: str | None = None, entries=None, prg: bool = False):
         own = (entries is None and not content_type
                and (url_key(url), method.upper(), location) == self._key)
+        base, carry = self._base, None
+        if self._fresh and (url_key(url), method.upper()) == self._key[:2]:
+            # FR-FUZZ-67 (BUG-0544 review B4): every send to the candidate's own request
+            # carries the fresh values, or is never made -- a raw or JSON body, entries a
+            # strategy built itself, another location: refused, whatever its shape
+            if not (own and location in ("query", "body")):
+                raise PrerequisiteUnavailable(
+                    self._unbound or "fresh " + ", ".join(sorted(self._fresh))
+                    + f": a {location} send of its own entries cannot carry them")
+            base, carry = self._fresh_base()     # before each own send
         if own and location == jsonbody.LOCATION:
             try:
                 if self._json_base is None:
@@ -157,7 +279,12 @@ class _FormBoundSender:
                 raise UnplaceableLocation(f"cannot place JSON leaf {param!r}: {exc}") \
                     from exc
         elif own and location in ("query", "body"):
-            entries = self._base.replace(param, value)
+            entries = base.replace(param, value)
+            if carry is not None:
+                # what the fetch left for this one send: the page's cookies
+                # (`RequestsProbeSender`), or the route it went out on, which the send
+                # must take too (the seam; BUG-0544 review R2-2)
+                entries.carry = carry
         if prg:
             # FR-FUZZ-49: the sender's PRG follow-up is a plain GET it builds itself, so
             # no sibling is ever bound into it (P3)
@@ -197,6 +324,13 @@ class _PrgRun:
     @property
     def prg_capable(self) -> bool:
         return accepts_prg(self._inner)
+
+    @property
+    def fetch_capable(self) -> bool:
+        return accepts_fetch(self._inner)
+
+    def fetch(self, url, *, route_url):
+        return self._inner.fetch(url, route_url=route_url)
 
     def send(self, url, param, value, timing: bool = False,
              method: str = "GET", location: str = "query",
@@ -371,7 +505,24 @@ class Oracle:
         ignored, as before. A mechanism whose probe got no response
         (`ProbeUnobserved`, BUG-0147) gives no verdict; with no confirmation the result is
         inconclusive (``unobserved``). Under a scheduler an inconclusive arm gets reward 0
-        and its real cost."""
+        and its real cost.
+
+        A candidate whose request can never be rebuilt (``replay_refusal``, FR-FUZZ-67)
+        is inconclusive (`UNBOUND`) with that reason before any strategy runs: nothing
+        is sent, by any mechanism, the browser's included."""
+        refusal = candidate.replay_refusal
+        fresh = (candidate.bindings or {}).get("fresh") \
+            if isinstance(candidate.bindings, dict) else None
+        if not refusal and fresh and candidate.location == jsonbody.LOCATION:
+            # no page holds a captured JSON body's leaves: nothing can bind them, so no
+            # mechanism -- whatever it sends -- may run (BUG-0544 review B4)
+            refusal = (f"fresh {', '.join(sorted(map(str, fresh)))}: a captured JSON body "
+                       "has no page to bind them from")
+        if refusal:
+            return None, Verdict(False, candidate.vuln_class or "", UNBOUND,
+                                 {"unbound": candidate.location,
+                                  "reason": str(refusal)[:200]},
+                                 inconclusive=True)
         if candidate.base_entries:                       # a form point: send its siblings
             sender = _FormBoundSender(sender, candidate)
         counts = dict.fromkeys(PRG_COUNTERS, 0)
@@ -428,6 +579,7 @@ class Oracle:
 
         inconclusive: Verdict | None = None
         placed, unplaceable = False, None
+        unbound: str | None = None              # FR-FUZZ-67: why prerequisites failed
         # FR-AUD-30 (BUG-0523): a candidate naming its deciding mechanism is placed only
         # by that mechanism; its own refusal is the reason given, and its absence is one
         decider_reason: str | None = None
@@ -461,7 +613,10 @@ class Oracle:
                                             "observation")
                 except UnplaceableLocation as exc:
                     # this mechanism cannot place the point (PA-0115): no verdict from it,
-                    # and no reward or cost for its arm; the others still run
+                    # and no reward or cost for its arm; the others still run. A request
+                    # whose prerequisites could not be rebuilt (FR-FUZZ-67) likewise
+                    if isinstance(exc, PrerequisiteUnavailable):
+                        unbound = unbound or str(exc)
                     unplaceable = unplaceable or str(exc)
                     if candidate.decided_by is not None and _decides(strategy, candidate):
                         decider_reason = decider_reason or str(exc)
@@ -539,6 +694,12 @@ class Oracle:
                             "mechanism": verdict.mechanism})
                     return verdict, None
 
+        if not placed and unbound is not None and decider_reason in (None, unbound):
+            # no mechanism could rebuild the request (FR-FUZZ-67): unlabelled, never a
+            # negative, with the reason; nothing was sent at the candidate
+            return None, Verdict(False, candidate.vuln_class or "", UNBOUND,
+                                 {"unbound": candidate.location,
+                                  "reason": unbound[:200]}, inconclusive=True)
         if not placed and (unplaceable is not None or missing is not None):
             # no deciding mechanism could place it: unlabelled, never a negative
             # (FR-FUZZ-47; BUG-0523: the decider's own reason first)
@@ -551,11 +712,17 @@ class Oracle:
     def _write_finding(self, candidate: Candidate, verdict: Verdict) -> None:
         if self.store is None or self.run_id is None:
             return
+        evidence = dict(verdict.evidence)
+        if candidate.context_key is not None:
+            # the request context the test confirmed (SP-57, FR-FUZZ-66): the finding is
+            # that context's, and ML labels only rows of its key (BUG-0530)
+            evidence["context_id"] = candidate.context_id
+            evidence["context_key"] = list(candidate.context_key)
         cur = self.store.conn.execute(
             "INSERT INTO finding (run_id, vuln_class, label, confidence, evidence, "
             "url, method, param) VALUES (?,?,?,?,?,?,?,?)",
             (self.run_id, verdict.vuln_class, 1, verdict.mechanism,
-             json.dumps(verdict.evidence), finding_url(candidate), candidate.method,
+             json.dumps(evidence), finding_url(candidate), candidate.method,
              candidate.param),
         )
         self.store.conn.commit()
@@ -570,6 +737,7 @@ class Oracle:
             "url": trace.safe_ref(url), "method": candidate.method,
             "param": candidate.param, "location": candidate.location,
             "origin": canonical_origin(candidate.url),
+            "request_context": candidate.context_id,      # SP-57 (FR-FUZZ-66)
             "exchanges": trace.collected(),
             "steps": trace.collected_steps()},             # FR-FUZZ-62
             key=f"finding:{cur.lastrowid}", scope=f"test:{test}" if test else "run")

@@ -1936,7 +1936,8 @@ rewards) derives from it.
     (its observe navigation, its GET store step and an SPA hash route's query). The
     crawler's SPA seed builder places its route query through the same owner
     (CC-CRAWL-0053).
-  - **Until AU-REQID8, a repeated name follows two rules:**
+  - **A repeated name follows two rules** (per-occurrence points are BUG-0530's
+    residual R1; the request context records which rule a point is sent by, FR-FUZZ-66):
     - a **standalone** URL (no entries) addresses the **first occurrence** of the name,
       in place (`place_query_param`);
     - **bound** entries (a link set, a form; the oracle's binder, unchanged) replace
@@ -1964,20 +1965,135 @@ rewards) derives from it.
     `_compared` does not apply to it).
   - **Stated gaps:**
     - a standalone operator URL with a repeated name probes its first occurrence only
-      (0 of 157 ground-truth rows carry a query), until AU-REQID8;
+      (0 of 157 ground-truth rows carry a query; BUG-0530 residual R1);
     - a stored link set's siblings are sent from their stored decoded values, so `flag`
       becomes `flag=` and `%20` becomes `+`, and `store_adapter.query_pairs` drops empty
-      parts (AU-REQID8, pinned);
+      parts (BUG-0530 residual R2, pinned);
     - a non-UTF-8 query name is stored decoded with `errors="replace"`, so it never
-      matches its URL's own raw occurrence and is appended as `%EF%BF%BD` (AU-REQID8);
+      matches its URL's own raw occurrence and is appended as `%EF%BF%BD` (BUG-0530
+      residual R2);
     - the M6 trace records no siblings; a form-body store request sends none;
     - query builders in other items' code, each pinned by a strict xfail naming its
-      owner: `store_adapter.import_disco` (AU-REQID8), `labgen/oracle_wrapper` (LAB).
+      owner: `labgen/oracle_wrapper` (LAB). (`store_adapter.import_disco`'s was fixed
+      by AU-REQID8, CC-AUD-0056: a form body is kept as ordered pairs.)
       (`disco/runner.py`'s was fixed by AU-OUTCOME, CC-FUZZ-0105: `Runner.prepare`
       places each case query value through `place_query_param`; `tools/spa.query_url`'s
       by CC-CRAWL-0053.)
     - *(Resolved, CC-FUZZ-0113:)* a **path** point's PRG follow-up re-requested the
       placed path (AU-PRGPATH, BUG-0542); see FR-FUZZ-69.
+- **FR-FUZZ-66 (one test per request context, `CC-FUZZ-0111`, 2026-10-21, BUG-0530)**
+  It supersedes FR-FUZZ-42's residual "one confirmation per (url, param, method,
+  location)" and FR-FUZZ-43's "the first crawled link wins".
+  - **The identity (SP-57, `core.reqctx`, version 1).** A request context holds the
+    origin, path, the URL's raw query parts and fragment, the method and location, the
+    target (a name; a JSON leaf's path; a header name), the placement rule (bound: every
+    occurrence; standalone: the first), the sibling entries as sent with the target's
+    slot as a placeholder, the content type, the setup steps run before each send (a
+    stored case's store request; a fresh-binding fetch, FR-FUZZ-67), a sibling the
+    replay refuses, and the run's identity scope. It never holds `sink_context`, the
+    rule, the deciding mechanism, the category or a value beyond the target's digest
+    (the *seed*).
+  - **One key.** The point builder keeps one point per (context, seed); the pipeline
+    confirms once per `confirmation_key`: the context's id and the category, plus the
+    seed for the categories whose strategies read the original value
+    (`SEED_CATEGORIES`: access-control, open-redirect, command-injection,
+    nosql-injection). Rows share a test only when they send the same wire request and
+    make the same observations; a row is marked by its own key's test only.
+  - **Carried.** The audit engine stamps every candidate's evidence with
+    `identity_scope` and `context_id`; the `Candidate` carries `context_id` and
+    `context_key`; the `test.start` and `finding` trace events carry
+    `request_context`; the finding's evidence records `context_id` and `context_key`,
+    which the ML label join reads (FR-ML-401).
+  - **Older rows** get their context on read, computed from the same evidence fields
+    (their identity scope reads as unrecorded); nothing is migrated.
+  - **Greybox** sends no siblings (FR-FUZZ-8), so `greybox.run.points_from_store` keeps
+    one point per request it sends (url, param, method, location), in order: contexts
+    that differ only in siblings are one greybox request (review round 1, BUG-0530).
+  - **Stated gaps:** a repeated name is bound by the every-occurrence rule (R1, pinned);
+    a stored link set's untouched siblings are sent from decoded values (R2, pinned); a
+    POST action's query parameters are not points (AU-REQID-POSTQ, pinned); contexts the
+    crawler's own form signature merges never reach the store (CRAWL, pinned; its
+    request signature was fixed by SPIDER9, BUG-0546); `rules_fired` is still counted per (run, path, param).
+- **FR-FUZZ-67 (stored evidence is never a replay template, `CC-FUZZ-0111`, 2026-10-21,
+  BUG-0544)**
+  - **The recipe.** Each stored sibling set records the page it came from and the names
+    of its entries whose stored value is a placeholder -- blanked by redaction (a CSRF
+    token or any sensitive name, an identifier-like value; FR-CORE-32, migration 25).
+    Names and a page only: never a value (D12). *(Review round 1:)* the page is stored
+    only when `core.redaction.page_url_is_clean` holds -- the strongest URL redactor
+    leaves it unchanged, it holds no redaction placeholder and no empty query value --
+    and only on the point's own origin; otherwise the set has no page.
+  - **Bound before each send.** The oracle's binder fetches that page through the
+    sender's `fetch`, on the probe's own session route, finds the form or link the page
+    offers now for the same origin, path, method and entry names
+    (`core.forms.page_template_entries`), and binds the named entries' current values
+    into that send only, in memory. An object selector the crawl saw blanked is resolved
+    the same way. *(Review round 1:)* the fetch is a request like any other:
+    - it is gated on its own URL -- the send gate; on the authenticated seam an auth
+      endpoint or another isolated path is never fetched with the run's session;
+    - it is made on the session the bound send carries: same origin, no session note;
+      *(review round 2:)* the seam records the route its GET actually went out on (the
+      client and identity label: the run's session, the path's isolated copy, or
+      anonymous) as the fetch's carry token, and the bound send carrying it is refused
+      (`PrerequisiteUnavailable`, so `UNBOUND`) when it would leave on another route or
+      identity -- e.g. when the copy's re-login on that fetch logged the run's session
+      out and the single-session breaker sent the path anonymous, or the copy could not
+      log in again for the send; *(review round 3:)* the token also records the session
+      generation the fetch's `prepare` applied (`Request.session_generation`, read,
+      never recomputed) and whether the manager saw that session lost on the page's own
+      answer (it told its listeners a loss of the identity while the GET was in flight,
+      FR-SESS-16; `prepare`'s own flag on the fetch is still False then). The bound send
+      is refused **before anything is sent** -- no re-login, no request -- when the
+      page's own answer lost the session (the next `prepare` would log in again, and the
+      page's token is the lost session's), and its answer is **not read** when its
+      `prepare` applied another generation than the fetch's (a re-login between the
+      fetch and the send: a time expiry, a loss found while a pause was waited out,
+      another send's loss). Either way `PrerequisiteUnavailable`, so `UNBOUND`, never a
+      negative; a copy's re-login on such a send is still verified (FR-FUZZ-44);
+    - the anonymous `RequestsProbeSender` holds the page's cookies in memory under a
+      one-time token and loads them only into the send whose bound entries carry it
+      (every other send discards them first, BUG-0112); the authenticated seam carries
+      no cookie a probe's or a page's answer set on any route, so a page that sets one is
+      refused (a health check's adopted rotation is the stated gap N-R3-2 below).
+  - **Every send of the candidate's own request** (its URL and method) is bound or
+    refused, whatever its shape: a raw or JSON body, entries a strategy built, another
+    location (review round 1).
+  - **Never a placeholder, never a stand-in.** When the values cannot be rebuilt -- no
+    page, an unclean or other-origin page, a sender that cannot fetch, a gated page, no
+    answer, a non-2xx, lost-session or session-noted answer, a cookie the route cannot
+    carry, no matching form or link, a captured JSON body (no page holds its leaves; such
+    a candidate is unbound before any strategy runs), a fresh value naming a host outside
+    the lab (the FR-AUD-20 predicate, failing closed on the value's tail too: an
+    allow-list of the tail's grammar since review round 3), a bound send whose route is
+    not its page fetch's or whose page's own answer lost the session, a bound send on
+    another session generation than its page fetch's (its answer unread) -- nothing is
+    sent and the test is inconclusive (`UNBOUND`) with the reason,
+    never a negative. A sibling naming a host outside the lab is never sent and never
+    replaced by loopback (FR-AUD-20, which fails closed: `value_shape.names_outside_lab`):
+    its point carries a `replay_refusal` and is inconclusive before any strategy runs.
+    The fingerprint baseline skips such points, header points never carry such a query,
+    and the M6 browser refuses a query point needing a binding.
+  - **Stated gaps:** a password field stays empty by policy (FR-FUZZ-44, D12); on the
+    authenticated seam a form page that sets a cookie is unbound (the seam adopts no
+    response cookie, and its pooled transport's jar keeps none, FR-CORE-509; the page
+    fetch is a bodiless GET pooled under the probe route's own key), and so is a CSRF-protected login form whose page is an auth
+    endpoint fetched on a session route; a captured JSON body's redacted leaf is never
+    rebuilt; a store row from before migration 25 has no recipe. *(Review round 3; the
+    round-2 residual "the route check does not compare the session's generation" is
+    closed:)* a session's generation is known only once `prepare` has run inside the
+    client's send, so a bound send whose own `prepare` logged in again has gone out --
+    on the new session, with the old session's token, to the lab -- before it is
+    refused; its answer is never read. A loss the manager tells its listeners on the
+    page's own answer is refused before that. **Stated gap** (BUG-0544 residual N-R3-2,
+    after the final round; owner FUZZ with SESS): a health check that answers LIVE
+    adopts a rotated session cookie in place, in the same generation
+    (`session.manager._adopt_rotation`; through `verify_live`, which `_verify_main` runs
+    after any copy login or re-login, a policy block's `check_health`, or a pause's LIVE
+    re-check in `prepare` -- the re-check above is covered only when it finds a loss),
+    and the token compares only route, identity, generation and loss. So a bound send
+    after such a check carries the old cookie's token on the new cookie, and its 403 is
+    read as a negative, not unbound; pinned by the strict xfail
+    `tests/test_replay_bindings.py::test_a_live_health_check_that_adopts_a_rotated_cookie_after_the_fetch_unbinds_the_send`.
 - **FR-FUZZ-68 (the template stage folds only true duplicates, `CC-FUZZ-0112`,
   `CC-CORE-0074`, 2026-10-21, BUG-0547)** When a caller gives `run_pipeline` the pages'
   HTML (`pages_html`), the stage before the audit folds injection points through
@@ -1999,9 +2115,16 @@ rewards) derives from it.
     `dedup_unknown_pages` (also `pipeline_dedup_*` run metrics) and `dedup_key`
     (`core.dedup.FOLD_KEY`); nothing is reported, and nothing folded, when no pages are
     given.
-  - **Until AU-REQID78 merges,** `wire_request_key` is a local stand-in for the
-    request-context identity SP-57; at merge it is replaced by SP-57, keeping these
-    guarantees.
+  - **SP-57 is a member of this key (AU-REQID78).** `wire_request_key` holds the
+    request-context identity (SP-57, `core.reqctx.point_key`, FR-FUZZ-66) as a member
+    (`context`) and adds every other point field as given, so a fold never joins two
+    request contexts: the fold must also keep apart the fields that change which rules
+    fire or which mechanism decides (sink, value shapes, origin, deciding mechanism)
+    and a store field without a store step, which the request context deliberately
+    leaves out. Both normalise a standalone query slot the same way (the first
+    occurrence, SP-42). A URL the identity cannot parse has no context member (None)
+    and is keyed as given. `FOLD_KEY` is `template+wire-request-v2` since this member
+    joined the key.
   - **Stated gap:** a PRG follow-up of a fragment-only `Location` is resolved against the
     point's unplaced URL (FR-FUZZ-64), so two folded standalone points could differ in that
     one follow-up's target.
@@ -2085,7 +2208,7 @@ rewards) derives from it.
   - Enforced by (the `--authorized` lab-only gate through `fuzzlab train run`; CC-FUZZ-0400): `tests/test_train_cli.py::test_train_run_without_authorized_sends_nothing`, `tests/test_train_cli.py::test_no_usage_error_leaves_a_store_or_a_run_row`
   - Enforced by (the M6 browser stays on its observe and store origins; CC-FUZZ-0066, BUG-0123): `PlaywrightBrowserExecutor.run` scoped launch, context guard, scope-checked plant with `max_redirects=0` — `tests/test_browser_scope.py::test_the_m6_browser_is_launched_scoped_and_plants_without_redirects`, `tests/test_browser_scope.py::test_every_browser_path_in_fuzzlab_is_scoped`
   - Enforced by (forms phase 2, CC-FUZZ-0063): header names checked at the CLI and at every sender's header branch, the header breaker, siblings never carrying the app's own host or an identifier, settings pickers never fuzzed — `tests/test_forms_phase2.py::test_header_point_names_are_validated`, `tests/test_forms_phase2.py::test_every_sender_refuses_a_denied_header_unless_explicit`, `tests/test_forms_phase2.py::test_every_header_branch_calls_the_header_gate`, `tests/test_forms_phase2.py::test_a_session_bound_to_user_agent_trips_the_breaker_after_one_relogin`, `tests/test_forms_phase2.py::test_a_crawled_hostname_is_never_sent`, `tests/test_forms_phase2.py::test_neutral_value_errs_toward_loopback`, `tests/test_forms_phase2.py::test_a_header_point_url_never_carries_the_apps_own_host`, `tests/test_forms_phase2.py::test_identifier_like_link_values_are_blanked_and_never_stored`, `tests/test_forms_phase2.py::test_link_sets_with_a_credential_or_destructive_entry_are_not_bound`, `tests/test_forms_phase2.py::test_settings_named_post_selectors_are_skipped`, `tests/test_forms_phase2.py::test_a_picker_seen_setting_a_cookie_is_not_fuzzed`
-  - Enforced by (forms phase 3, captured JSON requests; CC-AUD-0035 / CC-FUZZ-0068): DELETE, unflagged PUT/PATCH, destructive, transaction, cross-origin, credential-change and settings requests never imported (`store_adapter.captured_request`); a JSON login body probed only on an isolated or anonymous session, its password never a point and sent empty; siblings redacted and neutral; a DELETE refused again at every sender; a crawled fragment payload never sent over HTTP; greybox never sent a JSON point — `tests/test_json_points.py::test_each_refusal_is_never_imported`, `tests/test_json_points.py::test_put_and_patch_import_only_with_the_flag_and_a_safe_url`, `tests/test_json_points.py::test_malformed_unsupported_and_cross_origin_requests_are_refused`, `tests/test_json_points.py::test_the_credential_change_rule_is_one_function_shared_with_forms`, `tests/test_json_points.py::test_a_password_leaf_on_any_segment_is_isolated_sent_empty_and_never_a_point`, `tests/test_json_points.py::test_the_password_gate_holds_without_the_sensitive_name_pin`, `tests/test_json_points.py::test_object_selectors_sensitive_and_identifier_leaves_are_pinned`, `tests/test_json_points.py::test_a_json_login_sqli_is_confirmed_on_an_isolated_session_only`, `tests/test_json_points.py::test_a_json_login_sqli_is_confirmed_anonymously_by_the_plain_sender`, `tests/test_json_points.py::test_json_siblings_are_redacted_and_neutral_when_a_third_leaf_is_probed`, `tests/test_json_points.py::test_every_sender_refuses_a_crawl_sourced_delete_at_send_time`, `tests/test_json_points.py::test_a_crawled_fragment_payload_never_reaches_the_server`, `tests/test_json_points.py::test_a_destructive_spa_route_is_never_a_point`, `tests/test_json_points.py::test_a_second_hash_in_a_spa_route_hides_nothing_from_point_selection`, `tests/test_json_points.py::test_a_destructive_route_behind_a_second_hash_is_never_a_point`, `tests/test_json_points.py::test_greybox_refuses_a_json_point_and_never_gets_one_from_the_store`, `tests/test_sender_conformance.py::test_every_sender_places_a_json_leaf_in_the_rebuilt_body`, `tests/test_sender_conformance.py::test_the_form_bound_sender_places_a_json_leaf_in_the_rebuilt_body`, `tests/test_json_points.py::test_a_leaf_absent_from_a_captured_body_is_refused_never_appended`, `tests/test_json_points.py::test_server_side_rules_never_fire_on_a_fragment_point`, `tests/test_json_points.py::test_no_strategy_masks_an_unplaceable_send`, `tests/test_json_points.py::test_the_masking_guard_catches_a_synthetic_offender`, `tests/test_json_points.py::test_a_fragment_point_no_mechanism_can_place_is_inconclusive_never_a_negative`
+  - Enforced by (forms phase 3, captured JSON requests; CC-AUD-0035 / CC-FUZZ-0068): DELETE, unflagged PUT/PATCH, destructive, transaction, cross-origin, credential-change and settings requests never imported (`store_adapter.captured_request`); a JSON login body probed only on an isolated or anonymous session, its password never a point and sent empty; siblings redacted and neutral; a DELETE refused again at every sender; a crawled fragment payload never sent over HTTP; greybox never sent a JSON point — `tests/test_json_points.py::test_each_refusal_is_never_imported`, `tests/test_json_points.py::test_put_and_patch_import_only_with_the_flag_and_a_safe_url`, `tests/test_json_points.py::test_malformed_unsupported_and_cross_origin_requests_are_refused`, `tests/test_json_points.py::test_the_credential_change_rule_is_one_function_shared_with_forms`, `tests/test_json_points.py::test_a_password_leaf_on_any_segment_is_isolated_sent_empty_and_never_a_point`, `tests/test_json_points.py::test_the_password_gate_holds_without_the_sensitive_name_pin`, `tests/test_json_points.py::test_object_selectors_sensitive_and_identifier_leaves_are_pinned`, `tests/test_json_points.py::test_a_json_login_sqli_is_confirmed_on_an_isolated_session_only`, `tests/test_json_points.py::test_a_json_login_sqli_is_confirmed_anonymously_by_the_plain_sender`, `tests/test_json_points.py::test_json_siblings_are_never_sent_as_placeholders_or_stand_ins`, `tests/test_json_points.py::test_json_siblings_naming_loopback_are_sent_as_the_app_gave_them`, `tests/test_json_points.py::test_every_sender_refuses_a_crawl_sourced_delete_at_send_time`, `tests/test_json_points.py::test_a_crawled_fragment_payload_never_reaches_the_server`, `tests/test_json_points.py::test_a_destructive_spa_route_is_never_a_point`, `tests/test_json_points.py::test_a_second_hash_in_a_spa_route_hides_nothing_from_point_selection`, `tests/test_json_points.py::test_a_destructive_route_behind_a_second_hash_is_never_a_point`, `tests/test_json_points.py::test_greybox_refuses_a_json_point_and_never_gets_one_from_the_store`, `tests/test_sender_conformance.py::test_every_sender_places_a_json_leaf_in_the_rebuilt_body`, `tests/test_sender_conformance.py::test_the_form_bound_sender_places_a_json_leaf_in_the_rebuilt_body`, `tests/test_json_points.py::test_a_leaf_absent_from_a_captured_body_is_refused_never_appended`, `tests/test_json_points.py::test_server_side_rules_never_fire_on_a_fragment_point`, `tests/test_json_points.py::test_no_strategy_masks_an_unplaceable_send`, `tests/test_json_points.py::test_the_masking_guard_catches_a_synthetic_offender`, `tests/test_json_points.py::test_a_fragment_point_no_mechanism_can_place_is_inconclusive_never_a_negative`
   - Enforced by (the M6 executor's storage headers go through its guarded route only, in scope; CC-FUZZ-0076, FR-CRAWL-14's mechanism): `PlaywrightBrowserExecutor.run` → `navguard.guard_page(headers=)` — `tests/test_browser_scope.py::test_no_browser_context_gets_session_headers_outside_the_route`, `tests/test_browser_scope.py::test_session_headers_are_added_by_the_route_only_in_scope`
   - Clause (PRG follow-ups; FR-FUZZ-49, CC-FUZZ-0078): a post/redirect/get follow-up
     is one plain GET, never a re-sent body or payload, only to the probed URL's own
@@ -2397,10 +2520,12 @@ and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
     sends the form's **browser-default entry list, with empty free-text fields filled
     as a user would type them** — or, for a crawled link's parameter, **that link's
     query**. The URL and e-mail fillers use never-resolving `.invalid` names and are
-    sent as they are. An ip-, host- or url-shaped default is sent as loopback
-    (`127.0.0.1`, `http://127.0.0.1/`; FR-AUD-20). A sensitive-named or
-    identifier-like link value is sent `""`. The spider record keeps the raw defaults,
-    and `Oracle.confirm` binds the entries.
+    sent as they are. *(Amended by FR-FUZZ-67, `CC-FUZZ-0111`, 2026-10-21:)* a default
+    naming loopback is sent as given; one naming a host outside the lab is never sent,
+    as given or as a stand-in, and its point is inconclusive (FR-AUD-20). A
+    sensitive-named or identifier-like value is stored `""` as a placeholder, bound
+    fresh before each send, never sent blank. The spider record keeps the raw
+    defaults, and `Oracle.confirm` binds the entries.
   - **Never fuzzed:** credential-named parameters from crawl or form sources (ground
     truth is unaffected), submitters, sensitive names, and hidden object selectors.
   - **Never imported:** multipart and destructive forms, and password-bearing forms
@@ -2410,22 +2535,26 @@ and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
     too short, or the crawler saw it act as a settings form).*
   - **Residuals:**
     - probes complete real submissions, so rows, users or mail are created;
-    - forms needing a fresh CSRF token do not confirm;
+    - ~~forms needing a fresh CSRF token do not confirm~~ *(superseded by FR-FUZZ-67:
+      the token is fetched fresh in the probe's session before each send)*;
     - fillers ignore `maxlength` / `pattern`;
-    - one confirmation per (url, param, method, location).
+    - ~~one confirmation per (url, param, method, location)~~ *(superseded by
+      FR-FUZZ-66: one confirmation per request context)*.
 - **FR-FUZZ-43** *(forms phase 2: link siblings, header points, POST selectors;
   `CC-FUZZ-0063`, 2026-10-14).*
   - **Link siblings.** A crawled URL's query is a sibling set (a `form` row with
     `enctype` NULL, `core.forms.is_link_set`). A set with two or more names is bound to
-    its parameters that no form binds (forms win; the first crawled link wins). Values
-    pass `store_adapter.redact_sibling` (a sensitive name or an identifier-like raw
-    value is stored and sent `""`). A set with a destructive or credential entry is not
+    ~~its parameters that no form binds (forms win; the first crawled link wins)~~
+    *(superseded by FR-AUD-31 / FR-FUZZ-66: each set is its own context with its own
+    rows)*. Values pass `store_adapter.redact_sibling` (a sensitive name or an
+    identifier-like raw value is stored `""`, a placeholder bound fresh before each
+    send, FR-FUZZ-67). A set with a destructive or credential entry is not
     stored or bound (its parameters stay lone points).
   - **Header points** (`fuzzlab auto --header-points [NAMES]`, crawl points only, **off
     by default**; alone: User-Agent, Referer). One point per crawled 2xx GET page and
     name, after every other point. The URL carries the page's representative query
-    (its first link set only): identifier-like and sensitive values **blanked** (sent
-    `""`, as in the link set; not left out), ip/host/url values sent as loopback. Names pass `core.http.header_point_refusal` (framing,
+    (its first link set that holds no placeholder and no host outside the lab,
+    FR-FUZZ-67; none: the page alone): a placeholder or a stand-in is never sent. Names pass `core.http.header_point_refusal` (framing,
     routing, method-override and credential headers refused) at the CLI, before the
     store is opened, and again at every sender's header branch
     (`check_send_header`; ground-truth points are explicit). With an identity, header

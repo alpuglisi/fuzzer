@@ -528,6 +528,15 @@ the oracle owns truth (the oracle/advisory split).
     unknown (`None`), never a default.
   - **Never read:** a metric, `holdout.*`, `params`, or a sealed table (PA-0092).
   - **Malformed:** an unparsable calibration is reported `unreadable` (PA-0108).
+- **FR-ML-401** *(a label belongs to the request context the oracle tested; `CC-ML-0501`,
+  2026-10-21, BUG-0530).* `build_dataset` labels a candidate positive when a finding of
+  its own run names the candidate's confirmation key (`finding.evidence["context_key"]`,
+  FR-FUZZ-66; the candidate's key is `core.reqctx.confirmation_key`, computed on read for
+  an older row). A finding that names none (an older run, a finding written outside the
+  pipeline) keeps the legacy join on (run, path, param, category, method), per finding,
+  with BUG-0075's method rule. A context the confirming test never sent is never a
+  positive. Label-loss detection (FR-ML-24) counts both joins. `rules_fired` is still
+  counted per (run, path, param); no `FEATURE_VERSION` change.
 
 ## 4. Non-functional requirements
 - **NFR-ML-advisory** ML output is advisory: it can reorder, screen, or flag, but

@@ -59,17 +59,31 @@ class InjectionPoint:
     # arm)``, written by the point builder (a stored case's observe point, a
     # ground-truth DOM point); its arm reaches that category's evidence only.
     decided_by: tuple[str, str] | None = None
+    # FR-FUZZ-67 (BUG-0544): the replay recipe of entries whose stored value is a
+    # placeholder (blanked by redaction): ``(source page URL or None, (names, ...))``.
+    # Before each send the oracle's binder fetches the page in the probe's session and
+    # binds those entries' current values, in memory only; never a value here (D12).
+    bindings: tuple[str | None, tuple[str, ...]] | None = None
+    # Why this point's request can never be rebuilt (a sibling naming a host outside the
+    # lab, FR-AUD-20): the test is inconclusive with this reason; nothing is sent.
+    replay_refusal: str | None = None
 
 
 def evaluate(points: list[InjectionPoint], store, run_id: int,
              rules: list[Rule] | None = None,
-             categories: list[str] | None = None, plugins=None) -> dict[str, int]:
+             categories: list[str] | None = None, plugins=None,
+             identity: str | None = None) -> dict[str, int]:
     """Evaluate every rule against every point; record all evaluations + candidates.
 
     ``categories`` (None = all) scopes the active rules — the hook for D14/T2.9
     category selection. An optional ``plugins`` (PluginManager) contributes extra rules
     (``register_rules``) and is notified of each emitted candidate (``on_candidate``).
+
+    Every candidate's evidence carries its request context's id and the run's
+    ``identity`` scope (`core.reqctx.stamp`, SP-57, FR-FUZZ-66): the one identity the
+    pipeline confirms on, the oracle attributes a finding to and ML labels by.
     """
+    from fuzzlab.core import reqctx
     rules = load_rules() if rules is None else rules
     counts = {"evaluation": 0, "candidate": 0, "negative": 0}
     if plugins is not None:
@@ -100,26 +114,16 @@ def evaluate(points: list[InjectionPoint], store, run_id: int,
             )
             counts["evaluation"] += 1
             if fired:
+                # the request's own fields, written by the identity's owner (SP-57)
                 evidence = {"rule_id": rule.id, "category": rule.category,
-                            "url": point.url, "param": point.param,
-                            "method": point.method, "location": point.location}
-                if point.store_url:                      # stored-XSS store endpoint (M6)
-                    evidence["store_url"] = point.store_url
-                    evidence["store_param"] = point.store_param or point.param
-                    evidence["store_method"] = point.store_method
-                    evidence["store_location"] = point.store_location
-                    if point.store_entries is not None:
-                        evidence["store_entries"] = [list(e) for e in point.store_entries]
-                if point.body_content_type:
-                    evidence["body_content_type"] = point.body_content_type
-                if point.base_entries is not None:
-                    evidence["entries"] = [list(e) for e in point.base_entries]
+                            **reqctx.point_evidence(point)}
                 if point.base_value is not None:
                     evidence["base_value"] = point.base_value
                 if point.redirect_seed is not None and rule.category == "open-redirect":
                     evidence["redirect_seed"] = point.redirect_seed     # FR-AUD-21
                 if point.decided_by is not None and rule.category == point.decided_by[0]:
                     evidence["decided_by"] = point.decided_by[1]        # FR-AUD-30
+                reqctx.stamp(evidence, identity)                         # FR-FUZZ-66
                 store.conn.execute(
                     "INSERT INTO candidate (run_id, rule, evidence, sink_context) "
                     "VALUES (?,?,?,?)",
