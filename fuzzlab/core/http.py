@@ -11,8 +11,12 @@ injectable so tests never touch the network.
 
 from __future__ import annotations
 
+import functools
 import re
+import threading
 import time
+import weakref
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
 from urllib.parse import urlparse
@@ -134,7 +138,8 @@ class Request:
     #: yet recover (FR-SESS-23's re-login budget spent on an identity with no stable
     #: protected resource; CC-CORE-0070). The sender that built the request carries it
     #: to its reader, and the oracle reads any answer to such a request as not
-    #: comparable (FR-FUZZ-65). The seam itself never reads or changes either field.
+    #: comparable (FR-FUZZ-65). The seam itself never changes either field; it reads
+    #: ``session_generation`` only to key its transport's pool (FR-CORE-509).
     session_lost: bool = False
 
 
@@ -150,20 +155,255 @@ class Response:
 Transport = Callable[[str, str, Mapping[str, str], bytes | None, float], tuple[int, dict[str, str], bytes]]
 
 
-def _requests_transport(method: str, url: str, headers: Mapping[str, str],
-                        body: bytes | None, timeout: float):
+# --- the default transport: pooled per (origin, identity, generation) (FR-CORE-509) -----
+#: The methods a send is retried for, once, on a fresh connection, when the reused
+#: connection it went on was closed by the peer before any answer (RFC 9110 §9.2.2:
+#: idempotent; a POST or PATCH is never replayed).
+IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "TRACE", "PUT", "DELETE"})
+#: A pooled session no send has used for this long is dropped before its next send, so
+#: a reuse rarely races a server's own idle close: Node's http server and Apache httpd
+#: both close an idle keep-alive connection after 5 s by default.
+POOL_IDLE_SECONDS = 4.0
+#: At most this many pooled sessions per transport; the least recently used goes first.
+MAX_POOLED_SESSIONS = 32
+
+_REUSE = threading.local()       # did this thread's last pooled send reuse a connection
+
+
+@functools.lru_cache(maxsize=None)
+def _reuse_noting(pool_cls):
+    """``pool_cls`` (a urllib3 connection pool class) noting, per thread, whether the
+    connection it hands out was already connected: a reused one (urllib3 closes one it
+    finds dropped before handing it out, so an open socket is a live reuse)."""
+    class ReuseNoting(pool_cls):
+        def _get_conn(self, timeout=None):
+            conn = super()._get_conn(timeout)
+            _REUSE.reused = getattr(conn, "sock", None) is not None
+            return conn
+    ReuseNoting.__name__ = ReuseNoting.__qualname__ = "ReuseNoting" + pool_cls.__name__
+    return ReuseNoting
+
+
+@functools.lru_cache(maxsize=1)
+def _no_cookie_jar():
+    """A ``requests`` cookie jar that keeps nothing. The seam sets every request's
+    ``Cookie`` header itself (the session addon); a pooled session's own jar would
+    otherwise fill from the answers' ``Set-Cookie`` and add them to later requests that
+    were meant to go without (an anonymous send, a control)."""
+    from requests.cookies import RequestsCookieJar
+
+    class NoCookies(RequestsCookieJar):
+        def set_cookie(self, cookie, *args, **kwargs):
+            return None
+    return NoCookies
+
+
+def _new_session():
+    """A bounded (SP-60) ``requests`` session whose jar keeps nothing and whose direct
+    pools note a reused connection (`_reuse_noting`)."""
     import requests  # imported lazily so core has no hard runtime import cost
 
     from fuzzlab.core import bodyread
+    session = bodyread.bound(requests.Session())
+    if not isinstance(session, requests.sessions.Session):
+        return session                       # a test's in-memory stand-in, as given
+    session.cookies = _no_cookie_jar()()
+    for adapter in session.adapters.values():
+        manager = getattr(adapter, "poolmanager", None)
+        if manager is not None:
+            manager.pool_classes_by_scheme = {
+                scheme: _reuse_noting(cls)
+                for scheme, cls in manager.pool_classes_by_scheme.items()}
+    return session
+
+
+def _exchange(session, method: str, url: str, headers: Mapping[str, str],
+              body: bytes | None, timeout: float):
     # The body is read bounded (SP-60, BUG-0536): wire and decoded ceilings and a
     # wall-clock deadline; an incomplete one raises `bodyread.BodyIncomplete`, never
-    # comes back short. A fresh session per send, as `requests.request` made.
-    with bodyread.bound(requests.Session()) as session:
-        resp = session.request(
-            method, url, headers=dict(headers), data=body, timeout=timeout,
-            allow_redirects=False,
-        )
-        return resp.status_code, dict(resp.headers), resp.content
+    # comes back short.
+    jar = getattr(session, "cookies", None)
+    if type(jar) is _no_cookie_jar():
+        jar.clear()                              # belt and braces: it keeps nothing
+    resp = session.request(method, url, headers=dict(headers), data=body,
+                           timeout=timeout, allow_redirects=False)
+    return resp.status_code, dict(resp.headers), resp.content
+
+
+def _close_session(session) -> None:
+    try:
+        session.close()
+    except Exception:                            # noqa: BLE001 - closing only
+        pass
+
+
+def _peer_closed(exc: BaseException) -> bool:
+    """Did the peer close or reset the connection before any answer? (Never a timeout,
+    an incomplete body or a failed connect.)"""
+    import http.client
+    import ssl
+
+    import requests
+    if not isinstance(exc, requests.exceptions.ConnectionError) or \
+            isinstance(exc, requests.exceptions.Timeout):
+        return False                     # a body cut after its head is never retried
+    seen: set[int] = set()
+    todo: list[BaseException] = [exc]
+    while todo:
+        e = todo.pop()
+        if id(e) in seen:
+            continue
+        seen.add(id(e))
+        if isinstance(e, (http.client.RemoteDisconnected, ConnectionResetError,
+                          BrokenPipeError, ConnectionAbortedError, ssl.SSLEOFError,
+                          ssl.SSLZeroReturnError)):
+            return True
+        todo.extend(a for a in getattr(e, "args", ()) if isinstance(a, BaseException))
+        for nxt in (e.__cause__, e.__context__, getattr(e, "reason", None)):
+            if isinstance(nxt, BaseException):
+                todo.append(nxt)
+    return False
+
+
+class _Pooled:
+    """One pooled session, the sends using it now, when one last finished, and whether
+    it was retired (closed once its last send is done)."""
+    __slots__ = ("session", "inflight", "last_used", "retired", "pooled")
+
+    def __init__(self, session, now: float, *, pooled: bool = True):
+        self.session = session
+        self.inflight = 0
+        self.last_used = now
+        self.retired = not pooled
+        self.pooled = pooled
+
+
+class PooledTransport:
+    """The seam's default transport (FR-CORE-509, BUG-0549): one pooled, bounded
+    (SP-60) ``requests`` session per (origin, identity, session generation).
+
+    - **Never shared across identities or generations.** The key is the request's
+      canonical origin (SP-05), its identity and the ``session_generation`` its
+      session addon applied (FR-SESS-23). A newer generation of an (origin, identity)
+      retires the older ones' sessions; a send prepared on an older generation than
+      the newest seen gets a session of its own, closed after it, and displaces
+      nothing. ``None`` (no session applied) is its own key.
+    - **No cookie state.** Each session's jar keeps nothing (`_no_cookie_jar`), and is
+      cleared before each send: the seam sets ``Cookie`` explicitly.
+    - **Lifecycle.** A retired session is closed when its last send in flight is done,
+      never under one. A session idle past ``idle_seconds`` is retired before its next
+      send; at most ``max_sessions`` are kept (the least recently used goes). `close`
+      retires them all; a send after it gets a session of its own, closed after it.
+    - **A stale connection.** A send that went on a reused connection which the peer
+      closed or reset before any answer is sent once more on a fresh connection when
+      its method is idempotent (`IDEMPOTENT_METHODS`); otherwise the failure is raised
+      as any transport failure (SP-34). A timeout, an incomplete body or a failed
+      connect is never retried.
+
+    Thread-safe: the bookkeeping is under one lock, and ``requests`` sessions with no
+    cookie state are shared by concurrent sends (urllib3's pools are thread-safe).
+    """
+
+    def __init__(self, *, idle_seconds: float | None = None,
+                 max_sessions: int | None = None,
+                 clock: Callable[[], float] = time.monotonic):
+        self._idle = POOL_IDLE_SECONDS if idle_seconds is None else idle_seconds
+        self._max = MAX_POOLED_SESSIONS if max_sessions is None else max_sessions
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._entries: OrderedDict[tuple, _Pooled] = OrderedDict()
+        self._newest: dict[tuple, int] = {}
+        self._closed = False
+
+    def __call__(self, method: str, url: str, headers: Mapping[str, str],
+                 body: bytes | None, timeout: float, *, identity: str = "anonymous",
+                 generation: int | None = None):
+        entry = self._checkout(url, identity, generation)
+        try:
+            _REUSE.reused = False
+            try:
+                return _exchange(entry.session, method, url, headers, body, timeout)
+            except Exception as exc:
+                reused = getattr(_REUSE, "reused", False)
+                if not (reused and str(method).upper() in IDEMPOTENT_METHODS
+                        and _peer_closed(exc)):
+                    raise
+        finally:
+            self._checkin(entry)
+        session = _new_session()                         # one fresh connection
+        try:
+            return _exchange(session, method, url, headers, body, timeout)
+        finally:
+            _close_session(session)
+
+    def close(self) -> None:
+        """Retire every pooled session (each closed once its sends are done)."""
+        with self._lock:
+            self._closed = True
+            doomed = [self._retire(key) for key in list(self._entries)]
+        self._close_all(doomed)
+
+    # -- bookkeeping, under the lock ------------------------------------------------
+    def _checkout(self, url: str, identity: str, generation) -> _Pooled:
+        from fuzzlab.core.urls import canonical_origin
+        origin = canonical_origin(url)
+        doomed: list[_Pooled | None] = []
+        with self._lock:
+            now = self._clock()
+            entry = None
+            if not self._closed and origin is not None:
+                entry = self._pooled_entry(origin, identity, generation, now, doomed)
+            if entry is not None:
+                entry.inflight += 1
+        self._close_all(doomed)
+        if entry is None:                    # a session of its own, closed after the send
+            entry = _Pooled(_new_session(), now, pooled=False)
+            entry.inflight = 1
+        return entry
+
+    def _pooled_entry(self, origin, identity, generation, now, doomed):
+        if isinstance(generation, int) and not isinstance(generation, bool):
+            who = (origin, identity)
+            newest = self._newest.get(who)
+            if newest is not None and generation < newest:
+                return None                      # a late send of a replaced generation
+            if newest is None or generation > newest:
+                self._newest[who] = generation
+                doomed.extend(self._retire(key) for key in list(self._entries)
+                              if key[:2] == who and isinstance(key[2], int)
+                              and not isinstance(key[2], bool) and key[2] < generation)
+        key = (origin, identity, generation)
+        entry = self._entries.get(key)
+        if entry is not None and entry.inflight == 0 and now - entry.last_used > self._idle:
+            doomed.append(self._retire(key))
+            entry = None
+        if entry is None:
+            while len(self._entries) >= max(1, self._max):
+                doomed.append(self._retire(next(iter(self._entries))))
+            entry = self._entries[key] = _Pooled(_new_session(), now)
+        else:
+            self._entries.move_to_end(key)
+        return entry
+
+    def _retire(self, key) -> _Pooled | None:
+        """Take ``key``'s session out of the pool; return it when it can close now."""
+        entry = self._entries.pop(key)
+        entry.retired = True
+        return entry if entry.inflight == 0 else None
+
+    def _checkin(self, entry: _Pooled) -> None:
+        with self._lock:
+            entry.inflight -= 1
+            entry.last_used = self._clock()
+            done = entry.retired and entry.inflight == 0
+        if done:
+            self._close_all([entry])
+
+    @staticmethod
+    def _close_all(entries) -> None:
+        for entry in entries:
+            if entry is not None:
+                _close_session(entry.session)
 
 
 def _content_type(headers) -> str:
@@ -184,9 +424,27 @@ class HttpClient:
         self._session = session
         self._store = store
         self._run_id = run_id
-        self._transport = transport or _requests_transport
+        # The default transport is pooled per (origin, identity, generation) and owned
+        # by this client: closed by `close`, or when the client is collected
+        # (FR-CORE-509, BUG-0549). An injected transport is the caller's.
+        self._transport = transport or PooledTransport()
+        self._keyed = isinstance(self._transport, PooledTransport)
+        self._finalizer = (weakref.finalize(self, self._transport.close)
+                           if transport is None else None)
         self._timeout = timeout
         self._plugins = plugins       # optional PluginManager (on_request/on_response)
+
+    def close(self) -> None:
+        """Drop the pooled connections of the transport this client made (idempotent;
+        a send after it still works, on a connection closed after it)."""
+        if self._finalizer is not None:
+            self._finalizer()
+
+    def __enter__(self) -> "HttpClient":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
 
     def _check_scope(self, url: str) -> str:
         host = urlparse(url).hostname or ""
@@ -210,9 +468,15 @@ class HttpClient:
 
         def _do() -> Response:
             start = time.perf_counter()
-            status, headers, body = self._transport(
-                request.method, request.url, request.headers, request.body, self._timeout
-            )
+            if self._keyed:      # the pool key: the identity and the session generation
+                status, headers, body = self._transport(
+                    request.method, request.url, request.headers, request.body,
+                    self._timeout, identity=request.identity,
+                    generation=request.session_generation)
+            else:
+                status, headers, body = self._transport(
+                    request.method, request.url, request.headers, request.body,
+                    self._timeout)
             elapsed_ms = (time.perf_counter() - start) * 1000.0
             return Response(status=status, headers=headers, body=body, elapsed_ms=elapsed_ms)
 

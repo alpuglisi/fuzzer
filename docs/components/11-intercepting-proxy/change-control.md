@@ -3,6 +3,68 @@
 Component code: **PROXY**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PROXY-0029 — The upstream sender keeps exactly framed connections (FR-PROXY-405, BUG-0549) (2026-10-21)
+- Placement: pre-assigned to POOL24 (audit defect 24). CC-PROXY-0028 is AU-PROXY's, which
+  rewrites the framing in lines ~35-105 of the same file; this change touches only the
+  `SocketSender` class and adds helpers after it. Planned merge order: AU-PROXY, then
+  POOL24.
+- Change (`fuzzlab/proxy/socketsender.py`):
+  - `SocketSender` builds one SSL context per sender (`_context`, under a lock) instead
+    of one per call.
+  - It keeps upstream connections in an `_IdlePool` per (host, port, TLS), only after an
+    exchange that was exactly one well-formed HTTP/1.1 request (`reusable_request`) and
+    one fully framed HTTP/1.1 answer (`reusable_response`, with a strict chunked parse
+    `_chunked_exact`) with no `Connection: close`, upgrade or connection-bound
+    authentication; anything else is closed after its exchange, as before.
+  - Only a reusable, idempotent request takes a kept connection (`_IDEMPOTENT`: GET,
+    OPTIONS, TRACE, PUT, DELETE), after a check (`_quiet`: nothing readable, no buffered
+    TLS byte; idle at most `IDLE_SECONDS`, 4 s). When the peer closed it before a byte of
+    answer (an empty read before the idle timeout, or `_PEER_CLOSED`), the request is
+    sent once more on a fresh connection; a timeout is never resent.
+  - Bounds: `MAX_IDLE_PER_UPSTREAM` (8) and `MAX_IDLE_TOTAL` (64), the oldest closed
+    first, the expired closed at each return. New `close()` (idempotent; also run when
+    the sender is collected, `weakref.finalize`) and `keep_alive=False` (one socket per
+    call); `idle_seconds` and `max_idle` are configurable.
+  - New `tests/test_socketsender_pooling.py` (6 tests, 19 cases) on the shared loopback
+    peer `tests/_keepalive_peer.py` (CC-CORE-0075).
+- Impact (other components / project):
+  - The proxy engine, `fuzzlab proxy` and the web proxy's Repeater forward well-framed
+    traffic on kept connections; bytes on the wire and the answers returned are
+    unchanged (NFR-PROXY-byte-exact).
+  - A deliberately malformed request (duplicate `Content-Length`, a transfer coding, a
+    pipelined second request) never rides a kept connection and its connection is
+    closed after it: the desync experiments keep a fresh connection.
+  - UI: `fuzzlab/web/proxycontrol.py` and `fuzzlab/proxy/cli.py` (not this lane's files)
+    do not call `close()` at stop; the idle connections are closed when the sender is
+    collected (residual R2 in BUG-0549).
+  - No store or wire contract change.
+- Risk (medium):
+  - A misbehaving upstream that sends bytes after a fully framed answer could have them
+    read as the next request's answer if they arrive between the check and the next
+    read. Mitigated: such bytes already waiting make the connection be closed, and only
+    an exactly framed exchange is kept; accepted as the residual of any keep-alive
+    client.
+  - `reusable_response` parses the answer bytes a second time, strictly, beside
+    `recv_http_response`'s own framing (AU-PROXY's region). When AU-PROXY lands, the two
+    must agree: if AU-PROXY exposes an exact-end decision, this check should call it
+    (BUG-0549 R1).
+  - A HEAD request is never kept (its answer's framing depends on the request the reader
+    does not see).
+- Deliverables:
+  - [x] `SocketSender` kept connections, one SSL context, `close`, helpers — done
+  - [x] `tests/test_socketsender_pooling.py`: well-framed (Content-Length and chunked)
+    exchanges share a connection; 14 not-exactly-framed exchanges never leave their
+    connection and a malformed request never rides a kept one; a stale kept connection
+    resent once, a timeout never; TLS: one connection, one handshake, one context; 8
+    threads each get their own answers on at most 8 connections; `close` and collection
+    close the idle connections. Each failed on c483dc1 (one run) — done
+  - [x] FR-PROXY-405 added; FR-PROXY-12 edited in place — done
+- Effectiveness (assessed 2026-10-21): on loopback, 2 000 plain calls used 8 connections
+  instead of 2 000; sequential calls/s 1 489 -> 10 271 (an earlier pair: 1 781 -> 4 650),
+  8-thread 1 205 -> 3 140; over TLS 20 -> 3 826 sequential; a fresh TLS call built a
+  20 ms system-CA context that is now built once (BUG-0549). The harness result is in this
+  lane's report.
+
 ### CC-PROXY-0027 — A proxied flow's redirect target keeps its own key (BUG-0517) (2026-10-19)
 - Change (`fuzzlab/proxy/history.py::flow_event`): the redacted `Location` is
   `redirect`, not `location`.

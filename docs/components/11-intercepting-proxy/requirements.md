@@ -99,9 +99,10 @@ that shares the store, never a mandatory pipeline (D5).
   - **Configurable:** `SocketSender(max_body=, deadline=)` and `fuzzlab proxy
     --max-response-bytes / --response-deadline`. They cut off long-lived streams and
     very large downloads, by design.
-  - **Off the event loop:** the engine runs the (stateless) sender with
+  - **Off the event loop:** the engine runs the (thread-safe) sender with
     `asyncio.to_thread`, with at most min(32, CPUs + 4) concurrent upstream calls.
-    History is recorded on the loop thread.
+    History is recorded on the loop thread. *(CC-PROXY-0029:)* the sender keeps
+    exactly framed upstream connections between calls (FR-PROXY-405).
 - **FR-PROXY-13 (proxied traffic in the trace, CC-PROXY-0025)** Every in-scope flow
   the proxy engine records is also one `observe.exchange` trace event (FR-CORE-505),
   so the Diagrams page shows proxied traffic while it happens (the `proxy` sequence,
@@ -141,6 +142,43 @@ that shares the store, never a mandatory pipeline (D5).
   - **Measured cost** (CC-PROXY-0025): 400 flows at `batch_size=1` on the event-loop
     thread; per flow, median 0.30–0.38 ms without the trace and 1.38–1.46 ms with it,
     p95 1.3–2.5 ms without and 5.8–13.4 ms with.
+- **FR-PROXY-405** *(kept upstream connections; `CC-PROXY-0029`, 2026-10-21,
+  BUG-0549).* `SocketSender` keeps upstream connections between calls, only where reuse
+  is provably clean:
+  - **One SSL context per sender**, built on first TLS use (it built one per call; with
+    the system CA store that is about 21 ms each, measured).
+  - **Kept only after an exactly framed exchange.** A connection is left for reuse, per
+    (host, port, TLS), only when its request was exactly one well-formed HTTP/1.1
+    request (`reusable_request`: a token method other than HEAD or CONNECT; CRLF lines,
+    token names, no obs-fold; no `Transfer-Encoding`, `Expect` or `Upgrade`; no
+    `Connection: close`; no NTLM / Negotiate authorization; a body exactly its one
+    `Content-Length`, or none) and its answer exactly one fully framed HTTP/1.1 answer
+    (`reusable_response`: a final status; no `Connection: close` or upgrade; no NTLM /
+    Negotiate challenge; exactly one `Content-Length` the body matches, or
+    `Transfer-Encoding: chunked` alone with a body that is exactly one complete chunked
+    body, or a 204 / 304 with no body and no transfer coding). Everything else is closed
+    after its exchange, as before: a close-delimited, over-long, short, doubly framed or
+    HTTP/1.0 answer, and every deliberately malformed request.
+  - **Who takes a kept connection.** Only a request that is itself reusable and
+    idempotent (GET, OPTIONS, TRACE, PUT, DELETE). A desync probe, a POST, a PATCH and a
+    HEAD go on a fresh socket (a POST's may be kept after it).
+  - **Checked before use.** A kept connection idle more than `IDLE_SECONDS` (4 s), or with
+    anything readable on it (a close, a reset, a stray byte) or a buffered TLS byte, is
+    closed instead.
+  - **Stale-connection rule.** When a kept connection's peer closed it before a byte of
+    answer (an empty read before the idle timeout, or a reset, broken pipe or TLS EOF),
+    the request is sent once more on a fresh connection. An answer that timed out is
+    never resent.
+  - **Bounds and lifecycle.** At most `MAX_IDLE_PER_UPSTREAM` (8) idle connections per
+    upstream and `MAX_IDLE_TOTAL` (64) per sender, the oldest closed first; expired ones
+    are closed at each return. `close()` closes the idle connections (idempotent), as
+    does collecting the sender. `keep_alive=False` gives one socket per call.
+  - Thread-safe: one lock over the idle connections; a kept connection is used by one
+    call at a time.
+  - Measured (BUG-0549, loopback, `scripts/measure_pooling.py`): connections per 2 000
+    plain calls fell from 2 000 to 8, and the call rate rose 2.6-7x sequential and
+    2-2.6x with 8 threads; over TLS from 20 to 2 750-3 830 calls/s sequential.
+  - Enforced by: `tests/test_socketsender_pooling.py::test_well_framed_keep_alive_exchanges_reuse_one_upstream_connection`, `tests/test_socketsender_pooling.py::test_an_exchange_that_is_not_exactly_framed_never_leaves_its_connection`, `tests/test_socketsender_pooling.py::test_a_stale_pooled_connection_is_retried_once_and_a_timeout_never`, `tests/test_socketsender_pooling.py::test_tls_upstream_connections_are_reused_and_the_context_built_once`, `tests/test_socketsender_pooling.py::test_concurrent_exchanges_each_get_their_own_answer_on_reused_connections`, `tests/test_socketsender_pooling.py::test_closing_the_sender_closes_its_idle_upstream_connections`
 - **FR-PROXY-400** *(`--record`; `CC-PROXY-0400`, 2026-10-15).* Flow recording stays
   opt-in.
   - `--record` records into the resolved store (FR-CORE-400).

@@ -3,6 +3,77 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0075 — The seam keeps its connections per identity and session generation (FR-CORE-509, BUG-0549) (2026-10-21)
+- Placement: pre-assigned to POOL24 (audit defect 24); CC-CORE-0073 and CC-CORE-0074 are
+  other lanes'. Planned merge order: AU-PROXY, then POOL24.
+- Change (`fuzzlab/core/http.py`; the transport, `HttpClient`'s use of it, and one comment
+  on `Request.session_lost`):
+  - `_requests_transport` (a fresh `bodyread.bound(requests.Session())` per send) is
+    replaced by `PooledTransport`, `HttpClient`'s default transport. It keeps one
+    session per (canonical origin, identity, `session_generation`), each made by
+    `bodyread.bound(requests.Session())` (SP-60) in `_new_session`.
+    - A newer generation of an (origin, identity) retires the older ones; a send
+      prepared on an older generation than the newest seen gets a session of its own,
+      closed after it. A retired session is closed when its last send in flight is done.
+    - Each session's cookie jar keeps nothing (`_no_cookie_jar`) and is cleared before
+      each send.
+    - A session idle over `POOL_IDLE_SECONDS` (4 s) is retired before its next send; at
+      most `MAX_POOLED_SESSIONS` (32), least recently used retired first.
+    - Stale-connection rule: a `requests.ConnectionError` caused by the peer closing or
+      resetting a **reused** connection before any answer (`_peer_closed`) is sent once
+      more on a fresh session, for `IDEMPOTENT_METHODS` only. Reuse is noted per thread
+      by the session's direct pools (`_reuse_noting`, a subclass of the pool classes
+      `bodyread.bound` mounted, overriding urllib3's `_get_conn`).
+  - `HttpClient` passes `identity` and `session_generation` to a `PooledTransport` (an
+    injected transport keeps the five-argument call), owns the one it made, and gains
+    `close()`, `__enter__` / `__exit__`, and a `weakref.finalize` that closes the pools
+    when the client is collected.
+  - New `tests/test_http_pooling.py` (5 tests) and `tests/_keepalive_peer.py` (a loopback
+    keep-alive peer); new `scripts/measure_pooling.py` (the throughput measurement).
+- Impact (other components / project):
+  - Every `HttpClient` user (FUZZ's `SeamProbeSender`, blind-SQLi's `SeamSender`, AUD's
+    seam fetch, `tools/authhttp.py`'s clients, isolated copies' clients) now reuses
+    connections. Answers, redaction, recording, budget and the timing mutex are
+    unchanged; the budget still counts one checkout per `send` (a stale-connection
+    resend is the same send).
+  - SESS: the session addon's `prepare` already sets `session_generation`; nothing in
+    SESS changes. An answer's `Set-Cookie` no longer has even a per-send jar to land in
+    (it never reached a later send before either: the session was per send).
+  - Contract: no store or wire contract change. `HttpClient` gains `close()`; the seam
+    reads `Request.session_generation` (it never changes it).
+  - `tools/authhttp.py` does not call `close()` (its clients are closed when collected);
+    a caller that wants an explicit teardown can.
+- Risk (medium):
+  - A reused connection the server closes between urllib3's liveness check and the
+    send fails a non-idempotent send (SP-34 "not observed") where a fresh connection
+    would not have. Mitigated by the 4 s idle retirement (under the 5 s keep-alive
+    defaults of Node and Apache) and the liveness check; idempotent sends are resent
+    once. Accepted: never replaying a POST is the safe side.
+  - `_reuse_noting` overrides urllib3's private `_get_conn` (urllib3 2.8 measured); if a
+    future urllib3 renames it the override is never called, reuse is never noted, and
+    the only effect is that a stale idempotent send is not retried. bodyread's own pool
+    subclasses carry the same dependency.
+  - A send through an HTTP(S) proxy uses requests' proxy pools (not noted): never
+    retried.
+  - urllib3's default pool size (10 per host) is kept: more concurrent sends of one key
+    open extra connections discarded after use (a warning in urllib3's log).
+- Deliverables:
+  - [x] `PooledTransport`, `HttpClient.close` and the keyed call in `core/http.py` — done
+  - [x] `tests/test_http_pooling.py`: one connection for sequential and concurrent sends;
+    identities and generations never share a connection or a jar, a new generation
+    closes the old one's connection, a late old-generation send displaces nothing; a
+    generation change never closes a send in flight; a stale reused connection resent
+    once for GET, never for POST; `close` and collection close the pools. Each failed on
+    c483dc1 (one run) — done
+  - [x] FR-CORE-509 added; FR-CORE-6 and FR-CORE-536 edited in place — done
+  - [x] Measurement (`scripts/measure_pooling.py`), numbers in BUG-0549 — done
+  - [x] Shared-doc texts (CHANGELOG, ERROR_LOG, PA-0549, ARCHITECTURE, F-1XX) handed to the
+    coordinator — done
+- Effectiveness (assessed 2026-10-21): on loopback, 2 000 plain sends used 8 connections
+  instead of 2 000; sequential sends/s 549 -> 1 065, 8-thread 397 -> 722; over TLS 20 ->
+  959 sequential (two measured pairs agree; BUG-0549 has both, and the TLS phase
+  breakdown). The harness result is in this lane's report.
+
 ### CC-CORE-0072 — One bounded reader of a target's HTTP body (SP-60, FR-CORE-536, BUG-0536) (2026-10-20)
 - Placement: pre-assigned to AU-BOUNDED (audit defect 21); CC-CORE-0070 and CC-CORE-0071
   are other lanes'.
