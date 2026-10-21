@@ -16,7 +16,7 @@ same rules in a real browser."""
 
 from __future__ import annotations
 
-from fuzzlab.disco.explore import Explorer
+from fuzzlab.disco.explore import Explorer, Reading
 from fuzzlab.disco.fingerprint import state_fingerprint
 
 START = "http://127.0.0.1:3000/"
@@ -50,6 +50,12 @@ HOME = [{"tag": "a", "label": "Home", "href": "/"}, {"tag": "button", "label": "
 ABOUT = [{"tag": "h1", "label": "About"}, {"tag": "button", "label": "Contact us"}]
 
 
+def _read(els) -> Reading:
+    """A page read as ``els`` (only its elements matter to an alias: a fold, decided by
+    the structural key, FR-CRAWL-31)."""
+    return Reading("fp", "layout", START, els)
+
+
 def test_a_new_body_or_the_same_path_is_never_an_alias():
     ex = _explorer()
     assert ex._document_first(_Resp(b"<p>other</p>"), START + "help") is None
@@ -71,19 +77,19 @@ def test_a_history_mode_route_from_the_same_shell_is_explored():
     """The regression a body-only rule would cause: every history-mode route answers
     with the shell, and its view is new."""
     ex = _explorer()
-    ex._shared.known.add(state_fingerprint(START, HOME))
+    ex._shared.structures.add(state_fingerprint(START, HOME))
     first = ex._document_first(_Resp(SHELL), START + "about")
     page = _Page(START + "about", [START + "about", START + "contact"])
     assert first == "/"
-    assert not ex._alias_state(page, first, ("fp", ABOUT))
+    assert not ex._alias_state(page, first, _read(ABOUT))
     assert not ex._alias_state(page, first, None)          # nothing read: explored
 
 
 def test_a_soft_404_rendering_a_known_state_is_an_alias():
     ex = _explorer()
-    ex._shared.known.add(state_fingerprint(START, HOME))
+    ex._shared.structures.add(state_fingerprint(START, HOME))
     first = ex._document_first(_Resp(SHELL), START + "no/such/page")
-    assert ex._alias_state(_Page(START + "no/such/page"), first, ("fp", HOME))
+    assert ex._alias_state(_Page(START + "no/such/page"), first, _read(HOME))
 
 
 def test_the_explorer_counts_an_alias_and_explores_no_state_from_it(monkeypatch):
@@ -98,7 +104,8 @@ def test_the_explorer_counts_an_alias_and_explores_no_state_from_it(monkeypatch)
     monkeypatch.setattr(explore.navguard, "navigate", lambda *a, **k: _Nav())
     monkeypatch.setattr(ex, "wait_quiet", lambda page: None)
     monkeypatch.setattr(ex, "_tag", lambda ctx, kind: None)
-    monkeypatch.setattr(ex, "settled_fingerprint", lambda page, ctx: ("fp1", HOME))
+    monkeypatch.setattr(ex, "settled_fingerprint",
+                        lambda page, ctx: Reading("fp1", "layout", page.url, HOME))
     gathered = []
     monkeypatch.setattr(ex, "_gather", lambda page: gathered.append(page.url))
     page = _Page(START + "sitemap.xml#/")

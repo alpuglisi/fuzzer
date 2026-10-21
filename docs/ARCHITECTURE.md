@@ -1523,10 +1523,16 @@ tracked in the requirements files, not here.
     quarantining).
   - `explore.py` + `fingerprint.py` + `formfill.py`: a guarded Chromium (navguard
     launch, route, navigation and release owners; `proxy=` the recorder) explores a
-    state graph keyed by layout fingerprint, finds listener-only elements through
-    DevTools, fills forms valid-first (the browser's `checkValidity()` decides), waits
-    for network quiescence, recovers a lost session, and never acts on a destructive
-    control.
+    state graph whose states are execution keys (exact route, element multiset,
+    workflow markers, session generation; SP-62, FR-CRAWL-31) and whose frontier is
+    ordered and bounded per route by the structural layout key (bounds reported); takes
+    each action once per state (`WorkLedger`: retries, deprioritised repeats, skips only
+    on equal observed effects, FR-CRAWL-32); restores a state only to its recorded
+    contract, exactly (neither a subset nor a superset), acts only on a page that
+    holds it, and never replays a step that sent a non-idempotent request (FR-CRAWL-33);
+    finds listener-only elements through DevTools, fills forms valid-first (the
+    browser's `checkValidity()` decides), waits for network quiescence, recovers a lost
+    session, and never acts on a destructive control.
   - `synth.py`: the captures become an OpenAPI 3.1 inventory (templated paths, merged
     schemas, header classes, auth, response-only fields, dependency edges, JS
     candidates) -- the input of Phase 2 (component 9) and the contract (component 7).

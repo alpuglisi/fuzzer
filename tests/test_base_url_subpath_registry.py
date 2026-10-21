@@ -350,6 +350,10 @@ REGISTRY = {
     "fuzzlab.disco.generate:build_contract":
         Covered("tests/test_disco_contract.py::"
                 "test_a_contract_for_an_app_under_a_subpath_keeps_its_paths_once"),
+    # a recorded state's entry URL (any page's), CC-CRAWL-0055
+    "fuzzlab.disco.explore:State.read":
+        Covered("tests/test_disco_state_identity.py::"
+                "test_a_state_under_a_sub_path_keeps_its_whole_entry_url"),
 }
 
 

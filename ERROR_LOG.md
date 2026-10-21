@@ -18,6 +18,18 @@ Format per entry:
 
 ---
 
+## 2026-10-21 — crawl (disco merged distinct states, consumed work and accepted wrong restores; BUG-0539)
+- **Symptom:** the external audit's defects 1-3, reproduced at 08e3eaa in a real browser on loopback pages:
+  - a three-step wizard with one layout stopped at step 1 (the finish request never made);
+  - a dialog's second-stage Next was never taken (its confirmation POST never sent);
+  - one injected Playwright error removed the only action for the run;
+  - a cart recorded with pay and terms was restored with pay only, accepted, its core shrunk to `{start, pay}`, and pay explored as that state;
+  - (review round 1, on the first fix d9e269e) a modal closed by its own Close was declared optional run-wide and a restore that did not reopen it was accepted; a restore that landed on a later server stage (the contract plus Confirm) was accepted and the earlier stage's Help logged there; a step whose result page could not be read was marked done and never retried;
+  - every restore of a state reached by a POST re-sent the POST.
+- **Root cause:** work-saving heuristics were implemented as identity or acceptance decisions: a folded, set-based layout hash as the visited-state key; a route-scoped step key written before the step ran, and a chrome skip from layout identity; a restore that accepted a subset and narrowed the contract (introduced by BUG-0501's and BUG-0502's fixes), and a replay with no side-effect model.
+- **Remediation:** `fingerprint.execution_key` (SP-62) as the identity and `state_fingerprint` for scheduling and folding only (an AST guard); `WorkLedger` with per-state work items, retries and effect-based equivalence; `contract_mismatch` exact both ways (`extra` refused) with declared optional features (a dismissal only on the entry document, confirmed by a fresh load, never excusing what a state's own step added), strict replay, work finished only once its result was read, unsafe steps never replayed and in-place exploration of the states they reach, unresolved reasons reported (CC-CRAWL-0055, PA-0539).
+- **Status:** Fixed, with residuals R1-R7 (BUG-0539)
+
 ## 2026-10-21 — crawler and auditor, captured requests (a body holding a lone surrogate was lost at the write, and the import failed on one; BUG-0554)
 - **Symptom:** `StorageManager.record_request` raised `UnicodeEncodeError` for `{"a\ud800": 1}`, `{"action": "x\ud800"}` and `{"q": "\ud800"}` (lane SPIDER9's reproduction, on 33b423e). navguard's observer catch logged it at info; the request was not stored and not counted in `requests_not_recorded`. `store_adapter.import_spider` raised on a `discovered_requests` row holding such a body, and `import_disco` on such a captured body, failing the whole import.
 - **Root cause:** `json.loads` decodes a lone `\udXXX` escape to a surrogate code point, which SQLite's bind and a strict UTF-8 encode refuse. The writer bound `json.dumps(..., ensure_ascii=False)` text (the body, and `apiop.operation_key`'s text through the signature prefix) and digested key paths with a strict encode (`apiop.row_signature`, the GraphQL digest), under a totality claim tested only with well-formed text. The writer had no reason for a failed write, so the exception reached a guard that logs instead of counting. The importer bound such leaves (`jsonbody.encode_entries`, the parameter name and example).

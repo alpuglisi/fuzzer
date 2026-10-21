@@ -658,29 +658,32 @@ fuzzer.
     the context ignores HTTPS errors, blocks service workers, is guarded by
     `navguard.guard_page`, navigated through `navguard.navigate` and released through
     `navguard.release`.
-  - **States** are layout fingerprints (`fingerprint.state_fingerprint`): the normalised
-    route and the set of visible interactive elements' signatures (tag, role, type,
-    name, class tokens, a three-ancestor chain, normalised id / href / action; digit runs
-    folded; text never; *(CC-CRAWL-0032, BUG-0501)* classes that carry UI state -- a BEM
-    `--modifier` or a class with a state-word part (`visible`, `active`, `pristine`,
-    `touched`...) -- dropped; *(CC-CRAWL-0034, BUG-0502)* nothing of where the element
-    was seen: a form-less container has no action). At most `max_same_signature` (2)
-    elements of one signature per state.
-  - *(Amended in place, CC-CRAWL-0034, BUG-0502; was: once per state.)* **Each (route,
-    element signature, occurrence, action) is tried once**: an overlay state's work is
-    what it added. A step on **chrome** -- a signature seen on more than one route (a
-    header, a side-nav) -- is tried once in the whole run (`chrome_skipped` counts the
-    rest).
-  - *(Amended in place, CC-CRAWL-0032, BUG-0501.)* **The frontier** explores a state on
-    a route no known state is on before another state of a known route, and holds at
-    most `max_states_per_route` (8) states per route (`route_capped` counts the rest).
-  - *(Amended in place, CC-CRAWL-0032.)* **Restore:** the page leaves for `about:blank`,
-    then loads the state's entry URL (a fresh document, also on a hash-routed app) and
-    replays its path; a replay step whose element is gone (consumed UI) is skipped. The
-    state is reproduced when its fingerprint comes back, or the route matches and every
-    element of its *stable core* is present; a restore showing core elements only gone,
-    none new, narrows the core (one-time or dismissed UI, `transient_dropped`). A
-    fallback path covers a page only a POST shows.
+  - *(Amended in place, CC-CRAWL-0055, BUG-0539: a state's identity is FR-CRAWL-31's
+    execution key; this is the structural key.)* **Element signatures and the
+    structural key** (`fingerprint.state_fingerprint`): the normalised route and the set
+    of visible interactive elements' signatures (tag, role, type, name, class tokens, a
+    three-ancestor chain, normalised id / href / action; digit runs folded; text never;
+    *(CC-CRAWL-0032, BUG-0501)* classes that carry UI state -- a BEM `--modifier` or a
+    class with a state-word part (`visible`, `active`, `pristine`, `touched`...) --
+    dropped; *(CC-CRAWL-0034, BUG-0502)* nothing of where the element was seen: a
+    form-less container has no action). The structural key schedules and folds only. At
+    most `max_same_signature` (2) elements of one signature per state are acted on
+    (`same_signature_capped` counts the rest).
+  - *(Superseded by FR-CRAWL-32, CC-CRAWL-0055, BUG-0539; was, CC-CRAWL-0034: each
+    (route, element signature, occurrence, action) tried once, and a step on chrome --
+    a signature seen on more than one route -- once in the whole run.)*
+  - *(Amended in place, CC-CRAWL-0032, BUG-0501; CC-CRAWL-0055.)* **The frontier**
+    explores a state on a route no known state is on before another state of a known
+    route -- a new layout before a variant of a known one (FR-CRAWL-31) -- and holds at
+    most `max_states_per_route` (8) states per folded route (`route_capped` and
+    `coverage_excluded` count the rest).
+  - *(Superseded by FR-CRAWL-33, CC-CRAWL-0055, BUG-0539; was, CC-CRAWL-0032: a replay
+    step whose element is gone was skipped, and a restore showing core elements only
+    gone narrowed the core, `transient_dropped`.)* **Restore:** the page leaves for
+    `about:blank`, then loads the state's entry URL (a fresh document, also on a
+    hash-routed app), replays its path and checks the state's recorded contract
+    (FR-CRAWL-33). A fallback path covers a page only a POST shows, when its steps are
+    safe to repeat.
   - **Actionable elements:** native controls and ARIA roles; elements with a JS
     click / pointer / key listener from Chrome DevTools
     (`DOMDebugger.getEventListeners`, at most 200 candidates per enumeration);
@@ -728,11 +731,15 @@ fuzzer.
     origins (`browserlogin.filter_storage_state`); with more than one scope origin the
     guard's `cookie_scope` keeps the session to the start URL's origin (FR-SESS-20). A
     landing on a login URL (`session.detect.looks_like_login_url`) is a lost session:
-    the action is denied for the rest of the run and the context rebuilt.
+    the action is denied for the rest of the run and the context rebuilt;
+    *(CC-CRAWL-0055)* the rebuilt context's states are read in the next session
+    generation (FR-CRAWL-31).
   - Each action is logged to `actions.jsonl` (state, route, signature, kind, a 60-char
     label, the new state, *(CC-CRAWL-0036)* the element's occurrence;
     *(CC-CRAWL-0035)* the page URL after it, redacted
-    (`redact_url`), and for a form step its controls' names and types, never values).
+    (`redact_url`), and for a form step its controls' names and types, never values;
+    *(CC-CRAWL-0055)* `state` / `new_state` are execution keys and `replay_safe` is
+    whether the step sent no non-idempotent request, FR-CRAWL-33).
     `seq` is the number of the action id its requests carry (`act-<seq>`).
 - **FR-CRAWL-20 (the schema synthesizer, CC-CRAWL-0031, D70)** `fuzzlab disco synth`
   turns captures into an OpenAPI 3.1-shaped inventory (`fuzzlab.disco.synth`):
@@ -785,7 +792,10 @@ fuzzer.
   them whatever the response's media type (scope and destructive gates unchanged); its
   rendered engine never fetches as a page a subresource the browser already requested
   in the crawl. Disco gathers them per settled page and loads the never-requested ones
-  once its frontier is empty (`max_harvest`, 500), an HTML document becoming a state.
+  once its frontier holds no new route or layout, *(CC-CRAWL-0055)* four loads per
+  variant of a known layout (`max_harvest`, 500), an HTML document becoming a state. A
+  response body is marked read only once it was read (a body the driver let go is read
+  from its next response).
   **Never a link** (BUG-0503): a form's `action`, a `formaction`, a `ping`, or a string
   in a script -- their method is a write or unknown; forms reach the target only through
   the gated submission paths, and a script's requests are what the browser was seen to
@@ -933,6 +943,138 @@ fuzzer.
     `script_segments.json`), before any side effect and with `--dry-run` too. Order:
     scope URLs, run files, storage state, store, `--dry-run` (which names the trace),
     `--authorized`, workers.
+- **FR-CRAWL-31 (disco: a state's identity is its execution key, CC-CRAWL-0055,
+  BUG-0539)** The explorer keeps two keys per page (`disco/fingerprint.py`):
+  - **The execution key** (`execution_key`, SP-62) is a state's identity. It hashes:
+    - the exact route (`execution_route`): origin, the path as served (numeric segments
+      kept), every query pair with its value (sorted, each occurrence kept), and a SPA
+      route fragment with its own query pairs; a sensitive name's value is replaced
+      (`redact_query`);
+    - the element multiset (`element_multiset`): each signature with its count;
+    - the workflow markers (`workflow_markers`): an element's selection state (a
+      select's value, a checkbox's or radio's checked state, `aria-selected`,
+      `aria-current`, `aria-checked`; none for a sensitively named control), a named
+      hidden input's value (not for a sensitive name, a value over 64 characters or a
+      token-like one), and a non-interactive `aria-current` element's position; typed
+      text never;
+    - the session generation of the worker's context (0, plus one per rebuild after a
+      lost session).
+  - Every visited-state check reads it: the known set, a child state's novelty, a
+    harvest document's novelty.
+  - **The structural key** (`state_fingerprint`: folded route, set of signatures)
+    schedules and folds only: the frontier's order (a new route, then a new layout,
+    then a variant of a known layout; once only variants are queued, up to
+    `HARVEST_PER_VARIANT` (4) harvest loads and one variant take turns, so neither
+    starves the other) and per-route bound, and a harvest alias
+    (FR-CRAWL-27). It is called only from `Explorer.reading` and
+    `Explorer._alias_state` (an AST guard).
+  - A step's effect and whether it changed the page are judged against the page just
+    before it. A page that passed the state's contract (FR-CRAWL-33) is that state:
+    its key is added to the known set; no other reading is.
+  - **The per-route bound is reported, never claimed equivalence**: each state refused
+    because its folded route holds `max_states_per_route` states is counted in
+    `explore.json`'s `coverage_excluded` (per folded route) and `route_capped`; a state
+    found past `max_states`, or left in the frontier when `max_actions` ends
+    exploration, in `states_over_budget`.
+  - Enforced by `tests/test_disco_state_identity.py`
+    (`test_a_query_value_a_numeric_segment_or_a_second_identical_button_is_another_state`,
+    `test_the_structural_key_never_decides_a_visited_state`) and, in a real browser,
+    `tests/test_disco_state_identity_browser.py::test_a_wizard_step_with_the_same_layout_is_explored_to_its_end`.
+- **FR-CRAWL-32 (disco: action work per execution state, CC-CRAWL-0055, BUG-0539)**
+  - **The work key** of an action is (execution key, element signature, occurrence,
+    action kind) (`explore.work_key`). `WorkLedger` tracks each item as `pending`,
+    `running`, `succeeded`, `refused`, `retryable` or `failed` (`equivalent` when
+    skipped as below); `explore.json`'s `work` counts them at the end.
+  - **A failure never consumes the work.** A Playwright error, a step that could not
+    act, an element gone from the restored page, or *(CC-CRAWL-0055 review B3)* a safe
+    step whose result page could not be read makes the item `retryable` (an item is
+    `succeeded` only once its result was read); it is
+    queued again after a restore, up to `max_action_attempts` (3) attempts, then
+    `failed` (`actions_retried`, `actions_failed`). A refusal (the denylist, a
+    credential-change form) is `refused`.
+  - **Presumed chrome is a scheduling hint.** A step taken in another state is
+    scheduled after the state's own steps (`deprioritised`). It is skipped
+    (`chrome_skipped`, status `equivalent`) only when its recorded effect -- the
+    requests it made (method and folded route) and its transition (none, or the state
+    it led to) -- was the same in states on two folded routes, and never once two of
+    its effects differed. With one worker, a header button whose effect is the same
+    everywhere is taken at most twice in a run.
+  - **Perturbation passes** stay one per form (folded route and the *set* of its
+    fields: a second identical dialog adds no variation): a bound on value variations,
+    counted in `perturbations_folded`; the form's submission is work of every state.
+  - Enforced by `tests/test_disco_state_identity.py`
+    (`test_the_same_step_in_another_execution_state_of_one_route_is_new_work`,
+    `test_a_failed_attempt_never_consumes_the_work_and_is_retried_then_failed`,
+    `test_presumed_chrome_is_deprioritised_and_skipped_only_on_equal_effects_on_two_routes`,
+    `test_an_action_whose_result_could_not_be_read_is_retried_and_its_successor_recorded`)
+    and, in a real browser, `tests/test_disco_state_identity_browser.py`
+    (`test_a_dialogs_second_stage_takes_the_same_next_again`,
+    `test_a_transient_playwright_error_never_consumes_an_action`).
+- **FR-CRAWL-33 (disco: a restore never accepts or weakens a wrong state, CC-CRAWL-0055,
+  BUG-0539)**
+  - **A recorded contract** is the state's element multiset and workflow markers when
+    first read. It is never rewritten or narrowed. A restore reproduces the state when
+    its execution key comes back, or when the exact route matches and every element
+    is present exactly as many times as recorded, every recorded marker is shown and
+    no other (`explore.contract_mismatch`). *(Amended in place, CC-CRAWL-0055 review
+    B2; was: a page with more was accepted.)* Neither a proper subset (`core`,
+    `markers`) nor a superset (`extra`: a control more often than recorded, or a marker
+    the contract lacks) is accepted: a server that moved on shows a later stage with
+    the earlier stage's controls and more.
+  - **A step is taken only on a page that holds its state's contract.** Before each
+    step the page is read and, when the last step changed it or it no longer holds
+    the contract (a late render, a server that moved on), the state is restored and
+    checked again; only a page that passed is taken as the state (its key added to
+    the known set).
+  - **Optional features are declared, with evidence, never inferred by shrinking;** a
+    declared feature is excused whether missing or shown again:
+    - `first-visit`: what the start document's first load held and a fresh second load
+      of it (made when the start state is recorded) does not (a welcome dialog); the
+      start state's own optional counts and markers, and run-wide when gone altogether;
+    - *(Amended in place, CC-CRAWL-0055 review B1; was: any click that removed its own
+      element.)* `dismissed`: what a safe click (no non-idempotent request) on an
+      entry document as loaded (a state with no path) removed altogether, with no
+      navigation and nothing new, when the clicked element's own signature was among
+      it and all of it was in that state's recorded contract, and a fresh load of the
+      entry URL still shows none of it (a notice's "Got it"); run-wide. A control a
+      step added (a modal its Open showed) is never declared.
+    - A run-wide declaration never excuses a control the state's own last path step
+      added (`State.added`).
+    `explore.json`'s `optional_declared` counts them by evidence.
+  - **Replay never skips a missing step silently.** A path step whose element is
+    missing fails the restore (`missing-step`) unless its signature is declared
+    optional; that skip is counted (`replay_skipped_optional`).
+  - **A step that sent a non-idempotent request is never replayed.** Each step records
+    `safe` when taken: no request outside GET, HEAD and OPTIONS was issued during it
+    (sent or refused). A path holding an unsafe step is not restored (`unsafe-step`); a
+    replay that issues one anyway fails (`replay-mutated`). A state reached by an unsafe
+    step, or whose path holds one, is explored **in place** when it is reached
+    (`live_states`), to `max_live_depth` (3) such states one inside another; it is never
+    queued for a replay.
+  - **A failed restore marks the state unresolved** with its reason (`route`, `core`,
+    `extra`, `markers`, `missing-step`, `unsafe-step`, `replay-mutated`, `navigation`,
+    `step-refused`, `step-failed`, `replay-error`, `unreadable`, `live-depth`),
+    counted in `explore.json`'s `unresolved` and `unrestorable`; the steps it still had
+    are counted in `steps_abandoned`. Its contract is kept as recorded. A step that sent
+    a non-idempotent request and whose result page could not be read is counted
+    `unreadable` too, logged with no new state, and never taken again.
+  - **Not reset by a restore** (stated limit): `about:blank` resets the document only;
+    server state, cookies and storage persist. A state that depends on them either
+    holds its contract or is reported unresolved.
+  - Enforced by `tests/test_disco_state_identity.py`
+    (`test_a_recorded_core_is_never_accepted_by_a_proper_subset_nor_shrunk`,
+    `test_a_superset_of_the_contract_is_never_the_recorded_state`,
+    `test_a_declared_optional_feature_never_excuses_a_missing_mandatory_one`,
+    `test_a_declaration_never_excuses_what_the_states_own_last_step_added`,
+    `test_a_dismissal_is_declared_only_on_the_entry_document_and_confirmed_by_a_reload`,
+    `test_a_replay_never_skips_a_missing_step_silently`,
+    `test_a_path_that_sent_a_non_idempotent_request_is_never_replayed`) and, in a real
+    browser, `tests/test_disco_state_identity_browser.py`
+    (`test_a_restore_that_lost_a_core_control_is_unresolved_and_its_contract_kept`,
+    `test_a_state_reached_by_a_post_is_explored_in_place_and_never_replayed`,
+    `test_a_modal_closed_by_its_own_control_that_does_not_reopen_is_unresolved`,
+    `test_a_restore_that_lands_on_a_later_stage_is_unresolved_never_that_stage`).
+
 - **FR-CRAWL-37 (captured requests kept per API operation, CC-CRAWL-0057, BUG-0546,
   audit defect 9)** The spider's capture writer (`StorageManager.record_request`, the
   one writer of `discovered_requests`) keys every row through `tools/apiop.py`:
@@ -1272,6 +1414,14 @@ An old spider DB has no such table (the importer treats it as none).
 - `<run>/capture.jsonl.stats.json` (refusals per host `blocked`, `recorded`, `dropped`,
   `omitted` {`too_large`, `backlog`, `undecodable`}, `waited`, `queued`; FR-CRAWL-38),
   `<run>/actions.jsonl` (one line per UI action), `<run>/explore.json` (the report).
+  *(CC-CRAWL-0055, additive.)* An action line's `state` / `new_state` are execution keys
+  (FR-CRAWL-31) and it carries `replay_safe` (a load line: null). `explore.json`'s
+  `explore` gains `unresolved`, `optional_declared`, `replay_skipped_optional`,
+  `coverage_excluded`, `states_over_budget`, `live_states`, `deprioritised`,
+  `actions_retried`, `actions_failed`, `steps_abandoned`, `same_signature_capped`,
+  `perturbations_folded` and `work`, and loses `transient_dropped`. Readers of the run
+  directory (`store_adapter.import_disco`, `tools.observe`) read none of the changed
+  keys; an older run directory reads as before.
 - The inventory: an OpenAPI 3.1 document whose operations carry `x-disco`
   (`origin`, `method`, `content_type_family`, `observed`, `samples`, `actions`,
   `profiles`, `statuses`, `headers` {name: {class, value?}}, `auth`, `dependencies`
