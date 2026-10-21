@@ -412,8 +412,9 @@ budget where a vulnerability is plausible.
   - `audit.engine.evaluate` writes each candidate's request fields through
     `core.reqctx.point_evidence` and stamps `identity_scope` and `context_id` (SP-57,
     FR-FUZZ-66). `InjectionPoint` carries `bindings` and `replay_refusal`.
-  - Stated gap: the crawler's own form and request signatures merge contexts before
-    the store sees them (CRAWL, pinned by strict xfails).
+  - Stated gap: the crawler's own form signature merges contexts before the store sees
+    them (CRAWL, pinned by a strict xfail). Its request signature keeps operations apart
+    since SPIDER9 (BUG-0546, FR-CRAWL-37); that pin passes and was removed.
 - **FR-AUD-30** *(a point's deciding mechanism, scoped to its category; `CC-AUD-0055`,
   2026-10-19, BUG-0523).* An `InjectionPoint` may name the one mechanism that decides
   it: `decided_by`, a `(category, arm)` pair, written by the point builder, never by

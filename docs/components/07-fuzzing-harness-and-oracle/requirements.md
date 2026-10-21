@@ -2008,8 +2008,8 @@ rewards) derives from it.
   - **Stated gaps:** a repeated name is bound by the every-occurrence rule (R1, pinned);
     a stored link set's untouched siblings are sent from decoded values (R2, pinned); a
     POST action's query parameters are not points (AU-REQID-POSTQ, pinned); contexts the
-    crawler's own form and request signatures merge never reach the store (CRAWL,
-    pinned); `rules_fired` is still counted per (run, path, param).
+    crawler's own form signature merges never reach the store (CRAWL, pinned; its
+    request signature was fixed by SPIDER9, BUG-0546); `rules_fired` is still counted per (run, path, param).
 - **FR-FUZZ-67 (stored evidence is never a replay template, `CC-FUZZ-0111`, 2026-10-21,
   BUG-0544)**
   - **The recipe.** Each stored sibling set records the page it came from and the names

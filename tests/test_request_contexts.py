@@ -370,10 +370,11 @@ def test_upstream_the_spider_keeps_both_forms_an_operation_value_apart(tmp_path)
     assert (first, second) == (True, True)
 
 
-@_CRAWL_PIN
 def test_upstream_the_spider_keeps_both_requests_an_operation_value_apart(tmp_path):
-    """`record_request`'s signature is (method, url_key, body keys), so an operation
-    selector in the query or in a body value is one row."""
+    """`record_request`'s signature was (method, url_key, body keys), so an operation
+    selector in the query or in a body value was one row. Unpinned at the 2053f22 merge:
+    SPIDER9 (BUG-0546, CC-CRAWL-0057, FR-CRAWL-37) keys a captured request per operation,
+    and this pin then passed strictly (the forms pin above still holds)."""
     from fuzzlab.tools.spider import StorageManager
     sm = StorageManager(str(tmp_path / "s.db"))
     sm.reset()

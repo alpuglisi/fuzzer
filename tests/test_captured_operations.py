@@ -256,12 +256,11 @@ def test_the_disco_inventory_keeps_two_graphql_operations_apart():
     assert sum(len(item) for item in paths.values()) == 2
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
-    "BUG-0546 sweep: the importer stores a captured request's parameter only when no "
-    "earlier captured request on its endpoint has that name (the first wins), so a second "
-    "GraphQL operation's variables are bound to the first operation's form and never "
-    "sent with its own document (owner: audit defect 8 lane, the request-context "
-    "identity, tools/store_adapter.py::_store_request)"))
+# Was a strict xfail from the BUG-0546 sweep: the importer stored a captured request's
+# parameter only when no earlier captured request on its endpoint had that name (the first
+# won), so a second GraphQL operation's variables were bound to the first operation's form.
+# It is fixed by the audit defect 8 lane (BUG-0530, CC-AUD-0056: `_store_request` keeps one
+# row per request context, SP-57), and the pin was removed at that lane's 2053f22 merge.
 def test_each_captured_graphql_operation_gets_its_own_points_on_import(store, tmp_path):
     from fuzzlab.core.store import Store
     from fuzzlab.tools.store_adapter import import_spider
