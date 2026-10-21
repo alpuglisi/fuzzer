@@ -146,6 +146,12 @@ design record `docs/components/12-diagnostics-and-ui/DRAFT-AU-SITETREE.md`):
 - Tests: the L1, K, B and G tests listed in CC-UI-0068 (each failing on `7ebf48a` for its
   stated reason, DRAFT §5.5; each named revert re-proved against the implementation,
   DRAFT §11.4).
+- Review of `eb95cd4` (the one revision round, `5e4a48b`; DRAFT §11.7): the
+  implementation still had E8 in two paths -- a failed Contents fetch was drawn as an
+  empty node and the refresh counted as a success; a group refreshed on expand was
+  marked current whatever the refresh returned -- and `identity` lacked the stated
+  occurrence suffix for unkeyed siblings with one label. All three fixed, each with a
+  test that fails on `eb95cd4`.
 
 ## Recurrence review
 Searched `docs/bugs/` for fingerprint, `store_version`, `data_version`, refresh, focus,

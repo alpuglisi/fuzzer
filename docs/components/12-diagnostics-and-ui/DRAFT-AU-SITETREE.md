@@ -1266,3 +1266,72 @@ here, none a web, store or browser test. Browser files (`FUZZLAB_REQUIRE_BROWSER
 `test_web_sitetree_browser.py` 36 passed, `test_web_diagrams.py` 21,
 `test_web_pages_browser.py` 10, `test_web_projects_browser.py` 2,
 `test_web_launcher_browser.py` 1.
+
+### 11.7 The review of `eb95cd4`: the one revision round (`5e4a48b`)
+
+Both reviewers returned REVISE with one blocking finding each; everything else they
+checked held (across processes: no snapshot held, `data_version` sees same-process and
+shared-cache commits, 16 threads x 3000 commits clean, delete and replace handled).
+
+| Finding | Fix | Test (fails on `eb95cd4`, `rev3/old.out`) |
+|---|---|---|
+| **Blocking (UI).** A refresh whose Contents fetch failed counted as a success: `loadNode` checked only the summary, `showNode` drew an empty table and returned true, the poll marked the version seen (the reviewer's Chromium probe: `refreshes` +1, 0 rows for 3, no status, five polls never retried). `expand()` marked a group current whatever its refresh returned. | A non-200 Contents answer is a failure: the shown table stays (a refresh never draws another node's table either), the status says so, `showNode` returns false, the poll retries. `expand()` marks a group current only on success. | `test_a_refresh_whose_contents_fetch_fails_keeps_the_table_and_is_retried`: "Could not load this node's contents." expected, `""` on `eb95cd4`. `test_a_group_whose_refresh_fails_on_expand_is_retried_at_the_next_expand`: 3 items expected after the next expand, 2 on `eb95cd4`. |
+| **Blocking (store).** K4 passed its own assertions on the pre-fix `project.py`: the side files went, the identity re-check reopened the watch, a new epoch made every version differ; only the audit hook's teardown failed it. | K4 asserts `_side(path) == {"-wal", "-shm"}` after the listing, `prev is not None`, and one `_watch.epoch` across the scan. | On the pre-fix `project.py` (`4ee8007`'s) with the audit hook disarmed (`rev3/k4/`, `rev3/k4.out`): the new K4 fails at its own assertion, `set() == {'-shm', '-wal'}` ("another process's close folded and deleted the WAL under the store's watch"); `eb95cd4`'s K4, run in the same invocation on the same tree, passes -- the reviewer's finding reproduced. (On `eb95cd4` it passes: the fix is there.) |
+| `identity()` had no occurrence tie-break although D5/R7 said so: two unkeyed siblings with one label merged in `refreshGroup`'s map, each refresh added a duplicate, focus keys repeated. | `stamp` numbers each list in its group's order (`#2`, `#3`), carried across a "Show more" page. | `test_unkeyed_siblings_with_one_label_keep_distinct_identities_across_refreshes` (the root list answered with two appended unkeyed siblings): `[..., ...#2]` expected, two equal ids on `eb95cd4`. |
+| `refresh()` cleared `#st-status` at its start: a lasting failure was re-announced at every retry. | `say()`: written only when its text changes, cleared only by a success. | The Contents test counts the status line's mutations: 1 across two or more failed retries. |
+| `test_a_double_click_on_show_more_loads_the_page_once` slept 500 ms. | It waits until `data-loads` has counted every page the clicks asked for. G4 now follows module-level helpers a registered test calls (not methods), proven on a synthetic helper chain. | (a synchronisation change: passes on `eb95cd4`) |
+| `store_version`'s docstring said the version changes with nothing but a commit; a `wal_checkpoint(TRUNCATE)` by another process changes it (`rev3/m_ckpt.out`: TRUNCATE changes it once and it is stable after; PASSIVE, FULL and RESTART do not). | Docstring and FR-UI-505's residual made exact. | `test_no_read_close_or_checkpoint_changes_the_version`: FULL and RESTART added to the no-change cases; TRUNCATE as the stated change, asserted to change it exactly once (documents `eb95cd4`'s behaviour too: passes there). |
+| The audit hook built `self.stores | _stores` on every open (0.86 ms per open at 20k stores). | Two set lookups. | (cost only) |
+| The static guard missed opener aliases. | `import shutil as sh`, `from os import open as o`, `from shutil import copyfile`, `io.FileIO` resolved (30 lines); no new site in the web scope (60 allowances, 64 sites, 32 modules). | The synthetic offender test gains an aliased module (and a fuzzlab name that merely looks like `copy2`, not counted). |
+| `_xproc.wal_header` opened `-wal` raw in a process holding a connection. | A reasoned comment: SQLite locks no byte of `-wal`, so the close drops nothing; test-only, never the web process. | -- |
+| `loadSeq` had no generation: a poll's answer overtaken by a scope change was drawn over it. | A sequence generation (7 lines). | `test_a_sequence_answer_overtaken_by_a_scope_change_is_never_drawn`: the chosen scope's steps expected, the overtaken scope's steps drawn on `eb95cd4`. |
+
+All four new browser tests are registered (`tests/test_web_live_focus.py`). Per the
+coordinator's process change this round: each new or changed test was run once on
+`eb95cd4` in one pytest invocation (`rev3/old.out`: the four behaviour tests failed at
+their own assertions, the other 29 selected passed), no mutant suite and no loaded-run
+loop; the round-3 mutant definitions are kept unrun in `rev3/mutants3.py`.
+
+**The two ARCHITECTURE consequences the coordinator will add, measured**
+(`rev3/m_arch.py`, `m_arch.out`, `m_arch2.out`; every other connection in another
+process): (1) with the watch open, a writer's last close leaves `-wal`/`-shm` and the
+main file alone lacks the commit (a copy of it read 0 rows): the file is not
+self-contained until the watch is released, whose own close then folds the WAL. (2)
+with the watch open, another process's `PRAGMA journal_mode=DELETE` and a write under
+`PRAGMA locking_mode=EXCLUSIVE` both get "database is locked" (BUSY); a plain
+`BEGIN EXCLUSIVE` is not affected, and after the release the switch succeeds. Both
+statements are right; no fuzzlab code switches a store out of WAL or takes exclusive
+locking (`copy_to` sets `journal_mode=DELETE` on its new temporary copy only). The first
+version of the script copied the main file with `shutil.copyfile` in the watching
+process, which dropped the watch's locks (BUG-0535's mechanism) and let the switch
+succeed: discarded, recorded in the F-entry text below.
+
+**Text for the coordinator** (files this lane does not edit):
+
+- `docs/claude_juicelab_failures.md`, two entries:
+
+> ### F-1XX — AU-SITETREE's implementation broke its own "seen only once shown" rule in two paths, claimed a tie-break it lacked, and its K4 asserted nothing the pre-fix code failed
+> - **What:** in `e55379d`..`eb95cd4`, `loadNode` ignored a failed Contents fetch, so a refresh drew an empty node, counted as a success and marked the version seen -- the rule PA-0534(5) this lane wrote; `expand()` marked a group current after a failed refresh; `identity()` had no occurrence suffix although DRAFT D5/R7 and FR-UI-514 said unkeyed siblings are told apart; `store_version`'s docstring claimed only a commit changes the version (a TRUNCATE checkpoint does); and K4, named as the watch's regression test, passed its own assertions on the pre-fix `project.py` (only the audit hook failed it). The lane's revert proofs (§11.4) were derived from the tests it had written, not from each rule's every path, so none of these was tried.
+> - **Evidence:** the confirming reviews of `eb95cd4` (`scratchpad/rev-sitetree-b-probe/probe3.py`); `scratchpad/au-sitetree/rev3/old.out` (four new tests failing on `eb95cd4`), `rev3/k4.out`; DRAFT-AU-SITETREE §11.7.
+> - **Impact:** none landed (caught in review). A failed Contents fetch would have shown a node as empty and never been retried; a stale group would have stayed stale; duplicate tree items would have grown at every refresh.
+> - **Status:** fixed in `5e4a48b`, each with a test that fails on `eb95cd4` (K4 on the pre-fix `project.py`).
+
+> ### F-1XX — AU-SITETREE's measurement of the watch's consequences dropped the watch's own locks
+> - **What:** the first version of `rev3/m_arch.py` copied the watched store's main file with `shutil.copyfile` in the process holding the watch -- BUG-0535's own mechanism -- so the watch's locks were gone and another process's switch out of WAL "succeeded". The lane noticed the contradiction with a second measurement, found the cause, moved the copy to another process and re-measured: the switch gets BUSY.
+> - **Evidence:** `scratchpad/au-sitetree/rev3/m_arch.py` (with the comment on the first version), `m_arch.out`, `m_arch2.out`.
+> - **Impact:** none: caught before it was reported; it would have told the coordinator one of the two ARCHITECTURE consequences was wrong.
+> - **Status:** corrected; DRAFT §11.7 states the measured result.
+
+- `docs/PREVENTIVE_ACTIONS.md`, PA-0534, two amendments (the coordinator applies them):
+  - (5) becomes: "**A live view marks a version seen only once its refresh of that version
+    succeeded -- every fetch the refresh draws from** (each group's pages, the selection's
+    summary, findings and contents), a non-200 answer being a failure, never an empty
+    result: a failed refresh keeps what is shown, says so once, and is retried at the
+    next poll; a test injects a failed fetch into each kind of fetch to prove it."
+  - Its Enforced-by line gains:
+    `tests/test_web_sitetree_browser.py::test_a_refresh_whose_contents_fetch_fails_keeps_the_table_and_is_retried`,
+    `tests/test_web_sitetree_browser.py::test_a_group_whose_refresh_fails_on_expand_is_retried_at_the_next_expand`,
+    `tests/test_web_sitetree_browser.py::test_unkeyed_siblings_with_one_label_keep_distinct_identities_across_refreshes`.
+- `docs/ARCHITECTURE.md`: both consequences as the coordinator worded them are measured
+  right (above); suggested precision: "...or `locking_mode=EXCLUSIVE`, gets BUSY (a
+  plain `BEGIN EXCLUSIVE` does not)".

@@ -46,6 +46,15 @@ Newest first.
   - [x] the opener, `is_sqlite`, the `inspect`/`summary`/`copy_to` changes, the age bound — done
   - [x] FR-CORE-508 added; BUG-0535; texts for PA-0535, SP-59, ERROR_LOG and CHANGELOG to the coordinator — done
   - [x] verified with CC-UI-0068 and CC-FUZZ-0108 (one harness run) — done
+- Revision after the review of `eb95cd4` (DRAFT-AU-SITETREE §11.7; tests only, no CORE
+  code change): K4 now proves the claim the reviewer found it did not (the side files
+  after the listing, a version right after it, one watch epoch across the scan; it fails
+  at its own assertion on the pre-fix `project.py` with the audit hook disarmed); the
+  static guard of FR-CORE-508 resolves opener aliases (`import shutil as sh`, `from os
+  import open as o`, `from shutil import copyfile`, `io.FileIO`), proven on synthetic
+  offenders, with no new site in the web scope (still 60 allowances, 64 sites, 32
+  modules); the audit hook does two set lookups per open instead of a union (0.86 ms
+  per open at 20k stores, the reviewer's measurement).
 - Effectiveness (assessed 2026-10-20): `scripts/verify_change.py --base 4ee8007` on the committed tree `eb95cd4` (`3fb76bb` plus the merge of `01192c3`; the whole suite, since `tests/conftest.py` changed): **408 files, 8248 passed, 0 failed, 0 errors, 42 skipped, 36 xfailed**, one parallel pass, 1729 s (`scratchpad/au-sitetree/impl/vc_eb95cd4/`). The 42 skips are sandboxes, optional extras and tools absent here; none is a web, store or browser test. `test_core_store_read_only.py` 5 passed,
   `test_web_store_locks.py` 8, `test_core_project.py` 90, `test_web_projects.py` 123,
   `test_query_placement.py` 118 (8 xfailed). Re-proved against the implementation

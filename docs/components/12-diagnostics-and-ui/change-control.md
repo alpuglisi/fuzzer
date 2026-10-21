@@ -72,6 +72,40 @@ Newest first.
   ever); the moved-store checkpoint (measured: data loss and a wrong store without it);
   a refresh's group fetch reaches its last shown item (an exact-count fetch hid an item
   appended to a complete group); `data-loads`.
+- Revision after the review of `eb95cd4` (both reviewers REVISE, one blocking finding
+  each; the one revision round; DRAFT §11.7). Commit `5e4a48b`:
+  - **Blocking (UI):** a refresh whose Contents fetch (the selected node's
+    `/api/sitetree/children`) failed counted as a success: `loadNode` checked only the
+    summary, `showNode` drew an empty table and returned true, and the version was
+    marked seen, against this entry's own rule. Now a non-200 Contents answer is a
+    failure: the shown table stays, the status line says so, `showNode` returns false and
+    the next poll retries. `expand()` marks a group current only when its load or
+    refresh succeeded. Tests: `test_a_refresh_whose_contents_fetch_fails_keeps_the_table_and_is_retried`,
+    `test_a_group_whose_refresh_fails_on_expand_is_retried_at_the_next_expand`.
+  - **Blocking (store):** K4 (`test_a_projects_listing_never_drops_the_store_watchs_locks`)
+    passed its own assertions on the pre-fix `project.py` (the side files went, the
+    identity re-check reopened the watch, a new epoch made every version differ); only
+    the audit hook's teardown failed it. It now asserts the side files after the
+    listing, a version right after it, and one epoch across the scan.
+  - Also: unkeyed tree siblings with one label get an occurrence suffix (`#2`), as the
+    draft said (`identity` lacked it: each refresh added a duplicate); the status line is
+    written only when its text changes and cleared only by a success; `loadSeq` drops an
+    answer overtaken by a later load; the double-click test waits on `data-loads` and G4
+    follows module-level helpers; `store_version`'s docstring no longer claims that
+    nothing but a commit changes the version (a TRUNCATE checkpoint does, measured; FULL
+    and RESTART do not, now tested); the audit hook does two set lookups per open, not a
+    union; the static guard resolves opener aliases (`import shutil as sh`, `from os import
+    open as o`, `io.FileIO`); `_xproc.wal_header`'s raw `-wal` read is reasoned.
+  - Stated residuals: both poll intervals (`sitetree_poll_ms`, `diagram_poll_ms`) are
+    clamped to `sitetree.MAX_POLL_MS` (30 s); a group whose refresh fails on expand is
+    retried at the next expand or the next write, not by the poll; the occurrence suffix
+    is positional among same-label unkeyed siblings only; the static guard does not
+    follow a method call, `getattr` or a computed name, and G4 does not follow a method
+    (`tab.item`); measured consequences of the watch (`rev3/m_arch.out`): while a page
+    polls, a writer's last close does not fold the WAL (the `.fuzzlab` file is not
+    self-contained until the watch is released, as with any open reader), and another
+    process's switch out of WAL or `locking_mode=EXCLUSIVE` gets `SQLITE_BUSY` (a plain
+    `BEGIN EXCLUSIVE` does not); no fuzzlab code does either to a store.
 - Impact:
   - The web UI, plus CORE's opener (CC-CORE-0071). No schema or API-shape change:
     `{"version": str | null}` stays opaque.
@@ -99,6 +133,8 @@ Newest first.
   - [x] FR-UI-505, FR-UI-510 edited; FR-UI-514 added; NFR-UI-live, NFR-UI-read-only amended — done
   - [x] BUG-0534; texts for PA-0534, SP-58, ERROR_LOG, CHANGELOG, ARCHITECTURE to the coordinator — done
   - [x] `scripts/verify_change.py --base 4ee8007` on the committed tree; counts quoted — done
+  - [x] the review of `eb95cd4`: both blocking findings, the eight further items, each new test failing on `eb95cd4` and each revert re-proved (DRAFT §11.7) — done
+  - [ ] `scripts/verify_change.py --base eb95cd4` on the final commit — counts in the report to the coordinator (a later commit would not be the verified one)
 - Effectiveness (assessed 2026-10-20): `scripts/verify_change.py --base 4ee8007` on the committed tree `eb95cd4` (`3fb76bb` plus the merge of `01192c3`; the whole suite, since `tests/conftest.py` changed): **408 files, 8248 passed, 0 failed, 0 errors, 42 skipped, 36 xfailed**, one parallel pass, 1729 s (`scratchpad/au-sitetree/impl/vc_eb95cd4/`). The 42 skips are sandboxes, optional extras and tools absent here; none is a web, store or browser test. The browser files, under
   `FUZZLAB_REQUIRE_BROWSER=1`: `test_web_sitetree_browser.py` 36 passed,
   `test_web_diagrams.py` 21, `test_web_pages_browser.py` 10, `test_web_projects_browser.py` 2,

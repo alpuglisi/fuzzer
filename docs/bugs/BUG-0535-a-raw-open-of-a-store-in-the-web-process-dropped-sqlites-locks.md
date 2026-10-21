@@ -92,6 +92,14 @@ CC-CORE-0071 (this item's implementation commit on branch
   plugin the web process loads (`web/app.py:444`), a module imported by a computed name
   -- unless a web test runs it; opens by C code that raise no audit event; opens in
   another process.
+- Review of `eb95cd4` (DRAFT-AU-SITETREE §11.7): K4 passed its own assertions on the
+  pre-fix code (the identity re-check reopened the watch and a new epoch changed every
+  version); it now asserts the side files after the listing, a version right after it
+  and one epoch across the scan, and fails at its own assertion on the pre-fix
+  `project.py` with the audit hook disarmed. The static guard resolves opener aliases
+  (`import shutil as sh`, `from os import open as o`, `io.FileIO`); a method call,
+  `getattr` and a computed name remain unseen statically (the audit hook sees them at
+  run time).
 
 ## Recurrence review
 Searched `docs/bugs/` for fcntl, flock, lock, WAL, `-wal`, shm, checkpoint, raw open,
