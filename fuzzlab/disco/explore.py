@@ -46,16 +46,24 @@ action, restore and load, the answers the context got since the last check are
 classified by SP-56 (`core.comparability.response_class`, with SP-16's `login_facts`):
 a credentialed auth failure (a 401 or a login redirect that is not a credential
 submission) and a page at a login URL or showing this session's login form in place
-(SP-16) are *suspected* losses, a policy block (403) a suspected denial. With a provider,
-SP-61 (`SessionManager.check_health`) decides for the context's generation: live, a
-policy block or an answer is an authorization denial and nothing changes; lost, the
+(SP-16; without a known form, a password form where the page was seen without one: the
+URL before an action, the state restored, the start page) are *suspected* losses, a
+policy block (403) a suspected denial. With a provider, SP-61
+(`SessionManager.check_health`) decides for the context's generation: live, a policy
+block or an answer is an authorization denial and nothing changes, but a login page
+after an action means the context lost its copy, whatever answer came with it; lost, the
 provider gives a fresh session (a new login, never the snapshot the run started from),
 which must pass its own protected check before the old context is released and
-**closed** and a new one carries it. Without a provider a loss shape is an unconfirmed
-loss and a policy block never is one (PA-0533(1)). A loss nothing resolves ends the
-authenticated exploration, its reason in the report (`auth_ended`). The action ids whose
-answers fell in a known-lost window are marked (a ``session`` line in the action log,
-`ExploreReport.session_lost_actions`): never authenticated coverage (D').
+**closed** and a new one carries it. Without a provider, the start page is the run's
+protected resource when SP-61's `health_verdict` reads it live with the context's
+cookies and refused without them, and a suspicion is decided by a GET of it with the
+context's cookies; with none, a loss shape is an unconfirmed loss and a policy block
+never is one (PA-0533(1)). A loss nothing resolves ends the authenticated exploration,
+its reason in the report (`auth_ended`). A generation found lost is recorded for every
+worker at the verdict, before any recovery: no worker acts on it again, and each marks
+what it sent on it. The action ids whose answers fell in a known-lost window are marked
+(a ``session`` line in the action log, `ExploreReport.session_lost_actions`, read by
+`disco.capture.lost_action_ids`): never authenticated coverage (D').
 """
 
 from __future__ import annotations
@@ -72,8 +80,8 @@ from urllib.parse import urldefrag, urljoin, urlsplit, urlunsplit
 
 from fuzzlab.core.comparability import AUTH_FAILURE, POLICY_BLOCK, response_class
 from fuzzlab.core.redaction import redact_url
-from fuzzlab.core.urls import (destructive_reason, in_origin_scope, origin_scope,
-                               spa_route, text_destructive_reason)
+from fuzzlab.core.urls import (destructive_reason, document_key, in_origin_scope,
+                               origin_scope, spa_route, text_destructive_reason)
 from fuzzlab.disco import formfill
 from fuzzlab.disco.capture import ACTION_HEADER
 from fuzzlab.disco.fingerprint import element_signature, normalise_route, state_fingerprint
@@ -274,6 +282,9 @@ class State:
     path: list[Step] = field(default_factory=list)
     fallback: "State | None" = None
     core: frozenset = frozenset()
+    #: FR-CRAWL-41: the state showed a password form when it was found (an authenticated
+    #: run): a restore that shows one is the state's own page, never a sign of a loss
+    login_shown: bool = False
 
 
 class Frontier:
@@ -463,6 +474,14 @@ class _Shared:
         self.auth_lock = threading.RLock()
         self.auth: "_SessionMaterial | None" = None
         self.recoveries = 0
+        #: the generations a worker found lost (or unresolved): recorded at the verdict,
+        #: under `auth_lock`, before any recovery, so that no worker whose context still
+        #: carries one acts on it or clears its window (BUG-0552 review B1)
+        self.lost_generations: set = set()
+        #: a run without a session provider: the protected resource its suspicions are
+        #: checked against (`Explorer._find_protected_resource`; None: none, a loss
+        #: shape is an unconfirmed loss)
+        self.protected: str | None = None
 
 
 def refusal(el: dict, deny: tuple[str, ...]) -> str | None:
@@ -479,6 +498,13 @@ def refusal(el: dict, deny: tuple[str, ...]) -> str | None:
         if url and destructive_reason(url):
             return "destructive-url"
     return None
+
+
+def _same_place(url: str, other: str) -> bool:
+    """The same document (`core.urls.document_key`) and the same fragment: a page shown
+    there now replaced the one seen there before, in place (FR-CRAWL-41)."""
+    return document_key(url) == document_key(other) and \
+        urlsplit(url or "").fragment == urlsplit(other or "").fragment
 
 
 #: Input types that are clicked on their own (the rest are filled through their form).
@@ -784,18 +810,51 @@ class Explorer:
                                          f"({health.state}: {health.reason})")
         return material
 
-    def _session_current(self, page):
-        """The page to go on with: this worker's context replaced when the run's session
-        moved to a newer generation (another worker recovered it), and a page of this
-        worker's live context when ``page`` was closed with a replaced one."""
+    def _generation_gone(self) -> bool:
+        """BUG-0552 review B1: the session this context carries is no longer the run's
+        -- a newer generation was installed, or a worker found this one lost (recorded
+        at its verdict, before any recovery). An anonymous context carries none."""
+        gen = self._ctx_generation
+        if gen is None:
+            return False
+        shared = self._shared
+        auth = shared.auth
+        if auth is not None and auth.generation != gen:
+            return True
+        with shared.lock:
+            return gen in shared.lost_generations
+
+    def _gone_reason(self) -> str:
         auth = self._shared.auth
         if auth is not None and auth.generation != self._ctx_generation:
-            return self._replace_context(page)
+            return "a newer session was installed meanwhile"
+        return "another worker found this session lost"
+
+    def _note_gone(self) -> None:
+        """Record that the generation this context carries is lost for every worker.
+        The caller holds `auth_lock`: a worker that reads the record waits there for the
+        recovery decision that follows, and adopts its session or stops."""
+        if self._ctx_generation is not None:
+            with self._shared.lock:
+                self._shared.lost_generations.add(self._ctx_generation)
+
+    def _session_current(self, page):
+        """The page to go on with: this worker's context replaced when the session it
+        carries is gone (another worker installed a newer generation or found this one
+        lost) -- the action ids it sent since its last checkpoint marked first (stale),
+        then, single flight, the newer session adopted or, when the run's authenticated
+        exploration ended, nothing more (the caller reads ``stop``) -- and a page of
+        this worker's live context when ``page`` was closed with a replaced one."""
+        if self._generation_gone():
+            reason = self._gone_reason()
+            with self._shared.auth_lock:
+                self._mark_window("stale", reason, empty_too=False)
+                return self._recover_session(page, "stale", reason)
         if page.is_closed():
             return self._ctx.new_page()
         return page
 
-    def _session_checkpoint(self, page, *, asked: str | None = None,
+    def _session_checkpoint(self, page, *, asked: str | None = None, places=(),
                             login_shown: bool = False, before_url: str | None = None,
                             action: bool = False):
         """Was the session this context carries lost since the last checkpoint (after
@@ -804,30 +863,37 @@ class Explorer:
         checkpoint fell in a known-lost window -- marked, logged, and the session
         recovered or the authenticated exploration ended (`_recover_session`).
 
-        The suspicion (`_loss_signal`) is read through the session layer's owners only;
-        the decision is SP-61's for the context's generation (`_confirm_loss`). A newer
-        generation installed meanwhile makes the window stale (lost, the action not
-        blamed). ``asked``: the URL the step asked for (a link, a harvest URL, the
-        state's): a login page asked for is no sign. ``login_shown``: the state already
-        showed a login form. ``before_url``: the page's URL before the action (a login
-        form rendered in place is one at the same URL). ``action``: after an action,
-        a login page on a session the check finds live means the context no longer
-        carries it (`reinstall`); elsewhere such a page is the state's own."""
+        The suspicion (`_loss_signs`) is read through the session layer's owners only;
+        the decision is SP-61's for the context's generation (`_confirm_loss`). A
+        generation another worker found lost, or a newer one installed meanwhile, makes
+        the window stale (the action not blamed). A lost, stale or unresolved verdict is
+        recorded for every worker (`_Shared.lost_generations`) under `auth_lock`, before
+        the recovery it starts (BUG-0552 review B1). ``asked``: the URL the step asked
+        for (a link, a harvest URL, the state's): a login page asked for is no sign.
+        ``places``: URLs whose page showed no password form (the state restored, the
+        start page): one shown there now is in place. ``login_shown``: the page already
+        showed one. ``before_url``: the page's URL before the action. ``action``: after
+        an action, a login page on a session the provider's check finds live means the
+        context no longer carries it (`reinstall`), whatever answer came with it;
+        elsewhere such a page is the state's own."""
         shared = self._shared
-        signal = self._loss_signal(page, asked=asked, login_shown=login_shown,
-                                   before_url=before_url)
-        auth = shared.auth
-        if auth is not None and auth.generation != self._ctx_generation:
-            verdict, reason = "stale", "a newer session was installed meanwhile"
-        elif signal is None:
+        primary, page_sign = self._loss_signs(page, asked=asked, places=places,
+                                              login_shown=login_shown,
+                                              before_url=before_url)
+        if self._generation_gone():
+            verdict, reason = "stale", self._gone_reason()
+        elif primary is None:
             self._window_tags = set()
             return page, None
         else:
-            kind, reason, url = signal
+            kind, reason, url = primary
             self._bump("session_suspected")
             verdict, why = self._confirm_loss(kind, url)
-            if verdict == "reinstall" and not action:
-                verdict = "live"
+            if verdict == "live" and action and self.session is not None and \
+                    page_sign is not None and page_sign[2]:
+                # a login page after an action on a live session: the context no longer
+                # carries it, whichever answer (a 401 its script read) came first (R2)
+                verdict, reason, why = "reinstall", page_sign[0], ""
             if verdict == "live":
                 # an answer or a policy block refused on a live session; a login page a
                 # restore or a load shows is that state's own page
@@ -837,54 +903,92 @@ class Explorer:
                 return page, None
             if why:
                 reason = f"{reason}; {why}"
+        with shared.auth_lock:
+            if verdict in ("lost", "stale", "unknown"):
+                self._note_gone()
+            if verdict == "lost":
+                self._bump("session_lost")
+            self._mark_window(verdict, reason)
+            page = self._recover_session(page, verdict, reason)
+        return page, (verdict, reason)
+
+    def _mark_window(self, verdict: str, reason: str, *, empty_too: bool = True) -> list:
+        """Mark the action ids this context's requests went out under since its last
+        clean checkpoint (D'): `session_lost_actions` and one ``session`` line. With
+        ``empty_too`` false an empty window writes nothing."""
         window = sorted(t for t in self._window_tags if t)
         self._window_tags = set()
-        with shared.lock:
-            if verdict == "lost":
-                self.report.session_lost += 1
+        if not window and not empty_too:
+            return window
+        with self._shared.lock:
             self.report.session_lost_actions.extend(window)
         self._log_session_event(verdict, reason, window)
         logging.warning("disco: the session was %s (%s); %d action id(s) marked",
                         verdict, reason, len(window))
-        page = self._recover_session(page, verdict, reason)
-        return page, (verdict, reason)
+        return window
 
-    def _loss_signal(self, page, *, asked: str | None, login_shown: bool,
-                     before_url: str | None) -> tuple[str, str, str] | None:
-        """The first sign since the last checkpoint that the context's session may be
-        lost: ``(kind, reason, url)`` -- ``answer`` (SP-56 classes an answer a
-        credentialed auth failure), ``page`` (the page is at a login URL, or shows this
-        session's login form, SP-16), else ``policy`` (a credentialed policy block:
-        only a protected check tells it from a denial) -- or None. Reasons name a class
-        and a status, never a URL."""
+    def _loss_signs(self, page, *, asked: str | None, places, login_shown: bool,
+                    before_url: str | None):
+        """The signs since the last checkpoint that the context's session may be lost:
+        ``(primary, page_sign)``. ``primary`` is the one the check decides, ``(kind,
+        reason, url)``: ``answer`` (SP-56 classes an answer a credentialed auth
+        failure), else ``page`` (`_page_sign`), else ``policy`` (a credentialed policy
+        block: only a protected check tells it from a denial), or None. ``page_sign``
+        is the page's own, ``(reason, url, strong)``, read whatever the answers were
+        (BUG-0552 review R2). Reasons name a class and a status, never a URL."""
         auth = self._shared.auth
         answers, self._answers = self._answers, []
         if auth is None:
-            return None
-        policy = None
+            return None, None
+        answer = policy = None
         for req in answers:
             got = self._answer_class(req, auth)
             if got is None:
                 continue
             cls, why = got
             if cls == AUTH_FAILURE:
-                return "answer", why, req.url
+                answer = ("answer", why, req.url)
+                break
             if cls == POLICY_BLOCK and policy is None:
                 policy = ("policy", why, req.url)
+        page_sign = self._page_sign(page, auth, asked=asked, places=places,
+                                    login_shown=login_shown, before_url=before_url)
+        shown = ("page", page_sign[0], page_sign[1]) if page_sign else None
+        return answer or shown or policy, page_sign
+
+    def _page_sign(self, page, auth: _SessionMaterial, *, asked: str | None, places,
+                   login_shown: bool, before_url: str | None):
+        """A page that *became* a login page: ``(reason, url, strong)`` or None. Never
+        one the step asked for. At a login URL (unless the page before the action was
+        one); else, unless the page already showed a password form: this session's
+        login form (SP-16, when the provider knows it), or, with none known, any
+        password form -- *strong* in place (at the URL before the action, of the state
+        restored or of the start page: pages known without one; BUG-0552 review R1),
+        *weak* elsewhere (a harvest load, a navigation: nothing was seen there before),
+        and a weak one only where a protected check decides it (`_checkable`)."""
         url = page.url
-        # a page sign is a page that *became* a login page: never one the step asked
-        # for, nor one the state already was (a login URL, or its login form shown)
-        was_login = login_shown or bool(before_url and looks_like_login_url(before_url))
-        if not was_login and not (asked and looks_like_login_url(asked)):
-            if looks_like_login_url(url):
-                return "page", "the page is at a login URL", url
-            # this session's login form (SP-16); with no known login form, any password
-            # form only where it replaced the page in place (a coarse rule otherwise)
-            in_place = auth.login_url is not None or \
-                (before_url is not None and url == before_url)
-            if in_place and self._shows_login(page):
-                return "page", "a login form is shown in place", url
-        return policy
+        if asked and looks_like_login_url(asked):
+            return None
+        before_login = bool(before_url and looks_like_login_url(before_url))
+        if looks_like_login_url(url):
+            return None if before_login else ("the page is at a login URL", url, True)
+        if login_shown or before_login:
+            return None
+        if auth.login_url is not None:
+            return ("a login form is shown in place", url, True) \
+                if self._shows_login(page) else None
+        in_place = any(p and _same_place(url, p) for p in (before_url, *places))
+        if not in_place and not self._checkable():
+            return None
+        if not self._shows_login(page):
+            return None
+        return ("a login form is shown in place", url, True) if in_place else \
+            ("a password form is shown", url, False)
+
+    def _checkable(self) -> bool:
+        """Whether a suspicion here is decided by a protected check: the session
+        provider's (SP-61), or, without one, the run's protected resource."""
+        return self.session is not None or self._shared.protected is not None
 
     def _answer_class(self, req, auth: _SessionMaterial) -> tuple[str, str] | None:
         """SP-56's class of one answer the context got on the session's origins, with
@@ -926,28 +1030,91 @@ class Explorer:
 
     def _confirm_loss(self, kind: str, url: str) -> tuple[str, str]:
         """SP-61's verdict on a suspicion, for the generation the context carries:
-        ``("live" | "reinstall" | "lost" | "stale" | "unknown", why)``. Without a
-        provider there is no protected check: a loss shape is an unconfirmed loss and a
-        policy block never is one (PA-0533(1)). Live, an answer or a policy block was
-        an authorization denial; a login page on a live session means the context no
-        longer carries it (``reinstall``)."""
-        if self.session is None:
-            return ("live", "") if kind == "policy" else \
-                ("lost", "unconfirmed: no protected check without a session provider")
+        ``("live" | "lost" | "stale" | "unknown", why)``. With a provider, its
+        `check_health`. Without one, the run's protected resource
+        (`_find_protected_resource`) fetched with this context's cookies and judged by
+        SP-61's `health_verdict` (BUG-0552 review R3); with none, a loss shape is an
+        unconfirmed loss and a policy block never is one (PA-0533(1)). Live, an answer
+        or a policy block was an authorization denial (`_session_checkpoint` makes a
+        login page after an action on a provider's live session a ``reinstall``)."""
         from fuzzlab.session.manager import LIVE, LOST, STALE, SessionAuthError
-        sess = self.session
-        try:
-            health, _moved = sess.manager.check_health(
-                urlsplit(sess.base_url).hostname or "", sess.identity, sess.base_url,
-                generation=self._ctx_generation, signal_url=url, policy=kind == "policy",
-                pause=False)
-        except SessionAuthError as exc:
-            return "unknown", f"the protected check could not run ({type(exc).__name__})"
+        if self.session is None:
+            if self._shared.protected is None:
+                return ("live", "") if kind == "policy" else \
+                    ("lost", "unconfirmed: no protected check without a session provider")
+            health = self._context_check()
+        else:
+            sess = self.session
+            try:
+                health, _moved = sess.manager.check_health(
+                    urlsplit(sess.base_url).hostname or "", sess.identity, sess.base_url,
+                    generation=self._ctx_generation, signal_url=url,
+                    policy=kind == "policy", pause=False)
+            except SessionAuthError as exc:
+                return "unknown", \
+                    f"the protected check could not run ({type(exc).__name__})"
         if health.state == LIVE:
-            return ("reinstall" if kind == "page" else "live"), ""
+            return "live", ""
         if health.state in (LOST, STALE):
             return ("lost" if health.state == LOST else "stale"), health.reason
         return "unknown", f"{health.state}: {health.reason}"
+
+    # --- a protected check without a session provider (BUG-0552 review R3) -------------
+    def _protected_get(self, url: str, storage_state: dict | None):
+        """SP-61's verdict (`session.manager.health_verdict`) on one GET of ``url``:
+        with ``storage_state`` (a context's cookies and storage) or with no credential
+        at all (an empty ``Cookie``), from a request context of its own -- sent straight
+        to the target, never through the capture proxy, so it is never recorded as the
+        identity's exploration -- following no redirect (a login redirect is judged as
+        one). A failure to get an answer is INCONCLUSIVE; TLS is verified."""
+        from fuzzlab.session.manager import INCONCLUSIVE, Health, health_verdict
+        from fuzzlab.session.state import SessionState
+        navguard.checked_api_request(self._in_scope, url)
+        api = self._pw.request.new_context(storage_state=storage_state) \
+            if storage_state is not None else self._pw.request.new_context()
+        try:
+            resp = api.fetch(url, method="GET", max_redirects=0,
+                             timeout=self.opts.nav_timeout_ms,
+                             headers=None if storage_state is not None else {"cookie": ""})
+            status, headers, body = resp.status, dict(resp.headers or {}), resp.text()
+        except (_pw_error(), UnicodeDecodeError) as exc:
+            return Health(INCONCLUSIVE, f"no response ({type(exc).__name__})", 0)
+        finally:
+            try:
+                api.dispose()
+            except _pw_error():  # gone with its Playwright instance
+                pass
+        state = SessionState(urlsplit(url).hostname or "", "explore", kind="cookie",
+                             generation=0)
+        return health_verdict(state, status, headers, body, url, refusal=False)
+
+    def _context_check(self, url: str | None = None):
+        """The run's protected resource (or ``url``) fetched with this context's own
+        cookies and storage: is the session the context carries live?"""
+        from fuzzlab.session.manager import INCONCLUSIVE, Health
+        try:
+            storage = self._ctx.storage_state()
+        except _pw_error() as exc:  # the context went away under the read
+            return Health(INCONCLUSIVE, f"no context ({type(exc).__name__})", 0)
+        return self._protected_get(url or self._shared.protected, storage)
+
+    def _find_protected_resource(self, page) -> None:
+        """A storage-state run's protected resource (BUG-0552 review R3): the start
+        page's URL, kept only when SP-61's verdict reads a GET of it with this context's
+        cookies as live and one with no credential as refused (a login redirect, a 401,
+        a login form). Its suspicions are then decided by a GET of it with the suspected
+        context's cookies (`_context_check`); without one a loss shape stays an
+        unconfirmed loss (PA-0533(1))."""
+        from fuzzlab.session.manager import LIVE, LOST
+        url = urldefrag(page.url)[0]
+        if not self._in_scope(url) or destructive_reason(url) or looks_like_login_url(url):
+            return
+        if self._context_check(url).state != LIVE:
+            return
+        if self._protected_get(url, None).state != LOST:
+            return
+        with self._shared.lock:
+            self._shared.protected = url
 
     def _recover_session(self, page, verdict: str, reason: str):
         """After a known-lost window: adopt a newer generation another worker installed,
@@ -964,13 +1131,13 @@ class Explorer:
                 return page
             current = shared.auth
             if current is None or current.generation == self._ctx_generation:
+                if verdict == "unknown":
+                    return self._end_authenticated(
+                        page, f"the session's health could not be decided ({reason})")
                 if self.session is None:
                     return self._end_authenticated(
                         page, f"the session was lost ({reason}) and no session provider "
                               f"is configured to refresh it")
-                if verdict == "unknown":
-                    return self._end_authenticated(
-                        page, f"the session's health could not be decided ({reason})")
                 if shared.recoveries >= self.opts.max_session_recoveries:
                     return self._end_authenticated(
                         page, f"the session was lost again ({reason}) after "
@@ -989,25 +1156,35 @@ class Explorer:
                             page, f"no fresh session after a loss ({reason}): {why}")
                     shared.auth = fresh
                     self._bump("session_recovered")
-        return self._replace_context(page)
+        return self._replace_context(page, verdict, reason)
 
-    def _replace_context(self, page):
+    def _replace_context(self, page, verdict: str | None = None, reason: str = ""):
         """Replace this worker's context with one carrying the run's current session:
         the old one released (its pages frozen, drained and closed through the guard, a
         refusing route left; SP-38) and **closed** before the new one is made, so
-        repeated losses never leave a context open (BUG-0552). What the old context was
-        still tracking goes with it. Returns the new context's page."""
+        repeated losses never leave a context open (BUG-0552). The action ids the old
+        context sent after its window was marked are marked with the same ``verdict``
+        (B1); the rest of what it was tracking goes with it. Returns the new context's
+        page."""
         old = self._ctx
-        self._answers, self._responses, self._window_tags = [], [], set()
-        self._net = Inflight(clock=self.clock)
         if old is not None:
             navguard.release(old)
             try:
                 old.close()
             except _pw_error():  # closed already, with its browser
                 pass
+        if verdict is not None:
+            self._mark_window(verdict, reason, empty_too=False)
+        self._answers, self._responses, self._window_tags = [], [], set()
+        self._net = Inflight(clock=self.clock)
         self._ctx = self._new_context(self._browser, self._pw)
         return self._ctx.new_page()
+
+    def _mark_leftover(self) -> None:
+        """At a worker's end, its context released: the action ids it sent after its
+        last checkpoint on a session that is gone are marked (B1)."""
+        if self._window_tags and self._generation_gone():
+            self._mark_window("stale", self._gone_reason(), empty_too=False)
 
     def _end_authenticated(self, page, reason: str):
         """End the run's authenticated exploration, saying why (``auth_ended``): the
@@ -1045,26 +1222,35 @@ class Explorer:
         self._log_action(self._action_seq, state, el, step, None)
 
     def _restore_checked(self, page, state: "State"):
-        """`_restore_any`, then in an authenticated run a session checkpoint: a restore
-        that ran on a lost session is tried once more on the recovered one. Returns
-        ``(page, restored)``."""
-        restored = self._restore_any(page, self._ctx, state)
+        """In an authenticated run: never on a session that is gone (`_session_current`
+        first, B1), then `_restore_any` and a session checkpoint -- a password form now
+        shown at the state's URL, by a state found without one, is in place (R1); a
+        restore that ran on a lost session is tried once more on the recovered one.
+        Returns ``(page, restored)``."""
         if not self._authenticated():
-            return page, restored
-        page, lost = self._session_checkpoint(page, asked=state.url)
+            return page, self._restore_any(page, self._ctx, state)
+        page = self._session_current(page)
+        if self._shared.stop is not None:
+            return page, False
+        check = {"asked": state.url, "places": (state.url, state.entry_url),
+                 "login_shown": state.login_shown}
+        restored = self._restore_any(page, self._ctx, state)
+        page, lost = self._session_checkpoint(page, **check)
         if lost is None:
             return page, restored
         if self._shared.stop is not None:
             return page, False
         restored = self._restore_any(page, self._ctx, state)
-        page, lost = self._session_checkpoint(page, asked=state.url)
+        page, lost = self._session_checkpoint(page, **check)
         return page, restored and lost is None and self._shared.stop is None
 
     def _seed_session(self, page):
-        """The start page on a live session: a checkpoint after its load; on a loss the
-        page is loaded once more on the recovered session. None when it stays lost or
-        the authenticated exploration ended."""
-        page, lost = self._session_checkpoint(page)
+        """The start page on a live session: a checkpoint after its load -- the run's
+        first look, so a password form wherever it landed is in place (R1); on a loss
+        the page is loaded once more on the recovered session. None when it stays lost
+        or the authenticated exploration ended."""
+        page, lost = self._session_checkpoint(page, asked=self.start_url,
+                                              places=(self.start_url, page.url))
         if lost is None:
             return page
         if self._shared.stop is not None:
@@ -1074,7 +1260,8 @@ class Explorer:
                           wait_until="load")
         self.mark_activity()
         self.wait_quiet(page)
-        page, lost = self._session_checkpoint(page)
+        page, lost = self._session_checkpoint(page, asked=self.start_url,
+                                              places=(self.start_url, page.url))
         return page if lost is None and self._shared.stop is None else None
 
     def mark_activity(self) -> None:
@@ -1445,6 +1632,7 @@ class Explorer:
                     self._work(browser, pw, seed=seed)
                 finally:
                     navguard.release(self._ctx)
+                    self._mark_leftover()
                     browser.close()
         except BaseException as exc:  # handed to run(), never lost
             with shared.lock:
@@ -1468,7 +1656,10 @@ class Explorer:
         self._document_first(nav.response, self.start_url)    # records the start document
         self.mark_activity()
         self.wait_quiet(page)
-        if self._authenticated():                 # FR-CRAWL-41: seeded on a live session
+        authenticated = self._authenticated()
+        if authenticated:                         # FR-CRAWL-41: seeded on a live session
+            if self.session is None:              # a protected check of its own (R3)
+                self._find_protected_resource(page)
             page = self._seed_session(page)
             if page is None:
                 return
@@ -1478,7 +1669,8 @@ class Explorer:
             self._bump("unrestorable")
             return
         root = State(got[0], page.url, page.url,
-                     core=frozenset(e["signature"] for e in got[1]))
+                     core=frozenset(e["signature"] for e in got[1]),
+                     login_shown=authenticated and self._shows_login(page))
         with shared.lock:
             shared.frontier.push(root)
             shared.known.add(got[0])
@@ -1545,7 +1737,9 @@ class Explorer:
         shared = self._shared
         authenticated = self._authenticated()
         if authenticated:
-            page = self._session_current(page)        # FR-CRAWL-41
+            page = self._session_current(page)        # FR-CRAWL-41: never a lost one (B1)
+            if shared.stop is not None:
+                return page
         ctx = self._ctx
         self._tag(ctx, "harvest")
         try:
@@ -1576,7 +1770,8 @@ class Explorer:
                 return page
             if got is not None:
                 state = State(got[0], page.url, page.url,
-                              core=frozenset(e["signature"] for e in got[1]))
+                              core=frozenset(e["signature"] for e in got[1]),
+                              login_shown=authenticated and self._shows_login(page))
                 with shared.lock:
                     if got[0] not in shared.known:
                         if shared.frontier.push(state):
@@ -1716,14 +1911,37 @@ class Explorer:
             if shared.stop is not None:
                 return
 
+    def _ready(self, page, state: State, step: Step, dirty: bool):
+        """The page and ``step``'s element to act on: the state restored when ``dirty``,
+        and never on a session that is gone (BUG-0552 review B1) -- checked again right
+        before the act, so a loss another worker found while this one read its page
+        means a restore on the adopted session first (once; a second loss leaves the
+        step). Returns ``(page, el, end, dirty)``: ``end`` ``stop`` or ``unrestorable``
+        ends the state; ``el`` None skips the step."""
+        authenticated = self._authenticated()
+        for _attempt in range(2):
+            if authenticated and self._generation_gone():
+                dirty = True               # `_restore_checked` adopts the session first
+            if dirty:
+                page, restored = self._restore_checked(page, state)
+                if self._shared.stop is not None:
+                    return page, None, "stop", False
+                if not restored:
+                    return page, None, "unrestorable", False
+                dirty = False
+            now = self.settled_fingerprint(page, self._ctx)
+            el = self._find(now[1], step) if now else None
+            if el is None or not (authenticated and self._generation_gone()):
+                return page, el, None, False
+            dirty = True
+        return page, None, None, True
+
     def _process(self, state: State, page, browser, pw):
         """Explore one state's pending steps. Returns the page to go on with (a lost
         session replaces the context, FR-CRAWL-41)."""
         shared = self._shared
         authenticated = self._authenticated()
-        if authenticated:
-            page = self._session_current(page)
-        page, restored = self._restore_checked(page, state)
+        page, restored = self._restore_checked(page, state)     # on a current session
         ctx = self._ctx
         if shared.stop is not None:
             return page
@@ -1734,7 +1952,7 @@ class Explorer:
         if got is None:
             self._bump("unrestorable")
             return page
-        login_shown = authenticated and self._shows_login(page)
+        login_shown = authenticated and (state.login_shown or self._shows_login(page))
         self._gather(page)
         route = normalise_route(state.url)
         with shared.lock:
@@ -1770,17 +1988,12 @@ class Explorer:
             if why:
                 self._refuse(why)
                 continue
-            if dirty:
-                page, restored = self._restore_checked(page, state)
-                ctx = self._ctx
-                if shared.stop is not None:
-                    return page
-                if not restored:
+            page, el, end, dirty = self._ready(page, state, step, dirty)
+            ctx = self._ctx
+            if end is not None:
+                if end == "unrestorable":
                     self._bump("unrestorable")
-                    break
-            dirty = False
-            now = self.settled_fingerprint(page, ctx)
-            el = self._find(now[1], step) if now else None
+                return page
             if el is None:
                 continue
             before_url = page.url
@@ -1829,13 +2042,16 @@ class Explorer:
             self._log_action(self._action_seq, state, el, step, new_fp, url=page.url)
             if new_fp != state.fp:
                 dirty = True
+                shown = authenticated and self._shows_login(page)
                 if page.url != before_url:
                     new = State(new_fp, page.url, page.url, core=core,
                                 fallback=State(new_fp, page.url, state.entry_url,
-                                               [*state.path, step], core=core))
+                                               [*state.path, step], core=core,
+                                               login_shown=shown),
+                                login_shown=shown)
                 else:
                     new = State(new_fp, page.url, state.entry_url,
-                                [*state.path, step], core=core)
+                                [*state.path, step], core=core, login_shown=shown)
                 with shared.lock:
                     if new_fp not in shared.known and \
                             self._explored_states() >= self.opts.max_states:

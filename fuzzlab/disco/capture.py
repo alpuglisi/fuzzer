@@ -332,3 +332,33 @@ def read_capture(path: str | os.PathLike) -> CaptureRead:
     tail = CaptureTail(path)
     records = [rec for _i, rec in tail.read(final=True)]
     return CaptureRead(records=records, quarantined=tail.quarantined)
+
+
+def lost_action_ids(run_dir: str | os.PathLike) -> frozenset[str]:
+    """The action ids a disco run marked as a known-lost window (FR-CRAWL-41, D'): the
+    ``action_ids`` of every ``{"kind": "session", ...}`` line of the run's
+    ``actions.jsonl`` (the explorer's mark; such a line has no ``seq``, so the action
+    readers pass over it). An answer captured under one of them was given to a session
+    known lost: never the identity's evidence. The one reader of the mark (SP-71): every
+    consumer of a capture's answers reads it here (`ede`; the others are pinned).
+
+    Read through `JsonlTail` (bounded per line, BUG-0536): a malformed or over-long line
+    marks nothing; a missing log is no mark."""
+    ids: set[str] = set()
+    tail = JsonlTail(Path(run_dir) / "actions.jsonl")
+    try:
+        for raw in tail.lines(final=True):
+            if raw is OVERLONG or not raw.strip():
+                continue
+            try:
+                doc = json.loads(raw.decode("utf-8"))
+            except (ValueError, UnicodeDecodeError, RecursionError):
+                continue
+            if not isinstance(doc, dict) or doc.get("kind") != "session":
+                continue
+            marked = doc.get("action_ids")
+            if isinstance(marked, list):
+                ids.update(a for a in marked if isinstance(a, str) and a)
+    except FileNotFoundError:
+        return frozenset()
+    return frozenset(ids)

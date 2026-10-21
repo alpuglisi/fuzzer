@@ -187,7 +187,123 @@ not only the owner's callers. Text and enforcement in `docs/PREVENTIVE_ACTIONS.m
 | `tools/spider.py` (`_session_intact`, `_reveal_session_check`, `_readopt_session`; deprecated, FR-CRAWL-21) | a manager's browser session | client-side check of its own cookies and storage, then `verify_live` (SP-61) | compliant: the server half is the owner's; a re-adoption is revalidated by `verify_live` before reveals go on, and a second loss stops them -- never trusted as fresh; its main context is never replaced, and its extra contexts are released and closed (`release(context); context.close()`) |
 | `tools/fetcher.py` (the auditor's browser, CC-AUD-0040) | a manager's browser session | no loss decision at all | no own predicate and no replacement: not this bug. Its pages after a server-side loss are a degraded discovery window, as BUG-0533's sweep stated (discovery, not evidence); residual, owner AUD |
 | `disco/runner.py` (the contract runner) | a profile's credential | classifies each answer by SP-56 (an auth failure is never a pass) | no loss decision, no replacement: compliant |
-| `disco/ede.py` | no session (an anonymous context) | -- | not a holder |
+| `disco/ede.py` | no session (an anonymous context) | -- | not a holder; **but a consumer of a capture's answers** (row below; corrected in review round 1) |
 | `proxy/session_capture.py` | a captured session, adopted into the manager | -- | the owner's path (`adopt`): compliant |
 | consumers of a capture's answers: `disco/synth.py` (`fuzzlab disco synth`) | -- | takes every answer as the endpoint's under the run's profile | **pinned** by a strict xfail naming its owner (`test_an_answer_in_a_lost_window_is_never_in_the_inventory`), PA-0531(4); residual |
-| `tools/store_adapter.import_disco`, `tools/observe` / `disco/livetrace` | -- | read requests and their URLs (points, the trace), not answers as the identity's evidence | not evidence consumers: a request the app made under the identity is a real point; the trace shows what happened; the `session` line has no `seq`, so both readers pass over it |
+| consumers of a capture's answers: `disco/ede.py` (`fuzzlab disco ede`; review round 1, B2) | -- | replays the last 2xx JSON answer per URL and tests every 2xx HTML document: a lost window's answer replaced the identity's | **fixed** (review round 1): `ede.replayable`, `ede.page_urls` and `EdeRunner` skip marked action ids; the CLI passes `capture.lost_action_ids(run)` |
+| consumers of a capture's answers: `tools/store_adapter.import_disco` (`fuzzlab auto`; review round 1, B2) | -- | a GET's status is the page row's (a 2xx page row gives header injection points) and path-template evidence (`_answered`), its HTML media type makes it a page | **pinned** by a strict xfail naming its owner, AUD (`test_import_disco_never_takes_a_lost_windows_answer_as_evidence`); residual. *(Corrected: this row first read "reads requests and their URLs, not answers"; lines 259-266 read the answer's status and media type.)* |
+| `tools/observe` / `disco/livetrace` | -- | the trace of what was exchanged (FR-AUD-28/29) | not an evidence consumer: the trace shows what happened; listed with its reason in `tests/test_lost_window_mark.py` |
+
+## Review round 1 (2026-10-21, on a1a93b1; DISCO4-B1, B2, R1, R2, R3)
+
+Five confirmed findings on the lane's commit, each reproduced by a test that fails on
+a1a93b1 and passes after (CC-CRAWL-0060's "Review round 1"; branch `lane/DISCO4-r1`).
+
+### What each was
+- **B1, a lost generation was the run's only once replaced.** The run recorded that a
+  generation was gone only by moving `_Shared.auth` after a fresh session was installed.
+  Until then -- the whole recovery, or for ever after `_end_authenticated` -- another
+  worker whose context carried the lost generation saw no generation change and no sign
+  in its own (anonymous-200) answers: its checkpoint cleared its window, its action was
+  logged with a new state and URL, and what it found was pushed and gathered as the
+  identity's coverage. `_session_current` dropped a pending window unmarked when it
+  replaced a context.
+- **B2, two consumers of a capture's answers did not read the mark.** `ede.replayable`
+  served the last 2xx JSON answer per URL (a lost window's `{"login": true}` over the
+  identity's), and `store_adapter.import_disco` took a lost window's status and media
+  type as page, header-point and path-template evidence. The sweep had listed `ede`
+  only as "not a holder" and `import_disco` as reading "requests, not answers".
+- **R1, the in-place rule held only right after an action.** Without a known login form
+  (every storage-state run), a password form counted only when the page's URL equalled
+  the URL before an action. A loss that landed on a restore, at the seed or on a harvest
+  load was unseen: measured on a1a93b1 with `form`, budget 1 -- the sid died on the root
+  state's restore, `session_lost` 0, the run harvested on the dead session and ended
+  with no loss reported.
+- **R2, an answer sign hid the page sign.** `_loss_signal` returned the first auth
+  failure before reading the page, so a 401 whose script then went to `/login` (the
+  usual SPA interceptor) was checked as an answer: live, an authorization denial, and
+  the context explored on without its session.
+- **R3, nothing confirmed a suspicion on the CLI's path.** Without a provider every
+  loss shape was an unconfirmed loss that ended the run, so a role-gated 401 or a login
+  redirect for a live session's role ended every `fuzzlab disco capture`.
+
+### Root cause analysis (Five Whys, across the five)
+1. *Why did these reach review?* The lane's tests drove one worker, one loss per run,
+   at the moment its fixture chose (after a click), and a provider for every
+   confirmation; each finding lives outside that envelope (a second worker, a loss on a
+   restore or at the seed, a 401 and a page together, no provider).
+2. *Why was the envelope that narrow?* The design was derived from the provider path
+   (SP-61's `check_health` and its generation), and the storage-state path -- the only
+   one the CLI reaches -- was treated as its degenerate case (PA-0533(1)'s unconfirmed
+   loss), not as the production path with its own needs (an in-place reference and a
+   protected check of its own).
+3. *Why was the loss of a generation not shared at once?* The explorer took the
+   manager's model (the state object moves on install) without the manager's other half:
+   the manager marks a generation lost at the verdict (`_mark_lost`) before any
+   re-login, so every holder of it sees the loss at once. The explorer had no such
+   record, so "lost" became visible only as "replaced".
+4. *Why did the sweep miss two consumers?* PA-0552(4)'s consumer list was written from
+   reading descriptions (what each module is for), not from the call graph (who reads a
+   capture's answers), and nothing enforced the list.
+5. *Why did the page sign depend on the answers?* The suspicion was one first-match
+   value, so whichever sign came first decided the kind of check, and the "reinstall"
+   decision (which needs the page sign) was keyed on that kind.
+
+**Root cause:** the session-loss decision was built and tested for one worker on the
+provider path; the state a decision changes (a generation's loss) was published only
+through the side effect of its recovery, and the rule that every consumer reads the mark
+had no mechanical check.
+
+### Corrective action
+CC-CRAWL-0060 "Review round 1": `_Shared.lost_generations` recorded at the verdict under
+the recovery lock, checked before every action, restore and load, with every gone
+window marked (B1); `disco.capture.lost_action_ids` read by `fuzzlab disco ede`, the
+importer pinned (owner AUD), and a guard over every capture reader (B2); a password form
+in place at the restored state's URL or the start page, `State.login_shown`, weak signs
+only where a check decides them (R1); the page sign read whatever the answers, a live
+verdict after an action with a strong page sign a reinstall (R2); the start page as a
+storage-state run's protected resource, judged by SP-61's `health_verdict` (R3).
+
+### Recurrence review and prior-preventive-action failure analysis
+- **Same root cause as BUG-0533 (PA-0533(2)):** "evidence is bound ... to its
+  generation ... every write compare-and-sets ... atomic with every install". The
+  manager meets it by marking a generation lost at the verdict; the explorer, a second
+  holder of a generation (PA-0552(1) made it a session consumer), re-implemented the
+  generation without that rule. **PA-0533(2) was too narrow for this holder**: it is
+  written about the manager's writes; PA-0552(1) routed the explorer's *decision*
+  through the owners but said nothing about *publishing* it to every holder of the
+  generation.
+- **PA-0552(4) not enforced:** it required every consumer to read the mark or be
+  pinned, and the lane's own sweep (its first application) missed two consumers. A
+  rule with a list and no guard: the list was wrong on day one.
+- **PA-0533(1) applied without its precondition:** its unconfirmed loss is for an
+  identity "without a resource"; the lane never tried to find one for a storage-state
+  run, so the fallback became the rule.
+- **PA-0113 (BUG-0113) and the in-place rule:** the coarse "any password form" rule was
+  narrowed to "after an action, at the same URL" to avoid its false positives; the
+  narrowing dropped the other places a page is known without a form (a restore, the
+  seed), which is R1.
+
+### Preventive action
+PA-0552 (text in the lane's `doc_texts.md`) gains rules 6-8: a holder of a session
+generation publishes its loss to every other holder at the verdict, before any recovery,
+and no holder acts, restores or loads on a generation known gone (checked before each
+step, not at state boundaries); every consumer of a capture's answers reads the mark,
+enforced by a whole-package guard over the capture readers (`tests/test_lost_window_mark.py`,
+proven on synthetic offenders), not by a hand-written list; a session holder without a
+manager establishes a protected resource of its own before falling back to PA-0533(1)'s
+unconfirmed loss, and its suspicions are decided by SP-61's public `health_verdict`.
+
+### Sweep (PA-0002) for the review round
+- *Every reader of a capture's records* (the guard's enumeration): `disco/cli.py::_ede`
+  (fixed), `disco/cli.py::_synth` (pinned), `tools/store_adapter.py::import_disco`
+  (pinned, AUD), `disco/livetrace.py::LiveTrace.__init__` / `finish` (the trace: not
+  evidence). No other.
+- *Every holder of a session generation shared across threads*: the explorer's workers
+  (fixed); the session manager (`_mark_lost` at the verdict, under its lock: compliant).
+  The deprecated spider's workers (FR-CRAWL-21) each check their own context after a
+  reveal (client-side, then `verify_live`); whether one worker's loss reaches the
+  others was **not examined** in this round -- flagged, not cleared (owner CRAWL, the
+  spider's own item).
+- *Every first-match suspicion*: `session.manager.observe` reads one answer per call
+  (no page); `detect_logout` decides one answer: no other first-match over mixed signs.

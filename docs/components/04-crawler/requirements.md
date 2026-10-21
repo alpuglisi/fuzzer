@@ -808,7 +808,10 @@ fuzzer.
   `ede.json`, with its JSON type and whether its name is sensitive, never its value. A
   finding is a candidate: a field used only after an interaction is reported too. The
   replayed answers never reach the target; the pages and their assets do (hence
-  `--authorized`); an existing `ede.json` is never overwritten.
+  `--authorized`); an existing `ede.json` is never overwritten. *(CC-CRAWL-0060,
+  FR-CRAWL-41, BUG-0552 review B2)* An answer recorded in the run's known-lost window
+  (its action id marked, `disco.capture.lost_action_ids`) is neither replayed nor a page
+  of the run.
 - **FR-CRAWL-26 (dry submission and blocked writes recorded, CC-CRAWL-0045,
   BUG-0506)** In the Playwright engine with SPA routes on and `--submit-spa-forms` not
   given, each eligible form on an SPA route is dry-submitted unless `--no-dry-submit` is
@@ -942,8 +945,17 @@ fuzzer.
     `browserauth.browser_session`: its cookies and a browser login's storage state; a
     session carried only in headers is refused (`SessionUnavailable`, raised at the
     start). The run holds one session **generation** at a time (the manager's; 0 for a
-    storage state) and every worker's context carries the current one: a worker whose
-    context is older replaces it before its next state or load.
+    storage state) and every worker's context carries the current one.
+  - **One generation for every worker** *(review B1)*. A lost, stale or unresolved
+    verdict is recorded for the whole run (`_Shared.lost_generations`) at the verdict,
+    under the recovery lock, before any recovery starts. A worker whose context carries
+    a generation that is gone (recorded lost, or a newer one installed) never acts,
+    restores or loads on it: it checks before every action, restore and harvest load
+    (`_ready`, `_restore_checked`, `_load`), not only at a state boundary; its
+    checkpoint marks its window (stale) even when its answers show no sign; it then
+    waits for the recovery decision and adopts the newer session or stops. The action
+    ids a context sent after its window was marked, up to its release (a replacement or
+    the worker's end), are marked too.
   - **Suspicion.** After every action, restore, harvest load and the seed, each request
     the context sent on the session's origins whose answer arrived whole
     (`requestfinished`) is classed by SP-56 (`core.comparability.response_class`,
@@ -951,21 +963,35 @@ fuzzer.
     (a 401 or a login redirect that is not a credential submission; never a 407, which
     is an auth failure to anyone) is a suspected loss, a policy block (403, 451) a
     suspected denial; a throttle, a gateway, an incomplete answer or another origin's
-    answer is no sign. The page at a login URL (`looks_like_login_url`) or showing this
-    session's login form (`shows_login_form` with the session's login page and fields;
-    with none known, any password form, and only where it replaced the page at the same
-    URL after an action) is a suspected loss -- unless the step asked for a login URL
-    (a link, a harvest URL, the state's own URL) or the state already showed the form.
+    answer is no sign. The page is read whatever the answers were *(review R2)*. The
+    page at a login URL (`looks_like_login_url`), or showing this session's login form
+    (`shows_login_form` with the session's login page and fields), is a suspected loss
+    -- unless the step asked for a login URL (a link, a harvest URL, the state's own
+    URL), or, for a form, the page already showed one. With no known login form, any
+    password form is one *(review R1)*: **in place** (strong) where the page was known
+    without one -- the URL before an action, the restored state's URL or entry URL (a
+    state records whether it showed a password form when found, `State.login_shown`),
+    the start page at the seed; elsewhere (a harvest load, a navigation) it is a weak
+    sign, raised only when a protected check will decide it.
   - **Decision.** With a provider: SP-61, `SessionManager.check_health` for the
     context's generation (``signal_url`` the answer's or page's URL, ``policy`` for a
     policy block, ``pause=False``). Live: an answer or a policy block was an
-    authorization denial (`authorization_denials`) and nothing changes; a login page
-    after an action on a live session means the context no longer carries it -- the
+    authorization denial (`authorization_denials`) and nothing changes; after an action,
+    a strong page sign on a live session means the context no longer carries it --
+    whichever answer (a 401 its script read) came with it *(review R2)* -- and the
     context is given the live session again (`session_reinstalled`); a login page a
-    restore or load shows is that state's own. Lost: confirmed. Stale (another
-    generation): the context is replaced with the current one. Inconclusive, or a check
-    that cannot run: unresolved. Without a provider there is no check: a loss shape is
-    an unconfirmed loss and a policy block never is one (PA-0533(1)).
+    restore or load shows, or a weak sign, is that page's own. Lost: confirmed. Stale
+    (another generation): the context is replaced with the current one. Inconclusive,
+    or a check that cannot run: unresolved. **Without a provider** *(review R3)*: at the
+    seed, the start page's URL becomes the run's protected resource when SP-61's
+    `health_verdict` reads a GET of it with the context's cookies as live and one with
+    no credential as refused (a login redirect, a 401, a login form); both GETs, and
+    each check, go straight to the target from a request context of their own (never
+    through the capture proxy: not the identity's exploration), follow no redirect and
+    verify TLS. A suspicion (a loss shape or a policy block) is then decided by a GET of
+    it with the suspected context's cookies (`health_verdict`): live, an authorization
+    denial; lost, confirmed; anything else, unresolved. With no such resource, a loss
+    shape is an unconfirmed loss and a policy block never is one (PA-0533(1)).
   - **Recovery** (single flight across workers): a newer generation another worker
     installed is adopted; else the provider's session is taken (`ensure`, which logs in
     again on a lost one), must be another generation, and must pass its own protected
@@ -986,15 +1012,26 @@ fuzzer.
     no URL and denied for the rest of the run (it may have ended the session), unless
     the window was stale; nothing a lost window showed becomes a state, a harvest URL's
     document or a gathered link. Reasons name a class and a status, never a URL.
+  - **Reading the mark** *(review B2)*. `disco.capture.lost_action_ids(run_dir)` is
+    the one reader of the mark (SP-71): the action ids of every `session` line, read
+    bounded (`JsonlTail`). Every function of `fuzzlab/` that reads a capture's records
+    reads the mark too, or is listed with its pin or reason
+    (`tests/test_lost_window_mark.py`). `fuzzlab disco ede` reads it (FR-CRAWL-25).
   - **Counters** (`explore.json`): `session_lost` (confirmed, or unconfirmed without a
     provider), `session_suspected`, `authorization_denials`, `session_recovered`,
     `session_reinstalled`, `session_lost_actions`, `auth_ended`.
   - **Not covered (residuals, BUG-0552):** `fuzzlab disco capture` offers a storage
-    state only (no provider flag yet); `disco synth` does not read the window's mark
-    (pinned by a strict xfail naming it); a context that lost its copy of a live
-    session is caught only through a login page, not through a 401 the check finds live
-    (an authorization answer); without a provider, a page that newly shows any password
-    form at the same URL reads as a loss.
+    state only (no provider flag yet). Two consumers do not read the window's mark yet,
+    each pinned by a strict xfail naming its owner: `disco synth` (CRAWL) and
+    `store_adapter.import_disco` (AUD: a lost window's status and media type are its
+    page and path-template evidence). The live trace shows a lost window's exchanges
+    as exchanged (not evidence). Answers a context got after the server invalidated its
+    session but before any worker's checkpoint found a sign are not marked (D′ covers a
+    session *known* lost). Without a provider and without a protected resource, a
+    password form at the same place reads as an unconfirmed loss, and one shown by a
+    harvest load or a navigation is no sign. With a resource, a context that lost only
+    its own copy of the session (its script cleared a cookie) reads as lost, never
+    re-given the storage state.
 
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default

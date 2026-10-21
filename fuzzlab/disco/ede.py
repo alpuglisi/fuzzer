@@ -27,6 +27,10 @@ Per page of the run (each in-scope HTML document it loaded):
 Only GET answers are replayed (matched by method and redacted URL; the request body is
 not part of the key). Everything else goes to the guard (`navguard.guard_page`): scope,
 destructive URLs, the abort code, as in every guarded browser.
+
+An answer the capture recorded in a known-lost window (FR-CRAWL-41: its action id is
+marked, `capture.lost_action_ids`) was given to a session known lost: it is neither
+replayed nor a page of the run (D', BUG-0552 review B2).
 """
 
 from __future__ import annotations
@@ -79,13 +83,17 @@ def replay_key(method: str, url: str) -> tuple[str, str]:
     return str(method).upper(), urldefrag(redact_url(url))[0]
 
 
-def replayable(records: list[CaptureRecord]) -> dict[tuple[str, str], CaptureRecord]:
+def replayable(records: list[CaptureRecord],
+               lost=frozenset()) -> dict[tuple[str, str], CaptureRecord]:
     """The capture's JSON GET answers that can be served again: answered 2xx, a JSON
-    body that is whole (not truncated, not omitted). The last one per key wins."""
+    body that is whole (not truncated, not omitted), not in a known-lost window (an
+    action id in ``lost``). The last one per key wins."""
     out: dict[tuple[str, str], CaptureRecord] = {}
     for rec in records:
         if rec.kind != "http" or rec.method != "GET" or rec.status is None \
                 or not 200 <= rec.status < 300 or rec.res_truncated:
+            continue
+        if rec.action_id in lost:
             continue
         if content_family(rec.res_ctype) != "json" or \
                 parse_body(rec.res_body, rec.res_ctype) is None:
@@ -101,13 +109,14 @@ def _media(ctype: str | None) -> str:
     return (ctype or "").split(";", 1)[0].strip().lower()
 
 
-def page_urls(records: list[CaptureRecord], in_scope) -> list[str]:
-    """The in-scope HTML documents the run loaded, in first-seen order."""
+def page_urls(records: list[CaptureRecord], in_scope, lost=frozenset()) -> list[str]:
+    """The in-scope HTML documents the run loaded, in first-seen order; a document
+    answered in a known-lost window (an action id in ``lost``) is not one."""
     seen: dict[str, None] = {}
     for rec in records:
         if rec.kind == "http" and rec.method == "GET" and rec.status is not None \
                 and 200 <= rec.status < 300 and _media(rec.res_ctype) in _HTML \
-                and in_scope(rec.url):
+                and in_scope(rec.url) and rec.action_id not in lost:
             seen.setdefault(urldefrag(rec.url)[0], None)
     return list(seen)
 
@@ -208,11 +217,13 @@ class EdeRunner:
 
     def __init__(self, records: list[CaptureRecord], *, scope_urls: list[str],
                  headless: bool = True, max_pages: int = 20, deadline_s: float = 900.0,
-                 clock=time.monotonic):
+                 clock=time.monotonic, lost_actions=frozenset()):
+        """``lost_actions``: the run's known-lost window (`capture.lost_action_ids`):
+        no answer recorded under one of them is replayed or tested."""
         self.scope_urls = list(scope_urls)
         self.origins = origin_scope(*self.scope_urls)
-        self.replay = replayable(records)
-        self.pages = page_urls(records, self._in_scope)[:max_pages]
+        self.replay = replayable(records, lost_actions)
+        self.pages = page_urls(records, self._in_scope, lost_actions)[:max_pages]
         self.headless = headless
         self.deadline = clock() + deadline_s
         self.clock = clock

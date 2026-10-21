@@ -378,7 +378,7 @@ def _run(ns) -> int:
 
 def _ede(ns) -> int:
     from fuzzlab.core.urls import canonical_origin
-    from fuzzlab.disco.capture import read_capture
+    from fuzzlab.disco.capture import lost_action_ids, read_capture
     from fuzzlab.disco.ede import EdeRunner, write_report
     run = Path(ns.run)
     if any(canonical_origin(u) is None for u in ns.scope):
@@ -392,8 +392,9 @@ def _ede(ns) -> int:
         records = read_capture(run / "capture.jsonl").records
     except FileNotFoundError:
         return _fail(f"{run} holds no capture.jsonl")
+    # FR-CRAWL-41 (D'): no answer of a known-lost window is replayed or tested
     runner = EdeRunner(records, scope_urls=ns.scope, max_pages=ns.max_pages,
-                       deadline_s=ns.deadline)
+                       deadline_s=ns.deadline, lost_actions=lost_action_ids(run))
     if ns.dry_run:
         print("DRY RUN -- disco ede: plans the test, sends nothing.")
         print(f"  pages: {len(runner.pages)}  replayable answers: {len(runner.replay)}\n"

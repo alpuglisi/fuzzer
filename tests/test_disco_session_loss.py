@@ -16,6 +16,15 @@ check, in a new context made only after the old one was released and closed; an
 unresolved loss ends authenticated exploration with a reported reason; the action ids
 of the answers in a known-lost window are marked (D'), never authenticated coverage.
 
+Review round 1 (BUG-0552, "Review round 1"): a generation one worker finds lost is
+recorded for every worker before any recovery, and no worker acts on it again or clears a
+window sent on it (B1); no consumer of a capture's answers takes a known-lost window's
+answer as evidence unless pinned (B2, `disco.capture.lost_action_ids`); without a known
+login form, a password form shown where a restore or the start page showed none is in
+place (R1); a login page after an action on a provider's live session reinstalls it
+whatever answer came with it (R2); and a run without a provider checks a suspicion
+against the start page, its protected resource, through SP-61's `health_verdict` (R3).
+
 The real-browser tests drive a guarded Chromium through the real capture proxy against
 a loopback app (`_SessionApp`) whose session dies after a number of API answers. Under
 ``FUZZLAB_REQUIRE_BROWSER=1`` a missing browser or mitmproxy fails instead of skipping
@@ -45,14 +54,18 @@ SHELL = b"""<!doctype html><html><head><title>Board</title></head><body>
 <div id=root></div><script src="/app.js"></script></body></html>"""
 
 #: The board's script. Its items come from ``/api/me``; a click on one fetches
-#: ``/api/items/<n>`` and opens its panel. What it does when its session is gone is the
-#: app's ``mode``: ``stay`` shows an error line and keeps its route (``/dashboard``),
-#: ``form`` renders a login form in place (the API answers 200 ``{"login": true}``),
-#: ``redirect`` goes to ``/login``.
+#: ``/api/items/<n>`` and opens its panel. What it does on a 401 (or, in ``form`` mode,
+#: an answer saying its session is gone) is the app's ``mode``: ``stay`` shows an error
+#: line and keeps its route (``/dashboard``), ``form`` renders a login form in place (the
+#: API answers 200 ``{"login": true}``), ``redirect`` goes to ``/login``, ``clear``
+#: deletes its (script-readable) session cookie and goes to ``/login``.
 APP_JS = r"""
 const root = document.getElementById('root');
 const MODE = '__MODE__';
 function lost() {
+  if (MODE === 'clear') {
+    document.cookie = 'sid=; Max-Age=0; path=/'; location.href = '/login'; return;
+  }
   if (MODE === 'redirect') { location.href = '/login'; return; }
   if (MODE === 'form') {
     root.innerHTML = '<form method=post action="/login"><input name=username>'
@@ -92,11 +105,13 @@ class _SessionApp:
     ``/login``): it is the session's stable protected resource. ``/api/*`` answers 200
     JSON with a live ``sid``; with a dead one, 401 (``stay``/``redirect``) or 200
     ``{"login": true}`` (``form``). A ``sid`` dies after ``budget`` API answers (every
-    sid when ``every``, else the first only). Every request is recorded as ``(method,
-    path, sid)``, in order."""
+    sid when ``every``, else the first only). ``gated`` items answer 401 to a live sid
+    (this role may not read them: an authorization denial, the session untouched).
+    Every request is recorded as ``(method, path, sid)``, in order."""
 
-    def __init__(self, mode: str, budget: int, *, every: bool = False):
+    def __init__(self, mode: str, budget: int, *, every: bool = False, gated=()):
         self.mode, self.budget, self.every = mode, budget, every
+        self.gated = {f"/api/items/{n}" for n in gated}
         self.requests: list[tuple[str, str, str | None]] = []
         self.sids: list[str] = []            # issued, in order
         self.used: dict[str, int] = {}       # API answers per sid
@@ -173,6 +188,9 @@ class _SessionApp:
                     if app.live(sid):
                         return self._send(200, SHELL)
                     return self._send(302, headers=[("Location", "/login")])
+                if path in app.gated and app.live(sid):
+                    return self._send(401, b'{"error": "not for this role"}',
+                                      "application/json")
                 if path.startswith("/api/"):
                     if not app._spend(sid):
                         if app.mode == "form":
@@ -361,6 +379,84 @@ def test_without_a_provider_a_lost_session_ends_authenticated_exploration(
     assert line["session"] == "lost"
 
 
+def test_without_a_provider_a_login_form_rendered_on_a_restore_is_a_lost_session(
+        app_factory, tmp_path):
+    """Review R1: a storage state, no provider. The sid dies on the root state's restore
+    (its second ``/api/me``) and the board renders its login form in place, at
+    ``/dashboard``. A password form shown at the restored state's URL by a state found
+    without one is in place: a suspicion, which the start page's protected check (R3)
+    confirms. The run ends with its reason; nothing is acted on or loaded on the dead
+    session."""
+    app = app_factory("form", budget=1)
+    sid = app.issue()
+    ex, report = _explore(app, tmp_path, provider=False, sid=sid)
+    assert sid in app.dead
+    assert report.session_lost == 1 and report.actions == 0, report
+    assert report.harvest_loads == 0
+    assert report.auth_ended and "no session provider" in report.auth_ended
+    [line] = _session_lines(tmp_path)
+    assert line["session"] == "lost" and line["action_ids"]
+    assert ex.open_contexts == [1]
+
+
+def test_without_a_provider_a_login_form_at_the_seed_ends_before_anything_is_explored(
+        app_factory, tmp_path):
+    """Review R1: the sid dies on the start page's own ``/api/me`` and the board renders
+    its login form there. The run's first look is in place: an unconfirmed loss (the
+    start page cannot be the protected resource of a session already lost), and nothing
+    is explored as the identity."""
+    app = app_factory("form", budget=0)
+    sid = app.issue()
+    ex, report = _explore(app, tmp_path, provider=False, sid=sid)
+    assert sid in app.dead
+    assert report.session_lost == 1 and report.states == 0 and report.actions == 0, report
+    assert report.auth_ended and "no session provider" in report.auth_ended
+    assert ex.open_contexts == [1]
+
+
+def test_without_a_provider_a_role_gated_401_on_a_live_session_is_a_denial(
+        app_factory, tmp_path):
+    """Review R3: a storage state, no provider, a session that stays live; item 2
+    answers 401 to this role. The start page is the run's protected resource (SP-61's
+    `health_verdict` reads it live with the context's cookies and refused without
+    them); the 401 is checked against it, found live, counted an authorization denial,
+    and exploring goes on. Measured here too: the checks reach the app straight (one
+    with no session at all), never through the capture proxy."""
+    app = app_factory("stay", budget=1000, gated=[2])
+    sid = app.issue()
+    ex, report = _explore(app, tmp_path, provider=False, sid=sid, max_same_signature=4)
+    assert report.session_lost == 0 and report.auth_ended is None, report
+    assert report.authorization_denials >= 1 and not report.session_lost_actions
+    paths = app.paths(sid)
+    denied = paths.index("/api/items/2")
+    assert {"/api/items/3", "/api/items/4"} & set(paths[denied:]), paths
+    assert not _session_lines(tmp_path) and ex.open_contexts == [1]
+    assert ("GET", "/dashboard", None) in app.requests          # the uncredentialed check
+    shown = [r for r in _records(tmp_path)
+             if r.method == "GET" and r.url.endswith("/dashboard")]
+    assert shown and all(r.action_id for r in shown)             # only the browser's own
+    assert len([r for r in app.requests if r[1] == "/dashboard"]) > len(shown)
+
+
+def test_a_401_whose_script_drops_the_session_and_goes_to_login_reinstalls_it(
+        app_factory, tmp_path):
+    """Review R2: a provider run; item 2 answers 401 to this role on a live session, and
+    the board's 401 handler deletes its session cookie and goes to ``/login``. The
+    action's window holds both the 401 and the login page: the provider's check finds
+    the session live, so the context lost its copy -- it is given the live session again
+    (no new login), and exploring goes on with it."""
+    app = app_factory("clear", budget=1000, gated=[2])
+    ex, report = _explore(app, tmp_path, provider=True, max_same_signature=4)
+    assert report.session_reinstalled == 1 and report.session_lost == 0, report
+    assert report.auth_ended is None and len(app.sids) == 1     # never logged in again
+    paths = app.paths(app.sids[0])
+    denied = paths.index("/api/items/2")
+    assert {"/api/items/3", "/api/items/4"} & set(paths[denied:]), paths
+    [line] = _session_lines(tmp_path)
+    assert line["session"] == "reinstall" and line["action_ids"]
+    assert ex.open_contexts == [1, 1]
+
+
 # --- offline: the classification, with fakes ----------------------------------------------
 
 class _Resp:
@@ -406,16 +502,21 @@ class _Manager:
 START = "http://127.0.0.1:3000/dashboard"
 
 
-def _offline(manager=None):
+def _material(generation):
     from fuzzlab.core.urls import in_origin_scope, origin_scope
-    from fuzzlab.disco.explore import ExploreSession, _SessionMaterial
+    from fuzzlab.disco.explore import _SessionMaterial
+    origins = origin_scope(START)
+    return _SessionMaterial(
+        generation, scope=lambda u: in_origin_scope(u, origins),
+        login_url="http://127.0.0.1:3000/login", login_fields=("password", "username"))
+
+
+def _offline(manager=None):
+    from fuzzlab.disco.explore import ExploreSession
     kw = {"session": ExploreSession(manager, "user", START)} if manager else \
         {"storage_state": {"cookies": [], "origins": []}}
     ex = Explorer(START, scope_urls=[START], proxy="127.0.0.1:9", **kw)
-    origins = origin_scope(START)
-    ex._shared.auth = _SessionMaterial(
-        7, scope=lambda u: in_origin_scope(u, origins),
-        login_url="http://127.0.0.1:3000/login", login_fields=("password", "username"))
+    ex._shared.auth = _material(7)
     ex._ctx_generation = 7
     ex.recovered = []
     ex._recover_session = lambda page, verdict, reason: ex.recovered.append(verdict) or page
@@ -477,6 +578,150 @@ def test_a_credentialed_401_is_checked_for_the_contexts_generation():
     assert ex._session_checkpoint(_Page(START))[1] is None and ex.recovered == []
 
 
+def test_a_login_page_after_a_401_on_a_live_session_reinstalls_it():
+    """Review R2: the provider's check finds the session live, but the action's window
+    holds both a 401 and the page at ``/login`` (an app whose 401 handler drops its
+    session and goes to its login page): the context lost its copy -- ``reinstall``,
+    whichever sign came first. One check; no authorization denial counted."""
+    manager = _Manager("live")
+    ex = _offline(manager)
+    ex._answers = [_Req("GET", "http://127.0.0.1:3000/api/admin", 401)]
+    _page, outcome = ex._session_checkpoint(
+        _Page("http://127.0.0.1:3000/login", LOGIN.decode()), before_url=START, action=True)
+    assert outcome is not None and outcome[0] == "reinstall", outcome
+    assert ex.recovered == ["reinstall"] and len(manager.calls) == 1
+    assert ex.report.authorization_denials == 0
+
+
+# --- offline: two workers and one generation (review B1) ----------------------------------
+
+class _StepPage(_Page):
+    """A page whose state (``fp``) the fake restore and acts set."""
+
+    def __init__(self, url, html="<p>board</p>"):
+        super().__init__(url, html)
+        self.fp = "fp0"
+
+
+class _Ctx:
+    def new_page(self):
+        return _StepPage(START)
+
+
+def _stepper(ex, acts: list, on_act):
+    """Drive ``ex``'s real `_process` over fakes: a board at START with three buttons.
+    Each act sends one request (its action id in the window, an anonymous-looking 200
+    answer: no sign), records ``(action id, the generation its context carries)`` in
+    ``acts`` and calls ``on_act(n)``; the page then shows state ``fp<n>``. A replaced
+    context carries the run's current generation."""
+    els = [{"signature": f"button|id=b{n}", "occurrence": 0, "tag": "button",
+            "type": "submit", "label": f"Item {n}", "in_form": False} for n in (1, 2, 3)]
+    ex._ctx = _Ctx()
+    ex._restore_any = lambda page, ctx, state: setattr(page, "fp", "fp0") or True
+    ex.settled_fingerprint = lambda page, ctx: (page.fp, els)
+    ex.wait_quiet = lambda page: True
+    ex._close_popups = lambda ctx, page: None
+    ex._gather = lambda page: None
+    ex._shared.started = ex.clock()
+
+    def act(page, ctx, el, step):
+        n = len(acts) + 1
+        tag = ex._tag(ctx, "act")
+        ex._window_tags.add(tag)
+        ex._answers.append(_Req("GET", "http://127.0.0.1:3000/api/me", 200))
+        acts.append((tag, ex._ctx_generation))
+        on_act(n)
+        page.fp = f"fp{n}"
+        return True
+
+    def replace(page, *_verdict):
+        ex._window_tags, ex._answers = set(), []
+        ex._ctx_generation = ex._shared.auth.generation
+        return _StepPage(START)
+    ex.act, ex._replace_context = act, replace
+
+
+def _action_lines(path) -> list[dict]:
+    lines = [json.loads(ln) for ln in path.read_text().splitlines()]
+    return [d for d in lines if "seq" in d]
+
+
+def test_a_loss_another_worker_finds_mid_action_is_never_this_workers_coverage(tmp_path):
+    """Review B1, the CLI's own path (a storage state, two workers): worker A's 401 is an
+    unconfirmed loss and ends the run's authenticated exploration while worker B's action
+    is in flight. B's answers show no sign (an anonymous 200), but they went out on the
+    generation A found lost: B's window is marked, its action logged with no new state
+    and no URL, nothing it showed becomes a state, and B acts no more."""
+    from fuzzlab.disco.explore import State
+    a = _offline()
+    del a._recover_session                     # the real one: no provider, the run ends
+    a.actions_log = tmp_path / "actions.jsonl"
+    b = a._clone()
+    b._ctx_generation = 7
+    acts: list = []
+
+    def a_loses(n):
+        if n == 1:
+            a._window_tags = {"act-0"}
+            a._answers = [_Req("GET", "http://127.0.0.1:3000/api/items/1", 401)]
+            assert a._session_checkpoint(_Page(START))[1][0] == "lost"
+    _stepper(b, acts, a_loses)
+    b._shared.known.add("fp0")
+    b._process(State("fp0", START, START), _StepPage(START), None, None)
+    assert [gen for _tag, gen in acts] == [7]
+    assert b._shared.stop == "session-lost" and b.report.auth_ended
+    assert acts[0][0] in b.report.session_lost_actions, b.report.session_lost_actions
+    [mine] = [d for d in _action_lines(tmp_path / "actions.jsonl")
+              if d["action_id"] == acts[0][0]]
+    assert mine["new_state"] is None and mine["url"] is None
+    assert b._shared.known == {"fp0"}
+
+
+def test_no_worker_acts_on_a_generation_another_worker_found_lost(tmp_path):
+    """Review B1 with a provider: worker A confirms that generation 7 is lost while
+    worker B's action is in flight, and A's recovery has not installed anything yet
+    (stubbed: in progress). B's answers show no sign, but its window is marked (stale)
+    and B acts again only on a newer generation -- here 8, the fresh session its own
+    single-flight recovery took -- never on 7. A's check is the only one."""
+    from fuzzlab.disco.explore import State
+    manager = _Manager("lost")
+    a = _offline(manager)                     # A's recovery: in progress (stubbed)
+    a.actions_log = tmp_path / "actions.jsonl"
+    b = a._clone()
+    del b._recover_session                    # B's: the real one
+    b._ctx_generation = 7
+    b._provider_session = lambda **_kw: _material(8)
+    acts: list = []
+
+    def a_loses(n):
+        if n == 1:
+            a._answers = [_Req("GET", "http://127.0.0.1:3000/api/items/1", 401)]
+            a._session_checkpoint(_Page(START))
+    _stepper(b, acts, a_loses)
+    b._shared.known.add("fp0")
+    b._process(State("fp0", START, START), _StepPage(START), None, None)
+    assert [gen for _tag, gen in acts] == [7, 8, 8], acts
+    assert a.recovered == ["lost"] and len(manager.calls) == 1
+    assert acts[0][0] in b.report.session_lost_actions
+
+
+def test_a_newer_session_never_drops_a_pending_window_unmarked(tmp_path):
+    """Review B1: another worker installed generation 8 while this worker's context (7)
+    had sent ``act-5`` since its last checkpoint. Before its context is replaced,
+    ``act-5`` is marked (stale): what went out on the old generation is never coverage."""
+    ex = _offline()
+    del ex._recover_session
+    ex.actions_log = tmp_path / "actions.jsonl"
+    replaced = []
+    ex._replace_context = lambda page, *a: replaced.append(a) or page
+    ex._shared.auth = _material(8)
+    ex._window_tags = {"act-5"}
+    ex._session_current(_Page(START))
+    assert ex.report.session_lost_actions == ["act-5"] and len(replaced) == 1
+    [line] = _session_lines(tmp_path)
+    assert line["session"] == "stale" and line["action_ids"] == ["act-5"]
+
+
 # --- a consumer that does not read the mark yet (PA-0533(5), PA-0531(4)) -----------------
 
 @pytest.mark.xfail(strict=True, reason=(
@@ -503,3 +748,70 @@ def test_an_answer_in_a_lost_window_is_never_in_the_inventory(tmp_path):
     ops = [op for item in json.loads(out.read_text())["paths"].values()
            for op in item.values()]
     assert ops and all("401" not in op.get("responses", {}) for op in ops)
+
+
+BASE = "http://127.0.0.1:3000/"
+
+
+def _lost_window_run(tmp_path):
+    """A run directory whose capture holds the identity's answers (``act-1``) and, in a
+    known-lost window (``act-2``, marked by a ``session`` line), an anonymous view of the
+    same API, a login shell and an id-shaped API GET."""
+    from fuzzlab.disco.capture import append_record, make_record
+    run = tmp_path / "run"
+    run.mkdir()
+    for action, path, ctype, body in (
+            ("act-1", "dashboard", "text/html", b"<p>board</p>"),
+            ("act-1", "api/me", "application/json", b'{"items": [1, 2]}'),
+            ("act-2", "api/me", "application/json", b'{"login": true}'),
+            ("act-2", "settings", "text/html", LOGIN),
+            ("act-2", "api/items/9", "application/json", b'{"item": 9}')):
+        append_record(run / "capture.jsonl", make_record(
+            kind="http", t=1.0, action_id=action, method="GET", url=BASE + path,
+            req_headers={}, req_body=None, status=200,
+            res_headers={"content-type": ctype}, res_body=body, latency_ms=1,
+            profile="user"))
+    (run / "actions.jsonl").write_text(json.dumps(
+        {"kind": "session", "session": "lost", "reason": "an auth failure (401)",
+         "generation": 1, "action_ids": ["act-2"]}) + "\n")
+    return run
+
+
+def test_ede_never_replays_or_tests_an_answer_from_a_lost_window(tmp_path, capsys):
+    """Review B2: `fuzzlab disco ede` served the last 2xx JSON answer per URL -- the
+    known-lost window's ``{"login": true}`` over the identity's -- and tested the login
+    shell as a page of the run. It reads the mark (`capture.lost_action_ids`, SP-71):
+    the identity's answer is the one served, and the lost window's document is no page."""
+    from fuzzlab.disco import cli, ede
+    from fuzzlab.disco.capture import lost_action_ids, read_capture
+    run = _lost_window_run(tmp_path)
+    lost = lost_action_ids(run)
+    assert lost == {"act-2"}
+    runner = ede.EdeRunner(read_capture(run / "capture.jsonl").records,
+                           scope_urls=[BASE], lost_actions=lost)
+    assert runner.replay[ede.replay_key("GET", BASE + "api/me")].action_id == "act-1"
+    assert ede.replay_key("GET", BASE + "api/items/9") not in runner.replay
+    assert runner.pages == [BASE + "dashboard"]
+    assert cli.main(["ede", "--run", str(run), "--scope", BASE, "--dry-run"]) == 0
+    assert "pages: 1  replayable answers: 1" in capsys.readouterr().out
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "owner: tools/store_adapter.import_disco (AUD, FR-AUD-23; `fuzzlab auto`'s "
+    "import): it takes a known-lost window's answer as evidence -- its status as the "
+    "page's (a 2xx page row: header injection points), its 2xx as path-template "
+    "evidence, its HTML media type as a page -- and does not read FR-CRAWL-41's mark "
+    "(`disco.capture.lost_action_ids`); BUG-0552 review B2 residual (a CC-AUD entry)"))
+def test_import_disco_never_takes_a_lost_windows_answer_as_evidence(tmp_path):
+    from fuzzlab.core.store import Store
+    from fuzzlab.tools.store_adapter import import_disco
+    run = _lost_window_run(tmp_path)
+    store = Store(tmp_path / "store.db")
+    run_id = store.start_run("auto", "x")
+    import_disco(run, store, run_id, base_url=BASE)
+    pages = {tuple(r) for r in store.conn.execute(
+        "SELECT url, status FROM page WHERE run_id = ?", (run_id,)).fetchall()}
+    templates = [tuple(r) for r in store.conn.execute(
+        "SELECT name FROM parameter WHERE run_id = ? AND location = 'path'",
+        (run_id,)).fetchall()]
+    assert ("/settings", 200) not in pages and templates == [], (pages, templates)

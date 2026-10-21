@@ -101,6 +101,82 @@ Newest first.
   open); the provider and offline tests fail on the API the base lacks. After: the
   file's 13 tests pass and the synth pin xfails (28.6 s, real Chromium and mitmdump).
   The harness result is in the lane's report.
+- Review round 1 of a1a93b1 (2026-10-21; DISCO4-B1, B2, R1, R2, R3; branch
+  `lane/DISCO4-r1`):
+  - Change:
+    - **B1 (one generation for every worker).** `_Shared.lost_generations`: a lost,
+      stale or unresolved verdict records the context's generation at the verdict,
+      under `auth_lock`, before `_recover_session` (`_note_gone`); a worker that reads
+      the record waits on that lock for the decision and adopts or stops.
+      `_generation_gone` (a newer generation installed, or the context's recorded
+      lost) is checked by `_session_checkpoint` (a clean window on a gone generation is
+      marked stale), by `_session_current` (the pending window marked stale before the
+      context is replaced; nothing more when the run stopped), before every action
+      (`_ready`, new: once more right before the act), restore (`_restore_checked`
+      begins with `_session_current`) and harvest load (`_load` returns when stopped).
+      `_replace_context(page, verdict, reason)` releases and closes the old context and
+      then marks what it sent after its window was marked; `_mark_leftover` does the
+      same at a worker's end. `_mark_window` is the one marking path.
+    - **B2 (consumers read the mark).** `disco.capture.lost_action_ids(run_dir)`: the
+      one reader of the mark (bounded, `JsonlTail`). `ede.replayable` and
+      `ede.page_urls` take ``lost`` and `EdeRunner(lost_actions=)`; `fuzzlab disco ede`
+      passes the run's mark. `store_adapter.import_disco` (AUD) is pinned by a strict
+      xfail naming its owner (a fix needs a CC-AUD entry this lane holds no number
+      for). A whole-package guard (`tests/test_lost_window_mark.py`) requires every
+      capture reader to read the mark or be listed with its pin or reason.
+    - **R1 (in place without a known login form).** `State.login_shown` (new): whether
+      a state showed a password form when found (seed, action, harvest). The
+      checkpoint takes ``places``: a password form at the URL before an action, at the
+      restored state's URL or entry URL (unless the state showed one), or at the seed's
+      start page is a strong sign; at a harvest load or a navigation, a weak sign,
+      raised only when a protected check decides it (`_checkable`). `login_shown` now
+      suppresses only the form sign, not a login URL.
+    - **R2 (a page sign whatever the answers).** `_loss_signs` returns the primary sign
+      (answer, else page, else policy) and the page's own sign with its strength;
+      `_confirm_loss` no longer returns ``reinstall``: the checkpoint makes a provider's
+      live verdict after an action with a strong page sign a ``reinstall``.
+    - **R3 (a protected check without a provider).** `_find_protected_resource` (at the
+      seed of a storage-state run): the start page's URL is the run's protected
+      resource (`_Shared.protected`) when `session.manager.health_verdict` reads a GET
+      of it with the context's cookies (`ctx.storage_state()`) as live and one with no
+      credential as refused. `_protected_get`: one GET from a request context of its
+      own (`pw.request.new_context`, scope-checked by `checked_api_request`,
+      ``max_redirects=0``, TLS verified, never through the capture proxy), judged by
+      `health_verdict(refusal=False)`. `_confirm_loss` without a provider checks every
+      suspicion (a policy block too) against it with the suspected context's cookies
+      (`_context_check`); with none, as before. `_recover_session` reports an
+      unresolved verdict as such before the no-provider reason.
+  - Impact (other components / project): **SESS:** none changed; the explorer becomes
+    a consumer of SP-61's public `health_verdict` and `session.state.SessionState`
+    (SP-61's reader list grows; this lane's `doc_texts.md`). **AUD:**
+    `store_adapter.import_disco` is not changed; it is pinned (owner AUD). **File
+    contracts:** none changed (`actions.jsonl`'s `session` lines as before; more of
+    them in multi-worker runs). **New shared primitive SP-71** (the mark's one reader,
+    `disco.capture.lost_action_ids`; row text in `doc_texts.md`). **Traffic:** a
+    storage-state run sends two GETs of the start page at the seed and one per
+    suspicion, straight to the target (lab-only, in scope; no new host).
+  - Risk (level; mitigation or accepted-risk justification): **medium.** A gone
+    generation now stops every worker's next step until the recovery decision
+    (bounded by the recovery's own bounds; no new wait). A storage-state run whose
+    start page is a protected resource now continues past a denial instead of ending;
+    one whose start page is public keeps PA-0533(1)'s unconfirmed loss. Accepted: a
+    seed that shows a password form ends a no-resource run (the identity's start page
+    with a password form of its own is unusual; the reason says why).
+  - Deliverables:
+    - [x] B1, R1, R2, R3 in `explore.py`; B2 in `capture.py`, `ede.py`, `cli.py` — done
+    - [x] tests: `tests/test_disco_session_loss.py` (four real-browser, five offline,
+      the ede test, the import_disco pin), `tests/test_lost_window_mark.py` (the guard
+      and its synthetic offenders) — done
+    - [x] FR-CRAWL-41 and FR-CRAWL-25 amended in place — done
+    - [x] BUG-0552 "Review round 1"; shared-doc texts (PA-0552, SP-71, SP-61 readers,
+      CHANGELOG, ERROR_LOG, F-1XX) in the lane's `doc_texts.md` — done
+    - [ ] `store_adapter.import_disco` reads the mark (owner AUD; needs a CC-AUD number)
+      — todo
+    - [ ] a real two-worker run with an anonymous-200 API — todo (the race is covered
+      offline, deterministically)
+  - Effectiveness (assessed 2026-10-21): each new test fails on a1a93b1 (the product
+    files swapped in, one run) and passes after; the harness result is in the lane's
+    report.
 
 ### CC-CRAWL-0054 — The JSONL tail caps a line while reading it; the contract runner reads bounded and matches contract patterns in a killable worker (BUG-0536) (2026-10-20)
 - Placement: pre-assigned to AU-BOUNDED (audit defects 23 and 27, with the disco and
