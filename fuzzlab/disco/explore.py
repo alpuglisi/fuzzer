@@ -14,7 +14,8 @@ cache would hide traffic). Before each action the route's header hook (the guard
 correlation tag the proxy records and strips.
 
 **States.** A state is `fingerprint.state_fingerprint` of the page: its route and the
-signatures of its visible interactive elements, text excluded. Breadth first from the
+signatures of its visible interactive elements, text excluded, delegated candidates
+excluded (`fingerprint.counts_for_state`). Breadth first from the
 start URL: for each state, each actionable element not yet tried there (keyed by the
 state and the element's signature) is acted on once, the network is waited out
 (`wait_quiet`: no request in flight for ``idle_ms``, at most ``max_ms``), and a new
@@ -29,8 +30,9 @@ They are found four ways: accessibility roles and native controls; elements with
 JavaScript click / pointer / key listener, asked of Chrome DevTools (catches a
 framework's ``div`` buttons); ``cursor: pointer`` as a fallback; and **delegated**
 candidates -- a labelled, non-semantic element under an ancestor, document or window
-listening for clicks -- each tried once and kept only when its click made a request or
-changed the state (FR-CRAWL-40). Closed shadow roots, cross-origin and out-of-scope
+listening for clicks -- each tried once and kept only when its click caused a request
+(one a window with no click just before did not see) or changed the state
+(FR-CRAWL-40). Closed shadow roots, cross-origin and out-of-scope
 frames and every bound a read hit are counted in the report, never read. Enumeration
 runs again after every action, so dialogs and lazy panels are seen as they appear.
 
@@ -65,7 +67,8 @@ from fuzzlab.core.urls import (destructive_reason, in_origin_scope, origin_scope
                                spa_route, text_destructive_reason)
 from fuzzlab.disco import compose, formfill
 from fuzzlab.disco.capture import ACTION_HEADER
-from fuzzlab.disco.fingerprint import element_signature, normalise_route, state_fingerprint
+from fuzzlab.disco.fingerprint import (element_signature, normalise_route, state_fingerprint,
+                                       state_signatures)
 # the one script-route scanner both crawlers share (SP-47; D70's allowlist)
 from fuzzlab.tools.spa import (ROUTE_OK, classify_route, query_url_refusal, route_url,
                                scan_script, seed_url, spa_fragment)
@@ -120,9 +123,10 @@ class State:
     """A state and how to get back to it: ``entry_url`` then ``path``; when that no
     longer reproduces it (a page only a POST shows), ``fallback`` is tried.
 
-    ``core`` is the state's *stable* element signatures. It starts as everything first
-    seen; any restore that shows the same route with elements only gone, none new,
-    narrows it to what is left: one-time or consumed UI -- a first-visit dialog, a
+    ``core`` is the state's *stable* element signatures (`fingerprint.state_signatures`:
+    never a delegated candidate's). It starts as everything first seen; any restore
+    that shows the same route with elements only gone, none new, narrows it to what is
+    left: one-time or consumed UI -- a first-visit dialog, a
     cookie notice dismissed by an earlier action, a toast -- does not come back
     (measured on Juice Shop: its welcome dialog, then its dismissed cookie banner, each
     made the start page unrestorable). A restore succeeds when the route matches and
@@ -286,6 +290,19 @@ class _Shared:
         #: delegated candidates' verdicts and the composed reads' coverage (FR-CRAWL-39/40)
         self.trials = compose.Trials(compose.MAX_DELEGATED_TRIALS)
         self.coverage = compose.Coverage()
+        #: per route, the `request_key`s no longer evidence for a delegated trial: what a
+        #: control window saw (the page's own traffic) and what a trial already counted
+        #: (`Explorer._trial`)
+        self.explained: dict[str, set[tuple[str, str]]] = {}
+        #: the page shapes whose closed shadow roots were counted (`compose._census`)
+        self.censused: set = set()
+
+
+def request_key(method: str, url: str) -> tuple[str, str]:
+    """What a delegated trial compares requests by: the method and the normalised route
+    (`normalise_route`: digit runs folded, query values dropped), so a poll's next
+    request is the same key as its last."""
+    return (str(method or "").upper(), normalise_route(url))
 
 
 def refusal(el: dict, deny: tuple[str, ...]) -> str | None:
@@ -553,7 +570,8 @@ class Explorer:
         described ``disabled``: kept, so the read stays a function of the page, never
         acted on (FR-CRAWL-40). What the read could not reach is counted in the report."""
         read = compose.read_page(page, ctx, self._in_scope,
-                                 max_delegated=compose.MAX_DELEGATED)
+                                 max_delegated=compose.MAX_DELEGATED,
+                                 censused=self._shared.censused)
         els = read.elements
         counts: dict[str, int] = {}
         for el in els:
@@ -740,29 +758,50 @@ class Explorer:
         return bool(live)
 
     def _trial(self, page, ctx, step: Step) -> bool | None:
-        """Click a delegated candidate and observe whether a request was made, the
-        page's URL changed, a page opened, or the state's fingerprint changed; None when
-        the candidate was gone before its click. The fingerprints are the explorer's own
-        (`settled_fingerprint`), before and after, so "changed the state" means what it
-        means everywhere else in the run."""
-        before = self.settled_fingerprint(page, ctx)
-        target = self._find(before[1], step) if before else None
-        if target is None:
-            return None
-        url, pages, sent = page.url, len(ctx.pages), []
+        """Click a delegated candidate and observe whether the click caused a request,
+        the page's URL changed, a page opened, or the state's fingerprint changed; None
+        when the candidate was gone before its click. The fingerprints are the
+        explorer's own (`settled_fingerprint`), before and after, so "changed the state"
+        means what it means everywhere else in the run.
+
+        A request counts only when the click caused it (BUG-0551 review B3): a
+        notification poll, a beacon or a keep-alive reaches ``request`` whatever was
+        clicked. Just before the click, a **control window** leaves the page alone for
+        as long as the trial will wait (the same quiet rule, `wait_quiet`, from an
+        action mark). A request is evidence only when its `request_key` is not yet
+        explained on this route (`_Shared.explained`): neither this or an earlier
+        control window there saw it (the page's own traffic), nor did an earlier
+        trial there already count it. Background traffic slower than a control window
+        is therefore counted for at most one candidate per route (measured, BUG-0551
+        review B3)."""
+        seen: set[tuple[str, str]] = set()
 
         def on_request(req) -> None:
-            sent.append(req.url)
+            seen.add(request_key(req.method, req.url))
 
         page.on("request", on_request)
         try:
+            self.mark_activity()                   # the control window: nothing clicked,
+            self.wait_quiet(page)                  # then the read the click acts on
+            before = self.settled_fingerprint(page, ctx)
+            target = self._find(before[1], step) if before else None
+            if target is None:
+                return None
+            url, pages = page.url, len(ctx.pages)
+            control = set(seen)
+            seen.clear()
             if not self._click(ctx, self._locate(page, target), "act"):
                 return False                       # not actionable: it does nothing
             self.wait_quiet(page)
             after = self.settled_fingerprint(page, ctx)
         finally:
             page.remove_listener("request", on_request)
-        return bool(sent) or page.url != url or len(ctx.pages) != pages \
+        with self._shared.lock:
+            explained = self._shared.explained.setdefault(normalise_route(url), set())
+            explained |= control
+            caused = seen - explained
+            explained |= caused
+        return bool(caused) or page.url != url or len(ctx.pages) != pages \
             or after is None or after[0] != before[0]
 
     def _close_popups(self, ctx, page) -> None:
@@ -812,7 +851,7 @@ class Explorer:
             return True
         if normalise_route(url) != normalise_route(state.url):
             return False
-        sigs = frozenset(e["signature"] for e in els)
+        sigs = state_signatures(els)
         if state.core and state.core <= sigs:
             return True
         if sigs and sigs < state.core:
@@ -980,7 +1019,7 @@ class Explorer:
             self._bump("unrestorable")
             return
         root = State(got[0], page.url, page.url,
-                     core=frozenset(e["signature"] for e in got[1]))
+                     core=state_signatures(got[1]))
         with shared.lock:
             shared.frontier.push(root)
             shared.known.add(got[0])
@@ -1071,7 +1110,7 @@ class Explorer:
                 return page
             if got is not None:
                 state = State(got[0], page.url, page.url,
-                              core=frozenset(e["signature"] for e in got[1]))
+                              core=state_signatures(got[1]))
                 with shared.lock:
                     if got[0] not in shared.known:
                         if shared.frontier.push(state):
@@ -1308,7 +1347,7 @@ class Explorer:
                 dirty = True
                 continue
             new_fp = got[0]
-            core = frozenset(e["signature"] for e in got[1])
+            core = state_signatures(got[1])
             self._gather(page)
             self._log_action(self._action_seq, state, el, step, new_fp, url=page.url)
             if new_fp != state.fp:

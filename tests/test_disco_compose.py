@@ -7,7 +7,9 @@ A loopback app served by the test, shaped like no particular lab:
   that adds an ``Apply filter`` button to the shadow tree (reached only by replaying
   ``Advanced`` through the shadow root);
 * a web component (``<closed-box>``) whose **closed** shadow root holds a button that is
-  never reachable: counted, never claimed;
+  never reachable: counted, never claimed; and two more closed roots the census must
+  count too (review B4): one on a built-in ``<div>`` and one on a component that slots
+  a visible light child (``<x-card>``);
 * a same-origin **settings frame** that renders only when embedded (a widget's frame),
   with ``Save settings`` and ``More options`` (which adds ``Apply options``: reached
   only by replaying ``More options`` through the frame);
@@ -16,6 +18,12 @@ A loopback app served by the test, shaped like no particular lab:
 * tiles under a **document-level click listener**, no pointer cursor, no listener of
   their own: ``Open report`` fetches, ``Just a note`` does nothing, and three more
   shapes exceed the per-read and per-run delegated bounds (counted).
+
+A second app (`WIDGET`, review round 1) is an ordinary light page with a document-level
+click listener and a background poll every 100 ms, holding a form-less search widget
+whose input and button sit directly under its open shadow root (review B1), a Refresh
+button that only swaps static text (review B2), and two delegated tiles, one of which
+does nothing (review B3).
 
 Every request the app receives is recorded: the independent evidence each counter is
 reconciled with (PA-0502(2)). Under ``FUZZLAB_REQUIRE_BROWSER=1`` a missing browser
@@ -47,6 +55,8 @@ MAIN = """<!doctype html><html><head><title>Console</title></head><body>
   <div class="extra-b">Extra B</div>
   <div class="extra-c">Extra C</div>
 </div>
+<div id="vault" style="min-height: 20px"></div>
+<x-card><b>Card</b></x-card>
 <script>
 document.querySelector('body > button.go').addEventListener('click', () => fetch('/api/light/go'));
 customElements.define('search-box', class extends HTMLElement {
@@ -85,6 +95,50 @@ document.addEventListener('click', (e) => {
   const tile = e.target.closest('.tile');
   if (tile) fetch('/api/tile/' + tile.dataset.k);
 });
+// a closed root on a built-in host, and one that slots its visible light child
+document.getElementById('vault').attachShadow({mode: 'closed'}).innerHTML =
+  '<form><input name="u"><button>Vault login</button></form>';
+customElements.define('x-card', class extends HTMLElement {
+  constructor() {
+    super();
+    const root = this.attachShadow({mode: 'closed'});
+    root.innerHTML = '<slot></slot><button>Card action</button>';
+    root.querySelector('button').addEventListener('click', () => fetch('/api/card'));
+  }
+});
+</script></body></html>"""
+
+#: Review round 1 (B1-B3): an ordinary light page with a document click listener (a
+#: dismiss handler, a data-api, a framework root) and a background poll.
+WIDGET = """<!doctype html><html><head><title>Inbox</title></head><body>
+<h1>Inbox</h1>
+<search-widget></search-widget>
+<button id="refresh">Refresh</button>
+<div id="list"><p class="empty">No messages</p></div>
+<div id="tiles">
+  <div class="tile" data-k="7">Open report</div>
+  <div class="note">Just a note</div>
+</div>
+<script>
+customElements.define('search-widget', class extends HTMLElement {
+  constructor() {
+    super();
+    const root = this.attachShadow({mode: 'open'});
+    root.innerHTML = '<input name="q" placeholder="Search"><button>Find</button>';
+    root.querySelector('button').addEventListener('click', () =>
+      fetch('/api/search?q=' + encodeURIComponent(root.querySelector('input').value)));
+  }
+});
+document.getElementById('refresh').addEventListener('click', () => {
+  fetch('/api/list').then(() => {
+    document.getElementById('list').innerHTML = '<ul><li class="msg">Hello</li></ul>';
+  });
+});
+document.addEventListener('click', (e) => {
+  const tile = e.target.closest('.tile');
+  if (tile) fetch('/api/tile/' + tile.dataset.k);
+});
+setInterval(() => fetch('/api/notifications'), 100);
 </script></body></html>"""
 
 #: A widget's frame: it renders its controls only when embedded, so a top-level load of
@@ -280,8 +334,10 @@ def test_what_was_not_read_is_counted_never_claimed(explored):
     loaded. The delegated bounds (3 per read, 2 trials per run) leave candidates out:
     counted as budget-limited and unexplored, never acted on."""
     app, report = explored["app"], explored["report"]
-    assert "/api/closed" not in app.paths()
-    assert report.closed_shadow_roots >= 1
+    assert "/api/closed" not in app.paths() and "/api/card" not in app.paths()
+    # review B4: every closed root is counted -- the custom element that renders nothing
+    # light, the built-in <div> host, and the component slotting a visible light child
+    assert report.closed_shadow_roots == 3, report
     assert report.frames_cross_origin >= 1 and report.frames_out_of_scope >= 1
     assert explored["other"].paths() == []
     # 5 tile shapes, 3 kept per read; a container (the shadow panel holding a button,
@@ -290,10 +346,111 @@ def test_what_was_not_read_is_counted_never_claimed(explored):
     assert report.budget_limited.get("delegated") == 2, report.budget_limited
     assert report.delegated_unexplored == 1
     labels = {a["label"] for a in explored["actions"]}
-    assert not labels & {"Hidden action", "Extra A", "Extra B", "Extra C"}
+    assert not labels & {"Hidden action", "Extra A", "Extra B", "Extra C", "Vault login",
+                         "Card action"}
+
+
+@pytest.fixture(scope="module")
+def widget_run(tmp_path_factory):
+    """One exploration of `WIDGET` (review round 1): quiet waits never settle under the
+    100 ms poll, so each lasts ``max_quiet_ms``."""
+    import glob
+
+    _require_playwright()
+    from playwright.sync_api import Error as PlaywrightError
+
+    from fuzzlab.disco.explore import Explorer, ExploreOptions
+    out = tmp_path_factory.mktemp("widget")
+    app = _Server({"/": WIDGET})
+    try:
+        with pytest.MonkeyPatch.context() as mp:
+            exe = sorted(glob.glob("/opt/pw-browsers/chromium-*/chrome-linux/chrome"))[-1:]
+            if exe:
+                mp.setenv("PLAYWRIGHT_CHROMIUM_EXECUTABLE", exe[0])
+            ex = Explorer(app.url + "/", scope_urls=[app.url + "/"], proxy=None,
+                          actions_log=out / "actions.jsonl",
+                          options=ExploreOptions(idle_ms=150, max_quiet_ms=700,
+                                                 max_actions=20, deadline_s=120,
+                                                 max_harvest=1))
+            try:
+                report = ex.run()
+            except PlaywrightError as exc:
+                if "Executable doesn't exist" in str(exc) or "launch" in str(exc).lower():
+                    skip_or_fail(f"chromium unavailable: {str(exc).splitlines()[0]}")
+                raise
+        actions = [json.loads(ln) for ln in (out / "actions.jsonl").open()]
+        yield {"app": app, "report": report, "actions": actions}
+    finally:
+        app.close()
+
+
+def test_a_formless_widget_at_a_shadow_roots_top_is_filled_and_sent(widget_run):
+    """Review B1: the search widget's input and button sit directly under its open
+    shadow root (Lit's and Stencil's usual layout), so ``parentElement`` ends at the
+    root. The root is their container: the input gets its Enter step, the button its
+    submit step, and the request carries the filled value. Before: the button was
+    clicked bare and the server received ``q=`` empty."""
+    app = widget_run["app"]
+    searches = [p for p in app.paths() if p.startswith("/api/search")]
+    assert searches and all(p != "/api/search?q=" for p in searches), searches
+    kinds = {(a["kind"], a["label"]) for a in widget_run["actions"]}
+    assert ("submit", "Find") in kinds and ("enter", "Search") in kinds, kinds
+    assert widget_run["report"].submissions >= 2
+
+
+def test_a_click_that_only_swaps_static_text_keeps_the_state(widget_run):
+    """Review B2: a document click listener makes every labelled text leaf a delegated
+    candidate; they never count toward a state's identity. Refresh replaces
+    ``p.empty`` with ``ul > li.msg`` -- static text only -- so the page stays one state,
+    as before BUG-0551. Before: Refresh made a second state."""
+    report = widget_run["report"]
+    refresh = [a for a in widget_run["actions"] if a["label"] == "Refresh"]
+    assert refresh and all(a["new_state"] == a["state"] for a in refresh), refresh
+    assert report.states == 1, report
+
+
+def test_a_background_poll_never_makes_an_inert_candidate_live(widget_run):
+    """Review B3: the page polls ``/api/notifications`` every 100 ms, so every trial's
+    window holds poll requests. Only a request the click caused counts (one the
+    control window before it did not see): ``Open report`` fetches its tile and is
+    kept; ``Just a note`` stays inert, never logged. Before: the poll made it live."""
+    app, report = widget_run["app"], widget_run["report"]
+    assert "/api/tile/7" in app.paths() and "/api/notifications" in app.paths()
+    labels = [a["label"] for a in widget_run["actions"]]
+    assert "Open report" in labels and "Just a note" not in labels, labels
+    assert report.delegated_live == 1 and report.delegated_inert >= 1, report
 
 
 # --- the spider's form read (spa.FORMS_JS) in a real browser ------------------------------
+def test_the_spiders_form_read_finds_a_formless_widget_at_a_shadow_roots_top():
+    """Review B1 in `spa.FORMS_JS`: a form-less widget whose input and button sit
+    directly under its open shadow root is a form-like container (the root), its
+    control locatable by its ``data-fuzzlab-id``. Before: none was found."""
+    _require_playwright()
+    from playwright.sync_api import sync_playwright
+
+    from fuzzlab.tools import spa
+    from tests._browser import launch_browser_or_skip
+    app = _Server({"/": WIDGET})
+    try:
+        with sync_playwright() as pw:
+            browser = launch_browser_or_skip(pw)
+            try:
+                page = browser.new_page()
+                page.goto(app.url + "/")
+                forms = page.evaluate(spa.FORMS_JS, 20)
+                assert [(f["controls"], f["button"]) for f in forms] == \
+                    [([["q", "text"]], "Find")], forms
+                page.fill(f'[data-fuzzlab-id="{forms[0]["ids"][0]}"]', "abcde")
+                page.click(f'[data-fuzzlab-id="{forms[0]["button_id"]}"]')
+                page.wait_for_timeout(300)
+                assert "/api/search?q=abcde" in app.paths(), app.paths()
+            finally:
+                browser.close()
+    finally:
+        app.close()
+
+
 def test_the_spiders_form_read_finds_a_form_in_an_open_shadow_root():
     """BUG-0551 in `spa.FORMS_JS` (both the spider and the browser login read forms
     with it): a form inside an open shadow root is found and its controls are locatable
@@ -361,6 +518,92 @@ def test_coverage_counts_a_page_read_again_once():
     more = PageRead(counts={"shadow_roots": 3}, distinct={"frames": {"f1", "f2"}})
     assert cov.add("r", more) == {"shadow_roots": 1, "frames": 1}
     assert cov.add("r2", first) == {"shadow_roots": 2, "budget.delegated": 3, "frames": 1}
+
+
+def test_a_delegated_candidate_is_no_part_of_a_states_identity():
+    """Review B2: the state key and a state's core read every element but a delegated
+    candidate, whose membership depends on text and order."""
+    from fuzzlab.disco.fingerprint import state_fingerprint, state_signatures
+    button = {"how": "native", "tag": "button", "ancestry": "div#app"}
+    empty = {"how": "delegated", "tag": "p", "cls": "empty", "ancestry": "div#list"}
+    msg = {"how": "delegated", "tag": "li", "cls": "msg", "ancestry": "ul<div#list"}
+    url = "http://127.0.0.1:1/"
+    assert state_fingerprint(url, [button, empty]) == state_fingerprint(url, [button, msg])
+    assert state_fingerprint(url, [button, empty]) == state_fingerprint(url, [button])
+    assert state_signatures([button, empty, msg]) == state_signatures([button])
+    listener = {**empty, "how": "listener", "listeners": ["click"]}
+    assert state_fingerprint(url, [button, listener]) != state_fingerprint(url, [button])
+
+
+def test_a_request_is_keyed_by_method_and_route():
+    """Review B3: a poll's next request is the key of its last (query values and digit
+    runs folded), so a control window that saw one explains the next."""
+    from fuzzlab.disco.explore import request_key
+    assert request_key("get", "http://127.0.0.1:1/api/n?t=1") == \
+        request_key("GET", "http://127.0.0.1:1/api/n?t=2")
+    assert request_key("GET", "http://127.0.0.1:1/api/tile/7") == \
+        request_key("GET", "http://127.0.0.1:1/api/tile/8")
+    assert request_key("POST", "http://127.0.0.1:1/api/n") != \
+        request_key("GET", "http://127.0.0.1:1/api/n")
+
+
+class _FakeReader:
+    """A `compose.Reader` stand-in for the census: a page URL and a DevTools tree."""
+
+    def __init__(self, tree, url="http://127.0.0.1:1/app"):
+        from fuzzlab.disco.compose import Reader
+        self.page = type("P", (), {"url": url})()
+        self.cdp = type("C", (), {"send": lambda _s, _m, _p: {"root": tree}})()
+        self.calls = 0
+        self._closed = Reader.closed_hosts
+
+    def closed_hosts(self):
+        self.calls += 1
+        return self._closed(self)
+
+
+def _el(tag, attrs=(), children=(), roots=(), doc=None):
+    node = {"localName": tag, "attributes": list(attrs), "children": list(children),
+            "shadowRoots": list(roots)}
+    if doc is not None:
+        node["contentDocument"] = doc
+    return node
+
+
+def test_the_census_counts_every_closed_root_of_the_documents_read():
+    """Review B4: every element hosting a closed shadow root is counted -- a built-in
+    host, a nested one inside an open root, one in a frame read -- attributed to its
+    frame; a frame not read is left out; a page already checked in this shape is not
+    checked again; a page past the node bound is not checked, counted unchecked."""
+    from fuzzlab.disco import compose
+    closed = {"shadowRootType": "closed", "children": [_el("button")]}
+    inner = _el("section", ("id", "deep"), roots=[closed])
+    frame_doc = {"children": [_el("html", children=[_el("span", ("class", "b a"),
+                                                              roots=[closed])])]}
+    other_doc = {"children": [_el("div", roots=[closed])]}
+    tree = {"children": [_el("html", children=[
+        _el("div", ("id", "vault"), roots=[closed]),
+        _el("x-card", children=[_el("b")], roots=[closed]),
+        _el("open-box", roots=[{"shadowRootType": "open", "children": [inner]}]),
+        _el("input", roots=[{"shadowRootType": "user-agent", "children": []}]),
+        _el("iframe", ("id", "f", "data-disco-frame", "1"), doc=frame_doc),
+        _el("iframe", ("id", "g", "data-disco-frame", "2"), doc=other_doc),
+    ])]}
+    reader = _FakeReader(tree)
+    links = ["^frame", "iframe#f", "@/f.html"]
+    docs = {"": ([], 40, 7), "1": (links, 5, 9)}
+    censused: set = set()
+    read = compose.PageRead()
+    compose._census(reader, read, docs, censused)
+    assert read.distinct["closed_shadow_roots"] == {
+        "div#vault", "x-card", "section#deep", "<".join(["span.a.b", *links])}
+    assert "budget.census" not in read.counts
+    again = compose.PageRead()
+    compose._census(reader, again, docs, censused)
+    assert reader.calls == 1 and again.distinct == {} and again.counts == {}
+    big = compose.PageRead()
+    compose._census(reader, big, {"": ([], compose.MAX_NODES + 1, 3)}, censused)
+    assert reader.calls == 1 and big.counts == {"budget.census": compose.MAX_NODES + 1}
 
 
 def test_a_delegated_candidate_is_tried_once_within_the_runs_budget():

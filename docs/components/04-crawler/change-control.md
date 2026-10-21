@@ -51,6 +51,32 @@ Newest first.
       one is read by its light tree (as before), and left out when it is itself in a
       shadow root, because the browser login's X3 clear and `G1_READ_JS` resolve ids
       with `document.querySelector` (pinned).
+  - *(Review round 1, branch `lane/DISCO13-r1` from c219266; findings DISCO13-B1..B4,
+    BUG-0551's review-round section.)*
+    - **B1, a form-less widget at a shadow root's top.** `READ_JS`'s `formLike` returns
+      the shadow root its ancestor walk ends at when the root holds a typed control: no
+      `<form>`, so no action and `form_tag` false; `typed`, `last_typed` and
+      `submitters` are the root's. `spa.FORMS_JS` considers that root once its 8-ancestor
+      walk ends there, and describes such a container by its host (CAPTCHA hints, no
+      action). SP-70: `deepAll`/`deepFind` walk a shadow root passed as the root.
+    - **B2, state identity.** `fingerprint.counts_for_state` and `state_signatures`: a
+      delegated candidate is never part of the state key, a state's core or
+      `reproduces`. Every core in `explore.py` is built through `state_signatures`, and
+      `_alias_state` through `state_fingerprint`. Delegated candidates are still read,
+      stepped and tried.
+    - **B3, causal trial evidence.** `Explorer._trial` runs a control window just
+      before the click: `mark_activity` then `wait_quiet`, the same quiet wait the trial
+      ends with. A request counts only when its `request_key` (method, normalised
+      route) is not explained on that route (`_Shared.explained`): not seen by a control
+      window there, not already counted by an earlier trial there.
+    - **B4, the closed-root census.** The `suspects` heuristic, `Reader.census` and
+      `MAX_CENSUS` are gone. `compose._census` makes one
+      `DOM.getDocument({depth: -1, pierce: true})` per page. It counts every element
+      hosting a closed root in each document read, attributed by the frame key on its
+      frame element, once per route and page shape (`READ_JS` returns a digest of each
+      element's tag and child count in walk order; `_Shared.censused`). A page whose
+      documents read hold more than `MAX_NODES` elements, or that is read without
+      DevTools, is not checked: its elements count `budget.census`.
 - Impact (other components / project):
   - **SESS:** the session manager's browser login reads forms with `spa.FORMS_JS`.
     - A login form inside a shadow root is still never picked (left out, as before).
@@ -68,8 +94,14 @@ Newest first.
   - **The other lanes:**
     - AU-DISCO's new state identity must not read `disabled` or other flags of
       `how == "delegated"` elements (a trial verdict, not the DOM); BUG-0551 R7.
+      *(Review round 1.)* Nor their membership: its `element_multiset` and
+      `execution_key` (d9e269e) must filter `fingerprint.counts_for_state` at the merge,
+      as `state_fingerprint` and `state_signatures` do here.
     - The SPIDER lane, or anyone adding a page script with a light-tree query, must add
       an allowance to `tests/test_composed_tree_guard.py::ALLOWED` or build on SP-70.
+  - *(Review round 1.)* **SESS:** the browser login reads `spa.FORMS_JS`. A form-less
+    shadow widget is now a container, but one holding a password control is still left
+    out (it is in a shadow root), so the login's choice of form is unchanged.
 - Risk (medium):
   - **The enumeration path changed for every disco run**, from Playwright's evaluate to
     CDP's evaluate. Mitigation: light-tree descriptions are byte-for-byte those of the
@@ -80,6 +112,20 @@ Newest first.
     action. The destructive and deny gates run before `act` as for every element.
   - **The ancestry suffix** changes the signatures, and so the states, only of elements
     inside shadow roots and frames, which were not read before.
+  - *(Review round 1; the round-0 statement above was wrong for light pages:
+    delegated candidates changed state membership on any page with a document click
+    listener, B2.)* With delegated candidates out of state identity, a light page's
+    states are those of c483dc1 again.
+  - *(Review round 1.)* **Costs added:**
+    - each delegated trial waits one more quiet window (at least `idle_ms`): at most 48
+      per run;
+    - the closed-root census costs about 25 us per DOM node once per route and page
+      shape (230 ms at 6 000 elements; 1.3-1.9 s at 24 000-30 000), and is skipped past
+      `MAX_NODES` elements.
+  - *(Review round 1.)* Accepted: background traffic slower than a control window can
+    make one inert candidate per route and request key live (R8, measured). A delegated
+    candidate that appears only after an action that changes nothing else is not tried
+    there (R9; c483dc1's behaviour).
 - Deliverables:
   - [x] SP-70 `tools/composed.py`; `disco/compose.py`; the `explore.py` enumeration,
     acting and report changes; `spa.FORMS_JS` — done
@@ -101,6 +147,19 @@ Newest first.
     section 5's `explore.json` line edited in place — done
   - [x] BUG-0551. PA-0551, SP-70, CHANGELOG, ERROR_LOG, ARCHITECTURE and F-1XX texts
     are in the lane's `doc_texts.md` for the coordinator — done
+  - [x] *(Review round 1.)* B1-B4 fixed. Tests in `tests/test_disco_compose.py`:
+    - a second real-browser app (`WIDGET`: a form-less shadow search widget, a Refresh
+      that only swaps static text, delegated tiles, a 100 ms background poll) with
+      three tests;
+    - the spider's form read of the widget;
+    - two more closed roots in the main fixture (a `<div>` host and an `<x-card>`
+      slotting a visible child), counted exactly;
+    - offline: state identity without delegated candidates, `request_key`, and the
+      census's attribution, cache and bound.
+
+    FR-CRAWL-19, FR-CRAWL-39 and FR-CRAWL-40 edited in place; BUG-0551's review-round
+    section; PA-0551 (strengthened), SP-70, CHANGELOG, ERROR_LOG, ARCHITECTURE and
+    F-1XX texts updated in `doc_texts.md` — done
 - Effectiveness (assessed 2026-10-21, lane evidence; the harness on the committed tree
   is reported with the lane's result):
   - On c483dc1 the six defect tests in `tests/test_disco_compose.py` fail. The
@@ -112,6 +171,29 @@ Newest first.
   - Measured read cost: 20-28 ms for the fixture page (one document, one frame).
     getEventListeners inside the read costs 13 ms for 6 005 elements and 34 ms for
     24 005, one round trip, against about 1.35 ms per candidate per CDP call before.
+  - *(Review round 1, assessed 2026-10-21.)* The new test file was run once against
+    c219266's product code (a scratch copy of that tree, `FUZZLAB_REQUIRE_BROWSER=1`):
+    8 failed, 8 passed, 2 xfailed. These are the eight review-round tests:
+    - B1, explorer: the server got `/api/search?q=` (empty);
+    - B1, spider: `spa.FORMS_JS` returned `[]`;
+    - B2: Refresh's `new_state` differed from its state;
+    - B3: `Just a note` was logged as an action;
+    - B4: `closed_shadow_roots` was 1, not 3;
+    - the three offline tests: the new names did not exist.
+
+    On this branch the targeted files (`tests/test_disco_compose.py`,
+    `test_composed_tree_guard.py`, `test_disco_e2e.py`, `test_disco_harvest.py`,
+    `test_disco_workers.py`, `test_netquiet.py`, `test_session_browser_login.py`,
+    `test_browser_scope.py`, `test_fewer_requests.py`,
+    `test_base_url_subpath_registry.py`, `test_query_placement.py`,
+    `test_shared_primitives.py`) gave 515 passed and 12 xfailed in one invocation. The
+    reviewer's four probes on this branch:
+    - B1: `q=test` was sent through an Enter step and a submit step;
+    - B2: 1 state;
+    - B3 (400 ms poll): 2 trials, 1 live;
+    - B4: `div#host` and `x-card` counted.
+
+    The harness result on the committed tree is reported with the lane's result.
 
 ### CC-CRAWL-0054 — The JSONL tail caps a line while reading it; the contract runner reads bounded and matches contract patterns in a killable worker (BUG-0536) (2026-10-20)
 - Placement: pre-assigned to AU-BOUNDED (audit defects 23 and 27, with the disco and

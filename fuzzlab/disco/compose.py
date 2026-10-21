@@ -30,13 +30,15 @@
 
 What is not read is counted in the run report, never claimed (`PageRead`):
 
-* closed shadow roots -- confirmed through ``DOM.describeNode`` on custom elements whose
-  light tree renders nothing, at most `MAX_CENSUS` per read;
+* closed shadow roots -- every element of a document read that hosts one, on any host
+  (a ``div`` as well as a custom element; one that slots visible light children as
+  well as one that renders nothing), found by one ``DOM.getDocument`` of the whole
+  page with every shadow root pierced (`_census`; BUG-0551 review B4);
 * frames that are cross-origin or out of scope;
 * every bound a read hit (``budget_limited``).
 
 Without DevTools (a non-Chromium browser), the read runs through Playwright: no listener
-or delegated candidates, and no closed-root census.
+or delegated candidates, and no closed-root census (its elements counted unchecked).
 """
 
 from __future__ import annotations
@@ -45,6 +47,7 @@ import json
 from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
+from fuzzlab.disco.fingerprint import normalise_route
 from fuzzlab.tools.composed import COMPOSED_JS
 
 #: Listener types on an element that make it actionable itself.
@@ -68,11 +71,9 @@ MAX_NODES = 30000
 #: and a frame whose read failed because it was navigating under it).
 MAX_FRAMES = 8
 MAX_FRAME_DEPTH = 3
-#: Custom elements checked for a closed shadow root per document.
-MAX_CENSUS = 16
 #: The bounds a read reports in ``budget_limited`` (what each left out): described
 #: elements, listener candidates, delegated candidates, a document's walk, frames, and
-#: closed-root checks.
+#: the elements whose shadow roots the closed-root census did not check (`_census`).
 BUDGET_KINDS = ("elements", "candidates", "delegated", "nodes", "frames", "census")
 
 #: One document's read. Its argument is ``[maxElements, maxCand, maxDelegated, maxNodes,
@@ -95,9 +96,15 @@ READ_JS = r"""
   };
   const all = [];
   const deep = new Set();
-  let nodes = 0, shadows = 0;
+  let nodes = 0, shadows = 0, shape = 2166136261;
+  const tags = new Map();
   composedWalk(document, (e) => {
     nodes++;
+    // the composed tree's shape (each element's tag and light child count, in walk
+    // order): the closed-root census runs again only when it changed (`_census`)
+    let t = tags.get(e.tagName);
+    if (t === undefined) { t = tags.size + 1; tags.set(e.tagName, t); }
+    shape = Math.imul(shape ^ (t * 64 + Math.min(e.childElementCount, 63)), 16777619) >>> 0;
     for (const m of MARKS) if (e.hasAttribute(m)) e.removeAttribute(m);
     if (all.length < maxNodes) all.push(e);
     if (e.shadowRoot) {
@@ -126,7 +133,11 @@ READ_JS = r"""
   };
   const TYPED_ANY = 'input:not([type=hidden]):not([type=button]):not([type=submit])'
     + ':not([type=checkbox]):not([type=radio]),textarea,select';
-  const formLike = (e) => {        // a <form>, else the nearest ancestor holding typed inputs
+  // a <form>, else the nearest ancestor holding typed inputs, else -- the walk reached the
+  // top of a shadow tree -- that shadow root when it holds one: a widget whose input and
+  // button sit directly under its root (Lit, Stencil) has no container element, and
+  // `parentElement` ends there (BUG-0551 review B1). A root is no <form>: no action.
+  const formLike = (e) => {
     if (e.form) return e.form;
     const f = e.closest('form'); if (f) return f;
     let a = e.parentElement, k = 0;
@@ -134,6 +145,8 @@ READ_JS = r"""
       if (deepFind(deep, a, TYPED_ANY)) return a;
       a = a.parentElement; k++;
     }
+    const root = e.getRootNode();
+    if (!a && root.host && deepFind(deep, root, TYPED_ANY)) return root;
     return null;
   };
   window.__discoLayout = {cls, ancestry, formLike};
@@ -281,20 +294,8 @@ READ_JS = r"""
     } catch (x) { url = null; same = false; }
     frames.push({key, node: node(f), src: f.src || '', url, same, visible: visible(f)});
   }
-  // custom elements whose light tree renders nothing: a closed shadow root may render
-  // them (confirmed, or not, through DevTools by the caller)
-  const suspects = [];
-  for (const e of all) {
-    if (e.shadowRoot || !e.tagName.includes('-')) continue;
-    const r = e.getBoundingClientRect();
-    if (!(r.width > 0 && r.height > 0)) continue;
-    let shown = false;
-    for (const c of e.children) if (c.getClientRects().length) { shown = true; break; }
-    if (!shown) suspects.push(e);
-  }
-  window.__discoSuspects = suspects;
-  return {elements: out, frames, shadow_roots: shadows, nodes,
-          cut: nodes > all.length, suspects: suspects.map(node), listeners: cli,
+  return {elements: out, frames, shadow_roots: shadows, nodes, shape,
+          cut: nodes > all.length, listeners: cli,
           over: {elements: overElements, candidates: overCand, delegated: overDeleg}};
 }
 """
@@ -465,49 +466,70 @@ class Reader:
                     self._keys[value] = cid
         return self._keys.get(key)
 
-    def census(self, key: str, count: int) -> list[bool]:
-        """Whether each of the first ``count`` suspects of ``key``'s last read hosts a
-        closed shadow root (``DOM.describeNode``: its ``shadowRoots`` and their type)."""
-        if self.cdp is None or count <= 0:
-            return []
-        params = {"expression": "window.__discoSuspects || []"}
-        if key:
-            context = self._context(key)
-            if context is None:
-                return []
-            params["contextId"] = context
-        arr = self.cdp.send("Runtime.evaluate", params)
-        obj = (arr.get("result") or {}).get("objectId")
-        if not obj:
-            return []
-        props = self.cdp.send("Runtime.getProperties", {"objectId": obj, "ownProperties": True})
-        items = sorted((int(p["name"]), (p.get("value") or {}).get("objectId"))
-                       for p in props.get("result", []) if p.get("name", "").isdigit())
-        out = []
-        for _i, el in items[:count]:
-            if not el:
-                out.append(False)
-                continue
-            node = self.cdp.send("DOM.describeNode", {"objectId": el, "depth": 0}).get("node") or {}
-            out.append(any(r.get("shadowRootType") == "closed"
-                           for r in node.get("shadowRoots") or []))
+    def closed_hosts(self) -> list[tuple[str, str]] | None:
+        """Every element of the page hosting a closed shadow root, as (the frame key of
+        its document -- ``""`` for the page's own --, its ``tag#id.class``): one
+        ``DOM.getDocument`` of the whole tree, every shadow root (closed ones included)
+        and every in-process frame document pierced. A frame's document carries the key
+        its parent's read wrote on the frame element (``data-disco-frame``); one with no
+        key was not read and is left out. None without DevTools."""
+        if self.cdp is None:
+            return None
+        root = self.cdp.send("DOM.getDocument", {"depth": -1, "pierce": True}).get("root") or {}
+        out: list[tuple[str, str]] = []
+        stack = [(root, "")]
+        while stack:
+            node, key = stack.pop()
+            roots = node.get("shadowRoots") or []
+            if any(r.get("shadowRootType") == "closed" for r in roots):
+                out.append((key, _node_desc(node)))
+            stack.extend((r, key) for r in roots)
+            stack.extend((c, key) for c in node.get("children") or [])
+            doc = node.get("contentDocument")
+            frame = _attributes(node).get("data-disco-frame")
+            if doc is not None and frame:
+                stack.append((doc, frame))
         return out
 
 
-def read_page(page, ctx, in_scope, *, max_delegated: int = MAX_DELEGATED) -> PageRead:
+def _attributes(node: dict) -> dict[str, str]:
+    """A DevTools node's attributes (a flat ``[name, value, ...]`` list) as a dict."""
+    flat = node.get("attributes") or []
+    return dict(zip(flat[0::2], flat[1::2]))
+
+
+def _node_desc(node: dict) -> str:
+    """``tag#id.class`` of a DevTools element node, as `READ_JS`'s ``node`` writes it:
+    its first four class tokens, sorted."""
+    attrs = _attributes(node)
+    classes = list(dict.fromkeys((attrs.get("class") or "").split()))[:4]
+    out = (node.get("localName") or node.get("nodeName") or "").lower()
+    if attrs.get("id"):
+        out += "#" + attrs["id"]
+    if classes:
+        out += "." + ".".join(sorted(classes))
+    return out
+
+
+def read_page(page, ctx, in_scope, *, max_delegated: int = MAX_DELEGATED,
+              censused: set | None = None) -> PageRead:
     """The page's composed read (module doc). The page's own document first, then each
-    frame it reads, breadth first; elements in that order."""
+    frame it reads, breadth first; elements in that order. ``censused`` (the run's)
+    holds the page shapes whose closed roots were already counted: an unchanged page
+    is not checked again (`_census`)."""
     reader = Reader(page, ctx)
     try:
-        return _read(reader, in_scope, max_delegated)
+        return _read(reader, in_scope, max_delegated, censused)
     finally:
         reader.close()
 
 
-def _read(reader: Reader, in_scope, max_delegated: int) -> PageRead:
+def _read(reader: Reader, in_scope, max_delegated: int, censused: set | None) -> PageRead:
     read = PageRead()
     queue: list[tuple[str, list, list]] = [("", [], [])]
     room, deleg, frames = MAX_ELEMENTS, max_delegated, 0
+    #: each document read: its frame key -> (its frame links, its elements, its shape)
+    docs: dict[str, tuple[list, int, int]] = {}
     while queue:
         key, path, links = queue.pop(0)
         arg = [room, MAX_CDP_CANDIDATES, deleg, MAX_NODES, key, links,
@@ -533,16 +555,7 @@ def _read(reader: Reader, in_scope, max_delegated: int) -> PageRead:
             read.count(f"budget.{bound}", n)
         if got.get("cut"):
             read.count("budget.nodes", got["nodes"] - MAX_NODES)
-        suspects = got.get("suspects") or []
-        if suspects:
-            try:
-                closed = reader.census(key, MAX_CENSUS)
-            except _pw_error():      # a suspect detached under the check: unconfirmed
-                closed = []
-            read.count("budget.census", len(suspects) - len(closed))   # never confirmed
-            for desc, hit in zip(suspects, closed):
-                if hit:
-                    read.one("closed_shadow_roots", "<".join([desc, *links]))
+        docs[key] = (links, int(got.get("nodes") or 0), int(got.get("shape") or 0))
         for info in got["frames"]:
             verdict = classify_frame(info, in_scope)
             if verdict is None:
@@ -557,7 +570,39 @@ def _read(reader: Reader, in_scope, max_delegated: int) -> PageRead:
             frames += 1
             read.one("frames", "<".join(here))
             queue.append((info["key"], [*path, info["key"]], here))
+    _census(reader, read, docs, censused)
     return read
+
+
+def _census(reader: Reader, read: PageRead, docs: dict, censused: set | None) -> None:
+    """Count the closed shadow roots of the documents read (`Reader.closed_hosts`), each
+    once per route by its host and frames (``closed_shadow_roots``).
+
+    Bounded, and never claimed: a page whose documents read hold more than `MAX_NODES`
+    elements is not checked, nor is one read without DevTools or whose check failed (it
+    navigated under it); their elements are counted ``budget.census``. One full
+    ``DOM.getDocument`` costs about 25 us per node (measured: 230 ms for 6 000
+    elements, 1.3-1.9 s for 24 000-30 000), so a page whose route and documents' shapes
+    were already checked this run (``censused``) is not checked again."""
+    total = sum(n for _links, n, _shape in docs.values())
+    key = (normalise_route(reader.page.url),
+           tuple(sorted((k, n, shape) for k, (_links, n, shape) in docs.items())))
+    if censused is not None and key in censused:
+        return
+    hosts = None
+    if total <= MAX_NODES:
+        try:
+            hosts = reader.closed_hosts()
+        except _pw_error():          # the page navigated under the check: not checked
+            hosts = None
+    if hosts is None:
+        read.count("budget.census", total)
+        return
+    for frame, desc in hosts:
+        if frame in docs:
+            read.one("closed_shadow_roots", "<".join([desc, *docs[frame][0]]))
+    if censused is not None:
+        censused.add(key)
 
 
 class Coverage:

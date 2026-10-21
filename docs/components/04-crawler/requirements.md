@@ -662,7 +662,10 @@ fuzzer.
     `--modifier` or a class with a state-word part (`visible`, `active`, `pristine`,
     `touched`...) -- dropped; *(CC-CRAWL-0034, BUG-0502)* nothing of where the element
     was seen: a form-less container has no action). At most `max_same_signature` (2)
-    elements of one signature per state.
+    elements of one signature per state. *(CC-CRAWL-0059, review round 1.)* A delegated
+    candidate (FR-CRAWL-40) is never part of a state's identity: the key, a state's core
+    and every restore check read the other elements only
+    (`fingerprint.counts_for_state`, `state_signatures`).
   - *(Amended in place, CC-CRAWL-0034, BUG-0502; was: once per state.)* **Each (route,
     element signature, occurrence, action) is tried once**: an overlay state's work is
     what it added. A step on **chrome** -- a signature seen on more than one route (a
@@ -688,7 +691,10 @@ fuzzer.
     Text-like controls are filled through their form, never clicked alone.
   - *(Amended in place, CC-CRAWL-0032.)* **A form** is a `<form>` or, without one, the
     nearest ancestor (six levels) holding typed inputs; a button there is its submitter,
-    a disabled one included (filling enables it).
+    a disabled one included (filling enables it). *(CC-CRAWL-0059, review round 1.)*
+    When those ancestors end at the top of a shadow tree, the shadow root is the
+    container if it holds a typed control: a form-less widget whose input and button sit
+    directly under its root (no action, as any form-less container).
   - *(CC-CRAWL-0034.)* **Enter:** a text input that is the last typed control of a
     container with no submit control, or the only one of a form-less container (a
     search box among a toolbar's buttons), gets an Enter step: its container filled,
@@ -954,25 +960,34 @@ fuzzer.
       selector that pierces open shadow roots, so a state reached through a shadow root
       or a frame is restored by replaying there.
     - A form's controls are read, and earlier `data-disco-field` markers cleared, across
-      the document's composed tree.
+      the document's composed tree. A control's container may be the shadow root its
+      ancestors end at (FR-CRAWL-19's form rule; review round 1).
     - The described elements are bounded at 400 per read across the page and its
       frames, as before.
   - **What is not read is counted in `explore.json`, never claimed.** Per route; a page
     read again adds nothing; written while the run is live.
     - **Read:** `shadow_roots` (open shadow roots) and `frames` (same-origin frames).
     - **Not read:**
-      - `closed_shadow_roots`, confirmed through `DOM.describeNode` on a custom element
-        whose light tree renders nothing, at most 16 checked per document;
+      - *(Amended in place, review round 1; was: custom elements whose light tree
+        renders nothing, at most 16 per document.)* `closed_shadow_roots`: every element
+        of a document read that hosts a closed shadow root, on any host and whatever its
+        light children render, found by one `DOM.getDocument` of the page with every
+        shadow root and in-process frame pierced (`compose._census`). A page is checked
+        once per route and shape (each read document's tag and child-count digest);
       - `frames_cross_origin`;
       - `frames_out_of_scope` (by its `src` or its document; the guard never loads it).
     - **`budget_limited`:** per bound (`elements`, `candidates`, `delegated`, `nodes` (a
       walk past 30 000 elements), `frames` (past the frame bounds, or navigating under
-      the read), `census` (closed-root checks not made)), what it left out.
+      the read), `census` (the elements whose shadow roots were not checked: a page
+      whose documents read hold more than 30 000 elements, read without DevTools, or
+      navigating under the check)), what it left out.
   - **The spider's form read** (`spa.FORMS_JS`, also the session manager's browser login)
-    finds forms, buttons and controls across open shadow roots.
+    finds forms, buttons and controls across open shadow roots. *(Review round 1.)* A
+    button's container may be the shadow root its ancestors end at (a form-less widget,
+    described by its host).
   - **Not covered:**
-    - A closed shadow root on a non-custom host, or one that slots rendered light
-      children, is neither read nor counted.
+    - A closed shadow root attached where the page's composed shape did not change
+      (the same tags and child counts) is counted only once the shape next changes.
     - A cross-origin frame is not read in the page; its URL is explored as a top-level
       page when the harvest reaches it.
     - The harvest's link extraction reads the top document's serialised light tree;
@@ -987,12 +1002,22 @@ fuzzer.
     first of each shape is kept, at most 16 per read (`budget_limited.delegated` counts
     the rest). It is described `how: "delegated"`.
   - **Each is tried once per run**, at most 48 trials (`compose.Trials`). A trial clicks
-    it and waits for quiet. It is **live** when a request was made, the URL changed, a
-    page opened or the explorer's own state fingerprint changed: a performed, logged
-    action, clicked like any other from then on. Otherwise it is **inert**: never
+    it and waits for quiet. It is **live** when its click caused a request, the URL
+    changed, a page opened or the explorer's own state fingerprint changed: a performed,
+    logged action, clicked like any other from then on. Otherwise it is **inert**: never
     logged, never counted an action, and described `disabled` from then on. A candidate
     still untried once the trials are spent is described `disabled` and counted
     `delegated_unexplored`.
+  - *(Review round 1.)* **A request the click caused** is one whose method and
+    normalised route (`explore.request_key`) are not explained on that route: just
+    before the click, a **control window** leaves the page alone for the same quiet
+    wait (from an action mark); what it, or an earlier control window on the route,
+    saw is the page's own traffic (a poll, a beacon, a keep-alive), and a key an
+    earlier trial there already counted is not counted again.
+  - *(Review round 1.)* **A delegated candidate is no part of a state's identity**
+    (FR-CRAWL-19's states): which labelled leaves are candidates depends on their text
+    and order, so a click that only swaps static text under a document listener stays
+    in its state.
   - **Counters** (`explore.json`): `delegated_trials` = `delegated_live` +
     `delegated_inert`, and `delegated_unexplored`.
   - **Known gaps (pinned or allowed):**
@@ -1004,6 +1029,13 @@ fuzzer.
       xfails.
     - The legacy spider's reveal, option and menu scripts read the light tree only, and
       the spider reads no frame and no delegated action (deprecated, FR-CRAWL-21).
+    - *(Review round 1.)* Background traffic slower than a control window can make one
+      inert candidate per route and request key live (measured: a 2.5 s poll with
+      `idle_ms` 500, at most one per run, 4 of 12 inert candidates over 4 runs; 0 of
+      21 at 400 ms and 1 s).
+    - *(Review round 1.)* A delegated candidate that appears only after an action that
+      changes nothing else in the state is not tried there: the state is unchanged, and
+      its steps were planned before the action.
 
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default

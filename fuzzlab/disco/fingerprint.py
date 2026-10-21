@@ -5,6 +5,15 @@ plus the sorted signatures of its visible interactive elements. Text content is 
 out on purpose, so a page whose data changes (a new row, a counter) stays one state,
 while a page that grows a dialog, a tab panel or a form is a new one.
 
+**A delegated candidate is never part of a state's identity** (`counts_for_state`,
+FR-CRAWL-40; BUG-0551 review B2). It is any labelled text leaf -- a ``p``, ``span``,
+``li``, ``td`` -- under a click listener on an ancestor, the document or the window,
+which a dropdown's dismiss handler, a data-api or a framework's root registers on most
+pages. Which leaves are candidates depends on their text (an empty one is none) and
+their order (the first of each shape, a bound per read), so counting them made a click
+that only swapped static text a new state. The explorer still reads and tries them;
+the state key, a state's core and every restore check read the other elements only.
+
 An **element signature** is its layout identity: tag, role, type, name, class tokens,
 its short ancestor chain (``tag#id.class`` of up to three ancestors) and a normalised
 id / href / form action -- each with digit runs folded to ``#`` (``mat-input-3`` and
@@ -113,8 +122,21 @@ def element_signature(el: dict) -> str:
     return "|".join(parts)
 
 
+def counts_for_state(el: dict) -> bool:
+    """Whether an element description is part of a state's identity: every one but a
+    delegated candidate (``how == "delegated"``; module doc)."""
+    return el.get("how") != "delegated"
+
+
+def state_signatures(elements: list[dict]) -> frozenset[str]:
+    """The signatures a state's identity reads (`counts_for_state`): its key's set and
+    a state's core (`explore.State`)."""
+    return frozenset(element_signature(e) for e in elements if counts_for_state(e))
+
+
 def state_fingerprint(url: str, elements: list[dict]) -> str:
-    """The state key: hash of the route and the *set* of element signatures."""
-    sigs = sorted({element_signature(e) for e in elements})
+    """The state key: hash of the route and the *set* of element signatures
+    (`state_signatures`)."""
+    sigs = sorted(state_signatures(elements))
     doc = json.dumps([normalise_route(url), sigs], separators=(",", ":"))
     return hashlib.sha256(doc.encode("utf-8")).hexdigest()[:24]

@@ -24,11 +24,14 @@ builds on: function definitions a script concatenates at the top of its body, as
   ``deepAll(deep, root, selector, max)`` and ``deepFind(deep, root, selector)`` query
   ``root``'s composed subtree, and use the native light-tree query when ``deep`` says
   no shadow host is below it. A page without shadow roots costs what it did before.
+  ``root`` may be a shadow root itself (a widget whose controls sit directly under it
+  has no container element, BUG-0551 review B1): it is always walked, since ``deep``
+  holds elements only.
 
 What a page script cannot reach is stated, never claimed:
 
 * A **closed** shadow root is unreachable (``host.shadowRoot`` is ``null``). disco
-  counts the hosts it can confirm through DevTools (`disco.compose`).
+  counts every host of one through DevTools (`disco.compose._census`).
 * A **frame's** document is another realm. It is read by the same script run in that
   frame, never by walking into ``contentDocument`` (the DevTools listener query only
   sees its own realm's listeners: measured, BUG-0551). Which frames are read is the
@@ -91,8 +94,10 @@ COMPOSED_JS = r"""
     });
     return deep;
   };
-  const deepAll = (deep, root, sel, max) => (deep.has(root) || root.shadowRoot)
+  const deepAll = (deep, root, sel, max) => (deep.has(root) || root.shadowRoot
+      || root.nodeType === 11)
     ? composedAll(root, sel, max) : Array.from(root.querySelectorAll(sel));
-  const deepFind = (deep, root, sel) => (deep.has(root) || root.shadowRoot)
+  const deepFind = (deep, root, sel) => (deep.has(root) || root.shadowRoot
+      || root.nodeType === 11)
     ? composedFind(root, sel) : root.querySelector(sel);
 """

@@ -227,3 +227,237 @@ guard's allowance list):
   the DOM. State identity reads only signatures, which `disabled` is not part of. Any
   new execution-state key (the AU-DISCO lane's defect-1 work) must not read `disabled`
   or `how == "delegated"` elements' flags.
+
+## Review round 1 (2026-10-21, branch `lane/DISCO13-r1` from c219266)
+
+The independent review of c219266 confirmed four defects in this lane's fix, each
+reproduced in a real browser by the reviewer and by a refutation pass. They are part of
+BUG-0551, not new bugs: the lane's own change carried them, and none had merged.
+
+### Description
+- **B1 (`compose.READ_JS`, `spa.FORMS_JS`).** A search or login widget whose input and
+  button sit directly under its open shadow root (the usual layout of a Lit or Stencil
+  component) was found but never filled or submitted. `READ_JS`'s `formLike` walked
+  `parentElement`, which is null at the top of a shadow tree, so the button had no
+  container: `in_form` false, clicked bare. The input had `typed` 0 and no step.
+  `spa.FORMS_JS`'s container search had the same ancestor walk and found nothing.
+- **B2 (`explore.py`, state identity).** Delegated candidates, including ones already
+  found inert, were part of the state fingerprint, a state's core and `reproduces`.
+  On any light page with a click listener on an ancestor, the document or the window,
+  every labelled text leaf (`p`, `span`, `li`, `td`, ...) counted toward the state key,
+  so a click that only swapped static text made a new state. That broke the
+  fingerprint's contract ("a page whose data changes stays one state") and
+  CC-CRAWL-0059's own risk statement (only shadow and frame elements change states).
+- **B3 (`Explorer._trial`).** A trial judged a delegated candidate live whenever any
+  request reached `page.on("request")` between the click and the after-read. A
+  notification poll, a beacon or a keep-alive in that window made an inert candidate
+  live: performed and logged on every state where it appeared, and `delegated_live`
+  overstated.
+- **B4 (`compose.READ_JS`, `Reader.census`).** Closed shadow roots were counted only
+  on custom elements none of whose light children render. A closed root on a built-in
+  host (`div`, `section`, `span`, `article`) or one that slots visible light children
+  was neither read nor counted: `closed_shadow_roots` was 0 while a form was hidden.
+  The lane listed this as residual R1, against its own PA-0551(3).
+
+### Where encountered
+Code review of c219266 (findings DISCO13-B1..B4), with the reviewer's probes run against
+the lane tip in a real browser:
+- B1: a page holding `<search-widget>` whose open root is
+  `<input name=q placeholder=Search><button>Go</button>`. The server received
+  `/api/search?q=` (empty); the action log was `[('click','Go')]` with 0 submissions.
+  The same widget built in the light tree sent `q=test` through an Enter step and a
+  submit step. `page.evaluate(spa.FORMS_JS, 20)` returned `[]`.
+- B2: `<h1>Inbox</h1><button>Refresh</button><div id=list><p class=empty>No
+  messages</p></div>` with `document.addEventListener('click', ...)`; Refresh fetches
+  and replaces the list with `<ul><li class=msg>Hello</li></ul>`. c483dc1: 1 state.
+  c219266: 2 states, the Refresh action changed the state, and both delegated trials
+  were inert.
+- B3: a `.tile` served by a document click listener, a `.note`, and
+  `setInterval(() => fetch('/api/notifications'), 400)`. c219266: the log was
+  `[('click','Open report'), ('click','Just a note')]`, 2 trials, 2 live. Without the
+  poll, `Just a note` was inert.
+- B4: `compose.read_page` on a `<div>` with a closed root holding a login form, and on
+  `<x-card><span>Title</span></x-card>` whose closed root slots it: counts `{}`,
+  distinct `{}`.
+
+### What it caused to fail
+- B1: a form-less component's search or login was never sent with a value. Its endpoint
+  was reached, if at all, only with an empty parameter, and the spider never saw it as a
+  form.
+- B2: on most real pages (Bootstrap's data-api and jQuery register a document click
+  listener; React 17+ one on its root) states multiplied on data changes, spending the
+  state budget and replays on views that differed only by text.
+- B3: an inert element was clicked and logged as an action wherever it appeared, and
+  the report overstated what delegated discovery found.
+- B4: the report claimed nothing was missing while a closed component hid a form.
+
+### What the bug was identified to be
+- B1: a light-tree **ancestor** walk (`parentElement`) inside a composed read. The
+  lane composed every descendant query through SP-70, but not the walk up to a
+  container. `FIELDS_JS` already fell back to `getRootNode()`; `READ_JS` and
+  `FORMS_JS` did not.
+- B2: membership of the state's element set depended on a heuristic whose output varies
+  with text (an empty leaf is no candidate), order (the first of each shape, 16 per
+  read) and size. The verdict flags were kept out of identity (R7), but the members
+  were not.
+- B3: "made a request" was measured as correlation in a time window, not causation.
+- B4: a heuristic pre-filter (`suspects`) chose which hosts the complete DevTools check
+  ran on, and its misses were documented instead of counted.
+
+### Root cause analysis
+Five Whys, from the four symptoms:
+
+1. *Why did the lane ship four defects its tests passed?* Each test exercised one shape
+   per mechanism, chosen to show the mechanism working: a shadow form inside a real
+   `<form>` (reached through `e.form`); delegated tiles on a page whose other leaves never
+   changed; a page with no background traffic; a closed root on an empty custom element.
+2. *Why one shape each?* The lane's fixture plan (PA-0551(2)) listed **ways the
+   platform presents UI** (open and closed roots, frame kinds, delegated handlers), not
+   the **variants inside each way** that the code branches on (a container element or
+   none; a static page or one whose text changes; a quiet page or a polling one; a host
+   that renders nothing or one that slots its children).
+3. *Why were the variants not derived from the code?* The new code's branch points
+   (where `parentElement` ends, which elements feed the fingerprint, what the request
+   listener collects, what the census pre-filter skips) were not enumerated against the
+   tests. The risk statement was written from intent ("only shadow and frame elements
+   change states") and not checked by a test on a light page with a document listener.
+4. *Why did B4 survive the lane's own rule?* PA-0551(3) says what a read cannot reach
+   is counted. The lane met it with a residual paragraph (R1), and no test or guard
+   tells a documented gap from a counted one.
+5. *Why did B2 and B3 escape the fingerprint and counter rules?* PA-0502(3) protects an
+   element's identity from context, and PA-0502(1) requires counters of observed
+   effects. Neither names a **state's membership** or the **cause** of an observed
+   effect, so neither applied.
+
+**Root cause:** the review-round defects share one cause: the lane tested each new
+mechanism on a single confirming shape and never enumerated the inputs its code
+branches on (container or none, static or changing text, quiet or busy network,
+rendering or slotting host). The heuristic outputs it added (delegated membership,
+trial verdicts, census suspects) were therefore never checked against the contracts
+they fed (state identity, live counters, "counted, never claimed").
+
+### Corrective action
+CC-CRAWL-0059, review round 1 (branch `lane/DISCO13-r1`):
+- **B1:** `READ_JS`'s `formLike` returns the shadow root its ancestor walk ends at when
+  that root holds a typed control. A root is no `<form>`: no action, `form_tag` false,
+  and `typed`, `last_typed` and `submitters` come from the root. `spa.FORMS_JS`
+  considers the shadow root once its ancestor walk ends there, and describes such a
+  container by its host. SP-70's `deepAll`/`deepFind` walk a shadow root passed as the
+  root (the owner holds elements only in `deep`, so a root was queried natively,
+  missing nested roots).
+- **B2:** `fingerprint.counts_for_state` and `state_signatures`: a delegated candidate
+  (`how == "delegated"`) is never part of the state key, a state's core, or
+  `reproduces`. `explore.py` builds every core through `state_signatures`. Delegated
+  candidates stay in the element list, so they are still stepped and tried.
+- **B3:** `Explorer._trial` runs a **control window** just before the click: the page
+  left alone for the same quiet wait (`mark_activity` then `wait_quiet`), then the read
+  the click acts on (requests during it are the page's own too). A request is
+  evidence only when its `request_key` (method and normalised route) is not explained
+  on that route: neither a control window there saw it nor an earlier trial there
+  counted it (`_Shared.explained`). Measured with a 4-candidate page, `idle_ms` 500,
+  `max_quiet_ms` 1500: a 400 ms poll gave 0 false live of 9 over 3 runs, and a 1 s
+  poll 0 of 12 over 4 runs. A 2.5 s poll gave 8 of 12 with the control window alone
+  (the trial cycle phase-locks with the poll), and 3 and then 4 of 12 (at most one per
+  run) once a key counts once per route. The DevTools signals were measured and rejected: `hasUserGesture` is true for
+  every request in the 5 s after a click, poll included, and an initiator stack's async
+  parent needs the Debugger domain enabled before the page schedules the timer.
+- **B4:** `compose._census` replaces the suspects heuristic. One
+  `DOM.getDocument({depth: -1, pierce: true})` per page lists every element hosting a
+  closed root, in every shadow tree and every in-process frame document. Each is
+  attributed to its frame by the `data-disco-frame` key its parent's read wrote, and
+  only documents read count. Measured cost: about 25 us per node (230 ms for 6 000
+  elements, 1.3-1.9 s for 24 000-30 000; `DOMSnapshot.captureSnapshot` costs the same).
+  So a page is checked once per route and shape (each read document's digest of tag
+  and child count in walk order), and a page whose documents read hold more than
+  `MAX_NODES` elements, or that is read without DevTools, is not checked. Its elements
+  are counted `budget.census`.
+
+Tests (each fails on c219266, see CC-CRAWL-0059's effectiveness):
+- B1: `tests/test_disco_compose.py::test_a_formless_widget_at_a_shadow_roots_top_is_filled_and_sent`
+  and `::test_the_spiders_form_read_finds_a_formless_widget_at_a_shadow_roots_top`.
+- B2: `::test_a_click_that_only_swaps_static_text_keeps_the_state` and
+  `::test_a_delegated_candidate_is_no_part_of_a_states_identity`.
+- B3: `::test_a_background_poll_never_makes_an_inert_candidate_live` (a 100 ms poll)
+  and `::test_a_request_is_keyed_by_method_and_route`.
+- B4: `::test_what_was_not_read_is_counted_never_claimed` (the fixture adds a closed
+  root on a `<div>` and one on `<x-card>` slotting a visible child; exactly 3 counted)
+  and `::test_the_census_counts_every_closed_root_of_the_documents_read`.
+
+### Recurrence review (review round 1)
+Checked `docs/bugs/` for state identity and counter bugs (BUG-0501, BUG-0502,
+BUG-0505, BUG-0512; AU-DISCO's BUG-0539, not merged) and `docs/PREVENTIVE_ACTIONS.md`
+(PA-0501, PA-0502, PA-0505, PA-0512, and this bug's PA-0551 as first written):
+- **B2 recurs BUG-0501/BUG-0502's class:** something that varies (state classes, the
+  route in a form action, here text-dependent membership) entered state identity and
+  multiplied states.
+- **B3 recurs BUG-0502's class:** a counter of intent or correlation reported as an
+  effect (75 "submissions" there, delegated "live" here).
+- **B1 and B4 recur this bug's own class** within its fix: a light-tree assumption (an
+  ancestor walk) and an uncounted gap (closed roots).
+
+### Prior-preventive-action failure analysis (review round 1)
+- **PA-0502(3) (BUG-0502): too narrow.** "Element identity carries no context of where
+  the element was seen" constrains a signature. It says nothing about which elements a
+  state's key is built from, so a heuristic's membership was never checked against it.
+  Its guard (`test_state_classes_never_change_a_signature`) tests signatures only.
+- **PA-0502(1) (BUG-0502): too narrow.** "Effect counters count observed effects"
+  was met literally: a request was observed. The rule does not ask whether the action
+  caused it.
+- **PA-0551(1) as first written: not enforced on ancestor walks.** Its guard scans
+  descendant queries (`querySelector*`, `getElementsBy*`); a `parentElement` walk is a
+  light-tree traversal it cannot see.
+- **PA-0551(2) as first written: too coarse.** "Covers each way the platform presents
+  UI" was met with one confirming variant per way.
+- **PA-0551(3) as first written: not followed.** The lane wrote the closed-root gap
+  down as residual R1 instead of counting it.
+
+### Preventive action (review round 1)
+PA-0551 is strengthened before it merges (texts in the lane's `doc_texts.md`):
+- (2) now asks for the **variants each mechanism branches on**: a container element or
+  none, a static page and one whose text changes under a document listener, a quiet
+  network and a polling one, a host that renders nothing and one that slots its
+  children.
+- (3) is met only by a **complete count or a counted remainder** (`budget.*`), never a
+  residual paragraph.
+- New (4): an ancestor walk in a composed page script continues past the top of a
+  shadow tree (the root, or `composedParent`).
+- New (5): a heuristic candidate is kept only on evidence its own action caused,
+  compared with a control observation without it. Its presence, verdict or flags never
+  enter state identity.
+
+**PA-0002 sweep (review round 1):**
+- **Ancestor walks** in composed page scripts:
+  - `READ_JS` `formLike` and `FORMS_JS`'s container search: fixed.
+  - `FIELDS_JS`: already fell back to `getRootNode()`.
+  - `READ_JS` `ancestry` and `delegating`: already continue through hosts.
+  - The pointer check's `parentElement`: at a shadow tree's top, the element inherits
+    the host's cursor, and is described itself (correct).
+  - `closest('form')`: forms never span a shadow boundary.
+- **State identity inputs:** `listener` and `pointer` elements are DOM-defined, not
+  text-defined. Only delegated candidates were heuristic; they are now excluded. AU-DISCO's
+  `element_multiset`/`execution_key` (d9e269e) read every element: see R7.
+- **Time-window evidence:** the capture's action ids (`_tag`, BUG-0512) attribute every
+  request after an action to it, a background poll included. That is attribution for
+  the store, documented as such, not a verdict that keeps or drops anything; it is
+  unchanged. `submissions_sent` already requires a distinctive filled value in the
+  request (PA-0502(1)).
+- **Partial detectors behind a "counted" claim:** the frame classification counts every
+  frame it walks; the closed-root census was the only pre-filtered one.
+
+### Residuals after review round 1
+- **R1 (closed).** Every closed root of a document read is counted. A closed root
+  attached where the page's composed shape (tags and child counts) did not change is
+  counted once the shape next changes. A page past `MAX_NODES` elements, or read
+  without DevTools, is counted `budget.census`.
+- **R2-R6** are unchanged.
+- **R7 (merge note, extended):** a delegated candidate is no part of state identity:
+  neither its flags nor its membership. AU-DISCO's `element_multiset` and
+  `execution_key` must filter `fingerprint.counts_for_state`, as `state_fingerprint`
+  and `state_signatures` do, when the lanes merge.
+- **R8 (new):** background traffic slower than a control window can still make one
+  inert candidate per route and request key live. Measured: a 2.5 s poll, at most one
+  per run (4 of 12 inert candidates over 4 runs).
+- **R9 (new):** a delegated candidate that appears only after an action that changes
+  nothing else in the state (Refresh rendering `li.msg`) is not tried there. Its state
+  is unchanged and its steps were planned before the action. This is the behaviour of
+  c483dc1 for such leaves.

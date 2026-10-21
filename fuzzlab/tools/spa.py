@@ -491,9 +491,11 @@ from fuzzlab.tools.composed import COMPOSED_JS  # noqa: E402 - SP-70, used from 
 
 #: Finds the rendered page's forms and form-like containers (inputs with exactly one
 #: button) across its open shadow roots (SP-70, BUG-0551), marks each control and button
-#: with ``data-fuzzlab-id`` and describes them. A password control inside a shadow root
-#: is never described: a container holding one is read by its light tree only (as
-#: before), and left out when it is in a shadow root itself. The browser login's
+#: with ``data-fuzzlab-id`` and describes them. A button's container is its nearest
+#: ancestor holding typed controls, else the shadow root its ancestors end at (a widget
+#: whose input and button sit directly under its root). A password control inside a
+#: shadow root is never described: a container holding one is read by its light tree
+#: only (as before), and left out when it is in a shadow root itself. The browser login's
 #: password clear (X3) and the G1 read find a control by ``document.querySelector``,
 #: which no shadow root answers (FR-CRAWL-40's known gap, pinned by strict xfails).
 FORMS_JS = r"""
@@ -514,17 +516,22 @@ FORMS_JS = r"""
     .some(i => inShadow(i) && kindOf(i) === 'password');
   const containers = [];
   for (const f of composedAll(document, 'form')) containers.push(f);
+  // the nearest container holding typed controls: kept when it holds exactly one button
+  const container = node => {
+    const ctl = deepAll(deep, node, 'input, textarea, select').filter(typed);
+    if (!ctl.length) return false;
+    const btns = deepAll(deep, node, BTN).filter(buttonOk);
+    if (btns.length === 1 && !containers.includes(node)) containers.push(node);
+    return true;
+  };
   for (const b of composedAll(document, BTN)) {
     if (b.closest('form') || !buttonOk(b)) continue;
-    let node = b.parentElement;
-    for (let i = 0; node && i < 8; i++, node = node.parentElement) {
-      const ctl = deepAll(deep, node, 'input, textarea, select').filter(typed);
-      if (ctl.length) {
-        const btns = deepAll(deep, node, BTN).filter(buttonOk);
-        if (btns.length === 1 && !containers.includes(node)) containers.push(node);
-        break;
-      }
-    }
+    let node = b.parentElement, found = false;
+    for (let i = 0; node && i < 8 && !found; i++, node = node.parentElement) found = container(node);
+    // the walk reached the top of a shadow tree: the shadow root is the container of a
+    // widget whose controls sit directly under it (BUG-0551 review B1)
+    const root = b.getRootNode();
+    if (!found && !node && root.host) container(root);
   }
   window.__fuzzlabN = (window.__fuzzlabN || 0) + 1;
   const run = window.__fuzzlabN;
@@ -552,7 +559,9 @@ FORMS_JS = r"""
     // CAPTCHA hints (G1e): the attribute values and label texts of the container, judged
     // by whole token in Python (`captcha_reason`); a canvas is an image challenge
     const hints = [];
-    for (const el of [c, ...q('*', 400)].slice(0, 400)) {
+    // a shadow root container (no element) is described by its host
+    const box = c.nodeType === 11 ? c.host : c;
+    for (const el of [box, ...q('*', 400)].slice(0, 400)) {
       for (const a of ['id', 'class', 'name', 'aria-label', 'placeholder',
                        'formcontrolname', 'alt', 'title', 'src'])
         if (el.getAttribute(a)) hints.push(el.getAttribute(a).slice(0, 200));
@@ -567,7 +576,7 @@ FORMS_JS = r"""
       submit.setAttribute('data-fuzzlab-id', button);
       [label, aria, glyphs] = buttonLabels(submit);
     }
-    const action = c.tagName.toLowerCase() === 'form' && c.getAttribute('action')
+    const action = box === c && c.tagName.toLowerCase() === 'form' && c.getAttribute('action')
       ? c.action : null;
     out.push({controls, ids, autocomplete, tags, button: label, button_aria: aria,
               button_icons: glyphs, button_id: button, action,
