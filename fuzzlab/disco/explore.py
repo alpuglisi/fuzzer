@@ -17,16 +17,19 @@ correlation tag the proxy records and strips.
 (`fingerprint.execution_key`, SP-62): the exact route (query values, numeric path
 segments), the multiset of its visible interactive elements' signatures, the workflow
 markers its controls hold, and the session generation. Every visited-state check reads
-it. The structural key (`fingerprint.state_fingerprint`: folded route, set of
-signatures) only schedules and folds: the frontier explores a new route, then a new
-layout, then a variant of a known layout, and holds at most ``max_states_per_route``
-states per folded route -- the rest are reported (`coverage_excluded`), never claimed
-equivalent.
+it. A delegated candidate (FR-CRAWL-40) is no part of either key or of a state's
+contract (`fingerprint.counts_for_state`): which text leaves are candidates varies
+with their text and order (BUG-0551 review B2 and R7). The structural key
+(`fingerprint.state_fingerprint`: folded route, set of signatures) only schedules and
+folds: the frontier explores a new route, then a new layout, then a variant of a known
+layout, and holds at most ``max_states_per_route`` states per folded route -- the rest
+are reported (`coverage_excluded`), never claimed equivalent.
 
 **Work** (FR-CRAWL-32). An action's work key is ``(execution key, element signature,
 occurrence, kind)``, tracked by `WorkLedger` as pending, running, succeeded, refused,
-retryable or failed. A failure never consumes the work: it is retried up to
-``max_action_attempts`` times, then recorded failed and reported. A step already taken
+retryable or failed (a delegated candidate's also inert: its trial's verdict). A failure
+never consumes the work: it is retried up to ``max_action_attempts`` times, then
+recorded failed and reported. A step already taken
 in another state is scheduled after this state's own steps (deprioritised); it is
 skipped only once two states on two routes gave it the same observed effect (requests
 and transition).
@@ -45,11 +48,18 @@ non-idempotent request is never replayed: the state it reached is explored in pl
 when it is reached, and later restores of it are unresolved. A failed restore marks
 the state unresolved with its reason (`unresolved`).
 
-**Actionable elements** are found three ways: accessibility roles and native controls;
-elements with a JavaScript click / pointer / key listener, asked of Chrome DevTools
-(``DOMDebugger.getEventListeners``: catches a framework's ``div`` buttons); and
-``cursor: pointer`` as a fallback. Enumeration runs again after every action, so
-dialogs and lazy panels are seen as they appear.
+**Actionable elements** are found across the page's composed tree (`compose`,
+FR-CRAWL-39): its document, every open shadow root, and every visible same-origin,
+in-scope frame, each element's ancestry naming the shadow hosts and frames it is in.
+They are found four ways: accessibility roles and native controls; elements with a
+JavaScript click / pointer / key listener, asked of Chrome DevTools (catches a
+framework's ``div`` buttons); ``cursor: pointer`` as a fallback; and **delegated**
+candidates -- a labelled, non-semantic element under an ancestor, document or window
+listening for clicks -- each tried once and kept only when its click caused a request
+(one a window with no click just before did not see) or changed the state
+(FR-CRAWL-40). Closed shadow roots, cross-origin and out-of-scope
+frames and every bound a read hit are counted in the report, never read. Enumeration
+runs again after every action, so dialogs and lazy panels are seen as they appear.
 
 **Forms** are submitted valid-first (`formfill`): each control gets the first candidate
 its own ``checkValidity()`` accepts, then the submitter is clicked; then up to
@@ -80,7 +90,7 @@ from urllib.parse import urldefrag, urljoin, urlsplit, urlunsplit
 from fuzzlab.core.redaction import redact_url
 from fuzzlab.core.urls import (destructive_reason, in_origin_scope, origin_scope,
                                spa_route, text_destructive_reason)
-from fuzzlab.disco import formfill
+from fuzzlab.disco import compose, formfill
 from fuzzlab.disco.capture import ACTION_HEADER
 from fuzzlab.disco.fingerprint import (element_multiset, element_signature, execution_key,
                                        execution_route, normalise_route,
@@ -101,175 +111,11 @@ def _pw_error():
     return Error
 
 
-#: Listener types that make an element actionable.
-ACTION_LISTENERS = ("click", "mousedown", "mouseup", "pointerdown", "pointerup",
-                    "keydown", "touchstart", "dblclick")
-#: Elements asked of DevTools per enumeration (bounded: one CDP call each).
-MAX_CDP_CANDIDATES = 200
-#: Elements described per enumeration.
-MAX_ELEMENTS = 400
-
-_ENUMERATE_JS = r"""
-([maxElements, maxCand]) => {
-  const NATIVE = 'a[href],button,input,select,textarea,summary,[role=button],[role=link],'
-    + '[role=menuitem],[role=tab],[role=checkbox],[role=combobox],[role=option],'
-    + '[role=switch],[role=radio],[onclick],[contenteditable=true],[tabindex]:not([tabindex="-1"])';
-  const visible = (e) => {
-    if (!e.isConnected) return false;
-    const r = e.getClientRects();
-    if (!r.length) return false;
-    const s = getComputedStyle(e);
-    return s.visibility !== 'hidden' && s.display !== 'none' && s.opacity !== '0';
-  };
-  document.querySelectorAll('[data-disco-id]').forEach(e => e.removeAttribute('data-disco-id'));
-  document.querySelectorAll('[data-disco-cand]').forEach(e => e.removeAttribute('data-disco-cand'));
-  const out = [];
-  let n = 0;
-  const cls = (e) => Array.from(e.classList || []).slice(0, 4).sort().join('.');
-  const node = (e) => e.tagName.toLowerCase() + (e.id ? '#' + e.id : '') + (cls(e) ? '.' + cls(e) : '');
-  const ancestry = (e) => {
-    const out = []; let a = e.parentElement;
-    while (a && a !== document.body && out.length < 3) { out.push(node(a)); a = a.parentElement; }
-    return out.join('<');
-  };
-  const formLike = (e) => {        // a <form>, else the nearest ancestor holding typed inputs
-    if (e.form) return e.form;
-    const f = e.closest('form'); if (f) return f;
-    let a = e.parentElement, n = 0;
-    while (a && a !== document.body && n < 6) {
-      if (a.querySelector('input:not([type=hidden]):not([type=button]):not([type=submit])'
-                          + ':not([type=checkbox]):not([type=radio]),textarea,select')) return a;
-      a = a.parentElement; n++;
-    }
-    return null;
-  };
-  // the control values that select a workflow (FR-CRAWL-31's markers): a select's
-  // value, a box's checked state, ARIA selection; never typed text
-  const selState = (e) => {
-    const tag = e.tagName.toLowerCase(), parts = [];
-    if (tag === 'select') parts.push('value=' + String(e.value).slice(0, 64));
-    if (tag === 'input' && (e.type === 'checkbox' || e.type === 'radio'))
-      parts.push('checked=' + e.checked);
-    for (const a of ['aria-selected', 'aria-current', 'aria-checked']) {
-      const v = e.getAttribute(a);
-      if (v !== null && v !== '' && v !== 'false') parts.push(a + '=' + String(v).slice(0, 32));
-    }
-    return parts.join(';');
-  };
-  window.__discoLayout = {cls, ancestry, formLike, selState};
-  const TYPED = 'input:not([type=hidden]):not([type=button]):not([type=submit])'
-    + ':not([type=checkbox]):not([type=radio]):not([type=reset]):not([type=image]),textarea';
-  const describe = (e, how) => {
-    const id = String(n++);
-    e.setAttribute('data-disco-id', id);
-    const form = formLike(e);
-    const typed = form ? Array.from(form.querySelectorAll(TYPED)) : [];
-    const label = (e.getAttribute('aria-label') || e.getAttribute('title') || e.innerText
-                   || e.value || e.getAttribute('placeholder') || '').trim().slice(0, 80);
-    const tag = e.tagName.toLowerCase();
-    const type = (e.getAttribute('type') || (tag === 'button' ? 'submit' : '')).toLowerCase();
-    out.push({disco_id: id, how, tag, role: e.getAttribute('role') || '', type,
-              name: e.getAttribute('name') || '', id: e.id || '', cls: cls(e), ancestry: ancestry(e),
-              href: tag === 'a' ? e.href : '', label,
-              // a form-less container has no action: location.href put the route into
-              // every signature inside it, so a toolbar was new on each route (BUG-0502)
-              action: form && form.tagName === 'FORM' ? (form.action || location.href) : '',
-              in_form: !!form, disabled: !!e.disabled, cursor: getComputedStyle(e).cursor,
-              sel: selState(e),
-              // the Enter rule (`enter_submits`): what the element's container holds
-              form_tag: !!(form && form.tagName === 'FORM'), typed: typed.length,
-              last_typed: typed.length > 0 && typed[typed.length - 1] === e,
-              submitters: form ? form.querySelectorAll(
-                'button:not([type=button]):not([type=reset]),input[type=submit],'
-                + 'input[type=image]').length : 0});
-  };
-  for (const e of document.querySelectorAll(NATIVE)) {
-    if (out.length >= maxElements) break;
-    // a disabled control is kept only as a submitter (filling its form enables it)
-    if (visible(e) && (!e.disabled || (e.tagName === 'BUTTON' && formLike(e))))
-      describe(e, 'native');
-  }
-  let c = 0;
-  for (const e of document.querySelectorAll('div,span,li,img,svg,td,p,i,section,article,label')) {
-    if (out.length + c >= maxElements || c >= maxCand) break;
-    if (e.hasAttribute('data-disco-id') || !visible(e)) continue;
-    if (e.closest('[data-disco-id]')) continue;
-    if (getComputedStyle(e).cursor === 'pointer'
-        && !(e.parentElement && getComputedStyle(e.parentElement).cursor === 'pointer')) {
-      describe(e, 'pointer');
-      continue;
-    }
-    e.setAttribute('data-disco-cand', String(c++));
-  }
-  return out;
-}
-"""
-
-_CANDIDATES_JS = "() => Array.from(document.querySelectorAll('[data-disco-cand]'))"
-
-_MARK_JS = r"""
-(els) => {
-  const out = [];
-  for (const e of els) {
-    let n = document.querySelectorAll('[data-disco-id]').length;
-    e.setAttribute('data-disco-id', 'L' + n);
-    const lay = window.__discoLayout;
-    out.push({disco_id: 'L' + n, how: 'listener', tag: e.tagName.toLowerCase(),
-              role: e.getAttribute('role') || '', type: '', name: '', id: e.id || '',
-              cls: lay ? lay.cls(e) : '', ancestry: lay ? lay.ancestry(e) : '',
-              href: '', label: (e.getAttribute('aria-label') || e.innerText || '').trim().slice(0, 80),
-              action: '', in_form: !!e.closest('form'), cursor: getComputedStyle(e).cursor,
-              sel: lay ? lay.selState(e) : ''});
-  }
-  return out;
-}
-"""
-
-#: The page-level workflow markers (`fingerprint.workflow_markers`): each named hidden
-#: input (at most 50, value cut at 65 characters: longer is no marker) and each
-#: non-interactive ``aria-current`` element (a stepper's position; at most 20).
-_MARKS_JS = r"""
-() => {
-  const out = [];
-  const hidden = document.querySelectorAll('input[type=hidden][name]');
-  for (let i = 0; i < hidden.length && i < 50; i++)
-    out.push(['hidden', hidden[i].getAttribute('name') || '', String(hidden[i].value || '').slice(0, 65)]);
-  const lay = window.__discoLayout;
-  const cur = document.querySelectorAll('[aria-current]:not([aria-current="false"])');
-  for (let i = 0; i < cur.length && i < 20; i++) {
-    const e = cur[i];
-    if (e.hasAttribute('data-disco-id')) continue;     // an enumerated element: its own sel
-    const where = e.tagName.toLowerCase() + (lay ? '<' + lay.ancestry(e) : '');
-    const idx = e.parentElement ? Array.from(e.parentElement.children).indexOf(e) : 0;
-    out.push(['current', where, idx, String(e.getAttribute('aria-current')).slice(0, 32)]);
-  }
-  return out;
-}
-"""
-
-_FIELDS_JS = r"""
-(e) => {
-  // markers of an earlier form go first: a stale data-disco-field="0" earlier in the
-  // document was filled in place of this form's first control (BUG-0502)
-  document.querySelectorAll('[data-disco-field]').forEach(c => c.removeAttribute('data-disco-field'));
-  const lay = window.__discoLayout;
-  const form = (lay && lay.formLike(e)) || e.form || e.closest('form') || e.parentElement;
-  const ctrls = Array.from(form.querySelectorAll('input,select,textarea'));
-  return ctrls.map((c, i) => {
-    c.setAttribute('data-disco-field', String(i));
-    const lab = (c.labels && c.labels[0] && c.labels[0].innerText) || '';
-    return {field: String(i), tag: c.tagName.toLowerCase(), type: (c.getAttribute('type') || '').toLowerCase(),
-            name: c.getAttribute('name') || '', id: c.id || '', label: lab.trim().slice(0, 80),
-            aria_label: c.getAttribute('aria-label') || '', placeholder: c.getAttribute('placeholder') || '',
-            autocomplete: c.getAttribute('autocomplete') || '', pattern: c.getAttribute('pattern') || '',
-            min: c.getAttribute('min'), max: c.getAttribute('max'), step: c.getAttribute('step'),
-            minlength: c.getAttribute('minlength'), maxlength: c.getAttribute('maxlength'),
-            required: c.required, disabled: c.disabled, readonly: c.readOnly,
-            value: c.type === 'password' ? '' : String(c.value || '').slice(0, 64),
-            options: c.tagName === 'SELECT' ? Array.from(c.options).map(o => o.value) : []};
-  });
-}
-"""
+#: The enumeration's page scripts and bounds live in `compose` (FR-CRAWL-39): the
+#: composed read (`compose.READ_JS`, which also reads each element's ``sel`` and each
+#: document's page-level workflow markers, FR-CRAWL-31) and a submitter's form controls,
+#: marked ``data-disco-field`` across the document's open shadow roots.
+_FIELDS_JS = compose.FIELDS_JS
 
 
 #: A control's verdict on its value: ``valid``; ``aria-invalid`` when the browser accepts
@@ -331,8 +177,9 @@ class State:
     """A state and how to get back to it: ``entry_url`` then ``path``; when that no
     longer reproduces it (a page only a POST shows), ``fallback`` is tried.
 
-    ``fp`` is the execution key. ``core`` (the element multiset) and ``markers`` are
-    the state's contract, recorded when it was first read and **never rewritten**
+    ``fp`` is the execution key. ``core`` (the element multiset: never a delegated
+    candidate's, `fingerprint.element_multiset`) and ``markers`` are the state's
+    contract, recorded when it was first read and **never rewritten**
     (FR-CRAWL-33, BUG-0539: narrowing them to what a restore showed accepted a wrong
     state and weakened it for good). ``optional`` lists ``(signature, count)`` declared
     optional for this state and ``optional_markers`` its declared optional markers:
@@ -408,11 +255,16 @@ def contract_mismatch(state: State, got: Reading, optional=frozenset()) -> str |
 
 
 #: A work item's status (FR-CRAWL-32). ``equivalent``: skipped because two states on two
-#: routes gave the step the same observed effect.
+#: routes gave the step the same observed effect. ``inert``: a delegated candidate whose
+#: trial click caused nothing (FR-CRAWL-40) -- finished by that observed verdict, never
+#: by a failure.
 PENDING, RUNNING, SUCCEEDED, REFUSED = "pending", "running", "succeeded", "refused"
-RETRYABLE, FAILED, EQUIVALENT = "retryable", "failed", "equivalent"
-#: `Explorer.act`'s outcomes.
+RETRYABLE, FAILED, EQUIVALENT, INERT = "retryable", "failed", "equivalent", "inert"
+#: `Explorer.act`'s outcomes. A delegated candidate (`Explorer._act_delegated`) may also
+#: be `ACT_INERT` (its run-wide verdict is inert) or `ACT_UNEXPLORED` (the run's trials
+#: are spent: counted ``delegated_unexplored``; its work item stays pending, never done).
 ACTED, ACT_REFUSED, ACT_FAILED = "acted", "refused", "failed"
+ACT_INERT, ACT_UNEXPLORED = "inert", "unexplored"
 
 
 class WorkLedger:
@@ -646,6 +498,23 @@ class ExploreReport:
     aborted: int = 0
     out_of_scope: dict[str, int] = field(default_factory=dict)
     budget_hit: str | None = None
+    #: FR-CRAWL-39 (BUG-0551), per route, a page read again adds nothing
+    #: (`compose.Coverage`): open shadow roots and same-origin frames read; what was
+    #: not read, counted and never claimed -- closed shadow roots, cross-origin and
+    #: out-of-scope frames, and what each bound of a read left out (`budget_limited`:
+    #: ``elements``, ``candidates``, ``delegated``, ``nodes``, ``frames``, ``census``)
+    shadow_roots: int = 0
+    frames: int = 0
+    closed_shadow_roots: int = 0
+    frames_cross_origin: int = 0
+    frames_out_of_scope: int = 0
+    budget_limited: dict[str, int] = field(default_factory=dict)
+    #: FR-CRAWL-40: delegated candidates tried, kept (their click made a request or
+    #: changed the state), dropped, and never tried once the run's trials were spent
+    delegated_trials: int = 0
+    delegated_live: int = 0
+    delegated_inert: int = 0
+    delegated_unexplored: int = 0
 
     def refuse(self, why: str) -> None:
         self.refused[why] = self.refused.get(why, 0) + 1
@@ -693,6 +562,22 @@ class _Shared:
         #: the path segments the app's scripts hold (`core.pathtemplate.code_segments`,
         #: FR-CRAWL-28), written to ``script_segments.json`` beside the action log
         self.code_segments: set[str] = set()
+        #: delegated candidates' verdicts and the composed reads' coverage (FR-CRAWL-39/40)
+        self.trials = compose.Trials(compose.MAX_DELEGATED_TRIALS)
+        self.coverage = compose.Coverage()
+        #: per route, the `request_key`s no longer evidence for a delegated trial: what a
+        #: control window saw (the page's own traffic) and what a trial already counted
+        #: (`Explorer._trial`)
+        self.explained: dict[str, set[tuple[str, str]]] = {}
+        #: the page shapes whose closed shadow roots were counted (`compose._census`)
+        self.censused: set = set()
+
+
+def request_key(method: str, url: str) -> tuple[str, str]:
+    """What a delegated trial compares requests by: the method and the normalised route
+    (`normalise_route`: digit runs folded, query values dropped), so a poll's next
+    request is the same key as its last."""
+    return (str(method or "").upper(), normalise_route(url))
 
 
 def refusal(el: dict, deny: tuple[str, ...]) -> str | None:
@@ -966,62 +851,70 @@ class Explorer:
 
     # --- page reading ----------------------------------------------------------------
     def enumerate(self, page, ctx) -> list[dict]:
-        """The page's actionable elements, each marked ``data-disco-id``."""
-        els = page.evaluate(_ENUMERATE_JS, [MAX_ELEMENTS, MAX_CDP_CANDIDATES])
-        els += self._listener_elements(page, ctx)
+        """The page's actionable elements across its composed tree (`_read`)."""
+        return self._read(page, ctx).elements
+
+    def _read(self, page, ctx) -> compose.PageRead:
+        """The page's composed read (`compose.read_page`, FR-CRAWL-39): its actionable
+        elements, each marked ``data-disco-id`` in its own document and carrying
+        ``frame`` (the frame-marker keys `_locate` follows) and ``sel`` (its workflow
+        marker, FR-CRAWL-31), and its documents' page-level markers (``marks``). A
+        delegated candidate already found inert, or never tried once the run's trials
+        are spent, is described ``disabled``: kept, so the read stays a function of the
+        page, never acted on (FR-CRAWL-40). What the read could not reach is counted in
+        the report."""
+        read = compose.read_page(page, ctx, self._in_scope,
+                                 max_delegated=compose.MAX_DELEGATED,
+                                 censused=self._shared.censused)
+        els = read.elements
         counts: dict[str, int] = {}
         for el in els:
             el["signature"] = element_signature(el)
             el["occurrence"] = counts.get(el["signature"], 0)
             counts[el["signature"]] = el["occurrence"] + 1
-        return els
+        self._mark_delegated(els)
+        self._note_coverage(page.url, read)
+        return read
 
     @staticmethod
     def _find(els: list[dict], step: Step) -> dict | None:
         return next((e for e in els if e["signature"] == step.signature
                      and e["occurrence"] == step.occurrence), None)
 
-    def _listener_elements(self, page, ctx) -> list[dict]:
-        """Candidates with a JS action listener, asked of Chrome DevTools."""
-        try:
-            cdp = ctx.new_cdp_session(page)
-        except _pw_error():  # a browser without CDP: the other two ways only
-            return []
-        try:
-            arr = cdp.send("Runtime.evaluate", {"expression": f"({_CANDIDATES_JS})()"})
-            obj = arr.get("result", {}).get("objectId")
-            if not obj:
-                return []
-            props = cdp.send("Runtime.getProperties", {"objectId": obj, "ownProperties": True})
-            hits = []
-            for prop in props.get("result", []):
-                el_id = (prop.get("value") or {}).get("objectId")
-                if not el_id or not prop.get("name", "").isdigit():
+    def _mark_delegated(self, els: list[dict]) -> None:
+        """Describe ``disabled`` each delegated candidate the run will not act on: found
+        inert, or still untried once `compose.Trials` is spent (counted unexplored)."""
+        shared = self._shared
+        with shared.lock:
+            trials = shared.trials
+            for el in els:
+                if el.get("how") != "delegated":
                     continue
-                found = cdp.send("DOMDebugger.getEventListeners", {"objectId": el_id})
-                types = sorted({ln.get("type") for ln in found.get("listeners", [])
-                                if ln.get("type") in ACTION_LISTENERS})
-                if types:
-                    hits.append((int(prop["name"]), types))
-            if not hits:
-                return []
-            hits.sort()          # document order: CDP lists properties in no stated order
-            handles = page.locator("[data-disco-cand]")
-            chosen = [handles.nth(i) for i, _ in hits]
-            marked = page.evaluate(_MARK_JS, [h.element_handle() for h in chosen])
-            for desc, (_, types) in zip(marked, hits):
-                desc["listeners"] = types
-            return marked
-        finally:
-            try:
-                cdp.detach()
-            except _pw_error():  # the page may have gone already
-                pass
+                verdict = trials.verdict(el["signature"])
+                if verdict == "inert":
+                    el["disabled"] = True
+                elif verdict is None and trials.spent():
+                    el["disabled"] = True
+                    trials.unexplored.add(el["signature"])
+            self.report.delegated_unexplored = len(trials.unexplored)
+
+    def _note_coverage(self, url: str, read: compose.PageRead) -> None:
+        """Add a read's notes to the report, live (`compose.Coverage`: per route, a page
+        read again adds nothing)."""
+        with self._shared.lock:
+            for kind, n in self._shared.coverage.add(normalise_route(url), read).items():
+                if kind.startswith("budget."):
+                    bound = kind.split(".", 1)[1]
+                    self.report.budget_limited[bound] = \
+                        self.report.budget_limited.get(bound, 0) + n
+                else:
+                    setattr(self.report, kind, getattr(self.report, kind) + n)
 
     def fingerprint(self, page, ctx) -> Reading:
-        els = self.enumerate(page, ctx)
-        marks = page.evaluate(_MARKS_JS)
-        return self.reading(page.url, els, marks)
+        """The page read once (`_read`: its elements and page markers, one snapshot) as
+        its two keys (`reading`)."""
+        read = self._read(page, ctx)
+        return self.reading(page.url, read.elements, read.marks)
 
     def reading(self, url: str, els: list[dict], marks=()) -> Reading:
         """The two keys of a page (`fingerprint` module doc) from its read elements and
@@ -1042,12 +935,20 @@ class Explorer:
         return None
 
     # --- acting ----------------------------------------------------------------------
+    @staticmethod
+    def _scope(page, el: dict):
+        """What locates ``el`` and its form's controls: the page, or the frame locators
+        down to its frame (`compose.frame_scope`). A selector pierces open shadow roots
+        by itself."""
+        return compose.frame_scope(page, el.get("frame"))
+
     def _locate(self, page, el: dict):
-        return page.locator(f'[data-disco-id="{el["disco_id"]}"]').first
+        return self._scope(page, el).locator(f'[data-disco-id="{el["disco_id"]}"]').first
 
     def _fill(self, page, loc, perturb: tuple[str, str] | None) -> list[dict] | None:
         """Fill the submitter's form valid-first; ``perturb`` = (field, kind) replaces
-        one control's value. Returns the field descriptions, or None when refused."""
+        one control's value. Returns the field descriptions, or None when refused.
+        ``page`` locates the controls: the page, or the submitter's frame (`_scope`)."""
         fields = loc.evaluate(_FIELDS_JS)
         for f in fields:
             target = page.locator(f'[data-disco-field="{f["field"]}"]').first
@@ -1092,8 +993,11 @@ class Explorer:
 
     def act(self, page, ctx, el: dict, step: Step) -> str:
         """Perform one step on ``el``: `ACTED`, `ACT_REFUSED` (its form changes a
-        credential) or `ACT_FAILED` (not actionable). A Playwright error on the way
+        credential) or `ACT_FAILED` (not actionable); a delegated candidate also
+        `ACT_INERT` or `ACT_UNEXPLORED` (`_act_delegated`). A Playwright error on the way
         propagates (the caller maps it to a failed attempt, FR-CRAWL-32)."""
+        if el.get("how") == "delegated":
+            return self._act_delegated(page, ctx, el, step)
         loc = self._locate(page, el)
         prefix = "nav" if el.get("href") else "act"
         if step.kind != "click":
@@ -1102,7 +1006,7 @@ class Explorer:
                 _, fid, kind = step.kind.split(":", 2)
                 perturb = (fid, kind)
             self._fill_values, self._values_sent = [], False
-            fields = self._fill(page, loc, perturb)
+            fields = self._fill(self._scope(page, el), loc, perturb)
             self._last_fields = fields or []
             # a form-less container has no action: the page's URL stands for it
             reason = form_refusal(self._last_fields,
@@ -1111,11 +1015,17 @@ class Explorer:
                 self._refuse(reason)
                 self._fill_values = []
                 return ACT_REFUSED
-        self._tag(ctx, prefix)
         if step.kind == "enter":
+            self._tag(ctx, prefix)
             loc.press("Enter", timeout=3000)
             self.mark_activity()
             return ACTED
+        return self._click(ctx, loc, prefix)
+
+    def _click(self, ctx, loc, prefix: str) -> str:
+        """Tag the next action and click ``loc``: `ACTED`, or `ACT_FAILED` when it is
+        not actionable at all."""
+        self._tag(ctx, prefix)
         try:
             loc.click(timeout=3000)
         except _pw_error():  # covered or detached: one dispatched click
@@ -1125,6 +1035,94 @@ class Explorer:
                 return ACT_FAILED
         self.mark_activity()
         return ACTED
+
+    def _act_delegated(self, page, ctx, el: dict, step: Step) -> str:
+        """A delegated candidate (FR-CRAWL-40): clicked when already found live; tried
+        once when untried (`_trial`), and kept -- `ACTED`, performed -- only when the
+        click caused a request or changed the state; never acted on once inert
+        (`ACT_INERT`: its work is finished by that verdict) or once the run's trials are
+        spent (`ACT_UNEXPLORED`, counted). A trial that clicked nothing (the candidate
+        gone, or not actionable) and one another worker is running are `ACT_FAILED`: a
+        failed attempt, retried (FR-CRAWL-32), never a verdict."""
+        sig = el["signature"]
+        with self._shared.lock:
+            claim = self._shared.trials.claim(sig)
+            self.report.delegated_unexplored = len(self._shared.trials.unexplored)
+        if claim == "live":
+            return self._click(ctx, self._locate(page, el), "act")
+        if claim == "inert":
+            return ACT_INERT
+        if claim == "spent":
+            return ACT_UNEXPLORED
+        if claim != "trial":                       # another worker is trying it
+            return ACT_FAILED
+        live = None
+        try:
+            live = self._trial(page, ctx, step)
+        finally:
+            with self._shared.lock:
+                if live is None:                  # nothing was clicked
+                    self._shared.trials.release(sig)
+                else:
+                    self._shared.trials.decide(sig, live)
+                    self.report.delegated_trials += 1
+                    if live:
+                        self.report.delegated_live += 1
+                    else:
+                        self.report.delegated_inert += 1
+        if live is None:
+            return ACT_FAILED
+        return ACTED if live else ACT_INERT
+
+    def _trial(self, page, ctx, step: Step) -> bool | None:
+        """Click a delegated candidate and observe whether the click caused a request,
+        the page's URL changed, a page opened, or the state changed; None when nothing
+        was clicked (the candidate was gone before its click, or no click reached it: a
+        failed attempt, never a verdict, FR-CRAWL-32). The readings are the explorer's
+        own (`settled_fingerprint`), before and after, so "changed the state" means what
+        it means everywhere else in the run: another execution key (FR-CRAWL-31).
+
+        A request counts only when the click caused it (BUG-0551 review B3): a
+        notification poll, a beacon or a keep-alive reaches ``request`` whatever was
+        clicked. Just before the click, a **control window** leaves the page alone for
+        as long as the trial will wait (the same quiet rule, `wait_quiet`, from an
+        action mark). A request is evidence only when its `request_key` is not yet
+        explained on this route (`_Shared.explained`): neither this or an earlier
+        control window there saw it (the page's own traffic), nor did an earlier
+        trial there already count it. Background traffic slower than a control window
+        is therefore counted for at most one candidate per route (measured, BUG-0551
+        review B3)."""
+        seen: set[tuple[str, str]] = set()
+
+        def on_request(req) -> None:
+            seen.add(request_key(req.method, req.url))
+
+        page.on("request", on_request)
+        try:
+            self.mark_activity()                   # the control window: nothing clicked,
+            self.wait_quiet(page)                  # then the read the click acts on
+            before = self.settled_fingerprint(page, ctx)
+            target = self._find(before.els, step) if before else None
+            if target is None:
+                return None
+            url, pages = page.url, len(ctx.pages)
+            control = set(seen)
+            seen.clear()
+            if self._watch is not None:            # the step's requests are its click's:
+                self._watch.clear()                # the control window's are the page's
+            if self._click(ctx, self._locate(page, target), "act") != ACTED:
+                return None                        # no click reached it: not a verdict
+            self.wait_quiet(page)
+            after = self.settled_fingerprint(page, ctx)
+        finally:
+            page.remove_listener("request", on_request)
+        with self._shared.lock:
+            explained = self._shared.explained.setdefault(normalise_route(url), set())
+            explained |= control
+            caused = seen - explained
+            explained |= caused
+        return bool(caused) or page.url != url or len(ctx.pages) != pages \
+            or after is None or after.key != before.key
 
     def _close_popups(self, ctx, page) -> None:
         # frozen and drained through the guard first (BUG-0504, `navguard.close_pages`)
@@ -1757,6 +1755,11 @@ class Explorer:
                 self._watch = None
                 if outcome == ACT_REFUSED:
                     self._finish(key, REFUSED)
+                elif outcome == ACT_INERT:      # a trial's verdict (FR-CRAWL-40): its
+                    self._finish(key, INERT)    # click changed nothing, never logged
+                elif outcome == ACT_UNEXPLORED:     # the run's trials are spent: counted
+                    with shared.lock:               # (delegated_unexplored), not done
+                        shared.work.release(key)
                 else:
                     self._attempt_failed(key, el_desc, step, pending)
                     dirty = True

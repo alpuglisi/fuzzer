@@ -1521,18 +1521,30 @@ tracked in the requirements files, not here.
   - `capture.py` (SP-35): `capture.jsonl`, written only by `make_record` (redacted at
     the write, off the proxy's loop) and read only by `read_capture` (typed,
     quarantining).
-  - `explore.py` + `fingerprint.py` + `formfill.py`: a guarded Chromium (navguard
-    launch, route, navigation and release owners; `proxy=` the recorder) explores a
-    state graph whose states are execution keys (exact route, element multiset,
+  - `explore.py` + `fingerprint.py` + `formfill.py` + `compose.py`: a guarded Chromium
+    (navguard launch, route, navigation and release owners; `proxy=` the recorder)
+    explores a state graph whose states are execution keys (exact route, element multiset,
     workflow markers, session generation; SP-62, FR-CRAWL-31) and whose frontier is
     ordered and bounded per route by the structural layout key (bounds reported); takes
     each action once per state (`WorkLedger`: retries, deprioritised repeats, skips only
     on equal observed effects, FR-CRAWL-32); restores a state only to its recorded
     contract, exactly (neither a subset nor a superset), acts only on a page that
-    holds it, and never replays a step that sent a non-idempotent request (FR-CRAWL-33);
-    finds listener-only elements through DevTools, fills forms valid-first (the
-    browser's `checkValidity()` decides), waits for network quiescence, recovers a lost
-    session, and never acts on a destructive control.
+    holds it, and never replays a step that sent a non-idempotent request (FR-CRAWL-33).
+    Each read of a page (`compose.read_page`, FR-CRAWL-39, CC-CRAWL-0059):
+    - covers its composed tree: open shadow roots through SP-70, and visible
+      same-origin, in-scope frames, each read in its own context through DevTools'
+      Command Line API;
+    - finds listener-only elements, and delegated candidates that are tried once and
+      kept only when their click causes a request or changes the state (FR-CRAWL-40;
+      never part of a state's identity: neither key nor a recorded contract reads them);
+    - names each element's hosts and frames in its identity, and reads the workflow
+      markers (FR-CRAWL-31) in the same pass;
+    - counts what it cannot read (every closed shadow root, cross-origin and
+      out-of-scope frames, bounds).
+
+    The explorer fills forms valid-first (the browser's `checkValidity()` decides),
+    waits for network quiescence, recovers a lost session, and never acts on a
+    destructive control.
   - `synth.py`: the captures become an OpenAPI 3.1 inventory (templated paths, merged
     schemas, header classes, auth, response-only fields, dependency edges, JS
     candidates) -- the input of Phase 2 (component 9) and the contract (component 7).
@@ -1563,7 +1575,10 @@ tracked in the requirements files, not here.
   navigation, URL normalization, crawl budget. Built for single-page apps (forms
   phase 3, `tools/spa.py`): SPA route discovery from loaded scripts (hash and history
   mode), canonical page keys, request-body capture (`discovered_requests`, kept per API operation, FR-CRAWL-37) and opt-in
-  SPA form submission (FR-CRAWL-12/13); by default each eligible SPA form is
+  SPA form submission (FR-CRAWL-12/13);
+  forms and controls are found across open shadow roots (SP-70, CC-CRAWL-0059; a password
+  control inside a shadow root is left out until the browser login's X3 clear and the G1
+  read are composed, FR-CRAWL-40); by default each eligible SPA form is
   dry-submitted -- clicked inside the write-blocking window, its write recorded and
   aborted, the client state rolled back -- and every write a reveal window aborts is
   recorded too (FR-CRAWL-26, BUG-0506). An authenticated Playwright crawl adopts the
@@ -2259,6 +2274,7 @@ store: `capture.jsonl` -> inventory -> contract -> results. It imports `core/`
 (urls, redaction, net, credentials, http headers, comparability (SP-56)), the session
 layer's login-URL, login-facts (SP-16) and
 storage-state predicates, `tools/navguard.py` (every browser owner),
+`tools/composed.py` (the composed-tree walk, SP-70, shared with the spider's form read),
 `tools/store_adapter.credential_change_rule` (SP-19), `tools/probesender._unobserved`
 (SP-34) and `procutil` -- and nothing from the legacy spider (`tools/spider.py`,
 `spa.py`, `formnav.py`).

@@ -72,6 +72,219 @@ Newest first.
   (count 0 on 43231dc, 1 after). The writer's helper named in the placement line was
   folded back into `record_request` (43231dc).
 
+### CC-CRAWL-0059 — Discovery reads the composed UI tree: open shadow roots, same-origin frames, delegated actions; what it cannot read is counted (BUG-0551) (2026-10-21)
+- Placement: pre-assigned to lane DISCO13 (audit defect 13), branch `lane/DISCO13` from
+  c483dc1. Planned merge order: AU-DISCO, then DISCO13, then DISCO4. This lane's
+  `explore.py` changes are in the enumeration, candidate and acting regions (the
+  page-reading and acting sections, the report fields, `_Shared`); none is in
+  AU-DISCO's fingerprint, dedup and replay code or in DISCO4's session-loss code.
+- Change:
+  - **SP-70, `tools/composed.py::COMPOSED_JS` (new).**
+    - The composed-tree walk: a document and every open shadow root, each shadow tree
+      right after its host; composed queries, `composedClosest`, `composedHosts`.
+    - `deepAll`/`deepFind` use the native light-tree query when no shadow host is
+      below, so a page without shadow roots reads as before.
+  - **`disco/compose.py` (new): the explorer's read** (`read_page`, `READ_JS`,
+    `FIELDS_JS`, `Reader`, `classify_frame`, `frame_scope`, `Coverage`, `Trials`).
+    - `READ_JS` describes, per document, native, pointer, listener and delegated
+      elements, bounded, and returns the document's frames, its open shadow-root count
+      and its closed-root suspects. Unchanged for the light tree: the old ancestry,
+      the old fields, the same order.
+    - `Reader` runs it through DevTools' `Runtime.evaluate` with the Command Line API
+      (`getEventListeners` inside the read). Frames run in their own main-world
+      context, found through `Runtime.enable` and a marker the parent's read writes on
+      the frame's window. Without DevTools it runs through Playwright.
+    - An element's ancestry continues `^shadow<host` past each shadow root and
+      `^frame<iframe<@/path` past each frame.
+    - Frames are read when visible, same-origin and in scope; the rest are counted.
+      Closed roots are confirmed through `DOM.describeNode` on suspects.
+    - Delegated candidates are labelled non-semantic leaves under a
+      `click`/`dblclick`/`mouseup`/`pointerup` listener in their composed path.
+  - **`disco/explore.py`:**
+    - `enumerate` calls `compose.read_page`, marks delegated candidates found inert or
+      past the trial budget `disabled`, and adds the read's notes to the report
+      (`_mark_delegated`, `_note_coverage`).
+    - `_listener_elements`, `_ENUMERATE_JS`, `_CANDIDATES_JS` and `_MARK_JS` are gone.
+      `_FIELDS_JS` is `compose.FIELDS_JS`: markers are cleared across the composed
+      tree.
+    - `_scope` and `_locate` follow the frame markers. `act` fills a form through its
+      frame's scope, and a delegated element goes to `_act_delegated`/`_trial`. The
+      click is factored into `_click`, with the same behaviour.
+    - `ExploreReport` gains `shadow_roots`, `frames`, `closed_shadow_roots`,
+      `frames_cross_origin`, `frames_out_of_scope`, `budget_limited`,
+      `delegated_trials`, `delegated_live`, `delegated_inert` and
+      `delegated_unexplored`. `_Shared` gains `trials` and `coverage`.
+  - **`tools/spa.py::FORMS_JS`:**
+    - It finds forms, buttons and controls across open shadow roots through SP-70.
+    - A password control inside a shadow root is never described. A container holding
+      one is read by its light tree (as before), and left out when it is itself in a
+      shadow root, because the browser login's X3 clear and `G1_READ_JS` resolve ids
+      with `document.querySelector` (pinned).
+  - *(Review round 1, branch `lane/DISCO13-r1` from c219266; findings DISCO13-B1..B4,
+    BUG-0551's review-round section.)*
+    - **B1, a form-less widget at a shadow root's top.** `READ_JS`'s `formLike` returns
+      the shadow root its ancestor walk ends at when the root holds a typed control: no
+      `<form>`, so no action and `form_tag` false; `typed`, `last_typed` and
+      `submitters` are the root's. `spa.FORMS_JS` considers that root once its 8-ancestor
+      walk ends there, and describes such a container by its host (CAPTCHA hints, no
+      action). SP-70: `deepAll`/`deepFind` walk a shadow root passed as the root.
+    - **B2, state identity.** `fingerprint.counts_for_state` and `state_signatures`: a
+      delegated candidate is never part of the state key, a state's core or
+      `reproduces`. Every core in `explore.py` is built through `state_signatures`, and
+      `_alias_state` through `state_fingerprint`. Delegated candidates are still read,
+      stepped and tried.
+    - **B3, causal trial evidence.** `Explorer._trial` runs a control window just
+      before the click: `mark_activity` then `wait_quiet`, the same quiet wait the trial
+      ends with. A request counts only when its `request_key` (method, normalised
+      route) is not explained on that route (`_Shared.explained`): not seen by a control
+      window there, not already counted by an earlier trial there.
+    - **B4, the closed-root census.** The `suspects` heuristic, `Reader.census` and
+      `MAX_CENSUS` are gone. `compose._census` makes one
+      `DOM.getDocument({depth: -1, pierce: true})` per page. It counts every element
+      hosting a closed root in each document read, attributed by the frame key on its
+      frame element, once per route and page shape (`READ_JS` returns a digest of each
+      element's tag and child count in walk order; `_Shared.censused`). A page whose
+      documents read hold more than `MAX_NODES` elements, or that is read without
+      DevTools, is not checked: its elements count `budget.census`.
+- Impact (other components / project):
+  - **SESS:** the session manager's browser login reads forms with `spa.FORMS_JS`.
+    - A login form inside a shadow root is still never picked (left out, as before).
+    - A light login form whose user field is a component's shadow input is now
+      login-shaped and can be used. Its password stays in the light tree, where the X3
+      clear reaches it.
+    - No CC-SESS number was assigned to this lane; the coordinator decides whether
+      SESS records an entry.
+  - **The legacy spider** (deprecated) finds forms inside open shadow roots; G1 reads
+    their controls as missing (pinned). A light container whose shadow components hold
+    more buttons is no longer "one button" (composed semantics).
+  - **AUD:** `store_adapter.import_disco` reads `actions.jsonl` as before; a signature is
+    opaque. `explore.json` gains fields (additive). There is no store or wire
+    contract change.
+  - **The other lanes:**
+    - AU-DISCO's new state identity must not read `disabled` or other flags of
+      `how == "delegated"` elements (a trial verdict, not the DOM); BUG-0551 R7.
+      *(Review round 1.)* Nor their membership: its `element_multiset` and
+      `execution_key` (d9e269e) must filter `fingerprint.counts_for_state` at the merge,
+      as `state_fingerprint` and `state_signatures` do here.
+    - The SPIDER lane, or anyone adding a page script with a light-tree query, must add
+      an allowance to `tests/test_composed_tree_guard.py::ALLOWED` or build on SP-70.
+  - *(Review round 1.)* **SESS:** the browser login reads `spa.FORMS_JS`. A form-less
+    shadow widget is now a container, but one holding a password control is still left
+    out (it is in a shadow root), so the login's choice of form is unchanged.
+- Risk (medium):
+  - **The enumeration path changed for every disco run**, from Playwright's evaluate to
+    CDP's evaluate. Mitigation: light-tree descriptions are byte-for-byte those of the
+    old script (same fields, ancestry and order). `tests/test_disco_e2e.py`, with real
+    mitmdump and Chromium, runs unchanged.
+  - **Delegated trials add clicks** where a document-level click listener exists: at
+    most 48 per run, each one click and one extra read. An inert trial is never an
+    action. The destructive and deny gates run before `act` as for every element.
+  - **The ancestry suffix** changes the signatures, and so the states, only of elements
+    inside shadow roots and frames, which were not read before.
+  - *(Review round 1; the round-0 statement above was wrong for light pages:
+    delegated candidates changed state membership on any page with a document click
+    listener, B2.)* With delegated candidates out of state identity, a light page's
+    states are those of c483dc1 again.
+  - *(Review round 1.)* **Costs added:**
+    - each delegated trial waits one more quiet window (at least `idle_ms`): at most 48
+      per run;
+    - the closed-root census costs about 25 us per DOM node once per route and page
+      shape (230 ms at 6 000 elements; 1.3-1.9 s at 24 000-30 000), and is skipped past
+      `MAX_NODES` elements.
+  - *(Review round 1.)* Accepted: background traffic slower than a control window can
+    make one inert candidate per route and request key live (R8, measured). A delegated
+    candidate that appears only after an action that changes nothing else is not tried
+    there (R9; c483dc1's behaviour).
+- Deliverables:
+  - [x] SP-70 `tools/composed.py`; `disco/compose.py`; the `explore.py` enumeration,
+    acting and report changes; `spa.FORMS_JS` — done
+  - [x] `tests/test_disco_compose.py`, real browser:
+    - an open-shadow-root form, filled and sent;
+    - the shadow `Go`'s own identity, and a replay through the shadow root;
+    - the settings frame's controls, and a replay through the frame;
+    - a document-delegated tile kept and an inert candidate dropped;
+    - the closed root, the cross-origin and out-of-scope frames and the delegated
+      bounds counted;
+    - the spider's form read across a shadow root.
+
+    The offline tests cover frame classification, coverage aggregation and the trial
+    budget, plus two strict xfail pins (G1, the browser login's X3 clear) — done
+  - [x] `tests/test_composed_tree_guard.py`: the whole-package light-tree-query guard
+    with its allowance list, the owner check, and synthetic offenders and near-misses —
+    done
+  - [x] FR-CRAWL-39 and FR-CRAWL-40 added; FR-CRAWL-19's actionable-elements bullet and
+    section 5's `explore.json` line edited in place — done
+  - [x] BUG-0551. PA-0551, SP-70, CHANGELOG, ERROR_LOG, ARCHITECTURE and F-1XX texts
+    are in the lane's `doc_texts.md` for the coordinator — done
+  - [x] *(Review round 1.)* B1-B4 fixed. Tests in `tests/test_disco_compose.py`:
+    - a second real-browser app (`WIDGET`: a form-less shadow search widget, a Refresh
+      that only swaps static text, delegated tiles, a 100 ms background poll) with
+      three tests;
+    - the spider's form read of the widget;
+    - two more closed roots in the main fixture (a `<div>` host and an `<x-card>`
+      slotting a visible child), counted exactly;
+    - offline: state identity without delegated candidates, `request_key`, and the
+      census's attribution, cache and bound.
+
+    FR-CRAWL-19, FR-CRAWL-39 and FR-CRAWL-40 edited in place; BUG-0551's review-round
+    section; PA-0551 (strengthened), SP-70, CHANGELOG, ERROR_LOG, ARCHITECTURE and
+    F-1XX texts updated in `doc_texts.md` — done
+- Effectiveness (assessed 2026-10-21, lane evidence; the harness on the committed tree
+  is reported with the lane's result):
+  - On c483dc1 the six defect tests in `tests/test_disco_compose.py` fail. The
+    exploration never requests `/api/shadow/search`, `/api/shadow/go`,
+    `/api/shadow/apply`, `/api/frame/save`, `/api/frame/apply` or `/api/tile/7`; the
+    report has no composed-tree counters; `spa.FORMS_JS` misses the shadow form. The
+    guard fails on the old `FORMS_JS`.
+  - With the change all pass under `FUZZLAB_REQUIRE_BROWSER=1`.
+  - Measured read cost: 20-28 ms for the fixture page (one document, one frame).
+    getEventListeners inside the read costs 13 ms for 6 005 elements and 34 ms for
+    24 005, one round trip, against about 1.35 ms per candidate per CDP call before.
+  - *(Review round 1, assessed 2026-10-21.)* The new test file was run once against
+    c219266's product code (a scratch copy of that tree, `FUZZLAB_REQUIRE_BROWSER=1`):
+    8 failed, 8 passed, 2 xfailed. These are the eight review-round tests:
+    - B1, explorer: the server got `/api/search?q=` (empty);
+    - B1, spider: `spa.FORMS_JS` returned `[]`;
+    - B2: Refresh's `new_state` differed from its state;
+    - B3: `Just a note` was logged as an action;
+    - B4: `closed_shadow_roots` was 1, not 3;
+    - the three offline tests: the new names did not exist.
+
+    On this branch the targeted files (`tests/test_disco_compose.py`,
+    `test_composed_tree_guard.py`, `test_disco_e2e.py`, `test_disco_harvest.py`,
+    `test_disco_workers.py`, `test_netquiet.py`, `test_session_browser_login.py`,
+    `test_browser_scope.py`, `test_fewer_requests.py`,
+    `test_base_url_subpath_registry.py`, `test_query_placement.py`,
+    `test_shared_primitives.py`) gave 515 passed and 12 xfailed in one invocation. The
+    reviewer's four probes on this branch:
+    - B1: `q=test` was sent through an Enter step and a submit step;
+    - B2: 1 state;
+    - B3 (400 ms poll): 2 trials, 1 live;
+    - B4: `div#host` and `x-card` counted.
+
+    The harness result on the committed tree is reported with the lane's result.
+- *(Merge integration, 2026-10-21, onto AU-DISCO's merge 07792e0: BUG-0539,
+  CC-CRAWL-0055.)* `explore.py` (11 conflicting blocks) and `fingerprint.py` (1) were
+  resolved so both lanes hold over every candidate:
+  - AU-DISCO's identity inputs are read by the composed read. Each element's `sel` and
+    each document's page markers (named hidden inputs, non-described `aria-current`;
+    AU-DISCO's light-tree `_MARKS_JS`, which SP-70's guard refuses) moved into
+    `compose.READ_JS`, in the same read as the elements (`PageRead.marks`).
+  - BUG-0551 R7 closed: `fingerprint.element_multiset` and `workflow_markers` leave a
+    delegated candidate out (`counts_for_state`), so neither the execution key nor a
+    recorded contract reads it. Its `aria-current` is a page marker, as before it was a
+    candidate.
+  - `act` returns AU-DISCO's outcomes. A delegated candidate adds `ACT_INERT` (its work
+    item finished `inert`; never logged, never counted an action) and `ACT_UNEXPLORED`
+    (the run's trials spent: the item stays `pending`, counted). A trial whose click
+    reached nothing, and one another worker holds, is a failed attempt (retried,
+    FR-CRAWL-32): DISCO13 had decided a click that failed `inert`, which let one failure
+    consume the candidate run-wide. A trial's "changed the state" is another execution
+    key. `Step.safe` reads the requests after the click; the control window's are the
+    page's own.
+  - New tests: `tests/test_disco_compose.py::test_a_delegated_candidate_is_no_part_of_the_execution_key_or_a_contract`
+    and `::test_the_composed_read_carries_the_execution_keys_markers`.
+
 ### CC-CRAWL-0058 — The capture proxy builds records off its event loop, bounds its queue in bytes with backpressure, and counts every loss (BUG-0548, audit defect 22) (2026-10-21)
 - Placement: pre-assigned to lane DISCO22 (audit defect 22); independent of AU-DISCO's
   defects 1-3 (`disco/fingerprint.py`, `disco/explore.py`, not touched here).

@@ -2876,3 +2876,37 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
   4. **A recorded action is repeated (a replay, a restore) only on recorded evidence that it is safe to repeat** (no non-idempotent request observed); otherwise its result is used where it was reached, or reported unresolved.
   5. **A fold, skip, declaration or acceptance that saves work ships with a test of what it must not merge or accept** (two states, a second-stage step, a subset, a superset, a declared difference plus a missing mandatory element (PA-0029's pair), a failed attempt), proven on the pre-fix code -- including each one the fix itself introduces; the structural key's sites are fixed by an AST guard proven on synthetic offenders (`PA-0034(2)`). (from BUG-0539)
   - Enforced by: tests/test_disco_state_identity.py::test_the_structural_key_never_decides_a_visited_state, tests/test_disco_state_identity.py::test_the_structural_key_guard_catches_synthetic_offenders, tests/test_disco_state_identity.py::test_a_recorded_core_is_never_accepted_by_a_proper_subset_nor_shrunk, tests/test_disco_state_identity.py::test_a_failed_attempt_never_consumes_the_work_and_is_retried_then_failed, tests/test_disco_state_identity.py::test_a_path_that_sent_a_non_idempotent_request_is_never_replayed, tests/test_disco_state_identity_browser.py::test_a_wizard_step_with_the_same_layout_is_explored_to_its_end, tests/test_disco_state_identity_browser.py::test_a_dialogs_second_stage_takes_the_same_next_again, tests/test_disco_state_identity_browser.py::test_a_restore_that_lost_a_core_control_is_unresolved_and_its_contract_kept, tests/test_disco_state_identity.py::test_a_superset_of_the_contract_is_never_the_recorded_state, tests/test_disco_state_identity.py::test_a_declared_optional_feature_never_excuses_a_missing_mandatory_one, tests/test_disco_state_identity.py::test_an_action_whose_result_could_not_be_read_is_retried_and_its_successor_recorded, tests/test_disco_state_identity_browser.py::test_a_modal_closed_by_its_own_control_that_does_not_reopen_is_unresolved, tests/test_disco_state_identity_browser.py::test_a_restore_that_lands_on_a_later_stage_is_unresolved_never_that_stage
+
+- **PA-0551** — Strengthens `PA-0501(2)`, `PA-0502(1)`, `PA-0502(3)` and `PA-0505(2)`, after BUG-0551:
+  both crawlers read only the top document's light tree, so controls in shadow roots
+  and frames, and delegated actions, were never candidates, and nothing said so.
+  PA-0501(2) grows a fixture only from shapes a measured lab broke. PA-0502(3)'s
+  marker clear was done in the light tree. PA-0505(2) was never applied to enumeration.
+  The fix's review round found four more defects in the fix itself. It walked to a
+  container with `parentElement`, put a heuristic's candidates into state identity,
+  counted any request in a time window as a trial's effect, and wrote its closed-root
+  gap down as a residual. So (2) to (5) below go further. They strengthen `PA-0502(1)`:
+  an effect must be one the action caused. They strengthen `PA-0502(3)`: identity covers
+  which elements make up a state, not only each element's signature.
+  1. **A crawler page script that discovers or locates UI reads the composed tree
+     through the one owner** (SP-70, `tools/composed.py::COMPOSED_JS`). That covers
+     every open shadow root, and each frame by its own read in its own realm. A
+     light-tree-only DOM query in a page script is a reviewed allowance with its count
+     and its reason.
+  2. **A discovery mechanism's fixture covers each way the platform presents UI**, not
+     only the shapes a measured lab had: open and closed shadow roots; same-origin,
+     cross-origin and out-of-scope frames; delegated handlers. It also covers **the
+     variants each mechanism's code branches on**: a container element or none; a
+     static page and one whose text changes under a document listener; a quiet network
+     and a polling one; a host that renders nothing and one that slots its children.
+     Each has a real-browser test judged by what the server received.
+  3. **What a read cannot reach, or a bound leaves out, is counted in the run report,
+     never claimed.** It is met only by a complete count, or by a counted remainder
+     (`budget.*`), never by a residual paragraph.
+  4. **An ancestor walk in a composed page script continues past the top of a shadow
+     tree**, to the shadow root or its host (`composedParent`), wherever it looks for a
+     container or a context. `parentElement` ends there.
+  5. **A heuristic candidate is kept only on evidence its own action caused**, compared
+     with a control observation made without that action. **Its presence, its verdict and
+     its flags never enter state identity.** (from BUG-0551 and its review round)
+  - Enforced by: tests/test_composed_tree_guard.py::test_every_crawler_page_script_reads_the_composed_tree, tests/test_composed_tree_guard.py::test_the_composed_tree_guard_catches_synthetic_offenders, tests/test_composed_tree_guard.py::test_discos_reads_and_the_spiders_form_read_are_built_on_the_owner, tests/test_disco_compose.py::test_a_form_in_an_open_shadow_root_is_found_filled_and_sent, tests/test_disco_compose.py::test_a_same_origin_frames_controls_are_explored_and_replayed_through_the_frame, tests/test_disco_compose.py::test_a_document_delegated_action_is_kept_and_an_inert_candidate_dropped, tests/test_disco_compose.py::test_what_was_not_read_is_counted_never_claimed, tests/test_disco_compose.py::test_the_census_counts_every_closed_root_of_the_documents_read, tests/test_disco_compose.py::test_a_formless_widget_at_a_shadow_roots_top_is_filled_and_sent, tests/test_disco_compose.py::test_the_spiders_form_read_finds_a_formless_widget_at_a_shadow_roots_top, tests/test_disco_compose.py::test_a_click_that_only_swaps_static_text_keeps_the_state, tests/test_disco_compose.py::test_a_delegated_candidate_is_no_part_of_a_states_identity, tests/test_disco_compose.py::test_a_delegated_candidate_is_no_part_of_the_execution_key_or_a_contract, tests/test_disco_compose.py::test_a_background_poll_never_makes_an_inert_candidate_live

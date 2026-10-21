@@ -18,6 +18,31 @@ Format per entry:
 
 ---
 
+## 2026-10-21 — crawler, disco and spider (discovery read only the top document's light tree; BUG-0551)
+- **Symptom:** on a loopback fixture, disco never requested the endpoints behind a
+  search form in an open shadow root, a same-origin settings frame, or tiles served by a
+  document-level click listener (`/api/shadow/search`, `/api/frame/save`,
+  `/api/tile/7`, and their replay-only follow-ups). `spa.FORMS_JS` missed the shadow
+  form. The report showed no sign of anything unread (audit defect 13).
+- **Root cause:** each crawler's page script modelled the page's UI as the top
+  document's light tree (`document.querySelectorAll`). This was an unstated assumption
+  with no owner for the tree walk, no fixture shape violating it (PA-0501's fixture grows
+  only from labs' failures), no listener check beyond an element's own, and no report of
+  what a read could not reach.
+- **Remediation:** SP-70 `tools/composed.py` (the composed walk); `disco/compose.py`
+  (per-document reads through DevTools' Command Line API, frames in their own contexts,
+  ancestry through hosts and frames, delegated trials, coverage counters); markers
+  cleared across the composed tree; `spa.FORMS_JS` across open shadow roots, with
+  shadow-root password controls left out until the X3 clear and the G1 read are
+  composed (strict xfails). A whole-package guard covers every light-tree query in a
+  page script (CC-CRAWL-0059, BUG-0551, PA-0551). Review round 1 fixed four defects of
+  that fix: a form-less widget at a shadow root's top was never filled (its container
+  is now the root, in both crawlers); delegated candidates entered state identity (a
+  text swap made a new state; now excluded); a background poll made inert candidates
+  live (a control window now decides); closed roots on built-in or slotting hosts went
+  uncounted (one DevTools census per page shape now counts every one).
+- **Status:** Fixed (residuals R2-R9 in BUG-0551; R1 closed in review round 1)
+
 ## 2026-10-21 — crawl (disco merged distinct states, consumed work and accepted wrong restores; BUG-0539)
 - **Symptom:** the external audit's defects 1-3, reproduced at 08e3eaa in a real browser on loopback pages:
   - a three-step wizard with one layout stopped at step 1 (the finish request never made);
