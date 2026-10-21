@@ -1868,8 +1868,9 @@ tracked in the requirements files, not here.
   (`message.py::RawMessage`) — byte-exact, round-trips received bytes and edits by byte
   surgery so untouched lines stay verbatim (NFR-PROXY-byte-exact) — and the **parsed
   path** over `h11` (`parser.py`). The exit criterion holds in miniature: a hand-edited
-  conflicting duplicate `Content-Length` forwards byte-for-byte on the raw path while
-  the parsed path rejects it.
+  conflicting duplicate `Content-Length` forwards byte-for-byte on the raw path (the
+  Repeater, an intercepted edit, or the listener's explicit raw mode `--raw-framing`)
+  while the parsed path rejects it.
 - **WebSocket framing** `[built]` (Phase 9 T9.1, `ws.py`): a from-scratch, byte-exact RFC
   6455 frame codec (encode/decode, masking, fragmentation, control frames) + the handshake,
   recorded in history with a `protocol` tag (migration 9).
@@ -1893,7 +1894,17 @@ tracked in the requirements files, not here.
     (CC-PROXY-0021). A flush is all-or-nothing (savepoint, BUG-0106);
   - upstream reads are bounded (64 KiB headers, a configurable 64 MiB body and overall
     deadline) and never re-copied, and the blocking sender runs off the event loop
-    (FR-PROXY-12, BUG-0101).
+    (FR-PROXY-12, BUG-0101); a response is framed by SP-63 and never returned short (FR-PROXY-402).
+- **HTTP/1 framing and inbound bounds** `[built]` (FR-PROXY-401..403, CC-PROXY-0028,
+  SP-63): one sans-I/O framing owner (`framing.py`: `parse_head`, strict, and
+  `MessageReader`) for the listener's requests and the sender's responses. A head with a
+  bare CR or LF, obs-fold, a non-token field name or a malformed start line is refused
+  (a request 400, a response 502). Requests are read whole and a chunked one is
+  forwarded de-chunked; what cannot be framed is answered 400. A response ends only at
+  its framed end; a cut or stalled one is `UpstreamIncomplete` (502, recorded as no
+  response), inside a TLS tunnel too. The listener bounds head / body / per-request
+  time / connections (`InboundLimits`: 431 / 413 / 408 / 503, counted, configurable);
+  defaults follow SP-60 where one applies (16 MiB body, 60 s).
 - **History, repeater, interception, session capture** `[built]`: `flow` history
   (`history.py` — FTS5, batched writes, content-addressed bodies + raw bytes, secret
   redaction on write; migration 6); repeater (`repeater.py` — DB-persisted tabs, replay

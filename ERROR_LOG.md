@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-21 — proxy (HTTP/1 framed by guesswork; the listener's reads unbounded; BUG-0543)
+- **Symptom:** audit defects 18-20, reproduced at 08e3eaa over real loopback sockets (`tests/test_proxy_framing.py` on the pre-fix code). A chunked POST reached the upstream as its head alone. `8\r\nabc0\r\n\r\n` ended a chunked response inside its data, and a 10-byte body cut at 3 bytes was returned (and relayed, and recorded as a 200). A trailer, a HEAD, a 204, a 304 or a 103 held the response to the 20 s idle timeout. A `Content-Length: 10^12` request waited without bound, a 100 KiB head got no answer, and nothing capped connections.
+- **Root cause:** no HTTP/1 framing owner: the listener read `Content-Length` only and the sender guessed completion from a suffix or a quiet socket. PA-0102's bounds were applied to the upstream read only; BUG-0101's sweep cleared the listener on the presence of the stream reader's head limit.
+- **Remediation:** `proxy/framing.py` (SP-63, `MessageReader`) for both directions. The listener reads each request whole under `InboundLimits` (400 / 408 / 413 / 431 / 503, counted, configurable) and de-chunks it. The sender returns only a framed final response and raises `UpstreamIncomplete` / `UpstreamFramingError`. An AST guard fails on hand framing outside the owner (BUG-0543, PA-0543, CC-PROXY-0028).
+- **Status:** Fixed
+
 ## 2026-10-21 — crawler, captured requests (a dispatcher's operations and nested inputs were dropped as duplicates; BUG-0546)
 - **Symptom:** each of these second requests was recorded as `duplicate` and never reached the importer (audit defect 9, reproduced on c483dc1):
   - `POST /api {"data":{"cmd":"x"}}` after `{"data":{"q":"x"}}`;

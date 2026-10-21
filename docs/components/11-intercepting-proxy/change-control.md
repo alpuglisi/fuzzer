@@ -117,8 +117,9 @@ Newest first.
 - Effectiveness (assessed 2026-10-21): the targeted proxy files pass (112 passed: the
   new file, the upstream/flush, live, server, rules, trace, intercept-live and
   hand-written-response suites). The pre-fix proof is above. The one
-  `scripts/verify_change.py --base 08e3eaa` run on this commit is recorded in the lane
-  report, with its file count and pass / fail / skip counts, and is added here at merge.
+  `scripts/verify_change.py --base 08e3eaa` run on this commit (d84f97e, detached
+  worktree): 77 files, 3014 passed, 0 failed, 0 errors, 1 skipped (test_packaging
+  bdist_wheel, environment), 20 xfailed.
 - Review round 1 (2026-10-21, two reviewers and a skeptic on d84f97e: REVISE, five
   blocking findings, each reproduced; fixed on top of d84f97e):
   - **B1 (security): malformed field syntax still framed and forwarded.** `_start`
@@ -153,6 +154,7 @@ Newest first.
     strict-response test, the two tunnel tests
     and the quadratic-oracle test. Proof on d84f97e and harness: recorded in the lane
     report.
+  - Effectiveness of review round 1: Review round 1 fixed on 92024c8. The new tests on d84f97e: 9 failed, 40 passed (the five B1 request cases forwarded with a 200, the three strict-response cases did not raise, and the tunnel test got an empty close). The B3 tunnel test on 08e3eaa sent three requests (the head, the chunk bytes, the GET). `scripts/verify_change.py --base d84f97e` on 92024c8: 74 files, 2959 passed, 0 failed, 0 errors, 1 skipped (test_packaging, environment), 20 xfailed.
 
 ### CC-PROXY-0027 — A proxied flow's redirect target keeps its own key (BUG-0517) (2026-10-19)
 - Change (`fuzzlab/proxy/history.py::flow_event`): the redacted `Location` is
