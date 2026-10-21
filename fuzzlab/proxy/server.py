@@ -50,6 +50,9 @@ _HEADERS_TOO_LARGE = (b"HTTP/1.1 431 Request Header Fields Too Large\r\n"
                       b"Content-Length: 0\r\nConnection: close\r\n\r\n")
 _UNAVAILABLE = (b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n"
                 b"Connection: close\r\n\r\n")
+#: An upstream that failed, was cut, or closed without answering (FR-PROXY-402).
+_BAD_GATEWAY = (b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n"
+                b"Connection: close\r\n\r\n")
 
 
 @dataclass(frozen=True)
@@ -300,7 +303,7 @@ class AsyncProxyServer:
                                                     tgt.use_tls)
             if resp is not None:
                 written = True
-                writer.write(resp)
+                writer.write(resp or _BAD_GATEWAY)   # closed unanswered: 502, not empty
                 await writer.drain()
         except asyncio.CancelledError:
             pass                                     # shutting down; drop this connection
@@ -310,8 +313,7 @@ class AsyncProxyServer:
             self.errors.append(repr(exc))
             if not written:
                 try:
-                    writer.write(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n"
-                                 b"Connection: close\r\n\r\n")
+                    writer.write(_BAD_GATEWAY)
                     await writer.drain()
                 except (OSError, RuntimeError):
                     pass
@@ -403,8 +405,17 @@ class AsyncProxyServer:
             raw = await self._next_request(conn, writer)
             if raw is None:
                 break
-            resp = await self.engine.handle_request(raw, host, port, use_tls=True)
+            try:
+                resp = await self.engine.handle_request(raw, host, port, use_tls=True)
+            except Exception as exc:                 # noqa: BLE001 - per request
+                self.errors.append(repr(exc))        # contained, as outside (BUG-0085)
+                resp = b""
             if resp is None:
+                break                                # dropped by the operator
+            if not resp:
+                # a failed, cut or unanswered upstream is a 502 inside the tunnel: an
+                # empty close on a reused connection is retried by the browser
+                await _answer(conn, writer, _BAD_GATEWAY)
                 break
             writer.write(resp)
             await writer.drain()

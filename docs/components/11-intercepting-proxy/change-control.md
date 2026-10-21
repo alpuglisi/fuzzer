@@ -119,6 +119,40 @@ Newest first.
   hand-written-response suites). The pre-fix proof is above. The one
   `scripts/verify_change.py --base 08e3eaa` run on this commit is recorded in the lane
   report, with its file count and pass / fail / skip counts, and is added here at merge.
+- Review round 1 (2026-10-21, two reviewers and a skeptic on d84f97e: REVISE, five
+  blocking findings, each reproduced; fixed on top of d84f97e):
+  - **B1 (security): malformed field syntax still framed and forwarded.** `_start`
+    read fields through `RawMessage`, which splits a head at `\n\n` and skips lines it
+    cannot match. Four inputs were framed and forwarded on the default path: a bare-LF
+    pipeline (`X: y\n\nGET /smuggled …`), `Transfer-Encoding\t: chunked`,
+    `Transfer-Encoding : chunked` or an obs-folded one beside a `Content-Length`, and
+    `X: a\rContent-Length: 5`. Fix: `framing.parse_head` parses a head once, strictly,
+    from the bytes up to the first CRLF CRLF. It refuses a bare CR or LF, an empty start
+    line, obs-fold, a field line with no colon or a non-token name, a NUL in a value,
+    and a malformed request or status line. Framing reads its fields from that parse:
+    a request is answered 400, a response is a 502 (`UpstreamFramingError`).
+    `closes_connection` uses the same parse. Only CRLF pairs before a request line are
+    skipped. Raw mode still changes only the conflicting-length rule.
+  - **AU-PROXY-1: a cut or unanswered upstream inside the TLS tunnel closed it empty.**
+    The tunnel loop now contains each request's failure (`errors`). On a failure or an
+    empty response it answers `_BAD_GATEWAY` in the tunnel (a lingering close), then
+    ends it. The plain path answers an empty upstream response with 502 too.
+  - **B3: the keep-alive case had no listener-level test.**
+    `test_the_bytes_after_a_chunked_request_in_a_tunnel_are_the_next_request` sends a
+    chunked POST and a GET in one write through a real TLS tunnel (LocalCA, offline).
+  - **B2 / AU-PROXY-2: PA-0102's test lost its proof.**
+    `test_the_body_is_never_recopied_per_chunk` checks the body buffer's identity after
+    every receive as well as the copy count. `test_the_copy_oracle_flags_a_quadratic_reader`
+    proves the oracle on an honest quadratic reader (over 60 times the bytes received).
+  - **AU-PROXY-3: PA-0543(2) claimed every accept path.** Its admission and time clause
+    is scoped to the proxy listener (lead's option (a)). `oracle/oob.py`'s
+    `ThreadingHTTPServer` (a thread per connection, no cap, a 5 s socket timeout) and
+    the web UI's uvicorn listener are residuals R9 and R10 in BUG-0543's sweep: other
+    components' listeners, not widened here.
+  - Tests: five new 400 cases (the four inputs, the third in both forms), a three-case
+    strict-response test, the two tunnel tests
+    and the quadratic-oracle test. Proof on d84f97e and harness: recorded in the lane
+    report.
 
 ### CC-PROXY-0027 — A proxied flow's redirect target keeps its own key (BUG-0517) (2026-10-19)
 - Change (`fuzzlab/proxy/history.py::flow_event`): the redacted `Location` is

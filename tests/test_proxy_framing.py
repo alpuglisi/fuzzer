@@ -23,6 +23,7 @@ import ast
 import asyncio
 import re
 import socket
+import ssl
 import threading
 import time
 from pathlib import Path
@@ -42,10 +43,11 @@ class _Upstream:
     """A loopback upstream on a real socket. For each connection it reads one request
     (its head, then a ``Content-Length`` body, else whatever arrives within 0.5 s), keeps
     the bytes in ``requests``, then sends ``parts`` in order (a float is a pause in
-    seconds) and closes, or, with ``hold``, keeps the connection open until `close`."""
+    seconds) and closes, or, with ``hold``, keeps the connection open until `close`.
+    ``then`` gives the parts for each later connection instead (its last repeats)."""
 
-    def __init__(self, parts=(OK,), *, hold=False):
-        self.parts, self.hold = list(parts), hold
+    def __init__(self, parts=(OK,), *, hold=False, then=()):
+        self.parts, self.hold, self.then = list(parts), hold, list(then)
         self.requests: list[bytes] = []
         self._srv = socket.create_server(("127.0.0.1", 0))
         self.port = self._srv.getsockname()[1]
@@ -84,7 +86,10 @@ class _Upstream:
                 return
             with conn:
                 self.requests.append(self._read(conn))
-                for part in self.parts:
+                n = len(self.requests) - 2
+                parts = self.parts if n < 0 or not self.then else \
+                    self.then[min(n, len(self.then) - 1)]
+                for part in parts:
                     if isinstance(part, float):
                         time.sleep(part)
                     else:
@@ -101,8 +106,8 @@ class _Upstream:
 def upstream():
     made = []
 
-    def make(*parts, hold=False):
-        up = _Upstream(parts or (OK,), hold=hold)
+    def make(*parts, hold=False, then=()):
+        up = _Upstream(parts or (OK,), hold=hold, then=then)
         made.append(up)
         return up
     yield make
@@ -198,10 +203,18 @@ def test_a_chunked_request_reaches_the_upstream_whole_and_de_chunked(upstream):
     (b"Transfer-Encoding: gzip, chunked\r\n", b"5\r\nhello\r\n0\r\n\r\n"),
     (b"Content-Length: 5\r\nContent-Length: 6\r\n", b"hello"),
     (b"Content-Length: -5\r\n", b"hello"),
+    # malformed field syntax (review round 1, B1): each was framed and forwarded
+    (b"X: y\n\nGET /smuggled HTTP/1.1\r\nHost: h\r\n", b""),
+    (b"Transfer-Encoding\t: chunked\r\n", b"3\r\nabc\r\n0\r\n\r\n"),
+    (b"Content-Length: 5\r\nTransfer-Encoding : chunked\r\n", b"hello"),
+    (b"Content-Length: 5\r\nX: a\r\n Transfer-Encoding: chunked\r\n", b"hello"),
+    (b"X: a\rContent-Length: 5\r\n", b"hello"),
 ], ids=["cl-and-te", "bad-chunk-size", "no-crlf-after-data", "not-chunked-alone",
-        "conflicting-cl", "invalid-cl"])
+        "conflicting-cl", "invalid-cl", "bare-lf-pipeline", "ws-in-te-name",
+        "ws-before-colon", "obs-folded-te", "bare-cr"])
 def test_a_request_that_cannot_be_framed_is_answered_400_and_never_forwarded(
         upstream, headers, body):
+    """Never forwarded: the upstream gets no connection at all."""
     up = upstream(OK)
     server, hist = _server()
     got = _through(server, _post(up.port, headers, body))
@@ -300,6 +313,21 @@ def test_a_framed_response_ends_at_its_end_not_at_the_idle_timeout(upstream,
     assert got == (want or b"".join(p for p in parts if isinstance(p, bytes)))
 
 
+@pytest.mark.parametrize("head", [
+    b"HTTP/1.1 200 OK\r\nX: a\nContent-Length: 2\r\n\r\nok",
+    b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nX: a\r\n Transfer-Encoding: chunked\r\n"
+    b"\r\nok",
+    b"HTTP/1.1 200 OK\r\nContent-Length : 2\r\n\r\nok",
+], ids=["bare-lf", "obs-fold", "ws-before-colon"])
+def test_a_response_head_that_does_not_parse_strictly_is_never_relayed(upstream, head):
+    """RFC 9112 §5.1/§5.2: a response field line that is not ``token: value`` on CRLF is
+    a framing error (502), never a response framed by the fields a loose split found."""
+    up = upstream(head)
+    with pytest.raises(socketsender.UpstreamResponseError) as err:
+        _send(up, timeout=5)
+    assert type(err.value).__name__ == "UpstreamFramingError"
+
+
 def test_an_incomplete_upstream_response_is_a_502_recorded_as_no_response(upstream):
     """Pre-fix, the client got the cut bytes as a response and history recorded a 200."""
     up = upstream(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nabc")
@@ -310,6 +338,107 @@ def test_an_incomplete_upstream_response_is_a_502_recorded_as_no_response(upstre
     (rec,) = hist.recs
     assert rec.raw_response == b"" and rec.status is None
     assert rec.error == "UpstreamIncomplete"
+
+
+# --- the CONNECT/TLS keep-alive tunnel ---------------------------------------------------
+
+def _tls_or_skip():
+    try:
+        from cryptography.fernet import Fernet
+        Fernet(Fernet.generate_key()).encrypt(b"probe")   # force the rust bindings
+    except BaseException as exc:  # noqa: BLE001 - a broken native build panics
+        pytest.skip(f"cryptography unavailable/broken: {exc}")
+
+
+async def _tunnel(server, ca, port):
+    """A client's TLS tunnel through the proxy to ``127.0.0.1:port``, verifying the
+    proxy's CA-minted leaf."""
+    reader, writer = await asyncio.open_connection("127.0.0.1", server.port)
+    writer.write(b"CONNECT 127.0.0.1:%d HTTP/1.1\r\nHost: 127.0.0.1:%d\r\n\r\n"
+                 % (port, port))
+    await writer.drain()
+    assert (await reader.readuntil(b"\r\n\r\n")).startswith(b"HTTP/1.1 200")
+    ctx = ssl.create_default_context(cafile=str(ca.ca_cert_path))
+    await writer.start_tls(ctx, server_hostname="127.0.0.1")
+    return reader, writer
+
+
+def test_the_bytes_after_a_chunked_request_in_a_tunnel_are_the_next_request(tmp_path):
+    """Defect 18's keep-alive case at the listener (review round 1, B3): a chunked POST
+    and a GET in one write through the TLS tunnel are exactly two requests. On 08e3eaa
+    the upstream got three: the POST's head, its chunk bytes, and the GET."""
+    _tls_or_skip()
+    from fuzzlab.proxy.ca import LocalCA
+    ca = LocalCA(tmp_path / "ca")
+    ca.ensure_ca()
+    sent = []
+
+    def sender(host, port, use_tls, raw):
+        sent.append(raw)
+        return OK
+    engine = ProxyEngine(scope=Scope().include("127.0.0.1"), sender=sender)
+    server = AsyncProxyServer(engine, "127.0.0.1", 0, ca=ca)
+
+    async def main():
+        await server.start()
+        try:
+            reader, writer = await _tunnel(server, ca, 8443)
+            writer.write(b"POST /a HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+                         b"Transfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n0\r\n\r\n"
+                         b"GET /b HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+            await writer.drain()
+            got = await asyncio.wait_for(reader.readexactly(2 * len(OK)), 5)
+            await asyncio.sleep(0.2)            # room for a third request, if one came
+            writer.close()
+            return got
+        finally:
+            await server.stop()
+    assert asyncio.run(main()) == OK + OK
+    assert sent == [b"POST /a HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 3\r\n\r\nabc",
+                    b"GET /b HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"]
+
+
+def test_a_cut_response_in_a_tunnel_is_a_502_never_an_empty_close(upstream, tmp_path):
+    """Review round 1 (AU-PROXY-1): an upstream failure inside the TLS tunnel escaped the
+    loop and closed it with nothing written, which a browser retries on a reused
+    connection (a POST sent twice). Now the client gets a 502 in the tunnel, and each
+    request reached the upstream once."""
+    _tls_or_skip()
+    from fuzzlab.proxy.ca import LocalCA
+    ca = LocalCA(tmp_path / "ca")
+    ca.ensure_ca()
+    up = upstream(OK, then=[(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nabc",)])
+
+    def sender(host, port, use_tls, raw):        # the real sender, to the plain upstream
+        return SocketSender(timeout=5)(host, port, False, raw)
+    engine = ProxyEngine(scope=Scope().include("127.0.0.1"), sender=sender)
+    server = AsyncProxyServer(engine, "127.0.0.1", 0, ca=ca)
+
+    async def main():
+        await server.start()
+        try:
+            reader, writer = await _tunnel(server, ca, up.port)
+            writer.write(b"GET /a HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+            await writer.drain()
+            first = await asyncio.wait_for(reader.readexactly(len(OK)), 5)
+            writer.write(b"POST /b HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 1"
+                         b"\r\n\r\nx")
+            await writer.drain()
+            rest = bytearray()
+            try:
+                while chunk := await asyncio.wait_for(reader.read(65536), 5):
+                    rest += chunk
+            except (ConnectionError, ssl.SSLError):
+                pass
+            writer.close()
+            return first, bytes(rest)
+        finally:
+            await server.stop()
+    first, rest = asyncio.run(main())
+    assert first == OK
+    assert rest.startswith(b"HTTP/1.1 502 ") and b"Connection: close" in rest
+    assert len(up.requests) == 2 and up.requests[1].startswith(b"POST /b ")
+    assert any("UpstreamIncomplete" in e for e in server.errors)
 
 
 # --- defect 20: inbound bounds ---------------------------------------------------------

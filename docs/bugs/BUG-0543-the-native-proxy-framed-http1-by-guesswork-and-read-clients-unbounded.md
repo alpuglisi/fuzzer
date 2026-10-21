@@ -186,3 +186,67 @@ Checked `docs/bugs/` and `docs/PREVENTIVE_ACTIONS.md` for read bounds, framing a
 | every `requests` reader | target bodies | SP-60 (BUG-0536) |
 
 - Enforced by: tests/test_proxy_framing.py::test_every_proxy_http1_read_goes_through_the_framing_owner, tests/test_proxy_framing.py::test_the_framing_guard_catches_synthetic_offenders, tests/test_proxy_framing.py::test_a_response_cut_before_its_framed_end_is_incomplete_never_returned, tests/test_proxy_framing.py::test_a_request_that_cannot_be_framed_is_answered_400_and_never_forwarded, tests/test_proxy_framing.py::test_a_dripped_request_is_answered_408_at_its_deadline_and_never_forwarded, tests/test_proxy_framing.py::test_connections_over_the_cap_are_answered_503_and_counted
+
+## Review round 1 (2026-10-21)
+Two reviewers and a skeptic reviewed d84f97e: REVISE, with five blocking findings, each
+reproduced at d84f97e. They are fixed on top of it (CC-PROXY-0028, review-round note).
+
+- **B1 (security): the fix itself kept a loose header parse.** `MessageReader` found the
+  head's end at CRLF CRLF but read its fields through `RawMessage`, which splits at `\n\n`
+  and skips lines it cannot match. Four inputs were framed and forwarded on the default
+  path:
+  - a bare-LF pipeline (`X: y\n\nGET /smuggled …`), which reaches the upstream as two
+    valid requests after `_rebuild` normalises the line endings;
+  - `Transfer-Encoding\t: chunked`, framed as no body, so the chunks became the next
+    request in the tunnel (defect 18 again);
+  - `Transfer-Encoding : chunked`, or an obs-folded one, beside `Content-Length: 5`,
+    framed by the length;
+  - `X: a\rContent-Length: 5`, framed as no body.
+
+  *Why it happened:* the fix moved framing to one owner but left that owner reading
+  fields through a lenient view built for byte-exact editing. The head end and the
+  fields came from two parsers that disagree on line endings: the root cause of this bug
+  again, one layer down. *Fix:* `framing.parse_head` decides the head end once and
+  parses the fields from that same head, strictly (RFC 9112 §2.2, §5). It refuses a bare
+  CR or LF, an empty start line, obs-fold, a field line with no colon or a non-token
+  name, a NUL in a value, and a malformed request or status line: 400 for a request, a
+  502 for a response.
+- **AU-PROXY-1: an upstream failure inside the TLS tunnel was an empty close.** The
+  tunnel loop let `UpstreamIncomplete` escape, and `written=True` suppressed the 502.
+  An empty `b""` response did the same. Chromium retries an empty close on a reused
+  connection, so a POST could reach the upstream twice. *Fix:* each request in the
+  tunnel is contained; a failure or an empty response is answered 502 in the tunnel and
+  the tunnel ends. The plain path answers an empty response with 502 as well.
+- **B3:** the keep-alive case had only a sans-I/O test, so deleting the listener's
+  leftover carry-over left the suite green. A real TLS-tunnel test now sends a chunked
+  POST and a GET in one write.
+- **B2 / AU-PROXY-2:** PA-0102's enforcing test kept only a hand-maintained counter. It
+  now also checks the body buffer's identity after every receive, and the oracle is
+  proven on an honestly counting quadratic reader (PA-0135(3)).
+- **AU-PROXY-3:** PA-0543(2) claimed "every accept path has an admission cap", while
+  this sweep marked `oracle/oob.py` out of class and did not list the web UI's listener.
+  The orchestrator's option (a) applies. PA-0543(2)'s admission and time clause is
+  scoped to the proxy listener (this item's reader), and the two other listeners are
+  residuals:
+
+| Site | Reads | Disposition |
+|---|---|---|
+| `oracle/oob.py::OobListener` (`ThreadingHTTPServer`) | out-of-band callbacks to the oracle's loopback listener | R9: a thread per connection, no connection cap, a 5 s socket timeout per read (no total deadline). FUZZ's listener: flagged, not changed here |
+| `web/app.py::serve` (uvicorn) | the operator's control panel, loopback only | R10: uvicorn's own defaults (no `limit_concurrency`); UI's listener: flagged, not changed here |
+
+**Preventive action, amended (supersedes PA-0543(2) as first written above):**
+2. **A read bound covers both directions and every dimension, enforced while reading.**
+   The proxy's inbound read has head, body and time bounds, as its upstream read does.
+   The proxy listener has an admission cap whose refusals are counted. The admission and
+   time clause is scoped to the proxy listener: other listeners (`oracle/oob.py`, the web
+   UI) belong to other components and are recorded as residuals, not claimed. A sweep
+   that clears a reader names what each bound limits (head, body, time, count). For each
+   one it cites a test against an over-limit, dripping or flooding peer, never the
+   presence of a limit.
+
+PA-0543(1) gains a sentence: *the owner's own parse is the strict one: the head's end and
+its fields come from one parse of the same bytes, never from a lenient view.* Enforced
+additionally by
+`tests/test_proxy_framing.py::test_a_request_that_cannot_be_framed_is_answered_400_and_never_forwarded`
+(the four inputs) and
+`tests/test_proxy_framing.py::test_a_response_head_that_does_not_parse_strictly_is_never_relayed`.

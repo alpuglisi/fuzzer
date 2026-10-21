@@ -164,6 +164,12 @@ that shares the store, never a mandatory pipeline (D5).
 - **FR-PROXY-401 (request framing, CC-PROXY-0028, BUG-0543; audit defect 18)** The
   listener reads each request whole before it forwards anything, framed by SP-63
   (`proxy/framing.py::MessageReader`, RFC 9112 §6):
+  - **The head is parsed once, strictly** (`framing.parse_head`, RFC 9112 §2.2, §5;
+    review round 1): it ends at the first CRLF CRLF, and framing reads its fields from
+    that same parse. Answered 400: a bare CR or LF anywhere in the head, an empty start
+    line, an obs-folded field line, a field line with no colon or a name that is not a
+    token (whitespace before the colon included), a NUL in a value. Empty lines (CRLF)
+    before the request line are ignored.
   - **Chunked** bodies are parsed: `1*HEXDIG` sizes (extensions after `;`, at most
     8 KiB a line), CRLF after each chunk's data, and the trailer section to its empty
     line. The request is forwarded **de-chunked**: its payload with a `Content-Length` in
@@ -174,27 +180,34 @@ that shares the store, never a mandatory pipeline (D5).
     transfer coding other than `chunked` alone; `Transfer-Encoding` on HTTP/1.0; an
     invalid `Content-Length` or conflicting values (identical duplicates are one length;
     `raw_framing` frames conflicting values by the first, FR-PROXY-1); a bad chunk size or
-    chunk line; a malformed request line.
+    chunk line; a malformed request line (method a token, one target, `HTTP/1.x`).
   - A request cut by the client's close is dropped, never forwarded in part. A request
     with a body is never forwarded as its head alone.
-  - Enforced by: `tests/test_proxy_framing.py::test_a_chunked_request_reaches_the_upstream_whole_and_de_chunked`, `tests/test_proxy_framing.py::test_a_request_that_cannot_be_framed_is_answered_400_and_never_forwarded`, `tests/test_proxy_framing.py::test_raw_framing_forwards_conflicting_lengths_by_the_first_and_nothing_else`, `tests/test_proxy_framing.py::test_the_bytes_after_a_chunked_request_are_the_next_request`, `tests/test_proxy_framing.py::test_every_proxy_http1_read_goes_through_the_framing_owner`
+  - Enforced by: `tests/test_proxy_framing.py::test_a_chunked_request_reaches_the_upstream_whole_and_de_chunked`, `tests/test_proxy_framing.py::test_a_request_that_cannot_be_framed_is_answered_400_and_never_forwarded`, `tests/test_proxy_framing.py::test_raw_framing_forwards_conflicting_lengths_by_the_first_and_nothing_else`, `tests/test_proxy_framing.py::test_the_bytes_after_a_chunked_request_are_the_next_request`, `tests/test_proxy_framing.py::test_the_bytes_after_a_chunked_request_in_a_tunnel_are_the_next_request`, `tests/test_proxy_framing.py::test_every_proxy_http1_read_goes_through_the_framing_owner`
 - **FR-PROXY-402 (response framing, CC-PROXY-0028, BUG-0543; audit defect 19)**
   `SocketSender` reads one response framed by SP-63, given its request's method: the
   status line, the headers, then a `Content-Length`, a parsed chunked body (trailers
   included) or a close-delimited body; none for HEAD, 1xx, 204, 304 and a 2xx to
   CONNECT. Interim responses (1xx but 101) are read and passed over, at most 8: the
   proxy holds whole messages, so the final one follows at once, and it is the response
-  returned, recorded and relayed. `Transfer-Encoding` with `Content-Length`, or an
-  invalid `Content-Length`, is `UpstreamFramingError` (502).
+  returned, recorded and relayed. `Transfer-Encoding` with `Content-Length`, an
+  invalid `Content-Length`, or a head that fails the strict parse of FR-PROXY-401
+  (`parse_head`: a bare CR or LF, obs-fold, a non-token field name; RFC 9112 §5.1/§5.2;
+  review round 1) is `UpstreamFramingError` (502).
   - **A response is complete only at its framed end.** A close or an idle receive
     before it raises `UpstreamIncomplete` (reason `eof` / `idle`), never returns the
     bytes; the engine records the flow with no response and that error class
     (FR-PROXY-13) and the client gets a 502. A peer that closes before sending any byte
-    returns `b""`: no response (recorded as "connection closed", as before).
+    returns `b""`: no response (recorded as "connection closed", as before), and the
+    client gets a 502.
+  - **Inside the CONNECT/TLS tunnel too** (review round 1): a failed, cut or unanswered
+    upstream is answered `502` with `Connection: close` in the tunnel, then the tunnel
+    closes. It is never an empty close, which a browser retries on a reused connection
+    (a POST sent twice). The failure is contained and listed in `errors`.
   - A response that ends its connection (close-delimited, a 101, or `Connection:
     close` on either side, `framing.closes_connection`) ends the CONNECT/TLS keep-alive
     loop after it is relayed.
-  - Enforced by: `tests/test_proxy_framing.py::test_a_chunk_whose_data_looks_like_the_last_chunk_is_not_the_end`, `tests/test_proxy_framing.py::test_a_response_cut_before_its_framed_end_is_incomplete_never_returned`, `tests/test_proxy_framing.py::test_a_framed_response_ends_at_its_end_not_at_the_idle_timeout`, `tests/test_proxy_framing.py::test_an_incomplete_upstream_response_is_a_502_recorded_as_no_response`
+  - Enforced by: `tests/test_proxy_framing.py::test_a_chunk_whose_data_looks_like_the_last_chunk_is_not_the_end`, `tests/test_proxy_framing.py::test_a_response_cut_before_its_framed_end_is_incomplete_never_returned`, `tests/test_proxy_framing.py::test_a_framed_response_ends_at_its_end_not_at_the_idle_timeout`, `tests/test_proxy_framing.py::test_a_response_head_that_does_not_parse_strictly_is_never_relayed`, `tests/test_proxy_framing.py::test_an_incomplete_upstream_response_is_a_502_recorded_as_no_response`, `tests/test_proxy_framing.py::test_a_cut_response_in_a_tunnel_is_a_502_never_an_empty_close`
 - **FR-PROXY-403 (inbound bounds, CC-PROXY-0028, BUG-0543; audit defect 20)**
   `AsyncProxyServer(limits=InboundLimits(...))` bounds what clients send while it is
   read:

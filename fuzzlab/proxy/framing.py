@@ -10,6 +10,13 @@ peer closed (`eof`); the reader says when the message is whole (`done`). A messa
 never whole on a guess: it ends where its framing says, and a peer that closes first
 gives `Incomplete`, never a short message.
 
+**Heads** are parsed once, strictly, from the bytes up to the first CRLF CRLF (`parse_head`,
+RFC 9112 §2.2, §5): every line ends in CRLF (a bare CR or LF anywhere is refused, so no
+other line ending can end the head or a field), the start line is not empty, and every
+field line is ``token ":" value`` (no obs-fold, no whitespace before the colon, no NUL).
+A request head that fails is `FramingError` (400); a response head, a 502. The framing
+below reads its fields from that same parse.
+
 **Framing** (RFC 9112 §6.1-6.3, §7.1):
 
 - *Request.* ``Transfer-Encoding`` and ``Content-Length`` together, a transfer coding
@@ -52,6 +59,9 @@ NONE, LENGTH, CHUNKED, CLOSE = "none", "length", "chunked", "close"
 
 _DIGITS = frozenset(b"0123456789")
 _HEX = frozenset(b"0123456789abcdefABCDEF")
+#: RFC 9110 §5.6.2 tchar: what a method and a field name are made of.
+_TCHAR = frozenset(b"!#$%&'*+-.^_`|~0123456789"
+                   b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
 #: Longer than any real length: a value with more digits is over every bound.
 _HUGE = 10 ** 19
 
@@ -87,9 +97,72 @@ class FrameLimits:
     body: int            # body bytes as they cross the wire
 
 
+# --- the head --------------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class Head:
+    """A head as `parse_head` read it: ``raw`` (through the blank line), ``start_line``
+    and ``fields`` (lower-cased name, value without surrounding whitespace), in order,
+    duplicates kept."""
+    raw: bytes
+    start_line: bytes
+    fields: tuple[tuple[bytes, bytes], ...]
+
+    def get_all(self, name: str | bytes) -> list[bytes]:
+        key = (name.encode("latin-1") if isinstance(name, str) else name).lower()
+        return [v for n, v in self.fields if n == key]
+
+    @property
+    def method(self) -> bytes:
+        return self.start_line.split(b" ", 1)[0]
+
+
+def _http1_version(v: bytes) -> bool:
+    return len(v) == 8 and v.startswith(b"HTTP/1.") and v[7] in _DIGITS
+
+
+def parse_head(head: bytes, role: str) -> Head:
+    """Parse a head (start line through the blank line) strictly, or raise
+    `FramingError`: a bare CR or LF, an empty start line, an obs-folded field line, a
+    field line with no colon or a name that is not a token (whitespace before the colon
+    included), a NUL in a value, or a malformed request or status line."""
+    if not head.endswith(b"\r\n\r\n"):
+        raise FramingError("a head not ended by CRLF CRLF")
+    lines = head[:-4].split(b"\r\n")
+    if any(b"\r" in line or b"\n" in line for line in lines):
+        raise FramingError("a bare CR or LF in the head")
+    start = lines[0]
+    if not start:
+        raise FramingError("an empty start line")
+    fields = []
+    for line in lines[1:]:
+        if line[:1] in (b" ", b"\t"):
+            raise FramingError("an obs-folded field line")
+        name, colon, value = line.partition(b":")
+        if not colon or not name or not set(name) <= _TCHAR:
+            raise FramingError("a malformed field line")
+        if b"\0" in value:
+            raise FramingError("a NUL in a field value")
+        fields.append((name.lower(), value.strip(b" \t")))
+    parsed = Head(head, start, tuple(fields))
+    if role == "request":
+        parts = start.split(b" ")
+        if (len(parts) != 3 or not parts[0] or not set(parts[0]) <= _TCHAR
+                or not parts[1] or b"\t" in parts[1] or not _http1_version(parts[2])):
+            raise FramingError("a malformed request line")
+    else:
+        response_status(parsed)
+    return parsed
+
+
+def _head_of(message: bytes) -> bytes:
+    end = message.find(b"\r\n\r\n")
+    return message[:end + 4] if end >= 0 else message
+
+
 # --- the framing decision ------------------------------------------------------------------
 
-def _content_length(msg: RawMessage, *, first: bool = False) -> int | None:
+def _content_length(msg: Head, *, first: bool = False) -> int | None:
     values = []
     for v in msg.get_all("Content-Length"):
         for part in v.split(b","):
@@ -105,13 +178,14 @@ def _content_length(msg: RawMessage, *, first: bool = False) -> int | None:
     return values[0]
 
 
-def _codings(msg: RawMessage) -> list[bytes]:
+def _codings(msg: Head) -> list[bytes]:
     return [p for v in msg.get_all("Transfer-Encoding")
             for p in (c.strip(b" \t\r").lower() for c in v.split(b",")) if p]
 
 
-def request_framing(msg: RawMessage, *, raw_length: bool = False) -> Framing:
-    """How a request's body is framed; `FramingError` when it cannot be."""
+def request_framing(msg: Head, *, raw_length: bool = False) -> Framing:
+    """How a request's body is framed (``msg`` from `parse_head`); `FramingError` when
+    it cannot be."""
     if msg.get_all("Transfer-Encoding"):
         if msg.get_all("Content-Length"):
             raise FramingError("both Transfer-Encoding and Content-Length")
@@ -124,18 +198,18 @@ def request_framing(msg: RawMessage, *, raw_length: bool = False) -> Framing:
     return Framing(LENGTH, n) if n else Framing(NONE)
 
 
-def response_status(msg: RawMessage) -> int:
+def response_status(msg: Head) -> int:
     """A response's status code; `FramingError` for a malformed status line."""
     parts = msg.start_line.split(b" ", 2)
-    if (len(parts) < 2 or not parts[0].startswith(b"HTTP/") or len(parts[1]) != 3
+    if (len(parts) < 2 or not _http1_version(parts[0]) or len(parts[1]) != 3
             or not set(parts[1]) <= _DIGITS):
         raise FramingError("a malformed status line")
     return int(parts[1])
 
 
-def response_framing(msg: RawMessage, method: bytes, status: int) -> Framing:
-    """How a response to ``method`` with ``status`` is framed; `FramingError` when it
-    cannot be."""
+def response_framing(msg: Head, method: bytes, status: int) -> Framing:
+    """How a response to ``method`` with ``status`` is framed (``msg`` from
+    `parse_head`); `FramingError` when it cannot be."""
     if (method == b"HEAD" or 100 <= status < 200 or status in (204, 304)
             or (method == b"CONNECT" and 200 <= status < 300)):
         return Framing(NONE)
@@ -160,7 +234,11 @@ def _chunk_size(line: bytes) -> int:
 def closes_connection(request: bytes, response: bytes) -> bool:
     """Whether a connection ends after this exchange: the response is close-delimited, a
     101 or unframeable, or either side said ``Connection: close``."""
-    req, resp = RawMessage.from_bytes(request), RawMessage.from_bytes(response)
+    try:
+        req = parse_head(_head_of(bytes(request)), "request")
+        resp = parse_head(_head_of(bytes(response)), "response")
+    except FramingError:
+        return True
     for m in (req, resp):
         if any(t.strip().lower() == b"close"
                for v in m.get_all("Connection") for t in v.split(b",")):
@@ -242,7 +320,10 @@ class MessageReader:
     # -- the head ------------------------------------------------------------------------
     def _head(self, data: bytes) -> bytes:
         if self.role == "request" and not self._buf:
-            data = data.lstrip(b"\r\n")          # empty lines before a request-line
+            i = 0                                # empty lines (CRLF) before a request-
+            while data.startswith(b"\r\n", i):   # line are ignored (RFC 9112 §2.2)
+                i += 2
+            data = data[i:]
             if not data:
                 return b""
         self._buf += data
@@ -263,22 +344,21 @@ class MessageReader:
         return rest
 
     def _start(self, head: bytes) -> None:
-        msg = RawMessage(head)
+        parsed = parse_head(head, self.role)        # the one parse framing reads
         if self.role == "request":
-            parts = msg.start_line.split(b" ")
-            if len(parts) != 3 or not parts[0] or not parts[2].startswith(b"HTTP/1."):
-                raise FramingError("a malformed request line")
-            fr = request_framing(msg, raw_length=self.raw_length)
+            fr = request_framing(parsed, raw_length=self.raw_length)
         else:
-            status = response_status(msg)
+            status = response_status(parsed)
             if 100 <= status < 200 and status != 101:
                 self.interim += 1                       # passed over: read the next head
                 if self.interim > MAX_INTERIM:
                     raise FramingError("too many interim responses")
                 return
             self.status = status
-            fr = response_framing(msg, self.method, status)
-        self.head, self.msg, self.framing = head, msg, fr
+            fr = response_framing(parsed, self.method, status)
+        # RawMessage only for `message`'s surgery: the strict parse above leaves no bare
+        # LF, so its own split agrees with this head's end
+        self.head, self.msg, self.framing = head, RawMessage(head), fr
         if fr.kind == NONE:
             self.done = True
             return
