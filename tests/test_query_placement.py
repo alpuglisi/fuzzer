@@ -103,25 +103,35 @@ def test_the_equivalence_still_tells_apart_what_a_server_reads_apart():
 
 class _Echo:
     """A loopback HTTP server that records each request's raw target (path and query
-    exactly as received) to ``/p`` (and below it) and answers a small HTML page. With
-    ``redirect`` set, a request whose target carries `MARK` is answered
-    ``302 Location: <redirect>``."""
+    exactly as received) to ``/p`` (and below it), and whether the request carried
+    `MARK` anywhere (target, body or a header value: ``carried``), and answers a small
+    HTML page. With ``redirect`` set, a request carrying `MARK` is answered
+    ``302 Location: <redirect>``; with ``redirect_limit`` set too, only that many are
+    (the rest get the page, as an app's own resource answers its GET)."""
 
     def __init__(self):
         require_loopback("127.0.0.1")                      # PA-0130
         self.targets: list[str] = []
+        self.carried: list[bool] = []
         self.redirect: str | None = None
+        self.redirect_limit: int | None = None
+        self.redirected = 0
         echo = self
 
         class Handler(BaseHTTPRequestHandler):
             def _answer(self):
                 length = int(self.headers.get("Content-Length") or 0)
-                if length:
-                    self.rfile.read(length)
+                body = self.rfile.read(length) if length else b""
+                carries = MARK in self.path or MARK.encode() in body or any(
+                    MARK in value for value in self.headers.values())
                 path = urlsplit(self.path).path
                 if path == "/p" or path.startswith("/p/"):
                     echo.targets.append(self.path)
-                if echo.redirect is not None and MARK in self.path:
+                    echo.carried.append(carries)
+                if echo.redirect is not None and carries and (
+                        echo.redirect_limit is None
+                        or echo.redirected < echo.redirect_limit):
+                    echo.redirected += 1
                     self.send_response(302)
                     self.send_header("Location", echo.redirect)
                     self.send_header("Content-Length", "0")
@@ -483,20 +493,129 @@ def test_an_empty_location_is_not_followed(echo, sender_name):
     assert len(echo.targets) == 1
 
 
-@_pin("AU-PRGPATH", "a path point's PRG follow-up is resolved against the placed path")
-@pytest.mark.parametrize("sender_name", ["anonymous", "seam"])
-@pytest.mark.parametrize("location", ["#top", "edit"])
-def test_a_path_points_prg_follow_up_never_carries_the_payload(echo, sender_name,
-                                                               location):
-    """Both senders resolve the follow-up of a path probe against the placed path, so a
-    fragment-only or relative ``Location`` re-requests the payload (``/p/zqmark/edit``).
-    Not query placement: its own item (AU-PRGPATH)."""
+# --- PRG of a path point (FR-FUZZ-69, BUG-0542): resolved against its own template -----
+#: A path point's ``Location`` -> the follow-up's raw target, or None when nothing may
+#: follow. ``{base}`` is the echo server's origin. The point's own URL is its template
+#: (``/p/{id}/view``), as a query point's is its URL without the payload (FR-FUZZ-64).
+#: Resolved against it, a target that still holds ``{id}`` names the resource the
+#: payload is in, so a browser would fetch the payload again there (``#top`` ->
+#: ``/p/zqmark/view``, ``edit`` -> ``/p/zqmark/edit``): never fetched. So is an
+#: absolute path or URL the server wrote with the payload in it (``/p/zqmark/edit``,
+#: the same browser request as ``edit``). A target that leaves the segment is exactly
+#: where a browser goes.
+PATH_PRG = [
+    ("fragment", "#top", None),
+    ("relative", "edit", None),
+    ("relative-query", "?tab=2", None),
+    ("relative-same-dir", "./", None),
+    ("leaves-the-segment", "../list", "/p/list"),
+    ("absolute-path", "/p/list", "/p/list"),
+    ("absolute-url", "{base}/p/list", "/p/list"),
+    ("absolute-path-with-the-payload", "/p/" + MARK + "/edit", None),
+    ("absolute-url-with-the-payload", "{base}/p/" + MARK + "/edit", None),
+]
+#: `Probe.prg` for a refused follow-up that would re-send the payload (nothing is sent).
+RESENDS = "skipped: the follow-up would re-send the payload"
+
+
+def _path_prg_send(echo, sender_name, method, location):
     from fuzzlab.tools.probesender import RequestsProbeSender
-    echo.redirect = location
+    echo.redirect = location.format(base=echo.base)
     sender = RequestsProbeSender(timeout=5) if sender_name == "anonymous" \
         else _seam_sender()
-    sender.send(f"{echo.base}/p/{{id}}/view", "id", MARK, location="path", prg=True)
-    assert len(echo.targets) == 2 and MARK not in echo.targets[1], echo.targets
+    return sender.send(f"{echo.base}/p/{{id}}/view", "id", MARK, method=method,
+                       location="path", prg=True)
+
+
+@pytest.mark.parametrize("sender_name", ["anonymous", "seam"])
+@pytest.mark.parametrize("method", ["POST", "GET"])
+@pytest.mark.parametrize("location,want", [pytest.param(*c[1:], id=c[0])
+                                           for c in PATH_PRG])
+def test_a_path_points_prg_follow_up_never_carries_the_payload(echo, sender_name,
+                                                               method, location, want):
+    """On c483dc1 both senders resolved a path probe's ``Location`` against the placed
+    URL, so ``#top`` and ``edit`` re-requested the payload (``/p/zqmark/edit``), and the
+    oracle read that request as the page the probe led to (AU-PRGPATH). Now a target
+    that keeps the point's segment is refused before any send (`Probe.prg` says why;
+    no follow-up is counted), and any other target is fetched where a browser goes."""
+    from fuzzlab.oracle.probe import PRG_OBSERVED
+    probe = _path_prg_send(echo, sender_name, method, location)
+    assert echo.targets[0] == f"/p/{MARK}/view"
+    assert all(MARK not in t for t in echo.targets[1:]), echo.targets
+    if want is None:
+        assert echo.targets == [f"/p/{MARK}/view"]
+        assert probe.prg == RESENDS
+        assert probe.followed is None and probe.prg_sent is None
+        assert probe.follow_up_sends == 0
+    else:
+        assert echo.targets[1:] == [want]
+        assert probe.prg == PRG_OBSERVED and probe.followed.url == echo.base + want
+        assert probe.prg_sent["url"] == echo.base + want and probe.follow_up_sends == 1
+
+
+#: Every location a probe sender places (`test_sender_conformance.PLACEABLE`, a bound
+#: query and the path segment): (own URL under ``/p/``, method, entries). The echo
+#: redirects any request that carries `MARK`, wherever it is.
+PRG_EVERY_LOCATION = {
+    "query": ("/p/x?id=1", "GET", None),
+    "query-bound": ("/p/x", "GET", [("id", MARK), ("tag", "a")]),
+    "body": ("/p/x", "POST", None),
+    "header": ("/p/x", "GET", None),
+    "json": ("/p/x", "POST", None),
+    "path": ("/p/{id}/view", "POST", None),
+}
+
+
+def test_the_prg_location_table_covers_every_placeable_location():
+    from tests.test_sender_conformance import PLACEABLE
+    assert {k.split("-")[0] for k in PRG_EVERY_LOCATION} == set(PLACEABLE) | {"path"}
+
+
+@pytest.mark.parametrize("sender_name", ["anonymous", "seam"])
+@pytest.mark.parametrize("redirect", ["#top", "edit"])
+@pytest.mark.parametrize("key", sorted(PRG_EVERY_LOCATION))
+def test_no_prg_follow_up_carries_the_payload_at_any_location(echo, sender_name,
+                                                               redirect, key):
+    """PA-0542: the follow-up's resolution base is the probe's own URL at **every**
+    location, never the request that carried the payload. The PRG fixtures before
+    BUG-0542 were body points, where the two URLs are the same. Every location but the
+    path is followed (its own URL is payload-free); the path's ``#top``/``edit`` keep its
+    segment and are refused before any send."""
+    from fuzzlab.oracle.probe import PRG_OBSERVED
+    from fuzzlab.tools.probesender import RequestsProbeSender
+    own, method, entries = PRG_EVERY_LOCATION[key]
+    location = key.split("-")[0]
+    param = "X-Probe" if location == "header" else "id"
+    echo.redirect = redirect
+    sender = RequestsProbeSender(timeout=5) if sender_name == "anonymous" \
+        else _seam_sender()
+    probe = sender.send(echo.base + own, param, MARK, method=method, location=location,
+                        entries=entries, prg=True)
+    assert echo.carried[0] is True and not any(echo.carried[1:]), echo.targets
+    if location == "path":
+        assert len(echo.targets) == 1 and probe.prg == RESENDS
+    else:
+        assert len(echo.targets) == 2 and probe.prg == PRG_OBSERVED, echo.targets
+
+
+@pytest.mark.parametrize("sender_name", ["anonymous", "seam"])
+@pytest.mark.parametrize("location", ["/p/" + MARK + "/edit", "{base}/p/" + MARK + "/edit"],
+                         ids=["absolute-path", "absolute-url"])
+def test_a_location_the_server_wrote_with_the_payload_is_refused(echo, sender_name,
+                                                                 location):
+    """FR-FUZZ-69 (BUG-0542 review): an absolute ``Location`` the server wrote with the
+    payload in it (``/p/zqmark/edit``, as an app redirecting to the resource it was
+    posted builds it from the request) is the same browser request as ``edit``: it
+    re-sends the payload, and its answer is never the page the POST led to. On 9d0e819
+    it was fetched as written and, answered with a page, attached as the PRG
+    observation. Here the echo answers only the probe with a redirect, so a sent
+    follow-up would be observed: it is refused before any send, as ``edit`` is."""
+    echo.redirect_limit = 1
+    probe = _path_prg_send(echo, sender_name, "POST", location)
+    assert echo.targets == [f"/p/{MARK}/view"], echo.targets
+    assert probe.prg == RESENDS
+    assert probe.followed is None and probe.prg_sent is None
+    assert probe.follow_up_sends == 0
 
 
 # --- the M6 browser executor: what Chromium itself sends -------------------------------

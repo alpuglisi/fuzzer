@@ -1351,7 +1351,8 @@ rewards) derives from it.
     307/308 re-sends a POST body: not followed, no observation). One hop: a follow-up
     answered with a redirect (or a timeout) is no observation.
   - **The follow-up (P3)** is the sender's own plain GET of the `Location` (resolved
-    against the probed URL, fragment dropped; no payload, no siblings, no
+    against the probe's own URL, never the placed one: FR-FUZZ-64, FR-FUZZ-69;
+    fragment dropped; no payload, no siblings, no
     `_FormBoundSender` binding) through every gate: the probed URL's own origin
     (`canonical_origin`), `check_send_url`, `transaction_reason`,
     `account_endpoint_reason`, not a login page (`redirect_is_logout`: normal 3xx
@@ -1419,7 +1420,9 @@ rewards) derives from it.
     `tests/test_prg_observation.py::test_golden_impact_is_zero_with_prg_enabled`,
     `tests/test_sender_conformance.py::test_every_wrapper_forwards_every_protocol_argument`,
     `tests/test_sender_conformance.py::test_every_wrapper_reports_its_inner_senders_prg_capability`,
-    `tests/test_sender_conformance.py::test_every_sender_that_declares_prg_makes_the_follow_up`
+    `tests/test_sender_conformance.py::test_every_sender_that_declares_prg_makes_the_follow_up`,
+    `tests/test_prg_observation.py::test_a_path_points_follow_up_that_would_re_send_the_payload_never_confirms`
+    (FR-FUZZ-69)
 - **FR-FUZZ-50** *(a probe with no response; `CC-FUZZ-0088`, 2026-10-15, BUG-0147;
   edited in place by `CC-FUZZ-0109`, BUG-0536).* A probe whose connection is reset or
   aborted, or whose body is cut off or undecodable, or whose body the bounded reader
@@ -1973,7 +1976,8 @@ rewards) derives from it.
       (`disco/runner.py`'s was fixed by AU-OUTCOME, CC-FUZZ-0105: `Runner.prepare`
       places each case query value through `place_query_param`; `tools/spa.query_url`'s
       by CC-CRAWL-0053.)
-    - a **path** point's PRG follow-up re-requests the placed path (AU-PRGPATH, pinned).
+    - *(Resolved, CC-FUZZ-0113:)* a **path** point's PRG follow-up re-requested the
+      placed path (AU-PRGPATH, BUG-0542); see FR-FUZZ-69.
 - **FR-FUZZ-68 (the template stage folds only true duplicates, `CC-FUZZ-0112`,
   `CC-CORE-0074`, 2026-10-21, BUG-0547)** When a caller gives `run_pipeline` the pages'
   HTML (`pages_html`), the stage before the audit folds injection points through
@@ -2002,6 +2006,62 @@ rewards) derives from it.
     point's unplaced URL (FR-FUZZ-64), so two folded standalone points could differ in that
     one follow-up's target.
   - **Checks:** `tests/test_dom_dedup_folding.py`.
+- **FR-FUZZ-69 (a path point's PRG follow-up never re-sends the payload, `CC-FUZZ-0113`,
+  2026-10-21, BUG-0542)** A PRG follow-up (FR-FUZZ-49) is resolved against the probe's
+  **own** URL at every location, never the request that carried the payload: the URL
+  itself for a body, header or JSON point, a query point's URL without its payload
+  (FR-FUZZ-64), and a **path** point's template (`/p/{id}/view`). One rule
+  (`probesender.prg_target`) for both probe senders; the placed URL still routes and
+  attributes the follow-up (the seam's isolated copy, the header breaker), as it did the
+  probe.
+  - **A target that keeps the path point's own segment** (`{id}`) names the resource the
+    payload is in: a browser would fetch it with the payload (`#top` ->
+    `/p/<payload>/view`, `edit` -> `/p/<payload>/edit`, `?tab=2`, `./`). That request is
+    never the page the probe's own request led to, and no payload-free URL names it. It
+    is refused before any send: `Probe.prg` is `skipped: the follow-up would re-send the
+    payload`, with no `followed`, no `prg_sent` and no request counted
+    (`follow_up_sends` 0). The strategy reads the probe's own response, as for any
+    refused follow-up.
+  - **A target the server wrote with the placed value in its path** (an absolute path or
+    URL built from the request, as an app redirecting to the resource just posted
+    writes it: `/p/<payload>/edit`) is refused the same way, with the same
+    `Probe.prg`. It is the same browser request as `edit`, so the decision is the same
+    for every spelling of it: the value is matched as whole segments of the target's
+    path, as written and percent-decoded (a server that re-encodes `*` as `%2A`, or the
+    reverse, is still caught; a value with a `/` written raw spans its segments,
+    `probesender._re_sends`). Its answer is never the
+    page the POST led to: a page that renders its own URL would read as the POST's
+    stored result, and M4 confirmed through it with `observation: "prg"` (review round
+    1 of CC-FUZZ-0113, PRGPATH-R1; `strategies._rode_the_redirect` is read by M5 XSS
+    only, so the strategies did not classify it).
+  - **A target that leaves the segment** (`../list`, an absolute path or URL without the
+    placed value) is fetched exactly where a browser goes. Resolution is structural, so
+    the template and the placed URL give the same target. The sender never adds the
+    payload to a follow-up.
+  - `probesender.PRG_RULES` states both divergences from the browser
+    (`location-relative`: the probe's own URL; `own-segment-never-refetched`), each with
+    a fixture.
+  - **Decision: resolve against the unplaced URL, not "unobserved".** Nothing is sent,
+    and `PRG_UNOBSERVED` means a follow-up went out and gave no observation, which
+    `Probe.prg_sends` counts as a request (FR-FUZZ-49 P8). So the refusal is a gate's
+    `skipped:`, like an another-origin or login-page target.
+  - **Stated residuals:** such a path point's PRG-only signal is not observed, so a run
+    that decides nothing is a negative, as for every refused follow-up. A reflection
+    reachable only through a relative redirect is found at the target's own point, not
+    through this one. A payload made only of dot segments (`.`, `..`) is refused where
+    a browser would normalise it away. A value the target's path holds as whole
+    segments for another reason (a payload `list` and `Location: /p/list`) is refused
+    too: the sender cannot tell the two apart, and nothing is sent. A placed value the
+    server wrote only into the target's query (`/p/list?from=<payload>`) is not the
+    point's resource: it rode the redirect and is taken as written, as at every other
+    location (FR-FUZZ-49 P6).
+  - Enforced by: `tests/test_query_placement.py::test_a_path_points_prg_follow_up_never_carries_the_payload`,
+    `tests/test_query_placement.py::test_no_prg_follow_up_carries_the_payload_at_any_location`,
+    `tests/test_query_placement.py::test_the_prg_location_table_covers_every_placeable_location`,
+    `tests/test_query_placement.py::test_a_location_the_server_wrote_with_the_payload_is_refused`,
+    `tests/test_prg_observation.py::test_a_path_points_follow_up_that_would_re_send_the_payload_never_confirms`,
+    `tests/test_prg_observation.py::test_a_path_points_follow_up_that_leaves_its_segment_still_confirms`,
+    `tests/test_prg_observation.py::test_prg_rule` (`own-segment-never-refetched`)
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
   finding must reproduce.
@@ -2033,7 +2093,7 @@ rewards) derives from it.
     target, never from the run's session to an isolated path, always on the probe's
     own session route, never on a timing send, one hop.
   - Enforced by (PRG follow-ups): `probesender.prg_target` and
-    `SeamProbeSender._prg_session_gate` at the send — `tests/test_prg_observation.py::test_a_refused_target_is_never_fetched`, `tests/test_prg_observation.py::test_a_307_after_post_is_not_followed_but_after_get_it_is`, `tests/test_prg_observation.py::test_a_second_redirect_is_no_observation`, `tests/test_prg_observation.py::test_a_redirect_to_the_login_page_is_not_followed`, `tests/test_prg_observation.py::test_a_redirect_to_an_auth_endpoint_is_not_followed`, `tests/test_prg_observation.py::test_a_main_session_probe_redirected_to_an_isolated_path_is_not_followed`, `tests/test_prg_observation.py::test_an_isolated_post_is_followed_on_the_same_copy`, `tests/test_prg_observation.py::test_an_anonymous_probe_follows_anonymously`, `tests/test_prg_observation.py::test_no_follow_up_once_the_header_breaker_stopped_header_probes`, `tests/test_prg_observation.py::test_a_timing_send_never_follows`, `tests/test_prg_observation.py::test_sqli_timing_and_boolean_never_cause_a_follow_up`, `tests/test_prg_observation.py::test_prg_rule`
+    `SeamProbeSender._prg_session_gate` at the send — `tests/test_prg_observation.py::test_a_refused_target_is_never_fetched`, `tests/test_prg_observation.py::test_a_307_after_post_is_not_followed_but_after_get_it_is`, `tests/test_prg_observation.py::test_a_second_redirect_is_no_observation`, `tests/test_prg_observation.py::test_a_redirect_to_the_login_page_is_not_followed`, `tests/test_prg_observation.py::test_a_redirect_to_an_auth_endpoint_is_not_followed`, `tests/test_prg_observation.py::test_a_main_session_probe_redirected_to_an_isolated_path_is_not_followed`, `tests/test_prg_observation.py::test_an_isolated_post_is_followed_on_the_same_copy`, `tests/test_prg_observation.py::test_an_anonymous_probe_follows_anonymously`, `tests/test_prg_observation.py::test_no_follow_up_once_the_header_breaker_stopped_header_probes`, `tests/test_prg_observation.py::test_a_timing_send_never_follows`, `tests/test_prg_observation.py::test_sqli_timing_and_boolean_never_cause_a_follow_up`, `tests/test_prg_observation.py::test_prg_rule`, `tests/test_query_placement.py::test_no_prg_follow_up_carries_the_payload_at_any_location` (never a re-sent payload, at every location; FR-FUZZ-69, BUG-0542)
   - Not yet enforced (BUG-0301, deferred to the owner of `core/urls.py`, CC-CORE-0301): the send gate `check_send_url` lets through Juice Shop's `GET /rest/user/change-password?current=&new=&repeat=` (changes the session user's password; `current` is optional) and `/dataerasure` (files an erasure request, clears the token cookie). An imported change-password URL, or the erasure form once crawled, would be fuzzed. Pinned by strict xfails: `tests/test_destructive_routes_external_labs.py::test_juice_change_password_url_is_refused_at_the_send_gate`, `tests/test_destructive_routes_external_labs.py::test_juice_dataerasure_form_is_never_imported`; the compensating controls are checked by `tests/test_destructive_routes_external_labs.py::test_bug_0301_compensating_controls_hold_meanwhile`.
   - Not yet enforced: the destructive-**payload** gate on the `auto`/`fuzz` senders (their payload lists are non-destructive today; wiring it needs on-host benchmark verification); "no traffic off localhost" for the probe senders (scope is the operator's target, and BUG-0050 deliberately allows authorized external hosts, so the clause needs re-wording or a loopback gate; the browser part is enforced above, BUG-0123); the CLI `--authorized` refusal is untested for fuzz/auto/greybox-run/mutate-run/proxy. (BUG-0111 sweep; reported to the operator.) The existing SQLi timing templates include an OR form (`1' OR SLEEP(d)-- -`) and comment-terminated forms that can widen a WHERE or strip trailing predicates in a write (BUG-0118, open).
   - Clause (the contract runner, FR-FUZZ-52, CC-FUZZ-0089): every send is gated at the

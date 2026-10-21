@@ -1304,7 +1304,10 @@ tracked in the requirements files, not here.
     takes `prg` (a property `Oracle` sets on every send of an opt-in strategy's run,
     via `oracle._PrgRun`, when the sender declares `prg_capable`, which every wrapper
     delegates). A probe sender answering a PRG redirect makes one plain GET of the
-    same-origin target through every send gate (`probesender.prg_target`, plus the
+    same-origin target, resolved against the probe's own URL and never the placed one
+    (a path point's target that keeps its own segment, or holds the placed value in
+    its path however the server wrote it, is refused: FR-FUZZ-69, CC-FUZZ-0113),
+    through every send gate (`probesender.prg_target`, plus the
     session's auth-endpoint, isolation and header-breaker gates) on the probe's own
     route, and attaches it as `Probe.followed`; the raw 3xx stays the probe.
     Follow-ups are counted in `requests` and budgeted (`prg_*` run metrics);
