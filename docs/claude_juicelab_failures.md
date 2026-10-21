@@ -1568,3 +1568,9 @@ Juice Shop lab is complete.
 - **Evidence:** `scratchpad/lanes/SPIDER/review_round2.md` (S2-2); `scratchpad/lanes/SPIDER/r1/proof.log` (three c483dc1 tests only); `scratchpad/lanes/SPIDER/r2/direct_c483dc1.out` (all eight measured).
 - **Impact:** none landed; a requirement's enforcement text stated a measurement that had not been made.
 - **Status:** corrected in review round 2 (the anonymous home links the protected pages; every test's failing assertion on c483dc1 recorded in BUG-0545 and FR-CRAWL-34).
+
+### F-192 — SURROGATE's review fix changed a spider counter without running the test that pinned it, and the stack carried the failure to the crawl batch
+- **What:** the SURROGATE review fix (d83876f, BUG-0554) made `_record_dry` count a refused blocked write in `requests_not_recorded`. `tests/test_spa_capture.py::test_passive_capture_is_on_by_default_and_redacted`, written by SPIDER9 (34d4fd1) before it, asserted the count is 2; on the HashSpa lab the reveal window re-renders `/#/about` and its two over-bound writes are refused again, so the count is 4. The fix's run did not include that file, and nothing in the stack's later merges ran it, so 07792e0 already carried the failure (measured by driving the test's crawl on 07792e0's `spider.py` and `spa.py`).
+- **Evidence:** `scratchpad/crawl_batch_run.log` (the crawl batch's targeted run: `assert 4 == 2`); the instrumented direct run (`RECORD_DRY reveal-blocked POST .../rest/big`, `.../rest/deep`, each then "not recorded").
+- **Impact:** an unverified stack: a counter's consumer test failing on the unpushed stack until the crawl batch's run; no product defect (the count is the fix's intended one).
+- **Status:** the assertion now expects 4 with both paths named (CC-CRAWL-0061 merge-integration note); a counter change's sweep runs every test that reads the counter (PA-0152's consumer rule), which the fix's verification skipped.

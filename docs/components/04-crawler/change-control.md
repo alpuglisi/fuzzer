@@ -71,6 +71,16 @@ Newest first.
   Test: `tests/test_capture_surrogates.py::test_a_dry_write_the_store_refuses_is_counted_never_lost`
   (count 0 on 43231dc, 1 after). The writer's helper named in the placement line was
   folded back into `record_request` (43231dc).
+- *(Merge integration, 2026-10-21, found by the crawl batch's targeted run on
+  a98c66d.)* The review fix's count reached a consumer test it was never run against:
+  `tests/test_spa_capture.py::test_passive_capture_is_on_by_default_and_redacted`
+  (CC-CRAWL-0057, BUG-0546) asserted `requests_not_recorded == 2`, written before the
+  fix. On the HashSpa lab `/rest/big` and `/rest/deep` are refused twice each: by the
+  passive capture, and again when the reveal window renders `/#/about` once more and
+  blocks both writes (`_record_dry`, source `reveal-blocked`), which the fix counts.
+  Measured by driving the test's crawl directly (no pytest) on a98c66d and on 07792e0's
+  `spider.py` and `spa.py`: 4 each time, the second pair from `_record_dry`. The
+  assertion now expects 4, with the two paths named. No product change.
 
 ### CC-CRAWL-0060 — Disco decides a lost session through the session layer's owners, installs only a fresh revalidated one, and closes the context it replaces (BUG-0552, FR-CRAWL-41) (2026-10-21)
 - Placement: pre-assigned to lane DISCO4 (audit defect 4); merged after AU-DISCO
@@ -499,6 +509,14 @@ Newest first.
     page's own.
   - New tests: `tests/test_disco_compose.py::test_a_delegated_candidate_is_no_part_of_the_execution_key_or_a_contract`
     and `::test_the_composed_read_carries_the_execution_keys_markers`.
+  - *(Found by the crawl batch's targeted run on a98c66d.)*
+    `::test_an_element_in_a_shadow_root_has_its_own_identity_and_is_replayed_there`
+    asserted each `Go` acted on once in the run: BUG-0539's removed route-scoped step
+    key. The merged explorer takes each `Go` once in each of the fixture's 4 states
+    (all on `/`, never equivalent; measured by driving the fixture directly: 8 actions,
+    no (state, signature, occurrence, kind) twice). The test now asserts two
+    signatures, one naming the shadow host, and never one step twice in a state, as
+    AU-DISCO changed the e2e fixture's assertions (CC-CRAWL-0055).
 
 ### CC-CRAWL-0058 — The capture proxy builds records off its event loop, bounds its queue in bytes with backpressure, and counts every loss (BUG-0548, audit defect 22) (2026-10-21)
 - Placement: pre-assigned to lane DISCO22 (audit defect 22); independent of AU-DISCO's

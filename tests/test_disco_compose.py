@@ -290,14 +290,22 @@ def test_a_form_in_an_open_shadow_root_is_found_filled_and_sent(explored):
 
 def test_an_element_in_a_shadow_root_has_its_own_identity_and_is_replayed_there(explored):
     """The light ``Go`` and the shadow ``Go`` are the same shape; the shadow one's
-    ancestry names its host, so both are acted on, each once. ``Apply filter`` exists
-    only after ``Advanced`` (in the shadow root) was clicked: its request proves the
-    state was restored by replaying a step located through the shadow root."""
+    ancestry names its host, so both are acted on, each once in every state that holds
+    them. ``Apply filter`` exists only after ``Advanced`` (in the shadow root) was
+    clicked: its request proves the state was restored by replaying a step located
+    through the shadow root.
+
+    At the merge with BUG-0539 (FR-CRAWL-32): a step's work is per execution state, so
+    each ``Go`` is taken in every state of the route (all on ``/``: never skipped as
+    equivalent), never twice in one; this lane's "each once in the run" was the
+    route-scoped step key BUG-0539 removed."""
     app = explored["app"]
     assert "/api/shadow/go" in app.paths() and "/api/light/go" in app.paths()
     goes = [a for a in explored["actions"] if a["label"] == "Go"]
-    assert len(goes) == 2 and len({a["signature"] for a in goes}) == 2, goes
-    assert sum("^shadow<search-box#sb" in a["signature"] for a in goes) == 1
+    signatures = {a["signature"] for a in goes}
+    assert len(signatures) == 2, goes
+    assert len({(a["state"], a["signature"], a["kind"]) for a in goes}) == len(goes), goes
+    assert sum("^shadow<search-box#sb" in sig for sig in signatures) == 1
     assert "/api/shadow/apply" in app.paths()
 
 
