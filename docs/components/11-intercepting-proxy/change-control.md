@@ -328,7 +328,11 @@ Newest first.
     product files and the eight d83876f failures reproduce there (one run on d83876f's
     `socketsender.py`, `server.py` and `cli.py` with the d83876f test files beside the
     new ones: 12 failed, 39 passed, each failure for its stated reason);
-    the targeted run passes (@@RUN@@); FR-PROXY-402, 404 and 405 edited in place — done
+    the targeted run passes (one pytest on 57b054c, the 21 files `tests/test_proxy*.py`,
+    `test_socketsender_pooling.py` and `test_http_pooling.py`, `-n 3 --dist loadfile`:
+    354 passed, 3 xfailed (the two sweep pins and the history writer's pre-existing
+    web-repeater pin), 0 failed, 0 skipped); FR-PROXY-402, 404 and 405 edited in place
+    — done
 - Effectiveness (assessed 2026-10-21): on loopback, 2 000 plain calls used 8 connections
   instead of 2 000; sequential calls/s 1 489 -> 10 271 (an earlier pair: 1 781 -> 4 650),
   8-thread 1 205 -> 3 140; over TLS 20 -> 3 826 sequential; a fresh TLS call built a
