@@ -22,10 +22,15 @@ import argparse
 import contextlib
 import copy
 import functools
+import heapq
+import http.cookiejar
+import itertools
 import logging
 import sqlite3
 import threading
 import time
+from collections import Counter, deque
+from dataclasses import dataclass
 from urllib.parse import urldefrag, urljoin, urlparse
 
 import requests
@@ -72,15 +77,73 @@ def _locked(method):
 #: FR-CRAWL-28: at most this many script path segments are kept per crawl.
 MAX_SCRIPT_SEGMENTS = 20000
 
+# --- FR-CRAWL-36 (BUG-0545, audit defect 12): a load that may succeed if tried again ---
+#: Loads of one page at most (the first and its retries) before it is unresolved.
+FETCH_ATTEMPTS = 3
+#: The backoff before retry k is ``RETRY_BASE_S * 2**(k-1)``, at most `RETRY_MAX_S`; a
+#: ``Retry-After`` in seconds lengthens it, never past `RETRY_MAX_S`.
+RETRY_BASE_S = 1.0
+RETRY_MAX_S = 30.0
+
+# --- FR-CRAWL-36 (BUG-0545, audit defect 25): page rows are written in batches ---------
+#: A batch of page rows is committed when it holds this many rows, ...
+WRITE_BATCH_ROWS = 64
+#: ... this many bytes of row values, ...
+WRITE_BATCH_BYTES = 1 << 20
+#: ... or its oldest row has waited this long (seconds); and at close.
+WRITE_BATCH_SECONDS = 1.0
+#: A crawl thread waits for the writer only when the rows not yet written pass this
+#: (bounded memory, never a dropped row); each wait is counted.
+WRITE_BACKLOG_BYTES = 16 << 20
+
+# A page row's ``outcome`` (FR-CRAWL-36). Only `OUTCOME_VISITED` and `OUTCOME_WITHHELD`
+# are final: a resumed crawl skips them and loads every other row again.
+OUTCOME_VISITED = "visited"       # loaded and extracted
+OUTCOME_WITHHELD = "withheld"     # another origin than the session's: never extracted
+OUTCOME_PENDING = "pending"       # loaded; its extraction had not finished
+OUTCOME_FAILED = "failed"         # unresolved: no answer, or no answer to keep, yet
+FINAL_OUTCOMES = frozenset({OUTCOME_VISITED, OUTCOME_WITHHELD})
+
+
+def _final(status, outcome) -> bool:
+    """Is a stored page row final? A row from before FR-CRAWL-36 (no outcome) is when it
+    has a status; its status 0 was a failed load, loaded again on resume."""
+    return outcome in FINAL_OUTCOMES if outcome is not None else bool(status)
+
 
 class StorageManager:
     """Handles all database interactions to keep the crawler modular.
 
     Thread-safe by construction (PA-0023): crawl workers share one connection, opened
-    with ``check_same_thread=False``, and every public method holds `lock`."""
+    with ``check_same_thread=False``, and every method that touches it holds `lock`.
+
+    **Page rows (FR-CRAWL-36, BUG-0545).** `mark_visited` and `set_outcome` never touch
+    the connection: they decide from memory (`_mem`: the final visit keys, the stored
+    unresolved rows, the rows not yet written) and queue the row. One writer thread
+    takes the queued rows and the connection's `lock` together, in queue order, and
+    commits them as one transaction when they hold `WRITE_BATCH_ROWS` rows or
+    `WRITE_BATCH_BYTES` bytes, or the oldest waited `WRITE_BATCH_SECONDS`. A crawl
+    thread waits only when the unwritten rows pass `WRITE_BACKLOG_BYTES` (counted in
+    `writer_waits`). `flush` and `close` write everything left; a method that reads or
+    updates page rows (`count`, `set_source`) flushes first. A write that fails is
+    raised at the next page record, flush or close: rows are never dropped silently.
+    Lock order: `lock`, then `_mem`."""
     def __init__(self, db_name="spider_results.db"):
         self.db_name = db_name
         self.lock = threading.RLock()
+        #: guards the in-memory page state and the queued rows; never held across I/O
+        self._mem = threading.Condition(threading.Lock())
+        self._ops: list = []             # (sql, params, bytes), in queue order
+        self._ops_bytes = 0
+        self._ops_since = None           # monotonic time of the oldest queued row
+        self._writer = None
+        self._closing = False
+        self._closed = False
+        self._write_error = None
+        #: crawl threads that waited for the writer (backlog over its cap)
+        self.writer_waits = 0
+        #: queued rows the store refused as a duplicate (never expected; counted)
+        self.write_conflicts = 0
         self.conn = sqlite3.connect(self.db_name, check_same_thread=False)
         self.cursor = self.conn.cursor()
         self._init_db()
@@ -182,20 +245,40 @@ class StorageManager:
                 ("discovered_pages", "source", "TEXT DEFAULT 'link'"),
                 ("discovered_pages", "found_from", "TEXT"),
                 ("discovered_pages", "seen_at", "REAL"),
+                # FR-CRAWL-36: what became of the page's load (`OUTCOME_*`), how many
+                # loads it took, and why the last one failed (an error class or an
+                # answer class, never a URL or a body); NULL in an older row
+                ("discovered_pages", "outcome", "TEXT"),
+                ("discovered_pages", "attempts", "INTEGER"),
+                ("discovered_pages", "error", "TEXT"),
                 ("discovered_requests", "seen_at", "REAL")):
             try:
                 self.cursor.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
             except sqlite3.OperationalError:
                 pass  # column already exists
         self.conn.commit()
-        # Visit keys (`spa.visit_key`) of the pages already stored: a page is "visited"
-        # by key, so loopback aliases are one site and SPA routes distinct pages.
-        self._keys = {spa.visit_key(u) for (u,) in
-                      self.cursor.execute('SELECT url FROM discovered_pages')}
+        # Visit keys (`spa.visit_key`) of the pages already stored with a final outcome:
+        # a page is "visited" by key, so loopback aliases are one site and SPA routes
+        # distinct pages. Every other stored page is unresolved (FR-CRAWL-36): by key,
+        # its stored URL, so a later load of it updates that row.
+        self._keys: set = set()
+        self._unresolved: dict = {}
+        for url, status, outcome in self.cursor.execute(
+                'SELECT url, status_code, outcome FROM discovered_pages ORDER BY id'):
+            key = spa.visit_key(url)
+            if _final(status, outcome):
+                self._keys.add(key)
+            else:
+                self._unresolved.setdefault(key, url)
+        for key in self._keys & self._unresolved.keys():
+            del self._unresolved[key]
 
     @_locked
     def reset(self):
         """Clears previous results so a fresh crawl starts from an empty map."""
+        with self._mem:
+            self._ops, self._ops_bytes, self._ops_since = [], 0, None
+            self._keys, self._unresolved = set(), {}
         self.cursor.execute('DELETE FROM discovered_pages')
         self.cursor.execute('DELETE FROM discovered_forms')
         self.cursor.execute('DELETE FROM selector_verdicts')
@@ -362,14 +445,15 @@ class StorageManager:
         except sqlite3.IntegrityError:
             return False
 
-    @_locked
     def count(self):
-        self.cursor.execute('SELECT COUNT(*) FROM discovered_pages')
-        return self.cursor.fetchone()[0]
+        with self.lock:
+            self._flush_locked()
+            self.cursor.execute('SELECT COUNT(*) FROM discovered_pages')
+            return self.cursor.fetchone()[0]
 
-    @_locked
     def mark_visited(self, url, status_code, depth, title=None, content=None,
-                     rendered=0, source='link', found_from=None, seen_at=None):
+                     rendered=0, source='link', found_from=None, seen_at=None,
+                     outcome=OUTCOME_VISITED, attempts=None, error=None):
         """Records a URL (and any parsed content). Returns False if already present
         (by visit key: an alias spelling of a stored page is present). A probe marker
         (FR-CRAWL-17) in the URL, title, text or ``found_from`` is replaced
@@ -377,45 +461,206 @@ class StorageManager:
         carries one (review A-S4). FR-CRAWL-29: ``found_from`` is the queued URL whose
         load queued this one (None: the start URL or a well-known file), passed as the
         caller stores ``url`` (the same redaction); ``seen_at`` when its load began
-        (wall time, seconds), now when not given."""
+        (wall time, seconds), now when not given.
+
+        FR-CRAWL-36: "present" means stored with a final ``outcome`` (`FINAL_OUTCOMES`).
+        A page stored unresolved (``pending`` or ``failed``) is recorded again over its
+        own row, so a page loaded again keeps its place in crawl order. Only a final
+        outcome makes `is_visited` true. FR-CRAWL-36: the row is queued for the writer;
+        this never waits on the store (only on a backlog over `WRITE_BACKLOG_BYTES`)."""
         url, title, content, found_from = (spa.scrub_markers(v) for v in
                                            (url, title, content, found_from))
         seen_at = time.time() if seen_at is None else float(seen_at)
         key = spa.visit_key(url)
-        if key in self._keys:
-            return False
-        try:
-            self.cursor.execute('''
-                INSERT INTO discovered_pages (url, status_code, depth, title, content, rendered,
-                                              source, found_from, seen_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (url, status_code, depth, title, content, int(rendered), source,
-                  found_from, seen_at))
-            self.conn.commit()
-            self._keys.add(key)
+        values = (url, status_code, depth, title, content, int(rendered), source,
+                  found_from, seen_at, outcome, attempts, error)
+        with self._mem:
+            self._raise_write_error()
+            if key in self._keys:
+                return False
+            stored = self._unresolved.get(key)
+            if stored is None:
+                self._queue('''
+                    INSERT INTO discovered_pages (url, status_code, depth, title, content,
+                        rendered, source, found_from, seen_at, outcome, attempts, error)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', values)
+            else:
+                self._queue('''
+                    UPDATE discovered_pages SET url = ?, status_code = ?, depth = ?,
+                        title = ?, content = ?, rendered = ?, source = ?, found_from = ?,
+                        seen_at = ?, outcome = ?, attempts = ?, error = ?
+                    WHERE url = ?
+                ''', values + (stored,))
+            self._settle_key(key, url, outcome)
             return True
-        except sqlite3.IntegrityError:
-            # URL already exists in the unique column
-            return False
 
-    @_locked
+    def set_outcome(self, url, outcome, *, status_code=None, attempts=None, error=None):
+        """FR-CRAWL-36: move an unresolved page's row to ``outcome`` (a ``pending`` page
+        whose extraction finished becomes ``visited``; one that failed, ``failed``),
+        with its status, load count and error when given. Returns False when no
+        unresolved row of that page is stored. Queued like `mark_visited`."""
+        key = spa.visit_key(spa.scrub_markers(url))
+        with self._mem:
+            self._raise_write_error()
+            stored = self._unresolved.get(key)
+            if stored is None:
+                return False
+            self._queue('''
+                UPDATE discovered_pages SET outcome = ?,
+                    status_code = COALESCE(?, status_code),
+                    attempts = COALESCE(?, attempts), error = COALESCE(?, error)
+                WHERE url = ?
+            ''', (outcome, status_code, attempts, error, stored))
+            self._settle_key(key, stored, outcome)
+            return True
+
+    def _settle_key(self, key, url, outcome):
+        """Under `_mem`: a final outcome makes the key visited; any other keeps the row
+        unresolved under its stored URL."""
+        if outcome in FINAL_OUTCOMES:
+            self._keys.add(key)
+            self._unresolved.pop(key, None)
+        else:
+            self._unresolved[key] = url
+
+    def unresolved(self):
+        """FR-CRAWL-36: the stored pages a resumed crawl loads again -- every row whose
+        outcome is not final -- as crawl entries ``(url, depth, source, found_from)``,
+        in crawl order. A query seed or a write seed is not among them: it loads only
+        inside its window, which its route's visit opens (FR-CRAWL-17)."""
+        with self.lock:
+            self._flush_locked()
+            rows = self.cursor.execute(
+                'SELECT url, status_code, depth, source, found_from, outcome '
+                'FROM discovered_pages ORDER BY id').fetchall()
+        with self._mem:
+            stored = set(self._unresolved.values())       # one row per unresolved key
+        skip = (spa.SEED_SOURCE, spa.WRITE_SEED_SOURCE, spa.PROBE_SOURCE)
+        return [(url, depth or 0, source or "link", found_from)
+                for url, status, depth, source, found_from, outcome in rows
+                if not _final(status, outcome) and url in stored and source not in skip]
+
     def set_source(self, url, source):
         """Re-file a stored page's ``source`` (a query seed that blocked a write,
         FR-CRAWL-17). Returns True when a row changed."""
-        cur = self.cursor.execute("UPDATE discovered_pages SET source = ? WHERE url = ?",
-                                  (source, spa.scrub_markers(url)))
-        self.conn.commit()
-        return cur.rowcount > 0
+        with self.lock:
+            self._flush_locked()
+            cur = self.cursor.execute(
+                "UPDATE discovered_pages SET source = ? WHERE url = ?",
+                (source, spa.scrub_markers(url)))
+            self.conn.commit()
+            return cur.rowcount > 0
 
-    @_locked
     def is_visited(self, url):
         """Whether a page with this URL's visit key (`spa.visit_key`: canonical origin,
-        path, query and SPA-route fragment) has already been processed."""
-        return spa.visit_key(url) in self._keys
+        path, query and SPA-route fragment) has already been processed: stored with a
+        final outcome (FR-CRAWL-36). Read from memory, never the store (FR-CRAWL-36)."""
+        key = spa.visit_key(url)
+        with self._mem:
+            return key in self._keys
 
-    @_locked
+    # --- the page writer (FR-CRAWL-36) ------------------------------------------------
+    def _queue(self, sql, params):
+        """Under `_mem`: queue one page-row write and wake the writer; wait only while
+        the backlog is over `WRITE_BACKLOG_BYTES` and the writer can drain it."""
+        size = sum(len(p) if isinstance(p, (str, bytes)) else 8 for p in params)
+        if self._closed:
+            raise RuntimeError("the spider store is closed")
+        self._ops.append((sql, params))
+        self._ops_bytes += size
+        if self._ops_since is None:
+            self._ops_since = time.monotonic()
+        if self._writer is None and not self._closing:
+            self._writer = threading.Thread(target=self._run_writer, daemon=True,
+                                            name="spider-store-writer")
+            self._writer.start()
+        self._mem.notify_all()
+        while (self._ops_bytes > WRITE_BACKLOG_BYTES and not self._closing
+               and self._writer is not None and self._writer.is_alive()
+               and self._write_error is None):
+            self.writer_waits += 1
+            self._mem.wait(1.0)
+
+    def _due(self):
+        """Under `_mem`: is the queued batch due (count, bytes or age)?"""
+        if not self._ops:
+            return False
+        return (len(self._ops) >= WRITE_BATCH_ROWS or self._ops_bytes >= WRITE_BATCH_BYTES
+                or time.monotonic() - self._ops_since >= WRITE_BATCH_SECONDS)
+
+    def _run_writer(self):
+        """The writer thread: commits each due batch, and what is left at close."""
+        while True:
+            with self._mem:
+                while not self._closing and not self._due():
+                    wait = None if not self._ops else max(
+                        0.0, self._ops_since + WRITE_BATCH_SECONDS - time.monotonic())
+                    self._mem.wait(wait)
+                if not self._ops:
+                    return
+            try:
+                self.flush()
+            except Exception:  # noqa: BLE001 - kept in _write_error, raised to the crawl
+                return
+
+    def flush(self):
+        """Write every queued page row now (FR-CRAWL-36); raise a failed write."""
+        with self.lock:
+            self._flush_locked()
+
+    def _flush_locked(self):
+        """Under `lock`: take the queued rows (in queue order: the writer and every
+        flush hold `lock` while they take and write) and commit them as one
+        transaction. A row the store refuses as a duplicate is counted; any other
+        failure is kept and raised (never a silent loss)."""
+        with self._mem:
+            ops = self._ops
+            self._ops, self._ops_bytes, self._ops_since = [], 0, None
+            self._mem.notify_all()                 # a crawl thread waiting on the backlog
+        if ops and self._write_error is None and not self._closed:
+            try:
+                for sql, params in ops:
+                    try:
+                        # a cursor of its own: `cursor` is never shared across threads
+                        self.conn.execute(sql, params)
+                    except sqlite3.IntegrityError:
+                        self.write_conflicts += 1
+                self.conn.commit()
+            except sqlite3.Error as exc:
+                with contextlib.suppress(sqlite3.Error):
+                    self.conn.rollback()
+                with self._mem:
+                    self._write_error = exc
+                    self._mem.notify_all()
+        with self._mem:
+            self._raise_write_error()
+
+    def _raise_write_error(self):
+        """Under `_mem`: raise the writer's failure, if any."""
+        if self._write_error is not None:
+            raise RuntimeError(f"the spider store could not write page rows "
+                               f"({type(self._write_error).__name__}: "
+                               f"{self._write_error})") from self._write_error
+
     def close(self):
-        self.conn.close()
+        """Stop the writer, write what is queued, close the connection. Idempotent; a
+        failed write is raised after the connection is closed."""
+        with self._mem:
+            if self._closed:
+                return
+            self._closing = True
+            self._mem.notify_all()
+            writer = self._writer
+        if writer is not None and writer is not threading.current_thread():
+            writer.join()
+        try:
+            self.flush()
+        finally:
+            with self.lock:
+                with self._mem:
+                    self._closed = True
+                self.conn.close()
 
 
 def _storage_rotated(value) -> bool:
@@ -505,6 +750,175 @@ class SessionWithheld(RuntimeError):
     (FR-SESS-20): it is not crawled, and nothing is extracted from it."""
 
 
+class StaticIdentityUnsupported(RuntimeError):
+    """The static engine cannot carry the crawl's identity (FR-CRAWL-34, BUG-0545): its
+    session holds no cookie and no header a request can send (it lives in browser
+    storage). The crawl never goes on anonymously in its place."""
+
+
+class IdentityUnavailable(RuntimeError):
+    """The session manager could not give a static send the crawl's identity (a failed
+    login, a re-auth cap, a session whose health stayed unknown: FR-SESS-23). Raised
+    out of the crawl (FR-CRAWL-34): it never goes on anonymously."""
+
+
+class HostNotServed(RuntimeError):
+    """A load or send of the crawl's identity would go to a host its session does not
+    reach, so it would go out without the identity to what the crawl takes for the
+    session's own origin (FR-CRAWL-34; BUG-0545 review, R6): the session manager does
+    not serve the host (its ``prepare`` would apply no session and decide nothing: a
+    static send), or the browser holds the session's cookies for another host (a
+    loopback alias of a host-only cookie's host: a browser load). Raised before any
+    navigation or transport, at `LocalSpider._visit`'s gate for every load
+    (`LocalSpider._session_host_refusal`; review round 2) and at the static seam for a
+    redirect hop or a selector form's submission (`_SessionAddon`): nothing is sent. The
+    page is unresolved (``failed``), never ``withheld``. The message names the host and
+    the cause, never a URL."""
+
+
+class _SessionAddon:
+    """The static seam's session addon (FR-CRAWL-34): the session manager's own
+    ``prepare``, ``authorize`` and ``observe``, plus one refusal. After ``prepare``, a
+    request that carries no applied session (no ``session_generation``) and no recorded
+    decision (FR-SESS-20's ``session_decision``) is one the manager left alone -- its
+    host is outside the manager's scope -- and `HostNotServed` is raised there, before
+    the seam's transport (BUG-0545 review, R6). The manager's own decision is read, never
+    guessed from its scope; a request it withheld from another origin keeps FR-SESS-20's
+    disposition."""
+
+    def __init__(self, manager):
+        self._manager = manager
+
+    def prepare(self, request, identity):
+        self._manager.prepare(request, identity)
+        if request.session_generation is None and request.session_decision is None:
+            host = urlparse(request.url).hostname or "?"
+            raise HostNotServed(
+                f"the session manager does not serve host {host!r} (not in its "
+                f"scope_hosts): not sent, since it would go without the session; add the "
+                f"host to scope_hosts if it is this app's (FR-CRAWL-34)")
+
+    def authorize(self, request, identity, prepared_host=None):
+        self._manager.authorize(request, identity, prepared_host=prepared_host)
+
+    def observe(self, request, response, identity):
+        self._manager.observe(request, response, identity)
+
+
+def _cookie_reaches(cookie, host) -> bool:
+    """Does the browser send ``cookie`` (as a context holds it: a Playwright cookie with
+    a ``url``, or with a ``domain``) to a request for ``host``? A cookie added by URL,
+    or with a domain without a leading dot, is host-only: that exact host (measured:
+    Chromium sends a ``127.0.0.1`` cookie to ``127.0.0.1`` and not to ``localhost`` on
+    the same port, BUG-0545 review round 2). A dotted domain also reaches the hosts
+    under it, never an IP address (RFC 6265 §5.1.3). A deny-only check: where the
+    session goes is still decided by origin (``cookie_scope``)."""
+    import ipaddress
+    url = cookie.get("url")
+    if url:
+        domain, host_only = (urlparse(url).hostname or "").lower(), True
+    else:
+        raw = str(cookie.get("domain") or "").lower()
+        domain, host_only = raw.lstrip("."), not raw.startswith(".")
+    host = str(host or "").lower()
+    if not domain or not host:
+        return False
+    if host == domain:
+        return True
+    if host_only or not host.endswith("." + domain):
+        return False
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return True
+    return False
+
+
+class _Transient(Exception):
+    """A load that may succeed if tried again (FR-CRAWL-36): a throttle, gateway or other
+    5xx answer, or a send whose session the manager saw lost (its answer is no
+    evidence). ``status`` is the answer's (0: none kept)."""
+
+    def __init__(self, reason, status=0, retry_after=None):
+        super().__init__(reason)
+        self.status, self.retry_after = status, retry_after
+
+
+def _is_transient(exc) -> bool:
+    """FR-CRAWL-36: a failure a later load may not have -- `_Transient`, or a transport
+    failure: a connection error or reset, a timeout, a broken or undecodable body, or
+    SP-60's incomplete body (`bodyread.BodyIncomplete`: a ceiling or the deadline).
+    Anything else (an invalid URL, a scope refusal, a processing error) is not."""
+    from fuzzlab.core.bodyread import BodyIncomplete
+    exc_ = requests.exceptions
+    return isinstance(exc, (_Transient, BodyIncomplete, exc_.ConnectionError,
+                            exc_.Timeout, exc_.ChunkedEncodingError,
+                            exc_.ContentDecodingError))
+
+
+def _retry_after_s(headers):
+    """A ``Retry-After`` in seconds (non-negative), or None (absent, or an HTTP date)."""
+    for name, value in (headers or {}).items():
+        if str(name).lower() == "retry-after":
+            try:
+                return max(0.0, float(str(value).strip()))
+            except ValueError:
+                return None
+    return None
+
+
+def _backoff_s(attempt, retry_after=None):
+    """The wait before load ``attempt + 1`` after load ``attempt`` failed (FR-CRAWL-36)."""
+    wait = RETRY_BASE_S * (2 ** max(0, attempt - 1))
+    if retry_after is not None:
+        wait = max(wait, retry_after)
+    return min(RETRY_MAX_S, wait)
+
+
+class _NoCookies(http.cookiejar.DefaultCookiePolicy):
+    """A cookie policy that stores and sends nothing: the identity-carrying static
+    client's jar (FR-CRAWL-34). The session manager is the one source of the session's
+    cookies; a response's ``Set-Cookie`` never joins a request on its own."""
+
+    def set_ok(self, cookie, request):
+        return False
+
+    def return_ok(self, cookie, request):
+        return False
+
+    def domain_return_ok(self, domain, request):
+        return False
+
+    def path_return_ok(self, path, request):
+        return False
+
+
+def _as_requests_response(url, answer):
+    """A seam answer (`core.http.Response`) as the ``requests.Response`` that
+    `navguard.get_checked` and the static parse read: status, case-insensitive
+    headers, the body (already read whole and bounded, SP-60), its URL."""
+    from requests.structures import CaseInsensitiveDict
+    from requests.utils import get_encoding_from_headers
+    resp = requests.models.Response()
+    resp.status_code = answer.status
+    resp.headers = CaseInsensitiveDict(answer.headers or {})
+    resp._content = answer.body or b""
+    resp.url = url
+    resp.encoding = get_encoding_from_headers(resp.headers)
+    return resp
+
+
+class _SeamGet:
+    """The ``session`` `navguard.get_checked` walks redirects with in an authenticated
+    static crawl (FR-CRAWL-34): each hop is one send through the core seam."""
+
+    def __init__(self, spider):
+        self._spider = spider
+
+    def get(self, url, timeout=None, allow_redirects=False):
+        return self._spider._seam_page(url)
+
+
 def _parse_html(html, base):
     """``(title, text, links)`` of an HTML document, as the static engine reads it:
     ``links`` is every URL it links (`core.linkextract.html_urls`, CC-CRAWL-0038), not
@@ -535,21 +949,149 @@ def _entries(items, found_from):
     return [(url, depth, source, found_from) for url, depth, source in items]
 
 
-class _CrawlQueue(list):
-    """The crawl queue shared by workers: appends and extends hold its lock."""
+@dataclass(frozen=True)
+class FrontierLimits:
+    """The crawl frontier's admission budgets (FR-CRAWL-35, BUG-0545). Bounds, not
+    tuning: each is far above what a lab app needs, and each refusal is counted and
+    reported as partial coverage."""
+    #: URLs admitted per crawl, in all (the crawl's request budget for pages; a retry
+    #: of an admitted page is not a new admission)
+    max_pages: int = 20000
+    #: URLs waiting to be loaded at once (the queue's memory)
+    max_pending: int = 10000
+    #: URLs admitted per canonical origin (an external crawl's host on every port)
+    max_per_origin: int = 10000
+    #: URLs admitted per route shape (`spa.route_shape`): the query-value and id-shaped
+    #: path variants of one route (calendar cells, facets, nonces, record ids)
+    max_route_variants: int = 100
+    #: the longest URL admitted, in characters
+    max_url_length: int = 4096
 
-    def __init__(self, items, lock):
-        super().__init__(items)
+
+#: Why the frontier refused a URL, in the order it checks (`_Frontier.append`).
+FRONTIER_REASONS = ("url_length", "total", "origin", "route_shape", "pending")
+
+#: Why a load was refused before any request (`LocalSpider._load_refusal`, asked first by
+#: `LocalSpider._visit` for every load; BUG-0545 review, B1), in the order it checks;
+#: counted in ``crawl_stats`` as ``loads_refused[<reason>]``.
+LOAD_REFUSALS = ("out_of_scope", "destructive")
+
+
+class _Frontier:
+    """The crawl frontier shared by workers (FR-CRAWL-35, BUG-0545, audit defect 11).
+
+    - **Admission reserves a key.** A URL is admitted once per scheduling key
+      (`spa.visit_key`: canonical origin, path, exact query, SPA route): a key already
+      admitted (queued, loading or done) or stored final (``is_visited``) is a
+      duplicate, dropped silently. The entry keeps its exact URL: only scheduling reads
+      the key. A probe (FR-CRAWL-17) re-loads a visited route by design and is never
+      deduplicated here (its own planning admits each once).
+    - **Budgets** (`FrontierLimits`, checked in `FRONTIER_REASONS` order): URL length,
+      total admitted, admitted per origin, admitted per route shape, pending. A refused
+      URL is counted by reason (`report`), never queued and never stored.
+    - **O(1) queues.** Ordinary entries and query entries (seeds and probes, the first
+      worker's only) are two deques; `take` pops the older head. A retry
+      (FR-CRAWL-36) waits in a heap until it is due and is taken before both.
+
+    ``lock`` is the crawl's condition (`LocalSpider._lock`, re-entrant): every method
+    holds it, and an admission or a retry notifies the waiting workers. ``append`` and
+    ``extend`` take the crawl entries ``(url, depth, source, found_from)`` the
+    producers make, so `LocalSpider._visit` also runs on a plain list (tests)."""
+
+    def __init__(self, lock, limits, is_visited):
         self.lock = lock
+        self._limits = limits
+        self._is_visited = is_visited
+        self._ready: deque = deque()           # (seq, entry)
+        self._query: deque = deque()           # (seq, entry): seeds and probes
+        self._retry: list = []                 # heap of (due, seq, entry, attempt)
+        self._seq = itertools.count()
+        self._reserved: set = set()
+        self._per_origin: Counter = Counter()
+        self._per_shape: Counter = Counter()
+        self.admitted = 0
+        self.duplicates = 0
+        self.rejected: Counter = Counter()
 
-    def append(self, item):
+    def __len__(self):
         with self.lock:
-            super().append(item)
+            return len(self._ready) + len(self._query) + len(self._retry)
 
     def extend(self, items):
-        items = list(items)
+        for item in list(items):
+            self.append(item)
+
+    def append(self, item):
+        """Admit one crawl entry; returns why it was refused (a `FRONTIER_REASONS` entry
+        or ``"duplicate"``), or None when it was queued."""
+        url, _depth, source, _found_from = item
+        probe = source == spa.PROBE_SOURCE
+        key = spa.visit_key(url)
+        lim = self._limits
         with self.lock:
-            super().extend(items)
+            if not probe and (key in self._reserved or self._is_visited(url)):
+                self.duplicates += 1
+                return "duplicate"
+            origin = canonical_origin(url) or ""
+            shape = spa.route_shape(url)
+            why = ("url_length" if len(url or "") > lim.max_url_length else
+                   "total" if self.admitted >= lim.max_pages else
+                   "origin" if self._per_origin[origin] >= lim.max_per_origin else
+                   "route_shape" if self._per_shape[shape] >= lim.max_route_variants else
+                   "pending" if len(self._ready) + len(self._query) + len(self._retry)
+                   >= lim.max_pending else None)
+            if why is not None:
+                self.rejected[why] += 1
+                return why
+            if not probe:
+                self._reserved.add(key)
+            self.admitted += 1
+            self._per_origin[origin] += 1
+            self._per_shape[shape] += 1
+            queue = self._query if source in (spa.SEED_SOURCE, spa.PROBE_SOURCE) \
+                else self._ready
+            queue.append((next(self._seq), tuple(item)))
+            self.lock.notify_all()
+            return None
+
+    def take(self, first):
+        """The next entry for a worker, with its attempt number: ``(url, depth, source,
+        found_from, attempt)``, or None. A due retry first; then the older of the two
+        queue heads (a query entry for the first worker only)."""
+        with self.lock:
+            if self._retry and self._retry[0][0] <= time.monotonic():
+                _due, _seq, entry, attempt = heapq.heappop(self._retry)
+                return (*entry, attempt)
+            ready = self._ready[0][0] if self._ready else None
+            query = self._query[0][0] if first and self._query else None
+            if ready is None and query is None:
+                return None
+            pick = self._ready if query is None or (ready is not None and ready < query) \
+                else self._query
+            return (*pick.popleft()[1], 1)
+
+    def retry(self, entry, attempt, delay):
+        """Queue ``entry`` (already admitted: its key stays reserved) for load number
+        ``attempt`` after ``delay`` seconds (FR-CRAWL-36)."""
+        with self.lock:
+            heapq.heappush(self._retry, (time.monotonic() + max(0.0, delay),
+                                         next(self._seq), tuple(entry), attempt))
+            self.lock.notify_all()
+
+    def next_retry_in(self):
+        """Seconds until the earliest retry is due (0 when due), or None when none
+        waits."""
+        with self.lock:
+            if not self._retry:
+                return None
+            return max(0.0, self._retry[0][0] - time.monotonic())
+
+    def report(self):
+        """``{"admitted", "duplicates", "rejected": {reason: n}}``: what the frontier did
+        (only reasons that refused something)."""
+        with self.lock:
+            return {"admitted": self.admitted, "duplicates": self.duplicates,
+                    "rejected": {k: v for k, v in self.rejected.items() if v}}
 
 
 class LocalSpider:
@@ -569,17 +1111,22 @@ class LocalSpider:
                  session_manager=None, identity=None, selector_forms=None,
                  spa_routes=True, submit_spa_forms=None, reveal=True, spa_query=True,
                  dry_submit=True,
-                 workers=1):
+                 workers=1, limits=None):
         self._sh = {}                    # the crawl-wide fields (`_shared_field`)
         if not 1 <= workers <= MAX_WORKERS:
             raise ValueError(f"workers must be 1..{MAX_WORKERS}")
         self.workers = workers
-        #: guards the queue, the claimed URLs and the shared counts (CC-CRAWL-0037)
+        #: guards the frontier and the shared counts (CC-CRAWL-0037)
         self._lock = threading.Condition(threading.RLock())
         #: one worker at a time does anything that can write: reveals, submissions,
         #: selector forms, seed and probe loads (their caps and windows stay one-worker)
         self._interact = threading.RLock()
-        self._claimed: set = set()
+        #: FR-CRAWL-35: the frontier's budgets, and the frontier while a crawl runs
+        self._limits = limits or FrontierLimits()
+        self._frontier = None
+        #: FR-CRAWL-36: pages still unresolved after their last load, URL -> why (one
+        #: dict for every worker)
+        self.failed_pages: dict = {}
         self._crawled = 0
         self.start_url = start_url
         self.max_depth = max_depth
@@ -700,6 +1247,23 @@ class LocalSpider:
             logging.warning("--submit-spa-forms needs the Playwright engine with SPA routes "
                             "on; no SPA form will be submitted")
         self._authenticated = bool(session_manager and identity)
+        # FR-CRAWL-34 (BUG-0545): the static engine's identity-carrying client -- the
+        # core seam with the session manager as its addon -- made per worker on first
+        # use (`_identity_client`), over one request budget for the whole crawl
+        self._seam = None
+        self._seam_http = None
+        self._seam_budget = None
+        if self._authenticated:
+            from fuzzlab.core.budget import RequestBudget
+            from fuzzlab.tools.navguard import MAX_REDIRECTS
+            # per admitted page: every hop of every load, and one selector form's
+            # submissions (at most `formnav.MAX_OPTIONS`); the frontier bounds the pages
+            from fuzzlab.tools.formnav import MAX_OPTIONS
+            self._seam_budget = RequestBudget(
+                self._limits.max_pages * ((MAX_REDIRECTS + 1) * FETCH_ATTEMPTS
+                                          + MAX_OPTIONS))
+        #: the last answer's headers (a ``Retry-After``, FR-CRAWL-36)
+        self._last_headers = {}
         self._injected_cookies: list = []
         self._app_base = self._start_dir(start_url)
         self._scripts_seen: set = set()
@@ -821,6 +1385,71 @@ class LocalSpider:
             self.skipped_destructive[url] = reason
             logging.info(f"skipped destructive link {url} ({reason!r})")
         return reason
+
+    def _load_refusal(self, url):
+        """Why this crawl never loads ``url`` (a `LOAD_REFUSALS` reason), or None:
+        outside the crawl's scope (`_in_scope`: the start's host; a loopback start's
+        exact origin, BUG-0123) or destructive (`_destructive`; the start URL is the
+        operator's own). `_visit` asks it first for every load, whichever producer
+        queued it -- a link, a redirect, a route, a seed, a probe's route, a retry, or a
+        row a resumed crawl read from the store (FR-CRAWL-36) -- so none can send a
+        request around the crawl's scope and destructive rules (BUG-0545 review, B1)."""
+        if not self._in_scope(url):
+            return "out_of_scope"
+        if self._destructive(url):
+            return "destructive"
+        return None
+
+    def _session_host_refusal(self, url):
+        """Why an identity crawl's load of ``url`` would go without the session -- the
+        session does not reach ``url``'s host in the engine that loads it -- or None
+        (FR-CRAWL-34; BUG-0545 review round 2, R6 on both engines). `_visit` asks it for
+        every load, before any navigation or send, whichever producer queued it:
+
+        - **the static engine** carries the session through the session manager: its
+          own ``prepare`` is asked (`_SessionAddon`, on a request that is never sent)
+          and a host it does not serve -- it would apply no session and decide nothing
+          -- is refused (`HostNotServed`'s message). A manager that cannot give the
+          session at all is `IdentityUnavailable`, as on a send;
+        - **the browser** carries it in its context's cookie jar: a host that one of the
+          session's cookies, as the context holds them (`_cookie_reaches`), does not
+          reach is refused -- a loopback alias of a host-only cookie's host among them.
+          A session without cookies goes by its headers, by origin (``cookie_scope``).
+
+        Generic: the host a request goes to is compared with the hosts the session
+        reaches, never with a list of aliases. A refusal never widens where the session
+        goes; an origin outside the session's is FR-SESS-20's (`_other_origin`)."""
+        if not self._authenticated:
+            return None
+        host = urlparse(url).hostname or ""
+        if self.engine != "playwright":
+            from fuzzlab.core.http import Request
+            from fuzzlab.session.manager import SessionAuthError
+            probe = Request("GET", url, identity=self._identity, component="crawler")
+            try:
+                _SessionAddon(self._session_manager).prepare(probe, self._identity)
+            except HostNotServed as exc:
+                return str(exc)
+            except SessionAuthError as exc:
+                raise IdentityUnavailable(f"{self._identity}'s session is unavailable: "
+                                          f"{exc}") from exc
+            return None
+        sess = self._browser_session
+        if sess is None:
+            return (f"the browser holds no session for host {host!r}: not loaded, since "
+                    f"it would go without the session (FR-CRAWL-34)")
+        held = [*sess.cookies, *((sess.storage_state or {}).get("cookies") or [])]
+        names = {name for name, _value in sess.checked_cookies}
+        unreached = [n for n in sorted(names)
+                     if not any(c.get("name") == n and _cookie_reaches(c, host)
+                                for c in held)]
+        if not unreached:
+            return None
+        return (f"the session's cookies do not reach host {host!r} in the browser "
+                f"({len(unreached)} of {len(names)} scoped to another host; a host-only "
+                f"cookie reaches its own host only): not loaded, since it would go "
+                f"without the session; start the crawl on that host if it is this "
+                f"app's (FR-CRAWL-34)")
 
     # ----- browser lifecycle (Playwright engine only) -----
     def _start_browser(self):
@@ -1464,13 +2093,190 @@ class LocalSpider:
         return self._cookie_scope is not None and self._in_scope(url) and \
             not self._cookie_scope(url)
 
+    # ----- the static engine's identity (FR-CRAWL-34, BUG-0545) -----
+    def _static_identity(self):
+        """Validate, once per crawl, that the static engine can carry the identity and
+        that its session is live, before any page is loaded with it:
+
+        1. the session manager logs in (``ensure``, the operator's start URL as its base)
+           and its session must cover the start URL's origin over its transport
+           (``session_headers``: `SessionAuthError` otherwise);
+        2. the session must hold a cookie or a header a request can send, else
+           `StaticIdentityUnsupported` (a browser-storage session needs the browser);
+        3. the session must be live now (``verify_live``: the stable protected
+           resource's health check, SP-61), else `IdentityUnavailable`.
+
+        Then the static engine's session scope is the browser's (the one predicate,
+        `browserauth.header_scope_for`), and a loss the manager sees on any send is
+        counted (``add_logout_listener``) so an answer in flight meanwhile is retried,
+        never extracted. A failure is kept and raised again on every later call."""
+        with self._lock:
+            done = self._sh.get("static_identity")
+            if isinstance(done, BaseException):
+                raise done
+            if done:
+                return
+            try:
+                from fuzzlab.tools.browserauth import header_scope_for
+                manager, identity, base = (self._session_manager, self._identity,
+                                           self._auth_base_url)
+                host = urlparse(base).hostname or ""
+                state = manager.ensure(host, identity, base, operator=True)
+                if not manager.session_headers(host, identity, base, operator=True):
+                    raise StaticIdentityUnsupported(
+                        f"the static 'requests' engine cannot carry {identity}'s session: "
+                        f"it holds no cookie or header a request can send (a session in "
+                        f"browser storage); crawl it with --engine playwright")
+                if not manager.verify_live(host, identity, base):
+                    raise IdentityUnavailable(
+                        f"{identity}'s session was not live when checked before the crawl "
+                        f"(SP-61); nothing was crawled with it")
+                if self._cookie_scope is None:
+                    self._header_scope = self._cookie_scope = header_scope_for(
+                        state, base, self._in_scope)
+                manager.add_logout_listener(self._on_session_loss)
+                self._sh["static_identity"] = True
+            except BaseException as exc:
+                self._sh["static_identity"] = exc
+                raise
+
+    def _on_session_loss(self, origin, identity):
+        """The session manager saw this crawl's session lost on a send (FR-SESS-16): an
+        answer any worker had in flight meanwhile is no evidence (`_seam_send`)."""
+        if identity == self._identity:
+            self._bump_shared("session_losses")
+
+    def _identity_client(self):
+        """This worker's identity-carrying static client (FR-CRAWL-34): a `_SeamGet`
+        over the core seam (`core.http.HttpClient`) with the session manager as its
+        addon (`_SessionAddon`) -- ``prepare`` applies the session (or withholds it,
+        FR-SESS-20) and logs in again after a loss, and a request it would send without
+        the session to a host it does not serve is refused before the transport
+        (`HostNotServed`); ``observe`` reads each answer (SP-61) -- and a persistent,
+        bounded (SP-60) ``requests`` session whose jar keeps nothing. Raises what
+        `_static_identity` raised."""
+        self._static_identity()
+        if self._seam is None:
+            from fuzzlab.core import bodyread
+            from fuzzlab.core.http import DEFAULT_BROWSER_HEADERS, HttpClient
+            http = bodyread.bound(requests.Session())       # SP-60, BUG-0536
+            http.headers.update(DEFAULT_BROWSER_HEADERS)
+            http.cookies.set_policy(_NoCookies())
+            self._seam_http = http
+            # the seam's host gate is the crawl's own request scope (deny only; `_in_scope`
+            # decides each URL first); where the session goes is decided by origin
+            hosts = sorted(self._LOOPBACK) if self._scope_host in self._LOOPBACK else \
+                [self._scope_host, f"www.{self._scope_host}"]
+            self._seam = HttpClient(self._seam_budget, hosts,
+                                    session=_SessionAddon(self._session_manager),
+                                    transport=self._seam_transport,
+                                    timeout=self.timeout_ms / 1000)
+        return _SeamGet(self)
+
+    def _seam_transport(self, method, url, headers, body, timeout):
+        """The seam's transport for this worker: one send on its persistent session, no
+        redirect followed (the crawl walks them hop by hop)."""
+        resp = self._seam_http.request(method, url, headers=dict(headers), data=body,
+                                       timeout=timeout, allow_redirects=False)
+        return resp.status_code, resp.headers, resp.content
+
+    def _seam_send(self, method, url, headers=None, body=None):
+        """One send of the crawl's identity through the seam: ``(request, response)``,
+        the response as ``requests`` makes it. A session the manager already knew lost
+        (``session_lost``), or a loss it saw on any send while this one was in flight,
+        makes the answer no evidence: `_Transient` (retried after the re-login). A
+        `SessionAuthError` (no login, a re-auth cap, an unknown health) is
+        `IdentityUnavailable`: the crawl stops, never goes on anonymously. A host the
+        manager does not serve is refused before the transport (`HostNotServed`,
+        counted ``session_host_unserved``): nothing is sent."""
+        from fuzzlab.core.http import Request
+        from fuzzlab.session.manager import SessionAuthError
+        client = self._seam
+        request = Request(method, url, headers=dict(headers or {}), body=body,
+                          identity=self._identity, component="crawler")
+        losses = self._sh.get("session_losses", 0)
+        try:
+            answer = client.send(request)
+        except SessionAuthError as exc:
+            raise IdentityUnavailable(f"{self._identity}'s session is unavailable: "
+                                      f"{exc}") from exc
+        except HostNotServed:
+            self._bump_shared("session_host_unserved")
+            raise
+        if request.session_lost or self._sh.get("session_losses", 0) != losses:
+            raise _Transient("the session was lost on this send")
+        return request, _as_requests_response(url, answer)
+
+    @staticmethod
+    def _sent_without_session(request):
+        """Did the session manager send ``request`` without the session? It withheld it
+        (another origin, FR-SESS-20), or it applied none at all -- ``prepare`` records
+        the generation of every session it applies. A request it left alone (a host
+        outside the manager's own scope) is refused before the transport
+        (`_SessionAddon`, `HostNotServed`), so it never reaches here; the generation
+        check stays as the backstop for the answer."""
+        from fuzzlab.session.manager import OUT_OF_ORIGIN
+        return request.session_decision == OUT_OF_ORIGIN or \
+            request.session_generation is None
+
+    def _seam_page(self, url):
+        """`_seam_send` of one page hop: an answer sent without the session
+        (`_sent_without_session`) is never extracted as the identity's page."""
+        request, resp = self._seam_send("GET", url)
+        if self._sent_without_session(request):
+            self._note_session_withheld(url, "document")
+            raise SessionWithheld(url)
+        return resp
+
+    def _seam_submit(self, method, action_url, pairs):
+        """A selector form's submission carrying the identity (FR-CRAWL-8 with
+        FR-CRAWL-34): POST its entries form-encoded, or GET the action with its query
+        replaced by them (`core.urls.with_query`, SP-42); no redirect followed, no
+        cookie kept. Another origin than the session's is sent without the session
+        (the manager withholds it) and counted; a host the manager does not serve is
+        never sent to (`HostNotServed`, which stops that form's enumeration in
+        `_after_fetch`). Returns ``(status, headers)``."""
+        from urllib.parse import urlencode
+
+        from fuzzlab.core.urls import with_query
+        self._identity_client()
+        if method == "POST":
+            request, resp = self._seam_send(
+                "POST", action_url, body=urlencode(list(pairs)).encode(),
+                headers={"Content-Type": "application/x-www-form-urlencoded"})
+        else:
+            request, resp = self._seam_send("GET", with_query(action_url, pairs))
+        if self._sent_without_session(request):
+            self._note_session_withheld(action_url, "request")
+        return resp.status_code, dict(resp.headers)
+
     # ----- fetchers -----
     def _fetch_static(self, url):
         """No JavaScript. Parses the raw HTML with BeautifulSoup. Redirects are
-        followed by hand, each hop in scope and not destructive (BUG-0111)."""
+        followed by hand, each hop in scope and not destructive (BUG-0111).
+
+        FR-CRAWL-34 (BUG-0545): in an authenticated crawl -- the ``requests`` engine,
+        or the browser's fallback -- every hop is one send through the core seam with
+        the session manager (`_identity_client`), never the anonymous jar; a hop to
+        another origin than the session's is not followed and the load extracts
+        nothing (`SessionWithheld`, FR-SESS-20), as the browser's route does."""
         from fuzzlab.tools.navguard import get_checked
-        resp = get_checked(self.session, url, self.timeout_ms / 1000,
-                           lambda nxt: self._in_scope(nxt) and not self._destructive(nxt))
+        withheld: list = []
+
+        def may_follow(nxt):
+            if not self._in_scope(nxt) or self._destructive(nxt):
+                return False
+            if self._authenticated and self._other_origin(nxt):
+                withheld.append(nxt)
+                return False
+            return True
+        client = self._identity_client() if self._authenticated else self.session
+        self._last_headers = {}
+        resp = get_checked(client, url, self.timeout_ms / 1000, may_follow)
+        if withheld:
+            self._note_session_withheld(withheld[0], "landing", source=url)
+            raise SessionWithheld(url)
+        self._last_headers = resp.headers
         from fuzzlab.core.linkextract import response_urls
         ct = resp.headers.get('Content-Type', '')
         title, text = None, None
@@ -1569,6 +2375,8 @@ class LocalSpider:
         else:
             status = response.status if response else 0
             ct = (response.headers or {}).get('content-type', '') if response else ''
+            # a Retry-After read with the status (FR-CRAWL-36)
+            self._last_headers = dict(response.headers or {}) if response else {}
             if response:
                 self._last_doc = (status, ct)
 
@@ -1715,9 +2523,17 @@ class LocalSpider:
                 logging.info(f"selector form on {page} not submitted: {why}")
                 continue
             key = formnav.signature_key(record)
-            for target in formnav.enumerate_form(
+            try:
+                targets = formnav.enumerate_form(
                     record, self._isolated_submit, self._in_scope,
-                    on_verdict=lambda v, k=key: self.storage.record_verdict(k, v)):
+                    on_verdict=lambda v, k=key: self.storage.record_verdict(k, v))
+            except HostNotServed as exc:
+                # FR-CRAWL-34 (BUG-0545 review, R6): its action's host is one the
+                # session manager does not serve; nothing was sent there, and the page
+                # that holds the form is still this load's
+                logging.warning(f"selector form on {page} not submitted: {exc}")
+                continue
+            for target in targets:
                 if not self._destructive(target) and not self.storage.is_visited(target):
                     more.append((target, depth + 1, 'form'))
         return more
@@ -2892,6 +3708,10 @@ class LocalSpider:
                 return resp.status, dict(resp.headers)
             finally:
                 ctx.dispose()
+        if self._authenticated:
+            # FR-CRAWL-34 (BUG-0545): the static engine carries the identity here too,
+            # never the anonymous jar
+            return self._seam_submit(method, action_url, pairs)
         from fuzzlab.core import bodyread
         iso = bodyread.bound(requests.Session())      # its body read bounded (SP-60)
         iso.headers.update(self.session.headers)
@@ -3037,7 +3857,13 @@ class LocalSpider:
         other._browser_session = None
         other._auth_headers, other._adopted_storage, other._adopted_original = {}, {}, {}
         other._injected_cookies = []
-        other._header_scope, other._cookie_scope = other._in_scope, None
+        if self.engine == "playwright":
+            # each worker's browser session sets its own (`_start_browser`)
+            other._header_scope, other._cookie_scope = other._in_scope, None
+        # the static engine's session scope is the crawl's (`_static_identity`); its
+        # identity-carrying client is the worker's own (FR-CRAWL-34)
+        other._seam = other._seam_http = None
+        other._last_headers = {}
         from fuzzlab.core import bodyread
         other.session = bodyread.bound(requests.Session())     # SP-60, BUG-0536
         other.session.headers.update(self.session.headers)
@@ -3056,36 +3882,30 @@ class LocalSpider:
         return other
 
     def _take(self, queue, first):
-        """The next queued item for this worker, claimed (marked busy), or None when
-        the crawl is over. A seed or probe goes to the first worker only; a URL another
-        worker claimed is dropped; probes are planned once every worker is idle."""
-        query_sources = (spa.SEED_SOURCE, spa.PROBE_SOURCE)
+        """The next frontier entry for this worker, marked busy, as ``(url, depth,
+        source, found_from, attempt)``, or None when the crawl is over. A due retry
+        first (FR-CRAWL-36); a seed or probe goes to the first worker only; the frontier
+        admitted each key once, so no URL is loaded twice (FR-CRAWL-35). While a retry
+        waits, the crawl is not over; probes are planned once every worker is idle and
+        no retry waits."""
         with self._lock:
             while True:
                 if self._sh.get("stop"):
                     return None
-                i = 0
-                while i < len(queue):
-                    url, depth, source, found_from = queue[i]
-                    if source in query_sources and not first:
-                        i += 1
-                        continue
-                    list.__delitem__(queue, i)
-                    if source not in query_sources:
-                        if url in self._claimed:
-                            continue
-                        self._claimed.add(url)
+                item = queue.take(first)
+                if item is not None:
                     self._sh["busy"] += 1
-                    return url, depth, source, found_from
-                if self._sh["busy"] == 0:
+                    return item
+                wait = queue.next_retry_in()
+                if self._sh["busy"] == 0 and wait is None:
                     if first and self._query_on:
                         more = self._plan_probes()  # FR-CRAWL-17 (Q5): all idle now
                         if more:
-                            list.extend(queue, _entries(more, None))
+                            queue.extend(_entries(more, None))
                             continue
                     self._lock.notify_all()
                     return None
-                self._lock.wait(0.5)
+                self._lock.wait(0.5 if wait is None else min(0.5, max(0.005, wait)))
 
     def _work(self, queue, first, errors):
         """One crawl worker's loop (`_crawl_parallel`)."""
@@ -3097,12 +3917,12 @@ class LocalSpider:
                 if item is None:
                     return
                 try:
-                    url, depth, source, found_from = item
+                    url, depth, source, found_from, attempt = item
                     if source in (spa.SEED_SOURCE, spa.PROBE_SOURCE):
                         with self._interact:          # a write window: one at a time
-                            self._visit(url, depth, source, queue, found_from)
+                            self._visit(url, depth, source, queue, found_from, attempt)
                     else:
-                        self._visit(url, depth, source, queue, found_from)
+                        self._visit(url, depth, source, queue, found_from, attempt)
                 finally:
                     with self._lock:
                         self._sh["busy"] -= 1
@@ -3117,13 +3937,12 @@ class LocalSpider:
                 with contextlib.suppress(Exception):
                     self._stop_browser()
 
-    def _crawl_parallel(self, items):
-        """``workers`` workers over one queue. The first is this object, on this
-        thread, its browser already started (its session ensured first, so the others
-        adopt it); each other worker runs on its own thread and starts and stops its own
-        browser there. The first exception a worker raises stops the others and is
-        re-raised."""
-        queue = _CrawlQueue(items, self._lock)
+    def _crawl_parallel(self, queue):
+        """``workers`` workers over one frontier (one worker included). The first is
+        this object, on this thread, its browser already started (its session ensured
+        first, so the others adopt it); each other worker runs on its own thread and
+        starts and stops its own browser there. The first exception a worker raises
+        stops the others and is re-raised."""
         self._sh["busy"], self._sh["stop"] = 0, False
         workers = [self] + [self._clone() for _ in range(self.workers - 1)]
         errors: list = []
@@ -3140,17 +3959,99 @@ class LocalSpider:
         if errors:
             raise errors[0]
 
-    def _visit(self, current_url, depth, source, queue, found_from=None):
+    def _check_answer(self, status):
+        """FR-CRAWL-36: raise `_Transient` when the answer is not the page yet -- SP-56
+        (`core.comparability.response_class`) classes it incomplete (no status),
+        throttle-or-unavailable (429; 503) or gateway (502, 504), or it is another 5xx
+        -- with its ``Retry-After``. Any other answer is the page's, kept as before."""
+        from fuzzlab.core.comparability import (APPLICATION, GATEWAY, INCOMPLETE,
+                                                THROTTLE_OR_UNAVAILABLE, response_class)
+        cls, why = response_class(status, self._last_headers, complete=True,
+                                  credentialed=self._authenticated,
+                                  credential_submission=False, redirect_to_login=False)
+        if cls == APPLICATION and status >= 500:
+            why = f"a server error ({status})"
+        elif cls not in (INCOMPLETE, THROTTLE_OR_UNAVAILABLE, GATEWAY):
+            return
+        raise _Transient(why, status if cls != INCOMPLETE else 0,
+                         _retry_after_s(self._last_headers))
+
+    def _page_failed(self, queue, entry, attempt, exc, seen_at, stored, *, retry):
+        """FR-CRAWL-36: a load of ``entry`` failed. Its row is stored ``failed`` (with
+        the answer's status when it had one, the load count, and the failure's class --
+        an answer class or an exception class, never a URL or a body; a host the session
+        does not reach, `HostNotServed`, with that cause), never visited.
+        A failure a later load may not have (`_is_transient`) is retried, after
+        `_backoff_s`, while ``retry`` (not a seed or probe), loads remain and ``queue``
+        can (the frontier); otherwise the page is unresolved: reported, and loaded again
+        by a resumed crawl (`StorageManager.unresolved`)."""
+        from fuzzlab.core.bodyread import BodyIncomplete
+        url, depth, source, found_from = entry
+        error = str(exc) if isinstance(exc, (_Transient, BodyIncomplete, HostNotServed)) \
+            else type(exc).__name__
+        if stored:                      # answered; its extraction failed
+            self.storage.set_outcome(url, OUTCOME_FAILED, attempts=attempt, error=error)
+        else:
+            self.storage.mark_visited(
+                url, exc.status if isinstance(exc, _Transient) else 0, depth,
+                source=spa.WRITE_SEED_SOURCE if source == spa.SEED_SOURCE else source,
+                found_from=found_from, seen_at=seen_at, outcome=OUTCOME_FAILED,
+                attempts=attempt, error=error)
+        shown = spa.scrub_markers(url)
+        if retry and attempt < FETCH_ATTEMPTS and _is_transient(exc) and \
+                hasattr(queue, "retry"):
+            delay = _backoff_s(attempt, getattr(exc, "retry_after", None))
+            queue.retry(entry, attempt + 1, delay)
+            self._bump_shared("pages_retried")
+            logging.info(f"retrying {shown} in {delay:.2f} s (load {attempt} of "
+                         f"{FETCH_ATTEMPTS} failed: {error})")
+            return
+        with self._lock:
+            self.failed_pages[url] = error
+        self._bump_shared("pages_failed")
+        later = "a --resume crawl loads it again" if retry else \
+            "a seed loads only inside its route's window (FR-CRAWL-17)"
+        logging.warning(f"unresolved after {attempt} load(s): {shown} ({error}); kept as "
+                        f"failed, never visited; {later}")
+
+    def _visit(self, current_url, depth, source, queue, found_from=None, attempt=1):
         """One queued URL: its load (in a window for a seed or probe), its record,
-        what it queues. The body of the crawl loop, shared by the one-worker loop
-        and every worker (`crawl`); ``queue`` takes ``append`` / ``extend``.
+        what it queues. The body of the crawl loop, run by every worker (`crawl`);
+        ``queue`` takes ``append`` / ``extend`` (the frontier, or a plain list).
 
         FR-CRAWL-29: ``found_from`` (the queue entry's) is stored on this page's row,
         with ``seen_at``, when its load began; everything this visit queues carries
-        this queued URL as its own ``found_from`` (`_entries`)."""
+        this queued URL as its own ``found_from`` (`_entries`).
+
+        FR-CRAWL-36 (BUG-0545): the row is stored ``pending`` once the page answered
+        and made ``visited`` only when its extraction finished. A load that may succeed
+        if tried again (`_is_transient`: a throttle, gateway or other 5xx answer, a
+        transport failure, an incomplete body, a session lost on the send) is retried
+        after a backoff (`_backoff_s`) up to `FETCH_ATTEMPTS` loads; a failed load is
+        stored ``failed`` -- never visited -- and the last one is reported. ``attempt``
+        is this load's number.
+
+        BUG-0545 review (B1): every load first passes `_load_refusal` -- the crawl's
+        scope and destructive rules, whichever producer queued it (a resumed crawl's
+        stored rows included). A refused URL is never requested and nothing is stored
+        for it; the refusal is counted (``loads_refused[<reason>]``) and reported.
+
+        BUG-0545 review round 2 (R6): in an identity crawl, a load whose host the
+        session would not reach in the engine that loads it (`_session_host_refusal`)
+        is refused next, before any navigation or send, whatever queued it: stored
+        ``failed`` with that cause (unresolved, resumed), counted
+        (``session_host_unserved``), never visited and never filed as another
+        origin's."""
+        why = self._load_refusal(current_url)
+        if why is not None:
+            self._bump_shared(f"loads_refused[{why}]")
+            logging.info(f"not loaded: {spa.scrub_markers(current_url)} ({why}; "
+                         f"BUG-0123, NFR-CRAWL-safe)")
+            return
         probe = None
         queued = current_url            # a probe's load URL carries markers: not this
         seen_at = time.time()
+        stored = False                  # this visit stored the page's (pending) row
         if source in (spa.SEED_SOURCE, spa.PROBE_SOURCE) and self.spa_query_stopped:
             self._refuse_query("session lost")     # S10: no more query loads
             return
@@ -3178,6 +4079,14 @@ class LocalSpider:
         win, visited, bare_refused = None, False, False
         try:
             self._current_url = current_url
+            # BUG-0545 review round 2 (R6, both engines): a load the session would not
+            # reach -- its host unserved by the session manager (static), or not one
+            # the browser's session cookies reach -- is refused here, before any
+            # navigation or send; stored failed (unresolved), counted, never visited
+            unreached = self._session_host_refusal(current_url)
+            if unreached is not None:
+                self._bump_shared("session_host_unserved")
+                raise HostNotServed(unreached)
             if source in (spa.SEED_SOURCE, spa.PROBE_SOURCE):
                 # a query load starts from a fresh document (M7): the page
                 # before it is left first, outside the window, as any crawl
@@ -3230,9 +4139,12 @@ class LocalSpider:
                 self.spa_counts["spa_query_probe_loads"] += 1
                 queue.extend(_entries(self._finish_probe(probe, depth), queued))
                 return
+            # FR-CRAWL-36: an answer that is not the page yet is no page (a seed's is
+            # never retried: its window, FR-CRAWL-17)
+            self._check_answer(status)
 
             content = (text or "")[:8000]
-            self.storage.mark_visited(
+            stored = self.storage.mark_visited(
                 current_url, status, depth, title, content,
                 rendered=1 if self.engine == "playwright" else 0,
                 # U2 (fail closed): a seed is filed as a write seed (never a
@@ -3240,9 +4152,9 @@ class LocalSpider:
                 source=(spa.WRITE_SEED_SOURCE if source == spa.SEED_SOURCE
                         else source),
                 found_from=found_from, seen_at=seen_at,
+                outcome=OUTCOME_PENDING, attempts=attempt,
             )
             visited = True
-            self._count_crawled()
             if source == spa.SEED_SOURCE and self._last_html is not None:
                 self.spa_counts["spa_query_seeded"] += 1       # rendered (PA-0110)
                 if spa.spa_fragment(current_url) is not None:
@@ -3285,6 +4197,10 @@ class LocalSpider:
                             and not self._destructive(absolute_link)
                             and not self.storage.is_visited(absolute_link)):
                         queue.append((absolute_link, depth + 1, 'xhr', queued))
+            self._count_crawled()
+            if stored:
+                # FR-CRAWL-36: extracted, and what it links queued: now visited
+                self.storage.set_outcome(current_url, OUTCOME_VISITED)
 
         except SessionWithheld:
             # landed on another origin than the session's (FR-SESS-20, R1):
@@ -3294,17 +4210,29 @@ class LocalSpider:
                 self.storage.mark_visited(
                     current_url, 0, depth,
                     source=(spa.WRITE_SEED_SOURCE if source == spa.SEED_SOURCE
-                            else source), found_from=found_from, seen_at=seen_at)
+                            else source), found_from=found_from, seen_at=seen_at,
+                    outcome=OUTCOME_WITHHELD, attempts=attempt)
             visited = False
+        except (StaticIdentityUnsupported, IdentityUnavailable) as e:
+            # FR-CRAWL-34: the static engine cannot carry the identity here. Never an
+            # anonymous load in its place: a fallback page fails; a lost identity
+            # stops the crawl
+            if probe is None:
+                self._page_failed(queue, (current_url, depth, source, found_from),
+                                  attempt, e, seen_at, stored, retry=False)
+            visited = False
+            if isinstance(e, IdentityUnavailable):
+                raise
         except Exception as e:
             # M5: a probe's URL (and the error quoting it) carries its
             # markers: scrubbed before it is logged
             logging.error(spa.scrub_markers(f"Failed to process {current_url}: {e}"))
             if probe is None:                    # a probe records nothing
-                self.storage.mark_visited(
-                    current_url, 0, depth,
-                    source=(spa.WRITE_SEED_SOURCE if source == spa.SEED_SOURCE
-                            else source), found_from=found_from, seen_at=seen_at)
+                # FR-CRAWL-36: failed, never visited; retried when it may pass
+                self._page_failed(queue, (current_url, depth, source, found_from),
+                                  attempt, e, seen_at, stored,
+                                  retry=source not in (spa.SEED_SOURCE,
+                                                       spa.PROBE_SOURCE))
             visited = False
         finally:
             try:
@@ -3334,17 +4262,21 @@ class LocalSpider:
             self._start_browser()
 
         self._crawled = 0
+        # FR-CRAWL-35: one frontier for every worker; FR-CRAWL-36: a resumed crawl loads
+        # again what an earlier one left unresolved
+        frontier = self._frontier = _Frontier(self._lock, self._limits,
+                                              self.storage.is_visited)
+        frontier.extend(queue)
+        if self.resume:
+            # each stored row is loaded only through `_visit`'s gate (`_load_refusal`):
+            # a row an earlier crawl of another target, or of another start URL, left
+            # unresolved is never requested outside this crawl's scope or destructive
+            frontier.extend(self.storage.unresolved())
         try:
-            if self.workers > 1:
-                self._crawl_parallel(queue)
-            while self.workers == 1 and (queue or self._query_on):
-                if not queue:
-                    # FR-CRAWL-17 (Q5): the bare routes are visited; probe them
-                    queue.extend(_entries(self._plan_probes(), None))
-                    if not queue:
-                        break
-                current_url, depth, source, found_from = queue.pop(0)
-                self._visit(current_url, depth, source, queue, found_from)
+            if self.engine != "playwright" and self._authenticated:
+                # FR-CRAWL-34: the identity is validated before any page is loaded
+                self._static_identity()
+            self._crawl_parallel(frontier)
 
         except KeyboardInterrupt:
             logging.info("Crawl interrupted by user.")
@@ -3381,15 +4313,73 @@ class LocalSpider:
                              f"on another origin: {self.OTHER_ORIGIN_REASON}.")
             for line in self.spa_summary():
                 logging.info(line)
+            crawl = self.crawl_counts()
+            for line in self.crawl_summary(crawl):
+                logging.warning(line)
             self.storage.record_stats({**self.spa_counts,
                                        **{f"spa_query_refused[{k}]": v
                                           for k, v in self.spa_query_refused.items()},
                                        "submit_stopped": int(bool(self.spa_submit_stopped)),
                                        "reveals_stopped": int(bool(self.reveals_stopped)),
                                        "spa_query_stopped":
-                                           int(bool(self.spa_query_stopped))})
+                                           int(bool(self.spa_query_stopped)),
+                                       **crawl})
             self.storage.close()
             logging.info("Crawl finished. Data saved to SQLite database.")
+
+    #: The crawl-wide counts `crawl_counts` always stores (FR-CRAWL-34..36), besides
+    #: ``frontier_rejected[<reason>]`` for each `FRONTIER_REASONS` entry that refused and
+    #: ``loads_refused[<reason>]`` for each `LOAD_REFUSALS` entry that refused.
+    CRAWL_COUNTS = ("frontier_admitted", "frontier_duplicates", "pages_retried",
+                    "pages_failed", "store_writer_waits", "session_host_unserved")
+
+    def crawl_counts(self):
+        """What the frontier, the load gate, the retries, the static seam and the page
+        writer did (PA-0110: each an effect that happened), stored in ``crawl_stats``
+        with the SPA counts."""
+        report = self._frontier.report() if self._frontier is not None else \
+            {"admitted": 0, "duplicates": 0, "rejected": {}}
+        return {"frontier_admitted": report["admitted"],
+                "frontier_duplicates": report["duplicates"],
+                **{f"frontier_rejected[{k}]": v for k, v in report["rejected"].items()},
+                **{f"loads_refused[{k}]": self._sh[f"loads_refused[{k}]"]
+                   for k in LOAD_REFUSALS if self._sh.get(f"loads_refused[{k}]")},
+                "pages_retried": self._sh.get("pages_retried", 0),
+                "pages_failed": self._sh.get("pages_failed", 0),
+                "store_writer_waits": self.storage.writer_waits,
+                "session_host_unserved": self._sh.get("session_host_unserved", 0)}
+
+    def crawl_summary(self, counts):
+        """The crawl summary's coverage lines: URLs the frontier's budgets refused, loads
+        refused before any request (out of scope or destructive), requests not sent to a
+        host the session manager does not serve, and pages left unresolved -- never
+        silent."""
+        lines = []
+        refused = {k[len("frontier_rejected["):-1]: v for k, v in counts.items()
+                   if k.startswith("frontier_rejected[")}
+        if refused:
+            why = ", ".join(f"{k} x{v}" for k, v in sorted(refused.items()))
+            lines.append(f"The frontier's budgets refused {sum(refused.values())} URL(s) "
+                         f"({why}; FR-CRAWL-35): partial coverage.")
+        gated = {k[len("loads_refused["):-1]: v for k, v in counts.items()
+                 if k.startswith("loads_refused[")}
+        if gated:
+            why = ", ".join(f"{k} x{v}" for k, v in sorted(gated.items()))
+            lines.append(f"Refused {sum(gated.values())} queued URL(s) before any request "
+                         f"({why}): outside this crawl's scope or destructive, never "
+                         f"loaded (BUG-0123, NFR-CRAWL-safe).")
+        if counts["session_host_unserved"]:
+            lines.append(f"{counts['session_host_unserved']} load(s) or request(s) not "
+                         f"sent: the session does not reach their host (the session "
+                         f"manager does not serve it, or the browser holds the session's "
+                         f"cookies for another host), so they would have gone without "
+                         f"the session (FR-CRAWL-34); their pages are unresolved, and the "
+                         f"static engine submits no selector form there.")
+        if counts["pages_failed"]:
+            lines.append(f"{counts['pages_failed']} page(s) unresolved after their last "
+                         f"load (FR-CRAWL-36), kept as failed and never visited: partial "
+                         f"coverage; a --resume crawl loads them again.")
+        return lines
 
 
 def build_parser():
@@ -3418,7 +4408,11 @@ def build_parser():
                    help="Also consolidate results into the unified fuzzlab store at this path.")
     p.add_argument("--identity", default=None,
                    help="Crawl authenticated as this identity via the session manager "
-                        "(needs saved credentials; Playwright engine). Omit to crawl anonymously.")
+                        "(needs saved credentials). Either engine carries it: the "
+                        "browser adopts the session; the requests engine sends every "
+                        "request through the session manager, and refuses a session "
+                        "that lives only in browser storage (FR-CRAWL-34). Omit to "
+                        "crawl anonymously.")
     from fuzzlab.session.manager import AUTH_ORIGIN_HELP
     p.add_argument("--auth-origin", action="append", default=[], metavar="ORIGIN",
                    help=AUTH_ORIGIN_HELP)
@@ -3493,6 +4487,9 @@ def spider_kwargs(args, session_manager=None) -> dict:
         dry_submit=not args.no_dry_submit,
         spa_query=not args.no_spa_query,
         workers=args.workers,
+        # FR-CRAWL-35: the frontier's default budgets (no CLI flag; every refusal is
+        # counted and reported)
+        limits=None,
     )
 
 

@@ -42,6 +42,49 @@ Format per entry:
   - References: CC-PROXY-0029 (merge integration, review round 2), CC-CORE-0075 and CC-PROXY-0030 (review round 2), FR-CORE-509, FR-PROXY-402/404/405, BUG-0549, BUG-0543 and BUG-0550 integration and review-round-2 sections; PA-0549(3a)-(3c) and PA-0550(8)-(9) amendments below.
 - **Status:** Fixed, with stated residuals: a stray that arrives after every check is read as the next answer (any keep-alive client; BUG-0549 R8, R9). The Proxy page's script does not yet show the Repeater's `history_error`.
 
+## 2026-10-21 — crawler, merge integration of the crawl batch (two tests asserted a contract a merged lane had changed)
+- **Symptom:** the crawl batch's targeted run on `merge/crawl-batch` a98c66d (DISCO13, DISCO4 and SPIDER merged onto AU-DISCO) failed 2 of 2003: `test_spa_capture.py::test_passive_capture_is_on_by_default_and_redacted` counted `requests_not_recorded` 4, not 2; `test_disco_compose.py::test_an_element_in_a_shadow_root_has_its_own_identity_and_is_replayed_there` found 8 `Go` actions, not 2.
+- **Root cause:** each assertion encoded a contract another lane had changed. The spider count was written by SPIDER9 (BUG-0546) before SURROGATE's review fix (BUG-0554) made `_record_dry` count a refused blocked write, and that fix's verification never ran `test_spa_capture.py` (already failing on 07792e0's `spider.py` and `spa.py`, measured). The `Go` count was DISCO13's route-scoped "once in the run", which AU-DISCO's per-state work (BUG-0539, FR-CRAWL-32) removed.
+- **Remediation:** both tests assert the merged contract, the measured paths named in each (4 refusals: passive and reveal-blocked; two `Go` signatures, one naming the shadow host, never one step twice in a state); CC-CRAWL-0061's and CC-CRAWL-0059's merge-integration notes. No product change.
+- **Status:** Fixed
+
+## 2026-10-21 — crawler, the legacy spider (static crawls dropped the identity; failed loads were filed visited; an unbounded queue; a commit per page; BUG-0545)
+- **Symptom:** a `requests`-engine crawl with `--identity` (or the browser's fallback) fetched every page anonymously, and a session it could not carry, or a failed login, crawled anonymously instead of failing; a timeout, reset, dripped body or 503 was stored as a visited page (status 0 or 503), its links never followed, and `--resume` skipped it; 40 hubs linking the same 40 leaves held 1599 queue entries; a calendar trap made 931 loads at depth 3; 1000 page rows cost 1000 commits (11 s) on the crawl thread; and, found in the fix's reviews, a static request to a loopback alias the session manager does not serve, and a browser load of a loopback alias of the start, each went out without the session (the browser's cookie is host-only for the start's host), the browser's anonymous landing filed as the identity's page.
+- **Root cause:** the crawl loop had one "visited" record and one "unvisited" admission for who sent a load, whether it answered completely, whether its extraction finished, whether it may be retried and what admitting it costs; every state added later (session adoption, FR-SESS-20) went to the browser path only.
+- **Remediation:** static sends through the core seam with the session manager, validated before the crawl (`StaticIdentityUnsupported`, `IdentityUnavailable`); a frontier with reserved keys and budgets; `pending`/`visited`/`withheld`/`failed` outcomes, bounded retry with backoff, unresolved rows resumed; a batched page writer (CC-CRAWL-0056, FR-CRAWL-34..36, BUG-0545, PA-0545). Review round 1: every load passes the crawl's scope and destructive rules at `_visit` (a resumed crawl had loaded stored rows of another loopback port and a destructive URL), and a request to a host the session manager does not serve is refused before the transport (`HostNotServed`; it had gone out without the session). Review round 2: the browser engine loaded a loopback alias of its start without the session cookie (host-only for the start's host) and filed the anonymous landing as the identity's page; every load of either engine now passes one gate at `_visit` (`_session_host_refusal`) that compares the load's host with the hosts the session's carrier reaches (the manager's `prepare`; the browser's cookies) and refuses it before any navigation or send, stored failed.
+- **Status:** Fixed (residuals R1-R5, R7 and R8 in CC-CRAWL-0056; R6 closed in review rounds 1 and 2; R8 open: a browser redirect hop or selector form to a host the session's cookies do not reach is still sent without the cookie, flagged)
+
+## 2026-10-21 — behavioural discovery (a lost session went unseen and was re-installed stale; BUG-0552, a recurrence of BUG-0533's class)
+- **Symptom:** in an authenticated `disco capture`, an SPA whose session died while its route stayed `/dashboard` (its APIs answering 401), or whose login form was rendered in place, was explored on as the identity (`session_lost` 0); a loss that reached `/login` rebuilt the context from the storage state the run started with, so the dead session id was sent again, and each such loss left one browser context open (measured on c483dc1 by `tests/test_disco_session_loss.py`). Review round 1 of the fix (a1a93b1): a second worker kept acting on a generation the first had found lost and recorded what it found as coverage; a loss on a restore or at the seed of a storage-state run went unseen (measured: `form`, budget 1, `session_lost` 0); a 401 whose script then went to `/login` hid the login page; every storage-state run ended on a role-gated 401; `fuzzlab disco ede` and `store_adapter.import_disco` took a lost window's answers as evidence.
+- **Root cause:** the explorer decided its session's loss by its own predicate (`looks_like_login_url(page.url)`) and replaced it by its own means. The session layer's owners (SP-56, SP-16's login form, SP-61) and BUG-0533's sweep covered only the session manager's callers, and disco held a session without a manager. The first fix was built and tested for one worker on the provider path: a generation's loss was published only by its recovery's install, the storage-state path (the CLI's only one) had no in-place reference beyond an action and no protected check, and the "every consumer reads the mark" rule had no guard.
+- **Remediation:** a session provider (`ExploreSession`), one session generation per run, recorded lost for every worker at the verdict; suspicions through SP-56/SP-16 (the page read whatever the answers), decisions by SP-61 for the context's generation (`check_health` with a provider, `health_verdict` on the start page as a storage-state run's protected resource, PA-0533(1)'s unconfirmed loss with neither); a fresh, revalidated session or an explicit end (`auth_ended`); the old context released and closed first; the known-lost window's action ids marked and read through `disco.capture.lost_action_ids` (SP-71) with a guard over every capture reader (CC-CRAWL-0060 and its review round 1, FR-CRAWL-41, BUG-0552, PA-0552).
+- **Status:** Fixed (residuals: no CLI flag for a provider yet; `disco synth` (CRAWL) and `store_adapter.import_disco` (AUD) do not read the window's mark, each pinned by a strict xfail naming it; answers a context got after the server invalidated its session but before any sign was found are not marked).
+
+## 2026-10-21 — crawler, disco and spider (discovery read only the top document's light tree; BUG-0551)
+- **Symptom:** on a loopback fixture, disco never requested the endpoints behind a
+  search form in an open shadow root, a same-origin settings frame, or tiles served by a
+  document-level click listener (`/api/shadow/search`, `/api/frame/save`,
+  `/api/tile/7`, and their replay-only follow-ups). `spa.FORMS_JS` missed the shadow
+  form. The report showed no sign of anything unread (audit defect 13).
+- **Root cause:** each crawler's page script modelled the page's UI as the top
+  document's light tree (`document.querySelectorAll`). This was an unstated assumption
+  with no owner for the tree walk, no fixture shape violating it (PA-0501's fixture grows
+  only from labs' failures), no listener check beyond an element's own, and no report of
+  what a read could not reach.
+- **Remediation:** SP-70 `tools/composed.py` (the composed walk); `disco/compose.py`
+  (per-document reads through DevTools' Command Line API, frames in their own contexts,
+  ancestry through hosts and frames, delegated trials, coverage counters); markers
+  cleared across the composed tree; `spa.FORMS_JS` across open shadow roots, with
+  shadow-root password controls left out until the X3 clear and the G1 read are
+  composed (strict xfails). A whole-package guard covers every light-tree query in a
+  page script (CC-CRAWL-0059, BUG-0551, PA-0551). Review round 1 fixed four defects of
+  that fix: a form-less widget at a shadow root's top was never filled (its container
+  is now the root, in both crawlers); delegated candidates entered state identity (a
+  text swap made a new state; now excluded); a background poll made inert candidates
+  live (a control window now decides); closed roots on built-in or slotting hosts went
+  uncounted (one DevTools census per page shape now counts every one).
+- **Status:** Fixed (residuals R2-R9 in BUG-0551; R1 closed in review round 1)
+
 ## 2026-10-21 — crawl (disco merged distinct states, consumed work and accepted wrong restores; BUG-0539)
 - **Symptom:** the external audit's defects 1-3, reproduced at 08e3eaa in a real browser on loopback pages:
   - a three-step wizard with one layout stopped at step 1 (the finish request never made);

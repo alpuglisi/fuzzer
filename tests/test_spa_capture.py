@@ -523,7 +523,10 @@ def test_passive_capture_is_on_by_default_and_redacted(lab, tmp_path):
                                          "passive")
     assert not any("socket.io" in u for _m, u in got)            # a transport: excluded
     assert not any(u in ("rest/big", "rest/deep") for _m, u in got)   # 64 KiB / depth 8
-    assert sp.spa_counts["requests_not_recorded"] == 2
+    # each refused twice, each refusal counted: once by the passive capture (`_observe`)
+    # and once when the reveal window renders /#/about again and blocks both writes
+    # (`_record_dry`, source ``reveal-blocked``; counted since BUG-0554's review fix)
+    assert sp.spa_counts["requests_not_recorded"] == 4
     text = db_text(db)
     assert not [s for s in SECRETS if s in text] and IDENT not in text
 

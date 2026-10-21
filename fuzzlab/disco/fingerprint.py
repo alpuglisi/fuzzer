@@ -20,6 +20,17 @@ Text content is left out of both on purpose, so a page whose data changes (a new
 a counter) stays one state, while a page that grows a dialog, a tab panel or a form is
 a new one.
 
+**A delegated candidate is never part of a state's identity** (`counts_for_state`,
+FR-CRAWL-40; BUG-0551 review B2). It is any labelled text leaf -- a ``p``, ``span``,
+``li``, ``td`` -- under a click listener on an ancestor, the document or the window,
+which a dropdown's dismiss handler, a data-api or a framework's root registers on most
+pages. Which leaves are candidates depends on their text (an empty one is none) and
+their order (the first of each shape, a bound per read), so counting them made a click
+that only swapped static text a new state. The explorer still reads and tries them;
+both keys, a state's recorded contract and every restore check read the other elements
+only (the execution key's multiset and markers too: BUG-0551 R7, at the merge with
+BUG-0539).
+
 An **element signature** is its layout identity: tag, role, type, name, class tokens,
 its short ancestor chain (``tag#id.class`` of up to three ancestors) and a normalised
 id / href / form action -- each with digit runs folded to ``#`` (``mat-input-3`` and
@@ -128,11 +139,25 @@ def element_signature(el: dict) -> str:
     return "|".join(parts)
 
 
+def counts_for_state(el: dict) -> bool:
+    """Whether an element description is part of a state's identity: every one but a
+    delegated candidate (``how == "delegated"``; module doc)."""
+    return el.get("how") != "delegated"
+
+
+def state_signatures(elements: list[dict]) -> frozenset[str]:
+    """The element signatures that count for a state (`counts_for_state`): the
+    structural key's set. `element_multiset` and `workflow_markers` -- the execution
+    key's and a state's contract's inputs -- leave out the same elements."""
+    return frozenset(element_signature(e) for e in elements if counts_for_state(e))
+
+
 def state_fingerprint(url: str, elements: list[dict]) -> str:
     """The **structural** key: hash of the folded route and the *set* of element
-    signatures. A similarity index for scheduling and folding only, never a state's
-    identity (`execution_key` is; module doc)."""
-    sigs = sorted({element_signature(e) for e in elements})
+    signatures (`state_signatures`: never a delegated candidate's). A similarity index
+    for scheduling and folding only, never a state's identity (`execution_key` is;
+    module doc)."""
+    sigs = sorted(state_signatures(elements))
     doc = json.dumps([normalise_route(url), sigs], separators=(",", ":"))
     return hashlib.sha256(doc.encode("utf-8")).hexdigest()[:24]
 
@@ -167,9 +192,12 @@ def execution_route(url: str) -> str:
 
 def element_multiset(elements: list[dict]) -> tuple[tuple[str, int], ...]:
     """Each element signature with how many times the page holds it, sorted: one button
-    and two identical buttons differ."""
+    and two identical buttons differ. A delegated candidate is left out
+    (`counts_for_state`; BUG-0551 R7): its membership varies with text and order."""
     counts: dict[str, int] = {}
     for el in elements:
+        if not counts_for_state(el):
+            continue
         sig = el.get("signature") or element_signature(el)
         counts[sig] = counts.get(sig, 0) + 1
     return tuple(sorted(counts.items()))
@@ -186,11 +214,15 @@ def workflow_markers(elements: list[dict], page_marks=()) -> tuple[str, ...]:
       changes per load) -- and ``["current", where, index, value]`` for a
       non-interactive ``aria-current`` marker (a stepper's position).
 
-    Typed text is never a marker: it is data."""
+    Typed text is never a marker: it is data. A delegated candidate holds none
+    (`counts_for_state`; BUG-0551 R7: neither its flags nor its membership are part of
+    a state's identity)."""
     from fuzzlab.core.redaction import is_sensitive_name, looks_like_identifier
     out = []
     seen: dict[str, int] = {}
     for el in elements:
+        if not counts_for_state(el):
+            continue
         sel = str(el.get("sel") or "")
         sig = el.get("signature") or element_signature(el)
         occ = el.get("occurrence")

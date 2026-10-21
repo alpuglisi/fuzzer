@@ -17,16 +17,19 @@ correlation tag the proxy records and strips.
 (`fingerprint.execution_key`, SP-62): the exact route (query values, numeric path
 segments), the multiset of its visible interactive elements' signatures, the workflow
 markers its controls hold, and the session generation. Every visited-state check reads
-it. The structural key (`fingerprint.state_fingerprint`: folded route, set of
-signatures) only schedules and folds: the frontier explores a new route, then a new
-layout, then a variant of a known layout, and holds at most ``max_states_per_route``
-states per folded route -- the rest are reported (`coverage_excluded`), never claimed
-equivalent.
+it. A delegated candidate (FR-CRAWL-40) is no part of either key or of a state's
+contract (`fingerprint.counts_for_state`): which text leaves are candidates varies
+with their text and order (BUG-0551 review B2 and R7). The structural key
+(`fingerprint.state_fingerprint`: folded route, set of signatures) only schedules and
+folds: the frontier explores a new route, then a new layout, then a variant of a known
+layout, and holds at most ``max_states_per_route`` states per folded route -- the rest
+are reported (`coverage_excluded`), never claimed equivalent.
 
 **Work** (FR-CRAWL-32). An action's work key is ``(execution key, element signature,
 occurrence, kind)``, tracked by `WorkLedger` as pending, running, succeeded, refused,
-retryable or failed. A failure never consumes the work: it is retried up to
-``max_action_attempts`` times, then recorded failed and reported. A step already taken
+retryable or failed (a delegated candidate's also inert: its trial's verdict). A failure
+never consumes the work: it is retried up to ``max_action_attempts`` times, then
+recorded failed and reported. A step already taken
 in another state is scheduled after this state's own steps (deprioritised); it is
 skipped only once two states on two routes gave it the same observed effect (requests
 and transition).
@@ -45,11 +48,18 @@ non-idempotent request is never replayed: the state it reached is explored in pl
 when it is reached, and later restores of it are unresolved. A failed restore marks
 the state unresolved with its reason (`unresolved`).
 
-**Actionable elements** are found three ways: accessibility roles and native controls;
-elements with a JavaScript click / pointer / key listener, asked of Chrome DevTools
-(``DOMDebugger.getEventListeners``: catches a framework's ``div`` buttons); and
-``cursor: pointer`` as a fallback. Enumeration runs again after every action, so
-dialogs and lazy panels are seen as they appear.
+**Actionable elements** are found across the page's composed tree (`compose`,
+FR-CRAWL-39): its document, every open shadow root, and every visible same-origin,
+in-scope frame, each element's ancestry naming the shadow hosts and frames it is in.
+They are found four ways: accessibility roles and native controls; elements with a
+JavaScript click / pointer / key listener, asked of Chrome DevTools (catches a
+framework's ``div`` buttons); ``cursor: pointer`` as a fallback; and **delegated**
+candidates -- a labelled, non-semantic element under an ancestor, document or window
+listening for clicks -- each tried once and kept only when its click caused a request
+(one a window with no click just before did not see) or changed the state
+(FR-CRAWL-40). Closed shadow roots, cross-origin and out-of-scope
+frames and every bound a read hit are counted in the report, never read. Enumeration
+runs again after every action, so dialogs and lazy panels are seen as they appear.
 
 **Forms** are submitted valid-first (`formfill`): each control gets the first candidate
 its own ``checkValidity()`` accepts, then the submitter is clicked; then up to
@@ -60,9 +70,33 @@ destructive (`core.urls.text_destructive_reason`, `destructive_reason`: logout, 
 account, reset, ...) or one the operator denies (``deny``) is never acted on; a form
 that changes a credential (`store_adapter.credential_change_rule`) is never submitted
 (a CAPTCHA form is: its CAPTCHA control gets a filler answer, D71); the route guard aborts destructive and out-of-scope requests whatever
-the page does. In an authenticated run, landing on a login URL (`session.detect.
-looks_like_login_url`) marks the session lost: the action that caused it is denied for
-the rest of the run and the context is rebuilt from the storage state.
+the page does.
+
+**A lost session** (FR-CRAWL-41, BUG-0552). An authenticated run starts from a storage
+state, or from a session provider (`ExploreSession`: the run's session manager, its
+identity and base URL). Its contexts carry one session *generation*. After every
+action, restore and load, the answers the context got since the last check are
+classified by SP-56 (`core.comparability.response_class`, with SP-16's `login_facts`):
+a credentialed auth failure (a 401 or a login redirect that is not a credential
+submission) and a page at a login URL or showing this session's login form in place
+(SP-16; without a known form, a password form where the page was seen without one: the
+URL before an action, the state restored, the start page) are *suspected* losses, a
+policy block (403) a suspected denial. With a provider, SP-61
+(`SessionManager.check_health`) decides for the context's generation: live, a policy
+block or an answer is an authorization denial and nothing changes, but a login page
+after an action means the context lost its copy, whatever answer came with it; lost, the
+provider gives a fresh session (a new login, never the snapshot the run started from),
+which must pass its own protected check before the old context is released and
+**closed** and a new one carries it. Without a provider, the start page is the run's
+protected resource when SP-61's `health_verdict` reads it live with the context's
+cookies and refused without them, and a suspicion is decided by a GET of it with the
+context's cookies; with none, a loss shape is an unconfirmed loss and a policy block
+never is one (PA-0533(1)). A loss nothing resolves ends the authenticated exploration,
+its reason in the report (`auth_ended`). A generation found lost is recorded for every
+worker at the verdict, before any recovery: no worker acts on it again, and each marks
+what it sent on it. The action ids whose answers fell in a known-lost window are marked
+(a ``session`` line in the action log, `ExploreReport.session_lost_actions`, read by
+`disco.capture.lost_action_ids`): never authenticated coverage (D').
 """
 
 from __future__ import annotations
@@ -77,10 +111,11 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import urldefrag, urljoin, urlsplit, urlunsplit
 
+from fuzzlab.core.comparability import AUTH_FAILURE, POLICY_BLOCK, response_class
 from fuzzlab.core.redaction import redact_url
-from fuzzlab.core.urls import (destructive_reason, in_origin_scope, origin_scope,
-                               spa_route, text_destructive_reason)
-from fuzzlab.disco import formfill
+from fuzzlab.core.urls import (destructive_reason, document_key, in_origin_scope,
+                               origin_scope, spa_route, text_destructive_reason)
+from fuzzlab.disco import compose, formfill
 from fuzzlab.disco.capture import ACTION_HEADER
 from fuzzlab.disco.fingerprint import (element_multiset, element_signature, execution_key,
                                        execution_route, normalise_route,
@@ -88,7 +123,8 @@ from fuzzlab.disco.fingerprint import (element_multiset, element_signature, exec
 # the one script-route scanner both crawlers share (SP-47; D70's allowlist)
 from fuzzlab.tools.spa import (ROUTE_OK, classify_route, query_url_refusal, route_url,
                                scan_script, seed_url, spa_fragment)
-from fuzzlab.session.detect import looks_like_login_url
+from fuzzlab.session.detect import (login_facts, looks_like_login_url, request_entry_names,
+                                    shows_login_form)
 from fuzzlab.tools import navguard
 from fuzzlab.tools.netquiet import Inflight
 
@@ -101,175 +137,11 @@ def _pw_error():
     return Error
 
 
-#: Listener types that make an element actionable.
-ACTION_LISTENERS = ("click", "mousedown", "mouseup", "pointerdown", "pointerup",
-                    "keydown", "touchstart", "dblclick")
-#: Elements asked of DevTools per enumeration (bounded: one CDP call each).
-MAX_CDP_CANDIDATES = 200
-#: Elements described per enumeration.
-MAX_ELEMENTS = 400
-
-_ENUMERATE_JS = r"""
-([maxElements, maxCand]) => {
-  const NATIVE = 'a[href],button,input,select,textarea,summary,[role=button],[role=link],'
-    + '[role=menuitem],[role=tab],[role=checkbox],[role=combobox],[role=option],'
-    + '[role=switch],[role=radio],[onclick],[contenteditable=true],[tabindex]:not([tabindex="-1"])';
-  const visible = (e) => {
-    if (!e.isConnected) return false;
-    const r = e.getClientRects();
-    if (!r.length) return false;
-    const s = getComputedStyle(e);
-    return s.visibility !== 'hidden' && s.display !== 'none' && s.opacity !== '0';
-  };
-  document.querySelectorAll('[data-disco-id]').forEach(e => e.removeAttribute('data-disco-id'));
-  document.querySelectorAll('[data-disco-cand]').forEach(e => e.removeAttribute('data-disco-cand'));
-  const out = [];
-  let n = 0;
-  const cls = (e) => Array.from(e.classList || []).slice(0, 4).sort().join('.');
-  const node = (e) => e.tagName.toLowerCase() + (e.id ? '#' + e.id : '') + (cls(e) ? '.' + cls(e) : '');
-  const ancestry = (e) => {
-    const out = []; let a = e.parentElement;
-    while (a && a !== document.body && out.length < 3) { out.push(node(a)); a = a.parentElement; }
-    return out.join('<');
-  };
-  const formLike = (e) => {        // a <form>, else the nearest ancestor holding typed inputs
-    if (e.form) return e.form;
-    const f = e.closest('form'); if (f) return f;
-    let a = e.parentElement, n = 0;
-    while (a && a !== document.body && n < 6) {
-      if (a.querySelector('input:not([type=hidden]):not([type=button]):not([type=submit])'
-                          + ':not([type=checkbox]):not([type=radio]),textarea,select')) return a;
-      a = a.parentElement; n++;
-    }
-    return null;
-  };
-  // the control values that select a workflow (FR-CRAWL-31's markers): a select's
-  // value, a box's checked state, ARIA selection; never typed text
-  const selState = (e) => {
-    const tag = e.tagName.toLowerCase(), parts = [];
-    if (tag === 'select') parts.push('value=' + String(e.value).slice(0, 64));
-    if (tag === 'input' && (e.type === 'checkbox' || e.type === 'radio'))
-      parts.push('checked=' + e.checked);
-    for (const a of ['aria-selected', 'aria-current', 'aria-checked']) {
-      const v = e.getAttribute(a);
-      if (v !== null && v !== '' && v !== 'false') parts.push(a + '=' + String(v).slice(0, 32));
-    }
-    return parts.join(';');
-  };
-  window.__discoLayout = {cls, ancestry, formLike, selState};
-  const TYPED = 'input:not([type=hidden]):not([type=button]):not([type=submit])'
-    + ':not([type=checkbox]):not([type=radio]):not([type=reset]):not([type=image]),textarea';
-  const describe = (e, how) => {
-    const id = String(n++);
-    e.setAttribute('data-disco-id', id);
-    const form = formLike(e);
-    const typed = form ? Array.from(form.querySelectorAll(TYPED)) : [];
-    const label = (e.getAttribute('aria-label') || e.getAttribute('title') || e.innerText
-                   || e.value || e.getAttribute('placeholder') || '').trim().slice(0, 80);
-    const tag = e.tagName.toLowerCase();
-    const type = (e.getAttribute('type') || (tag === 'button' ? 'submit' : '')).toLowerCase();
-    out.push({disco_id: id, how, tag, role: e.getAttribute('role') || '', type,
-              name: e.getAttribute('name') || '', id: e.id || '', cls: cls(e), ancestry: ancestry(e),
-              href: tag === 'a' ? e.href : '', label,
-              // a form-less container has no action: location.href put the route into
-              // every signature inside it, so a toolbar was new on each route (BUG-0502)
-              action: form && form.tagName === 'FORM' ? (form.action || location.href) : '',
-              in_form: !!form, disabled: !!e.disabled, cursor: getComputedStyle(e).cursor,
-              sel: selState(e),
-              // the Enter rule (`enter_submits`): what the element's container holds
-              form_tag: !!(form && form.tagName === 'FORM'), typed: typed.length,
-              last_typed: typed.length > 0 && typed[typed.length - 1] === e,
-              submitters: form ? form.querySelectorAll(
-                'button:not([type=button]):not([type=reset]),input[type=submit],'
-                + 'input[type=image]').length : 0});
-  };
-  for (const e of document.querySelectorAll(NATIVE)) {
-    if (out.length >= maxElements) break;
-    // a disabled control is kept only as a submitter (filling its form enables it)
-    if (visible(e) && (!e.disabled || (e.tagName === 'BUTTON' && formLike(e))))
-      describe(e, 'native');
-  }
-  let c = 0;
-  for (const e of document.querySelectorAll('div,span,li,img,svg,td,p,i,section,article,label')) {
-    if (out.length + c >= maxElements || c >= maxCand) break;
-    if (e.hasAttribute('data-disco-id') || !visible(e)) continue;
-    if (e.closest('[data-disco-id]')) continue;
-    if (getComputedStyle(e).cursor === 'pointer'
-        && !(e.parentElement && getComputedStyle(e.parentElement).cursor === 'pointer')) {
-      describe(e, 'pointer');
-      continue;
-    }
-    e.setAttribute('data-disco-cand', String(c++));
-  }
-  return out;
-}
-"""
-
-_CANDIDATES_JS = "() => Array.from(document.querySelectorAll('[data-disco-cand]'))"
-
-_MARK_JS = r"""
-(els) => {
-  const out = [];
-  for (const e of els) {
-    let n = document.querySelectorAll('[data-disco-id]').length;
-    e.setAttribute('data-disco-id', 'L' + n);
-    const lay = window.__discoLayout;
-    out.push({disco_id: 'L' + n, how: 'listener', tag: e.tagName.toLowerCase(),
-              role: e.getAttribute('role') || '', type: '', name: '', id: e.id || '',
-              cls: lay ? lay.cls(e) : '', ancestry: lay ? lay.ancestry(e) : '',
-              href: '', label: (e.getAttribute('aria-label') || e.innerText || '').trim().slice(0, 80),
-              action: '', in_form: !!e.closest('form'), cursor: getComputedStyle(e).cursor,
-              sel: lay ? lay.selState(e) : ''});
-  }
-  return out;
-}
-"""
-
-#: The page-level workflow markers (`fingerprint.workflow_markers`): each named hidden
-#: input (at most 50, value cut at 65 characters: longer is no marker) and each
-#: non-interactive ``aria-current`` element (a stepper's position; at most 20).
-_MARKS_JS = r"""
-() => {
-  const out = [];
-  const hidden = document.querySelectorAll('input[type=hidden][name]');
-  for (let i = 0; i < hidden.length && i < 50; i++)
-    out.push(['hidden', hidden[i].getAttribute('name') || '', String(hidden[i].value || '').slice(0, 65)]);
-  const lay = window.__discoLayout;
-  const cur = document.querySelectorAll('[aria-current]:not([aria-current="false"])');
-  for (let i = 0; i < cur.length && i < 20; i++) {
-    const e = cur[i];
-    if (e.hasAttribute('data-disco-id')) continue;     // an enumerated element: its own sel
-    const where = e.tagName.toLowerCase() + (lay ? '<' + lay.ancestry(e) : '');
-    const idx = e.parentElement ? Array.from(e.parentElement.children).indexOf(e) : 0;
-    out.push(['current', where, idx, String(e.getAttribute('aria-current')).slice(0, 32)]);
-  }
-  return out;
-}
-"""
-
-_FIELDS_JS = r"""
-(e) => {
-  // markers of an earlier form go first: a stale data-disco-field="0" earlier in the
-  // document was filled in place of this form's first control (BUG-0502)
-  document.querySelectorAll('[data-disco-field]').forEach(c => c.removeAttribute('data-disco-field'));
-  const lay = window.__discoLayout;
-  const form = (lay && lay.formLike(e)) || e.form || e.closest('form') || e.parentElement;
-  const ctrls = Array.from(form.querySelectorAll('input,select,textarea'));
-  return ctrls.map((c, i) => {
-    c.setAttribute('data-disco-field', String(i));
-    const lab = (c.labels && c.labels[0] && c.labels[0].innerText) || '';
-    return {field: String(i), tag: c.tagName.toLowerCase(), type: (c.getAttribute('type') || '').toLowerCase(),
-            name: c.getAttribute('name') || '', id: c.id || '', label: lab.trim().slice(0, 80),
-            aria_label: c.getAttribute('aria-label') || '', placeholder: c.getAttribute('placeholder') || '',
-            autocomplete: c.getAttribute('autocomplete') || '', pattern: c.getAttribute('pattern') || '',
-            min: c.getAttribute('min'), max: c.getAttribute('max'), step: c.getAttribute('step'),
-            minlength: c.getAttribute('minlength'), maxlength: c.getAttribute('maxlength'),
-            required: c.required, disabled: c.disabled, readonly: c.readOnly,
-            value: c.type === 'password' ? '' : String(c.value || '').slice(0, 64),
-            options: c.tagName === 'SELECT' ? Array.from(c.options).map(o => o.value) : []};
-  });
-}
-"""
+#: The enumeration's page scripts and bounds live in `compose` (FR-CRAWL-39): the
+#: composed read (`compose.READ_JS`, which also reads each element's ``sel`` and each
+#: document's page-level workflow markers, FR-CRAWL-31) and a submitter's form controls,
+#: marked ``data-disco-field`` across the document's open shadow roots.
+_FIELDS_JS = compose.FIELDS_JS
 
 
 #: A control's verdict on its value: ``valid``; ``aria-invalid`` when the browser accepts
@@ -331,8 +203,9 @@ class State:
     """A state and how to get back to it: ``entry_url`` then ``path``; when that no
     longer reproduces it (a page only a POST shows), ``fallback`` is tried.
 
-    ``fp`` is the execution key. ``core`` (the element multiset) and ``markers`` are
-    the state's contract, recorded when it was first read and **never rewritten**
+    ``fp`` is the execution key. ``core`` (the element multiset: never a delegated
+    candidate's, `fingerprint.element_multiset`) and ``markers`` are the state's
+    contract, recorded when it was first read and **never rewritten**
     (FR-CRAWL-33, BUG-0539: narrowing them to what a restore showed accepted a wrong
     state and weakened it for good). ``optional`` lists ``(signature, count)`` declared
     optional for this state and ``optional_markers`` its declared optional markers:
@@ -353,14 +226,17 @@ class State:
     optional_markers: tuple = ()
     unresolved: str | None = None
     added: tuple = ()
+    #: FR-CRAWL-41: the state showed a password form when it was found (an authenticated
+    #: run): a restore that shows one is the state's own page, never a sign of a loss
+    login_shown: bool = False
 
     @classmethod
     def read(cls, got: Reading, *, entry_url: str, path=None,
-             fallback: "State | None" = None, added=()) -> "State":
+             fallback: "State | None" = None, added=(), login_shown: bool = False) -> "State":
         """A state recorded from ``got``: its contract is what ``got`` shows."""
         return cls(got.key, got.url, entry_url, list(path or []), fallback,
                    core=got.counts, markers=got.markers, structure=got.structure,
-                   added=tuple(added))
+                   added=tuple(added), login_shown=login_shown)
 
     def replayable(self) -> bool:
         """Whether ``path`` holds only steps recorded safe to repeat."""
@@ -408,11 +284,16 @@ def contract_mismatch(state: State, got: Reading, optional=frozenset()) -> str |
 
 
 #: A work item's status (FR-CRAWL-32). ``equivalent``: skipped because two states on two
-#: routes gave the step the same observed effect.
+#: routes gave the step the same observed effect. ``inert``: a delegated candidate whose
+#: trial click caused nothing (FR-CRAWL-40) -- finished by that observed verdict, never
+#: by a failure.
 PENDING, RUNNING, SUCCEEDED, REFUSED = "pending", "running", "succeeded", "refused"
-RETRYABLE, FAILED, EQUIVALENT = "retryable", "failed", "equivalent"
-#: `Explorer.act`'s outcomes.
+RETRYABLE, FAILED, EQUIVALENT, INERT = "retryable", "failed", "equivalent", "inert"
+#: `Explorer.act`'s outcomes. A delegated candidate (`Explorer._act_delegated`) may also
+#: be `ACT_INERT` (its run-wide verdict is inert) or `ACT_UNEXPLORED` (the run's trials
+#: are spent: counted ``delegated_unexplored``; its work item stays pending, never done).
 ACTED, ACT_REFUSED, ACT_FAILED = "acted", "refused", "failed"
+ACT_INERT, ACT_UNEXPLORED = "inert", "unexplored"
 
 
 class WorkLedger:
@@ -569,6 +450,9 @@ class ExploreOptions:
     #: How deep states that cannot be replayed (reached by a non-idempotent step) are
     #: explored in place, one inside another (FR-CRAWL-33).
     max_live_depth: int = 3
+    #: FR-CRAWL-41: fresh sessions a run takes after losses before its authenticated
+    #: exploration ends (each one a login through the session provider).
+    max_session_recoveries: int = 3
 
 
 #: The most workers a run may ask for (each is a browser).
@@ -593,7 +477,8 @@ class ExploreReport:
     #: FR-CRAWL-33: unresolved states by reason -- ``route``, ``core``, ``extra``,
     #: ``markers`` (the contract did not hold), ``missing-step``, ``unsafe-step`` (a path step sent a
     #: non-idempotent request), ``replay-mutated``, ``navigation``, ``step-refused``,
-    #: ``step-failed``, ``replay-error``, ``unreadable``, ``live-depth``
+    #: ``step-failed``, ``replay-error``, ``unreadable``, ``live-depth``; ``session-lost``
+    #: (FR-CRAWL-41: its restore was lost again on the recovered session)
     unresolved: dict[str, int] = field(default_factory=dict)
     #: features declared optional, by evidence: ``first-visit`` (gone on a fresh second
     #: load of the start URL), ``dismissed`` (removed for good by its own control)
@@ -642,13 +527,77 @@ class ExploreReport:
     #: script bodies over `tools.spa.MAX_SCRIPT_BYTES`: not scanned for routes
     scripts_too_large: int = 0
     errors: int = 0
+    #: FR-CRAWL-41 (BUG-0552): losses of the session a context carried (confirmed by the
+    #: protected check, or a loss shape with no provider to check), the suspicions
+    #: checked, the policy blocks or answers a live check made an authorization denial,
+    #: the fresh sessions installed (revalidated), the contexts re-given the live
+    #: session they had lost, the action ids whose answers fell in a known-lost window
+    #: (never evidence, D'), and why authenticated exploration ended, if it did
     session_lost: int = 0
+    session_suspected: int = 0
+    authorization_denials: int = 0
+    session_recovered: int = 0
+    session_reinstalled: int = 0
+    session_lost_actions: list = field(default_factory=list)
+    auth_ended: str | None = None
     aborted: int = 0
     out_of_scope: dict[str, int] = field(default_factory=dict)
     budget_hit: str | None = None
+    #: FR-CRAWL-39 (BUG-0551), per route, a page read again adds nothing
+    #: (`compose.Coverage`): open shadow roots and same-origin frames read; what was
+    #: not read, counted and never claimed -- closed shadow roots, cross-origin and
+    #: out-of-scope frames, and what each bound of a read left out (`budget_limited`:
+    #: ``elements``, ``candidates``, ``delegated``, ``nodes``, ``frames``, ``census``)
+    shadow_roots: int = 0
+    frames: int = 0
+    closed_shadow_roots: int = 0
+    frames_cross_origin: int = 0
+    frames_out_of_scope: int = 0
+    budget_limited: dict[str, int] = field(default_factory=dict)
+    #: FR-CRAWL-40: delegated candidates tried, kept (their click made a request or
+    #: changed the state), dropped, and never tried once the run's trials were spent
+    delegated_trials: int = 0
+    delegated_live: int = 0
+    delegated_inert: int = 0
+    delegated_unexplored: int = 0
 
     def refuse(self, why: str) -> None:
         self.refused[why] = self.refused.get(why, 0) + 1
+
+
+@dataclass
+class ExploreSession:
+    """The session provider of an authenticated exploration (FR-CRAWL-41): the run's
+    `session.manager.SessionManager` -- the owner of whether the identity's session is
+    live (SP-61, `check_health`) and of a fresh one (`ensure`) -- the identity explored
+    as, and the operator's base URL that identity logs in from (``operator=True``). A
+    context adopts its session through `tools.browserauth.browser_session` (the one
+    adoption helper): cookies and a browser login's storage state; a session carried
+    only in headers (a token login with no browser state) cannot be (the app's own
+    script would not send it) and is refused loudly."""
+    manager: object
+    identity: str
+    base_url: str
+
+
+@dataclass
+class _SessionMaterial:
+    """What a context of one session generation adopts (FR-CRAWL-41): the generation
+    (the session manager's, or 0 for a storage state), the storage state and cookies,
+    where the session goes (``scope``: the session's origins), and its login page and
+    form fields (SP-16's `shows_login_form` reads them; unknown for a storage state)."""
+    generation: int | None
+    storage_state: dict | None = field(default=None, repr=False)
+    cookies: list = field(default_factory=list, repr=False)
+    scope: Callable[[str], bool] | None = field(default=None, repr=False)
+    login_url: str | None = None
+    login_fields: tuple | None = None
+
+
+class SessionUnavailable(RuntimeError):
+    """The session provider gave no session a context can carry (FR-CRAWL-41): at the
+    start it is raised (never a silent anonymous run); after a loss it ends the
+    authenticated exploration with its message as the reason. Messages name no URL."""
 
 
 class _Shared:
@@ -693,6 +642,38 @@ class _Shared:
         #: the path segments the app's scripts hold (`core.pathtemplate.code_segments`,
         #: FR-CRAWL-28), written to ``script_segments.json`` beside the action log
         self.code_segments: set[str] = set()
+        #: delegated candidates' verdicts and the composed reads' coverage (FR-CRAWL-39/40)
+        self.trials = compose.Trials(compose.MAX_DELEGATED_TRIALS)
+        self.coverage = compose.Coverage()
+        #: per route, the `request_key`s no longer evidence for a delegated trial: what a
+        #: control window saw (the page's own traffic) and what a trial already counted
+        #: (`Explorer._trial`)
+        self.explained: dict[str, set[tuple[str, str]]] = {}
+        #: the page shapes whose closed shadow roots were counted (`compose._census`)
+        self.censused: set = set()
+
+        #: FR-CRAWL-41: the session every worker's context should carry (its generation,
+        #: `_SessionMaterial`), the fresh sessions taken, and the lock a recovery holds
+        #: (single flight: one worker logs in again, the others adopt what it got). Taken
+        #: before `lock` when both are held, never while `lock` is held.
+        self.auth_lock = threading.RLock()
+        self.auth: "_SessionMaterial | None" = None
+        self.recoveries = 0
+        #: the generations a worker found lost (or unresolved): recorded at the verdict,
+        #: under `auth_lock`, before any recovery, so that no worker whose context still
+        #: carries one acts on it or clears its window (BUG-0552 review B1)
+        self.lost_generations: set = set()
+        #: a run without a session provider: the protected resource its suspicions are
+        #: checked against (`Explorer._find_protected_resource`; None: none, a loss
+        #: shape is an unconfirmed loss)
+        self.protected: str | None = None
+
+
+def request_key(method: str, url: str) -> tuple[str, str]:
+    """What a delegated trial compares requests by: the method and the normalised route
+    (`normalise_route`: digit runs folded, query values dropped), so a poll's next
+    request is the same key as its last."""
+    return (str(method or "").upper(), normalise_route(url))
 
 
 def refusal(el: dict, deny: tuple[str, ...]) -> str | None:
@@ -709,6 +690,13 @@ def refusal(el: dict, deny: tuple[str, ...]) -> str | None:
         if url and destructive_reason(url):
             return "destructive-url"
     return None
+
+
+def _same_place(url: str, other: str) -> bool:
+    """The same document (`core.urls.document_key`) and the same fragment: a page shown
+    there now replaced the one seen there before, in place (FR-CRAWL-41)."""
+    return document_key(url) == document_key(other) and \
+        urlsplit(url or "").fragment == urlsplit(other or "").fragment
 
 
 #: Input types that are clicked on their own (the rest are filled through their form).
@@ -787,15 +775,19 @@ class Explorer:
     def __init__(self, start_url: str, *, scope_urls: list[str], proxy: str,
                  options: ExploreOptions | None = None, storage_state: dict | None = None,
                  actions_log: Path | None = None,
-                 clock: Callable[[], float] = time.monotonic):
+                 clock: Callable[[], float] = time.monotonic,
+                 session: ExploreSession | None = None):
         self.start_url = start_url
         self.scope_urls = list(scope_urls)
         self.origins = origin_scope(*self.scope_urls)
         if not in_origin_scope(start_url, self.origins):
             raise ValueError("the start URL is outside the scope")
+        if storage_state is not None and session is not None:
+            raise ValueError("one session source: a storage state or a session provider")
         self.proxy = proxy
         self.opts = options or ExploreOptions()
         self.storage_state = storage_state
+        self.session = session
         self.actions_log = actions_log
         self.clock = clock
         if not 1 <= self.opts.workers <= MAX_WORKERS:
@@ -817,14 +809,28 @@ class Explorer:
         self._ctx = None
         self._tag_headers: dict[str, str] = {}      # the guard reads it per request
         self._responses: list = []                # in-scope responses since `_gather`
-        #: the session generation of this worker's context (FR-CRAWL-31's slot in the
-        #: execution key): bumped when the context is rebuilt after a lost session
+        #: this worker's context rebuilds (`_replace_context`): the execution key's
+        #: generation slot (FR-CRAWL-31) only for a context that carries no run-wide
+        #: session generation; one that does is keyed by that generation
+        #: (`_ctx_generation`, FR-CRAWL-41), the same for every worker on one session
         self._generation = 0
         #: ``(method, url)`` of every request the page issues while an action or a
         #: replay is watched (None: not watching) -- what `Step.safe` is decided from
         self._watch: list[tuple[str, str]] | None = None
         self._restore_failure: str | None = None   # why the last restore failed
         self._mismatch: str | None = None          # the last `contract_mismatch`
+        #: the delegated candidate whose trial `act` just decided (FR-CRAWL-40): its
+        #: verdict is reopened when the session checkpoint finds the window lost
+        self._trialled: str | None = None
+        # FR-CRAWL-41, an authenticated context only: the requests that finished since
+        # the last session checkpoint, the action ids requests went out under since then
+        # (the window a loss marks), the session generation this context carries, and
+        # the browser and Playwright instance a replacement context is made with
+        self._answers: list = []
+        self._window_tags: set = set()
+        self._ctx_generation: int | None = None
+        self._browser = None
+        self._pw = None
 
     def _clone(self) -> "Explorer":
         """Another worker of this run: the same configuration and `_shared` state."""
@@ -842,25 +848,32 @@ class Explorer:
         return in_origin_scope(url, self.origins)
 
     def _new_context(self, browser, pw):
-        state = None
-        if self.storage_state is not None:
-            from fuzzlab.session.browserlogin import filter_storage_state
-            state = filter_storage_state(self.storage_state, self._in_scope, self.scope_urls)
+        """A guarded context for this worker, carrying the run's session of the current
+        generation (FR-CRAWL-41, `_current_session`): never the storage state the run
+        started from once a newer generation exists. With more than one scope origin the
+        guard keeps the session to its own origins (FR-SESS-20)."""
+        self._browser, self._pw = browser, pw
+        auth = self._current_session()
         ctx = browser.new_context(service_workers="block", ignore_https_errors=True,
-                                  storage_state=state)
-        session_origins = origin_scope(self.start_url)
-        authenticated = state is not None and len(self.origins) > 1
+                                  storage_state=auth.storage_state if auth else None)
+        isolate = auth is not None and len(self.origins) > 1
         navguard.guard_page(
             ctx, in_scope=self._in_scope, headers=self._tag_headers,
             on_out_of_scope=self._count_out_of_scope,
             on_abort=lambda url, why: self._count_abort(),
-            cookie_scope=(lambda u: in_origin_scope(u, session_origins))
-            if authenticated else None,
-            isolated_request=(lambda: pw.request.new_context()) if authenticated else None)
+            cookie_scope=auth.scope if isolate else None,
+            isolated_request=(lambda: pw.request.new_context()) if isolate else None)
+        if auth is not None and auth.cookies:
+            from fuzzlab.tools import browserauth
+            browserauth.apply_to_context(ctx, auth.cookies)
         ctx.on("request", self._on_request)
         ctx.on("response", self._on_response)
         ctx.on("requestfinished", self._on_done)
         ctx.on("requestfailed", self._on_done)
+        if auth is not None:
+            ctx.on("request", self._note_window_tag)
+            ctx.on("requestfinished", self._note_answer)
+        self._ctx_generation = auth.generation if auth is not None else None
         return ctx
 
     def _count_out_of_scope(self, url: str) -> None:
@@ -889,6 +902,17 @@ class Explorer:
     def _on_response(self, resp) -> None:
         if self._in_scope(resp.url):
             self._responses.append(resp)          # read later, never in the handler
+
+    def _note_window_tag(self, req) -> None:
+        """FR-CRAWL-41: the action id this request goes out under (the guard stamps the
+        same one): a loss found at the next checkpoint marks every such id."""
+        self._window_tags.add(self._tag_headers.get(ACTION_HEADER))
+
+    def _note_answer(self, req) -> None:
+        """FR-CRAWL-41: a request whose answer arrived whole (``requestfinished``): read
+        at the next session checkpoint, never in the handler."""
+        if self._in_scope(req.url):
+            self._answers.append(req)
 
     def _gather(self, page) -> None:
         """Queue for the harvest what the page and its responses since the last call
@@ -934,6 +958,547 @@ class Explorer:
     def _on_done(self, req) -> None:
         self._net.ended(req)
 
+    # --- the session (FR-CRAWL-41, BUG-0552) -----------------------------------------------
+    def _authenticated(self) -> bool:
+        """An authenticated run: a session to explore with -- a storage state or a
+        session provider -- and a start URL that is not itself a login page."""
+        return (self.storage_state is not None or self.session is not None) and \
+            not looks_like_login_url(self.start_url)
+
+    def _current_session(self) -> "_SessionMaterial | None":
+        """The session of the run's current generation (the first one made on first
+        use), or None for an anonymous run."""
+        if self.storage_state is None and self.session is None:
+            return None
+        shared = self._shared
+        with shared.auth_lock:
+            if shared.auth is None:
+                if self.session is not None:
+                    shared.auth = self._provider_session(revalidate=False)
+                else:
+                    from fuzzlab.session.browserlogin import filter_storage_state
+                    origins = origin_scope(self.start_url)
+                    shared.auth = _SessionMaterial(
+                        0, storage_state=filter_storage_state(
+                            self.storage_state, self._in_scope, self.scope_urls),
+                        scope=lambda u: in_origin_scope(u, origins))
+            return shared.auth
+
+    def _provider_session(self, *, revalidate: bool,
+                          lost: int | None = None) -> _SessionMaterial:
+        """The provider's session, shaped for a context (`browserauth.browser_session`).
+        After a loss (``lost``: the generation found lost) it must be another generation
+        and ``revalidate`` asks SP-61 for a fresh protected check of it, which must be
+        live. Raises `SessionUnavailable` (or the manager's `SessionAuthError`)."""
+        from fuzzlab.session.manager import LIVE
+        from fuzzlab.tools import browserauth
+        sess = self.session
+        host = urlsplit(sess.base_url).hostname or ""
+        state = sess.manager.ensure(host, sess.identity, sess.base_url, operator=True)
+        if not getattr(state, "valid", False):
+            raise SessionUnavailable("the session provider has no live session (no "
+                                     "login was drawn)")
+        if lost is not None and state.generation == lost:
+            raise SessionUnavailable("the session provider gave back the lost session")
+        shaped = browserauth.browser_session(sess.manager, sess.identity, sess.base_url,
+                                             in_scope=self._in_scope,
+                                             scope_urls=self.scope_urls)
+        if shaped.headers and not shaped.storage_state:
+            raise SessionUnavailable("the session is carried in headers only (a token "
+                                     "login with no browser state): a browser context "
+                                     "cannot carry it")
+        material = _SessionMaterial(state.generation, storage_state=shaped.storage_state,
+                                    cookies=list(shaped.cookies), scope=shaped.cookie_scope,
+                                    login_url=state.login_url,
+                                    login_fields=state.login_fields)
+        if revalidate:
+            health, _moved = sess.manager.check_health(
+                host, sess.identity, sess.base_url, generation=state.generation,
+                use_cache=False, pause=False)
+            if health.state != LIVE:
+                raise SessionUnavailable(f"the fresh session failed its protected check "
+                                         f"({health.state}: {health.reason})")
+        return material
+
+    def _generation_gone(self) -> bool:
+        """BUG-0552 review B1: the session this context carries is no longer the run's
+        -- a newer generation was installed, or a worker found this one lost (recorded
+        at its verdict, before any recovery). An anonymous context carries none."""
+        gen = self._ctx_generation
+        if gen is None:
+            return False
+        shared = self._shared
+        auth = shared.auth
+        if auth is not None and auth.generation != gen:
+            return True
+        with shared.lock:
+            return gen in shared.lost_generations
+
+    def _gone_reason(self) -> str:
+        auth = self._shared.auth
+        if auth is not None and auth.generation != self._ctx_generation:
+            return "a newer session was installed meanwhile"
+        return "another worker found this session lost"
+
+    def _note_gone(self) -> None:
+        """Record that the generation this context carries is lost for every worker.
+        The caller holds `auth_lock`: a worker that reads the record waits there for the
+        recovery decision that follows, and adopts its session or stops."""
+        if self._ctx_generation is not None:
+            with self._shared.lock:
+                self._shared.lost_generations.add(self._ctx_generation)
+
+    def _session_current(self, page):
+        """The page to go on with: this worker's context replaced when the session it
+        carries is gone (another worker installed a newer generation or found this one
+        lost) -- the action ids it sent since its last checkpoint marked first (stale),
+        then, single flight, the newer session adopted or, when the run's authenticated
+        exploration ended, nothing more (the caller reads ``stop``) -- and a page of
+        this worker's live context when ``page`` was closed with a replaced one."""
+        if self._generation_gone():
+            reason = self._gone_reason()
+            with self._shared.auth_lock:
+                self._mark_window("stale", reason, empty_too=False)
+                return self._recover_session(page, "stale", reason)
+        if page.is_closed():
+            return self._ctx.new_page()
+        return page
+
+    def _session_checkpoint(self, page, *, asked: str | None = None, places=(),
+                            login_shown: bool = False, before_url: str | None = None,
+                            action: bool = False):
+        """Was the session this context carries lost since the last checkpoint (after
+        an action, a restore, a load)? Returns ``(page, outcome)``: the page to go on
+        with, and None, or ``(verdict, reason)`` when the answers since the last
+        checkpoint fell in a known-lost window -- marked, logged, and the session
+        recovered or the authenticated exploration ended (`_recover_session`).
+
+        The suspicion (`_loss_signs`) is read through the session layer's owners only;
+        the decision is SP-61's for the context's generation (`_confirm_loss`). A
+        generation another worker found lost, or a newer one installed meanwhile, makes
+        the window stale (the action not blamed). A lost, stale or unresolved verdict is
+        recorded for every worker (`_Shared.lost_generations`) under `auth_lock`, before
+        the recovery it starts (BUG-0552 review B1). ``asked``: the URL the step asked
+        for (a link, a harvest URL, the state's): a login page asked for is no sign.
+        ``places``: URLs whose page showed no password form (the state restored, the
+        start page): one shown there now is in place. ``login_shown``: the page already
+        showed one. ``before_url``: the page's URL before the action. ``action``: after
+        an action, a login page on a session the provider's check finds live means the
+        context no longer carries it (`reinstall`), whatever answer came with it;
+        elsewhere such a page is the state's own."""
+        shared = self._shared
+        primary, page_sign = self._loss_signs(page, asked=asked, places=places,
+                                              login_shown=login_shown,
+                                              before_url=before_url)
+        if self._generation_gone():
+            verdict, reason = "stale", self._gone_reason()
+        elif primary is None:
+            self._window_tags = set()
+            return page, None
+        else:
+            kind, reason, url = primary
+            self._bump("session_suspected")
+            verdict, why = self._confirm_loss(kind, url)
+            if verdict == "live" and action and self.session is not None and \
+                    page_sign is not None and page_sign[2]:
+                # a login page after an action on a live session: the context no longer
+                # carries it, whichever answer (a 401 its script read) came first (R2)
+                verdict, reason, why = "reinstall", page_sign[0], ""
+            if verdict == "live":
+                # an answer or a policy block refused on a live session; a login page a
+                # restore or a load shows is that state's own page
+                if kind != "page":
+                    self._bump("authorization_denials")
+                self._window_tags = set()
+                return page, None
+            if why:
+                reason = f"{reason}; {why}"
+        with shared.auth_lock:
+            if verdict in ("lost", "stale", "unknown"):
+                self._note_gone()
+            if verdict == "lost":
+                self._bump("session_lost")
+            self._mark_window(verdict, reason)
+            page = self._recover_session(page, verdict, reason)
+        return page, (verdict, reason)
+
+    def _mark_window(self, verdict: str, reason: str, *, empty_too: bool = True) -> list:
+        """Mark the action ids this context's requests went out under since its last
+        clean checkpoint (D'): `session_lost_actions` and one ``session`` line. With
+        ``empty_too`` false an empty window writes nothing."""
+        window = sorted(t for t in self._window_tags if t)
+        self._window_tags = set()
+        if not window and not empty_too:
+            return window
+        with self._shared.lock:
+            self.report.session_lost_actions.extend(window)
+        self._log_session_event(verdict, reason, window)
+        logging.warning("disco: the session was %s (%s); %d action id(s) marked",
+                        verdict, reason, len(window))
+        return window
+
+    def _loss_signs(self, page, *, asked: str | None, places, login_shown: bool,
+                    before_url: str | None):
+        """The signs since the last checkpoint that the context's session may be lost:
+        ``(primary, page_sign)``. ``primary`` is the one the check decides, ``(kind,
+        reason, url)``: ``answer`` (SP-56 classes an answer a credentialed auth
+        failure), else ``page`` (`_page_sign`), else ``policy`` (a credentialed policy
+        block: only a protected check tells it from a denial), or None. ``page_sign``
+        is the page's own, ``(reason, url, strong)``, read whatever the answers were
+        (BUG-0552 review R2). Reasons name a class and a status, never a URL."""
+        auth = self._shared.auth
+        answers, self._answers = self._answers, []
+        if auth is None:
+            return None, None
+        answer = policy = None
+        for req in answers:
+            got = self._answer_class(req, auth)
+            if got is None:
+                continue
+            cls, why = got
+            if cls == AUTH_FAILURE:
+                answer = ("answer", why, req.url)
+                break
+            if cls == POLICY_BLOCK and policy is None:
+                policy = ("policy", why, req.url)
+        page_sign = self._page_sign(page, auth, asked=asked, places=places,
+                                    login_shown=login_shown, before_url=before_url)
+        shown = ("page", page_sign[0], page_sign[1]) if page_sign else None
+        return answer or shown or policy, page_sign
+
+    def _page_sign(self, page, auth: _SessionMaterial, *, asked: str | None, places,
+                   login_shown: bool, before_url: str | None):
+        """A page that *became* a login page: ``(reason, url, strong)`` or None. Never
+        one the step asked for. At a login URL (unless the page before the action was
+        one); else, unless the page already showed a password form: this session's
+        login form (SP-16, when the provider knows it), or, with none known, any
+        password form -- *strong* in place (at the URL before the action, of the state
+        restored or of the start page: pages known without one; BUG-0552 review R1),
+        *weak* elsewhere (a harvest load, a navigation: nothing was seen there before),
+        and a weak one only where a protected check decides it (`_checkable`)."""
+        url = page.url
+        if asked and looks_like_login_url(asked):
+            return None
+        before_login = bool(before_url and looks_like_login_url(before_url))
+        if looks_like_login_url(url):
+            return None if before_login else ("the page is at a login URL", url, True)
+        if login_shown or before_login:
+            return None
+        if auth.login_url is not None:
+            return ("a login form is shown in place", url, True) \
+                if self._shows_login(page) else None
+        in_place = any(p and _same_place(url, p) for p in (before_url, *places))
+        if not in_place and not self._checkable():
+            return None
+        if not self._shows_login(page):
+            return None
+        return ("a login form is shown in place", url, True) if in_place else \
+            ("a password form is shown", url, False)
+
+    def _checkable(self) -> bool:
+        """Whether a suspicion here is decided by a protected check: the session
+        provider's (SP-61), or, without one, the run's protected resource."""
+        return self.session is not None or self._shared.protected is not None
+
+    def _answer_class(self, req, auth: _SessionMaterial) -> tuple[str, str] | None:
+        """SP-56's class of one answer the context got on the session's origins, with
+        SP-16's facts (a credential submission, a redirect to a login page), or None
+        for a request off the session's origins or one whose answer cannot be read."""
+        url = req.url
+        if auth.scope is not None and not auth.scope(url):
+            return None
+        try:
+            resp = req.response()
+            if resp is None:
+                return None
+            status, headers, resp_url = resp.status, dict(resp.headers or {}), resp.url
+            body = req.post_data_buffer
+            ctype = (req.headers or {}).get("content-type")
+        except _pw_error():  # the context went away under the read
+            return None
+        facts = login_facts(url, headers, response_url=resp_url, login_url=auth.login_url,
+                            entry_names=request_entry_names(url, body, ctype))
+        sent = {"complete": True, "credential_submission": facts.credential_submission,
+                "redirect_to_login": facts.redirect_to_login}
+        cls, why = response_class(status, headers, credentialed=True, **sent)
+        if cls == AUTH_FAILURE and \
+                response_class(status, headers, credentialed=False, **sent)[0] == AUTH_FAILURE:
+            return None    # an intermediary's demand (a 407): no answer about this session
+        return cls, why
+
+    def _shows_login(self, page) -> bool:
+        """Whether the page shows this session's login form (SP-16's
+        `shows_login_form`: its login page and fields when the provider knows them,
+        else any password form)."""
+        auth = self._shared.auth
+        try:
+            html = page.content()
+        except _pw_error():  # the page moved on under the read
+            return False
+        return shows_login_form(html, page.url, auth.login_url if auth else None,
+                                auth.login_fields if auth else None)
+
+    def _confirm_loss(self, kind: str, url: str) -> tuple[str, str]:
+        """SP-61's verdict on a suspicion, for the generation the context carries:
+        ``("live" | "lost" | "stale" | "unknown", why)``. With a provider, its
+        `check_health`. Without one, the run's protected resource
+        (`_find_protected_resource`) fetched with this context's cookies and judged by
+        SP-61's `health_verdict` (BUG-0552 review R3); with none, a loss shape is an
+        unconfirmed loss and a policy block never is one (PA-0533(1)). Live, an answer
+        or a policy block was an authorization denial (`_session_checkpoint` makes a
+        login page after an action on a provider's live session a ``reinstall``)."""
+        from fuzzlab.session.manager import LIVE, LOST, STALE, SessionAuthError
+        if self.session is None:
+            if self._shared.protected is None:
+                return ("live", "") if kind == "policy" else \
+                    ("lost", "unconfirmed: no protected check without a session provider")
+            health = self._context_check()
+        else:
+            sess = self.session
+            try:
+                health, _moved = sess.manager.check_health(
+                    urlsplit(sess.base_url).hostname or "", sess.identity, sess.base_url,
+                    generation=self._ctx_generation, signal_url=url,
+                    policy=kind == "policy", pause=False)
+            except SessionAuthError as exc:
+                return "unknown", \
+                    f"the protected check could not run ({type(exc).__name__})"
+        if health.state == LIVE:
+            return "live", ""
+        if health.state in (LOST, STALE):
+            return ("lost" if health.state == LOST else "stale"), health.reason
+        return "unknown", f"{health.state}: {health.reason}"
+
+    # --- a protected check without a session provider (BUG-0552 review R3) -------------
+    def _protected_get(self, url: str, storage_state: dict | None):
+        """SP-61's verdict (`session.manager.health_verdict`) on one GET of ``url``:
+        with ``storage_state`` (a context's cookies and storage) or with no credential
+        at all (an empty ``Cookie``), from a request context of its own -- sent straight
+        to the target, never through the capture proxy, so it is never recorded as the
+        identity's exploration -- following no redirect (a login redirect is judged as
+        one). The scope and destructive gates sit here, at the send (PA-0083(1)): disco's
+        second send path of its own, beside the contract runner's. A failure to get an
+        answer is INCONCLUSIVE; TLS is verified."""
+        from fuzzlab.core.urls import check_send_url
+        from fuzzlab.session.manager import INCONCLUSIVE, Health, health_verdict
+        from fuzzlab.session.state import SessionState
+        navguard.checked_api_request(self._in_scope, url)
+        check_send_url(url, method="GET")
+        api = self._pw.request.new_context(storage_state=storage_state) \
+            if storage_state is not None else self._pw.request.new_context()
+        try:
+            resp = api.fetch(url, method="GET", max_redirects=0,
+                             timeout=self.opts.nav_timeout_ms,
+                             headers=None if storage_state is not None else {"cookie": ""})
+            status, headers, body = resp.status, dict(resp.headers or {}), resp.text()
+        except (_pw_error(), UnicodeDecodeError) as exc:
+            return Health(INCONCLUSIVE, f"no response ({type(exc).__name__})", 0)
+        finally:
+            try:
+                api.dispose()
+            except _pw_error():  # gone with its Playwright instance
+                pass
+        state = SessionState(urlsplit(url).hostname or "", "explore", kind="cookie",
+                             generation=0)
+        return health_verdict(state, status, headers, body, url, refusal=False)
+
+    def _context_check(self, url: str | None = None):
+        """The run's protected resource (or ``url``) fetched with this context's own
+        cookies and storage: is the session the context carries live?"""
+        from fuzzlab.session.manager import INCONCLUSIVE, Health
+        try:
+            storage = self._ctx.storage_state()
+        except _pw_error() as exc:  # the context went away under the read
+            return Health(INCONCLUSIVE, f"no context ({type(exc).__name__})", 0)
+        return self._protected_get(url or self._shared.protected, storage)
+
+    def _find_protected_resource(self, page) -> None:
+        """A storage-state run's protected resource (BUG-0552 review R3): the start
+        page's URL, kept only when SP-61's verdict reads a GET of it with this context's
+        cookies as live and one with no credential as refused (a login redirect, a 401,
+        a login form). Its suspicions are then decided by a GET of it with the suspected
+        context's cookies (`_context_check`); without one a loss shape stays an
+        unconfirmed loss (PA-0533(1))."""
+        from fuzzlab.session.manager import LIVE, LOST
+        url = urldefrag(page.url)[0]
+        if not self._in_scope(url) or destructive_reason(url) or looks_like_login_url(url):
+            return
+        if self._context_check(url).state != LIVE:
+            return
+        if self._protected_get(url, None).state != LOST:
+            return
+        with self._shared.lock:
+            self._shared.protected = url
+
+    def _recover_session(self, page, verdict: str, reason: str):
+        """After a known-lost window: adopt a newer generation another worker installed,
+        else (single flight, `auth_lock`) take a fresh session from the provider --
+        revalidated by its own protected check -- or re-give the context the live
+        session it lost (``reinstall``), at most ``max_session_recoveries`` times a run;
+        then replace the context (`_replace_context`). A loss nothing resolves -- no
+        provider, an unknown health, no fresh session, the cap -- ends authenticated
+        exploration (`_end_authenticated`). Returns the page to go on with."""
+        from fuzzlab.session.manager import SessionAuthError
+        shared = self._shared
+        with shared.auth_lock:
+            if shared.stop is not None:
+                return page
+            current = shared.auth
+            if current is None or current.generation == self._ctx_generation:
+                if verdict == "unknown":
+                    return self._end_authenticated(
+                        page, f"the session's health could not be decided ({reason})")
+                if self.session is None:
+                    return self._end_authenticated(
+                        page, f"the session was lost ({reason}) and no session provider "
+                              f"is configured to refresh it")
+                if shared.recoveries >= self.opts.max_session_recoveries:
+                    return self._end_authenticated(
+                        page, f"the session was lost again ({reason}) after "
+                              f"{shared.recoveries} fresh session(s), the most a run takes")
+                shared.recoveries += 1
+                if verdict == "reinstall":
+                    self._bump("session_reinstalled")
+                else:
+                    try:
+                        fresh = self._provider_session(revalidate=True,
+                                                       lost=self._ctx_generation)
+                    except (SessionUnavailable, SessionAuthError) as exc:
+                        why = str(exc) if isinstance(exc, SessionUnavailable) else \
+                            type(exc).__name__
+                        return self._end_authenticated(
+                            page, f"no fresh session after a loss ({reason}): {why}")
+                    shared.auth = fresh
+                    self._bump("session_recovered")
+        return self._replace_context(page, verdict, reason)
+
+    def _replace_context(self, page, verdict: str | None = None, reason: str = ""):
+        """Replace this worker's context with one carrying the run's current session:
+        the old one released (its pages frozen, drained and closed through the guard, a
+        refusing route left; SP-38) and **closed** before the new one is made, so
+        repeated losses never leave a context open (BUG-0552). The action ids the old
+        context sent after its window was marked are marked with the same ``verdict``
+        (B1); the rest of what it was tracking goes with it. Returns the new context's
+        page."""
+        old = self._ctx
+        if old is not None:
+            navguard.release(old)
+            try:
+                old.close()
+            except _pw_error():  # closed already, with its browser
+                pass
+        if verdict is not None:
+            self._mark_window(verdict, reason, empty_too=False)
+        self._answers, self._responses, self._window_tags = [], [], set()
+        self._net = Inflight(clock=self.clock)
+        self._ctx = self._new_context(self._browser, self._pw)
+        self._generation += 1             # the slot only without a session generation
+        return self._ctx.new_page()
+
+    def _mark_leftover(self) -> None:
+        """At a worker's end, its context released: the action ids it sent after its
+        last checkpoint on a session that is gone are marked (B1)."""
+        if self._window_tags and self._generation_gone():
+            self._mark_window("stale", self._gone_reason(), empty_too=False)
+
+    def _end_authenticated(self, page, reason: str):
+        """End the run's authenticated exploration, saying why (``auth_ended``): the
+        run explores as one identity, so nothing more is explored -- an anonymous
+        continuation would be recorded under the identity's profile. Returns ``page``."""
+        shared = self._shared
+        with shared.lock:
+            if self.report.auth_ended is None:
+                self.report.auth_ended = reason
+            shared.stop = shared.stop or "session-lost"
+            shared.lock.notify_all()
+        logging.warning("disco: authenticated exploration ended: %s", reason)
+        return page
+
+    def _log_session_event(self, verdict: str, reason: str, window: list[str]) -> None:
+        """One ``session`` line in ``actions.jsonl``: the verdict, its reason, the
+        generation the context carried and the action ids whose answers fell in the
+        known-lost window. It has no ``seq`` (not an action): the action-log readers
+        pass over it."""
+        if self.actions_log is None:
+            return
+        rec = {"kind": "session", "session": verdict, "reason": reason,
+               "generation": self._ctx_generation, "action_ids": window}
+        with self._shared.lock, open(self.actions_log, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(rec, sort_keys=True) + "\n")
+
+    def _lost_action(self, state: "State", el: dict, step: "Step", outcome) -> None:
+        """An action whose answers fell in a known-lost window: denied for the rest of
+        the run unless the window was stale (it may have ended the session itself), and
+        logged with no new state and no URL (nothing it showed is the state's)."""
+        verdict, _reason = outcome
+        if verdict != "stale":
+            with self._shared.lock:
+                self._shared.denied.add(step.key())
+        self._log_action(self._action_seq, state, el, step, None)
+
+    def _lost_window(self, key: tuple, state: "State", el: dict, step: "Step",
+                     outcome) -> None:
+        """An action whose answers fell in a known-lost window (FR-CRAWL-41): denied
+        unless the window was stale and logged with no new state (`_lost_action`); its
+        work item finished, its effect a lost session (FR-CRAWL-32). The context it ran
+        in was replaced (`_replace_context`: another generation, FR-CRAWL-31) or the
+        authenticated exploration ended."""
+        self._lost_action(state, el, step, outcome)
+        self._finish(key, SUCCEEDED)
+
+    def _reopen_trial(self, sig: str) -> None:
+        """A delegated trial observed in a known-lost window decides nothing (D'): the
+        candidate is untried again, its trial and its inert count taken back."""
+        with self._shared.lock:
+            if self._shared.trials.reopen(sig):
+                self.report.delegated_trials -= 1
+                self.report.delegated_inert -= 1
+
+    def _restore_checked(self, page, state: "State"):
+        """In an authenticated run: never on a session that is gone (`_session_current`
+        first, B1), then `_restore_any` and a session checkpoint -- a password form now
+        shown at the state's URL, by a state found without one, is in place (R1); a
+        restore that ran on a lost session is tried once more on the recovered one.
+        Returns ``(page, restored)``."""
+        if not self._authenticated():
+            return page, self._restore_any(page, self._ctx, state)
+        page = self._session_current(page)
+        if self._shared.stop is not None:
+            return page, False
+        check = {"asked": state.url, "places": (state.url, state.entry_url),
+                 "login_shown": state.login_shown}
+        restored = self._restore_any(page, self._ctx, state)
+        page, lost = self._session_checkpoint(page, **check)
+        if lost is None:
+            return page, restored
+        if self._shared.stop is not None:
+            return page, False
+        restored = self._restore_any(page, self._ctx, state)
+        page, lost = self._session_checkpoint(page, **check)
+        if lost is not None:
+            self._restore_failure = "session-lost"
+        return page, restored and lost is None and self._shared.stop is None
+
+    def _seed_session(self, page):
+        """The start page on a live session: a checkpoint after its load -- the run's
+        first look, so a password form wherever it landed is in place (R1); on a loss
+        the page is loaded once more on the recovered session. None when it stays lost
+        or the authenticated exploration ended."""
+        page, lost = self._session_checkpoint(page, asked=self.start_url,
+                                              places=(self.start_url, page.url))
+        if lost is None:
+            return page
+        if self._shared.stop is not None:
+            return None
+        self._tag(self._ctx, "nav")
+        navguard.navigate(page, self.start_url, timeout_ms=self.opts.nav_timeout_ms,
+                          wait_until="load")
+        self.mark_activity()
+        self.wait_quiet(page)
+        page, lost = self._session_checkpoint(page, asked=self.start_url,
+                                              places=(self.start_url, page.url))
+        return page if lost is None and self._shared.stop is None else None
+
     def mark_activity(self) -> None:
         """An action (a click, a navigation) is activity itself: its requests reach the
         ``request`` event only after the handler runs (a debounce, a timer, a promise),
@@ -966,68 +1531,80 @@ class Explorer:
 
     # --- page reading ----------------------------------------------------------------
     def enumerate(self, page, ctx) -> list[dict]:
-        """The page's actionable elements, each marked ``data-disco-id``."""
-        els = page.evaluate(_ENUMERATE_JS, [MAX_ELEMENTS, MAX_CDP_CANDIDATES])
-        els += self._listener_elements(page, ctx)
+        """The page's actionable elements across its composed tree (`_read`)."""
+        return self._read(page, ctx).elements
+
+    def _read(self, page, ctx) -> compose.PageRead:
+        """The page's composed read (`compose.read_page`, FR-CRAWL-39): its actionable
+        elements, each marked ``data-disco-id`` in its own document and carrying
+        ``frame`` (the frame-marker keys `_locate` follows) and ``sel`` (its workflow
+        marker, FR-CRAWL-31), and its documents' page-level markers (``marks``). A
+        delegated candidate already found inert, or never tried once the run's trials
+        are spent, is described ``disabled``: kept, so the read stays a function of the
+        page, never acted on (FR-CRAWL-40). What the read could not reach is counted in
+        the report."""
+        read = compose.read_page(page, ctx, self._in_scope,
+                                 max_delegated=compose.MAX_DELEGATED,
+                                 censused=self._shared.censused)
+        els = read.elements
         counts: dict[str, int] = {}
         for el in els:
             el["signature"] = element_signature(el)
             el["occurrence"] = counts.get(el["signature"], 0)
             counts[el["signature"]] = el["occurrence"] + 1
-        return els
+        self._mark_delegated(els)
+        self._note_coverage(page.url, read)
+        return read
 
     @staticmethod
     def _find(els: list[dict], step: Step) -> dict | None:
         return next((e for e in els if e["signature"] == step.signature
                      and e["occurrence"] == step.occurrence), None)
 
-    def _listener_elements(self, page, ctx) -> list[dict]:
-        """Candidates with a JS action listener, asked of Chrome DevTools."""
-        try:
-            cdp = ctx.new_cdp_session(page)
-        except _pw_error():  # a browser without CDP: the other two ways only
-            return []
-        try:
-            arr = cdp.send("Runtime.evaluate", {"expression": f"({_CANDIDATES_JS})()"})
-            obj = arr.get("result", {}).get("objectId")
-            if not obj:
-                return []
-            props = cdp.send("Runtime.getProperties", {"objectId": obj, "ownProperties": True})
-            hits = []
-            for prop in props.get("result", []):
-                el_id = (prop.get("value") or {}).get("objectId")
-                if not el_id or not prop.get("name", "").isdigit():
+    def _mark_delegated(self, els: list[dict]) -> None:
+        """Describe ``disabled`` each delegated candidate the run will not act on: found
+        inert, or still untried once `compose.Trials` is spent (counted unexplored)."""
+        shared = self._shared
+        with shared.lock:
+            trials = shared.trials
+            for el in els:
+                if el.get("how") != "delegated":
                     continue
-                found = cdp.send("DOMDebugger.getEventListeners", {"objectId": el_id})
-                types = sorted({ln.get("type") for ln in found.get("listeners", [])
-                                if ln.get("type") in ACTION_LISTENERS})
-                if types:
-                    hits.append((int(prop["name"]), types))
-            if not hits:
-                return []
-            hits.sort()          # document order: CDP lists properties in no stated order
-            handles = page.locator("[data-disco-cand]")
-            chosen = [handles.nth(i) for i, _ in hits]
-            marked = page.evaluate(_MARK_JS, [h.element_handle() for h in chosen])
-            for desc, (_, types) in zip(marked, hits):
-                desc["listeners"] = types
-            return marked
-        finally:
-            try:
-                cdp.detach()
-            except _pw_error():  # the page may have gone already
-                pass
+                verdict = trials.verdict(el["signature"])
+                if verdict == "inert":
+                    el["disabled"] = True
+                elif verdict is None and trials.spent():
+                    el["disabled"] = True
+                    trials.unexplored.add(el["signature"])
+            self.report.delegated_unexplored = len(trials.unexplored)
+
+    def _note_coverage(self, url: str, read: compose.PageRead) -> None:
+        """Add a read's notes to the report, live (`compose.Coverage`: per route, a page
+        read again adds nothing)."""
+        with self._shared.lock:
+            for kind, n in self._shared.coverage.add(normalise_route(url), read).items():
+                if kind.startswith("budget."):
+                    bound = kind.split(".", 1)[1]
+                    self.report.budget_limited[bound] = \
+                        self.report.budget_limited.get(bound, 0) + n
+                else:
+                    setattr(self.report, kind, getattr(self.report, kind) + n)
 
     def fingerprint(self, page, ctx) -> Reading:
-        els = self.enumerate(page, ctx)
-        marks = page.evaluate(_MARKS_JS)
-        return self.reading(page.url, els, marks)
+        """The page read once (`_read`: its elements and page markers, one snapshot) as
+        its two keys (`reading`)."""
+        read = self._read(page, ctx)
+        return self.reading(page.url, read.elements, read.marks)
 
     def reading(self, url: str, els: list[dict], marks=()) -> Reading:
         """The two keys of a page (`fingerprint` module doc) from its read elements and
         page-level markers, in this worker's session generation."""
         markers = workflow_markers(els, marks)
-        return Reading(key=execution_key(url, els, markers, self._generation),
+        # the session the context carries, run-wide (a reinstall keeps it; a worker that
+        # adopts a fresh one reads under its generation); else this worker's rebuilds
+        generation = self._ctx_generation if self._ctx_generation is not None \
+            else self._generation
+        return Reading(key=execution_key(url, els, markers, generation),
                        structure=state_fingerprint(url, els), url=url, els=els,
                        counts=element_multiset(els), markers=markers)
 
@@ -1042,12 +1619,20 @@ class Explorer:
         return None
 
     # --- acting ----------------------------------------------------------------------
+    @staticmethod
+    def _scope(page, el: dict):
+        """What locates ``el`` and its form's controls: the page, or the frame locators
+        down to its frame (`compose.frame_scope`). A selector pierces open shadow roots
+        by itself."""
+        return compose.frame_scope(page, el.get("frame"))
+
     def _locate(self, page, el: dict):
-        return page.locator(f'[data-disco-id="{el["disco_id"]}"]').first
+        return self._scope(page, el).locator(f'[data-disco-id="{el["disco_id"]}"]').first
 
     def _fill(self, page, loc, perturb: tuple[str, str] | None) -> list[dict] | None:
         """Fill the submitter's form valid-first; ``perturb`` = (field, kind) replaces
-        one control's value. Returns the field descriptions, or None when refused."""
+        one control's value. Returns the field descriptions, or None when refused.
+        ``page`` locates the controls: the page, or the submitter's frame (`_scope`)."""
         fields = loc.evaluate(_FIELDS_JS)
         for f in fields:
             target = page.locator(f'[data-disco-field="{f["field"]}"]').first
@@ -1092,8 +1677,11 @@ class Explorer:
 
     def act(self, page, ctx, el: dict, step: Step) -> str:
         """Perform one step on ``el``: `ACTED`, `ACT_REFUSED` (its form changes a
-        credential) or `ACT_FAILED` (not actionable). A Playwright error on the way
+        credential) or `ACT_FAILED` (not actionable); a delegated candidate also
+        `ACT_INERT` or `ACT_UNEXPLORED` (`_act_delegated`). A Playwright error on the way
         propagates (the caller maps it to a failed attempt, FR-CRAWL-32)."""
+        if el.get("how") == "delegated":
+            return self._act_delegated(page, ctx, el, step)
         loc = self._locate(page, el)
         prefix = "nav" if el.get("href") else "act"
         if step.kind != "click":
@@ -1102,7 +1690,7 @@ class Explorer:
                 _, fid, kind = step.kind.split(":", 2)
                 perturb = (fid, kind)
             self._fill_values, self._values_sent = [], False
-            fields = self._fill(page, loc, perturb)
+            fields = self._fill(self._scope(page, el), loc, perturb)
             self._last_fields = fields or []
             # a form-less container has no action: the page's URL stands for it
             reason = form_refusal(self._last_fields,
@@ -1111,11 +1699,17 @@ class Explorer:
                 self._refuse(reason)
                 self._fill_values = []
                 return ACT_REFUSED
-        self._tag(ctx, prefix)
         if step.kind == "enter":
+            self._tag(ctx, prefix)
             loc.press("Enter", timeout=3000)
             self.mark_activity()
             return ACTED
+        return self._click(ctx, loc, prefix)
+
+    def _click(self, ctx, loc, prefix: str) -> str:
+        """Tag the next action and click ``loc``: `ACTED`, or `ACT_FAILED` when it is
+        not actionable at all."""
+        self._tag(ctx, prefix)
         try:
             loc.click(timeout=3000)
         except _pw_error():  # covered or detached: one dispatched click
@@ -1125,6 +1719,96 @@ class Explorer:
                 return ACT_FAILED
         self.mark_activity()
         return ACTED
+
+    def _act_delegated(self, page, ctx, el: dict, step: Step) -> str:
+        """A delegated candidate (FR-CRAWL-40): clicked when already found live; tried
+        once when untried (`_trial`), and kept -- `ACTED`, performed -- only when the
+        click caused a request or changed the state; never acted on once inert
+        (`ACT_INERT`: its work is finished by that verdict) or once the run's trials are
+        spent (`ACT_UNEXPLORED`, counted). A trial that clicked nothing (the candidate
+        gone, or not actionable) and one another worker is running are `ACT_FAILED`: a
+        failed attempt, retried (FR-CRAWL-32), never a verdict."""
+        sig = el["signature"]
+        self._trialled = None
+        with self._shared.lock:
+            claim = self._shared.trials.claim(sig)
+            self.report.delegated_unexplored = len(self._shared.trials.unexplored)
+        if claim == "live":
+            return self._click(ctx, self._locate(page, el), "act")
+        if claim == "inert":
+            return ACT_INERT
+        if claim == "spent":
+            return ACT_UNEXPLORED
+        if claim != "trial":                       # another worker is trying it
+            return ACT_FAILED
+        live = None
+        try:
+            live = self._trial(page, ctx, step)
+        finally:
+            with self._shared.lock:
+                if live is None:                  # nothing was clicked
+                    self._shared.trials.release(sig)
+                else:
+                    self._shared.trials.decide(sig, live)
+                    self._trialled = sig
+                    self.report.delegated_trials += 1
+                    if live:
+                        self.report.delegated_live += 1
+                    else:
+                        self.report.delegated_inert += 1
+        if live is None:
+            return ACT_FAILED
+        return ACTED if live else ACT_INERT
+
+    def _trial(self, page, ctx, step: Step) -> bool | None:
+        """Click a delegated candidate and observe whether the click caused a request,
+        the page's URL changed, a page opened, or the state changed; None when nothing
+        was clicked (the candidate was gone before its click, or no click reached it: a
+        failed attempt, never a verdict, FR-CRAWL-32). The readings are the explorer's
+        own (`settled_fingerprint`), before and after, so "changed the state" means what
+        it means everywhere else in the run: another execution key (FR-CRAWL-31).
+
+        A request counts only when the click caused it (BUG-0551 review B3): a
+        notification poll, a beacon or a keep-alive reaches ``request`` whatever was
+        clicked. Just before the click, a **control window** leaves the page alone for
+        as long as the trial will wait (the same quiet rule, `wait_quiet`, from an
+        action mark). A request is evidence only when its `request_key` is not yet
+        explained on this route (`_Shared.explained`): neither this or an earlier
+        control window there saw it (the page's own traffic), nor did an earlier
+        trial there already count it. Background traffic slower than a control window
+        is therefore counted for at most one candidate per route (measured, BUG-0551
+        review B3)."""
+        seen: set[tuple[str, str]] = set()
+
+        def on_request(req) -> None:
+            seen.add(request_key(req.method, req.url))
+
+        page.on("request", on_request)
+        try:
+            self.mark_activity()                   # the control window: nothing clicked,
+            self.wait_quiet(page)                  # then the read the click acts on
+            before = self.settled_fingerprint(page, ctx)
+            target = self._find(before.els, step) if before else None
+            if target is None:
+                return None
+            url, pages = page.url, len(ctx.pages)
+            control = set(seen)
+            seen.clear()
+            if self._watch is not None:            # the step's requests are its click's:
+                self._watch.clear()                # the control window's are the page's
+            if self._click(ctx, self._locate(page, target), "act") != ACTED:
+                return None                        # no click reached it: not a verdict
+            self.wait_quiet(page)
+            after = self.settled_fingerprint(page, ctx)
+        finally:
+            page.remove_listener("request", on_request)
+        with self._shared.lock:
+            explained = self._shared.explained.setdefault(normalise_route(url), set())
+            explained |= control
+            caused = seen - explained
+            explained |= caused
+        return bool(caused) or page.url != url or len(ctx.pages) != pages \
+            or after is None or after.key != before.key
 
     def _close_popups(self, ctx, page) -> None:
         # frozen and drained through the guard first (BUG-0504, `navguard.close_pages`)
@@ -1340,6 +2024,7 @@ class Explorer:
                     self._work(browser, pw, seed=seed)
                 finally:
                     navguard.release(self._ctx)
+                    self._mark_leftover()
                     browser.close()
         except BaseException as exc:  # handed to run(), never lost
             with shared.lock:
@@ -1388,13 +2073,24 @@ class Explorer:
         self._document_first(nav.response, self.start_url)    # records the start document
         self.mark_activity()
         self.wait_quiet(page)
+        authenticated = self._authenticated()
+        if authenticated:                         # FR-CRAWL-41: seeded on a live session
+            if self.session is None:              # a protected check of its own (R3)
+                self._find_protected_resource(page)
+            page = self._seed_session(page)
+            if page is None:
+                return
+            ctx = self._ctx
         got = self.settled_fingerprint(page, ctx)
         if got is None:
             self._unresolved(State("", self.start_url, self.start_url), "unreadable")
             return
-        root = State.read(got, entry_url=page.url)
+        root = State.read(got, entry_url=page.url,
+                          login_shown=authenticated and self._shows_login(page))
         self._gather(page)           # this document's bodies, before it is left
-        self._first_visit(page, ctx, root, got)
+        page = self._first_visit(page, ctx, root, got)
+        if shared.stop is not None:  # FR-CRAWL-41: the session ended on its reload
+            return
         with shared.lock:
             shared.frontier.push(root)
             shared.known.add(root.fp)
@@ -1408,24 +2104,33 @@ class Explorer:
                     shared.harvest.setdefault(url, None)
         self._gather(page)
 
-    def _first_visit(self, page, ctx, root: State, first: Reading) -> None:
+    def _first_visit(self, page, ctx, root: State, first: Reading):
         """Declare what the start document shows on the first visit only (FR-CRAWL-33):
         a fresh second load of it is read (`restore` with an empty path: about:blank,
         then the URL), and each element the first load held more often than the second
         is declared optional for ``root`` (``first-visit``; run-wide when it is gone
         altogether), each marker it lost too. A one-time welcome dialog (measured on
         Juice Shop, BUG-0501) is declared here, when the state is recorded -- never
-        inferred later from what a restore happened to show."""
+        inferred later from what a restore happened to show. In an authenticated run
+        the second load is session-checked first (FR-CRAWL-41): a load in a known-lost
+        window declares nothing (D'). Returns the page to go on with."""
         self.restore(page, ctx, root)       # its verdict is not the point: the read is
+        if self._authenticated():
+            page, lost = self._session_checkpoint(
+                page, asked=root.url, places=(root.url, root.entry_url),
+                login_shown=root.login_shown)
+            if lost is not None:
+                return page
         again = self.settled_fingerprint(page, ctx)
         if again is None or execution_route(again.url) != execution_route(first.url):
-            return
+            return page
         have = dict(again.counts)
         root.optional = tuple((sig, n - have.get(sig, 0)) for sig, n in first.counts
                               if have.get(sig, 0) < n)
         shown = set(again.markers)
         root.optional_markers = tuple(m for m in first.markers if m not in shown)
         self._declare([sig for sig, _n in root.optional if sig not in have], "first-visit")
+        return page
 
     def _next_state(self) -> "State | str | None":
         """The next state for this worker (marked busy) -- or, once the frontier is
@@ -1492,6 +2197,11 @@ class Explorer:
         gathered; an HTML document not seen before becomes a frontier state (explored
         like any other, outside ``max_states``). Returns the page to go on with."""
         shared = self._shared
+        authenticated = self._authenticated()
+        if authenticated:
+            page = self._session_current(page)        # FR-CRAWL-41: never a lost one (B1)
+            if shared.stop is not None:
+                return page
         ctx = self._ctx
         self._tag(ctx, "harvest")
         try:
@@ -1502,6 +2212,10 @@ class Explorer:
             return page
         self.mark_activity()
         self.wait_quiet(page)
+        if authenticated:            # FR-CRAWL-41: nothing read from a lost window
+            page, lost = self._session_checkpoint(page, asked=url)
+            if lost is not None:
+                return page
         resp = nav.response
         media = ((resp.headers or {}).get("content-type", "") if resp else "").lower()
         route = spa_route(url) is not None
@@ -1517,7 +2231,8 @@ class Explorer:
                     self.report.harvest_aliases += 1     # the same app: not a new state
                 return page
             if got is not None:
-                state = State.read(got, entry_url=page.url)
+                state = State.read(got, entry_url=page.url,
+                                   login_shown=authenticated and self._shows_login(page))
                 with shared.lock:
                     if got.key not in shared.known:
                         if shared.frontier.push(state):
@@ -1667,10 +2382,14 @@ class Explorer:
                 return
 
     def _process(self, state: State, page, browser, pw):
-        """Explore one frontier state: restore it, then its pending steps
-        (`_explore_here`). A state that cannot be restored is unresolved (FR-CRAWL-33).
-        Returns the page to go on with (a lost session rebuilds the context)."""
-        if not self._restore_any(page, self._ctx, state):
+        """Explore one frontier state: restore it on a current session
+        (`_restore_checked`, FR-CRAWL-41), then its pending steps (`_explore_here`). A state
+        that cannot be restored is unresolved (FR-CRAWL-33). Returns the page to go on with
+        (a lost session replaces the context)."""
+        page, restored = self._restore_checked(page, state)
+        if self._shared.stop is not None:
+            return page
+        if not restored:
             self._unresolved(state, self._restore_failure or "restore")
             return page
         return self._explore_here(state, page, browser, pw, depth=0)
@@ -1693,15 +2412,18 @@ class Explorer:
 
     def _explore_here(self, state: State, page, browser, pw, *, depth: int):
         """Take ``state``'s pending steps; the page is in ``state`` now. Between two
-        steps the state is restored when the first changed the page. Returns the page
-        to go on with."""
+        steps the state is restored when the first changed the page, and never acted on
+        on a session that is gone (FR-CRAWL-41: `_bring_to`). Returns the page to go on
+        with (a lost session replaces the context)."""
         shared = self._shared
-        authenticated = self.storage_state is not None and \
-            not looks_like_login_url(self.start_url)
-        got = self._bring_to(state, page, restore=False)
+        authenticated = self._authenticated()
+        page, got = self._bring_to(state, page, restore=False)
+        if got is None and shared.stop is not None:
+            return page
         if got is None:
             self._unresolved(state, self._restore_failure or "unreadable")
             return page
+        login_shown = authenticated and (state.login_shown or self._shows_login(page))
         self._gather(page)
         route = normalise_route(state.url)
         pending = deque(self._pending(page, state, got.els))
@@ -1733,14 +2455,18 @@ class Explorer:
                 self._refuse(why)
                 self._finish(key, REFUSED)
                 continue
-            ctx = self._ctx
             # the page just before the step, holding the state's contract (restored
-            # when the last step changed it, or when it drifted since: review B2)
-            now = self._bring_to(state, page, restore=dirty)
+            # when the last step changed it, or when it drifted since: review B2), on a
+            # session that is not gone (FR-CRAWL-41, BUG-0552 review B1)
+            page, now = self._bring_to(state, page, restore=dirty)
+            ctx = self._ctx
             if now is None:
                 with shared.lock:
                     shared.work.release(key)
-                    self.report.steps_abandoned += 1 + len(pending)
+                    if shared.stop is None:
+                        self.report.steps_abandoned += 1 + len(pending)
+                if shared.stop is not None:
+                    return page
                 self._unresolved(state, self._restore_failure or "restore")
                 break
             dirty = False
@@ -1757,6 +2483,23 @@ class Explorer:
                 self._watch = None
                 if outcome == ACT_REFUSED:
                     self._finish(key, REFUSED)
+                elif outcome == ACT_INERT:      # a trial's verdict (FR-CRAWL-40): its
+                    trialled, self._trialled = self._trialled, None   # click changed
+                    if authenticated and trialled is not None:        # nothing
+                        page, lost = self._session_checkpoint(
+                            page, login_shown=login_shown, before_url=before_url,
+                            action=True)
+                        if lost is not None:    # observed in a known-lost window: no
+                            self._reopen_trial(trialled)    # verdict (D', FR-CRAWL-41)
+                            self._lost_window(key, state, el, step, lost)
+                            if shared.stop is not None:
+                                return page
+                            dirty = True
+                            continue
+                    self._finish(key, INERT)    # never logged
+                elif outcome == ACT_UNEXPLORED:     # the run's trials are spent: counted
+                    with shared.lock:               # (delegated_unexplored), not done
+                        shared.work.release(key)
                 else:
                     self._attempt_failed(key, el_desc, step, pending)
                     dirty = True
@@ -1776,18 +2519,16 @@ class Explorer:
                     self._bump("captcha_submissions")
             self._fill_values = []
             self._close_popups(self._ctx, page)
-            if authenticated and looks_like_login_url(page.url):
-                with shared.lock:
-                    shared.work.finish(key, SUCCEEDED)    # its effect: a lost session
-                    self.report.session_lost += 1
-                    shared.denied.add(step.key())
-                navguard.release(self._ctx)
-                self._ctx = self._new_context(browser, pw)
-                self._generation += 1             # FR-CRAWL-31's session generation
-                page = self._ctx.new_page()
-                dirty = True
-                self._log_action(self._action_seq, state, el, step, None)
-                continue
+            if authenticated:          # FR-CRAWL-41 (BUG-0552): was the session lost?
+                page, lost = self._session_checkpoint(
+                    page, asked=el.get("href") or None, login_shown=login_shown,
+                    before_url=before_url, action=True)
+                if lost is not None:
+                    self._lost_window(key, state, el, step, lost)
+                    if shared.stop is not None:
+                        return page
+                    dirty = True
+                    continue
             after = self.settled_fingerprint(page, self._ctx)
             if after is None:                 # its effect could not be read (review B3)
                 dirty = True
@@ -1806,13 +2547,16 @@ class Explorer:
             self._gather(page)
             self._log_action(self._action_seq, state, el, step, after.key, url=page.url)
             after_url = page.url
+            # read before a dismissal's check reloads the page (FR-CRAWL-41)
+            shown = authenticated and after.key != now.key and self._shows_login(page)
             # a dismissal's check reloads the entry document; it runs only for a safe
             # step from a state with no path, whose child is queued, never in place
             if self._dismissal(state, now, after, step, before_url, page):
                 dirty = True
             if after.key != now.key:          # the step changed the page it acted on
                 dirty = True
-                new = self._child(state, step, now, after, before_url, after_url)
+                new = self._child(state, step, now, after, before_url, after_url,
+                                  login_shown=shown)
                 live = not step.safe or not new.replayable()
                 page = self._admit(new, page, browser, pw, live=live, depth=depth)
         return page
@@ -1835,29 +2579,47 @@ class Explorer:
         if retry:
             pending.append((el_desc, step))
 
-    def _bring_to(self, state: State, page, *, restore: bool) -> Reading | None:
-        """The page read as ``state``, or None (``_restore_failure`` says why). Restored
-        first when ``restore``, or when the page no longer holds the state's contract (a
-        late render, a server that moved on): a step is taken, and logged under the
-        state's key, only on a page the contract accepted (review B2). The reading is
-        then that state (`_seen_as`)."""
-        ctx = self._ctx
-        if not restore:
-            got = self.settled_fingerprint(page, ctx)
-            if got is not None and (got.key == state.fp or self.reproduces(state, got)):
-                self._seen_as(state, got)
-                return got
-        if not self._restore_any(page, ctx, state):
-            return None
-        got = self.settled_fingerprint(page, ctx)
-        if got is None:
-            self._restore_failure = "unreadable"
-            return None
-        if got.key != state.fp and not self.reproduces(state, got):
-            self._restore_failure = self._mismatch or "contract"
-            return None
-        self._seen_as(state, got)
-        return got
+    def _bring_to(self, state: State, page, *, restore: bool):
+        """``(page, reading)``: the page to go on with, read as ``state`` -- or a None
+        reading (``_restore_failure`` says why). Restored first when ``restore``, or when
+        the page no longer holds the state's contract (a late render, a server that moved
+        on): a step is taken, and logged under the state's key, only on a page the
+        contract accepted (review B2). The reading is then that state (`_seen_as`).
+
+        In an authenticated run (FR-CRAWL-41, BUG-0552 review B1) never on a session
+        that is gone: a restore goes through `_restore_checked` (the session adopted
+        first, then checked), and the session is checked again after the read -- a
+        loss another worker found meanwhile means one more restore on the adopted
+        session; a second one leaves the state (``session-lost``)."""
+        authenticated = self._authenticated()
+        for _attempt in range(2):
+            if authenticated and self._generation_gone():
+                restore = True                 # `_restore_checked` adopts the session first
+            if not restore:
+                got = self.settled_fingerprint(page, self._ctx)
+                if got is not None and (got.key == state.fp or self.reproduces(state, got)):
+                    if not (authenticated and self._generation_gone()):
+                        self._seen_as(state, got)
+                        return page, got
+                    restore = True
+                    continue
+            page, restored = self._restore_checked(page, state)
+            if not restored:
+                return page, None
+            got = self.settled_fingerprint(page, self._ctx)
+            if got is None:
+                self._restore_failure = "unreadable"
+                return page, None
+            if got.key != state.fp and not self.reproduces(state, got):
+                self._restore_failure = self._mismatch or "contract"
+                return page, None
+            if authenticated and self._generation_gone():
+                restore = True
+                continue
+            self._seen_as(state, got)
+            return page, got
+        self._restore_failure = "session-lost"
+        return page, None
 
     def _seen_as(self, state: State, got: Reading) -> None:
         """``got`` is ``state`` as the page shows it now: the state itself, or a page its
@@ -1903,7 +2665,13 @@ class Explorer:
         if step.signature not in gone or any(sig not in recorded for sig in gone):
             return False
         self.restore(page, self._ctx, state)    # a fresh entry document; its verdict
-        again = self.settled_fingerprint(page, self._ctx)   # is not the point: the read
+        if self._authenticated():               # is not the point: the read; never one
+            _page, lost = self._session_checkpoint(     # in a known-lost window (D',
+                page, asked=state.entry_url, places=(state.entry_url,),   # FR-CRAWL-41;
+                login_shown=state.login_shown)  # a replaced page is the caller's
+            if lost is not None:                # restore's, `_session_current`)
+                return True
+        again = self.settled_fingerprint(page, self._ctx)
         if again is not None and \
                 execution_route(again.url) == execution_route(state.entry_url) and \
                 not any(sig in dict(again.counts) for sig in gone):
@@ -1911,19 +2679,22 @@ class Explorer:
         return True
 
     def _child(self, state: State, step: Step, before: Reading, after: Reading,
-               before_url: str, after_url: str) -> State:
+               before_url: str, after_url: str, *, login_shown: bool = False) -> State:
         """The state ``step`` led to from ``state``: by its own URL when the step
         navigated (its path the fallback: a page only a POST shows), else by
         ``state``'s path plus ``step``. ``added``: what the step added (more often
-        than on the page before it), which no run-wide declaration excuses."""
+        than on the page before it), which no run-wide declaration excuses.
+        ``login_shown``: the page showed a password form (FR-CRAWL-41)."""
         path = [*state.path, step]
         had = dict(before.counts)
         added = tuple(sig for sig, n in after.counts if n > had.get(sig, 0))
         if after_url != before_url:
-            return State.read(after, entry_url=after_url,
+            return State.read(after, entry_url=after_url, login_shown=login_shown,
                               fallback=State.read(after, entry_url=state.entry_url,
-                                                  path=path, added=added))
-        return State.read(after, entry_url=state.entry_url, path=path, added=added)
+                                                  path=path, added=added,
+                                                  login_shown=login_shown))
+        return State.read(after, entry_url=state.entry_url, path=path, added=added,
+                          login_shown=login_shown)
 
     def _admit(self, new: State, page, browser, pw, *, live: bool, depth: int):
         """A state a step led to: known (nothing), over a budget or its route's bound

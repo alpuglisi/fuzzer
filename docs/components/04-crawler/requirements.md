@@ -27,7 +27,8 @@ fuzzer.
 - **FR-CRAWL-5** Crawl per identity, using the session manager; detect logout and
   re-authenticate. The login is discovered from the start URL itself, path and all,
   never its bare origin; injected cookies are scoped to the origin root (CC-CRAWL-0012,
-  BUG-0113).
+  BUG-0113). Every engine carries the identity or refuses: the static engine too
+  (FR-CRAWL-34, CC-CRAWL-0056).
 - **FR-CRAWL-6** Respect a crawl budget and deadline via the shared budget
   manager; never overlap headless work with timing-sensitive fuzzing.
 - **FR-CRAWL-7** Link-following scope is the **start URL's own host** (loopback
@@ -669,6 +670,11 @@ fuzzer.
     form-less container has no action). The structural key schedules and folds only. At
     most `max_same_signature` (2) elements of one signature per state are acted on
     (`same_signature_capped` counts the rest).
+    *(CC-CRAWL-0059, review round 1; at the merge with CC-CRAWL-0055.)* A delegated
+    candidate (FR-CRAWL-40) is never part of a state's identity: neither key, a state's
+    recorded contract nor any restore check reads it -- its membership or its flags
+    (`fingerprint.counts_for_state`: `state_signatures`, and the execution key's
+    `element_multiset` and `workflow_markers`).
   - *(Superseded by FR-CRAWL-32, CC-CRAWL-0055, BUG-0539; was, CC-CRAWL-0034: each
     (route, element signature, occurrence, action) tried once, and a step on chrome --
     a signature seen on more than one route -- once in the whole run.)*
@@ -685,13 +691,19 @@ fuzzer.
     (FR-CRAWL-33). A fallback path covers a page only a POST shows, when its steps are
     safe to repeat.
   - **Actionable elements:** native controls and ARIA roles; elements with a JS
-    click / pointer / key listener from Chrome DevTools
-    (`DOMDebugger.getEventListeners`, at most 200 candidates per enumeration);
-    `cursor: pointer` as a fallback; re-enumerated after every action. Text-like
-    controls are filled through their form, never clicked alone.
+    click / pointer / key listener from Chrome DevTools (*(amended in place,
+    CC-CRAWL-0059)* the Command Line API's `getEventListeners`, run inside the read, at
+    most 200 candidates per document; was: `DOMDebugger.getEventListeners` per
+    candidate); `cursor: pointer` as a fallback; *(CC-CRAWL-0059)* delegated candidates
+    (FR-CRAWL-40); re-enumerated after every action, *(CC-CRAWL-0059)* across the
+    page's composed tree (FR-CRAWL-39; was: the top document's light tree only).
+    Text-like controls are filled through their form, never clicked alone.
   - *(Amended in place, CC-CRAWL-0032.)* **A form** is a `<form>` or, without one, the
     nearest ancestor (six levels) holding typed inputs; a button there is its submitter,
-    a disabled one included (filling enables it).
+    a disabled one included (filling enables it). *(CC-CRAWL-0059, review round 1.)*
+    When those ancestors end at the top of a shadow tree, the shadow root is the
+    container if it holds a typed control: a form-less widget whose input and button sit
+    directly under its root (no action, as any form-less container).
   - *(CC-CRAWL-0034.)* **Enter:** a text input that is the last typed control of a
     container with no submit control, or the only one of a form-less container (a
     search box among a toolbar's buttons), gets an Enter step: its container filled,
@@ -728,12 +740,14 @@ fuzzer.
     which state is not deterministic, and one worker's submissions change the server
     state the others see.
   - **Authenticated runs** start from a Playwright storage state kept to in-scope
-    origins (`browserlogin.filter_storage_state`); with more than one scope origin the
-    guard's `cookie_scope` keeps the session to the start URL's origin (FR-SESS-20). A
-    landing on a login URL (`session.detect.looks_like_login_url`) is a lost session:
-    the action is denied for the rest of the run and the context rebuilt;
-    *(CC-CRAWL-0055)* the rebuilt context's states are read in the next session
-    generation (FR-CRAWL-31).
+    origins (`browserlogin.filter_storage_state`), *(CC-CRAWL-0060)* or from a session
+    provider (`ExploreSession`, FR-CRAWL-41); with more than one scope origin the
+    guard's `cookie_scope` keeps the session to its origins (FR-SESS-20). *(Superseded
+    in place by FR-CRAWL-41, CC-CRAWL-0060, BUG-0552; was: a landing on a login URL is a
+    lost session, the action is denied and the context rebuilt from the storage
+    state.)* A lost session is FR-CRAWL-41's.
+    *(CC-CRAWL-0055; at the merge with CC-CRAWL-0060)* a replaced context's states are
+    read in the next session generation (FR-CRAWL-31).
   - Each action is logged to `actions.jsonl` (state, route, signature, kind, a 60-char
     label, the new state, *(CC-CRAWL-0036)* the element's occurrence;
     *(CC-CRAWL-0035)* the page URL after it, redacted
@@ -771,8 +785,9 @@ fuzzer.
   default 1) loads and renders N queued pages at once, one browser (or HTTP session)
   per worker. The first worker runs on the calling thread and starts its browser first
   (the session is ensured once; the others adopt it); each other worker starts and
-  stops its own browser on its own thread. A URL is claimed under the crawl lock before
-  it is loaded, so no page is loaded twice. Whatever can write -- reveals, SPA form
+  stops its own browser on its own thread. *(Amended in place, CC-CRAWL-0056.)* A URL's
+  key is reserved when the frontier admits it (FR-CRAWL-35), so no page is queued or
+  loaded twice; one worker runs the same loop. Whatever can write -- reveals, SPA form
   submissions, selector-form enumeration (`_after_fetch`) and every seed or probe load
   (FR-CRAWL-17) -- runs under one crawl-wide lock (`_interact`), one worker at a time,
   so the submission, reveal and probe caps and the write windows keep their one-worker
@@ -819,7 +834,10 @@ fuzzer.
   `ede.json`, with its JSON type and whether its name is sensitive, never its value. A
   finding is a candidate: a field used only after an interaction is reported too. The
   replayed answers never reach the target; the pages and their assets do (hence
-  `--authorized`); an existing `ede.json` is never overwritten.
+  `--authorized`); an existing `ede.json` is never overwritten. *(CC-CRAWL-0060,
+  FR-CRAWL-41, BUG-0552 review B2)* An answer recorded in the run's known-lost window
+  (its action id marked, `disco.capture.lost_action_ids`) is neither replayed nor a page
+  of the run.
 - **FR-CRAWL-26 (dry submission and blocked writes recorded, CC-CRAWL-0045,
   BUG-0506)** In the Playwright engine with SPA routes on and `--submit-spa-forms` not
   given, each eligible form on an SPA route is dry-submitted unless `--no-dry-submit` is
@@ -956,9 +974,16 @@ fuzzer.
       `aria-current`, `aria-checked`; none for a sensitively named control), a named
       hidden input's value (not for a sensitive name, a value over 64 characters or a
       token-like one), and a non-interactive `aria-current` element's position; typed
-      text never;
-    - the session generation of the worker's context (0, plus one per rebuild after a
-      lost session).
+      text never; *(at the merge with CC-CRAWL-0059)* read in the same composed read
+      as the elements (FR-CRAWL-39: across open shadow roots and the frames read);
+    - the session generation of the worker's context: the run-wide generation of the
+      session it carries (FR-CRAWL-41: one for every worker on that session, unchanged
+      by a reinstall of it), or, for a context that carries none, 0 plus one per
+      rebuild *(amended at the crawl batch's merge integration)*.
+  - *(At the merge with CC-CRAWL-0059.)* A delegated candidate (FR-CRAWL-40) is in
+    neither the multiset nor the markers (`fingerprint.counts_for_state`); its
+    `aria-current`, if any, is read as a page-level marker, as it was before it was a
+    candidate.
   - Every visited-state check reads it: the known set, a child state's novelty, a
     harvest document's novelty.
   - **The structural key** (`state_fingerprint`: folded route, set of signatures)
@@ -992,6 +1017,11 @@ fuzzer.
     queued again after a restore, up to `max_action_attempts` (3) attempts, then
     `failed` (`actions_retried`, `actions_failed`). A refusal (the denylist, a
     credential-change form) is `refused`.
+  - *(At the merge with CC-CRAWL-0059.)* **A delegated candidate's work** (FR-CRAWL-40)
+    is `inert` once its trial found it inert (an observed verdict, never a failure). A
+    trial whose click reached nothing, and one another worker is running, is a failed
+    attempt (`retryable`). An item the run's spent trials leave untried stays
+    `pending`, counted `delegated_unexplored`.
   - **Presumed chrome is a scheduling hint.** A step taken in another state is
     scheduled after the state's own steps (`deprioritised`). It is skipped
     (`chrome_skipped`, status `equivalent`) only when its recorded effect -- the
@@ -1075,6 +1105,133 @@ fuzzer.
     `test_a_modal_closed_by_its_own_control_that_does_not_reopen_is_unresolved`,
     `test_a_restore_that_lands_on_a_later_stage_is_unresolved_never_that_stage`).
 
+- **FR-CRAWL-34 (the legacy spider's static engine carries its identity, and no load of
+  either engine goes where the session does not reach, CC-CRAWL-0056, BUG-0545)** In a
+  crawl with `--identity`, every request the `requests` engine sends --
+  the engine chosen, the engine Playwright's absence selects, the browser's fallback for
+  a page it cannot render, and a selector form's submission (FR-CRAWL-8) -- goes through
+  the core seam (`core.http.HttpClient`) with the session manager as its addon, on a
+  persistent bounded session (SP-60) whose cookie jar keeps nothing: the manager is the
+  one source of the session.
+  - **Before any page** (`_static_identity`): the manager logs in from the start URL
+    (operator base); the session must cover the start URL's origin over its transport
+    (`session_headers`); it must hold a cookie or a header a request can send, else the
+    crawl fails with `StaticIdentityUnsupported` ("cannot carry": a session in browser
+    storage needs `--engine playwright`); and it must be live (`verify_live`, SP-61). A
+    failed login fails the crawl. Nothing is crawled anonymously in its place.
+  - **Each hop:** the crawl's scope and destructive rules decide a redirect hop as before;
+    a hop to another origin than the session's is not followed and the load extracts
+    nothing (`withheld`, FR-SESS-20). An answer the manager withheld the session from
+    (another origin) is never extracted (`withheld`).
+  - **A host the session does not reach is never loaded or sent to, in either engine**
+    *(BUG-0545 review, R6; review round 2 for the browser)*. Every load of an identity
+    crawl -- whatever queued it -- passes one gate in `_visit`
+    (`_session_host_refusal`), after the scope, destructive and other-origin checks and
+    before any navigation or send. It compares the host the load goes to with the hosts
+    the engine's carrier of the session reaches: the **static** engine asks the session
+    manager's own `prepare` (through `_SessionAddon`, on a request that is never sent),
+    and a host it leaves alone -- no session applied (`session_generation` unset) and no
+    decision recorded: outside the manager's own scope, such as a loopback alias of the
+    start the config does not list -- is refused; the **browser** refuses a host that
+    one of the session's credential cookies, as its context holds them (by URL, or a
+    browser login's cookies by domain), does not reach (`_cookie_reaches`: a host-only
+    cookie reaches its own host only, so a loopback alias of the start is refused even
+    when the manager serves it; a dotted domain also reaches its subdomains, never an IP
+    address). A session without cookies goes by its headers, by origin (FR-SESS-20).
+    Never a list of aliases. A refused load raises `HostNotServed` with the cause:
+    nothing is sent; the page is stored `failed` (unresolved, resumed) with that cause,
+    counted `session_host_unserved` in `crawl_stats` and reported, never `withheld`.
+    Inside a static load the seam keeps the same refusal before the transport for a
+    redirect hop and a selector form's submission (logged; the page holding the form is
+    kept). Adding the host to `scope_hosts` makes the manager serve it (measured for a
+    loopback alias); `--auth-origin` does not; a browser crawl of such a host starts
+    there. *Not yet enforced (residual R8, CC-CRAWL-0056):* inside a browser load, a
+    redirect hop (the route's walk) and a selector form's submission to a host the
+    cookies do not reach are still sent without the cookie (measured).
+  - **Losses:** an answer on a session the manager knows lost, or sent while the manager
+    saw a loss on any send (its logout listener), is no evidence: the page is retried
+    (FR-CRAWL-36) after the manager's re-login. A `SessionAuthError` on a send (a re-auth
+    cap, an unknown health) stops the crawl (`IdentityUnavailable`).
+  - Enforced by: `tests/test_spider_static_identity.py` (8 tests). The test site serves
+    an anonymous visitor the same links and forms as the identity (`/secret`,
+    `/expiring` and each test's extra ones; BUG-0545 review B2 and round 2 S2-2), so
+    c483dc1's anonymous crawl reaches every page a test is about. Measured on c483dc1,
+    each test's failing assertion (BUG-0545, review round 2): the identity test, `/`
+    stored as `home`; the session-loss test, `/expiring` filed as the login redirect's
+    answer `(200, '')`; the cannot-carry and failed-login tests, "DID NOT RAISE" (the
+    old code crawled instead of refusing); the redirect test, B received a request; the
+    unserved-host test, `GET /deeper?via=alias` with no cookie; the selector-form test,
+    `/pick?bug=1` and `?bug=2` with no cookie; the browser test, the alias received
+    `GET /deeper?via=alias` and two `GET /login`. The unserved-host test also fails on
+    9071440 (the alias was sent with no cookie), and
+    `test_a_browser_load_the_session_cookie_does_not_reach_is_refused_never_sent` on
+    8c2fa86 (the same three requests to the alias).
+- **FR-CRAWL-35 (the legacy spider's frontier: one admission per key, budgets,
+  CC-CRAWL-0056, BUG-0545)** Every URL the crawl would load enters through one frontier
+  (`_Frontier`), shared by every worker:
+  - **One admission per key.** A URL is admitted once per scheduling key
+    (`spa.visit_key`: canonical origin, path, exact query, SPA route); a key already
+    admitted or stored final is a duplicate (counted, dropped). The entry keeps its exact
+    URL. A probe (FR-CRAWL-17) is never deduplicated.
+  - **Budgets** (`FrontierLimits`; defaults are bounds, not tuning): `max_url_length`
+    4096 characters, `max_pages` 20000 admissions, `max_per_origin` 10000,
+    `max_route_variants` 100 per route shape (`spa.route_shape`: origin, path with
+    id-shaped segments as `{}` through `core.pathtemplate.id_shaped`, sorted query names,
+    the SPA route's own shape -- values never count), `max_pending` 10000 queued, checked
+    in that order. A refusal is counted by reason in `crawl_stats`
+    (`frontier_rejected[<reason>]`) and logged as partial coverage; it is never queued or
+    stored.
+  - **Order.** Two queues (ordinary; seeds and probes, the first worker's) and a retry
+    heap; a worker takes a due retry first, then the older head: one worker crawls in
+    admission order, as before. A pending retry keeps the crawl going; probes are planned
+    once every worker is idle and no retry waits.
+  - **Every load passes the crawl's scope and destructive rules first** *(BUG-0545
+    review, B1)*. Whatever queued it -- a link, a redirect, a route, a seed, a probe's
+    route, a retry, or a row a resumed crawl read from the store (FR-CRAWL-36) --
+    `_visit` asks `_load_refusal` before anything else: outside the crawl's scope
+    (`_in_scope`, FR-CRAWL-7/11; another loopback port is another service) or
+    destructive (`_destructive`; the start URL is the operator's own) is never requested
+    and nothing is stored for it. Each refusal is counted by reason in `crawl_stats`
+    (`loads_refused[out_of_scope]`, `loads_refused[destructive]`, `LOAD_REFUSALS`) and
+    reported in the crawl summary. The check sits where every load is made, not at the
+    producers (PA-0123(1)); a stored row refused there was admitted by the frontier
+    first, so it counts in `frontier_admitted` and the frontier's budgets.
+  - Enforced by: `tests/test_spider_frontier.py::test_a_destination_many_parents_link_is_queued_once`,
+    `tests/test_spider_frontier.py::test_a_fan_out_trap_is_bounded_by_the_route_budget_and_reported`,
+    `tests/test_spider_frontier.py::test_the_frontier_admits_each_key_once_and_counts_every_budget`,
+    `tests/test_spider_frontier.py::test_a_resumed_crawl_never_loads_a_stored_row_out_of_its_scope_or_destructive`.
+- **FR-CRAWL-36 (the legacy spider's page record: a load's outcome, retries, the
+  batched writer, CC-CRAWL-0056, BUG-0545)**
+  - **Outcomes.** `discovered_pages.outcome` is `pending` once the page answered,
+    `visited` only when its extraction finished (links queued), `withheld` for another
+    origin than the session's (FR-SESS-20), `failed` for a load that did not give the
+    page. Only `visited` and `withheld` (and a row from before this requirement with a
+    status) are visited: skipped by the run and by a resumed crawl.
+  - **Transient failures.** A load whose answer SP-56 classes incomplete,
+    throttle-or-unavailable or gateway, another 5xx, a transport failure (connection,
+    timeout, a broken or undecodable body), SP-60's `BodyIncomplete`, or a session lost on
+    the send (FR-CRAWL-34) is stored `failed` (its status, `attempts`, `error`: an answer
+    or exception class, never a URL or a body) and loaded again after a backoff (1 s
+    doubling, a `Retry-After` honoured, at most 30 s), up to 3 loads; seeds and probes are
+    never retried (their windows, FR-CRAWL-17). A page still failing is unresolved:
+    `failed_pages`, `pages_failed`, a warning. A `--resume` crawl admits every stored
+    unresolved row again (not a seed or a probe); each is loaded only through the crawl's
+    scope and destructive rules (FR-CRAWL-35's load gate), so a row another target's or
+    another start URL's crawl left is never requested and stays unresolved for a crawl
+    whose scope it is in. `pages_retried` counts retries. A host the session does not
+    reach (FR-CRAWL-34: the manager does not serve it, or the browser's session cookies
+    do not reach it) is unresolved too, with that cause, never `withheld`.
+  - **The writer.** Recording a page never touches the store: rows are queued in memory
+    and one writer thread commits them in order when they hold 64 rows or 1 MiB, or the
+    oldest waited 1 s, and at close; reads of page rows flush first. A crawl thread waits
+    only when the unwritten rows pass 16 MiB (`store_writer_waits`). A failed write is
+    raised at the next record, flush or close, never dropped. `is_visited` reads memory.
+  - Enforced by: `tests/test_spider_frontier.py::test_a_transient_failure_is_retried_and_never_recorded_visited`,
+    `tests/test_spider_frontier.py::test_an_incomplete_body_is_retried_never_taken_for_a_page`,
+    `tests/test_spider_frontier.py::test_a_page_that_keeps_failing_is_unresolved_reported_and_resumed`,
+    `tests/test_spider_frontier.py::test_a_resumed_crawl_never_loads_a_stored_row_out_of_its_scope_or_destructive`,
+    `tests/test_spider_frontier.py::test_recording_a_page_never_waits_for_the_stores_lock`,
+    `tests/test_spider_frontier.py::test_page_rows_are_committed_by_count_bytes_and_age_and_flushed_at_close`.
 - **FR-CRAWL-37 (captured requests kept per API operation, CC-CRAWL-0057, BUG-0546,
   audit defect 9)** The spider's capture writer (`StorageManager.record_request`, the
   one writer of `discovered_requests`) keys every row through `tools/apiop.py`:
@@ -1186,6 +1343,216 @@ fuzzer.
       8.4 -> 10.7 requests/s, paced to the writer (7.4 records/s). All 201 records
       written whole.
     - A repeat pair under heavier load agrees (BUG-0548's table).
+- **FR-CRAWL-39 (the composed UI tree, CC-CRAWL-0059, BUG-0551)** Discovery reads what a
+  page offers across its composed tree, not only its top document's light tree.
+  - **One walk** (SP-70, `tools/composed.py::COMPOSED_JS`): a document and every open
+    shadow root under it, each shadow tree right after its host. On a page without a
+    shadow root, its order and result are `querySelectorAll`'s. Every crawler page
+    script that discovers or locates UI builds on it. A light-tree-only query is a
+    reviewed allowance with its count and its reason
+    (`tests/test_composed_tree_guard.py`).
+  - **disco** (`disco/compose.py::read_page`, from `Explorer.enumerate`):
+    - It reads the page's document and each **visible, same-origin, in-scope frame**,
+      each in its own main-world context, breadth first, at most 8 frames, 3 deep.
+    - It runs through DevTools' `Runtime.evaluate` with the Command Line API when the
+      browser has it, else through Playwright (no listeners then).
+    - An element's ancestry goes on past each shadow root (`^shadow<host`) and each frame
+      (`^frame<iframe#id<@/path`). Its signature, the identity of its steps and of the
+      states it is in, says which component and frame it is in; on a page without
+      shadow roots or frames, signatures are unchanged.
+    - A step is located through the frame markers (`compose.frame_scope`) and a
+      selector that pierces open shadow roots, so a state reached through a shadow root
+      or a frame is restored by replaying there.
+    - A form's controls are read, and earlier `data-disco-field` markers cleared, across
+      the document's composed tree. A control's container may be the shadow root its
+      ancestors end at (FR-CRAWL-19's form rule; review round 1).
+    - The described elements are bounded at 400 per read across the page and its
+      frames, as before.
+  - **What is not read is counted in `explore.json`, never claimed.** Per route; a page
+    read again adds nothing; written while the run is live.
+    - **Read:** `shadow_roots` (open shadow roots) and `frames` (same-origin frames).
+    - **Not read:**
+      - *(Amended in place, review round 1; was: custom elements whose light tree
+        renders nothing, at most 16 per document.)* `closed_shadow_roots`: every element
+        of a document read that hosts a closed shadow root, on any host and whatever its
+        light children render, found by one `DOM.getDocument` of the page with every
+        shadow root and in-process frame pierced (`compose._census`). A page is checked
+        once per route and shape (each read document's tag and child-count digest);
+      - `frames_cross_origin`;
+      - `frames_out_of_scope` (by its `src` or its document; the guard never loads it).
+    - **`budget_limited`:** per bound (`elements`, `candidates`, `delegated`, `nodes` (a
+      walk past 30 000 elements), `frames` (past the frame bounds, or navigating under
+      the read), `census` (the elements whose shadow roots were not checked: a page
+      whose documents read hold more than 30 000 elements, read without DevTools, or
+      navigating under the check)), what it left out.
+  - **The spider's form read** (`spa.FORMS_JS`, also the session manager's browser login)
+    finds forms, buttons and controls across open shadow roots. *(Review round 1.)* A
+    button's container may be the shadow root its ancestors end at (a form-less widget,
+    described by its host).
+  - **Not covered:**
+    - A closed shadow root attached where the page's composed shape did not change
+      (the same tags and child counts) is counted only once the shape next changes.
+    - A cross-origin frame is not read in the page; its URL is explored as a top-level
+      page when the harvest reaches it.
+    - The harvest's link extraction reads the top document's serialised light tree;
+      links inside shadow roots and frames are reached by acting on them.
+- **FR-CRAWL-40 (delegated actions, and the composed tree's known gaps, CC-CRAWL-0059,
+  BUG-0551)**
+  - **A delegated candidate** is a labelled, non-semantic element with no action
+    listener of its own and no pointer cursor, whose composed event path (an ancestor
+    element, a shadow root, its document or its window) listens for `click`,
+    `dblclick`, `mouseup` or `pointerup`. It must hold no other candidate and no
+    described element, and must cover less than a quarter of the viewport. Only the
+    first of each shape is kept, at most 16 per read (`budget_limited.delegated` counts
+    the rest). It is described `how: "delegated"`.
+  - **Each is tried once per run**, at most 48 trials (`compose.Trials`). A trial clicks
+    it and waits for quiet. It is **live** when its click caused a request, the URL
+    changed, a page opened or *(amended in place at the merge with CC-CRAWL-0055; was:
+    the explorer's own state fingerprint)* the page's execution key (FR-CRAWL-31)
+    changed: a performed, logged action, clicked like any other from then on. Otherwise
+    it is **inert**: never logged, never counted an action, and described `disabled`
+    from then on. A candidate still untried once the trials are spent is described
+    `disabled` and counted `delegated_unexplored`. *(At the merge with CC-CRAWL-0055.)*
+    A trial whose click reached nothing (the candidate gone, or not actionable) is no
+    verdict: it is released and counts as a failed attempt (FR-CRAWL-32). Whether a
+    live step is safe to replay (FR-CRAWL-33) is decided from the requests after its
+    click: the control window's are the page's own.
+  - *(Review round 1.)* **A request the click caused** is one whose method and
+    normalised route (`explore.request_key`) are not explained on that route: just
+    before the click, a **control window** leaves the page alone for the same quiet
+    wait (from an action mark); what it, or an earlier control window on the route,
+    saw is the page's own traffic (a poll, a beacon, a keep-alive), and a key an
+    earlier trial there already counted is not counted again.
+  - *(Review round 1.)* **A delegated candidate is no part of a state's identity**
+    (FR-CRAWL-19's states): which labelled leaves are candidates depends on their text
+    and order, so a click that only swaps static text under a document listener stays
+    in its state.
+  - **Counters** (`explore.json`): `delegated_trials` = `delegated_live` +
+    `delegated_inert`, and `delegated_unexplored`.
+  - **Known gaps (pinned or allowed):**
+    - The spider's G1 read (`spa.G1_READ_JS`) and the browser login's X3 password clear
+      (`session/browserlogin.py::_CLEAR_IF_PRESENT`) resolve a FORMS_JS id with
+      `document.querySelector`. Until both go through SP-70, FORMS_JS never describes
+      a password control inside a shadow root: its container is read by its light tree
+      only, and left out when it is in a shadow root itself. Both are pinned by strict
+      xfails.
+    - The legacy spider's reveal, option and menu scripts read the light tree only, and
+      the spider reads no frame and no delegated action (deprecated, FR-CRAWL-21).
+    - *(Review round 1.)* Background traffic slower than a control window can make one
+      inert candidate per route and request key live (measured: a 2.5 s poll with
+      `idle_ms` 500, at most one per run, 4 of 12 inert candidates over 4 runs; 0 of
+      21 at 400 ms and 1 s).
+    - *(Review round 1.)* A delegated candidate that appears only after an action that
+      changes nothing else in the state is not tried there: the state is unchanged, and
+      its steps were planned before the action.
+- **FR-CRAWL-41 (disco: a lost session, CC-CRAWL-0060, BUG-0552)** An authenticated
+  exploration (FR-CRAWL-19) decides that the session its contexts carry was lost only
+  through the session layer's owners, replaces it only with a fresh, revalidated one,
+  and never takes an answer on a session known lost as the identity's coverage (D′).
+  - **The session.** `Explorer(storage_state=)` or `Explorer(session=ExploreSession(
+    manager, identity, base_url))` -- one, not both. With a provider the context adopts
+    the manager's session (`ensure(..., operator=True)`) through
+    `browserauth.browser_session`: its cookies and a browser login's storage state; a
+    session carried only in headers is refused (`SessionUnavailable`, raised at the
+    start). The run holds one session **generation** at a time (the manager's; 0 for a
+    storage state) and every worker's context carries the current one.
+  - **One generation for every worker** *(review B1)*. A lost, stale or unresolved
+    verdict is recorded for the whole run (`_Shared.lost_generations`) at the verdict,
+    under the recovery lock, before any recovery starts. A worker whose context carries
+    a generation that is gone (recorded lost, or a newer one installed) never acts,
+    restores or loads on it: it checks before every action, restore and harvest load
+    (*(amended in place at the merge with CC-CRAWL-0055; was `_ready`)* `_bring_to`,
+    `_restore_checked`, `_load`), not only at a state boundary; its
+    checkpoint marks its window (stale) even when its answers show no sign; it then
+    waits for the recovery decision and adopts the newer session or stops. The action
+    ids a context sent after its window was marked, up to its release (a replacement or
+    the worker's end), are marked too.
+  - **Suspicion.** After every action, restore, harvest load and the seed, each request
+    the context sent on the session's origins whose answer arrived whole
+    (`requestfinished`) is classed by SP-56 (`core.comparability.response_class`,
+    credentialed, with SP-16's `login_facts` and `request_entry_names`): an auth failure
+    (a 401 or a login redirect that is not a credential submission; never a 407, which
+    is an auth failure to anyone) is a suspected loss, a policy block (403, 451) a
+    suspected denial; a throttle, a gateway, an incomplete answer or another origin's
+    answer is no sign. The page is read whatever the answers were *(review R2)*. The
+    page at a login URL (`looks_like_login_url`), or showing this session's login form
+    (`shows_login_form` with the session's login page and fields), is a suspected loss
+    -- unless the step asked for a login URL (a link, a harvest URL, the state's own
+    URL), or, for a form, the page already showed one. With no known login form, any
+    password form is one *(review R1)*: **in place** (strong) where the page was known
+    without one -- the URL before an action, the restored state's URL or entry URL (a
+    state records whether it showed a password form when found, `State.login_shown`),
+    the start page at the seed; elsewhere (a harvest load, a navigation) it is a weak
+    sign, raised only when a protected check will decide it.
+  - **Decision.** With a provider: SP-61, `SessionManager.check_health` for the
+    context's generation (``signal_url`` the answer's or page's URL, ``policy`` for a
+    policy block, ``pause=False``). Live: an answer or a policy block was an
+    authorization denial (`authorization_denials`) and nothing changes; after an action,
+    a strong page sign on a live session means the context no longer carries it --
+    whichever answer (a 401 its script read) came with it *(review R2)* -- and the
+    context is given the live session again (`session_reinstalled`); a login page a
+    restore or load shows, or a weak sign, is that page's own. Lost: confirmed. Stale
+    (another generation): the context is replaced with the current one. Inconclusive,
+    or a check that cannot run: unresolved. **Without a provider** *(review R3)*: at the
+    seed, the start page's URL becomes the run's protected resource when SP-61's
+    `health_verdict` reads a GET of it with the context's cookies as live and one with
+    no credential as refused (a login redirect, a 401, a login form); both GETs, and
+    each check, go straight to the target from a request context of their own (never
+    through the capture proxy: not the identity's exploration), are scope- and
+    destructive-gated at the send (`checked_api_request`, `check_send_url`), follow no
+    redirect and verify TLS; this is disco's second send path of its own, beside the
+    contract runner's (`tests/test_disco_isolation.py`). A suspicion (a loss shape or a policy block) is then decided by a GET of
+    it with the suspected context's cookies (`health_verdict`): live, an authorization
+    denial; lost, confirmed; anything else, unresolved. With no such resource, a loss
+    shape is an unconfirmed loss and a policy block never is one (PA-0533(1)).
+  - **Recovery** (single flight across workers): a newer generation another worker
+    installed is adopted; else the provider's session is taken (`ensure`, which logs in
+    again on a lost one), must be another generation, and must pass its own protected
+    check (`check_health`, ``use_cache=False``) before use. The old context is released
+    (SP-38) and **closed** before the new one is made. At most
+    `ExploreOptions.max_session_recoveries` (3) fresh sessions or re-gives a run. A loss
+    nothing resolves -- no provider, an unresolved check, no fresh session, the cap --
+    **ends the run's exploration** (the identity is the run's only one: an anonymous
+    continuation would be recorded under its profile), the reason in
+    `ExploreReport.auth_ended` and a warning; it never re-installs the storage state
+    the run started from.
+  - **The known-lost window (D′).** The action ids requests went out under since the
+    last checkpoint without a sign are marked on a loss: appended to
+    `ExploreReport.session_lost_actions` and written as one `actions.jsonl` line
+    `{"kind": "session", "session": <lost|stale|reinstall|unknown>, "reason",
+    "generation", "action_ids"}` (no `seq`: `observe.DiscoActionLines` and the importer
+    pass over it). The action whose answers fell in it is logged with no new state and
+    no URL and denied for the rest of the run (it may have ended the session), unless
+    the window was stale; nothing a lost window showed becomes a state, a harvest URL's
+    document or a gathered link. Reasons name a class and a status, never a URL.
+  - **Reading the mark** *(review B2)*. `disco.capture.lost_action_ids(run_dir)` is
+    the one reader of the mark (SP-71): the action ids of every `session` line, read
+    bounded (`JsonlTail`). Every function of `fuzzlab/` that reads a capture's records
+    reads the mark too, or is listed with its pin or reason
+    (`tests/test_lost_window_mark.py`). `fuzzlab disco ede` reads it (FR-CRAWL-25).
+  - **Counters** (`explore.json`): `session_lost` (confirmed, or unconfirmed without a
+    provider), `session_suspected`, `authorization_denials`, `session_recovered`,
+    `session_reinstalled`, `session_lost_actions`, `auth_ended`.
+  - **Not covered (residuals, BUG-0552):** `fuzzlab disco capture` offers a storage
+    state only (no provider flag yet). Two consumers do not read the window's mark yet,
+    each pinned by a strict xfail naming its owner: `disco synth` (CRAWL) and
+    `store_adapter.import_disco` (AUD: a lost window's status and media type are its
+    page and path-template evidence). The live trace shows a lost window's exchanges
+    as exchanged (not evidence). Answers a context got after the server invalidated its
+    session but before any worker's checkpoint found a sign are not marked (D′ covers a
+    session *known* lost). Without a provider and without a protected resource, a
+    password form at the same place reads as an unconfirmed loss, and one shown by a
+    harvest load or a navigation is no sign. With a resource, a context that lost only
+    its own copy of the session (its script cleared a cookie) reads as lost, never
+    re-given the storage state.
+  - *(At the merge with CC-CRAWL-0055 and CC-CRAWL-0059.)* An action whose answers
+    fell in a known-lost window finishes its work item (FR-CRAWL-32: its effect a lost
+    session); a delegated trial decided in such a window decides nothing (its verdict
+    reopened, FR-CRAWL-40). A replaced context reads its states in the next session
+    generation of the execution key (FR-CRAWL-31). The first-visit and dismissal reloads
+    (FR-CRAWL-33) are session-checked before anything is declared from them. A step is
+    taken only on a page that holds its state's contract and a current session
+    (`_bring_to`); a restore lost twice is unresolved `session-lost`.
 - **FR-CRAWL-42 (the capture writer is total: a lone surrogate is stored, a failed write
   is counted; CC-CRAWL-0061, BUG-0554)** A captured JSON body may hold a `\udXXX`
   escape with no partner (valid JSON; measured 2026-10-21, Chromium's `JSON.stringify`
@@ -1226,6 +1593,9 @@ fuzzer.
   the queue; static redirects (by hand); the browser (a context-wide route that walks
   redirect chains hop by hop, WebSockets routed, plus launch arguments that resolve
   nothing outside scope); and the API-request client (scope-checked, no redirects).
+  *(BUG-0545 review, B1:)* and every load, where it is made (`_visit`): scope and the
+  destructive rule are asked again whatever queued it, a resumed crawl's stored rows
+  included (FR-CRAWL-35).
   *(CC-CRAWL-0028, BUG-0136:)* **how** a request is refused is one rule: every abort
   of a document request (a navigation, top-level or frame, and each of its redirect
   hops), whatever the reason -- scope, destructive, refused method or body, the reveal
@@ -1294,6 +1664,7 @@ fuzzer.
   - Enforced by (a failed navigation settles before it raises; the cleanup has one owner; BUG-0522): `navguard.navigate` / `reload` (`_settle_failure`), `navguard.end_failed_load` — `tests/test_navigation_aborts.py::test_a_failed_navigation_returns_after_its_own_error_page`, `tests/test_navigation_aborts.py::test_a_navigation_overtaken_by_an_error_page_waits_for_it`, `tests/test_navigation_aborts.py::test_only_the_leading_code_decides_a_wait_for_an_error_page`, `tests/test_navigation_aborts.py::test_a_refused_load_naming_a_network_error_in_its_url_is_not_waited_for`, `tests/test_navigation_aborts.py::test_the_spiders_load_after_failed_loads_is_rendered`, `tests/test_navigation_aborts.py::test_a_query_load_after_a_failed_load_is_rendered`, `tests/test_disco_harvest.py::test_disco_harvest_and_restore_after_failed_loads`, `tests/test_shared_primitives.py::test_every_about_blank_navigation_is_a_reasoned_exception`, `tests/test_shared_primitives.py::test_the_about_blank_guard_catches_synthetic_offenders`
   - Enforced by (no navigation waits for a load a refused navigation cancelled; one helper; BUG-0138): `navguard.navigate` / `reload` / `wait_for_state` / `response_html`, `LocalSpider._goto_and_parse` — `tests/test_guarded_navigation.py::test_a_head_script_navigation_to_a_refused_url_is_not_waited_out`, `tests/test_guarded_navigation.py::test_a_slow_page_is_still_waited_for`, `tests/test_guarded_navigation.py::test_query_probe_and_seed_loads_are_not_waited_out`, `tests/test_guarded_navigation.py::test_every_guarded_navigation_goes_through_the_one_helper`, `tests/test_guarded_navigation.py::test_the_navigation_guard_catches_synthetic_offenders`, `tests/test_guarded_navigation.py::test_a_failure_reported_before_the_commit_never_cuts_the_wait`, `tests/test_guarded_navigation.py::test_a_previous_pages_pending_navigation_never_cuts_the_next_load`, `tests/test_guarded_navigation.py::test_a_merely_slow_page_keeps_its_rendered_text`, `tests/test_guarded_navigation.py::test_another_document_never_fills_this_urls_row`, `tests/test_guarded_navigation.py::test_a_same_path_document_with_another_query_never_fills_this_urls_row`
   - Enforced by (scope, per layer): `LocalSpider._in_scope`, `navguard.guard_page` / `make_route_handler` / `make_ws_handler` / `browser_launch_args` / `checked_api_request` — `tests/test_spider_scope.py::test_loopback_start_treats_aliases_as_one_host`, `tests/test_browser_scope.py::test_a_rendered_crawl_never_leaves_the_target_origin`, `tests/test_browser_scope.py::test_the_launch_args_alone_confine_an_unrouted_page_to_the_origin`, `tests/test_browser_scope.py::test_a_redirect_hop_out_of_scope_is_never_requested`, `tests/test_browser_scope.py::test_out_of_scope_requests_are_aborted_and_reported`, `tests/test_browser_scope.py::test_allow_never_lifts_scope`, `tests/test_browser_scope.py::test_websockets_are_scope_checked`, `tests/test_browser_scope.py::test_the_spiders_isolated_submit_refuses_an_out_of_scope_action`, `tests/test_browser_scope.py::test_every_browser_path_in_fuzzlab_is_scoped`, `tests/test_browser_scope.py::test_the_browser_guard_catches_synthetic_offenders`, `tests/test_browser_scope.py::test_scope_is_checked_before_any_fetch`
+  - Enforced by (every load, whatever queued it -- a resumed crawl's stored rows included -- passes scope and destructive first; BUG-0545 review, B1): `LocalSpider._load_refusal`, asked first by `LocalSpider._visit` — `tests/test_spider_frontier.py::test_a_resumed_crawl_never_loads_a_stored_row_out_of_its_scope_or_destructive`
   *(CC-CRAWL-0039, BUG-0503:)* **a URL source feeding the queue returns only GET-safe
   URLs**: `core.linkextract` never returns a form `action`, a `formaction`, a `ping` or
   a script string; forms are submitted only through the gated paths, and a script's
@@ -1357,7 +1728,9 @@ fuzzer.
   - Enforced by (the explorer, end to end in a real browser): `disco.explore.refusal` / `form_refusal` — `tests/test_disco_e2e.py::test_destructive_controls_and_other_origins_are_never_reached`, `tests/test_disco_e2e.py::test_every_exchange_is_recorded_with_its_cause_and_the_tag_never_reaches_the_app`, `tests/test_disco_synth.py::test_a_captcha_form_is_submitted_and_a_credential_change_is_not`
   - Enforced by (the capture is redacted at the write): `disco.capture.make_record` — `tests/test_disco_capture.py::test_no_secret_reaches_the_capture_file_and_benign_content_stays`, `tests/test_disco_capture.py::test_a_secret_straddling_the_body_cut_is_still_removed`, `tests/test_disco_capture.py::test_an_unparseable_json_body_with_a_secret_is_omitted`
 - **NFR-CRAWL-bounded** Cap per-template instance counts to avoid infinite crawl
-  spaces.
+  spaces. *(Built for the legacy spider, CC-CRAWL-0056: FR-CRAWL-35's per-route-shape,
+  per-origin, total, pending and URL-length budgets, each refusal counted and reported;
+  disco's explorer bounds itself by states and actions, FR-CRAWL-19.)*
 - **NFR-CRAWL-reproducible** Record a crawl manifest (URL → template →
   discovered-from) so runs can be diffed.
 - **NFR-CRAWL-dry-run** `fuzzlab crawl` accepts `--dry-run`: plans and prints the
@@ -1377,11 +1750,19 @@ Spider DB (the spider's own schema, `StorageManager`; no store migration):
 `discovered_pages` (`source` is `link`, `xhr`, `redirect`, `form`, since FR-CRAWL-12
 `spa-route`, since FR-CRAWL-16 `reveal`, or since FR-CRAWL-17 `spa-query` (a query
 seed); a SPA route page's `url` keeps its `#/…` fragment, a seed's with its query;
-since FR-CRAWL-29 `found_from TEXT` and `seen_at REAL`, NULL when unknown),
+since FR-CRAWL-29 `found_from TEXT` and `seen_at REAL`, NULL when unknown; since
+FR-CRAWL-36 `outcome TEXT` (`pending` | `visited` | `withheld` | `failed`), `attempts
+INTEGER` and `error TEXT` (an answer or exception class), NULL in an older row, whose
+status 0 reads unresolved; a failed load is still a row with its status, 0 when there was
+no answer),
 `discovered_forms`, `selector_verdicts`, `crawl_stats (name TEXT PRIMARY KEY,
 value INTEGER)` (the last crawl's SPA, reveal and, since FR-CRAWL-17, `spa_query_*`
 counts -- refusals by reason as `spa_query_refused[<reason>]` -- `submit_stopped` and
-`reveals_stopped`), since FR-CRAWL-16 **`revealed_forms`** `(id, page_url, route,
+`reveals_stopped`; since FR-CRAWL-35/36 `frontier_admitted`, `frontier_duplicates`,
+`frontier_rejected[<reason>]`, `pages_retried`, `pages_failed`, `store_writer_waits`;
+since BUG-0545's review `loads_refused[<reason>]` (only a reason that refused) and
+`session_host_unserved`),
+since FR-CRAWL-16 **`revealed_forms`** `(id, page_url, route,
 signature, submitted INTEGER, UNIQUE (route, signature))` — the forms a reveal showed,
 for a later opt-in (`page_url` redacted by `redact_url_identifiers`; never values) —
 and, since FR-CRAWL-13,
@@ -1413,7 +1794,9 @@ An old spider DB has no such table (the importer treats it as none).
   read only by `disco.capture.read_capture`.
 - `<run>/capture.jsonl.stats.json` (refusals per host `blocked`, `recorded`, `dropped`,
   `omitted` {`too_large`, `backlog`, `undecodable`}, `waited`, `queued`; FR-CRAWL-38),
-  `<run>/actions.jsonl` (one line per UI action), `<run>/explore.json` (the report).
+  `<run>/actions.jsonl` (one line per UI action; *(CC-CRAWL-0060, FR-CRAWL-41)* plus one
+  `{"kind": "session", ...}` line, with no `seq`, per known-lost window, naming its
+  action ids), `<run>/explore.json` (the report; FR-CRAWL-41's session counters).
   *(CC-CRAWL-0055, additive.)* An action line's `state` / `new_state` are execution keys
   (FR-CRAWL-31) and it carries `replay_safe` (a load line: null). `explore.json`'s
   `explore` gains `unresolved`, `optional_declared`, `replay_skipped_optional`,
@@ -1422,6 +1805,11 @@ An old spider DB has no such table (the importer treats it as none).
   `perturbations_folded` and `work`, and loses `transient_dropped`. Readers of the run
   directory (`store_adapter.import_disco`, `tools.observe`) read none of the changed
   keys; an older run directory reads as before.
+  *(CC-CRAWL-0059, additive)* `explore.json`'s `explore` carries FR-CRAWL-39's and
+  FR-CRAWL-40's counters; *(at the merge with CC-CRAWL-0055)* its `work` may hold
+  `inert` (a delegated candidate's trial verdict). An action's `signature` is opaque to
+  every reader; *(CC-CRAWL-0059)* inside a shadow root or a frame its ancestry part names
+  the hosts and frames (`^shadow<...`, `^frame<...`).
 - The inventory: an OpenAPI 3.1 document whose operations carry `x-disco`
   (`origin`, `method`, `content_type_family`, `observed`, `samples`, `actions`,
   `profiles`, `statuses`, `headers` {name: {class, value?}}, `auth`, `dependencies`

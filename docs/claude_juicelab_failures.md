@@ -1406,3 +1406,171 @@ Juice Shop lab is complete.
 - **Evidence:** review round 1 of d9e269e (`scratchpad/disco_lane/review_round1.md`, findings B1-B3, each reproduced by a skeptic: `audisco_demo/browser_demo.py` `unresolved == {}`; `audisco_demo/browser_superset.py` Help logged under stage 1; `b3tree/tests/test_zz_b3_after_none.py` status succeeded, retried 0); the round's new tests failing on d9e269e (CC-CRAWL-0055's effectiveness).
 - **Impact:** a revision round; on merge without it, disco would have kept accepting wrong states on the overlay and superset paths and losing work to unreadable results -- the audit's defects 2 and 3, still open.
 - **Status:** fixed in the revision (B1 evidence rule and `State.added`, B2 `extra` and `_bring_to`, B3 finish after the read), PA-0539(2), (3), (5) sharpened.
+
+### F-166 — disco's enumeration and the spider's form read covered only the top document's light tree, and the agent's validation never tried a web component, a frame or a delegated handler
+- **What:** CC-CRAWL-0031 (the explorer) and the forms-phase-3 `spa.FORMS_JS` enumerated with `document.querySelectorAll`. Controls inside an open shadow root or a frame never became candidates. A non-semantic element served by a document-level click listener was invisible, since the DevTools query read only an element's own listeners. The run report had no counter that could show any of it. The agent validated the explorer on its own fixture and on Juice Shop (BUG-0501, PA-0501) and called discovery working; neither app had a shadow root, a frame used as UI, or a root-delegated handler, and no fixture was built to try them. The gap was found by the external audit (defect 13), not by the agent.
+- **Evidence:** audit defect 13 (6552276); `tests/test_disco_compose.py` failing on c483dc1 (no request to `/api/shadow/search`, `/api/frame/save` or `/api/tile/7`; `spa.FORMS_JS` missing the shadow form); BUG-0551.
+- **Impact:** every disco and spider run since CC-CRAWL-0031 and forms phase 3 left a web component's forms, an embedded frame's controls and root-delegated actions unexplored, with nothing in the report saying so. An endpoint reachable only through such UI got no point and no test.
+- **Status:** fixed in CC-CRAWL-0059 (lane DISCO13), with BUG-0551's residuals R1-R7 stated; PA-0551 makes the composed tree a guarded owner (SP-70) and requires fixtures for each way the platform presents UI.
+
+### F-167 — DISCO13 committed a guard test it had never run green, and the first harness run failed on it
+- **What:** the lane's targeted pytest run (which held `tests/test_composed_tree_guard.py`) was refused by the host pytest lock after its 1800 s wait, with nothing run. The lane committed `4f15c46` without running that file again; only the pre-fix proof ran it, where it was meant to fail. On the committed tree, `test_discos_reads_and_the_spiders_form_read_are_built_on_the_owner` failed. The test removed the owner and the legacy `FORMS_JS` fragment before checking for light-tree queries, but not `spa._LABELS_FN`, which `FORMS_JS` concatenates and which carries its own reviewed allowance (a detached clone's query).
+- **Evidence:** `scratchpad/lanes/DISCO13/vc_console_run1.out` (`TOTAL 85 file(s): 3668 passed, 1 failed, 0 errors, 1 skipped, 27 xfailed`); `parallel.log` of that run (`assert not ['.querySelectorAll(']`).
+- **Impact:** none landed. The product code was correct, and the whole-package guard and the synthetic-offender test passed. One extra harness run of the shared host was spent.
+- **Status:** fixed in the lane's next commit: the test also removes `spa._LABELS_FN`. The assertion was checked offline before the second harness run.
+
+### F-168 — DISCO13's fix shipped four defects its own tests could not see: a form-less shadow widget never filled, delegated text leaves in state identity, a poll counted as a click's effect, and closed roots left uncounted behind a residual
+- **What:** review of c219266 confirmed four defects in the lane's BUG-0551 fix.
+  - B1: `READ_JS`'s `formLike` and `spa.FORMS_JS` walked `parentElement` to a container, so a widget whose input and button sit directly under its shadow root had none. The button was clicked bare (`q=` empty), and the spider found no form.
+  - B2: delegated candidates, any labelled text leaf under a document click listener, entered the state fingerprint and cores, so a click that only swapped static text made a new state. The lane's risk statement said only shadow and frame elements changed states; it was never tested on a light page with a document listener.
+  - B3: a trial counted any request in its window, so a background poll made an inert candidate live.
+  - B4: closed roots were checked only on custom elements rendering nothing light. The rest was written down as residual R1 against the lane's own PA-0551(3).
+
+  Each test showed one confirming shape per mechanism; none varied what the code branches on.
+- **Evidence:** reviewer probes and refutation runs on c219266 (DISCO13-B1..B4). `tests/test_disco_compose.py`'s review-round tests fail on c219266 (CC-CRAWL-0059 review-round effectiveness). BUG-0551's review-round section.
+- **Impact:** none merged. Had it merged, disco on most real pages (Bootstrap, jQuery, React roots) would have multiplied states on data changes, logged inert clicks wherever a page polls, missed form-less component forms, and reported no closed roots where they hid forms.
+- **Status:** fixed in CC-CRAWL-0059's review round 1 (`lane/DISCO13-r1`). PA-0551 strengthened ((2) variants, (3) counted remainder, new (4) and (5)). Residuals R8 (slow background traffic, measured) and R9 stated.
+
+### F-169 — The AI agent built disco's explorer with a URL-only session-loss rule and a snapshot "recovery" that leaked a context per loss
+- **What:** CC-CRAWL-0031 (D70) gave `fuzzlab/disco/explore.py` one loss signal, `looks_like_login_url(page.url)`, and a recovery that rebuilt the context from the storage state the run started with, after `navguard.release` but without closing the context. An SPA's 401s at an unchanged route and an in-place login form were invisible; a server-invalidated session was re-installed as if fresh; each loss left a context open until browser shutdown. The rule was copied from the session layer's oldest logout rule, not derived from how a browser-held session is lost.
+- **Evidence:** audit defect 4 (2026-10-19); `tests/test_disco_session_loss.py` on c483dc1 (`[stay]` and `[form]`: `session_lost == 0`; `[redirect]`: two contexts open); BUG-0552.
+- **Impact:** every authenticated disco capture since CC-CRAWL-0031 could have recorded answers on a dead session under the identity's profile (D′ broken for captures) and explored a logged-out app as the identity.
+- **Status:** fixed in CC-CRAWL-0060 (lane DISCO4) and its review round 1; residuals stated in FR-CRAWL-41.
+
+### F-170 — BUG-0533's sweep excluded disco from the session-loss rule because it held no session manager
+- **What:** the AU-SESS403 lane's PA-0002 sweep for PA-0533 enumerated the callers of the session manager and wrote disco as "not consumers (R9)", deferring its loss decision to "defect 4", although disco held a session and decided its loss itself. The sweep's criterion (who calls the owner) excluded exactly the components that decide a loss without it.
+- **Evidence:** `docs/bugs/BUG-0533-a-forbidden-answer-logged-the-session-in-again.md`, §"The sweep", last row; BUG-0552 §"Prior-preventive-action failure analysis".
+- **Impact:** disco's explorer kept its URL-only rule and its stale recovery for another day after PA-0533 landed; no other holder was missed (BUG-0552's sweep by holder).
+- **Status:** PA-0552(5) makes a session rule's sweep enumerate the holders of a session; BUG-0552's sweep is the first one done that way.
+
+### F-171 — Lane DISCO4 wrapped its targeted pytest in a 900 s outer timeout that killed it while it queued for the host lock
+- **What:** the lane's first targeted run (`timeout 900 python -m pytest tests/test_disco_session_loss.py`) was started while five other lanes' sessions held or queued on the host pytest lock (`/tmp/fuzzlab-pytest.lock`, waits up to 1800 s by default). The outer `timeout` killed it (exit 143) at 900 s, still queued, before it had run a test; the lane had to queue again from the back.
+- **Evidence:** the run's output (`Terminated`, exit 143, no test line); `pgrep -af pytest` at 01:21 and 01:31 UTC showing the queue.
+- **Impact:** about 15 minutes of the lane's wall time lost; no other lane's run was disturbed (a queued session holds nothing).
+- **Status:** the rerun queues with `FUZZLAB_PYTEST_LOCK_WAIT=7200` and no outer timeout. A process rule, not code: a wrapper's time bound must exceed the lock's wait plus the run (BUG-0532/PA-0532's queue is the bound).
+
+### F-172 — Lane DISCO4's first pre-fix proof failed every real-browser test on an import, not on the defect
+- **What:** the test helper `_explore` imported the new `ExploreSession` for every test, so on the pre-fix explorer the three no-provider tests (which the old `Explorer` accepts) failed with `ImportError` before exploring anything: "13 failed" proved nothing about their defect. The lane read the failure reasons before reporting, moved the import under `provider=True` and put the context count first, and ran the pre-fix proof once more.
+- **Evidence:** `scratchpad/lanes/DISCO4/prefix.out` (each real test: `ImportError: cannot import name 'ExploreSession'`, 13 failed in 3.41 s), then `prefix2.out`.
+- **Impact:** one more queued pytest session on the shared host; no wrong claim reported.
+- **Status:** fixed in the lane's commit; the reported pre-fix failures are `prefix2.out`'s.
+
+### F-173 — Lane DISCO4 published a lost session generation only through its recovery's install, so a second worker kept acting on it
+- **What:** in a1a93b1 the explorer recorded that a generation was gone only by moving `_Shared.auth` once a fresh session was installed. During the recovery, and for ever after `_end_authenticated`, another worker on the lost generation saw no generation change and (with an anonymous-200 API) no sign: it cleared its window, logged its action with a new state and URL and pushed what it found as the identity's coverage. `_session_current` dropped a pending window unmarked on a replacement. The lane's tests drove one worker only, though `--workers N>1` is a CLI option.
+- **Evidence:** review finding DISCO4-B1 (reproduced on a1a93b1: B's window `{act-2}` returned `(page, None)`, `session_lost_actions == ['act-1']`; B's real `_process` logged `{'new_state': 'fpB', 'url': ...}` after A's session line); `tests/test_disco_session_loss.py::test_a_loss_another_worker_finds_mid_action_is_never_this_workers_coverage`, `::test_no_worker_acts_on_a_generation_another_worker_found_lost`, `::test_a_newer_session_never_drops_a_pending_window_unmarked` fail on a1a93b1.
+- **Impact:** a multi-worker authenticated capture could record answers and states found on a session known lost as the identity's coverage (D′, PA-0533(5)); caught in review, never merged.
+- **Status:** fixed in CC-CRAWL-0060 review round 1 (`_Shared.lost_generations` recorded at the verdict under the recovery lock; a check before every action, restore and load); PA-0552(6).
+
+### F-174 — Lane DISCO4's sweep for its own rule missed two consumers of the lost-window mark and misdescribed one
+- **What:** PA-0552(4) (the lane's own text) required every consumer that takes a capture's answers as evidence to read the mark or be pinned. The lane's sweep listed `disco/ede.py` only as "not a holder" and `store_adapter.import_disco` as reading "requests and their URLs, not answers"; `ede.replayable` served the last 2xx answer per URL and `import_disco` took an answer's status and media type as page, header-point and path-template evidence. The list was written from what the modules are for, not from who reads the records.
+- **Evidence:** review finding DISCO4-B2 (reproduced on a1a93b1: `replayable(...)[GET /api/me].action_id == 'act-2'`; the page table held `('/settings', 200)`); `tests/test_lost_window_mark.py::test_every_capture_reader_reads_the_lost_window_mark` fails on a1a93b1.
+- **Impact:** `disco ede` would test a lost window's answer as the page's, and `fuzzlab auto` would build injection points from it; caught in review, never merged.
+- **Status:** `ede` fixed and `import_disco` pinned (owner AUD) in CC-CRAWL-0060 review round 1; a whole-package guard over the capture readers replaces the hand-written list (PA-0552(4)); SP-71.
+
+### F-175 — Lane DISCO4 narrowed the in-place login-form sign to "right after an action", so the CLI's runs missed a loss on a restore or at the seed, while its report called the in-place form fixed
+- **What:** without a known login form (every storage-state run, the CLI's only mode) a password form counted only when the URL equalled the URL before an action. A loss that landed on a restore, at the seed or on a harvest load was unseen. The lane's `[form]` test passed only because its budget put the loss right after a click; BUG-0552 said defect 1's in-place form and login shell were fixed.
+- **Evidence:** review finding DISCO4-R1 (measured on a1a93b1: `form`, budget 1, `sid in app.dead`, `session_lost=0`, harvest on the dead session); `tests/test_disco_session_loss.py::test_without_a_provider_a_login_form_rendered_on_a_restore_is_a_lost_session` and `::test_without_a_provider_a_login_form_at_the_seed_ends_before_anything_is_explored` fail on a1a93b1.
+- **Impact:** a storage-state capture whose session expired during a restore ended silently with every state unrestorable, or explored a login page as the identity; a status that overstated the fix.
+- **Status:** fixed in CC-CRAWL-0060 review round 1 (`places`, `State.login_shown`, weak signs only where a check decides them); PA-0552(8).
+
+### F-176 — Lane DISCO4 read only the first sign of a window, so a 401 hid the login page its script went to
+- **What:** `_loss_signal` returned the first auth-failure answer before reading the page; `_confirm_loss('answer')` on a live session gave an authorization denial, so a context whose script dropped its session on a 401 and went to `/login` explored on without it -- the usual SPA interceptor flow, and the case FR-CRAWL-41 itself said was reinstalled.
+- **Evidence:** review finding DISCO4-R2 (on a1a93b1: outcome None, `authorization_denials == 1`, `recovered == []`); `tests/test_disco_session_loss.py::test_a_login_page_after_a_401_on_a_live_session_reinstalls_it` and `::test_a_401_whose_script_drops_the_session_and_goes_to_login_reinstalls_it` fail on a1a93b1.
+- **Impact:** a provider run would explore a logged-out context and record its login page and later states as the identity's coverage; caught in review.
+- **Status:** fixed in CC-CRAWL-0060 review round 1 (`_loss_signs` returns the page's sign whatever the answers); PA-0552(1).
+
+### F-177 — Lane DISCO4 gave the CLI's only path no protected check, so a role-gated 401 ended every storage-state run
+- **What:** the only production caller passes a storage state, never a provider; without one, `_confirm_loss` called every loss shape an unconfirmed loss and the run ended, so a role-gated 401 or a login redirect for a live session's role ended every `fuzzlab disco capture`. The base had ignored 401s. The lane's only no-provider test covered sessions really dead; it never tried to establish a protected resource, which PA-0533(1)'s fallback presupposes.
+- **Evidence:** review finding DISCO4-R3 (an offline probe on a1a93b1: a 401 from `/api/admin/stats` and a 302 from `/admin.php` each gave `('lost', ...unconfirmed...)`, `auth_ended` set, `authorization_denials` 0); `tests/test_disco_session_loss.py::test_without_a_provider_a_role_gated_401_on_a_live_session_is_a_denial` fails on a1a93b1.
+- **Impact:** a regression against the base on the production path: any role-gated answer would end authenticated exploration; caught in review.
+- **Status:** fixed in CC-CRAWL-0060 review round 1 (the start page as a storage-state run's protected resource, judged by SP-61's `health_verdict`); PA-0552(7).
+
+### F-178 — Lane DISCO4's review-round R2 real-browser test passed on the pre-fix code: its fixture never put the 401 in the window
+- **What:** `test_a_401_whose_script_drops_the_session_and_goes_to_login_reinstalls_it` was written to reproduce DISCO4-R2 (a 401 and a login page in one window). Its board left for `/login` as soon as the 401's headers arrived, so the XHR never finished (`requestfinished` did not fire) and the window held the page sign alone, which a1a93b1 already reinstalled: the test passed on the pre-fix code (the one pass among the ten new tests in the proof run). It reproduced the scenario's outcome, not the finding's precondition.
+- **Evidence:** `scratchpad/lanes/DISCO4/r1/prefix.out` ("9 failed, 1 passed"; the pass is this test); the corrected board reads each answer whole before reacting (as an HTTP client's interceptor does), then `scratchpad/lanes/DISCO4/r1/prefix2.out` (the test on a1a93b1 alone).
+- **Impact:** one more queued pytest session on the shared host; the offline R2 test (`test_a_login_page_after_a_401_on_a_live_session_reinstalls_it`) did fail on a1a93b1, so the finding was covered; no wrong claim reported.
+- **Status:** fixed in the lane's review-round commit; the pre-fix proof of every new test is read per test, not by its count.
+
+### F-179 — The orchestrated session filled the host disk, and lane DISCO4's review-round harness run died of ENOSPC
+- **What:** the session's lanes kept their artifacts on the one host disk (the shared scratchpad held 9.2 GB at 06:15 UTC on 2026-10-21: `juice` 3.7 GB, `lanes` 2.1 GB of which `DISCO22` 1.6 GB, `secdevlabs` 0.7 GB, `au-sitetree` 0.4 GB; `/tmp/pytest-of-root` 1.3 GB; `/root/.cache` 2.4 GB) with no cleanup step, until `/` had 350 MB, then 4 MB, free. DISCO4's harness run (`verify_change.py --base a1a93b1`, 86 files, on 033a8e4) ran its tests and then could not write its junit report (`OSError: [Errno 28] No space left on device`); `parse_junit` raised on the truncated 2 MiB file, so the run gave no verdict. Its in-run errors were the same cause (`could not create numbered dir ... after 10 tries`, `database or disk is full`, a Chromium that could not launch). Space did not come back in 25 minutes of waiting.
+- **Evidence:** `scratchpad/lanes/DISCO4/r1/vc_console.out` (the `ParseError` traceback), `scratchpad/lanes/DISCO4/vc_r1/parallel.log` (the `OSError: [Errno 28]` in `pytest_sessionfinish`), `df -h /` (`39G` used, `350M`/`4.2M`/`6.2M` available).
+- **Impact:** no lane can be verified until space is freed; DISCO4's review round is committed (033a8e4) but unverified by the harness.
+- **Status:** open: the orchestrator frees space (each lane's finished harness worktrees and scratch copies, stale `pytest-of-root` dirs) and re-runs DISCO4's harness; a process rule: a lane deletes its own scratch copies and its harness output once reported, and the orchestrator checks free disk before dispatching a harness run.
+
+### F-180 — A reviewing agent of lane DISCO4 overwrote a shared scratchpad file with an archived product file
+- **What:** while refuting DISCO4-B1, the reviewing agent's first command overwrote the shared scratchpad file `scratchpad/explore.py` with a1a93b1's `fuzzlab/disco/explore.py`; its earlier contents (another session's) are lost.
+- **Evidence:** the reviewer's own housekeeping note in the DISCO4 review round 1 task text.
+- **Impact:** whatever that file held for another session is gone; no product file or worktree was touched.
+- **Status:** reported; a process rule, not code: a scratch extraction goes to a new directory of its own (the review's later runs did), never to an existing shared file name.
+
+### F-181 — Lane SPIDER ran its pre-fix proof twice, the second piped into `head`, and stopped it while it queued
+- **What:** after the one pre-fix run of the 14 new tests on c483dc1 (14 failed, 9.6 s), the lane started the same invocation again to read the failure lines, piped into `grep | head` (PA-0151: no pipe into a reader that can stop early). It queued on the host pytest lock behind another lane's harness run for over 10 minutes; the lane stopped it before it had run anything.
+- **Evidence:** the lane's session log; `scratchpad/lanes/SPIDER/` (the first run's output is in the session; the second produced no test output).
+- **Impact:** no lock time used (it never held the lock); a second, unneeded proof run against PA-0541(2)'s budget was attempted, and a PA-0151 pipe was written.
+- **Status:** recorded; the first run is the proof reported.
+
+### F-182 — Lane SPIDER's first pre-fix proof could not tell its own test defects from the product's
+- **What:** the lane's 14 new tests all failed on c483dc1 in its one pre-fix run, but four would have failed on correct code too: three identity tests attributed requests by the browser User-Agent, which the session manager's login fetcher also sends (assumed, not measured), and the transient-failure test used a `/reset` path the destructive rule rightly refuses. Five more failed on the base only because a new name (`FrontierLimits`, `FETCH_ATTEMPTS`, `WRITE_BATCH_ROWS`, the `outcome` column, `StaticIdentityUnsupported`) did not exist, not on the behaviour. Running the tests' bodies directly against the fix (no pytest) exposed the four; the lane fixed the tests, reordered the assertions so the behaviour is checked first, and proved them again on the base: 13 of 14 now fail on the behaviour (the frontier's unit test needs the class by nature).
+- **Evidence:** `scratchpad/lanes/SPIDER/measure/direct.out` (the four failures on the fix), `direct_old2.out` (the behavioural failures on the base).
+- **Impact:** none landed: caught before the targeted run and the commit; a "fails on the pre-fix code" claim for those tests would otherwise have rested on a failure that proved nothing about the defect (PA-0034(2)).
+- **Status:** corrected before the commit.
+
+### F-183 — Lane SPIDER's first static-identity design trusted every answer the seam returned
+- **What:** the lane's first `_seam_page` treated only `OUT_OF_ORIGIN` as "sent without the session". `SessionManager.prepare` also returns early, applying nothing and recording nothing, for a host outside its own scope, and the crawl's scope can admit one (a loopback alias the config does not list): such an answer would have been extracted as the identity's page. Found while answering the host-compare guard (PA-0134(3)) the targeted run failed on; the backstop (`_sent_without_session`: no `session_generation`) and a test that fails on c483dc1 were added before the commit. The request itself still goes out without the session (CC-CRAWL-0056 R6, flagged to SESS).
+- **Evidence:** `scratchpad/lanes/SPIDER/targeted3.log` (the guard failure), `measure/direct_old3.out`; `tests/test_spider_static_identity.py::test_an_answer_the_manager_sent_without_the_session_is_never_extracted`.
+- **Impact:** none landed.
+- **Status:** corrected before the commit; R6 open for SESS.
+
+### F-184 — Lane SPIDER left two consumers of its own change to the selection run
+- **What:** the lane added `LocalSpider(limits=...)` without passing it through the CLI's one builder (`spider_kwargs`), which `tests/test_spa_query.py::test_the_cli_flags_reach_the_spider_through_one_builder` pins (U9), and batched the page rows without sweeping the tests that read the store mid-crawl: the U2 seed test timed its injected stop by the newest row on disk, which the writer had not written yet, so the stop fired after the promotion. Neither file was in the lane's targeted set; both failed in the run of the harness's 96-file selection (2 failed, 3751 passed). PA-0152 (name a shared contract's consumers from the code) applied to both and was not followed.
+- **Evidence:** `scratchpad/lanes/SPIDER/selection_run.log`.
+- **Impact:** none landed; fixed in the lane's second commit (`limits=None` in the builder; the test flushes the store under its lock before reading), and the selection run again.
+- **Status:** corrected before the report.
+
+### F-185 — Lane SPIDER's harness run never ran; its evidence is a direct run of the harness's selection
+- **What:** `scripts/verify_change.py --base c483dc1 --wait-other 7200` on `7098d66` waited 2 h for the host verification lock (about eight lanes' harnesses queued) and was stopped by the session's background-task limit before it ran a test; the tool's note said not to restart a task that already had the longest limit. The lane instead ran the harness's own selection (`vc/selection.json`: 96 files, all parallel) directly, once per commit, with the harness's `FUZZLAB_REQUIRE_BROWSER/LINT/NETNS=1`, `-n 3 --dist loadfile`, in the clean lane worktree: on `7098d66` 2 failed, 3751 passed (fixed in `5b8660e`); on `5b8660e` 3753 passed, 5 skipped, 29 xfailed, 0 failed, 0 errors.
+- **Evidence:** `scratchpad/lanes/SPIDER/vc_console.out` (the queued harness, "interrupted (signal 15)"), `selection_run.log`, `selection_run2.log`, `selection_run2.xml`.
+- **Impact:** the lane's report carries no `verify_change` TOTAL line: the run that covers the selection did not go through the harness's detached worktree or its lock; the coordinator's merge verification is the harness proof.
+- **Status:** open for the coordinator (run the harness on `5b8660e` or the merge).
+
+### F-186 — Lane SPIDER named its frontier FR-CRAWL-33, a number not pre-assigned to it
+- **What:** the lane wrote FR-CRAWL-33 for the frontier in code, tests and its draft docs, though it was pre-assigned FR-CRAWL-34..36 only (PA-0031). It noticed before committing and remapped: the frontier is FR-CRAWL-35, the page record (outcomes, retries, writer) FR-CRAWL-36.
+- **Evidence:** the lane's session log; the committed tree has no FR-CRAWL-33 reference of the lane's.
+- **Impact:** none landed.
+- **Status:** corrected before the commit.
+
+### F-187 — Lane SPIDER's resume let stored rows around the crawl's scope and destructive rules
+- **What:** FR-CRAWL-36's resume fed every stored unresolved row to the frontier without the `_in_scope` and `_destructive` checks every other producer applies, and the static engine sends a load's first hop unasked. A `--resume` crawl of one loopback port requested another port's failed page (another service, BUG-0123), and a destructive URL that only an earlier crawl's start-URL exemption had let through was loaded by a crawl started elsewhere: a lab-only scope rule (D11) broken by `--resume` with the default database. The lane's sweep listed the queue's producers from pages, not the store it had just made one; its resume test resumed the same target.
+- **Evidence:** `scratchpad/lanes/SPIDER/review_round1.md` (B1, both reviewers; the skeptics measured 3 GETs to the out-of-scope port on 9071440, none on c483dc1); `scratchpad/lanes/SPIDER/r1/proof.log`.
+- **Impact:** none landed (found in review before the merge).
+- **Status:** fixed in review round 1: `_visit` asks `_load_refusal` first for every load; a test resumes an out-of-scope and a destructive row and asserts neither target received a request.
+
+### F-188 — Lane SPIDER left a send without the session as a residual, against its own new rule, and its test pinned it
+- **What:** the lane found that the session manager's `prepare` sends a request to a host outside its scope without the session (a loopback alias the config does not list) and recorded it as residual R6 "for SESS", though its own PA-0545(1) says "sends anonymously" is never a disposition and the spider could refuse before the transport (the seam calls the addon's `prepare` first). The page was then stored `withheld` with a false "another origin ... pass --auth-origin" reason, and the test asserted that row, not what the site received.
+- **Evidence:** CC-CRAWL-0056's residual R6 at 9071440; `review_round1.md` (B2-R6, reviewer A, skeptic's runs incl. `::1`); `scratchpad/lanes/SPIDER/r1/alias_scope.py` (the remedy measured).
+- **Impact:** none landed.
+- **Status:** fixed in review round 1 (`_SessionAddon`, `HostNotServed`; the test asserts nothing reached the alias).
+
+### F-189 — Lane SPIDER's bug doc stated three pre-fix behaviours it had not measured
+- **What:** BUG-0545 said that on c483dc1 a loopback alias "was crawled anonymously and filed as a page", "B's landing was followed" and "`/pick` was submitted with no cookie", citing outputs that show the old crawl loading only `/`, `robots.txt` and `sitemap.xml`: the test site gave an anonymous visitor no link, so the three tests failed on c483dc1 only because the crawl was anonymous. The lane's earlier F-record on its proof was closed by reordering assertions, without checking that each test reached its own behaviour.
+- **Evidence:** `review_round1.md` (B2, reviewer B); `measure/direct_old2.out`, `direct_old3.out`; `r1/proof.log` (each now fails on c483dc1 on its own assertion).
+- **Impact:** none landed; FR-CRAWL-34's "each test fails on c483dc1" was true and misleading.
+- **Status:** corrected in review round 1 (the test site; BUG-0545's review section).
+
+### F-190 — Lane SPIDER fixed R6 in one engine and gave the other a disposition it never measured
+- **What:** in review round 1 the lane refused a host the session manager does not serve in the static seam only, where R6 was found, and its PA-0002 sweep recorded the browser path as "withholds by route (FR-SESS-20)" from the route's origin rule. The browser carries a cookie session in a host-scoped jar: its cookie is host-only for the start's host, and the route's origin rule folds loopback aliases, so a browser crawl loaded `localhost` of a `127.0.0.1` start with no cookie, followed its redirect to an anonymous `/login` and stored the alias as a visited page -- R6 again, against the lane's own PA-0545(1), in the round that claimed it closed.
+- **Evidence:** `scratchpad/lanes/SPIDER/review_round2.md` (S2-1, measured on 8c2fa86 and 9071440 with two manager scopes); `scratchpad/lanes/SPIDER/r2/proof.log` (the new browser test fails on 8c2fa86 at `to_alias == []`).
+- **Impact:** none landed (found in review before the merge); a "closed" status for R6 was overstated for one engine.
+- **Status:** fixed in review round 2 (one gate at `_visit` for both engines, `_session_host_refusal`); in-load browser paths (a redirect hop, a selector form) measured still sending without the cookie and flagged as residual R8.
+
+### F-191 — Lane SPIDER's round-1 fixture fix and proof covered only the tests the review named
+- **What:** round 1 made `_IdSite` serve `home_extra` to an anonymous visitor, for the three tests the review named, but left `/secret` and `/expiring` linked from the live session's home only; its pre-fix proof ran only those three tests on c483dc1. `test_a_session_lost_on_a_send_is_never_extracted_and_the_page_is_retried` therefore still failed on c483dc1 only because the crawl was anonymous (`KeyError: '/expiring'`), while the lane's new FR-CRAWL-34 text said each test failed on its own assertion and BUG-0545 kept "a session lost on a send never reached `/expiring`". PA-0545(6), written in the same round, was not applied to every test.
+- **Evidence:** `scratchpad/lanes/SPIDER/review_round2.md` (S2-2); `scratchpad/lanes/SPIDER/r1/proof.log` (three c483dc1 tests only); `scratchpad/lanes/SPIDER/r2/direct_c483dc1.out` (all eight measured).
+- **Impact:** none landed; a requirement's enforcement text stated a measurement that had not been made.
+- **Status:** corrected in review round 2 (the anonymous home links the protected pages; every test's failing assertion on c483dc1 recorded in BUG-0545 and FR-CRAWL-34).
+
+### F-192 — SURROGATE's review fix changed a spider counter without running the test that pinned it, and the stack carried the failure to the crawl batch
+- **What:** the SURROGATE review fix (d83876f, BUG-0554) made `_record_dry` count a refused blocked write in `requests_not_recorded`. `tests/test_spa_capture.py::test_passive_capture_is_on_by_default_and_redacted`, written by SPIDER9 (34d4fd1) before it, asserted the count is 2; on the HashSpa lab the reveal window re-renders `/#/about` and its two over-bound writes are refused again, so the count is 4. The fix's run did not include that file, and nothing in the stack's later merges ran it, so 07792e0 already carried the failure (measured by driving the test's crawl on 07792e0's `spider.py` and `spa.py`).
+- **Evidence:** `scratchpad/crawl_batch_run.log` (the crawl batch's targeted run: `assert 4 == 2`); the instrumented direct run (`RECORD_DRY reveal-blocked POST .../rest/big`, `.../rest/deep`, each then "not recorded").
+- **Impact:** an unverified stack: a counter's consumer test failing on the unpushed stack until the crawl batch's run; no product defect (the count is the fix's intended one).
+- **Status:** the assertion now expects 4 with both paths named (CC-CRAWL-0061 merge-integration note); a counter change's sweep runs every test that reads the counter (PA-0152's consumer rule), which the fix's verification skipped.

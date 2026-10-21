@@ -1087,8 +1087,13 @@ def test_a_seed_is_never_importable_until_its_window_closed_cleanly(monkeypatch,
         original, fired = sp._take_query_navs, []
 
         def take(depth):
-            row = sp.storage.cursor.execute(
-                "SELECT source FROM discovered_pages ORDER BY rowid DESC LIMIT 1").fetchone()
+            # page rows are queued for the store's writer thread (FR-CRAWL-36): written
+            # first, and read under the store's lock, which that thread also takes
+            with sp.storage.lock:
+                sp.storage.flush()
+                row = sp.storage.cursor.execute(
+                    "SELECT source FROM discovered_pages ORDER BY rowid DESC LIMIT 1"
+                ).fetchone()
             if not fired and row and row[0] in (spa.SEED_SOURCE, spa.WRITE_SEED_SOURCE):
                 fired.append(1)
                 raise RuntimeError("injected")
