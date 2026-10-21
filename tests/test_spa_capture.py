@@ -237,8 +237,9 @@ def test_record_request_redacts_at_the_write_site_and_dedupes_by_signature(tmp_p
                                  f"http://localhost/api/x?ref={IDENT}",
                                  "application/json; charset=utf-8",
                                  b'{"password":"SECRETVALUE","b":1}', "passive") is None
-        # same method, canonical path and keys: one row (an alias host included)
-        assert sm.record_request("http://h/", "POST", "http://127.0.0.1/api/x",
+        # same operation (method, canonical path, media type, no selector) and the same
+        # typed key paths and query names: one row (an alias host included; FR-CRAWL-37)
+        assert sm.record_request("http://h/", "POST", "http://127.0.0.1/api/x?ref=1",
                                  JSON, b'{"b":2,"password":"x"}', "submit") == "duplicate"
         assert sm.record_request("http://h/", "POST", "http://h/api/x", JSON,
                                  b'{"c":1}', "submit") is None
@@ -249,8 +250,11 @@ def test_record_request_redacts_at_the_write_site_and_dedupes_by_signature(tmp_p
         sm.close()
     rows = db_rows(db, "SELECT page_url, method, url, content_type, body_json, source, "
                        "signature FROM discovered_requests")
-    assert rows == [("http://h/", "PUT", "http://h/api/y", JSON, "[1, 2]", "passive",
-                     '["PUT", "http://h:80/api/y", []]')]
+    from fuzzlab.tools import apiop                     # the one signature (FR-CRAWL-37)
+    sig = apiop.row_signature(apiop.operation_key("PUT", "http://h/api/y", JSON, [1, 2]),
+                          apiop.request_shape([1, 2], "http://h/api/y"))
+    assert sig.startswith('["PUT", "http://h:80/api/y", "application/json", [], "')
+    assert rows == [("http://h/", "PUT", "http://h/api/y", JSON, "[1, 2]", "passive", sig)]
 
 
 def test_record_request_stores_no_secret_and_no_identifier(tmp_path):

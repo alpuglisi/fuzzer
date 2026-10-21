@@ -18,6 +18,36 @@ Format per entry:
 
 ---
 
+## 2026-10-21 — core seam and proxy sender (a connection per send; BUG-0549, audit defect 24)
+- **Symptom:** every send through `HttpClient`'s default transport and every call of the proxy's `SocketSender` opened a new connection (2 000 connections for 2 000 loopback sends); a TLS call through the proxy also built a system-CA SSL context (about 21 ms) and did a full handshake. Review round 1 of the fix found four defects in it: a CL.0 probe's kept connection absorbed the next request (another identity's), the Repeater shared kept connections across tabs, the seam's transport re-sent a probe no try recorded, and the proxy's sender replayed a request after part of its answer.
+- **Root cause:** the transports' interfaces did not carry what decides whether a connection may be reused (whose request, which session generation, whether the last exchange ended exactly), so each took the always-safe "fresh per call"; PA-0148's "do invariant setup once" was scoped to build and harness setup, and the per-send cost was never measured (CC-CORE-0072 kept it "as before"). The round-1 defects: reuse and resend safety were argued from the client's own bytes and exception classes instead of from what can be observed of the peer, and a re-send was placed below the evidence producer.
+- **Remediation:** `core.http.PooledTransport` (FR-CORE-509): a pooled, bounded session per (origin, identity, generation), no cookie jar, retire-on-new-generation, `HttpClient.close()`, one try per send, a send with a body on a session of its own; `SocketSender` (FR-PROXY-405): one SSL context, connections kept only after an exactly framed, bodiless exchange, idempotent requests only take them, one resend only when no answer byte came; the Repeater's sender `keep_alive=False` (CC-CORE-0075, CC-PROXY-0029, BUG-0549, PA-0549).
+- **Status:** Fixed
+
+## 2026-10-21 — proxy (HTTP/1 framed by guesswork; the listener's reads unbounded; BUG-0543)
+- **Symptom:** audit defects 18-20, reproduced at 08e3eaa over real loopback sockets (`tests/test_proxy_framing.py` on the pre-fix code). A chunked POST reached the upstream as its head alone. `8\r\nabc0\r\n\r\n` ended a chunked response inside its data, and a 10-byte body cut at 3 bytes was returned (and relayed, and recorded as a 200). A trailer, a HEAD, a 204, a 304 or a 103 held the response to the 20 s idle timeout. A `Content-Length: 10^12` request waited without bound, a 100 KiB head got no answer, and nothing capped connections.
+- **Root cause:** no HTTP/1 framing owner: the listener read `Content-Length` only and the sender guessed completion from a suffix or a quiet socket. PA-0102's bounds were applied to the upstream read only; BUG-0101's sweep cleared the listener on the presence of the stream reader's head limit.
+- **Remediation:** `proxy/framing.py` (SP-63, `MessageReader`) for both directions. The listener reads each request whole under `InboundLimits` (400 / 408 / 413 / 431 / 503, counted, configurable) and de-chunks it. The sender returns only a framed final response and raises `UpstreamIncomplete` / `UpstreamFramingError`. An AST guard fails on hand framing outside the owner (BUG-0543, PA-0543, CC-PROXY-0028).
+- **Status:** Fixed
+
+## 2026-10-21 — crawler, captured requests (a dispatcher's operations and nested inputs were dropped as duplicates; BUG-0546)
+- **Symptom:** each of these second requests was recorded as `duplicate` and never reached the importer (audit defect 9, reproduced on c483dc1):
+  - `POST /api {"data":{"cmd":"x"}}` after `{"data":{"q":"x"}}`;
+  - a second GraphQL operation on `/graphql`;
+  - a second JSON-RPC method;
+  - a second `?action=` value;
+  - a form body after a JSON one with the same names;
+  - a request adding a query parameter.
+  - In review round 1 (on 34d4fd1, the first fix): `action=Remove+from+cart` after `action=Add+to+cart` (form, JSON or query), and two `action` values over 64 characters.
+- **Root cause:** `StorageManager.record_request` keyed `discovered_requests` by method, canonical path and sorted top-level body keys. That key was chosen from the first targets' flat bodies, and the `UNIQUE` signature dropped a later request whole. PA-0505(1) (identity by content) was scoped to disco's documents and states and was not enforced. In the first fix, the selector rule made a value with whitespace, or over 64 characters, into data, so the rule erred towards merging.
+- **Remediation:**
+  - The operation key adds the media type and every operation selector (`tools/apiop.py`). Every non-empty string value of a selector field is a selector: whitespace is folded, and a value over 64 characters is keyed by its digest.
+  - A request is a duplicate only when a row of its operation has its exact typed key paths. One that adds an input is always stored with its own body. Contexts that add nothing are capped at 32 rows per operation.
+  - An AST guard keeps every writer of the table on that key.
+  - Instances in other items' code are pinned by strict xfails: `record_form`, `disco.synth` and `store_adapter._store_request`; the pipeline's DOM-template stage was fixed by BUG-0547 (its pin is a regression test). A guard checks that every row of the bug's sweep is fixed, not an instance, or pinned.
+  - References: CC-CRAWL-0057, FR-CRAWL-37, BUG-0546, PA-0546.
+- **Status:** Fixed
+
 ## 2026-10-21 — fuzzing harness and core (DOM-template dedup deleted unrelated attack surfaces; BUG-0547)
 - **Symptom:** `run_pipeline(pages_html=...)` audited only the points on the first URL of each DOM-skeleton template: equal skeletons at `/safe?q=` and `/admin?cmd=` left `q` alone; another form action, parameter, location or sibling set on a look-alike page was never evaluated; every page without HTML was one template. Nothing reported the drop.
 - **Root cause:** a deduplication step decided two units of work were the same by a similarity of their page (tag names only: no action, input name or handler) instead of by what they send and observe, defaulted an unknown page to one shared value, and was tested only where page and request coincide (BUG-0075's and BUG-0507's class; PA-0076 was worded for joins, PA-0507 for route classification).

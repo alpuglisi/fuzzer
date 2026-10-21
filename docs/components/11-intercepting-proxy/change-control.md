@@ -3,6 +3,275 @@
 Component code: **PROXY**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PROXY-0029 — The upstream sender keeps exactly framed connections (FR-PROXY-405, BUG-0549) (2026-10-21)
+- Placement: pre-assigned to POOL24 (audit defect 24). CC-PROXY-0028 is AU-PROXY's, which
+  rewrites the framing in lines ~35-105 of the same file; this change touches only the
+  `SocketSender` class and adds helpers after it. Planned merge order: AU-PROXY, then
+  POOL24.
+  *(Review round 1:)* the round also changes one line of `fuzzlab/web/proxycontrol.py`
+  (the Repeater's sender, finding B2), a UI-component file outside the lane's set; it
+  merges with POOL24-r1, after AU-PROXY. No CC-UI number was pre-assigned: the
+  coordinator's CC-UI entry text is in the lane's doc texts.
+- Change (`fuzzlab/proxy/socketsender.py`):
+  - `SocketSender` builds one SSL context per sender (`_context`, under a lock) instead
+    of one per call.
+  - It keeps upstream connections in an `_IdlePool` per (host, port, TLS), only after an
+    exchange that was exactly one well-formed HTTP/1.1 request (`reusable_request`) and
+    one fully framed HTTP/1.1 answer (`reusable_response`, with a strict chunked parse
+    `_chunked_exact`) with no `Connection: close`, upgrade or connection-bound
+    authentication; anything else is closed after its exchange, as before.
+  - Only a reusable, idempotent request takes a kept connection (`_IDEMPOTENT`: GET,
+    OPTIONS, TRACE, PUT, DELETE), after a check (`_quiet`: nothing readable, no buffered
+    TLS byte; idle at most `IDLE_SECONDS`, 4 s). When the peer closed it before a byte of
+    answer (an empty read before the idle timeout, or `_PEER_CLOSED`), the request is
+    sent once more on a fresh connection; a timeout is never resent.
+  - Bounds: `MAX_IDLE_PER_UPSTREAM` (8) and `MAX_IDLE_TOTAL` (64), the oldest closed
+    first, the expired closed at each return. New `close()` (idempotent; also run when
+    the sender is collected, `weakref.finalize`) and `keep_alive=False` (one socket per
+    call); `idle_seconds` and `max_idle` are configurable.
+  - New `tests/test_socketsender_pooling.py` (6 tests, 19 cases) on the shared loopback
+    peer `tests/_keepalive_peer.py` (CC-CORE-0075).
+  - *(Review round 1.)*
+    - **A body is never kept (B1).** `reusable_request` now also refuses a request with
+      body bytes or a `Content-Length` other than `0`, and one with a framing header
+      spelled with an underscore (`Transfer_Encoding`, `Content_Length`). Such a request
+      neither takes nor leaves a kept connection. A well-formed CL.0 probe (`POST
+      /static` whose body is a request prefix) had its connection kept; the upstream had
+      left the body unread, so the next request on it, another tab's or another
+      identity's, completed the smuggled request with its request line and `Cookie`.
+    - **No resend after an answer byte (B3).** The kept-connection path reads through
+      `_Counted`, which counts the answer bytes received (it offers only `sendall`,
+      `settimeout`, `recv`, `recv_into`). A `_PEER_CLOSED` failure after a byte came is
+      raised to the caller; only one before any byte is resent. A partial answer
+      followed by a reset had been discarded and the request replayed.
+    - **The Repeater keeps fresh sockets (B2).** `web/proxycontrol.py::RepeaterController.
+      _writer` builds `SocketSender(verify_tls=False, keep_alive=False)` (verification
+      as before; only `keep_alive` added). Its per-thread sender had shared kept
+      connections across tabs and the identities their cookies carry, against audit
+      defect 24's "retain fresh sockets for deliberate desynchronization probes and
+      connection-sensitive experiments".
+    - Tests: `NOT_FRAMED` gains "a GET with a body" and "a framing header spelled with an
+      underscore"; new `test_a_body_the_upstream_leaves_unread_never_reaches_the_next_request`,
+      `test_a_kept_connection_reset_after_part_of_its_answer_is_never_resent`, and
+      `tests/test_web_repeater.py::test_each_repeater_send_gets_a_fresh_upstream_connection`;
+      the stale-connection test now asserts the POST's connection is closed after it.
+      `tests/_keepalive_peer.py` gains `Reset` (part of an answer, then a reset) and
+      `unread_body` (a CL.0 peer).
+- Impact (other components / project):
+  - The proxy engine, `fuzzlab proxy` and the web proxy's Repeater forward well-framed
+    traffic on kept connections; bytes on the wire and the answers returned are
+    unchanged (NFR-PROXY-byte-exact).
+  - A deliberately malformed request (duplicate `Content-Length`, a transfer coding, a
+    pipelined second request) never rides a kept connection and its connection is
+    closed after it: the desync experiments keep a fresh connection. *(Review round 1:
+    this held for malformed requests only. A well-formed request with a body, the CL.0
+    class, was kept and could poison the next request; it now gets a fresh connection
+    closed after it, as does every request with a body.)*
+  - UI: `fuzzlab/web/proxycontrol.py` and `fuzzlab/proxy/cli.py` (not this lane's files)
+    do not call `close()` at stop; the idle connections are closed when the sender is
+    collected (residual R2 in BUG-0549).
+  - No store or wire contract change.
+  - *(Review round 1.)* Kept connections now serve bodiless requests only: a proxied
+    POST, PUT or PATCH with a body pays a connect (and a handshake) as before the lane.
+    The web Repeater opens one upstream connection per send, as before the lane (BUG-0549
+    R4 closed). The proxy engine and `fuzzlab proxy` keep connections for bodiless
+    requests; a reset after part of an answer now reaches the engine as an upstream
+    failure instead of a silent replay.
+- Risk (medium):
+  - A misbehaving upstream that sends bytes after a fully framed answer could have them
+    read as the next request's answer if they arrive between the check and the next
+    read. Mitigated: such bytes already waiting make the connection be closed, and only
+    an exactly framed exchange is kept; accepted as the residual of any keep-alive
+    client.
+  - `reusable_response` parses the answer bytes a second time, strictly, beside
+    `recv_http_response`'s own framing (AU-PROXY's region). When AU-PROXY lands, the two
+    must agree: if AU-PROXY exposes an exact-end decision, this check should call it
+    (BUG-0549 R1).
+  - A HEAD request is never kept (its answer's framing depends on the request the reader
+    does not see).
+  - *(Review round 1.)* `_Counted` relies on the reader receiving through `recv` or
+    `recv_into`; a reader that needs any other socket method fails loudly
+    (`AttributeError`) instead of reading uncounted. AU-PROXY's reader (d84f97e) uses
+    `settimeout` and `recv` only, and lets a reset from `recv` propagate, so the rule
+    holds after that merge. A bodiless request a server still reads as framed (an
+    unknown spelling not covered by the underscore rule) is the residual; the classic
+    CL.0 and TE.0 shapes are covered.
+- Deliverables:
+  - [x] `SocketSender` kept connections, one SSL context, `close`, helpers — done
+  - [x] `tests/test_socketsender_pooling.py`: well-framed (Content-Length and chunked)
+    exchanges share a connection; 14 not-exactly-framed exchanges never leave their
+    connection and a malformed request never rides a kept one; a stale kept connection
+    resent once, a timeout never; TLS: one connection, one handshake, one context; 8
+    threads each get their own answers on at most 8 connections; `close` and collection
+    close the idle connections. Each failed on c483dc1 (one run) — done
+  - [x] FR-PROXY-405 added; FR-PROXY-12 edited in place — done
+  - [x] *(Review round 1)* B1, B2, B3 fixed, each with a test that failed on 093685e (one
+    run) and passes now; FR-PROXY-405 corrected in place ("a POST's may be kept after
+    it" removed; a body is never kept; resend only before any answer byte; the
+    Repeater's fresh sockets) — done
+- Effectiveness (assessed 2026-10-21): on loopback, 2 000 plain calls used 8 connections
+  instead of 2 000; sequential calls/s 1 489 -> 10 271 (an earlier pair: 1 781 -> 4 650),
+  8-thread 1 205 -> 3 140; over TLS 20 -> 3 826 sequential; a fresh TLS call built a
+  20 ms system-CA context that is now built once (BUG-0549). The harness result is in this
+  lane's report. *(Review round 1:)* the reviewers' repro scripts, run on the fixed tree:
+  CL.0 (`cl0.py`, `cl0_demo.py`) two connections and the victim's `GET /me` intact with
+  its own answer (was one connection, absorbed); partial answer then reset
+  (`midreset_demo.py`) raises `ConnectionResetError` and the upstream saw `/2` once (was
+  twice, answer swallowed). The measured numbers are for bodiless GETs and stand.
+
+### CC-PROXY-0028 — HTTP/1 framed by the protocol on both sides; the listener's reads bounded (BUG-0543; audit defects 18-20) (2026-10-21)
+- Change:
+  - **New `proxy/framing.py` (SP-63):** `MessageReader`, a sans-I/O HTTP/1 reader
+    (`feed` / `eof`), with `request_framing`, `response_framing`, `response_status` and
+    `closes_connection` (RFC 9112 §6-7). It parses chunked bodies (sizes, extensions,
+    CRLFs, trailers), `Content-Length` (identical duplicates are one; conflicting or
+    invalid is `FramingError`; `raw_length` frames conflicting ones by the first) and
+    close-delimited bodies. HEAD / 1xx / 204 / 304 / a 2xx to CONNECT have no body.
+    Interim 1xx responses are passed over (at most 8). Head and body bounds are checked
+    as bytes arrive (`OverLimit`); a close before the framed end is `Incomplete`. It
+    counts the bytes it copies (`copied`).
+  - **`proxy/server.py`:** `AsyncProxyServer(limits=InboundLimits(...),
+    raw_framing=False)`.
+    - `_next_request` reads each request whole through SP-63 under a per-request
+      deadline and forwards a chunked one de-chunked with a `Content-Length` (trailer
+      fields dropped).
+    - Refusals: 400 for what cannot be framed, 431 / 413 for a head / body over its
+      bound, 408 at the deadline, each with a lingering close (write side shut, client
+      bytes discarded for at most 1 s). A connection over `max_connections` is answered
+      503 and closed. All are counted in `counts`.
+    - Bytes after a request are the next one (`_Inbound`). The CONNECT/TLS loop ends
+      after a response that ends its connection.
+    - `_read_http_message` is removed.
+  - **`proxy/socketsender.py`:** `recv_http_response(..., method=)` reads through SP-63
+    and returns the final response's exact bytes. It raises `UpstreamIncomplete`
+    (`reason`: `eof`, `idle`, `deadline`, `head`, `wire`) or `UpstreamFramingError`, both
+    `UpstreamResponseError`s. A close before any byte still returns `b""`. Each receive
+    waits at most the time left to the deadline. `SocketSender` passes the request's
+    method. The receive size and the deadline factor are SP-60's (`READ_SIZE`,
+    `DEADLINE_TIMEOUTS`); `_body_complete` and `_CHUNK` are removed.
+  - **`proxy/cli.py`:** `--max-connections`, `--max-request-bytes`, `--max-header-bytes`,
+    `--request-deadline` (`inbound_limits`; a bound that is not positive is a usage
+    error) and `--raw-framing`. The non-zero refusal counts are printed at stop.
+  - **`fuzzlab/cli_taxonomy.py`** (FUZZ's file, the proxy's own flags only, as CRAWL
+    lanes classify theirs): the five new dests, class `B`.
+  - **`scripts/proxy_e2e.sh`** (on-host Part I): step 3 starts the proxy with
+    `--raw-framing`, which step 5's conflicting-`Content-Length` request now needs.
+- Reason: audit defects 18-20 (BUG-0543). A chunked request was forwarded as its head
+  alone and its chunks were left on the connection. A response ended at payload bytes
+  that looked like the last chunk, or at an idle receive or a close, and a cut response
+  was relayed and recorded as whole. The listener read a declared body without a cap or
+  deadline and admitted connections without bound.
+- Impact (other components / project):
+  - **Wire contract of the listener (FR-PROXY-1, FR-PROXY-401).** A request with
+    conflicting `Content-Length` values, both `Transfer-Encoding` and `Content-Length`, a
+    non-`chunked` transfer coding or a malformed request line is now answered 400 and
+    not forwarded. It used to be forwarded (framed by the first length).
+    `--raw-framing` keeps the conflicting-length case; the Repeater still sends any bytes
+    verbatim. A chunked request now reaches the upstream de-chunked with a
+    `Content-Length`. ARCHITECTURE's "exit criterion in miniature" sentence needs the
+    raw-mode qualifier (text in the lane report).
+  - **History and the trace (FR-PROXY-13).** A cut or stalled upstream response is now a
+    flow with no response and error `UpstreamIncomplete` (a lost arrow in the proxy
+    sequence), not a 200. A response preceded by 1xx is recorded with its final status.
+  - **The web UI** (`web/proxycontrol.py`, UI) builds `AsyncProxyServer` with the default
+    `InboundLimits`; no code change. The repeater route (`web/app.py`) already answers
+    500 on any sender exception; `UpstreamIncomplete` joins those (R5).
+  - **Clients:** a refused connection or request gets `Connection: close` (PA-0153(4));
+    an interim 1xx is not relayed (R4).
+  - No store, schema or `Sender` seam change.
+- Risk: medium. The listener's request handling is rewritten on the browser's path. The
+  mitigation is the real-socket tests below plus the existing proxy suites (plain HTTP,
+  trace, intercept, rules, live). Accepted residuals:
+  - **R1:** `h2transport._drain` / `send_raw` have a deadline but no byte cap, and
+    re-decode `bytes(buf)` per receive. Not on the listener's path; flagged for its own
+    item.
+  - **R2:** `redact._dechunk` is a second, lenient chunk decoder (redaction only; it
+    fails closed). Routing it to SP-63 is a redaction change (two reviews, PA-0541(1)).
+  - **R3:** no `100 Continue` from the listener. A client that waits for one (curl,
+    over 1 MiB) sends after its own timer; the result is correct but slower.
+  - **R4:** interim 1xx responses are read and not relayed (the proxy holds whole
+    messages; RFC 9110 §15.2 says forward). A 101 is relayed and then the connection
+    ends: upgrades through the listener are still unsupported.
+  - **R5:** the web repeater route answers 500 on a sender exception (UI file).
+  - **R6:** `scripts/proxy_e2e.sh` with `--raw-framing` is not run on-host here (no
+    lab); `docs/ON_HOST_RUNBOOK.md` Part I needs the matching line (text in the lane
+    report).
+  - **R7:** the connection cap's default (64) is not measured against a browser's own
+    connection limit (CLAUDE.md step 8). It is configurable.
+  - **R8:** no aggregate byte reservation or disk spooling. The worst case buffered is
+    connections × (head + request body + one upstream response): about 5 GiB at the
+    defaults.
+- Deliverables:
+  - [x] code (`proxy/framing.py` new; `server.py`, `socketsender.py`, `cli.py`;
+    `cli_taxonomy.py`; `scripts/proxy_e2e.sh`) — done
+  - [x] tests: new `tests/test_proxy_framing.py`, over real loopback sockets (client →
+    `AsyncProxyServer` → `SocketSender` → an upstream socket), plus the SP-63 guard and
+    its synthetic offenders; `test_the_body_is_never_recopied_per_chunk` reads the
+    reader's copy count; `test_async_server_forwards_duplicate_content_length_byte_exact`
+    runs in raw mode — done
+  - [x] proof on the pre-fix code (the new test file against 08e3eaa's `fuzzlab/`, one
+    run) — done: 26 failed, 1 passed (the guard's synthetic-offender test, which tests
+    the oracle only), in 109 s.
+    - Behavioural on the old code:
+      - the chunked request reached the upstream as `…Transfer-Encoding: chunked\r\n\r\n`
+        with no body;
+      - all six unframeable requests and both over-limit ones were forwarded or hung, with
+        no 400 / 413;
+      - `abc0\r\n\r\n` ended the response;
+      - the three cut responses were returned (DID NOT RAISE);
+      - the trailer / HEAD / 204 / 304 / 103 cases each took 20.0 s, the idle timeout;
+      - the cut upstream response reached the client and history as a 200;
+      - a 100 KiB head got no 431;
+      - the guard found `server.py`'s `readuntil` / `readexactly` and `socketsender.py:46`.
+    - By a missing API: the 408, 503, CLI and raw-mode tests (`InboundLimits`,
+      `raw_framing`) and the reader-level leftover test (`fuzzlab.proxy.framing`).
+  - [x] FR-PROXY-1, FR-PROXY-12 and NFR-PROXY-byte-exact amended; FR-PROXY-401, 402 and
+    403 added — done
+  - [x] BUG-0543 — done
+  - [ ] CHANGELOG, ERROR_LOG, PA-0543, SHARED_PRIMITIVES (SP-63), ARCHITECTURE,
+    ON_HOST_RUNBOOK, the failure record — the orchestrator's (text in the lane report)
+- Effectiveness (assessed 2026-10-21): the targeted proxy files pass (112 passed: the
+  new file, the upstream/flush, live, server, rules, trace, intercept-live and
+  hand-written-response suites). The pre-fix proof is above. The one
+  `scripts/verify_change.py --base 08e3eaa` run on this commit (d84f97e, detached
+  worktree): 77 files, 3014 passed, 0 failed, 0 errors, 1 skipped (test_packaging
+  bdist_wheel, environment), 20 xfailed.
+- Review round 1 (2026-10-21, two reviewers and a skeptic on d84f97e: REVISE, five
+  blocking findings, each reproduced; fixed on top of d84f97e):
+  - **B1 (security): malformed field syntax still framed and forwarded.** `_start`
+    read fields through `RawMessage`, which splits a head at `\n\n` and skips lines it
+    cannot match. Four inputs were framed and forwarded on the default path: a bare-LF
+    pipeline (`X: y\n\nGET /smuggled …`), `Transfer-Encoding\t: chunked`,
+    `Transfer-Encoding : chunked` or an obs-folded one beside a `Content-Length`, and
+    `X: a\rContent-Length: 5`. Fix: `framing.parse_head` parses a head once, strictly,
+    from the bytes up to the first CRLF CRLF. It refuses a bare CR or LF, an empty start
+    line, obs-fold, a field line with no colon or a non-token name, a NUL in a value,
+    and a malformed request or status line. Framing reads its fields from that parse:
+    a request is answered 400, a response is a 502 (`UpstreamFramingError`).
+    `closes_connection` uses the same parse. Only CRLF pairs before a request line are
+    skipped. Raw mode still changes only the conflicting-length rule.
+  - **AU-PROXY-1: a cut or unanswered upstream inside the TLS tunnel closed it empty.**
+    The tunnel loop now contains each request's failure (`errors`). On a failure or an
+    empty response it answers `_BAD_GATEWAY` in the tunnel (a lingering close), then
+    ends it. The plain path answers an empty upstream response with 502 too.
+  - **B3: the keep-alive case had no listener-level test.**
+    `test_the_bytes_after_a_chunked_request_in_a_tunnel_are_the_next_request` sends a
+    chunked POST and a GET in one write through a real TLS tunnel (LocalCA, offline).
+  - **B2 / AU-PROXY-2: PA-0102's test lost its proof.**
+    `test_the_body_is_never_recopied_per_chunk` checks the body buffer's identity after
+    every receive as well as the copy count. `test_the_copy_oracle_flags_a_quadratic_reader`
+    proves the oracle on an honest quadratic reader (over 60 times the bytes received).
+  - **AU-PROXY-3: PA-0543(2) claimed every accept path.** Its admission and time clause
+    is scoped to the proxy listener (lead's option (a)). `oracle/oob.py`'s
+    `ThreadingHTTPServer` (a thread per connection, no cap, a 5 s socket timeout) and
+    the web UI's uvicorn listener are residuals R9 and R10 in BUG-0543's sweep: other
+    components' listeners, not widened here.
+  - Tests: five new 400 cases (the four inputs, the third in both forms), a three-case
+    strict-response test, the two tunnel tests
+    and the quadratic-oracle test. Proof on d84f97e and harness: recorded in the lane
+    report.
+  - Effectiveness of review round 1: Review round 1 fixed on 92024c8. The new tests on d84f97e: 9 failed, 40 passed (the five B1 request cases forwarded with a 200, the three strict-response cases did not raise, and the tunnel test got an empty close). The B3 tunnel test on 08e3eaa sent three requests (the head, the chunk bytes, the GET). `scripts/verify_change.py --base d84f97e` on 92024c8: 74 files, 2959 passed, 0 failed, 0 errors, 1 skipped (test_packaging, environment), 20 xfailed.
+
 ### CC-PROXY-0027 — A proxied flow's redirect target keeps its own key (BUG-0517) (2026-10-19)
 - Change (`fuzzlab/proxy/history.py::flow_event`): the redacted `Location` is
   `redirect`, not `location`.

@@ -1196,3 +1196,87 @@ Juice Shop lab is complete.
 - **Evidence:** `tasks/b7u31c8qc.output` ("Terminated"); the rerun `tasks/bbwfuml8o.output` (queued, then 40 passed).
 - **Impact:** about 20 minutes of the lane's time and its place in the queue; no test ran, no lock was held, no result was lost or misreported.
 - **Status:** recorded; later runs were queued in the background with no shorter bound than the lock's wait.
+
+### F-131 — The spider's request-capture key was designed from the first targets' flat bodies, and BUG-0505's sweep did not reach it
+- **What:** forms phase 3 (CC-CRAWL-0017, built by the agent) keyed `discovered_requests` by method, canonical path and sorted top-level body keys. A `UNIQUE` signature dropped any later request with the same key. Every GraphQL, JSON-RPC or `action=` operation after the first on an endpoint was dropped silently, and so was every input a later request added below the top level. BUG-0505 (2026-10-19) found disco identifying states by address rather than content and wrote PA-0505(1). Its PA-0002 sweep covered disco's fingerprint and harvest only. It did not reach the spider's request signature, a deduplication key of the same kind in the sibling tool.
+- **Evidence:** audit defect 9 (6552276, `tools/spider.py` 220-255); `tests/test_captured_operations.py` fails on c483dc1's `spider.py` (the defect tests); BUG-0546's recurrence review and prior-PA failure analysis.
+- **Impact:** coverage only, and silent: the operations and nested inputs of dispatcher endpoints were never imported, so they were never tested. No finding was wrong.
+- **Status:** fixed in CC-CRAWL-0057 (BUG-0546, and PA-0546 with an AST guard). Instances in other items' code are pinned by strict xfails.
+
+### F-132 — BUG-0546's first fix made a multi-word selector value into data, merging "Add to cart" with "Remove from cart", and its test asserted the merge as intended
+- **What:** the agent's first fix (34d4fd1, lane SPIDER9) treated an `action`/`op`/`cmd` field as a selector only when its value was a whitespace-free token of at most 64 characters. Two operations told apart by a submit button's label (`Add to cart` / `Remove from cart`, in a form body, JSON or the query), or by values over 64 characters, stayed one operation, and the second was dropped as `duplicate`. That is the defect the change was fixing. The rule contradicted the lane's own FR-CRAWL-37 ("costs a row, never an input") and PA-0546(2) ("errs towards keeping"). PA-0546(2) itself named "a token value" as the decider, and `tests/test_captured_operations.py` asserted the free-text `command` merge as intended behaviour.
+- **Evidence:** review finding B1 on 34d4fd1, reproduced through `StorageManager.record_request` (four cases). `test_a_selector_value_with_whitespace_or_over_64_characters_keeps_operations_apart` fails on 34d4fd1.
+- **Impact:** caught in review before merge. Had it merged, every operation after the first of a dispatcher with multi-word or long values would have been lost silently again.
+- **Status:** fixed in CC-CRAWL-0057 review round 1. PA-0546(2) is reworded so that a value condition may only add a selector.
+
+### F-133 — BUG-0546's sweep deferred two known instances in prose, against PA-0531(4), and overstated what the importer gets
+- **What:** the agent's PA-0002 sweep for BUG-0546 pinned two instances with strict xfails. It wrote "another lane's item; not pinned here" for the importer's first-wins parameters (`store_adapter._store_request`, audit defect 8), and listed `core/dedup.py` (audit defect 10) with no pin and no reason. PA-0531(4) and PA-0054(3) forbid exactly that. CC-CRAWL-0057 also said the importer "gets the added operations and inputs as form rows and points". In fact, a second GraphQL operation's shared inputs are bound to the first operation's form and never become its points.
+- **Evidence:** review finding B2 on 34d4fd1. Two operations imported with `import_spider` give 2 forms and 3 parameters, all with form_id 1. The sweep guard `sweep_rows_without_a_pin` flags 34d4fd1's two rows.
+- **Impact:** process and reporting. The instances stayed unpinned, so a merge could not tell when the owners fixed them, and the change-control entry overstated the end-to-end effect. Caught in review before merge.
+- **Status:** fixed in CC-CRAWL-0057 review round 1. Both instances are pinned by strict xfails naming their owners. A guard over BUG-0546's sweep rows enforces PA-0546(5), and the impact line is corrected.
+
+### F-134 — The spider's capture writer raises on a body holding a lone surrogate, and the request is lost uncounted
+- **What:** `StorageManager.record_request` (forms phase 3, CC-CRAWL-0017, built by the agent) stores `json.dumps(doc, ensure_ascii=False)` text. A captured JSON body that holds a lone surrogate (`{"q":"\ud800"}`, valid JSON) makes the `sqlite3` bind raise `UnicodeEncodeError`, and CC-CRAWL-0057's `apiop.row_signature` raises the same way for such a key. The observer guard in `navguard` catches the exception and logs it at info. The request is lost and is not counted in `requests_not_recorded`. The capture boundary is documented as total ("it never raises"), but the write after it is not. Found by lane SPIDER9 in review round 1 while making its own digest total; not fixed there (out of scope; it needs its own BUG number).
+- **Evidence:** /tmp/claude-0/-home-user-fuzzer/2f299c5d-40a8-582c-a2d4-d0cdcbec2db1/scratchpad/lanes/SPIDER9/r1/scripts/surrogate.py on 34d4fd1. All three bodies raise. c483dc1's writer binds the same text.
+- **Impact:** coverage, small and silent: a request whose body carries a lone surrogate (rare, but possible from an app's JSON encoder) is never imported.
+- **Status:** open: BUG-0554 / PA-0554 assigned; fixed by lane SURROGATE.
+
+### F-135 — BUG-0101's sweep cleared the proxy listener's read as bounded, and the native proxy shipped framing guesses marked "good enough for lab traffic"
+- **What:** (1) the PA-0002 sweep written for BUG-0101 (2026-10-13) cleared `proxy/server._read_http_message` as "asyncio readers, with a stated limit". The limit was the stream reader's head limit for `readuntil`; the body was `readexactly(int(Content-Length))` with no cap and no deadline, and nothing capped connections (audit defect 20). (2) The upstream sender's chunk completion was `endswith(b"0\r\n\r\n")` with the comment "Good enough for lab traffic", and an idle receive or a close returned whatever had arrived as a response; the listener read only `Content-Length`, so a chunked upload lost its body (audit defects 18-19). BUG-0536 (2026-10-20) flagged the reader again and left it to this item.
+- **Evidence:** `docs/bugs/BUG-0101-unbounded-upstream-read.md` (sweep); `tests/test_proxy_framing.py` run on 08e3eaa's `fuzzlab/` (see CC-PROXY-0028: the pre-fix proof); BUG-0543.
+- **Impact:** from Phase 6 until 2026-10-21, chunked uploads through the proxy reached the lab app without bodies, cut responses were relayed and recorded as complete (FR-PROXY-3/13), and any local client could hold the listener's connections and buffers.
+- **Status:** fixed by AU-PROXY (SP-63, PA-0543).
+
+### F-136 — The AU-PROXY lane wrapped a targeted pytest in `timeout 900` while the host lock was held
+- **What:** the lane's first targeted run was `timeout 900 python -m pytest …` while another lane held the host pytest lock (BUG-0532). Had the lock freed late, the wrapper would have killed the run part-way. It was stopped while still waiting (nothing had run) and re-run without the wrapper. The lane then kept editing `server.py` and the new test file while the re-run waited for the lock, so that run imported a tree caught mid-edit (the refusal helper's call sites changed, its definition not yet): its 12 failures in `test_proxy_framing.py` were 502s from that mismatch, not product results. The files were run again on a settled tree (112 passed).
+- **Evidence:** this lane's transcript; `scratchpad/au-proxy/targeted1.log` (12 failed: 502 from `_answer`'s mismatched signature), `targeted2.log` (112 passed).
+- **Impact:** one wasted targeted run on the shared host; no wrong result reported.
+- **Status:** practice: no `timeout` around a pytest that queues on the host lock; no edits under a queued run.
+
+### F-137 — The AU-PROXY implementation framed by one owner but read the fields through a lenient view, and left the TLS tunnel closing empty on an upstream failure
+- **What:** (1) d84f97e's `MessageReader` ended a head at CRLF CRLF but read its fields through `RawMessage`, which splits at `\n\n` and skips lines it cannot match. Four malformed heads were framed and forwarded on the default path: a bare-LF pipeline (two valid requests upstream after `_rebuild` normalised them), `Transfer-Encoding\t: chunked` (no body, so the chunks became the next tunnel request: defect 18 again), `Transfer-Encoding : chunked` or obs-folded beside a `Content-Length`, and `X: a\rContent-Length: 5`. The lane's own root cause (two parsers disagreeing about where a message ends) recurred one layer down, inside the owner built to remove it. (2) In the CONNECT/TLS loop, an `UpstreamIncomplete` (or an empty `b""` response) escaped with `written=True`, so the tunnel closed with nothing written. Chromium retries that on a reused connection, so a POST could reach the upstream twice. The lane's tests never drove the tunnel with a failing upstream, and its keep-alive test was sans-I/O only. (3) PA-0102's enforcing test lost its quadratic proof, and PA-0543(2) claimed "every accept path" while the sweep cleared `oracle/oob.py`.
+- **Evidence:** the AU-PROXY review of d84f97e (2026-10-21; two reviewers and a skeptic, each finding reproduced); `tests/test_proxy_framing.py` cases `bare-lf-pipeline`, `ws-in-te-name`, `ws-before-colon`, `obs-folded-te`, `bare-cr` and `test_a_cut_response_in_a_tunnel_is_a_502_never_an_empty_close`, failing on d84f97e (the lane report).
+- **Impact:** none shipped beyond the lead's merge of d84f97e. The B1 inputs are smuggling primitives on the browser's default path. One revision round.
+- **Status:** fixed in the revision (`framing.parse_head`; the tunnel's contained 502; listener-level tunnel tests; the quadratic oracle proof; PA-0543(2) scoped, with R9 and R10).
+
+### F-138 — The host pytest lock I had built (AU-TESTLOCK) has no queue order, so a waiting verification can starve
+- **What:** `tests/_pytest_lock.py` waits by polling a non-blocking `flock` every 0.5 s; whichever waiter polls first after a release wins. With a dozen lanes queueing sessions, the orchestrator's merge verification (dcc7091, 101 files) waited past its 30-minute background limit and was killed without running, while lane sessions that queued later took the lock. AU-TESTLOCK (BUG-0532) was specified and approved for mutual exclusion only; its fairness under many waiters was never measured.
+- **Evidence:** `scratchpad/vpush5.log` (selected, then "interrupted (signal 15)" with no parallel log); the holder side file showing successive lane sessions during that wait; `_acquire`'s `LOCK_NB` poll loop.
+- **Impact:** one merge verification lost (about 35 minutes) and pushes delayed; no wrong result.
+- **Status:** open: worked around by batching merges into one verification with a two-hour wait; a FIFO ticket queue in the lock is queued as a process fix after the current wave (all lanes run the old lock code until they merge the tip).
+
+### F-139 — The seam's transport and the proxy's sender opened a connection per send, and a later agent change carried it forward unmeasured
+- **What:** `core/http.py`'s default transport made a `requests` session per send and `proxy/socketsender.py` a socket and an SSL context per call ("Stateless between calls (one socket per call)"). CC-CORE-0072 (BUG-0536) rewrote the transport and kept "a fresh session per send, as `requests.request` made" on purpose, without measuring what it cost; PA-0148(2) (measure a slow step before calling it inherent) was not applied because the step was per send, not "several seconds".
+- **Evidence:** audit defect 24; `fuzzlab/core/http.py` at c483dc1 (lines 153-166); BUG-0549's measurement (2 000 connections per 2 000 loopback sends; a 21 ms system-CA context per proxied TLS call; 20 sends/s over TLS before, about 960 after, sequential, on the seam).
+- **Impact:** every authenticated probe and every proxied call paid a connection (and over TLS a context and a handshake); timing-sensitive probes carried a changing handshake cost. No wrong answer resulted.
+- **Status:** fixed in POOL24 (CC-CORE-0075, CC-PROXY-0029, BUG-0549, PA-0549).
+
+### F-140 — POOL24 wrapped its pre-fix proof run in a 900 s `timeout`, which killed it while it was still queued for the host pytest lock
+- **What:** the lane started its one pre-fix proof run (`tests/test_http_pooling.py`, `tests/test_socketsender_pooling.py` on c483dc1) under `timeout 900`; the run queued on the host pytest lock (BUG-0532) behind other lanes and was killed (exit 143) before it ran anything. The rerun was started without a wrapper, with `FUZZLAB_PYTEST_LOCK_WAIT=7000`.
+- **Evidence:** the background task's exit 143 with only "waiting for the pytest lock" lines in its output; `scratchpad/lanes/POOL24/prefix_proof.txt` (the rerun).
+- **Impact:** none on other lanes (it held no lock and ran no test); this lane lost its place in the queue and about 15 minutes.
+- **Status:** recorded; the rerun is the proof reported.
+
+### F-141 — POOL24 kept the proxy sender's connection after a request with a body (CL.0) while its own docs said a desync probe always got a fresh socket
+- **What:** `reusable_request` (093685e) accepted any well-formed request whose body matched its `Content-Length`, so a CL.0 probe's connection was kept and the next request on it, another Repeater tab's or another browser identity's, was absorbed into the smuggled request with its cookie. FR-PROXY-405 even said "a POST's may be kept after it", while the class docstring, CC-PROXY-0029, BUG-0549 and PA-0549(3) claimed every desync probe got a fresh connection. Its "not framed" tests covered client-malformed requests only.
+- **Evidence:** review round 1 finding B1 (reported twice); `scratchpad/review_pool24/cl0.py` and `scratchpad/lanes/POOL24/revscripts/cl0_demo.py` on 093685e (one connection, the victim's request line and `Cookie: sid=VICTIM-alice` absorbed, the victim given `/smuggled`).
+- **Impact:** a regression from one socket per call: connection state could cross identities through the proxy, and history recorded the smuggled answer against the next request. Caught in review, never merged.
+- **Status:** fixed in POOL24 round 1 (a request with a body is never kept; CC-PROXY-0029, BUG-0549, PA-0549(3)).
+
+### F-142 — POOL24 put a silent re-send into the core seam's transport, below the sender that records each try
+- **What:** `PooledTransport` (093685e) resent an idempotent request when a reused connection was closed unanswered. `SeamProbeSender` records one try per dispatch (FR-FUZZ-61), so the target got a request no evidence recorded and the probe's `elapsed_ms` included the failed try. This repeats the BUG-0510 class (PA-0510(1)) and is the silent retry-on-error PA-0046 forbids; CC-CORE-0075 even said "a stale-connection resend is the same send". No test counted the server's requests through the default transport (PA-0510(2)).
+- **Evidence:** review round 1 finding B2 (core); `scratchpad/lanes/POOL24/revscripts/attempts_demo.py` on 093685e (3 requests received, 2 tries recorded).
+- **Impact:** a payload that reset a connection was delivered twice and the reset lost as evidence. Caught in review, never merged.
+- **Status:** fixed in POOL24 round 1 (one try per send; CC-CORE-0075, BUG-0549, PA-0549(4)).
+
+### F-143 — POOL24's proxy sender replayed a request after part of its answer had arrived, contrary to its own stated rule
+- **What:** the kept-connection path caught a reset from the whole exchange, but the reader raises a reset after buffering bytes; the partial answer was discarded and the request sent again, though FR-PROXY-405 and the docstring said "before a byte of answer". The rule was inferred from the exception class, not observed, and no test reset a connection after a partial answer.
+- **Evidence:** review round 1 finding B3; `scratchpad/lanes/POOL24/revscripts/midreset_demo.py` on 093685e (the upstream saw `/2` twice, the caller got `200 ... /2`, the partial 500 swallowed).
+- **Impact:** an upstream crash signal hidden and the request processed twice. Caught in review, never merged.
+- **Status:** fixed in POOL24 round 1 (answer bytes counted by `_Counted`; CC-PROXY-0029, BUG-0549, PA-0549(4)).
+
+### F-144 — POOL24 left the Repeater on kept connections as a prose residual
+- **What:** the Repeater's per-thread sender took the new keep-alive default, so tabs with different identities' cookies shared one upstream connection, against audit defect 24's "retain fresh sockets for deliberate desynchronization probes and connection-sensitive experiments". The lane wrote it as residual R4 with no switch instead of fixing or flagging it for a planned merge (PA-0134(2)).
+- **Evidence:** review round 1 finding B2; at 093685e two Repeater sends from one thread arrived on one upstream connection (c483dc1: two).
+- **Impact:** connection-sensitive experiments in the Repeater lost their fresh-connection baseline. Caught in review, never merged.
+- **Status:** fixed in POOL24 round 1 (`keep_alive=False`; CC-PROXY-0029, BUG-0549, PA-0549(5)).

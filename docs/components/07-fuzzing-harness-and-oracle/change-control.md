@@ -3,6 +3,14 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0114 — `SeamProbeSender._dispatch` docstring: the transport never re-sends (BUG-0549 review round 1) (2026-10-21)
+- Change: docstring only, `fuzzlab/tools/probesender.py::SeamProbeSender._dispatch`: "it never re-sends: each request has a fresh connection" becomes "it never re-sends, BUG-0147, and neither does its transport, FR-CORE-509".
+- Impact (other components / project): none; FR-FUZZ-61 ("never re-sends, so at most one try per dispatch") holds again since CC-CORE-0075's round 1 removed the transport's resend.
+- Risk (low): documentation only.
+- Deliverables:
+  - [x] docstring corrected — done
+- Effectiveness (assessed 2026-10-21): `tests/test_trace_attempts.py::test_the_seams_default_transport_sends_exactly_the_tries_it_records` passes (server requests = recorded tries through the default transport).
+
 ### CC-FUZZ-0112 — The pipeline's template stage folds only true duplicates and reports them (FR-FUZZ-68, BUG-0547) (2026-10-21)
 - Placement: pre-assigned to lane DEDUP10 (audit defect 10, item AU-REQID78); CC-FUZZ-0111
   is another lane's.

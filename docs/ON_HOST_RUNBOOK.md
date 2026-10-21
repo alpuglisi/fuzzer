@@ -625,6 +625,11 @@ values, e.g. `0` and `5`), forward it, and confirm the recorded flow's raw reque
 headers verbatim while `fuzzlab.proxy.parser.is_valid_request` returns `False` — the raw
 path forwards what the parsed path would reject.
 
+The script's step 5 sends the conflicting-`Content-Length` request from the client, so it
+runs the proxy with `--raw-framing` (CC-PROXY-0028): by default the listener answers such a
+request 400 and forwards nothing. The by-hand route above (an intercepted request edited
+after the listener read it) works in either mode.
+
 ## Part J — Phase 8: mutation engine vs the lab WAF (T8.7) `[run]`
 
 The engine was already built (`fuzzlab/mutation/`): semantics-preserving operators +

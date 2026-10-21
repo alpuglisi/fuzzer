@@ -44,8 +44,11 @@ plugin registry. It is the layer that makes the store the integration bus.
   bool = False` is declared beside it: `prepare` sets it when the state it applied is one
   it already knew to be lost and could not yet recover (FR-SESS-23's D window), and the
   sender that built the request carries it to its reader (`Probe.session_lost`), whose
-  layer 1 reads any answer to it as not comparable. The seam itself never reads or
-  changes either field.
+  layer 1 reads any answer to it as not comparable. The seam itself never changes
+  either field, and reads only `session_generation`, to key its transport's pool.
+  *(CC-CORE-0075, BUG-0549:)* its default transport is pooled per (origin, identity,
+  `session_generation`) and passed those two fields; the client owns it and closes it
+  (`HttpClient.close`, or when collected) -- FR-CORE-509.
 - **FR-CORE-7** Provide a plugin registry (entry points plus hooks).
 - **FR-CORE-8** Provide a generic cross-run scalar time-series sink,
   `metric_series(run_id, source, key, step, ts, value)`, for per-step
@@ -807,7 +810,9 @@ plugin registry. It is the layer that makes the store the integration bus.
     - An incomplete body raises `BodyIncomplete`, a `requests.RequestException` whose
       message names the reason only, and the response is closed.
     - Every `requests` session fuzzlab makes for a target is bounded where it is made.
-      The core seam's transport makes one per send.
+      The core seam's transport makes one per (origin, identity, session generation)
+      and keeps it, and one per send that carries a body (FR-CORE-509; it made one per
+      send until BUG-0549).
     - SP-34 maps the marker to "not observed" (FR-FUZZ-50).
   - **Stated limit.** The connect (and a TLS handshake) is bounded by the connect
     timeout only: a socket shutdown does not interrupt a connect.
@@ -853,6 +858,49 @@ plugin registry. It is the layer that makes the store the integration bus.
     (2 s, `_summary_clock`): its stat key can miss a commit inside the WAL's old extent
     within one coarse mtime tick.
   - Enforced by: `tests/test_core_store_read_only.py::test_the_read_only_opener_never_creates_writes_or_migrates`, `tests/test_core_store_read_only.py::test_the_read_only_opener_pins_a_private_cache`, `tests/test_core_store_read_only.py::test_whether_a_file_is_sqlite_is_asked_of_sqlite_never_read_raw`, `tests/test_core_store_read_only.py::test_every_read_only_open_goes_through_the_opener`, `tests/test_core_store_read_only.py::test_the_read_only_open_guard_catches_synthetic_offenders`, `tests/test_web_store_locks.py::test_no_web_process_module_opens_a_store_file_except_through_sqlite`, `tests/test_web_store_locks.py::test_the_store_file_guard_catches_synthetic_offenders`, `tests/test_web_store_locks.py::test_the_store_open_audit_catches_synthetic_offenders`, `tests/test_web_store_locks.py::test_a_projects_listing_never_drops_the_in_process_proxys_store_locks`, `tests/test_web_store_locks.py::test_a_projects_listing_never_drops_a_request_readers_locks`, `tests/test_web_store_locks.py::test_opening_a_project_never_drops_a_held_connections_locks`, `tests/test_web_sitetree.py::test_the_project_listing_never_serves_a_summary_older_than_its_bound`
+- **FR-CORE-509** *(the seam keeps its connections, per identity and session generation;
+  `CC-CORE-0075`, 2026-10-21, BUG-0549).*
+  - `core.http.PooledTransport` is `HttpClient`'s default transport. It keeps one
+    `requests` session per (canonical origin (`core.urls.canonical_origin`, SP-05),
+    identity, `Request.session_generation`), each made by
+    `bodyread.bound(requests.Session())` (SP-60). `HttpClient.send` passes it the
+    request's `identity` and `session_generation`; an injected transport keeps the
+    five-argument call `(method, url, headers, body, timeout)`.
+  - **Never shared across identities or generations.** A newer generation of an
+    (origin, identity) retires the older generations' sessions. A send prepared on an
+    older generation than the newest seen gets a session of its own, closed after it,
+    and displaces nothing. `None` (no session applied) is its own key.
+  - **A body never shares a connection** *(review round 1)*. A send that carries body
+    bytes goes on a session of its own, closed after it; it still counts for the
+    generation rule above. Whether a target read a body cannot be observed, and one
+    that answers without reading it (CL.0) leaves its bytes at the head of the next
+    request on that connection: the next send would complete a smuggled request and
+    get its answer.
+  - **No cookie state.** A pooled session's jar keeps nothing (`set_cookie` is a no-op)
+    and is cleared before each send: the session addon's explicit `Cookie` header is the
+    only cookie a seam send carries; an answer's `Set-Cookie` never reaches a later send.
+  - **Lifecycle.** A retired session is closed when its last send in flight is done, never
+    under one. A session idle over `POOL_IDLE_SECONDS` (4 s) is retired before its next
+    send; at most `MAX_POOLED_SESSIONS` (32) are kept, the least recently used retired
+    first. `HttpClient.close()` (also `with HttpClient(...)`) retires every session of the
+    transport the client made; a client collected without `close` does the same
+    (`weakref.finalize`). A send after `close` works, on a session closed after it. An
+    injected transport is the caller's to close.
+  - **One try per send** *(review round 1; supersedes the stale-connection resend)*.
+    The transport never re-sends: a send that fails, on a reused connection the peer
+    closed or reset before any answer too, raises as any transport failure (SP-34). A
+    re-send is the evidence producer's to make and record (FR-FUZZ-61, PA-0510): the
+    transport resent below `SeamProbeSender`, so the target received a request no try
+    recorded and the probe's `elapsed_ms` included the failed try. urllib3 drops a
+    pooled connection it finds closed before reusing it, and the idle retirement keeps a
+    reuse under the usual 5 s server idle close; the remaining race (a close landing
+    between that check and the request) gives a not-observed send, recorded as one.
+  - Thread-safe: the bookkeeping is under one lock; concurrent sends of one key share a
+    session (urllib3's pools are thread-safe; the jar holds nothing).
+  - Measured (BUG-0549, loopback, `scripts/measure_pooling.py`): connections per 2 000
+    plain GET sends fell from 2 000 to 8 (a send with a body is not pooled), and the send rate rose about 2x sequential and
+    1.6-1.8x with 8 threads; over TLS from 20 to about 960 sends/s sequential.
+  - Enforced by: `tests/test_http_pooling.py::test_sends_of_one_identity_share_a_connection_sequentially_and_concurrently`, `tests/test_http_pooling.py::test_identities_and_generations_never_share_a_connection_or_a_cookie_jar`, `tests/test_http_pooling.py::test_a_generation_change_never_closes_a_send_still_in_flight`, `tests/test_http_pooling.py::test_a_reused_connection_closed_before_any_answer_is_never_resent_by_the_transport`, `tests/test_http_pooling.py::test_a_send_with_a_body_never_leaves_or_takes_a_pooled_connection`, `tests/test_http_pooling.py::test_closing_the_client_closes_its_pooled_connections`, `tests/test_trace_attempts.py::test_the_seams_default_transport_sends_exactly_the_tries_it_records`
 - **FR-CORE-500** *(one reader for a run's target; one method key; `CC-CORE-0500`,
   2026-10-15).*
   - `fuzzlab/core/runtarget.py` is the one reader of the `target` table (PA-0063(1)): a

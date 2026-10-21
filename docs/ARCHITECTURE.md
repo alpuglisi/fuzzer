@@ -1153,7 +1153,12 @@ tracked in the requirements files, not here.
 
 ### 2. `core/` shared library `[built]` (plugin registry: component 13)
 - **HTTP client** `[built]`: one send helper behind an injectable seam; requires a
-  session context; records raw bytes (`core/http.py`).
+  session context; records raw bytes (`core/http.py`). Its default transport
+  (`PooledTransport`, FR-CORE-509, BUG-0549) keeps one bounded `requests` session per
+  (origin, identity, session generation), with no cookie jar; a newer generation retires
+  the older one's, `HttpClient.close()` (or collection) closes them, a send with a body
+  gets a session of its own, and the transport never re-sends (each try is the sender's
+  to make and record, FR-FUZZ-61).
 - **Store** `[built]`: SQLite access, schema, and numbered forward-only migrations
   (`core/store.py`, `core/migrations.py`; head = migration 24 -- the last, the trace
   model's tables, FR-CORE-505). One read-only opener, `core.store.open_read_only` (with
@@ -1371,7 +1376,18 @@ tracked in the requirements files, not here.
     - the spider table `discovered_requests` (the contract lane J imports) holds the
       app's own fetch/XHR requests with a JSON or form body, redacted only by
       `core.redaction.redact_captured_body` / `redact_url_identifiers` at the one write
-      site (PA-0100 guard); no header or cookie is stored;
+      site (PA-0100 guard); no header or cookie is stored. Since FR-CRAWL-37
+      (CC-CRAWL-0057, BUG-0546) its rows are kept per API operation (`tools/apiop.py`:
+      method, canonical path, media type and every operation selector -- a GraphQL
+      operation, the non-empty value of an `action`/`op`/`cmd` field, a JSON-RPC
+      `method` -- in the body at any depth or the query); a request is a duplicate only
+      when a row of its operation has its exact typed key paths, one that adds a key
+      path or a type is always stored with its own body, and contexts that add nothing
+      are capped at 32 rows per operation. Bodies are never merged (the importer judges
+      a body whole); an AST guard keeps every writer of the table on this key
+      (PA-0546). The importer still binds a parameter name to the first captured
+      request of its endpoint (audit defect 8, pinned), so an input a second operation
+      shares by name is not its own point yet;
     - `--submit-spa-forms [ROUTE …]` (off by default) fills and clicks eligible forms
       once (`spa.form_refusal`, 50 per crawl); a password form only in a fresh
       unauthenticated context of the same guarded browser; in an authenticated crawl
@@ -1532,7 +1548,7 @@ tracked in the requirements files, not here.
   capture, JS endpoint extraction, DOM-skeleton template dedup, state-aware
   navigation, URL normalization, crawl budget. Built for single-page apps (forms
   phase 3, `tools/spa.py`): SPA route discovery from loaded scripts (hash and history
-  mode), canonical page keys, request-body capture (`discovered_requests`) and opt-in
+  mode), canonical page keys, request-body capture (`discovered_requests`, kept per API operation, FR-CRAWL-37) and opt-in
   SPA form submission (FR-CRAWL-12/13); by default each eligible SPA form is
   dry-submitted -- clicked inside the write-blocking window, its write recorded and
   aborted, the client state rolled back -- and every write a reveal window aborts is
@@ -1857,8 +1873,9 @@ tracked in the requirements files, not here.
   (`message.py::RawMessage`) — byte-exact, round-trips received bytes and edits by byte
   surgery so untouched lines stay verbatim (NFR-PROXY-byte-exact) — and the **parsed
   path** over `h11` (`parser.py`). The exit criterion holds in miniature: a hand-edited
-  conflicting duplicate `Content-Length` forwards byte-for-byte on the raw path while
-  the parsed path rejects it.
+  conflicting duplicate `Content-Length` forwards byte-for-byte on the raw path (the
+  Repeater, an intercepted edit, or the listener's explicit raw mode `--raw-framing`)
+  while the parsed path rejects it.
 - **WebSocket framing** `[built]` (Phase 9 T9.1, `ws.py`): a from-scratch, byte-exact RFC
   6455 frame codec (encode/decode, masking, fragmentation, control frames) + the handshake,
   recorded in history with a `protocol` tag (migration 9).
@@ -1882,7 +1899,20 @@ tracked in the requirements files, not here.
     (CC-PROXY-0021). A flush is all-or-nothing (savepoint, BUG-0106);
   - upstream reads are bounded (64 KiB headers, a configurable 64 MiB body and overall
     deadline) and never re-copied, and the blocking sender runs off the event loop
-    (FR-PROXY-12, BUG-0101).
+    (FR-PROXY-12, BUG-0101); a response is framed by SP-63 and never returned short (FR-PROXY-402). The sender builds one SSL context and keeps an upstream
+    connection only after an exactly framed, bodiless HTTP/1.1 exchange; a desync probe
+    (a malformed request, or one with a body) never rides a kept one, and the web
+    Repeater's sender keeps none (FR-PROXY-405, BUG-0549).
+- **HTTP/1 framing and inbound bounds** `[built]` (FR-PROXY-401..403, CC-PROXY-0028,
+  SP-63): one sans-I/O framing owner (`framing.py`: `parse_head`, strict, and
+  `MessageReader`) for the listener's requests and the sender's responses. A head with a
+  bare CR or LF, obs-fold, a non-token field name or a malformed start line is refused
+  (a request 400, a response 502). Requests are read whole and a chunked one is
+  forwarded de-chunked; what cannot be framed is answered 400. A response ends only at
+  its framed end; a cut or stalled one is `UpstreamIncomplete` (502, recorded as no
+  response), inside a TLS tunnel too. The listener bounds head / body / per-request
+  time / connections (`InboundLimits`: 431 / 413 / 408 / 503, counted, configurable);
+  defaults follow SP-60 where one applies (16 MiB body, 60 s).
 - **History, repeater, interception, session capture** `[built]`: `flow` history
   (`history.py` — FTS5, batched writes, content-addressed bodies + raw bytes, secret
   redaction on write; migration 6); repeater (`repeater.py` — DB-persisted tabs, replay

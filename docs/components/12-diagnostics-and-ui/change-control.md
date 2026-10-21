@@ -3,6 +3,15 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0069 — The Repeater's upstream sender keeps no connections (FR-PROXY-405, BUG-0549 review round 1) (2026-10-21)
+- Change: `fuzzlab/web/proxycontrol.py::RepeaterController._writer` builds its sender as `SocketSender(verify_tls=False, keep_alive=False)` (only `keep_alive` added; verification unchanged).
+- Impact (other components / project): PROXY: every Repeater tab send opens its own upstream connection, closed after it (as before CC-PROXY-0029). No route, template, store or wire change.
+- Risk (low): a Repeater send pays a connect (and handshake) per send, as before the lane; accepted, it is the point (audit defect 24: fresh sockets for desync and connection-sensitive probes).
+- Deliverables:
+  - [x] `keep_alive=False` at the Repeater's sender — done
+  - [x] `tests/test_web_repeater.py::test_each_repeater_send_gets_a_fresh_upstream_connection` (failed on 093685e, passes) — done
+- Effectiveness (assessed 2026-10-21): three sends (alice, bob, alice) from one thread open three upstream connections, each closed.
+
 ### CC-UI-0068 — The store version is SQLite's change counter on one held read-only connection; a live refresh keeps the user's place (FR-UI-505, FR-UI-510, FR-UI-514, BUG-0534, BUG-0535) (2026-10-20)
 - Placement: pre-assigned to AU-SITETREE. Design record: `DRAFT-AU-SITETREE.md`
   (revision 2, its confirming review's six blockers fixed in §11). Depends on
