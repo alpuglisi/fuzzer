@@ -63,6 +63,27 @@ def _own_segment(location: str, param: str) -> str | None:
     return path_placeholder(param) if location == PATH_LOCATION else None
 
 
+def _placed_value(location: str, value) -> str | None:
+    """A path point's placed value (FR-FUZZ-57), which a PRG follow-up's target must not
+    hold however the server wrote it (FR-FUZZ-69); None for every other location."""
+    return str(value) if location == PATH_LOCATION else None
+
+
+def _re_sends(path: str, own_segment: str | None, own_value: str | None) -> bool:
+    """Whether a path point's follow-up target (its ``path``) would re-send the payload
+    (FR-FUZZ-69): it keeps the point's own segment (a ``Location`` resolved against the
+    template: ``#top``, ``edit``), or it holds the placed value as whole segments,
+    however the server wrote it (``/p/<payload>/edit``, an absolute path or URL built
+    from the request). The value is compared as written and percent-decoded, so a
+    server that re-encodes it (``%2A`` for ``*``, or the reverse) is still caught, and a
+    value with a ``/`` the server wrote raw spans its segments."""
+    from urllib.parse import unquote
+    if own_segment is not None and own_segment in path.split("/"):
+        return True
+    return bool(own_value) and any(f"/{own_value}/" in f"/{spelled}/"
+                                   for spelled in (path, unquote(path)))
+
+
 #: The browser redirect behaviour a PRG follow-up emulates (FR-FUZZ-49), rule by rule
 #: (PA-0111), each with the spec step it follows or the deliberate divergence it is.
 #: Fetch = WHATWG Fetch, "HTTP-redirect fetch"; every rule has a fixture in
@@ -91,9 +112,11 @@ PRG_RULES: dict[str, str] = {
     "own-segment-never-refetched": "divergence (a browser fetches the Location resolved "
                                    "against the placed URL): a path point's target that "
                                    "keeps the point's own segment (#top, a relative "
-                                   "path or query) would carry the payload again, never "
-                                   "the page the probe led to; it is refused, nothing "
-                                   "is sent (FR-FUZZ-69, BUG-0542)",
+                                   "path or query) or holds the placed value however "
+                                   "the server wrote it (an absolute path or URL) "
+                                   "would carry the payload again, never the page the "
+                                   "probe led to; it is refused, nothing is sent "
+                                   "(FR-FUZZ-69, BUG-0542)",
     "one-hop": "divergence (Fetch step 5 allows 20 redirects): one hop; a redirect in "
                "the follow-up's response is no observation",
     "same-origin-only": "divergence (a browser follows any origin): only the probed "
@@ -108,7 +131,8 @@ PRG_RULES: dict[str, str] = {
 
 def prg_target(probe: Probe, url: str, method: str,
                explicit: frozenset[str] = frozenset(),
-               own_segment: str | None = None) -> tuple[str | None, str | None]:
+               own_segment: str | None = None,
+               own_value: str | None = None) -> tuple[str | None, str | None]:
     """The PRG follow-up a probe's response calls for (FR-FUZZ-49): ``(target, None)``
     to follow, ``(None, None)`` when the response is not a PRG redirect at all, or
     ``(None, "skipped: <reason>")`` when it is one but a gate refuses the target. The
@@ -118,20 +142,22 @@ def prg_target(probe: Probe, url: str, method: str,
     ``url`` is the probe's **own** URL, never the placed one (FR-FUZZ-64, FR-FUZZ-69):
     the URL itself for a body, header or JSON point, a query point's URL without its
     payload, a path point's template. ``own_segment`` is a path point's ``{param}``
-    (`_own_segment`).
+    (`_own_segment`), ``own_value`` the value placed in it (`_placed_value`).
 
     A PRG redirect is `PRG_ANY_METHOD` after any method, or `PRG_GET_ONLY` after a GET
     only. Its target (``Location`` resolved against ``url``, fragment dropped) must not
-    keep ``own_segment``: that target is the resource the payload is in (``#top``,
-    ``edit``, ``?tab=2``), where a browser would send the payload again, which is never
-    the page the probe's own request led to, and no payload-free URL names it -- refused
-    (``"skipped: the follow-up would re-send the payload"``), never sent (PA-0115(1)).
-    A target the server wrote whole (an absolute path or URL) is taken as written, the
-    payload in it included: the payload rode the redirect (FR-FUZZ-49 P6). The target
-    must be the probed URL's own origin (`canonical_origin`), pass `check_send_url` as a
-    GET, and be neither a transaction (`transaction_reason`), an account endpoint
-    (`account_endpoint_reason`) nor a login page (`redirect_is_logout`, BUG-0122; that
-    redirect is the session's own logout handling)."""
+    re-send a path point's payload (`_re_sends`): neither keep ``own_segment``
+    (``#top``, ``edit``, ``?tab=2``) nor hold ``own_value`` as whole segments, however
+    the server wrote it (``/p/<payload>/edit``, an absolute path or URL). Both name the
+    resource the payload is in -- ``edit`` and ``/p/<payload>/edit`` are one browser
+    request -- whose answer is never the page the probe's own request led to (a page
+    that renders its own URL would read as the probe's stored result), and no
+    payload-free URL names it: refused (``"skipped: the follow-up would re-send the
+    payload"``), never sent (PA-0115(1)). The target must be the probed URL's own
+    origin (`canonical_origin`), pass `check_send_url` as a GET, and be neither a
+    transaction (`transaction_reason`), an account endpoint (`account_endpoint_reason`)
+    nor a login page (`redirect_is_logout`, BUG-0122; that redirect is the session's own
+    logout handling)."""
     from urllib.parse import urldefrag, urljoin, urlsplit
 
     from fuzzlab.session.browserlogin import account_endpoint_reason
@@ -148,7 +174,7 @@ def prg_target(probe: Probe, url: str, method: str,
         return None, _skipped("no Location")
     try:
         target = urldefrag(urljoin(url, location))[0]
-        keeps = own_segment is not None and own_segment in urlsplit(target).path.split("/")
+        keeps = _re_sends(urlsplit(target).path, own_segment, own_value)
     except ValueError:
         return None, _skipped("unparsable Location")
     if keeps:                                    # FR-FUZZ-69 (BUG-0542)
@@ -742,7 +768,8 @@ class SeamProbeSender(_ExplicitAllowance):
                 client, identity, copy = self._client, "anonymous", None
                 probe = send_on(client, identity)
         if prg and not timing:                 # FR-FUZZ-49; a timing send never follows
-            self._follow(probe, client, identity, copy, url, param, method, location, own)
+            self._follow(probe, client, identity, copy, url, param, value, method,
+                         location, own)
         return probe
 
     def _on_copy(self, copy, url, send_on):
@@ -786,16 +813,18 @@ class SeamProbeSender(_ExplicitAllowance):
         return None
 
     def _follow(self, probe: Probe, client, identity: str, copy, url: str, param: str,
-                method: str, location: str, own: str) -> None:
+                value, method: str, location: str, own: str) -> None:
         """One plain GET of the probe's PRG target, on the probe's own route (the run's
         session, the path's isolated copy, or anonymous), through the client (budget,
         scope, session observe) and the header breaker as part of the probe; attached
         as ``probe.followed`` (FR-FUZZ-49, P3/P4). The target is resolved against
         ``own``, the probe's own URL; ``url`` (the request it sent) routes and
-        attributes it, as it did the probe (FR-FUZZ-69)."""
+        attributes it, as it did the probe; a path point's ``value`` is never re-sent
+        (FR-FUZZ-69)."""
         from fuzzlab.core.http import Request
         target, why = prg_target(probe, own, method, self._explicit,
-                                 _own_segment(location, param))
+                                 _own_segment(location, param),
+                                 _placed_value(location, value))
         if target is not None:
             why = self._prg_session_gate(target, identity, copy, location)
         if target is None or why is not None:
@@ -1034,7 +1063,8 @@ class RequestsProbeSender(_ExplicitAllowance):
             wire = place_query_param(url, param, value)
         probe = self._request(method.upper(), wire, kwargs)
         if prg and not timing:                 # FR-FUZZ-49; a timing send never follows
-            self._follow(probe, own, method, _own_segment(location, param))
+            self._follow(probe, own, method, _own_segment(location, param),
+                         _placed_value(location, value))
         return probe
 
     #: Methods re-sent once after a connection failed with no response (RFC 9110
@@ -1088,11 +1118,12 @@ class RequestsProbeSender(_ExplicitAllowance):
         raise AssertionError("unreachable")
 
     def _follow(self, probe: Probe, own: str, method: str,
-                own_segment: str | None = None) -> None:
+                own_segment: str | None = None, own_value: str | None = None) -> None:
         """One plain GET of the probe's PRG target (`prg_target`, resolved against
         ``own``, the probe's own URL: FR-FUZZ-69), anonymous like the probe: the jar is
         cleared first (BUG-0112), no redirect is followed."""
-        target, why = prg_target(probe, own, method, self._explicit, own_segment)
+        target, why = prg_target(probe, own, method, self._explicit, own_segment,
+                                 own_value)
         if target is None:
             probe.prg = why
             return

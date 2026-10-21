@@ -38,6 +38,9 @@ from fuzzlab.oracle.strategies import (OpenRedirectStrategy,
 from fuzzlab.tools.probesender import RequestsProbeSender, SeamProbeSender
 
 SQL_ERROR = "You have an error in your SQL syntax; check the manual"
+#: What an RFC 3986 path-segment encoder leaves raw beyond the unreserved characters
+#: (``pchar``: sub-delims, ``:`` and ``@``), so ``{pchar}`` respells ``%2A`` as ``*``.
+PCHAR_RAW = "!$&'()*+,;=:@"
 
 
 # --- a loopback PRG app -------------------------------------------------------------
@@ -56,9 +59,12 @@ class PrgSite:
     redirect), as an app validating its input would refuse a control.
 
     A path point (FR-FUZZ-69): ``POST /p/<seg>/view`` stores ``<seg>`` as the username
-    and answers ``status`` to ``location``; ``GET /p/<seg>/<any>`` renders its **own**
-    segment with ``#{a*b}`` evaluated -- what it shows comes from the request itself,
-    never from a POST."""
+    and answers ``status`` to ``location``, built from the request as an app redirecting
+    to the resource it was posted does: ``{base}`` is the site's origin, ``{seg}`` the
+    segment as received, ``{pchar}`` the segment decoded and re-encoded as an RFC 3986
+    path segment (sub-delimiters such as ``$`` and ``*`` raw); ``GET /p/<seg>/<any>``
+    renders its **own** segment with ``#{a*b}`` evaluated -- what it shows comes from the
+    request itself, never from a POST."""
 
     def __init__(self, render="evaluate", status=303, location="/profile",
                  reject_plain=False, set_cookie=False, with_location=True):
@@ -93,8 +99,11 @@ class PrgSite:
                 if len(segs) == 4 and segs[1] == "p" and segs[3] == "view":
                     site.values["username"] = unquote(segs[2])
                     site.history.append(site.values["username"])
+                    where = site.location.replace("{base}", site.base).replace(
+                        "{seg}", segs[2]).replace(
+                        "{pchar}", quote(unquote(segs[2]), safe=PCHAR_RAW))
                     return self._reply(site.status, b"<html>See Other</html>",
-                                       headers=[("Location", site.location)])
+                                       headers=[("Location", where)])
                 if urlsplit(self.path).path != "/profile":
                     return self._reply(404, b"no")
                 if site.reject_plain and not any("'" in v for v in data.values()):
@@ -385,18 +394,26 @@ def test_a_payload_that_rode_the_redirect_is_reflected_xss(site):
                for _m, p, q in [(m, urlsplit(x).path, d) for m, x, d in app.log])
 
 
-@pytest.mark.parametrize("location", ["edit", "#top", "?tab=2"])
-def test_a_path_points_follow_up_that_would_re_send_the_payload_never_confirms(site,
-                                                                              location):
+@pytest.mark.parametrize("sender_name", ["anonymous", "seam"])
+@pytest.mark.parametrize("location", [
+    "edit", "#top", "?tab=2", "/p/{seg}/edit", "{base}/p/{seg}/edit", "/p/{pchar}/edit"],
+    ids=["relative", "fragment", "query", "absolute-path", "absolute-url",
+         "absolute-path-re-encoded"])
+def test_a_path_points_follow_up_that_would_re_send_the_payload_never_confirms(
+        site, sender_name, location):
     """FR-FUZZ-69 (BUG-0542): ``POST /p/<payload>/view`` -> ``303 <location>``. A browser
     would fetch ``/p/<payload>/edit`` (or the placed URL again), a page that evaluates its
-    own path. On c483dc1 the sender made that request and M4 confirmed through it, as
-    if it were the page the POST led to. The follow-up is refused instead: no request
+    own path. On c483dc1 the sender made that request for ``edit``/``#top``/``?tab=2``,
+    and on 9d0e819 still for an absolute path or URL the server built from the request
+    (``/p/<payload>/edit``, the same browser request as ``edit``); M4 confirmed through
+    it with ``observation: "prg"``, as if it were the page the POST led to. The
+    follow-up is refused instead, however the server spelled the segment: no request
     after the POSTs, no confirmation."""
     app = site(location=location)
     cand = Candidate(url=app.base + "/p/{id}/view", param="id", method="POST",
                      location="path", category="server-side-template-injection")
-    assert Oracle(strategies=[SstiStrategy()]).confirm(cand, RequestsProbeSender()) is None
+    sender = RequestsProbeSender() if sender_name == "anonymous" else _client_sender()
+    assert Oracle(strategies=[SstiStrategy()]).confirm(cand, sender) is None
     assert {m for m, _p, _d in app.log} == {"POST"}, app.log
 
 
@@ -952,15 +969,17 @@ def _fx_relative(site):
 
 def _fx_own_segment(site):
     """A path point's ``Location`` is resolved against its template (FR-FUZZ-69):
-    ``#done`` keeps the point's segment, where a browser would fetch the payload again,
-    so nothing follows; ``../../profile`` leaves it and is fetched where a browser goes."""
+    ``#done`` keeps the point's segment, and ``/p/zqpayload/edit`` (written by the
+    server) holds the placed value, where a browser would fetch the payload again, so
+    nothing follows; ``../../profile`` leaves it and is fetched where a browser goes."""
     def send(app):
         return RequestsProbeSender().send(app.base + "/p/{id}/view", "id", "zqpayload",
                                           method="POST", location="path", prg=True)
-    app = site(location="#done")
-    probe = send(app)
-    assert probe.prg == "skipped: the follow-up would re-send the payload"
-    assert [m for m, _p, _d in app.log] == ["POST"] and probe.prg_sends == 0
+    for where in ("#done", "/p/{seg}/edit"):
+        app = site(location=where)
+        probe = send(app)
+        assert probe.prg == "skipped: the follow-up would re-send the payload"
+        assert [m for m, _p, _d in app.log] == ["POST"] and probe.prg_sends == 0
     app = site(location="../../profile")
     probe = send(app)
     assert probe.prg == PRG_OBSERVED and probe.followed.url == app.base + "/profile"

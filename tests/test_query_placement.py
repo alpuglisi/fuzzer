@@ -106,13 +106,16 @@ class _Echo:
     exactly as received) to ``/p`` (and below it), and whether the request carried
     `MARK` anywhere (target, body or a header value: ``carried``), and answers a small
     HTML page. With ``redirect`` set, a request carrying `MARK` is answered
-    ``302 Location: <redirect>``."""
+    ``302 Location: <redirect>``; with ``redirect_limit`` set too, only that many are
+    (the rest get the page, as an app's own resource answers its GET)."""
 
     def __init__(self):
         require_loopback("127.0.0.1")                      # PA-0130
         self.targets: list[str] = []
         self.carried: list[bool] = []
         self.redirect: str | None = None
+        self.redirect_limit: int | None = None
+        self.redirected = 0
         echo = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -125,7 +128,10 @@ class _Echo:
                 if path == "/p" or path.startswith("/p/"):
                     echo.targets.append(self.path)
                     echo.carried.append(carries)
-                if echo.redirect is not None and carries:
+                if echo.redirect is not None and carries and (
+                        echo.redirect_limit is None
+                        or echo.redirected < echo.redirect_limit):
+                    echo.redirected += 1
                     self.send_response(302)
                     self.send_header("Location", echo.redirect)
                     self.send_header("Content-Length", "0")
@@ -493,8 +499,10 @@ def test_an_empty_location_is_not_followed(echo, sender_name):
 #: (``/p/{id}/view``), as a query point's is its URL without the payload (FR-FUZZ-64).
 #: Resolved against it, a target that still holds ``{id}`` names the resource the
 #: payload is in, so a browser would fetch the payload again there (``#top`` ->
-#: ``/p/zqmark/view``, ``edit`` -> ``/p/zqmark/edit``): never fetched. A target that
-#: leaves the segment is exactly where a browser goes.
+#: ``/p/zqmark/view``, ``edit`` -> ``/p/zqmark/edit``): never fetched. So is an
+#: absolute path or URL the server wrote with the payload in it (``/p/zqmark/edit``,
+#: the same browser request as ``edit``). A target that leaves the segment is exactly
+#: where a browser goes.
 PATH_PRG = [
     ("fragment", "#top", None),
     ("relative", "edit", None),
@@ -503,6 +511,8 @@ PATH_PRG = [
     ("leaves-the-segment", "../list", "/p/list"),
     ("absolute-path", "/p/list", "/p/list"),
     ("absolute-url", "{base}/p/list", "/p/list"),
+    ("absolute-path-with-the-payload", "/p/" + MARK + "/edit", None),
+    ("absolute-url-with-the-payload", "{base}/p/" + MARK + "/edit", None),
 ]
 #: `Probe.prg` for a refused follow-up that would re-send the payload (nothing is sent).
 RESENDS = "skipped: the follow-up would re-send the payload"
@@ -591,17 +601,21 @@ def test_no_prg_follow_up_carries_the_payload_at_any_location(echo, sender_name,
 @pytest.mark.parametrize("sender_name", ["anonymous", "seam"])
 @pytest.mark.parametrize("location", ["/p/" + MARK + "/edit", "{base}/p/" + MARK + "/edit"],
                          ids=["absolute-path", "absolute-url"])
-def test_a_location_the_server_wrote_with_the_payload_is_fetched_as_written(
-        echo, sender_name, location):
-    """The rule's boundary (FR-FUZZ-69): the sender never puts the payload into a
-    follow-up, and never rewrites the target the server wrote. An absolute ``Location``
-    that itself holds the payload is fetched as written: the payload rode the redirect,
-    which the strategies read as such (FR-FUZZ-49 P6, `strategies._rode_the_redirect`).
-    The echo answers it with another redirect, so it is no observation (one hop)."""
-    from fuzzlab.oracle.probe import PRG_UNOBSERVED
+def test_a_location_the_server_wrote_with_the_payload_is_refused(echo, sender_name,
+                                                                 location):
+    """FR-FUZZ-69 (BUG-0542 review): an absolute ``Location`` the server wrote with the
+    payload in it (``/p/zqmark/edit``, as an app redirecting to the resource it was
+    posted builds it from the request) is the same browser request as ``edit``: it
+    re-sends the payload, and its answer is never the page the POST led to. On 9d0e819
+    it was fetched as written and, answered with a page, attached as the PRG
+    observation. Here the echo answers only the probe with a redirect, so a sent
+    follow-up would be observed: it is refused before any send, as ``edit`` is."""
+    echo.redirect_limit = 1
     probe = _path_prg_send(echo, sender_name, "POST", location)
-    assert echo.targets == [f"/p/{MARK}/view", f"/p/{MARK}/edit"]
-    assert probe.prg == PRG_UNOBSERVED and probe.followed is None
+    assert echo.targets == [f"/p/{MARK}/view"], echo.targets
+    assert probe.prg == RESENDS
+    assert probe.followed is None and probe.prg_sent is None
+    assert probe.follow_up_sends == 0
 
 
 # --- the M6 browser executor: what Chromium itself sends -------------------------------

@@ -1,7 +1,8 @@
 # BUG-0542 — A path point's PRG follow-up re-sent the payload
 
 - Date: 2026-10-21
-- Status: fixed (CC-FUZZ-0113, FR-FUZZ-69; branch `lane/PRGPATH`)
+- Status: fixed (CC-FUZZ-0113, FR-FUZZ-69; branch `lane/PRGPATH`; review round 1,
+  PRGPATH-R1: branch `lane/PRGPATH-r1`)
 - Severity: medium. The follow-up of a path point's probe was a second request carrying
   the payload, and the oracle read its answer as the page the probe's own request led
   to. It broke the NFR-FUZZ-safe clause "a post/redirect/get follow-up is one plain GET,
@@ -84,25 +85,33 @@ CC-FUZZ-0113 (FR-FUZZ-69), in `fuzzlab/tools/probesender.py` only (the PRG follo
   segment (`{id}`): it names the resource the payload is in, and the only request for it
   carries the payload (`#top`, `edit`, `?tab=2`, `./`). `Probe.prg` is
   `skipped: the follow-up would re-send the payload`; nothing is sent, nothing counted.
-  A target that leaves the segment (`../list`, an absolute path or URL) is fetched where
-  a browser goes: resolution is structural, so the template and the placed URL give the
-  same target.
+  A target that leaves the segment (`../list`, an absolute path or URL without the
+  placed value) is fetched where a browser goes: resolution is structural, so the
+  template and the placed URL give the same target.
 - **Not "unobserved":** `PRG_UNOBSERVED` means a follow-up went out and gave no
   observation, and `Probe.prg_sends` counts it as a request (FR-FUZZ-49 P8). Nothing is
   sent here, so the refusal is a gate's `skipped:`, like another-origin or login-page
   targets.
-- **The boundary, unchanged:** a `Location` the server wrote whole, a payload in it
-  included (`/p/<payload>/edit` as an absolute path), is taken as written: the payload
-  rode the redirect, which the strategies classify (FR-FUZZ-49 P6,
-  `strategies._rode_the_redirect`). The sender never adds the payload itself.
+- **A target the server wrote with the payload in its path is refused the same way**
+  (review round 1, PRGPATH-R1): `prg_target(..., own_value=)` also refuses a target whose
+  path holds the placed value as whole segments, as written or percent-decoded
+  (`_re_sends`). `Location: /p/<payload>/edit`, as an absolute path or URL the server
+  built from the request, is the same browser request as `edit`, so it gets the same
+  decision. The round-0 text here called that target "taken as written: the payload
+  rode the redirect, which the strategies classify (`strategies._rode_the_redirect`)".
+  That was wrong: only M5 XSS reads `_rode_the_redirect`, and M4 confirmed through such
+  a follow-up with `observation: "prg"` (see the review round below). A payload the
+  server wrote only into the target's query is not the point's resource; it still
+  rode the redirect and is taken as written, as at every location (FR-FUZZ-49 P6).
 - `PRG_RULES` states both divergences: `location-relative` (the probe's own URL, never
   the placed one) and the new `own-segment-never-refetched`, with its fixture.
 - Tests: the pin is a passing test over `#top`, `edit`, `?tab=2`, `./`, `../list`, an
   absolute path and an absolute URL, POST and GET, both senders; a whole-location guard
   (`test_no_prg_follow_up_carries_the_payload_at_any_location`, its table checked against
-  `test_sender_conformance.PLACEABLE` plus the path); the server-written boundary; an
-  oracle-level test (M4 never confirms through such a follow-up) with its control (a
-  path point redirected to a page that shows the stored value still confirms).
+  `test_sender_conformance.PLACEABLE` plus the path); the server-written target (taken
+  as written in round 0, refused since review round 1); an oracle-level test (M4
+  never confirms through such a follow-up) with its control (a path point redirected
+  to a page that shows the stored value still confirms).
 
 ## Recurrence review
 Checked `docs/bugs/` (every report naming PRG, a follow-up, or the placed URL) and
@@ -172,3 +181,135 @@ answer):
   `oracle/strategies.py`, evidence-only (the class stays `sqli`), and the same for
   query points; it is reported to the coordinator, not pinned here, because the sender
   never re-sent anything there.
+
+## Review round 1 (PRGPATH-R1, 2026-10-21)
+**Finding (confirmed by the reviewer with a loopback reproduction on `9d0e819`).** The
+round-0 fix refused a path point's follow-up only when its target, resolved against the
+template, kept `{id}`. A `Location` the server wrote as an absolute path or URL holding
+the placed segment (`/p/<payload>/edit`, `http://host/p/<payload>/edit`) passed every
+gate and was fetched with the payload. A browser resolves `edit` to the same request, so
+the two spellings got opposite decisions. The scope's invariant ("the oracle must never
+treat a follow-up that re-sends the payload as the PRG observation of the original
+request", tested for `#top`, relative `edit`, absolute-path and absolute-URL Locations)
+did not hold for two of its four forms, on both senders.
+
+**What it caused to fail.** This is the Attribution failure listed above, through
+another spelling. The reviewer's script
+(`scratchpad/prgpath_review/repro_abs.py`) ran
+`Oracle(strategies=[SstiStrategy()]).confirm` on `POST /p/{id}/view` -> `303
+/p/<seg>/edit` (built from the request's own segment), where `GET /p/<seg>/<any>`
+evaluates its own segment and nothing is stored. On `9d0e819` that gave `CONFIRMED` with
+`observation: "prg"`, for both senders and both absolute spellings. Every follow-up GET
+carried the payload (`/p/%24%7B346%2A504%7D/edit`, ...). The relative `edit` gave no
+verdict and no GET.
+
+**What the defect was.** `prg_target` compared the target's path segments with the
+template's placeholder only (`own_segment in urlsplit(target).path.split("/")`). It
+never compared them with the value the probe placed, so a target the server wrote whole
+could hold the payload unseen. The docstring, FR-FUZZ-69 and this report called that
+deliberate ("taken as written: the payload rode the redirect, classified by the
+strategies, `strategies._rode_the_redirect`").
+
+**Root cause analysis (Five Whys).**
+1. *Why was `/p/<payload>/edit` fetched?* The refusal looked for `{id}`, which only a
+   target resolved against the template can keep.
+2. *Why only `{id}`?* The lane framed the defect as "which base is the `Location`
+   resolved against" (the root cause of round 0). It fixed the base, and treated a
+   target that carries the payload without the base's help as another case: "the
+   payload rode the redirect".
+3. *Why was that case thought safe?* The lane justified it by a consumer's behaviour
+   (`_rode_the_redirect` classifies such a follow-up) without reading which consumers
+   apply it. Only M5 XSS calls it (`strategies.py:762`). M4, SpEL, M2 and the passwd
+   markers set `observation: "prg"` whenever a response came through a follow-up
+   (FR-FUZZ-49 P6 says so: "other strategies add `observation: "prg"`").
+4. *Why did the lane's own tests not show it?* The boundary test
+   (`test_a_location_the_server_wrote_with_the_payload_is_fetched_as_written`) used
+   `_Echo`, which answers every request carrying the mark with another 302. So the
+   follow-up was always `PRG_UNOBSERVED`, and the question the rule protects (is this
+   answer read as the POST's observation?) was never asked. The `PATH_PRG` absolute
+   rows (`/p/list`, `{base}/p/list`) were payload-free, and the oracle-level test had
+   only relative rows.
+5. *Why were those fixtures accepted?* Nothing required a boundary or carve-out test
+   to make the excluded request observable, or a carve-out justified by downstream
+   handling to be checked against every consumer.
+
+**Root cause:** the refusal was keyed to one spelling of the resource (the template's
+placeholder), not to the resource itself (the point's segment holding the placed value,
+however written). The carve-out for the other spellings rested on an unverified claim
+about every strategy, and its test could not observe the misattribution it allowed.
+
+**Corrective action (this round, CC-FUZZ-0113 round 1, branch `lane/PRGPATH-r1`).**
+- `probesender._re_sends(path, own_segment, own_value)`: a path point's target re-sends
+  the payload when its path keeps `{param}`, or holds the placed value as whole segments
+  as written or percent-decoded. So `%2A` against `*` is caught, and so is a value with a
+  `/` written raw. `prg_target(..., own_value=)` refuses with the same `Probe.prg`
+  (`skipped: the follow-up would re-send the payload`), before any send. Both senders
+  pass `_placed_value(location, value)` (the value for a path point, None elsewhere)
+  next to `_own_segment`. Every other location is unchanged.
+- `PRG_RULES['own-segment-never-refetched']`, the `prg_target` docstring and FR-FUZZ-69
+  state it. The "taken as written" text is replaced. A payload written only into the
+  target's query stays the P6 "rode the redirect" case, as at every location.
+- Tests (each fails on `9d0e819`):
+  - `tests/test_query_placement.py::test_a_location_the_server_wrote_with_the_payload_is_refused`
+    (renamed from `..._is_fetched_as_written`): the echo now answers only the probe
+    with a redirect (`_Echo.redirect_limit`), so a sent follow-up would be observed.
+    It asserts `probe.followed is None`, `probe.prg == RESENDS` and no second target,
+    for both senders and both absolute spellings.
+  - `tests/test_query_placement.py::test_a_path_points_prg_follow_up_never_carries_the_payload`:
+    new rows `absolute-path-with-the-payload` and `absolute-url-with-the-payload` (POST
+    and GET, both senders).
+  - `tests/test_prg_observation.py::test_a_path_points_follow_up_that_would_re_send_the_payload_never_confirms`:
+    now covers both senders, with new rows `/p/{seg}/edit`, `{base}/p/{seg}/edit` and a
+    re-encoded `/p/{pchar}/edit`. `PrgSite` builds them from the request's own segment.
+    These are the reviewer's reproduction as a test.
+  - The rule fixture `_fx_own_segment` adds the server-written spelling.
+
+**Recurrence review.** The same bug as round 0 (a path point's follow-up re-sends the
+payload and is read as the POST's observation), through a spelling the round-0 fix
+left open. Checked again: BUG-0531/PA-0531, BUG-0110/PA-0111, BUG-0115/PA-0115,
+BUG-0117/PA-0117 (above), and PA-0542 as drafted in round 0 (handed to the coordinator,
+not yet merged). The new element is the carve-out's justification. BUG-0117/PA-0117
+("a signature counts only when caused by the probe") is the nearest prior rule about
+attribution. It constrains each strategy's own reading, not a sender's choice of what
+to hand the strategies as the observation.
+
+**Prior-preventive-action failure analysis.**
+- **PA-0542 round-0 draft, rule (2), was applied to one spelling.** It says that where
+  no payload-free target exists, the follow-up is refused, never sent with the payload.
+  The lane implemented "the target keeps `{id}`", a property of how the target was
+  resolved, not of what it requests. So the rule held for every relative `Location`
+  and failed for the absolute ones naming the same resource. The rule text did not say
+  "however the target is spelled", and its enforcing tests had no payload-holding
+  absolute row.
+- **PA-0542 round-0 draft, rule (1), was satisfied vacuously for the boundary.** It
+  requires exercising every location, and the lane did. But the boundary test's fixture
+  answered the follow-up with a redirect, so the observation the rule protects could
+  not occur in it.
+- **PA-0117(1) (BUG-0117)** binds strategies to signatures the probe caused. It was
+  correct but sits at the wrong layer for this case: the sender decided which response
+  the strategies read as the probe's, and no rule bound that decision.
+
+**Preventive action.** PA-0542 is strengthened before it merges (text in the lane's
+`doc_texts.md`). Rule (2) now reads "however the target is spelled (relative to the
+resource, or an absolute path or URL holding the placed value), compared as written and
+decoded". Two rules are new:
+- **(4)** A carve-out justified by what a downstream consumer does is checked against
+  every consumer of that output, by reading their code or by a test per consumer, and
+  is otherwise not a carve-out.
+- **(5)** A boundary or carve-out test makes the excluded outcome observable. Its
+  fixture answers the request the rule refuses or allows with what would be misread (a
+  page, not another redirect), so the test fails if the rule is wrong.
+
+(4) and (5) are applied in review. The tests above enforce (2) for both senders.
+
+**PA-0002 sweep (by mechanism).** `prg_target` is the one target rule, and both callers
+pass the placed value. No other code derives a request from a probe's `Location`; the
+round-0 list above still holds. Outside this finding, reported and not changed here:
+at a body or query point, a `Location` the server wrote with the payload is still
+followed (FR-FUZZ-49 P6, by design). Every strategy but M5 XSS then reads it as
+`observation: "prg"` without asking whether the payload rode the redirect (M4, SpEL
+and Go-template SSTI `strategies.py:894`, `:949`, `:1219`; M2 `:554`; the path
+traversal markers `:1255`, `:1342`; line numbers at `9d0e819`). That is
+the same misattribution at the other locations. It belongs to `oracle/strategies.py`
+(classification) and to FR-FUZZ-49 P6's owner, and is handed to the coordinator as a
+residual.

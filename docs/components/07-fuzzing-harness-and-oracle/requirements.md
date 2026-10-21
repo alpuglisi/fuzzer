@@ -1994,12 +1994,22 @@ rewards) derives from it.
     payload`, with no `followed`, no `prg_sent` and no request counted
     (`follow_up_sends` 0). The strategy reads the probe's own response, as for any
     refused follow-up.
-  - **A target that leaves the segment** (`../list`, an absolute path or URL) is fetched
-    exactly where a browser goes. Resolution is structural, so the template and the
-    placed URL give the same target.
-  - **A target the server wrote whole** is taken as written, a payload in it included:
-    the payload rode the redirect (FR-FUZZ-49 P6, classified by the strategies,
-    `strategies._rode_the_redirect`). The sender never adds the payload to a follow-up.
+  - **A target the server wrote with the placed value in its path** (an absolute path or
+    URL built from the request, as an app redirecting to the resource just posted
+    writes it: `/p/<payload>/edit`) is refused the same way, with the same
+    `Probe.prg`. It is the same browser request as `edit`, so the decision is the same
+    for every spelling of it: the value is matched as whole segments of the target's
+    path, as written and percent-decoded (a server that re-encodes `*` as `%2A`, or the
+    reverse, is still caught; a value with a `/` written raw spans its segments,
+    `probesender._re_sends`). Its answer is never the
+    page the POST led to: a page that renders its own URL would read as the POST's
+    stored result, and M4 confirmed through it with `observation: "prg"` (review round
+    1 of CC-FUZZ-0113, PRGPATH-R1; `strategies._rode_the_redirect` is read by M5 XSS
+    only, so the strategies did not classify it).
+  - **A target that leaves the segment** (`../list`, an absolute path or URL without the
+    placed value) is fetched exactly where a browser goes. Resolution is structural, so
+    the template and the placed URL give the same target. The sender never adds the
+    payload to a follow-up.
   - `probesender.PRG_RULES` states both divergences from the browser
     (`location-relative`: the probe's own URL; `own-segment-never-refetched`), each with
     a fixture.
@@ -2011,11 +2021,16 @@ rewards) derives from it.
     that decides nothing is a negative, as for every refused follow-up. A reflection
     reachable only through a relative redirect is found at the target's own point, not
     through this one. A payload made only of dot segments (`.`, `..`) is refused where
-    a browser would normalise it away.
+    a browser would normalise it away. A value the target's path holds as whole
+    segments for another reason (a payload `list` and `Location: /p/list`) is refused
+    too: the sender cannot tell the two apart, and nothing is sent. A placed value the
+    server wrote only into the target's query (`/p/list?from=<payload>`) is not the
+    point's resource: it rode the redirect and is taken as written, as at every other
+    location (FR-FUZZ-49 P6).
   - Enforced by: `tests/test_query_placement.py::test_a_path_points_prg_follow_up_never_carries_the_payload`,
     `tests/test_query_placement.py::test_no_prg_follow_up_carries_the_payload_at_any_location`,
     `tests/test_query_placement.py::test_the_prg_location_table_covers_every_placeable_location`,
-    `tests/test_query_placement.py::test_a_location_the_server_wrote_with_the_payload_is_fetched_as_written`,
+    `tests/test_query_placement.py::test_a_location_the_server_wrote_with_the_payload_is_refused`,
     `tests/test_prg_observation.py::test_a_path_points_follow_up_that_would_re_send_the_payload_never_confirms`,
     `tests/test_prg_observation.py::test_a_path_points_follow_up_that_leaves_its_segment_still_confirms`,
     `tests/test_prg_observation.py::test_prg_rule` (`own-segment-never-refetched`)
