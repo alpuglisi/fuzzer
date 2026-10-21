@@ -410,6 +410,158 @@ def test_the_seams_page_fetch_goes_through_its_pooled_transport_on_the_probes_id
     assert keys == [(canonical_origin(site.base), "anonymous", None)]
 
 
+# --- the bound send takes the route its page was fetched on, or is unbound (review R2-2) --
+class _CookieBoundForm:
+    """A loopback app whose CSRF token is tied to the session cookie the form page's
+    request carries (with none, the page sets a new one); ``POST /do`` reflects ``q`` raw
+    only past the cookie-and-token check, else 403. Every request is logged."""
+
+    def __init__(self):
+        from fuzzlab.core.net import require_loopback
+        require_loopback("127.0.0.1")                      # PA-0130
+        self.tokens: dict[str, str] = {}
+        self.seen: list[tuple[str, str, str | None]] = []   # (method, path, cookie)
+        counter = itertools.count(1)
+        app = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def _answer(self, status, body, cookie=None):
+                self.send_response(status)
+                if cookie:
+                    self.send_header("Set-Cookie", f"sid={cookie}; Path=/")
+                self.send_header("Content-Type", "text/html")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_GET(self):
+                cookie = self.headers.get("Cookie")
+                app.seen.append(("GET", self.path, cookie))
+                n = next(counter)
+                sid, new = ((cookie.removeprefix("sid="), None) if cookie
+                            else (f"s{n}", f"s{n}"))
+                app.tokens[sid] = f"t{n}"
+                self._answer(200, (f"<html><body><form method=post action='/do'><input "
+                                   f"type=hidden name=csrf_token value=t{n}><input "
+                                   "name=q></form></body></html>").encode(), new)
+
+            def do_POST(self):
+                cookie = self.headers.get("Cookie")
+                app.seen.append(("POST", self.path, cookie))
+                length = int(self.headers.get("Content-Length") or 0)
+                form = dict(parse_qsl(self.rfile.read(length).decode(),
+                                      keep_blank_values=True))
+                sid = (cookie or "").removeprefix("sid=")
+                if sid not in app.tokens or form.get("csrf_token") != app.tokens[sid]:
+                    self._answer(403, b"<html>invalid token</html>")
+                    return
+                self._answer(200, f"<html><body><p>{form.get('q', '')}</p></body></html>"
+                             .encode())
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.base = f"http://127.0.0.1:{self.server.server_address[1]}"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+
+class _CopySession:
+    """An isolated copy's session (FR-FUZZ-44) as its client's session addon: each
+    login gives it a new cookie; ``logged_out`` is a probe having logged it out, so its
+    next request logs in again first (as `SessionManager.prepare` does)."""
+
+    label = "alice (isolated 1)"
+
+    def __init__(self):
+        self.logins, self.logged_out, self.sid = 0, False, None
+
+    def login_attempts(self):
+        return self.logins
+
+    def ensure(self, *a, **k):
+        self.logins += 1
+        self.sid, self.logged_out = f"copy{self.logins}", False
+
+    def prepare(self, request, identity):
+        if self.logged_out:
+            self.ensure()
+        request.headers = {**request.headers, "Cookie": f"sid={self.sid}"}
+
+    def observe(self, request, response, identity):
+        pass
+
+
+class _RunSession:
+    """The run's session manager, as far as the seam's isolation reads it: ``alive`` is
+    what `verify_live` answers after a copy login (False: a single-session app)."""
+
+    def __init__(self, copy):
+        self.copy, self.alive, self.released = copy, True, []
+
+    def ensure(self, *a, **k):
+        pass
+
+    def is_auth_endpoint(self, url):
+        return False
+
+    def add_logout_listener(self, listener):
+        pass
+
+    def isolated_copy(self, identity, *, ordinal):
+        return self.copy
+
+    def release_copy(self, manager):
+        self.released.append(manager)
+
+    def verify_live(self, host, identity, base):
+        return self.alive
+
+
+def test_a_bound_send_never_leaves_on_another_route_than_its_pages_fetch():
+    """Review R2-2 (its N3 path), on a real socket: ``/do`` is an isolated path, so its
+    page is fetched on the path's copy and the token is the copy cookie's. A probe logged
+    the copy out; the fetch's re-login logs the run's session out (a single-session app),
+    so `_on_copy`'s verify trips the breaker during the fetch and the path goes
+    anonymous. The bound send would leave without the copy's cookie and be refused
+    before the handler (403, read as a negative): it is not sent, and the test is unbound."""
+    from fuzzlab.core.budget import RequestBudget
+    from fuzzlab.core.http import HttpClient
+    from fuzzlab.oracle.oracle import UNBOUND, Oracle
+    from fuzzlab.oracle.probe import Candidate
+    from fuzzlab.oracle.strategies import ReflectedXssStrategy
+    from fuzzlab.tools.probesender import SeamProbeSender
+    app = _CookieBoundForm()
+    copy = _CopySession()
+    run = _RunSession(copy)
+    try:
+        sender = SeamProbeSender(
+            HttpClient(RequestBudget(200), ["127.0.0.1"], timeout=5), identity="alice",
+            manager=run, isolated_client=lambda m: HttpClient(
+                RequestBudget(200), ["127.0.0.1"], session=m, timeout=5))
+        sender.isolate([app.base + "/do"])
+        cand = Candidate(url=app.base + "/do", param="q", method="POST", location="body",
+                         category="xss", base_entries=(("csrf_token", ""), ("q", "x")),
+                         bindings={"page": app.base + "/form", "fresh": ["csrf_token"]})
+        oracle = Oracle(strategies=[ReflectedXssStrategy()])
+        control, _ = oracle.confirm_outcome(cand, sender)    # the copy's route holds
+        before = len(app.seen)
+        copy.logged_out, run.alive = True, False
+        verdict, unsure = oracle.confirm_outcome(cand, sender)
+    finally:
+        app.close()
+    assert control is not None and control.confirmed
+    assert all(c == "sid=copy1" for _m, _p, c in app.seen[:before])
+    assert sender.isolation_report()["breaker"]["trip"] == "single-session"
+    assert app.seen[before:] == [("GET", "/form", "sid=copy2")]     # no POST went out
+    assert verdict is None and unsure is not None and unsure.mechanism == UNBOUND
+    assert "route" in unsure.evidence["reason"]
+
+
 # --- the source page never stores, nor puts on the wire, a target's value (review B1) ---
 _SECRET = "SECRETKEY123zq"
 
@@ -471,13 +623,38 @@ def test_a_page_whose_url_holds_a_redacted_value_is_never_fetched():
         assert site.events == []
 
 
-# --- FR-AUD-20, fail closed (review B3) --------------------------------------------------
-@pytest.mark.parametrize("value", [
+# --- FR-AUD-20, fail closed (review B3, review R2-1) -------------------------------------
+#: Values that name a host beyond loopback to some reader. Review B3's four, then review
+#: R2-1's: a host and a port, or a scheme and ':' with or without '//', in the path, query
+#: or fragment (`new URL("https:evil.example", "http://127.0.0.1/")` is
+#: https://evil.example/ in node 22; a reader that puts 'http://' before a token reads
+#: evil.example:8080 and 8.8.8.8:53 as host and port), then the same class spelled with a
+#: bracketed literal, one slash, an underscore label, a hex or trailing-dot quad, and
+#: fullwidth letters (each measured as a host in node 22).
+_OUTSIDE_LAB = [
     "127.0.0.1:80@evil.example/",
     "localhost:1@evil.example",
     "http://evil.example\\@127.0.0.1/",
     "http://127.0.0.1:8080/r?next=http://evil.example/",
-])
+    "http://127.0.0.1/?next=evil.example:8080",
+    "http://127.0.0.1/?next=8.8.8.8:53",
+    "http://127.0.0.1/?next=https:evil.example",
+    "127.0.0.1/go?to=evil.example:443",
+    "localhost:3000/r?u=evil.example:80/x",
+    "http://127.0.0.1/#evil.example:8080",
+    "http://127.0.0.1/?h=[::ffff:8.8.8.8]:53",
+    "http://127.0.0.1/?next=https:/evil.example",
+    "http://127.0.0.1/?u=a_b.evil.example",
+    "http://127.0.0.1/?h=0x8.8.8.8",
+    "http://127.0.0.1/?h=8.8.8.8.",
+    "http://127.0.0.1/?next=ｅｖｉｌ.example",
+]
+#: Values naming loopback and nothing else: sent as the app gave them.
+_LAB_ONLY = ["http://127.0.0.1:8080/after", "http://localhost:3/x?a=1", "http://[::1]:80/x",
+             "http://127.0.0.1:3000/list?page=2&sort=name", "http://127.0.0.1/app.js?v=1.2.3"]
+
+
+@pytest.mark.parametrize("value", _OUTSIDE_LAB)
 def test_a_value_that_names_a_host_beyond_loopback_to_any_reader_is_outside_the_lab(value):
     from fuzzlab.audit.value_shape import names_outside_lab
     from fuzzlab.harness.auto import _send_value
@@ -485,11 +662,37 @@ def test_a_value_that_names_a_host_beyond_loopback_to_any_reader_is_outside_the_
     assert _send_value(value) != value                  # never sent as given
 
 
-@pytest.mark.parametrize("value", ["http://127.0.0.1:8080/after", "http://localhost:3/x?a=1",
-                                   "http://[::1]:80/x"])
+@pytest.mark.parametrize("value", _LAB_ONLY)
 def test_a_value_naming_only_loopback_is_the_lab(value):
     from fuzzlab.audit.value_shape import names_outside_lab
+    from fuzzlab.harness.auto import _send_value
     assert not names_outside_lab(value)
+    assert _send_value(value) == value
+
+
+@pytest.mark.parametrize("value, sent", [(v, False) for v in _OUTSIDE_LAB]
+                         + [(v, True) for v in _LAB_ONLY])
+def test_the_binder_never_binds_a_fresh_value_that_names_a_host_beyond_loopback(value, sent):
+    """Review R2-1: the same predicate gates the fresh values a page offers now
+    (`_FormBoundSender._bind_fresh`): one naming a host beyond loopback to any reader is
+    refused and nothing is sent (unbound); one naming only loopback is bound as given."""
+    from fuzzlab.oracle.oracle import _FormBoundSender
+    from fuzzlab.oracle.probe import Candidate, PrerequisiteUnavailable
+    form = ("<html><form method=post action='/app/go.php'><input type=hidden name=next "
+            f"value=\"{html.escape(value, quote=True)}\"><input name=q></form></html>")
+    site = _Site({"/app/p.php": lambda s, n: form},
+                 lambda req, s: Probe(200, "<html>ok</html>"))
+    cand = Candidate(url="http://h/app/go.php", param="q", method="POST", location="body",
+                     base_entries=(("next", ""), ("q", "x")),
+                     bindings={"page": "http://h/app/p.php", "fresh": ["next"]})
+    bound = _FormBoundSender(site, cand)
+    if sent:
+        bound.send("http://h/app/go.php", "q", "M", method="POST", location="body")
+        assert [r["body"]["next"] for r in site.sends("/app/go.php")] == [value]
+    else:
+        with pytest.raises(PrerequisiteUnavailable, match="outside the lab"):
+            bound.send("http://h/app/go.php", "q", "M", method="POST", location="body")
+        assert site.sends("/app/go.php") == []
 
 
 # --- every send of the candidate's own request is bound or refused (review B4) -----------

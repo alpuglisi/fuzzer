@@ -175,6 +175,24 @@ class _Copy:
         self.label = manager.label
 
 
+class _FetchRoute:
+    """The session route a seam page fetch went out on (FR-FUZZ-67; BUG-0544 review
+    R2-2): the client and the identity label its GET was dispatched with -- the run's
+    session, a path's isolated copy, or anonymous. The fetch returns it as
+    ``probe.carry``; the binder puts it on the bound send's entries (``entries.carry``),
+    and that send is made only on the same route: a value bound from the page belongs to
+    that route's session."""
+
+    __slots__ = ("client", "identity")
+
+    def __init__(self, client, identity: str):
+        self.client = client
+        self.identity = identity
+
+    def same(self, client, identity: str) -> bool:
+        return client is self.client and identity == self.identity
+
+
 def _chain(exc: BaseException) -> list[BaseException]:
     """``exc`` and what it wraps: ``__cause__``, ``__context__`` and exception
     arguments (``requests`` puts the urllib3 error in ``args``, urllib3 its cause)."""
@@ -675,7 +693,12 @@ class SeamProbeSender(_ExplicitAllowance):
         route of this seam carries a response's cookies into the next request (the
         session manager adopts none, and an anonymous route keeps no jar): a page that
         sets a cookie is refused, since its value may be tied to that cookie (review
-        R2-B1) -- the test is then inconclusive, never a negative."""
+        R2-B1) -- the test is then inconclusive, never a negative.
+
+        The route the GET actually went out on is returned as ``probe.carry``
+        (`_FetchRoute`); the bound send carrying it is refused when it would leave on
+        another route or identity -- e.g. after the copy's re-login on this fetch logged
+        the run's session out and the breaker sent the path anonymous (review R2-2)."""
         from fuzzlab.core.http import Request
         from fuzzlab.oracle.probe import PrerequisiteUnavailable
         check_send_url(url, self._explicit, method="GET")
@@ -692,9 +715,11 @@ class SeamProbeSender(_ExplicitAllowance):
                         copy is not None and url_key(url) == url_key(route_url)):
                     raise PrerequisiteUnavailable("their page is an isolated path: never "
                                                   "fetched with another route's session")
+            went: list[_FetchRoute] = []
 
             def dispatch(on_client, on_identity):
                 req = Request("GET", url, identity=on_identity, component="oracle")
+                went.append(_FetchRoute(on_client, on_identity))
                 return self._dispatch(on_client, on_identity, req, "query", "", url)
             if copy is None:
                 page = dispatch(client, identity)
@@ -706,6 +731,7 @@ class SeamProbeSender(_ExplicitAllowance):
             if any(str(k).lower() == "set-cookie" for k in (page.headers or {})):
                 raise PrerequisiteUnavailable("their page sets a cookie this session route "
                                               "cannot carry into the bound send")
+            page.carry = went[-1]
             return page
         except PrerequisiteUnavailable:
             raise
@@ -752,8 +778,18 @@ class SeamProbeSender(_ExplicitAllowance):
         client, copy = self._client, None
         if identity != "anonymous" and url_key(url) in self._isolated_keys:
             client, identity, copy = self._route_isolated(url)  # FR-FUZZ-44
+        fetched = getattr(entries, "carry", None)
+        fetched = fetched if isinstance(fetched, _FetchRoute) else None
 
         def send_on(on_client, on_identity):
+            if fetched is not None and not fetched.same(on_client, on_identity):
+                # FR-FUZZ-67 (BUG-0544 review R2-2): its fresh values were fetched on
+                # another session route (the breaker or a lost copy moved the path) and
+                # are that session's: never sent, so the test is unbound, not a negative
+                from fuzzlab.oracle.probe import PrerequisiteUnavailable
+                raise PrerequisiteUnavailable(
+                    "the bound send's session route is not the one its page was fetched "
+                    "on")
             return self._send_on(on_client, on_identity, url, param, value, timing,
                                  method, location, content_type, entries)
         if copy is None:

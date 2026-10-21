@@ -281,7 +281,9 @@ class _FormBoundSender:
         elif own and location in ("query", "body"):
             entries = base.replace(param, value)
             if carry is not None:
-                # the page's cookies ride on this one send only (`RequestsProbeSender`)
+                # what the fetch left for this one send: the page's cookies
+                # (`RequestsProbeSender`), or the route it went out on, which the send
+                # must take too (the seam; BUG-0544 review R2-2)
                 entries.carry = carry
         if prg:
             # FR-FUZZ-49: the sender's PRG follow-up is a plain GET it builds itself, so

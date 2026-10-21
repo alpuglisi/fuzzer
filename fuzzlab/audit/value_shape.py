@@ -207,8 +207,72 @@ def names_outside_lab(value) -> bool:
     return not _names_only_lab(value)
 
 
-#: Separators a value's path, query or fragment is split on to look for another host.
-_TAIL_SEPARATORS = "/?#&=;,+ "
+#: What a host, a port, a scheme or an IPv6 literal is spelled with. A value's path,
+#: query and fragment are cut at every other character, so each run a reader could take
+#: for a host is looked at whole (BUG-0544 review R2-1: a fixed separator list missed
+#: ``evil.example:8080`` and ``https:evil.example``).
+_HOSTISH = frozenset(string.ascii_letters + string.digits + "-.:[]")
+_SCHEME_CHARS = frozenset(string.ascii_letters + string.digits + "+-.")
+_HOST_PORT_CHARS = frozenset(string.ascii_letters + string.digits + "-.")
+
+
+def _tail_tokens(tail: str):
+    """The maximal runs of `_HOSTISH` characters in ``tail``, in order (linear, no
+    regular expression; PA-0095)."""
+    run: list[str] = []
+    for ch in tail:
+        if ch in _HOSTISH:
+            run.append(ch)
+        elif run:
+            yield "".join(run)
+            run = []
+    if run:
+        yield "".join(run)
+
+
+def _ipv4_like(text: str) -> bool:
+    """Four dot-separated numbers in any radix WHATWG's IPv4 parser reads (decimal,
+    ``0x`` hex, leading-``0`` octal): ``0x8.8.8.8`` and ``010.8.8.8`` are 8.8.8.8 to a
+    reader that puts ``http://`` before them, as the canonical quad is (measured in
+    node 22)."""
+    parts = text.split(".")
+    if len(parts) != 4:
+        return False
+    for part in parts:
+        digits, base = ((part[2:], string.hexdigits) if part[:2].lower() == "0x"
+                        else (part, string.digits))
+        if not digits or not all(ch in base for ch in digits):
+            return False
+    return True
+
+
+def _reads_as_host(token: str) -> bool:
+    """Whether one run of a value's path, query or fragment (`_tail_tokens`) names a
+    host to some reader (FR-AUD-20, fail closed; BUG-0544 review R2-1), loopback
+    included -- a value is the lab only when its tail names no host at all:
+
+    * `value_shape` reads it (one trailing dot off) as a URL, an IP or a host name, or
+      it is a dotted quad in another radix (`_ipv4_like`);
+    * it starts with a scheme and ``:``, with or without ``//`` (``https:evil.example``,
+      which WHATWG resolves against the page to ``https://evil.example/``;
+      ``evil.example:8080``, a scheme to WHATWG and a host to the next reader);
+    * it is a host and a port: a dotted, numeric or bracketed label, ``:`` and digits or
+      nothing (``8.8.8.8:53``, ``[::ffff:8.8.8.8]:53``), which a reader that puts
+      ``http://`` before it reads as one. Accepted false positive: a time (``10:30``,
+      host 0.0.0.10 to that reader) or a ``word:`` (``Help:Contents``) is a host here."""
+    text = token[:-1] if token.endswith(".") else token
+    if not text:
+        return False
+    if value_shape(text) in ("url", "ip", "hostname") or _ipv4_like(text):
+        return True
+    if text.startswith("[") and "]" in text:
+        return text[text.index("]") + 1:].startswith(":")
+    head, colon, port = text.partition(":")
+    if not colon or not head:
+        return False
+    if head[0] in string.ascii_letters and all(ch in _SCHEME_CHARS for ch in head):
+        return True
+    return all(ch in _HOST_PORT_CHARS for ch in head) and (not port or port.isdigit())
 
 
 def _loopback_authority(authority: str) -> bool:
@@ -235,16 +299,19 @@ def _loopback_authority(authority: str) -> bool:
 
 def _names_only_lab(value: str) -> bool:
     """Whether ``value`` provably names loopback and nothing else (FR-AUD-20 as amended
-    by FR-FUZZ-67): no ``@``, ``\\``, ``%`` or control character anywhere (WHATWG and
-    other consumers read those differently from `urlsplit`); only ``http``/``https``
-    when a scheme is given; the whole authority a loopback host with a numeric port, as
-    `_loopback_authority` splits it **and** as `urlsplit` reads it; and no part of the
-    path, query or fragment naming another host or URL (``?next=http://evil.example/``
-    is outside)."""
+    by FR-FUZZ-67): no ``@``, ``\\``, ``%``, control or non-ASCII character anywhere
+    (WHATWG and other consumers read those differently from `urlsplit`; a reader that
+    maps a fullwidth ``evil`` and an ideographic full stop before ``example`` reads
+    evil.example, measured in node 22); only ``http``/``https`` when a scheme is given;
+    the whole authority a loopback host with a numeric port, as `_loopback_authority`
+    splits it **and** as `urlsplit` reads it; and no part of the path, query or fragment
+    naming a host or URL to any reader
+    (`_reads_as_host`: ``?next=http://evil.example/``, ``?next=evil.example:8080``,
+    ``?next=https:evil.example`` and ``#8.8.8.8:53`` are outside; review R2-1)."""
     from urllib.parse import urlsplit
 
     from fuzzlab.core.urls import is_loopback_origin
-    if any(ch in value for ch in "@\\%") or any(ord(ch) < 33 or ord(ch) == 127
+    if any(ch in value for ch in "@\\%") or any(ord(ch) < 33 or ord(ch) >= 127
                                                   for ch in value):
         return False
     if "://" in value:
@@ -270,13 +337,7 @@ def _names_only_lab(value: str) -> bool:
         return False
     if "//" in tail:
         return False
-    for sep in _TAIL_SEPARATORS:
-        tail = tail.replace(sep, " ")
-    for token in tail.split():
-        shape = value_shape(token)
-        if shape in ("url", "ip", "hostname") and not _loopback_authority(token):
-            return False
-    return True
+    return not any(_reads_as_host(token) for token in _tail_tokens(tail))
 
 
 def neutral_value(value):
