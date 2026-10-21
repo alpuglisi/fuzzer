@@ -947,14 +947,27 @@ fuzzer.
     failed login fails the crawl. Nothing is crawled anonymously in its place.
   - **Each hop:** the crawl's scope and destructive rules decide a redirect hop as before;
     a hop to another origin than the session's is not followed and the load extracts
-    nothing (`withheld`, FR-SESS-20). An answer the manager sent without the session --
-    withheld (another origin), or with none applied (no `session_generation`: a host
-    outside the manager's own scope) -- is never extracted (`withheld`).
+    nothing (`withheld`, FR-SESS-20). An answer the manager withheld the session from
+    (another origin) is never extracted (`withheld`).
+  - **A host the session manager does not serve is never sent to** *(BUG-0545 review,
+    R6)*. The seam's addon (`_SessionAddon`) runs the manager's `prepare`; a request it
+    left alone -- no session applied (`session_generation` unset) and no decision
+    recorded: its host is outside the manager's own scope, such as a loopback alias of
+    the start the config does not list -- raises `HostNotServed` before the transport.
+    Nothing is sent. The page is stored `failed` (unresolved, resumed) with that cause,
+    counted `session_host_unserved` in `crawl_stats` and reported; a selector form whose
+    action is on such a host is not submitted (logged; the page holding it is kept).
+    Adding the host to `scope_hosts` makes the manager serve it (measured for a loopback
+    alias); `--auth-origin` does not.
   - **Losses:** an answer on a session the manager knows lost, or sent while the manager
     saw a loss on any send (its logout listener), is no evidence: the page is retried
     (FR-CRAWL-36) after the manager's re-login. A `SessionAuthError` on a send (a re-auth
     cap, an unknown health) stops the crawl (`IdentityUnavailable`).
-  - Enforced by: `tests/test_spider_static_identity.py` (each test fails on c483dc1).
+  - Enforced by: `tests/test_spider_static_identity.py`. Each test fails on c483dc1 on
+    its own assertion: the test site serves its extra links and forms to an anonymous
+    visitor too, so c483dc1's anonymous crawl reaches them (BUG-0545 review, B2).
+    `test_a_host_the_session_manager_does_not_serve_is_never_sent_without_the_session`
+    also fails on 9071440 (the alias was sent with no cookie).
 - **FR-CRAWL-35 (the legacy spider's frontier: one admission per key, budgets,
   CC-CRAWL-0056, BUG-0545)** Every URL the crawl would load enters through one frontier
   (`_Frontier`), shared by every worker:
@@ -974,9 +987,21 @@ fuzzer.
     heap; a worker takes a due retry first, then the older head: one worker crawls in
     admission order, as before. A pending retry keeps the crawl going; probes are planned
     once every worker is idle and no retry waits.
+  - **Every load passes the crawl's scope and destructive rules first** *(BUG-0545
+    review, B1)*. Whatever queued it -- a link, a redirect, a route, a seed, a probe's
+    route, a retry, or a row a resumed crawl read from the store (FR-CRAWL-36) --
+    `_visit` asks `_load_refusal` before anything else: outside the crawl's scope
+    (`_in_scope`, FR-CRAWL-7/11; another loopback port is another service) or
+    destructive (`_destructive`; the start URL is the operator's own) is never requested
+    and nothing is stored for it. Each refusal is counted by reason in `crawl_stats`
+    (`loads_refused[out_of_scope]`, `loads_refused[destructive]`, `LOAD_REFUSALS`) and
+    reported in the crawl summary. The check sits where every load is made, not at the
+    producers (PA-0123(1)); a stored row refused there was admitted by the frontier
+    first, so it counts in `frontier_admitted` and the frontier's budgets.
   - Enforced by: `tests/test_spider_frontier.py::test_a_destination_many_parents_link_is_queued_once`,
     `tests/test_spider_frontier.py::test_a_fan_out_trap_is_bounded_by_the_route_budget_and_reported`,
-    `tests/test_spider_frontier.py::test_the_frontier_admits_each_key_once_and_counts_every_budget`.
+    `tests/test_spider_frontier.py::test_the_frontier_admits_each_key_once_and_counts_every_budget`,
+    `tests/test_spider_frontier.py::test_a_resumed_crawl_never_loads_a_stored_row_out_of_its_scope_or_destructive`.
 - **FR-CRAWL-36 (the legacy spider's page record: a load's outcome, retries, the
   batched writer, CC-CRAWL-0056, BUG-0545)**
   - **Outcomes.** `discovered_pages.outcome` is `pending` once the page answered,
@@ -992,7 +1017,11 @@ fuzzer.
     doubling, a `Retry-After` honoured, at most 30 s), up to 3 loads; seeds and probes are
     never retried (their windows, FR-CRAWL-17). A page still failing is unresolved:
     `failed_pages`, `pages_failed`, a warning. A `--resume` crawl admits every stored
-    unresolved row again (not a seed or a probe). `pages_retried` counts retries.
+    unresolved row again (not a seed or a probe); each is loaded only through the crawl's
+    scope and destructive rules (FR-CRAWL-35's load gate), so a row another target's or
+    another start URL's crawl left is never requested and stays unresolved for a crawl
+    whose scope it is in. `pages_retried` counts retries. A host the session manager
+    does not serve (FR-CRAWL-34) is unresolved too, with that cause, never `withheld`.
   - **The writer.** Recording a page never touches the store: rows are queued in memory
     and one writer thread commits them in order when they hold 64 rows or 1 MiB, or the
     oldest waited 1 s, and at close; reads of page rows flush first. A crawl thread waits
@@ -1001,6 +1030,7 @@ fuzzer.
   - Enforced by: `tests/test_spider_frontier.py::test_a_transient_failure_is_retried_and_never_recorded_visited`,
     `tests/test_spider_frontier.py::test_an_incomplete_body_is_retried_never_taken_for_a_page`,
     `tests/test_spider_frontier.py::test_a_page_that_keeps_failing_is_unresolved_reported_and_resumed`,
+    `tests/test_spider_frontier.py::test_a_resumed_crawl_never_loads_a_stored_row_out_of_its_scope_or_destructive`,
     `tests/test_spider_frontier.py::test_recording_a_page_never_waits_for_the_stores_lock`,
     `tests/test_spider_frontier.py::test_page_rows_are_committed_by_count_bytes_and_age_and_flushed_at_close`.
 
@@ -1019,6 +1049,9 @@ fuzzer.
   the queue; static redirects (by hand); the browser (a context-wide route that walks
   redirect chains hop by hop, WebSockets routed, plus launch arguments that resolve
   nothing outside scope); and the API-request client (scope-checked, no redirects).
+  *(BUG-0545 review, B1:)* and every load, where it is made (`_visit`): scope and the
+  destructive rule are asked again whatever queued it, a resumed crawl's stored rows
+  included (FR-CRAWL-35).
   *(CC-CRAWL-0028, BUG-0136:)* **how** a request is refused is one rule: every abort
   of a document request (a navigation, top-level or frame, and each of its redirect
   hops), whatever the reason -- scope, destructive, refused method or body, the reveal
@@ -1087,6 +1120,7 @@ fuzzer.
   - Enforced by (a failed navigation settles before it raises; the cleanup has one owner; BUG-0522): `navguard.navigate` / `reload` (`_settle_failure`), `navguard.end_failed_load` — `tests/test_navigation_aborts.py::test_a_failed_navigation_returns_after_its_own_error_page`, `tests/test_navigation_aborts.py::test_a_navigation_overtaken_by_an_error_page_waits_for_it`, `tests/test_navigation_aborts.py::test_only_the_leading_code_decides_a_wait_for_an_error_page`, `tests/test_navigation_aborts.py::test_a_refused_load_naming_a_network_error_in_its_url_is_not_waited_for`, `tests/test_navigation_aborts.py::test_the_spiders_load_after_failed_loads_is_rendered`, `tests/test_navigation_aborts.py::test_a_query_load_after_a_failed_load_is_rendered`, `tests/test_disco_harvest.py::test_disco_harvest_and_restore_after_failed_loads`, `tests/test_shared_primitives.py::test_every_about_blank_navigation_is_a_reasoned_exception`, `tests/test_shared_primitives.py::test_the_about_blank_guard_catches_synthetic_offenders`
   - Enforced by (no navigation waits for a load a refused navigation cancelled; one helper; BUG-0138): `navguard.navigate` / `reload` / `wait_for_state` / `response_html`, `LocalSpider._goto_and_parse` — `tests/test_guarded_navigation.py::test_a_head_script_navigation_to_a_refused_url_is_not_waited_out`, `tests/test_guarded_navigation.py::test_a_slow_page_is_still_waited_for`, `tests/test_guarded_navigation.py::test_query_probe_and_seed_loads_are_not_waited_out`, `tests/test_guarded_navigation.py::test_every_guarded_navigation_goes_through_the_one_helper`, `tests/test_guarded_navigation.py::test_the_navigation_guard_catches_synthetic_offenders`, `tests/test_guarded_navigation.py::test_a_failure_reported_before_the_commit_never_cuts_the_wait`, `tests/test_guarded_navigation.py::test_a_previous_pages_pending_navigation_never_cuts_the_next_load`, `tests/test_guarded_navigation.py::test_a_merely_slow_page_keeps_its_rendered_text`, `tests/test_guarded_navigation.py::test_another_document_never_fills_this_urls_row`, `tests/test_guarded_navigation.py::test_a_same_path_document_with_another_query_never_fills_this_urls_row`
   - Enforced by (scope, per layer): `LocalSpider._in_scope`, `navguard.guard_page` / `make_route_handler` / `make_ws_handler` / `browser_launch_args` / `checked_api_request` — `tests/test_spider_scope.py::test_loopback_start_treats_aliases_as_one_host`, `tests/test_browser_scope.py::test_a_rendered_crawl_never_leaves_the_target_origin`, `tests/test_browser_scope.py::test_the_launch_args_alone_confine_an_unrouted_page_to_the_origin`, `tests/test_browser_scope.py::test_a_redirect_hop_out_of_scope_is_never_requested`, `tests/test_browser_scope.py::test_out_of_scope_requests_are_aborted_and_reported`, `tests/test_browser_scope.py::test_allow_never_lifts_scope`, `tests/test_browser_scope.py::test_websockets_are_scope_checked`, `tests/test_browser_scope.py::test_the_spiders_isolated_submit_refuses_an_out_of_scope_action`, `tests/test_browser_scope.py::test_every_browser_path_in_fuzzlab_is_scoped`, `tests/test_browser_scope.py::test_the_browser_guard_catches_synthetic_offenders`, `tests/test_browser_scope.py::test_scope_is_checked_before_any_fetch`
+  - Enforced by (every load, whatever queued it -- a resumed crawl's stored rows included -- passes scope and destructive first; BUG-0545 review, B1): `LocalSpider._load_refusal`, asked first by `LocalSpider._visit` — `tests/test_spider_frontier.py::test_a_resumed_crawl_never_loads_a_stored_row_out_of_its_scope_or_destructive`
   *(CC-CRAWL-0039, BUG-0503:)* **a URL source feeding the queue returns only GET-safe
   URLs**: `core.linkextract` never returns a form `action`, a `formaction`, a `ping` or
   a script string; forms are submitted only through the gated paths, and a script's
@@ -1181,7 +1215,9 @@ no answer),
 value INTEGER)` (the last crawl's SPA, reveal and, since FR-CRAWL-17, `spa_query_*`
 counts -- refusals by reason as `spa_query_refused[<reason>]` -- `submit_stopped` and
 `reveals_stopped`; since FR-CRAWL-35/36 `frontier_admitted`, `frontier_duplicates`,
-`frontier_rejected[<reason>]`, `pages_retried`, `pages_failed`, `store_writer_waits`),
+`frontier_rejected[<reason>]`, `pages_retried`, `pages_failed`, `store_writer_waits`;
+since BUG-0545's review `loads_refused[<reason>]` (only a reason that refused) and
+`session_host_unserved`),
 since FR-CRAWL-16 **`revealed_forms`** `(id, page_url, route,
 signature, submitted INTEGER, UNIQUE (route, signature))` — the forms a reveal showed,
 for a later opt-in (`page_url` redacted by `redact_url_identifiers`; never values) —

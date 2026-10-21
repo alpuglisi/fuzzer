@@ -726,6 +726,45 @@ class IdentityUnavailable(RuntimeError):
     out of the crawl (FR-CRAWL-34): it never goes on anonymously."""
 
 
+class HostNotServed(RuntimeError):
+    """A static send of the crawl's identity went to a host the session manager does not
+    serve (outside its own scope, such as a loopback alias of the start it was not
+    given): its ``prepare`` applied no session and decided nothing, so the request would
+    have gone out without the identity to what the crawl takes for the session's own
+    origin (FR-CRAWL-34; BUG-0545 review, R6). Raised before the transport: nothing is
+    sent. The page is unresolved (``failed``), never ``withheld``. The message names the
+    host and the cause, never a URL."""
+
+
+class _SessionAddon:
+    """The static seam's session addon (FR-CRAWL-34): the session manager's own
+    ``prepare``, ``authorize`` and ``observe``, plus one refusal. After ``prepare``, a
+    request that carries no applied session (no ``session_generation``) and no recorded
+    decision (FR-SESS-20's ``session_decision``) is one the manager left alone -- its
+    host is outside the manager's scope -- and `HostNotServed` is raised there, before
+    the seam's transport (BUG-0545 review, R6). The manager's own decision is read, never
+    guessed from its scope; a request it withheld from another origin keeps FR-SESS-20's
+    disposition."""
+
+    def __init__(self, manager):
+        self._manager = manager
+
+    def prepare(self, request, identity):
+        self._manager.prepare(request, identity)
+        if request.session_generation is None and request.session_decision is None:
+            host = urlparse(request.url).hostname or "?"
+            raise HostNotServed(
+                f"the session manager does not serve host {host!r} (not in its "
+                f"scope_hosts): not sent, since it would go without the session; add the "
+                f"host to scope_hosts if it is this app's (FR-CRAWL-34)")
+
+    def authorize(self, request, identity, prepared_host=None):
+        self._manager.authorize(request, identity, prepared_host=prepared_host)
+
+    def observe(self, request, response, identity):
+        self._manager.observe(request, response, identity)
+
+
 class _Transient(Exception):
     """A load that may succeed if tried again (FR-CRAWL-36): a throttle, gateway or other
     5xx answer, or a send whose session the manager saw lost (its answer is no
@@ -862,6 +901,11 @@ class FrontierLimits:
 
 #: Why the frontier refused a URL, in the order it checks (`_Frontier.append`).
 FRONTIER_REASONS = ("url_length", "total", "origin", "route_shape", "pending")
+
+#: Why a load was refused before any request (`LocalSpider._load_refusal`, asked first by
+#: `LocalSpider._visit` for every load; BUG-0545 review, B1), in the order it checks;
+#: counted in ``crawl_stats`` as ``loads_refused[<reason>]``.
+LOAD_REFUSALS = ("out_of_scope", "destructive")
 
 
 class _Frontier:
@@ -1272,6 +1316,20 @@ class LocalSpider:
             self.skipped_destructive[url] = reason
             logging.info(f"skipped destructive link {url} ({reason!r})")
         return reason
+
+    def _load_refusal(self, url):
+        """Why this crawl never loads ``url`` (a `LOAD_REFUSALS` reason), or None:
+        outside the crawl's scope (`_in_scope`: the start's host; a loopback start's
+        exact origin, BUG-0123) or destructive (`_destructive`; the start URL is the
+        operator's own). `_visit` asks it first for every load, whichever producer
+        queued it -- a link, a redirect, a route, a seed, a probe's route, a retry, or a
+        row a resumed crawl read from the store (FR-CRAWL-36) -- so none can send a
+        request around the crawl's scope and destructive rules (BUG-0545 review, B1)."""
+        if not self._in_scope(url):
+            return "out_of_scope"
+        if self._destructive(url):
+            return "destructive"
+        return None
 
     # ----- browser lifecycle (Playwright engine only) -----
     def _start_browser(self):
@@ -1971,10 +2029,12 @@ class LocalSpider:
     def _identity_client(self):
         """This worker's identity-carrying static client (FR-CRAWL-34): a `_SeamGet`
         over the core seam (`core.http.HttpClient`) with the session manager as its
-        addon -- ``prepare`` applies the session (or withholds it, FR-SESS-20) and logs
-        in again after a loss, ``observe`` reads each answer (SP-61) -- and a
-        persistent, bounded (SP-60) ``requests`` session whose jar keeps nothing. Raises
-        what `_static_identity` raised."""
+        addon (`_SessionAddon`) -- ``prepare`` applies the session (or withholds it,
+        FR-SESS-20) and logs in again after a loss, and a request it would send without
+        the session to a host it does not serve is refused before the transport
+        (`HostNotServed`); ``observe`` reads each answer (SP-61) -- and a persistent,
+        bounded (SP-60) ``requests`` session whose jar keeps nothing. Raises what
+        `_static_identity` raised."""
         self._static_identity()
         if self._seam is None:
             from fuzzlab.core import bodyread
@@ -1987,7 +2047,8 @@ class LocalSpider:
             # decides each URL first); where the session goes is decided by origin
             hosts = sorted(self._LOOPBACK) if self._scope_host in self._LOOPBACK else \
                 [self._scope_host, f"www.{self._scope_host}"]
-            self._seam = HttpClient(self._seam_budget, hosts, session=self._session_manager,
+            self._seam = HttpClient(self._seam_budget, hosts,
+                                    session=_SessionAddon(self._session_manager),
                                     transport=self._seam_transport,
                                     timeout=self.timeout_ms / 1000)
         return _SeamGet(self)
@@ -2005,7 +2066,9 @@ class LocalSpider:
         (``session_lost``), or a loss it saw on any send while this one was in flight,
         makes the answer no evidence: `_Transient` (retried after the re-login). A
         `SessionAuthError` (no login, a re-auth cap, an unknown health) is
-        `IdentityUnavailable`: the crawl stops, never goes on anonymously."""
+        `IdentityUnavailable`: the crawl stops, never goes on anonymously. A host the
+        manager does not serve is refused before the transport (`HostNotServed`,
+        counted ``session_host_unserved``): nothing is sent."""
         from fuzzlab.core.http import Request
         from fuzzlab.session.manager import SessionAuthError
         client = self._seam
@@ -2017,6 +2080,9 @@ class LocalSpider:
         except SessionAuthError as exc:
             raise IdentityUnavailable(f"{self._identity}'s session is unavailable: "
                                       f"{exc}") from exc
+        except HostNotServed:
+            self._bump_shared("session_host_unserved")
+            raise
         if request.session_lost or self._sh.get("session_losses", 0) != losses:
             raise _Transient("the session was lost on this send")
         return request, _as_requests_response(url, answer)
@@ -2025,9 +2091,10 @@ class LocalSpider:
     def _sent_without_session(request):
         """Did the session manager send ``request`` without the session? It withheld it
         (another origin, FR-SESS-20), or it applied none at all -- ``prepare`` records
-        the generation of every session it applies, so a request it left alone (a host
-        outside the manager's own scope, such as a loopback alias it was not given)
-        carries no ``session_generation``."""
+        the generation of every session it applies. A request it left alone (a host
+        outside the manager's own scope) is refused before the transport
+        (`_SessionAddon`, `HostNotServed`), so it never reaches here; the generation
+        check stays as the backstop for the answer."""
         from fuzzlab.session.manager import OUT_OF_ORIGIN
         return request.session_decision == OUT_OF_ORIGIN or \
             request.session_generation is None
@@ -2046,7 +2113,9 @@ class LocalSpider:
         FR-CRAWL-34): POST its entries form-encoded, or GET the action with its query
         replaced by them (`core.urls.with_query`, SP-42); no redirect followed, no
         cookie kept. Another origin than the session's is sent without the session
-        (the manager withholds it) and counted. Returns ``(status, headers)``."""
+        (the manager withholds it) and counted; a host the manager does not serve is
+        never sent to (`HostNotServed`, which stops that form's enumeration in
+        `_after_fetch`). Returns ``(status, headers)``."""
         from urllib.parse import urlencode
 
         from fuzzlab.core.urls import with_query
@@ -2334,9 +2403,17 @@ class LocalSpider:
                 logging.info(f"selector form on {page} not submitted: {why}")
                 continue
             key = formnav.signature_key(record)
-            for target in formnav.enumerate_form(
+            try:
+                targets = formnav.enumerate_form(
                     record, self._isolated_submit, self._in_scope,
-                    on_verdict=lambda v, k=key: self.storage.record_verdict(k, v)):
+                    on_verdict=lambda v, k=key: self.storage.record_verdict(k, v))
+            except HostNotServed as exc:
+                # FR-CRAWL-34 (BUG-0545 review, R6): its action's host is one the
+                # session manager does not serve; nothing was sent there, and the page
+                # that holds the form is still this load's
+                logging.warning(f"selector form on {page} not submitted: {exc}")
+                continue
+            for target in targets:
                 if not self._destructive(target) and not self.storage.is_visited(target):
                     more.append((target, depth + 1, 'form'))
         return more
@@ -3778,15 +3855,16 @@ class LocalSpider:
     def _page_failed(self, queue, entry, attempt, exc, seen_at, stored, *, retry):
         """FR-CRAWL-36: a load of ``entry`` failed. Its row is stored ``failed`` (with
         the answer's status when it had one, the load count, and the failure's class --
-        an answer class or an exception class, never a URL or a body), never visited.
+        an answer class or an exception class, never a URL or a body; a host the session
+        manager does not serve, `HostNotServed`, with that cause), never visited.
         A failure a later load may not have (`_is_transient`) is retried, after
         `_backoff_s`, while ``retry`` (not a seed or probe), loads remain and ``queue``
         can (the frontier); otherwise the page is unresolved: reported, and loaded again
         by a resumed crawl (`StorageManager.unresolved`)."""
         from fuzzlab.core.bodyread import BodyIncomplete
         url, depth, source, found_from = entry
-        error = str(exc) if isinstance(exc, (_Transient, BodyIncomplete)) else \
-            type(exc).__name__
+        error = str(exc) if isinstance(exc, (_Transient, BodyIncomplete, HostNotServed)) \
+            else type(exc).__name__
         if stored:                      # answered; its extraction failed
             self.storage.set_outcome(url, OUTCOME_FAILED, attempts=attempt, error=error)
         else:
@@ -3827,7 +3905,18 @@ class LocalSpider:
         transport failure, an incomplete body, a session lost on the send) is retried
         after a backoff (`_backoff_s`) up to `FETCH_ATTEMPTS` loads; a failed load is
         stored ``failed`` -- never visited -- and the last one is reported. ``attempt``
-        is this load's number."""
+        is this load's number.
+
+        BUG-0545 review (B1): every load first passes `_load_refusal` -- the crawl's
+        scope and destructive rules, whichever producer queued it (a resumed crawl's
+        stored rows included). A refused URL is never requested and nothing is stored
+        for it; the refusal is counted (``loads_refused[<reason>]``) and reported."""
+        why = self._load_refusal(current_url)
+        if why is not None:
+            self._bump_shared(f"loads_refused[{why}]")
+            logging.info(f"not loaded: {spa.scrub_markers(current_url)} ({why}; "
+                         f"BUG-0123, NFR-CRAWL-safe)")
+            return
         probe = None
         queued = current_url            # a probe's load URL carries markers: not this
         seen_at = time.time()
@@ -4040,6 +4129,9 @@ class LocalSpider:
                                               self.storage.is_visited)
         frontier.extend(queue)
         if self.resume:
+            # each stored row is loaded only through `_visit`'s gate (`_load_refusal`):
+            # a row an earlier crawl of another target, or of another start URL, left
+            # unresolved is never requested outside this crawl's scope or destructive
             frontier.extend(self.storage.unresolved())
         try:
             if self.engine != "playwright" and self._authenticated:
@@ -4096,26 +4188,33 @@ class LocalSpider:
             self.storage.close()
             logging.info("Crawl finished. Data saved to SQLite database.")
 
-    #: The crawl-wide counts `crawl_counts` always stores (FR-CRAWL-35/36), besides
-    #: ``frontier_rejected[<reason>]`` for each `FRONTIER_REASONS` entry that refused.
+    #: The crawl-wide counts `crawl_counts` always stores (FR-CRAWL-34..36), besides
+    #: ``frontier_rejected[<reason>]`` for each `FRONTIER_REASONS` entry that refused and
+    #: ``loads_refused[<reason>]`` for each `LOAD_REFUSALS` entry that refused.
     CRAWL_COUNTS = ("frontier_admitted", "frontier_duplicates", "pages_retried",
-                    "pages_failed", "store_writer_waits")
+                    "pages_failed", "store_writer_waits", "session_host_unserved")
 
     def crawl_counts(self):
-        """What the frontier, the retries and the page writer did (PA-0110: each an
-        effect that happened), stored in ``crawl_stats`` with the SPA counts."""
+        """What the frontier, the load gate, the retries, the static seam and the page
+        writer did (PA-0110: each an effect that happened), stored in ``crawl_stats``
+        with the SPA counts."""
         report = self._frontier.report() if self._frontier is not None else \
             {"admitted": 0, "duplicates": 0, "rejected": {}}
         return {"frontier_admitted": report["admitted"],
                 "frontier_duplicates": report["duplicates"],
                 **{f"frontier_rejected[{k}]": v for k, v in report["rejected"].items()},
+                **{f"loads_refused[{k}]": self._sh[f"loads_refused[{k}]"]
+                   for k in LOAD_REFUSALS if self._sh.get(f"loads_refused[{k}]")},
                 "pages_retried": self._sh.get("pages_retried", 0),
                 "pages_failed": self._sh.get("pages_failed", 0),
-                "store_writer_waits": self.storage.writer_waits}
+                "store_writer_waits": self.storage.writer_waits,
+                "session_host_unserved": self._sh.get("session_host_unserved", 0)}
 
     def crawl_summary(self, counts):
-        """The crawl summary's coverage lines: URLs the frontier's budgets refused, and
-        pages left unresolved -- each partial coverage, never silent."""
+        """The crawl summary's coverage lines: URLs the frontier's budgets refused, loads
+        refused before any request (out of scope or destructive), requests not sent to a
+        host the session manager does not serve, and pages left unresolved -- never
+        silent."""
         lines = []
         refused = {k[len("frontier_rejected["):-1]: v for k, v in counts.items()
                    if k.startswith("frontier_rejected[")}
@@ -4123,6 +4222,19 @@ class LocalSpider:
             why = ", ".join(f"{k} x{v}" for k, v in sorted(refused.items()))
             lines.append(f"The frontier's budgets refused {sum(refused.values())} URL(s) "
                          f"({why}; FR-CRAWL-35): partial coverage.")
+        gated = {k[len("loads_refused["):-1]: v for k, v in counts.items()
+                 if k.startswith("loads_refused[")}
+        if gated:
+            why = ", ".join(f"{k} x{v}" for k, v in sorted(gated.items()))
+            lines.append(f"Refused {sum(gated.values())} queued URL(s) before any request "
+                         f"({why}): outside this crawl's scope or destructive, never "
+                         f"loaded (BUG-0123, NFR-CRAWL-safe).")
+        if counts["session_host_unserved"]:
+            lines.append(f"{counts['session_host_unserved']} request(s) not sent: the "
+                         f"session manager does not serve their host (not in its "
+                         f"scope_hosts), so they would have gone without the session "
+                         f"(FR-CRAWL-34); their pages are unresolved and a selector "
+                         f"form there is not submitted.")
         if counts["pages_failed"]:
             lines.append(f"{counts['pages_failed']} page(s) unresolved after their last "
                          f"load (FR-CRAWL-36), kept as failed and never visited: partial "

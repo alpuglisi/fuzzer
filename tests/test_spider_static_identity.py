@@ -37,12 +37,17 @@ from tests.test_session_origin_scope import LOGIN_FORM, PASSWORD, USER, _creds
 
 class _IdSite:
     """A loopback app: ``/login`` (a form; a right POST sets a fresh ``sid``), ``/`` (with
-    a live ``sid``: a welcome page linking the protected pages; else an anonymous page
-    linking nothing), ``/secret`` and ``/deeper`` (200 with a live ``sid``, else a 302 to
-    ``/login``), ``/expiring`` (its first credentialed GET drops every session, as an
-    expiry, and answers the 302; then as ``/secret``), ``/go`` (a 302 to ``other``),
-    ``/pick`` (a selector form's GET target: 302 to ``/secret``). Every request is
-    recorded as ``(method, path, Cookie, User-Agent)``."""
+    a live ``sid``: a welcome page linking the protected pages; else an anonymous page;
+    both carry ``home_extra``), ``/secret`` and ``/deeper`` (200 with a live ``sid``,
+    else a 302 to ``/login``), ``/expiring`` (its first credentialed GET drops every
+    session, as an expiry, and answers the 302; then as ``/secret``), ``/go`` (a 302 to
+    ``other``), ``/pick`` (a selector form's GET target: 302 to ``/secret``). Every
+    request is recorded as ``(method, path, Cookie, User-Agent)``.
+
+    ``home_extra`` is on the anonymous page too (BUG-0545 review, B2), so a crawl that
+    dropped the identity (c483dc1's anonymous static engine) still reaches ``/go``,
+    ``/pick`` and an alias link, and each test that uses it fails there on its own
+    behaviour, not only on the first test's."""
 
     def __init__(self, host="127.0.0.1", other=None, home_extra=""):
         self.sessions: set[str] = set()
@@ -88,7 +93,8 @@ class _IdSite:
                     return self._send(200, LOGIN_FORM.encode())
                 if path == "/":
                     if not live:
-                        return self._send(200, b"<html><body><p>home</p></body></html>")
+                        return self._send(200, ("<html><body><p>home</p>" + site.home_extra
+                                                + "</body></html>").encode())
                     body = ("<html><body><p>welcome alice</p><a href='/secret'>s</a>"
                             "<a href='/expiring'>e</a>" + site.home_extra +
                             "</body></html>")
@@ -246,7 +252,8 @@ def test_a_redirect_to_another_origin_is_never_followed_with_or_without_the_sess
     """An external crawl (127.0.0.2: its host on every port is in scope) of A, whose
     ``/go`` redirects to B on another port: the hop is not followed -- B receives
     nothing, neither the session nor an anonymous request -- and the landing is
-    recorded as skipped on another origin (FR-SESS-20), as the browser does."""
+    recorded as skipped on another origin (FR-SESS-20), as the browser does. Before
+    (c483dc1): the anonymous crawl followed ``/go`` to B's ``/land``."""
     other = _IdSite("127.0.0.2")
     a = _IdSite("127.0.0.2", other=other.base, home_extra="<a href='/go'>go</a>")
     try:
@@ -259,23 +266,41 @@ def test_a_redirect_to_another_origin_is_never_followed_with_or_without_the_sess
     assert "welcome alice" in _rows(db)["/"][1]
 
 
-def test_an_answer_the_manager_sent_without_the_session_is_never_extracted(site, tmp_path):
-    """A loopback alias (``localhost``) of the start's origin is in the crawl's scope, but
-    this manager's own host scope is ``127.0.0.1`` only, so ``prepare`` sends the request
-    without the session and records no decision. The answer is never filed as the
-    identity's page: the load is withheld (FR-SESS-20's record), nothing extracted."""
+def test_a_host_the_session_manager_does_not_serve_is_never_sent_without_the_session(
+        site, tmp_path):
+    """A loopback alias (``localhost``) of the start's origin is in the crawl's scope and
+    on the session's own origin, but this manager's own host scope is ``127.0.0.1`` only,
+    so its ``prepare`` would send the request without the session (applying nothing,
+    deciding nothing). The request is refused before the transport (BUG-0545 review,
+    R6): the site receives nothing for the alias, and the page is unresolved -- stored
+    ``failed`` with that cause, counted, resumed -- never reported as another origin
+    than the session's (it is the session's; ``--auth-origin`` cannot help). Before
+    (c483dc1 and 9071440): the alias was requested with no cookie."""
     port = site.base.rsplit(":", 1)[1].strip("/")
     alias = f"http://localhost:{port}/deeper?via=alias"
     site.home_extra = f"<a href='{alias}'>alias</a>"
     spider, db = _crawl(site, tmp_path, _manager(), max_depth=1)
-    assert alias in spider.skipped_other_origin
+    with site._lock:
+        sent = [(m, p, c) for m, p, c, _ua in site.requests if "via=alias" in p]
+    assert sent == [], sent                    # nothing reached the alias, of any kind
     con = sqlite3.connect(db)
     try:
-        row = con.execute("SELECT status_code, content, outcome FROM discovered_pages "
-                          "WHERE url = ?", (alias,)).fetchone()
+        row = con.execute("SELECT status_code, content, outcome, error FROM "
+                          "discovered_pages WHERE url = ?", (alias,)).fetchone()
+        stats = dict(con.execute("SELECT name, value FROM crawl_stats"))
     finally:
         con.close()
-    assert row == (0, None, "withheld")
+    assert row[:3] == (0, None, "failed"), row
+    assert "does not serve host 'localhost'" in row[3], row
+    assert "does not serve" in spider.failed_pages[alias]
+    assert alias not in spider.skipped_other_origin
+    assert stats["session_host_unserved"] == 1
+    assert "welcome alice" in _rows(db)["/"][1]        # the session's own pages crawled
+    reopened = sp.StorageManager(db)
+    try:
+        assert alias in [u for u, *_rest in reopened.unresolved()]
+    finally:
+        reopened.close()
 
 
 def test_a_selector_form_is_submitted_with_the_session(site, tmp_path):

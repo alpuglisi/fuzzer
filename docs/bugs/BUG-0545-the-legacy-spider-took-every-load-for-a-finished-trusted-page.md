@@ -235,3 +235,137 @@ to a crawl's bounds):
    write raised. (from BUG-0545)
 
 Enforced by: the tests named on PA-0545's line in `docs/PREVENTIVE_ACTIONS.md`.
+
+## Review round 1 (added in review round 1, 2026-10-21)
+Two reviewers of 9071440; each finding below was confirmed by a skeptic with a run on
+both commits. Fixed on `lane/SPIDER-r1` (CC-CRAWL-0056, review round 1). This section
+supersedes the paragraphs above where they disagree.
+
+### What the fix still let through, or claimed without measuring
+- **B1 (both reviewers; a regression this fix introduced): a resumed crawl loaded stored
+  rows around the scope and destructive rules.** `crawl()` put every unresolved row
+  (`StorageManager.unresolved`) into the frontier. Every other producer asks `_in_scope`
+  and `_destructive` before it queues; the frontier and `_visit` asked neither, and
+  `navguard.get_checked` sends the first hop without asking anyone (`may_follow` decides
+  redirect hops only). Measured on 9071440 (`scratchpad/lanes/SPIDER/rev1-scripts/
+  resume_scope.py`, the skeptics' `refute_b1`): a `--resume` crawl of B
+  (`127.0.0.1:Y`) sent three GETs to A's `/down` (`127.0.0.1:X`, another service,
+  BUG-0123); a row that only an earlier crawl's start-URL exemption let through
+  (`A/logout`) was loaded by a crawl started at `A/`. c483dc1 never loaded a stored URL.
+  The CLI reaches it: `--db` defaults to one file for every run. An older database's
+  status-0 rows (unresolved by `_final`) took the same path.
+- **R6 (reviewer A; the fix's own residual R6, flagged to SESS): a host the session
+  manager does not serve was sent to without the session.** The seam's host gate admits
+  every loopback alias; `SessionManager.prepare` returns early, applying nothing and
+  recording nothing, for a host outside its scope; `_seam_page` noticed only after the
+  send, stored the page `withheld` (final, never resumed) and reported "another origin
+  than the session's ... pass --auth-origin", which is false (its canonical origin is
+  the session's) and names a remedy that cannot help. That broke this bug's own
+  PA-0545(1) ("sends anonymously is never a disposition"), and the test written for it
+  asserted the withheld row, not what the site received, so it pinned the defect.
+  Measured on 9071440: the site recorded `GET /deeper?via=alias` with no Cookie.
+- **B2 (reviewer B): three tests failed on c483dc1 only for the first test's reason.**
+  `_IdSite` served an anonymous `/` with no link and no form, so c483dc1's anonymous
+  crawl loaded only `/`, `robots.txt` and `sitemap.xml` and never reached `/go`,
+  `/pick` or the alias (`measure/direct_old2.out`, `direct_old3.out`). The redirect,
+  selector-form and alias tests therefore failed on c483dc1 because the crawl was
+  anonymous, not on their own behaviour.
+
+### Correction of "What it caused to fail" (added in review round 1)
+The paragraph above says that on c483dc1 "a loopback alias outside the manager's host
+scope was crawled anonymously and filed as a page", that "B's landing was followed and
+not recorded as withheld" and that "`/pick` was submitted with no cookie". The outputs
+it cites show none of the three: those claims were inferred, not measured. With the
+test site fixed, they are measured now on c483dc1 (one pytest invocation, below):
+B received `GET /land` with no cookie (the redirect test fails at `other.requests == []`); `/pick?bug=1` and `/pick?bug=2` were sent with no cookie (the selector-form test fails at its `sid=` assertion); the alias received `GET /deeper?via=alias` with no cookie (the alias test fails at `sent == []`). c483dc1's `spider.py` was loaded in place of the module the tests call; the rest of the tree differs from c483dc1 only by additions (`scratchpad/lanes/SPIDER/r1/proof.log`).
+
+### Root cause of the review findings (added in review round 1)
+Five Whys, B1:
+1. *Why did a resumed crawl send to another service?* A new producer -- the stored
+   unresolved rows -- fed the frontier without the gates every other producer applies.
+2. *Why could a producer skip them?* Scope and the destructive rule were checked by each
+   producer before it queued, not where a load is made; the static engine's first hop
+   is sent unasked.
+3. *Why was the new producer not gated?* This fix's sweep listed the queue's producers
+   by what feeds it from a page; the store, which this fix itself made a source, was not
+   seen as one.
+4. *Why did nothing fail?* The resume test resumed the same target, where every stored
+   row is in scope.
+5. *Why was the check not at the load already?* PA-0123(1) ("every outbound path is
+   scope-checked where the request is made") was enforced for the browser and redirect
+   hops, never for the static engine's first hop.
+
+R6: the fix detected a send without the session after the send, and its author left the
+send itself as a residual for another component though the spider can refuse it before
+the transport (the seam calls the addon's `prepare` first). B2: the pre-fix proof asked
+"does each test fail on c483dc1", not "on its own assertion".
+
+**Root cause:** the crawl's load-time rules (scope, destructive, "never without the
+session") were enforced where URLs and sends were chosen -- at each producer, and after
+the send -- instead of at the one point every load and every send passes, so a new
+producer and an unserved host each went around them; and the tests proved what was
+recorded, not what each target received.
+
+### Corrective action (added in review round 1)
+CC-CRAWL-0056, review round 1 (`fuzzlab/tools/spider.py`):
+- **B1.** `_visit` asks `_load_refusal` before anything else for every load, whatever
+  queued it: `out_of_scope` (`_in_scope`) or `destructive` (`_destructive`) is never
+  requested and nothing is stored; each refusal is counted (`loads_refused[<reason>]`,
+  `LOAD_REFUSALS`) and reported. The stored rows stay unresolved for a crawl whose scope
+  covers them.
+- **R6.** The seam's session addon is `_SessionAddon`: the manager's `prepare`,
+  `authorize` and `observe`, and, after `prepare`, a request with no
+  `session_generation` and no `session_decision` (the manager left it alone) raises
+  `HostNotServed` before the transport. Nothing is sent; the page is `failed`
+  (unresolved) with the cause, counted `session_host_unserved`; a selector form whose
+  action is on such a host is not submitted. The remedy it names (add the host to
+  `scope_hosts`) was measured: with `localhost` in the manager's scope the alias goes
+  with the session (`scratchpad/lanes/SPIDER/r1/alias_scope.py`). No SESS change.
+- **B2.** `_IdSite` serves `home_extra` to an anonymous visitor too.
+- Tests: `test_spider_frontier.py::test_a_resumed_crawl_never_loads_a_stored_row_out_of_its_scope_or_destructive`
+  (new); `test_spider_static_identity.py::test_a_host_the_session_manager_does_not_serve_is_never_sent_without_the_session`
+  replaces `test_an_answer_the_manager_sent_without_the_session_is_never_extracted` and
+  asserts that nothing reached the alias. Pre-fix proof: one pytest invocation with 9071440's `spider.py` in place (`scratchpad/lanes/SPIDER/r1/proof.log`, 5 failed in 4.87 s with the three c483dc1 runs above): the resume test fails at "B's crawl loaded A's row" (`A/logout` received 6 GETs, 3 expected); the unserved-host test fails at `sent == []` (`GET /deeper?via=alias` with no cookie). Both pass on the fix.
+
+**PA-0002 sweep (added in review round 1).**
+- *Producers that queue a load without the crawl's gates:* the start URL and the
+  well-known files (in scope by construction), links and XHR URLs, redirect landings,
+  selector-form targets, SPA routes, seeds and probes (`_query_gate`), reveal links,
+  query-window navigations (all gated), probe routes (`_plan_probes`: visited routes)
+  and the resumed rows (not gated). All now pass `_visit`'s gate as well.
+- *Send paths that could go without the session:* the static page hop and the selector
+  form submission (both through `_seam_send`, refused before the transport now). The
+  browser path withholds by route (FR-SESS-20). The auditor's static fetch and the probe
+  senders use the CLI's `make_auth` client, whose scope is the manager's own
+  (`authhttp._build_parts`), so `prepare` serves every host its seam admits: no gap.
+
+### Recurrence review (added in review round 1)
+- **B1** is BUG-0123's root cause (scope enforced where a URL is chosen, not where the
+  request is made) and PA-0503(1)'s class (a queue source that does not state its GET
+  safety). **Match.**
+- **R6** is this bug's own PA-0545(1). **Match** (same bug, same fix).
+- **B2** is F-record class "a pre-fix proof that cannot tell a test's own failure"
+  (this lane's earlier F-record) and PA-0034(2). **Match.**
+
+### Prior-preventive-action failure analysis (added in review round 1)
+- **PA-0123(1): enforced on the wrong layer for the static engine.** Its tests cover the
+  browser's every request and the redirect hops; the static engine's first hop relied on
+  the producers, so the rule held only while every producer remembered it.
+- **PA-0503(1): too narrow.** It asks a source that feeds the queue to state that its
+  URLs are safe to GET; it did not say that a store is such a source, so the resumed
+  rows stated nothing.
+- **PA-0545(1): not followed by its author.** Written with this fix, it forbids "sends
+  anonymously" as a disposition; R6 was given exactly that disposition (a residual), and
+  the rule's own test clause (assert what the target received) was not applied.
+- **PA-0034(2) and this lane's earlier F-record: not applied to the proof.** A test was
+  counted as proven when it failed on the old code, whatever the assertion.
+
+### Preventive action (added in review round 1)
+PA-0545 is strengthened (no new number; text in the lane's doc_texts): (1) now says a
+send the session layer would make without the identity is refused before the transport,
+never sent and then withheld; new (5): every load passes the crawl's scope and
+destructive rules at the one point every load passes, whatever queued it -- a store
+read back by a resumed run is a producer -- and its test asserts what an out-of-scope
+and a destructive target received; new (6): a regression test's pre-fix proof records
+the failing assertion of each test, and a fixture serves the pre-fix path what the
+test needs to reach its own behaviour.

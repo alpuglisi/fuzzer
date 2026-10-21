@@ -305,6 +305,54 @@ def test_a_page_that_keeps_failing_is_unresolved_reported_and_resumed(tmp_path,
     assert pages["/down"] == (200, "visited") and pages["/below"] == (200, "visited")
 
 
+def test_a_resumed_crawl_never_loads_a_stored_row_out_of_its_scope_or_destructive(
+        tmp_path, fast_retries):
+    """BUG-0545 review (B1): a resumed crawl loads the stored unresolved rows again, and
+    each load passes the crawl's scope and destructive rules first, as every other one
+    does. One DB (the CLI's default is one file for every run) gets ``A/logout`` left
+    failed by a crawl that started there (the start URL is the operator's own, so the
+    destructive rule let it through), then ``B/down`` left failed by a resumed crawl of
+    B, another loopback port: another service (BUG-0123), so A is out of its scope. A
+    last crawl resumes from ``A/``: B is out of its scope and ``A/logout`` is destructive.
+    Neither target receives a request from a crawl that may not load it; each refusal
+    is counted; both rows stay unresolved for a crawl that may load them. Before
+    (9071440): B's resumed crawl loaded ``A/logout`` (3 GETs), and A's loaded ``B/down``
+    and ``A/logout`` again."""
+    a = _Site({"/": lambda h, n: _page(text="a"),
+               "/logout": lambda h, n: (503, "down", {})})
+    b = _Site({"/": lambda h, n: _page("/down"), "/down": lambda h, n: (503, "down", {})})
+    db = str(tmp_path / "s.db")
+    try:
+        sp.LocalSpider(a.base + "logout", max_depth=1, db_name=db,
+                       engine="requests").crawl()
+        assert a.gets("/logout") == sp.FETCH_ATTEMPTS        # its own start: loaded
+        crawl_b = sp.LocalSpider(b.base, max_depth=1, db_name=db, engine="requests",
+                                 resume=True)
+        crawl_b.crawl()
+        assert a.gets("/logout") == sp.FETCH_ATTEMPTS, "B's crawl loaded A's row"
+        assert b.gets("/down") == sp.FETCH_ATTEMPTS
+        crawl_a = sp.LocalSpider(a.base, max_depth=1, db_name=db, engine="requests",
+                                 resume=True)
+        crawl_a.crawl()
+        assert b.gets("/down") == sp.FETCH_ATTEMPTS, "A's crawl loaded B's row"
+        assert a.gets("/logout") == sp.FETCH_ATTEMPTS, "a destructive row was loaded"
+        assert a.gets("/") >= 1                    # the resumed crawl itself ran
+    finally:
+        a.close()
+        b.close()
+    assert crawl_b.crawl_counts()["loads_refused[out_of_scope]"] == 1
+    counts = crawl_a.crawl_counts()
+    assert counts["loads_refused[out_of_scope]"] == 1
+    assert counts["loads_refused[destructive]"] == 1
+    assert crawl_a.skipped_destructive == {a.base + "logout": "logout"}
+    reopened = sp.StorageManager(db)
+    try:
+        assert sorted(u for u, *_rest in reopened.unresolved()) == sorted(
+            [a.base + "logout", b.base + "down"])
+    finally:
+        reopened.close()
+
+
 # --- defect 25: the page writer -------------------------------------------------------
 def test_recording_a_page_never_waits_for_the_stores_lock(tmp_path):
     """A crawl thread records a page while another thread holds the store's lock (a

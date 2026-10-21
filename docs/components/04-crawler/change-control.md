@@ -143,6 +143,54 @@ Newest first.
   trap loads 931 -> 100, a once-503 hub's child found, 1000 page rows 1000 commits /
   11.0 s -> 3 commits / 0.07 s on the recording thread. The harness result is in the
   lane report.
+- Review round 1 of 9071440 (2026-10-21; two reviewers, each finding confirmed by a
+  skeptic on both commits; branch `lane/SPIDER-r1`; BUG-0545's review section):
+  - **B1 (both reviewers; a regression of this entry): a resumed crawl loaded stored
+    rows around the scope and destructive rules.** `crawl()` fed every unresolved row
+    to the frontier, and neither the frontier nor `_visit` asked `_in_scope` or
+    `_destructive` (every other producer does, before it queues; `get_checked` sends
+    the first hop unasked). Measured on 9071440: a `--resume` crawl of another loopback
+    port sent 3 GETs to the first port's failed `/down` (BUG-0123), and a crawl started
+    at `A/` loaded `A/logout`, which only an earlier crawl's start-URL exemption had let
+    through. Now `_visit` asks `_load_refusal` (`LOAD_REFUSALS`: `out_of_scope`,
+    `destructive`) first for every load, whatever queued it: never requested, nothing
+    stored, counted `loads_refused[<reason>]` in `crawl_stats` and in the crawl
+    summary; the rows stay unresolved. At the load, where the request is made
+    (PA-0123(1)), not at the frontier: one place every load passes, retries and
+    plain-list callers included.
+  - **R6 (reviewer A; was residual R6, flagged to SESS): a host the session manager
+    does not serve was sent to without the session**, then stored `withheld` with the
+    false "another origin ... pass --auth-origin" reason. `_identity_client`'s seam now
+    takes `_SessionAddon(manager)`: the manager's `prepare`, `authorize` and `observe`,
+    and after `prepare` a request with no `session_generation` and no
+    `session_decision` raises `HostNotServed` before the transport. Nothing is sent;
+    `_seam_send` counts it (`session_host_unserved`, in `CRAWL_COUNTS`); the page is
+    stored `failed` with the cause (`_page_failed` keeps `HostNotServed`'s text, which
+    names the host, never a URL) and resumed; `_after_fetch` stops a selector form whose
+    action is on such a host (logged; the page is kept). The manager's own decision is
+    read, not its scope: no SESS change. The named remedy (add the host to
+    `scope_hosts`) was measured: the alias then goes with the session
+    (`scratchpad/lanes/SPIDER/r1/alias_scope.py`). Residual R6 is closed.
+  - **B2 (reviewer B): three tests failed on c483dc1 only for the first test's
+    reason** (the test site's anonymous `/` linked nothing). `_IdSite` serves
+    `home_extra` to an anonymous visitor too; each now fails on c483dc1 on its own
+    assertion. BUG-0545's "What it caused to fail" claims for these three are corrected
+    in its review section (append-only).
+  - Tests: `tests/test_spider_frontier.py::test_a_resumed_crawl_never_loads_a_stored_row_out_of_its_scope_or_destructive`
+    (new: an out-of-scope and a destructive unresolved row; neither target receives a
+    request); `tests/test_spider_static_identity.py::test_a_host_the_session_manager_does_not_serve_is_never_sent_without_the_session`
+    replaces `test_an_answer_the_manager_sent_without_the_session_is_never_extracted`
+    (it asserted the withheld row, not what the site received). Pre-fix proof, one
+    pytest invocation (`scratchpad/lanes/SPIDER/r1/proof.log`): 5 failed in 4.87 s, each on its own assertion -- on 9071440's `spider.py`, the resume test ("B's crawl loaded A's row": `A/logout` 6 GETs, 3 expected) and the unserved-host test (`GET /deeper?via=alias` with no cookie); on c483dc1's `spider.py`, loaded in place of the tests' module, the redirect test (B got `GET /land`), the selector-form test (`/pick?bug=1`, `?bug=2` with no cookie) and the unserved-host test (the alias got a GET with no cookie). Targeted
+    run: pending (recorded by the follow-up docs commit).
+  - Impact: `crawl_stats` gains `loads_refused[<reason>]` (when one refused) and
+    `session_host_unserved`; its readers are the spider itself and two tests
+    (`test_spa_routes.py` takes `CRAWL_COUNTS` out first; searched `crawl_stats` across
+    `fuzzlab/`: no other reader). FR-CRAWL-34, FR-CRAWL-35, FR-CRAWL-36, the spider DB
+    contract and NFR-CRAWL-safe edited in place.
+  - Residual R7 (new): a stored row refused at its load was admitted by the frontier
+    first, so it counts in `frontier_admitted` and against that crawl's total and
+    pending budgets (one admission per stored unresolved row).
 
 ### CC-CRAWL-0054 — The JSONL tail caps a line while reading it; the contract runner reads bounded and matches contract patterns in a killable worker (BUG-0536) (2026-10-20)
 - Placement: pre-assigned to AU-BOUNDED (audit defects 23 and 27, with the disco and
