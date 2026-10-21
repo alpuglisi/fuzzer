@@ -14,12 +14,18 @@ depth, plus query names). One that adds a key path or a type to the operation's 
 schema (`apiop.operation_schema`) is always stored with its own body; another
 combination of known inputs is stored up to `apiop.MAX_CONTEXT_ROWS` rows. Every test
 here drives the real write site.
+
+Review round 1: every non-empty string value of a selector field is a selector (B1: a
+value with whitespace, or over 64 characters, was data and merged two operations); the
+PA-0002 sweep pins every instance it does not fix, checked by a guard over BUG-0546's
+sweep rows (B2).
 """
 
 from __future__ import annotations
 
 import ast
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -140,10 +146,52 @@ def test_an_action_op_or_cmd_field_in_the_body_or_query_keeps_operations_apart(s
     assert store(API, b"_method=PUT&title=a", FORM) is None    # a method override
     assert store(API, {"cmd": 3, "arg": "a"}) is None
     assert store(API, {"cmd": 4, "arg": "a"}) is None
-    # a field so named whose value is no token is data, not a selector
+    # free text in a field so named is kept as a selector too: a data field misjudged
+    # as one costs a row, never an input (FR-CRAWL-37)
     assert store(API, {"command": "ls -la /tmp", "arg": "a"}) is None
-    assert store(API, {"command": "cat a.txt", "arg": "a"}) == "duplicate"
-    assert len(store.rows()) == 8
+    assert store(API, {"command": "cat a.txt", "arg": "a"}) is None   # was "duplicate"
+    # a boolean is no selector: the flag's two values are one operation
+    assert store(API, {"op": True, "flag": 1}) is None
+    assert store(API, {"op": False, "flag": 1}) == "duplicate"
+    assert len(store.rows()) == 10
+
+
+CART = "http://127.0.0.1:8080/cart"
+
+
+def test_a_selector_value_with_whitespace_or_over_64_characters_keeps_operations_apart(store):
+    """A submit button's label is a common dispatcher value (``name=action value="Add
+    to cart"``, sent by a FormData built with its submitter): every non-empty string
+    value of a selector field is a selector (review round 1, B1)."""
+    # (1) form-encoded body
+    assert store(CART, b"action=Add+to+cart&item=1", FORM) is None
+    assert store(CART, b"action=Remove+from+cart&item=1", FORM) is None   # was "duplicate"
+    assert store(CART, b"action=Add+to+cart&item=2", FORM) == "duplicate"
+    # (2) JSON body; a run of whitespace is folded to one space
+    assert store(CART, {"action": "Add to cart", "item": 1}) is None
+    assert store(CART, {"action": "Delete item", "item": 1}) is None      # was "duplicate"
+    assert store(CART, {"action": "Add  to\tcart", "item": 7}) == "duplicate"
+    # (3) the query
+    assert store(CART + "?action=Add+to+cart", {"item": 1}) is None
+    assert store(CART + "?action=Remove+item", {"item": 1}) is None       # was "duplicate"
+    # (4) a value over 64 characters is keyed by the digest of its folded text
+    assert store(API, {"action": "x" * 65, "u": "a"}) is None
+    assert store(API, {"action": "y" * 65, "u": "a"}) is None             # was "duplicate"
+    assert store(API, {"action": "x" * 65, "u": "b"}) == "duplicate"
+    assert [(u, json.loads(b).get("action")) for u, b in store.rows()] == [
+        (CART, "Add to cart"), (CART, "Remove from cart"), (CART, "Add to cart"),
+        (CART, "Delete item"), (CART + "?action=Add+to+cart", None),
+        (CART + "?action=Remove+item", None), (API, "x" * 65), (API, "y" * 65)]
+    # the selector itself: a short folded value by its text, a long one by its digest
+    import hashlib
+    assert apiop.operation_selectors({"action": "Add \n to  cart"}) == [
+        ["field", ["$", "action"], "Add to cart"]]
+    long_value = "z" * (apiop.MAX_SELECTOR_CHARS + 1)
+    assert apiop.operation_selectors({"action": long_value}) == [
+        ["field", ["$", "action"],
+         "sha256:" + hashlib.sha256(long_value.encode("utf-8")).hexdigest()]]
+    assert apiop.operation_selectors({"action": ""}) == []                # no value
+    assert apiop.operation_selectors({"action": True}) == []              # a flag
 
 
 def test_the_media_type_and_a_new_query_name_are_kept(store):
@@ -206,6 +254,121 @@ def test_the_disco_inventory_keeps_two_graphql_operations_apart():
                for i, b in enumerate(bodies)]
     paths = synthesize(records)["paths"]
     assert sum(len(item) for item in paths.values()) == 2
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
+    "BUG-0546 sweep: the importer stores a captured request's parameter only when no "
+    "earlier captured request on its endpoint has that name (the first wins), so a second "
+    "GraphQL operation's variables are bound to the first operation's form and never "
+    "sent with its own document (owner: audit defect 8 lane, the request-context "
+    "identity, tools/store_adapter.py::_store_request)"))
+def test_each_captured_graphql_operation_gets_its_own_points_on_import(store, tmp_path):
+    from fuzzlab.core.store import Store
+    from fuzzlab.tools.store_adapter import import_spider
+    get_user = {"query": "query GetUser($n: String) { user(name: $n) { email } }",
+                "operationName": "GetUser", "variables": {"n": "alice"}}
+    search = {"query": "query SearchPosts($n: String) { posts(title: $n) { body } }",
+              "operationName": "SearchPosts", "variables": {"n": "hello"}}
+    assert store(GQL, get_user) is None
+    assert store(GQL, search) is None                     # two rows: this lane's fix
+    with Store(tmp_path / "u.db") as st:
+        run = st.start_run("auto", "localhost")
+        counts = import_spider(store.db, st, run)
+        forms = [r["id"] for r in st.conn.execute(
+            "SELECT id FROM form WHERE run_id=? ORDER BY id", (run,))]
+        params = {(r["form_id"], r["name"]) for r in st.conn.execute(
+            "SELECT form_id, name FROM parameter WHERE run_id=?", (run,))}
+    assert counts["request_json"] == 2 and len(forms) == 2   # both are form rows
+    assert (forms[0], "variables.n") in params
+    assert (forms[1], "variables.n") in params            # SearchPosts' own input
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
+    "BUG-0546 sweep: the pipeline's DOM-template stage keeps only the points on the "
+    "first page of each tag-skeleton template, a key that holds no endpoint, parameter "
+    "or input name, so another endpoint on a look-alike page is never audited (owner: "
+    "audit defect 10 lane DEDUP10, BUG-0547, fuzzlab/core/dedup.py::TemplateClusterer "
+    "as used by fuzzlab/harness/pipeline.py::_dedup)"))
+def test_two_endpoints_on_pages_of_one_dom_template_are_both_audited(tmp_path):
+    from fuzzlab.audit import InjectionPoint
+    from fuzzlab.core.runmode import RunPlan
+    from fuzzlab.core.store import Store
+    from fuzzlab.harness.pipeline import run_pipeline
+    from fuzzlab.oracle.probe import Probe
+
+    class Alike:
+        """A target that answers every request alike (nothing is confirmed)."""
+
+        def send(self, url, param, value, timing=False, **kw):
+            return Probe(200, "<html><body>ok</body></html>", headers={"Server": "test"})
+
+    page = "<html><body><h1>{}</h1><form><input><button>go</button></form></body></html>"
+    points = [InjectionPoint("http://127.0.0.1:8080/safe?q=1", "q"),
+              InjectionPoint("http://127.0.0.1:8080/admin?cmd=ls", "cmd")]
+    plan = RunPlan("automatic", ["sql-injection"], scored=False, source="user")
+    with Store(tmp_path / "p.db") as st:
+        run = st.start_run("pipeline", "localhost")
+        result = run_pipeline(points, st, run, Alike(), plan,
+                              pages_html={p.url: page.format(i)
+                                          for i, p in enumerate(points)})
+    assert result.points_audited == 2
+
+
+BUG_DOC = REPO / "docs" / "bugs" / \
+    "BUG-0546-captured-api-requests-were-deduplicated-by-their-top-level-keys.md"
+#: What a sweep row may say instead of naming its pin.
+_SETTLED = ("fixed here", "fixed by", "not instances", "not an instance")
+_PIN = re.compile(r"tests/test_captured_operations\.py::(\w+)")
+
+
+def sweep_rows_without_a_pin(doc: str, module: dict) -> list[str]:
+    """The rows of a bug doc's ``## PA-0002 sweep`` section that neither say the
+    instance is fixed or is not one (`_SETTLED`) nor name a strict xfail of this module
+    that exists (PA-0531(4), PA-0546(5)); each row by its first line."""
+    parts = re.split(r"(?m)^## PA-0002 sweep", doc, maxsplit=1)
+    section = parts[1].partition("\n## ")[0] if len(parts) == 2 else ""
+    rows = re.split(r"\n(?=- )", section)[1:]
+    out = []
+    for row in rows:
+        text = " ".join(row.split()).lower()
+        if any(word in text for word in _SETTLED):
+            continue
+        pins = _PIN.findall(row)
+        if not pins or not all(
+                any(m.name == "xfail" and m.kwargs.get("strict") is True
+                    for m in getattr(module.get(name), "pytestmark", ()))
+                for name in pins):
+            out.append(row.splitlines()[0])
+    return out
+
+
+def test_the_bug_0546_sweep_pins_every_instance_it_does_not_fix():
+    assert re.search(r"(?m)^## PA-0002 sweep", BUG_DOC.read_text())
+    assert sweep_rows_without_a_pin(BUG_DOC.read_text(), globals()) == []
+
+
+def test_the_sweep_guard_catches_a_prose_deferral():
+    head = "# BUG\n\n## PA-0002 sweep (instances)\n"
+    tail = "\n## Recurrence review\n- `x`: another lane's item; not pinned here.\n"
+    pinned = ("- `a.py::f`: an instance, pinned by\n  "
+              "`tests/test_captured_operations.py::"
+              "test_two_forms_told_apart_by_a_hidden_action_value_are_both_kept`.\n")
+    offenders = [
+        # 34d4fd1's rows: a prose deferral, and an instance with no pin and no reason
+        "- `tools/store_adapter.py::_store_request`: first wins. That is audit defect 8,\n"
+        "  another lane's item; not pinned here.\n",
+        "- `core/dedup.py` (DOM templates): audit defect 10, another lane's item.\n",
+        # a pin that does not exist, and a test that is no strict xfail
+        "- `b.py`: pinned by `tests/test_captured_operations.py::test_no_such_pin`.\n",
+        "- `c.py`: pinned by `tests/test_captured_operations.py::"
+        "test_json_rpc_methods_stay_apart`.\n",
+    ]
+    for row in offenders:
+        assert sweep_rows_without_a_pin(head + pinned + row + tail, globals()) == \
+            [row.splitlines()[0]], row
+    clean = (pinned + "- `spider.py::record_request`: fixed here.\n"
+             "- `formnav.signature`: forms for submission caps. Not instances.\n")
+    assert sweep_rows_without_a_pin(head + clean + tail, globals()) == []
 
 
 def test_contexts_are_capped_per_operation_and_a_new_input_never_is(store):

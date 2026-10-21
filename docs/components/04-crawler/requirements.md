@@ -945,10 +945,16 @@ fuzzer.
       document, such as search text, selects nothing);
     - the value of a dispatcher field: `action`, `act`, `op`, `operation`,
       `operationName`, `cmd`, `command`, `do`, `task`, `func`, `function`, `method`
-      (JSON-RPC), `_method` (a method override), compared lower-cased, when the value is
-      a token (at most 64 characters, no whitespace) or an integer. A field so named
-      whose value is not one is data. Misjudging a data field costs a row, never an
-      input.
+      (JSON-RPC), `_method` (a method override), compared lower-cased, whatever its
+      value when that value is a non-empty string or an integer (a boolean, an empty
+      string, `null`, a float or a container selects nothing). A string is keyed with
+      every run of whitespace folded to one space: a folded value of at most 64
+      characters (`apiop.MAX_SELECTOR_CHARS`) by its text, a longer one by
+      `sha256:` and the digest of its folded text. So multi-word values (a submit
+      button's `value="Add to cart"`) and long ones keep their operations apart. A data
+      field so named is a selector too: misjudging it costs a row, never an input.
+      *(CC-CRAWL-0057 review round 1, B1: a value with whitespace, or over 64
+      characters, was data, so two operations told apart only by it were merged.)*
   - **What a request adds** (`apiop.request_shape`, `apiop.operation_schema`): a
     request's shape is its typed key paths, every position of its body at every depth
     with the JSON type found there (array elements as one position), and each query
@@ -967,17 +973,31 @@ fuzzer.
     for a field another request carried (measured 2026-10-21: `{"q"}` imports,
     `{"q", "sort"}` is refused as a settings field, and the 80-leaf union of two
     40-leaf bodies is over the leaf limit).
-  - **Bounds:** the context cap above; at most 64 selectors per operation. A request
-    that adds an input is never capped (bounded by the crawl's captures, as before).
+  - **Bounds:** the context cap above; at most 64 selectors per operation; a selector
+    value in the key is at most 71 characters (64, or `sha256:` and a digest). A
+    request that adds an input is never capped, and each distinct selector value is its
+    own operation (both bounded by the crawl's captures, as before).
   - **Known gaps (PA-0505(2), BUG-0546 sweep), pinned by strict xfails in
-    `tests/test_captured_operations.py`:** disco's synthesizer (FR-CRAWL-20) keys an
-    endpoint by origin, method, template and content family, so a GraphQL or JSON-RPC
-    endpoint's operations are one inventory operation (their schemas are merged, not
-    lost; the disco import itself imports every exchange); and
-    `StorageManager.record_form` keys a crawled form by action, method and control
-    names, so a form told apart only by a hidden dispatcher value is dropped. A spider
-    DB written before FR-CRAWL-37 keeps its rows; a resumed crawl stores new rows beside
-    them (an old signature never matches a new one).
+    `tests/test_captured_operations.py` (PA-0531(4)):**
+    - disco's synthesizer (FR-CRAWL-20) keys an endpoint by origin, method, template
+      and content family, so a GraphQL or JSON-RPC endpoint's operations are one
+      inventory operation (their schemas are merged, not lost; the disco import itself
+      imports every exchange);
+    - `StorageManager.record_form` keys a crawled form by action, method and control
+      names, so a form told apart only by a hidden dispatcher value is dropped;
+    - the importer (`tools/store_adapter.py::_store_request`, FR-AUD-22) keeps a
+      captured request's parameter only when no earlier captured request on its
+      endpoint has that name, so the inputs a second operation shares by name with the
+      first (every GraphQL operation's `query`, `operationName` and a shared variable
+      name) are bound to the first operation's form and never sent with the second's
+      document: the rows FR-CRAWL-37 keeps reach the store as forms, not all as points
+      (audit defect 8);
+    - the pipeline's DOM-template stage (`core/dedup.py`, `harness/pipeline.py::_dedup`)
+      keeps only the points on the first page of each tag-skeleton template (audit
+      defect 10, BUG-0547).
+
+    A spider DB written before FR-CRAWL-37 keeps its rows; a resumed crawl stores new
+    rows beside them (an old signature never matches a new one).
 
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default

@@ -17,9 +17,14 @@ only when all of these match:
     field, a JSON-RPC ``method``, an HTTP method override (``_method``), GraphQL's
     ``operationName``.
 
-  A field is a selector only when its value is a short token or an integer
-  (`_is_selector_value`). Misjudging a data field as a selector costs a row, never an
-  input: every row is imported.
+  A field so named is a selector whenever its value is a non-empty string or an
+  integer, never a boolean (`_selector_value`): a multi-word value (a submit button's
+  ``value="Add to cart"``) or a long one selects as a short token does. A string is
+  keyed with its whitespace runs folded to one space, by its text up to
+  `MAX_SELECTOR_CHARS`, else by the digest of its folded text. Misjudging a data field
+  as a selector costs a row, never an input: every row is imported (review round 1,
+  B1: a value with whitespace, or over 64 characters, was data, and merged two
+  operations).
 
 **What a request adds** (`request_shape`, `operation_schema`). A request's shape is its
 typed key paths: every position of its body, at every depth (object keys by name, array
@@ -58,10 +63,11 @@ from fuzzlab.core.urls import url_key
 SELECTOR_NAMES = frozenset({
     "action", "act", "op", "operation", "operationname", "cmd", "command", "do",
     "task", "func", "function", "method", "_method"})
-#: A selector value: a token (no whitespace or control character) of at most this many
-#: characters, or an integer.
+#: A selector's string value (whitespace runs folded) of at most this many characters is
+#: keyed by its text; a longer one by ``"sha256:"`` and the hex digest of its folded
+#: text, 71 characters, so never equal to a short one.
 MAX_SELECTOR_CHARS = 64
-_TOKEN = re.compile(r"[^\s\x00-\x1f\x7f]{1,64}\Z")          # 64: MAX_SELECTOR_CHARS
+_WHITESPACE_RUN = re.compile(r"\s+")
 #: At most this many selectors identify one operation (the first, in sorted order).
 MAX_SELECTORS = 64
 #: No walk goes deeper than this (the capture boundary stops at 8).
@@ -94,25 +100,38 @@ def _query_pairs(url: str) -> list[tuple[str, str]]:
         return []
 
 
-def _is_selector_value(value) -> bool:
+def _selector_value(value):
+    """How a dispatcher field's value is keyed, or None when it selects nothing: an
+    integer as itself; a non-empty string with every whitespace run folded to one space,
+    as its text up to `MAX_SELECTOR_CHARS`, else ``"sha256:<hex>"`` of the folded text
+    (surrogates passed through, so it is total). A boolean, an empty string, ``None``,
+    a float or a container selects nothing."""
     if isinstance(value, bool):
-        return False
+        return None
     if isinstance(value, int):
-        return True
-    return isinstance(value, str) and _TOKEN.match(value) is not None
+        return value
+    if not isinstance(value, str) or not value:
+        return None
+    folded = _WHITESPACE_RUN.sub(" ", value)
+    if len(folded) <= MAX_SELECTOR_CHARS:
+        return folded
+    digest = hashlib.sha256(folded.encode("utf-8", "surrogatepass")).hexdigest()
+    return "sha256:" + digest
 
 
 def operation_selectors(doc, query_pairs=()) -> list:
     """The operation selectors of a request whose redacted body is ``doc`` and whose
     query is ``query_pairs``, sorted, at most `MAX_SELECTORS`: ``["field", path,
-    value]`` for a dispatcher field and ``["graphql", path, operations]`` for a GraphQL
-    document (`graphql_operations`). A body path starts with ``"$"``, a query one with
-    ``"?"``; array elements are numbered."""
+    value]`` for a dispatcher field (the value as `_selector_value` keys it) and
+    ``["graphql", path, operations]`` for a GraphQL document (`graphql_operations`). A
+    body path starts with ``"$"``, a query one with ``"?"``; array elements are
+    numbered."""
     found: list = []
     op_name = next((v for n, v in query_pairs if n == "operationName"), None)
     for name, value in query_pairs:
-        if name.lower() in SELECTOR_NAMES and _is_selector_value(value):
-            found.append(["field", ["?", name], value])
+        key = _selector_value(value) if name.lower() in SELECTOR_NAMES else None
+        if key is not None:
+            found.append(["field", ["?", name], key])
         if name == "query":
             ops = graphql_operations(value, op_name)
             if ops is not None:
@@ -131,8 +150,9 @@ def operation_selectors(doc, query_pairs=()) -> list:
                     found.append(["graphql", path + ["query"], ops])
             for key, value in node.items():
                 key = str(key)
-                if key.lower() in SELECTOR_NAMES and _is_selector_value(value):
-                    found.append(["field", path + [key], value])
+                selects = _selector_value(value) if key.lower() in SELECTOR_NAMES else None
+                if selects is not None:
+                    found.append(["field", path + [key], selects])
                 if isinstance(value, (dict, list)):
                     stack.append((path + [key], value, depth + 1))
         elif isinstance(node, list):

@@ -46,6 +46,26 @@ Newest first.
     form by action, method and control names (owner lane SPIDER); `disco.synth` keys an
     endpoint without selectors (owner disco synth). Recorded as known gaps in
     FR-CRAWL-37 (PA-0505(2)).
+  - *(Review round 1, branch `lane/SPIDER9-r1` on 34d4fd1.)*
+    - **B1, `apiop._selector_value` (was `_is_selector_value` and `_TOKEN`).** A
+      `SELECTOR_NAMES` field was a selector only when its value was a whitespace-free
+      token of at most 64 characters, so `action=Add+to+cart` and
+      `action=Remove+from+cart` (form, JSON or query), or two values over 64
+      characters, were one operation and the second was dropped as `duplicate`. Now
+      every non-empty string value is a selector (a boolean is not, as before):
+      whitespace runs are folded to one space, a folded value of at most
+      `MAX_SELECTOR_CHARS` (64) is keyed by its text, a longer one by `sha256:` and the
+      digest of its folded UTF-8 (surrogates passed through, so the digest is total).
+      The free-text `command` case the first commit asserted as a merge is now two
+      rows.
+    - **B2, the sweep.** Two instances were left as prose: the importer's first-wins
+      parameters (`tools/store_adapter.py::_store_request`, audit defect 8) and the
+      pipeline's DOM-template stage (`core/dedup.py` via `harness/pipeline.py::_dedup`,
+      audit defect 10, lane DEDUP10). Each is now pinned by an offline strict xfail
+      naming its owner (PA-0531(4)), and BUG-0546's sweep names the pins. A guard
+      (`sweep_rows_without_a_pin`) checks that every row of BUG-0546's sweep is fixed,
+      not an instance, or names a strict xfail that exists, proven on synthetic
+      offenders (34d4fd1's two rows among them).
 - Impact (other components / project):
   - **Store contract (spider DB, `discovered_requests`; PA-0152 consumers from the
     code: `tools/store_adapter._import_requests`/`captured_request`,
@@ -57,16 +77,24 @@ Newest first.
     top-level keys), so no request the old writer stored is dropped now, except one
     that adds no input past its operation's 32nd row; there are more rows for a
     dispatcher endpoint, a nested or type difference, a media type or a query name.
-    AUD's importer gets the added operations and inputs as form rows and points; its
-    parameters are still first-wins per endpoint and name (audit defect 8, another
-    lane).
+    AUD's importer gets every added operation as a form row, but not every added input
+    as a point: its parameters are still first-wins per endpoint and name, so an input
+    a second operation shares by name with the first (a GraphQL operation's `query`,
+    `operationName`, a shared variable) is bound to the first operation's form and
+    never sent with the second's document; only names new to the endpoint become
+    points (audit defect 8, another lane; pinned by a strict xfail in review round 1,
+    B2). *(As first committed this read "gets the added operations and inputs as form
+    rows and points", which the review showed wrong for shared names.)*
   - An older spider DB keeps its rows; a resumed crawl's new rows never match an old
     signature, so they are stored beside the old ones (no loss).
   - `tools/spider.py`: only `record_request` and the `_init_db` comment changed; the
     callers `_observe` and `_record_dry` read the same return values.
 - Risk (level; mitigation or accepted-risk justification): medium.
   - A data field named like a selector splits rows. Accepted: a split costs a row and
-    is imported, never an input; a value with whitespace is data.
+    is imported, never an input. Every non-empty string value of such a field is a
+    selector, whitespace runs folded, a value over 64 characters keyed by its digest
+    *(review round 1, B1; as first committed a value with whitespace or over 64
+    characters was data, which merged two operations told apart only by it)*.
   - Row growth: one row per distinct typed shape of an operation, bounded by the
     crawl's captures as before; rows that add no input are capped at 32 per operation
     (counted and logged beyond). A request that adds an input is never refused.
@@ -83,7 +111,29 @@ Newest first.
   - [x] the harness run on the committed tree (`verify_change.py --base c483dc1`) —
     done; its counts are in the lane report to the orchestrator (this entry is
     committed with the tree it verified)
+  - [x] *(review round 1)* B1: `apiop._selector_value`, the selector-value test and the
+    `command` case as two rows — done
+  - [x] *(review round 1)* B2: strict xfails for `store_adapter._store_request` and the
+    DOM-template stage, the BUG-0546 sweep naming them, the sweep guard with synthetic
+    offenders, the impact line corrected — done
+  - [x] *(review round 1)* FR-CRAWL-37 (selector values, bounds, known gaps), BUG-0546
+    (review round section, PA-0546(2) and (5)), and the lane doc texts — done
+  - [x] *(review round 1)* the harness run on the committed tree
+    (`verify_change.py --base 34d4fd1`) — done; its counts are in the lane report (this
+    entry is committed with the tree it verified)
 - Effectiveness (assessed 2026-10-21): achieved for the defect's scenarios.
+  - *(Review round 1.)* One targeted pytest run on 34d4fd1's `apiop.py` (the round-1
+    tests in place; `--runxfail`, so the pins report where they fail) failed exactly at
+    the asserted requests:
+    - `action=Remove+from+cart` after `action=Add+to+cart` returned `duplicate`;
+    - `{"command": "cat a.txt"}` returned `duplicate`;
+    - the importer pin failed at SearchPosts' own `variables.n` (all three parameters
+      were on form 1);
+    - the DOM-template pin audited 1 point of 2;
+    - and the two earlier pins failed as before.
+    The sweep guard was run on 34d4fd1's BUG-0546 text with a plain-Python driver. It
+    flags exactly the two prose rows (`_store_request`, `core/dedup.py`). On this tree
+    the round-1 tests pass and the four pins are xfailed.
   - Pre-fix proof: the new tests run once against c483dc1's `tools/spider.py` (a scratch
     copy of the tree, `apiop.py` present; a plain-Python driver calling the test
     functions, not pytest, while the host's pytest lock was queued by other lanes;
