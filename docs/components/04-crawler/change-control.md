@@ -3,6 +3,68 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0061 — The capture writer is total: a body holding a lone surrogate is stored losslessly, and a write the store refuses is counted (FR-CRAWL-42, BUG-0554) (2026-10-21)
+- Placement: pre-assigned to lane SURROGATE (item AU-REQID78), base 33b423e (after
+  SPIDER9). Inside `StorageManager.record_request` and its new helper only; lane SPIDER
+  owns the rest of `tools/spider.py` (disjoint regions). Also touches
+  `tools/store_adapter.py::captured_request` (the importer's decision, component AUD:
+  its own change-control entry needs a CC-AUD number, requested at merge).
+- Change:
+  - **`tools/apiop.py`.** `storable_json(value)`: `json.dumps(value,
+    ensure_ascii=False)` with each surrogate code point written as its `\uXXXX` escape
+    (`encode("utf-8", "backslashreplace")`); byte-identical for text without one, and
+    `json.loads` returns the value. `_digest(text)`: SHA-256 with `surrogatepass`.
+    `operation_key` returns `storable_json(...)`; `row_signature`, the over-cap GraphQL
+    digest and `_selector_value` use `_digest`. The module docstring states the rule.
+  - **`tools/spider.py::StorageManager.record_request`** runs its work inside one
+    `try` (still one function, so the PA-0100 and PA-0546 writer guards see the
+    redactors and the keying beside the `INSERT`): `IntegrityError` is still
+    `duplicate`; any other exception is rolled back and returned
+    as `write failed (<error class>)`, so `_observe` counts it in
+    `requests_not_recorded` and logs it; `_record_dry` does not count it as captured.
+    `body_json` is `apiop.storable_json(doc)`. The marker scrub keeps the raw
+    `ensure_ascii=False` text (an escape's hex digits would hide a following marker
+    from the scrub's word boundary).
+  - **`tools/store_adapter.py::captured_request`** refuses a body whose field name or
+    string value holds a lone surrogate ("a field holding a lone surrogate (not storable
+    text)", counted `request_refused`), for `import_spider` and `import_disco`; new
+    private `_storable_text`.
+- Impact (other components / project):
+  - Spider DB contract (§5): no change for any body that could be stored before (text
+    and signature byte-identical, tested against BUG-0546's formula). A row may now hold
+    a `\udXXX` escape in `body_json` and `signature`. Readers of the table, found by
+    searching `discovered_requests` over `fuzzlab/` and `scripts/`:
+    `tools/store_adapter.py` (refuses such a row, counted; it failed the import before),
+    `tools/observe.py` (top-level field names into the trace, written by `json.dumps`'s
+    ASCII default: tested with a recorder active), `apiop.operation_schema`
+    (`json.loads`).
+  - AUD (FR-AUD-22): one more refusal; `import_disco` no longer fails on a captured body
+    holding a lone surrogate, which it did before this change.
+  - CORE: none changed. `core.redaction.redact_json_body` still raises on a body with a
+    sensitive field and a lone surrogate (pinned, BUG-0554 sweep; owner CORE).
+  - No traffic change.
+- Risk (low): a broad `except Exception` in the writer turns a programming error into a
+  counted, logged reason instead of a crash. Accepted: before, the same exception was
+  swallowed uncounted by navguard's observer catch; every writer test asserts the
+  stored result, so such an error still fails a test. The escape is applied only to
+  surrogates, so no existing row, signature or resume changes.
+- Deliverables:
+  - [x] `apiop.storable_json`, `_digest`, `operation_key`, `row_signature`, GraphQL and
+    selector digests — done
+  - [x] `record_request` total (one `try` around its work), `body_json` escaped, scrub
+    on raw text — done
+  - [x] `store_adapter.captured_request` refusal (AUD entry text in the lane's doc
+    texts, number requested) — done
+  - [x] tests: `tests/test_capture_surrogates.py` (new): 7 defect and regression tests,
+    each defect test failing on 33b423e; the bind guard and the keying guard with
+    synthetic offenders; the BUG-0554 sweep guard; the strict xfail pinning
+    `redact_json_body` — done
+  - [x] measured: Chromium's `JSON.stringify` writes a lone half as `\udXXX`; DOM
+    strings reach Python with U+FFFD (BUG-0554) — done
+  - [x] FR-CRAWL-42 added; §5 `discovered_requests` edited in place; FR-AUD-22 edited in
+    place — done
+- Effectiveness (assessed <date> or pending): pending.
+
 ### CC-CRAWL-0058 — The capture proxy builds records off its event loop, bounds its queue in bytes with backpressure, and counts every loss (BUG-0548, audit defect 22) (2026-10-21)
 - Placement: pre-assigned to lane DISCO22 (audit defect 22); independent of AU-DISCO's
   defects 1-3 (`disco/fingerprint.py`, `disco/explore.py`, not touched here).

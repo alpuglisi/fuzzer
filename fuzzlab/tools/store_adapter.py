@@ -811,7 +811,10 @@ def _import_requests(src, store: Store, run_id: int, counts: dict, *,
 def captured_request(row: dict, *, fuzz_json_writes: bool = False):
     """``(refusal or None, body kind, leaves)`` for one ``discovered_requests`` row: the
     whole import decision, pure (FR-AUD-22). ``leaves`` is ``[(name, key segments,
-    path or None, value)]`` when the request is accepted."""
+    path or None, value)]`` when the request is accepted. A body with a field name or
+    string value holding a lone surrogate (a JSON ``\\udXXX`` escape with no partner,
+    which the capture stores losslessly) is refused: no store row can hold it
+    (BUG-0554)."""
     from fuzzlab.core import jsonbody
     url = row.get("url") or ""
     kind = _body_kind(row.get("content_type"))
@@ -830,7 +833,22 @@ def captured_request(row: dict, *, fuzz_json_writes: bool = False):
         return leaves, kind, None
     if not leaves:
         return "an empty body", kind, None
+    if not all(_storable_text(name) and _storable_text(value)
+               for name, _segs, _path, value in leaves):
+        return "a field holding a lone surrogate (not storable text)", kind, None
     return body_refusal(url, leaves), kind, leaves
+
+
+def _storable_text(value) -> bool:
+    """False for a string SQLite cannot bind: one holding a surrogate code point (BUG-0554;
+    `json.loads` decodes a lone ``\\udXXX`` escape to one). True for anything else."""
+    if not isinstance(value, str):
+        return True
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
 
 
 def _store_request(store, run_id, counts, kind, method, url, leaves, *,

@@ -254,7 +254,11 @@ budget where a vulnerability is plausible.
     `destructive_reason` or `transaction_reason` flags; a URL on another origin than
     the page that sent it; a content type other than JSON (`application/json`,
     `application/*+json`) or form-encoded; a body that is malformed, not an object,
-    empty, over 64 leaves or 16 levels; a **credential-change body**
+    empty, over 64 leaves or 16 levels; a body with a field name or string value
+    holding a lone surrogate (a JSON `\udXXX` escape with no partner, which the spider
+    stores losslessly since FR-CRAWL-42 and disco's capture keeps as sent): no store row
+    can hold it, and before BUG-0554 the import failed on it (both importers, through
+    `captured_request`); a **credential-change body**
     (`store_adapter.credential_change_rule`, the one rule crawled forms use: two or
     more password fields, a password field named with a change word — new, confirm,
     repeat, current, old …, or an account-management token in the URL path); a body
