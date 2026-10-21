@@ -987,8 +987,10 @@ fuzzer.
     `health_verdict` reads a GET of it with the context's cookies as live and one with
     no credential as refused (a login redirect, a 401, a login form); both GETs, and
     each check, go straight to the target from a request context of their own (never
-    through the capture proxy: not the identity's exploration), follow no redirect and
-    verify TLS. A suspicion (a loss shape or a policy block) is then decided by a GET of
+    through the capture proxy: not the identity's exploration), are scope- and
+    destructive-gated at the send (`checked_api_request`, `check_send_url`), follow no
+    redirect and verify TLS; this is disco's second send path of its own, beside the
+    contract runner's (`tests/test_disco_isolation.py`). A suspicion (a loss shape or a policy block) is then decided by a GET of
     it with the suspected context's cookies (`health_verdict`): live, an authorization
     denial; lost, confirmed; anything else, unresolved. With no such resource, a loss
     shape is an unconfirmed loss and a policy block never is one (PA-0533(1)).

@@ -75,10 +75,16 @@ function lost() {
   const p = document.createElement('p'); p.className = 'error';
   p.textContent = 'Something went wrong'; root.appendChild(p);
 }
+// the answer is read whole before the app reacts to it (as an HTTP client's interceptor
+// does): a 401 has arrived complete when the board then leaves for /login
 function api(url) {
-  return fetch(url).then(r => { if (r.status === 401) { lost(); return null; }
-                                return r.json(); })
-    .then(d => { if (d && d.login) { lost(); return null; } return d; });
+  return fetch(url).then(r => r.text().then(t => [r.status, t]))
+    .then(([status, t]) => {
+      if (status === 401) { lost(); return null; }
+      const d = JSON.parse(t);
+      if (d && d.login) { lost(); return null; }
+      return d;
+    });
 }
 api('/api/me').then(me => {
   if (!me) return;

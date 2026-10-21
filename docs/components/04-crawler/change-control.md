@@ -140,9 +140,11 @@ Newest first.
       resource (`_Shared.protected`) when `session.manager.health_verdict` reads a GET
       of it with the context's cookies (`ctx.storage_state()`) as live and one with no
       credential as refused. `_protected_get`: one GET from a request context of its
-      own (`pw.request.new_context`, scope-checked by `checked_api_request`,
-      ``max_redirects=0``, TLS verified, never through the capture proxy), judged by
-      `health_verdict(refusal=False)`. `_confirm_loss` without a provider checks every
+      own (`pw.request.new_context`, gated at the send by `checked_api_request` and
+      `check_send_url`, ``max_redirects=0``, TLS verified, never through the capture
+      proxy), judged by `health_verdict(refusal=False)`; disco's second send path of
+      its own, which `tests/test_disco_isolation.py`'s send guard now sees (a
+      ``.fetch(`` on a client the function made) and lists beside `Runner.send`. `_confirm_loss` without a provider checks every
       suspicion (a policy block too) against it with the suspected context's cookies
       (`_context_check`); with none, as before. `_recover_session` reports an
       unresolved verdict as such before the no-provider reason.
@@ -166,7 +168,8 @@ Newest first.
     - [x] B1, R1, R2, R3 in `explore.py`; B2 in `capture.py`, `ede.py`, `cli.py` — done
     - [x] tests: `tests/test_disco_session_loss.py` (four real-browser, five offline,
       the ede test, the import_disco pin), `tests/test_lost_window_mark.py` (the guard
-      and its synthetic offenders) — done
+      and its synthetic offenders), `tests/test_disco_isolation.py` (the send guard
+      sees an API-request client's ``fetch``; `Explorer._protected_get` listed) — done
     - [x] FR-CRAWL-41 and FR-CRAWL-25 amended in place — done
     - [x] BUG-0552 "Review round 1"; shared-doc texts (PA-0552, SP-71, SP-61 readers,
       CHANGELOG, ERROR_LOG, F-1XX) in the lane's `doc_texts.md` — done
@@ -174,9 +177,18 @@ Newest first.
       — todo
     - [ ] a real two-worker run with an anonymous-200 API — todo (the race is covered
       offline, deterministically)
-  - Effectiveness (assessed 2026-10-21): each new test fails on a1a93b1 (the product
-    files swapped in, one run) and passes after; the harness result is in the lane's
-    report.
+  - Effectiveness (assessed 2026-10-21): the targeted files passed (34 passed, the two
+    pins xfailed). On a1a93b1 (its four product files swapped in, one run) nine of the
+    ten new tests failed on their defect -- the no-provider restore and seed cases
+    (`session_lost` 0; the seed's login form explored as the root state), the
+    role-gated 401 (the run ended, `session_lost` 1), the offline R2 case (no
+    reinstall), the three B1 cases (B's window unmarked; B acted on generation 7 three
+    times; `act-5` dropped), the ede test (no `lost_action_ids`) and the guard (`_ede`
+    unlisted). The tenth, the real-browser R2 test, passed there: its board left for
+    `/login` before the 401 arrived whole, so the window held the page sign alone. Its
+    board now reads each answer whole before reacting (as a client's interceptor does);
+    run alone on a1a93b1 it fails (`session_reinstalled` 0, two states unrestorable).
+    The harness result is in the lane's report.
 
 ### CC-CRAWL-0054 — The JSONL tail caps a line while reading it; the contract runner reads bounded and matches contract patterns in a killable worker (BUG-0536) (2026-10-20)
 - Placement: pre-assigned to AU-BOUNDED (audit defects 23 and 27, with the disco and

@@ -1066,10 +1066,14 @@ class Explorer:
         at all (an empty ``Cookie``), from a request context of its own -- sent straight
         to the target, never through the capture proxy, so it is never recorded as the
         identity's exploration -- following no redirect (a login redirect is judged as
-        one). A failure to get an answer is INCONCLUSIVE; TLS is verified."""
+        one). The scope and destructive gates sit here, at the send (PA-0083(1)): disco's
+        second send path of its own, beside the contract runner's. A failure to get an
+        answer is INCONCLUSIVE; TLS is verified."""
+        from fuzzlab.core.urls import check_send_url
         from fuzzlab.session.manager import INCONCLUSIVE, Health, health_verdict
         from fuzzlab.session.state import SessionState
         navguard.checked_api_request(self._in_scope, url)
+        check_send_url(url, method="GET")
         api = self._pw.request.new_context(storage_state=storage_state) \
             if storage_state is not None else self._pw.request.new_context()
         try:
