@@ -6,13 +6,17 @@ The recorder is driven here with fake mitmproxy flows (the real proxy runs in
 
 from __future__ import annotations
 
+import asyncio
 import json
+import queue
+import threading
 import types
 
 import pytest
 
 from fuzzlab.core.redaction import PLACEHOLDER
 from fuzzlab.disco import capture, mitm, recorder
+from tests._browser import skip_or_fail
 from fuzzlab.disco.capture import (ACTION_HEADER, MAX_BODY_CHARS, append_record, make_record,
                                    read_capture)
 
@@ -128,10 +132,11 @@ class _Flow:
             url=url, method=method, host=host or parts.hostname,
             port=port or parts.port or (443 if parts.scheme == "https" else 80),
             headers=_Headers(headers or {}), timestamp_start=100.0,
-            get_content=lambda strict=False: body)
+            raw_content=body, get_content=lambda strict=False: body)
         self.response = types.SimpleNamespace(
             status_code=status, headers=_Headers({"Content-Type": "application/json"}),
-            timestamp_end=100.05, get_content=lambda strict=False: res_body)
+            timestamp_end=100.05, raw_content=res_body,
+            get_content=lambda strict=False: res_body)
 
     def kill(self):
         self.killed = True
@@ -147,10 +152,26 @@ def _recorder(tmp_path, scope="http://127.0.0.1:8080/", keep_tag=False):
     return rec
 
 
-def _drive(rec, flow):
+def _respond(rec, flow):
+    """The request and response hooks, as mitmproxy calls them; the response hook's
+    return (None, or an awaitable mitmproxy would await)."""
     rec.request(flow)
-    if not flow.killed:
-        rec.response(flow)
+    killed = getattr(flow, "killed", None)          # a real flow: killed is an error
+    if not (killed if killed is not None else flow.error is not None):
+        return rec.response(flow)
+    return None
+
+
+def _drive(rec, flow):
+    wait = _respond(rec, flow)
+    if wait is not None:
+        _await_all([wait])
+
+
+def _await_all(waits):
+    async def _all():
+        await asyncio.gather(*[w for w in waits if w is not None])
+    asyncio.run(_all())
 
 
 def test_an_out_of_scope_request_is_killed_counted_and_never_recorded(tmp_path):
@@ -208,12 +229,19 @@ def test_the_tag_is_read_and_stripped_unless_kept(tmp_path):
     assert read_capture(tmp_path / "c.jsonl").records[0].action_id == "act-7"
 
 
-def test_a_full_queue_drops_and_counts_never_blocks(tmp_path, monkeypatch):
+def test_a_full_queue_holds_the_flow_back_then_drops_and_counts_never_blocking(
+        tmp_path, monkeypatch):
+    """BUG-0548: a full queue no longer drops at once. The hook returns an awaitable
+    (mitmproxy awaits it: that flow waits, the loop runs on); one still without room
+    after `BACKPRESSURE_WAIT_S` is dropped and counted."""
+    monkeypatch.setattr(recorder, "BACKPRESSURE_WAIT_S", 0.05)
     rec = _recorder(tmp_path)
     monkeypatch.setattr(rec, "start", lambda: None)            # no writer: the queue fills
-    rec._queue = __import__("queue").Queue(maxsize=2)
-    for _ in range(5):
-        _drive(rec, _Flow("http://127.0.0.1:8080/api"))
+    rec._queue = queue.Queue(maxsize=2)
+    waits = [_respond(rec, _Flow("http://127.0.0.1:8080/api")) for _ in range(5)]
+    assert waits[:2] == [None, None] and all(asyncio.iscoroutine(w) for w in waits[2:])
+    assert rec.dropped == 0 and rec.waited == 3
+    _await_all(waits[2:])
     assert rec.dropped == 3
 
 
@@ -227,3 +255,287 @@ def test_mitmdump_runs_loopback_lazy_and_with_the_recorder():
     ns.listen_host = "0.0.0.0"
     with pytest.raises(ValueError):
         mitm.mitmdump_args(ns)
+
+
+# --- off the proxy's loop: the hook takes, the writer works (BUG-0548, audit defect 22) ----
+
+def _mitm():
+    try:
+        from mitmproxy import http
+        from mitmproxy.test import tflow
+    except ImportError as exc:                     # pragma: no cover - installed with disco
+        skip_or_fail(f"mitmproxy unavailable: {exc}")
+    return http, tflow
+
+
+def _real_flow(url="http://127.0.0.1:8080/api/x", *, method="POST", req_body=b"",
+               req_headers=None, res_body=b"", res_headers=None):
+    """A real mitmproxy flow: ``raw_content`` is the body as sent (``Response.make``
+    encodes it per its ``Content-Encoding``)."""
+    http, tflow = _mitm()
+    return tflow.tflow(req=http.Request.make(method, url, req_body, req_headers or {}),
+                       resp=http.Response.make(200, res_body, res_headers or {}))
+
+
+def _stats(tmp_path) -> dict:
+    return json.loads((tmp_path / "s.json").read_text())
+
+
+def test_the_proxy_hook_takes_the_exchange_and_the_writer_does_all_the_work(
+        tmp_path, monkeypatch):
+    """The hooks run on the loop that carries every browser request. A hook only takes
+    the exchange (the bodies as sent); decoding, redaction and serialisation all run on
+    the writer thread, and the record is what it was."""
+    hook = threading.current_thread()
+    where: list[tuple[str, threading.Thread]] = []
+    real_redact, real_json = capture.redact_body, capture.CaptureRecord.to_json
+
+    def redact(body, ctype):
+        where.append(("redact", threading.current_thread()))
+        return real_redact(body, ctype)
+
+    def to_json(self):
+        where.append(("json", threading.current_thread()))
+        return real_json(self)
+
+    monkeypatch.setattr(capture, "redact_body", redact)
+    monkeypatch.setattr(capture.CaptureRecord, "to_json", to_json)
+    doc = json.dumps({"user": "alice", "password": "HOOKSECRET", "pad": "p" * 50_000})
+    flow = _real_flow(req_body=doc.encode(), req_headers={"Content-Type": "application/json"},
+                      res_body=doc.encode(), res_headers={"Content-Type": "application/json",
+                                                          "Content-Encoding": "gzip"})
+    assert flow.response.raw_content[:2] == b"\x1f\x8b"         # gzip as sent
+    rec = _recorder(tmp_path)
+    _drive(rec, flow)
+    rec.stop()
+    assert {what for what, _t in where} == {"redact", "json"}
+    assert [what for what, t in where if t is hook] == []
+    [got] = read_capture(tmp_path / "c.jsonl").records
+    assert "HOOKSECRET" not in (tmp_path / "c.jsonl").read_text()
+    assert json.loads(got.res_body)["user"] == "alice" and not got.res_truncated
+    assert json.loads(got.req_body)["password"] == PLACEHOLDER
+    assert _stats(tmp_path)["recorded"] == 1
+
+
+def _sized_flows(n, size=100_000):
+    return [_real_flow(f"http://127.0.0.1:8080/api/{i}", method="GET",
+                       res_body=json.dumps({"n": i, "pad": "x" * size}).encode(),
+                       res_headers={"Content-Type": "application/json"}) for i in range(n)]
+
+
+def test_past_its_byte_budget_the_queue_holds_the_browser_back_and_loses_nothing(
+        tmp_path, monkeypatch):
+    """The queue holds at most `QUEUE_MAX_BYTES`, not only `QUEUE_MAX` records. Past
+    it, an exchange waits -- its hook returns an awaitable, the loop never waits -- and
+    so does every exchange after it, even one that would fit, so records keep their
+    order. Once the writer makes room, every one is recorded whole."""
+    monkeypatch.setattr(recorder, "QUEUE_MAX_BYTES", 250_000)
+    rec = _recorder(tmp_path)
+    rec.start = lambda: None                       # no writer yet: the queue fills
+    waits = [_respond(rec, flow) for flow in _sized_flows(4)]
+    small = _real_flow("http://127.0.0.1:8080/api/small", method="GET")
+    waits.append(_respond(rec, small))             # fits, but must not overtake
+    assert waits[:2] == [None, None] and all(asyncio.iscoroutine(w) for w in waits[2:])
+    assert rec.queued_bytes <= recorder.QUEUE_MAX_BYTES and rec.waited == 3
+    del rec.start
+    rec.start()
+    _await_all(waits)
+    rec.stop()
+    recs = read_capture(tmp_path / "c.jsonl").records
+    assert [r.url.rsplit("/", 1)[1] for r in recs] == ["0", "1", "2", "3", "small"]
+    assert all(r.res_body is not None and not r.res_truncated for r in recs[:4])
+    stats = _stats(tmp_path)
+    assert (stats["omitted"]["backlog"], stats["dropped"], stats["recorded"],
+            stats["waited"], stats["queued"]) == (0, 0, 5, 3, 0)
+    assert rec.queued_bytes == 0
+
+
+def test_an_exchange_still_without_room_after_its_wait_keeps_its_record_not_its_body(
+        tmp_path, monkeypatch):
+    """Backpressure is bounded (`BACKPRESSURE_WAIT_S`): a writer that cannot keep up
+    loses bodies, counted, never records or order."""
+    monkeypatch.setattr(recorder, "QUEUE_MAX_BYTES", 250_000)
+    monkeypatch.setattr(recorder, "BACKPRESSURE_WAIT_S", 0.05)
+    rec = _recorder(tmp_path)
+    rec.start = lambda: None
+    _await_all([_respond(rec, flow) for flow in _sized_flows(5)])
+    assert rec.omitted["backlog"] == 3 and rec.dropped == 0
+    del rec.start
+    rec.start()
+    rec.stop()
+    recs = read_capture(tmp_path / "c.jsonl").records
+    assert [r.url.rsplit("/", 1)[1] for r in recs] == ["0", "1", "2", "3", "4"]
+    assert [r.res_body is not None for r in recs] == [True, True, False, False, False]
+    assert all(r.res_truncated for r in recs[2:]) and not recs[0].res_truncated
+    stats = _stats(tmp_path)
+    assert (stats["omitted"]["backlog"], stats["dropped"], stats["recorded"]) == (3, 0, 5)
+
+
+def test_the_line_moves_without_its_waiters_and_is_written_at_shutdown(tmp_path,
+                                                                       monkeypatch):
+    """The line is data: a waiter mitmproxy never resumes holds no one back, and what
+    still waits at shutdown is complete (only the browser was held back), so it is
+    written, in order."""
+    monkeypatch.setattr(recorder, "QUEUE_MAX_BYTES", 250_000)
+    rec = _recorder(tmp_path)
+    rec.start = lambda: None
+    waits = [_respond(rec, flow) for flow in _sized_flows(5)]  # 2 queued, 3 in line
+    del rec.start
+    rec.start()
+    _await_all([waits[3]])                         # the head's awaitable never runs
+    rec.stop()
+    for w in waits[2:]:
+        w.close()
+    recs = read_capture(tmp_path / "c.jsonl").records
+    assert [r.url.rsplit("/", 1)[1] for r in recs] == ["0", "1", "2", "3", "4"]
+    assert all(r.res_body is not None for r in recs)
+    stats = _stats(tmp_path)
+    assert (stats["recorded"], stats["dropped"], stats["queued"]) == (5, 0, 0)
+
+
+def test_a_waiting_exchange_whose_flow_is_cancelled_is_counted_and_holds_no_one_back(
+        tmp_path, monkeypatch):
+    """mitmproxy cancels a waiting flow (its client went away, or shutdown): that
+    exchange is counted ``dropped``, and the exchanges behind it are still queued."""
+    monkeypatch.setattr(recorder, "QUEUE_MAX_BYTES", 250_000)
+    rec = _recorder(tmp_path)
+    rec.start = lambda: None
+    waits = [_respond(rec, flow) for flow in _sized_flows(4)]
+
+    async def _cancel_the_first_waiter():
+        first, second = (asyncio.ensure_future(w) for w in waits[2:])
+        await asyncio.sleep(0.02)
+        first.cancel()
+        del rec.start
+        rec.start()                                # the writer makes room
+        await second
+        with pytest.raises(asyncio.CancelledError):
+            await first
+
+    asyncio.run(_cancel_the_first_waiter())
+    rec.stop()
+    assert [r.url.rsplit("/", 1)[1] for r in read_capture(tmp_path / "c.jsonl").records] \
+        == ["0", "1", "3"]
+    assert (_stats(tmp_path)["dropped"], _stats(tmp_path)["recorded"]) == (1, 3)
+
+
+def test_a_body_too_large_or_undecodable_is_never_held_whole_and_its_record_says_so(
+        tmp_path, monkeypatch):
+    """A body over the capture ceiling as sent is never held past the hook; a small one
+    that decodes past it (a gzip bomb), or in a coding with no bounded decoder, is cut
+    by SP-60's reader on the writer. Each is recorded with no body, marked truncated
+    and counted; redaction never sees a part of a body (PA-0455)."""
+    monkeypatch.setattr(capture, "MAX_CAPTURE_BODY_BYTES", 64 * 1024)
+    json_ct = {"Content-Type": "application/json"}
+    big = json.dumps({"password": "BIGSECRET", "pad": "x" * 70_000}).encode()
+    bomb = json.dumps({"password": "BOMBSECRET", "pad": "0" * 2_000_000}).encode()
+    taken = capture.snapshot(kind="http", t=1.0, action_id=None, method="GET",
+                             url="http://h/", req_headers={}, req_body=None,
+                             res_headers=json_ct, res_body=big)
+    assert (taken.res_body, taken.res_omitted) == (None, "too_large") and taken.size < 1000
+    flows = {
+        "big": _real_flow("http://127.0.0.1:8080/big", method="GET", res_body=big,
+                          res_headers=json_ct),
+        "bomb": _real_flow("http://127.0.0.1:8080/bomb", method="GET", res_body=bomb,
+                           res_headers={**json_ct, "Content-Encoding": "gzip"}),
+        "zstd": _real_flow("http://127.0.0.1:8080/zstd", method="GET",
+                           res_headers={**json_ct, "Content-Encoding": "zstd"}),
+        "fine": _real_flow("http://127.0.0.1:8080/fine", method="GET", res_body=b'{"ok": 1}',
+                           res_headers=json_ct)}
+    flows["zstd"].response.raw_content = b"(\xb5/\xfd" + b"ZSTDSECRET"
+    assert len(flows["bomb"].response.raw_content) < capture.MAX_CAPTURE_BODY_BYTES
+    rec = _recorder(tmp_path)
+    for flow in flows.values():
+        _drive(rec, flow)
+    rec.stop()
+    recs = {r.url.rsplit("/", 1)[1]: r for r in read_capture(tmp_path / "c.jsonl").records}
+    for name in ("big", "bomb", "zstd"):
+        assert recs[name].res_body is None and recs[name].res_truncated, name
+    assert recs["fine"].res_body == '{"ok": 1}' and not recs["fine"].res_truncated
+    assert "SECRET" not in (tmp_path / "c.jsonl").read_text()
+    assert _stats(tmp_path)["omitted"] == {"too_large": 1, "backlog": 0, "undecodable": 2}
+
+
+def test_a_stats_refresh_is_never_counted_as_a_lost_record(tmp_path, monkeypatch):
+    """A refusal asks the writer to rewrite the stats. With the queue full that request
+    waits; it is not a record, so it is never counted ``dropped``."""
+    monkeypatch.setattr(recorder, "BACKPRESSURE_WAIT_S", 0.05, raising=False)
+    rec = _recorder(tmp_path)
+    rec.start = lambda: None
+    rec._queue = queue.Queue(maxsize=1)
+    _drive(rec, _Flow("http://127.0.0.1:8080/a"))             # fills the queue
+    refused = _Flow("http://example.com/x")
+    _drive(rec, refused)
+    assert refused.killed and rec.dropped == 0
+    _drive(rec, _Flow("http://127.0.0.1:8080/b"))             # a record lost: counted
+    assert rec.dropped == 1
+    del rec.start
+    rec.start()
+    rec.stop()
+    stats = _stats(tmp_path)
+    assert (stats["blocked"], stats["dropped"], stats["recorded"]) == ({"example.com": 1}, 1, 1)
+
+
+def test_a_record_that_cannot_be_built_is_counted_and_the_writer_goes_on(tmp_path,
+                                                                         monkeypatch):
+    """PA-0086(2): the work moved to the writer thread, so one exchange's failure there
+    is contained, logged and counted; the next exchange is still written."""
+    real = capture._body_text
+
+    def body_text(body, ctype, *rest):
+        if body and b"POISON" in body:
+            raise RuntimeError("cannot build")
+        return real(body, ctype, *rest)
+
+    monkeypatch.setattr(capture, "_body_text", body_text)
+    rec = _recorder(tmp_path)
+    _drive(rec, _Flow("http://127.0.0.1:8080/a", res_body=b'{"x": "POISON"}'))
+    _drive(rec, _Flow("http://127.0.0.1:8080/b"))
+    rec.stop()
+    assert [r.url for r in read_capture(tmp_path / "c.jsonl").records] == [
+        "http://127.0.0.1:8080/b"]
+    assert (_stats(tmp_path)["dropped"], _stats(tmp_path)["recorded"]) == (1, 1)
+
+
+def test_the_proxy_process_hands_the_gil_to_its_loop_within_the_switch_interval(
+        tmp_path, monkeypatch):
+    """The writer's work holds the GIL; at CPython's 5 ms default the loop waits that
+    long at each wake-up (measured: loop lag median 6.1 ms with the work on a thread,
+    2.2 ms at 1 ms). mitmdump's process sets the shorter interval when it runs."""
+    import sys
+    calls = []
+    monkeypatch.setattr(sys, "setswitchinterval", calls.append)
+    rec = _recorder(tmp_path)
+    rec.running()
+    rec.stop()
+    assert calls == [recorder.SWITCH_INTERVAL_S] and recorder.SWITCH_INTERVAL_S <= 0.001
+
+
+def test_a_proxy_stop_outlasts_the_recorders_drain(tmp_path, monkeypatch):
+    """PA-0138(3): the writer may be behind at the stop, so the consumer that waits for
+    the proxy (procutil's grace before its kill) waits longer than the recorder drains;
+    otherwise the backlog and the final stats would be lost to the kill, uncounted."""
+    from fuzzlab import procutil
+    from fuzzlab.disco import proxyproc
+    seen = {}
+
+    def start(argv_for, **kwargs):
+        seen.update(kwargs)
+        raise RuntimeError("not started")
+
+    monkeypatch.setattr(procutil, "start_server_on_free_port", start)
+    with pytest.raises(RuntimeError):
+        proxyproc.CaptureProxy(["http://127.0.0.1:1/"], out=tmp_path / "c.jsonl").start()
+    assert seen["grace"] == proxyproc.STOP_GRACE_S >= recorder.DRAIN_TIMEOUT_S + 10
+
+
+def test_the_target_is_asked_only_for_codings_the_writer_decodes_bounded(tmp_path):
+    """The writer decodes through SP-60, which has no bounded ``zstd`` decoder; asking
+    for it would lose those bodies, so the proxy narrows ``Accept-Encoding``
+    (`bodyread.advertise`, PA-0536(1))."""
+    rec = _recorder(tmp_path)
+    flow = _real_flow(method="GET", req_headers={"Accept-Encoding": "gzip, deflate, br, zstd"})
+    rec.request(flow)
+    sent = {t.strip() for t in flow.request.headers["accept-encoding"].split(",")}
+    assert "zstd" not in sent and {"gzip", "deflate"} <= sent
+    rec.stop()
