@@ -1364,3 +1364,9 @@ Juice Shop lab is complete.
 - **Evidence:** `scratchpad/vpush8/` (TOTAL 135 files: 4139 passed, 8 failed); `scratchpad/lanes/INTEG/findings.md`.
 - **Impact:** none pushed (the merge-level verification caught it); one integration revision and one more serialised verification.
 - **Status:** an integration lane (integ/proxy-r1) fixes I1-I3 with tests; practice: concurrent lanes on one subsystem get each other's contract changes in their dispatch, and a merge of such lanes runs the subsystem's tests before the batch.
+
+### F-159 — AU-REQID78's first revision fixed the lab-boundary check for the reviewer's four spellings, not for the class
+- **What:** round 1 found that the FR-AUD-20 loopback check (`audit/value_shape.py`) accepted values naming a host beyond loopback (`127.0.0.1:80@evil.example`, a backslash, an embedded URL). The revision (0703688) made those four spellings fail, but the tail check still treated as loopback a URL whose query or fragment names an outside host as `host:port` or as a scheme-colon URL with no `//` (`http://127.0.0.1/?next=evil.example:8080`, `?next=https:evil.example`), and sent it verbatim; the same predicate gates the fresh-value binder. Its new test held only the reviewer's values. The same revision left a route switch in the seam: a token bound on the isolated copy's route could be sent on the anonymous fallback, ending a reflected-XSS row as a negative instead of unbound.
+- **Evidence:** the adversarial fix check `wf_65b48065-55b` (journal), reproductions against a `git archive` export of 0703688; `scratchpad/reqid78/review_round2.md`.
+- **Impact:** none pushed (caught before merge); a second revision round for AU-REQID78.
+- **Status:** sent back as round 2 (`lane/REQID78-r2`: the tail fails closed; a bound send refuses a route or identity other than its page fetch's). Practice already in force (PA-0507(1), PA-0547(4)): a fix's test covers the class, not the reported values.
