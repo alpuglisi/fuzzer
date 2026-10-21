@@ -1574,3 +1574,55 @@ Juice Shop lab is complete.
 - **Evidence:** `scratchpad/crawl_batch_run.log` (the crawl batch's targeted run: `assert 4 == 2`); the instrumented direct run (`RECORD_DRY reveal-blocked POST .../rest/big`, `.../rest/deep`, each then "not recorded").
 - **Impact:** an unverified stack: a counter's consumer test failing on the unpushed stack until the crawl batch's run; no product defect (the count is the fix's intended one).
 - **Status:** the assertion now expects 4 with both paths named (CC-CRAWL-0061 merge-integration note); a counter change's sweep runs every test that reads the counter (PA-0152's consumer rule), which the fix's verification skipped.
+
+### F-193 — Three proxy lanes were each green alone and failed 8 tests merged; one failure was a security regression that POOL24 had named in prose (BUG-0549 R1)
+- **What:** AU-PROXY (SP-63), POOL24 (kept connections) and HIST25 (history thread) all changed `fuzzlab/proxy/socketsender.py` / `server.py` in one window. They had a planned merge order (AU-PROXY, then POOL24) but no test of the merged behaviour.
+  - POOL24's keep check decided "nothing after the answer" from `recv_http_response`'s return value, which held trailing bytes only before SP-63.
+  - Its residual R1 said "when AU-PROXY lands, the two must agree", in prose.
+  - Its tests expected the pre-SP-63 reader (bytes back for unframeable answers, `b""` on a stall).
+  - AU-PROXY's framing tests used a fake history without HIST25's `submit`.
+- **Evidence:** `scratchpad/vpush8/` (verify on 3cfd912: 4139 passed, 8 failed); `scratchpad/lanes/INTEG/findings.md`; `test_bytes_after_a_framed_answer_never_leave_its_connection_kept` fails on d83876f's product files (lane INTEG proof run).
+- **Impact:** caught at merge by the harness, before shipping. On the merged tree, a connection whose upstream answered twice was kept. The stray answer was dropped unseen or, arriving later, read as the next request's answer (a response desync across tabs or identities).
+- **Status:** fixed on `integ/proxy-r1` (CC-PROXY-0029 merge integration; BUG-0549 and BUG-0543 integration sections; PA-0549(3a) proposed).
+
+### F-194 — HIST25's hand-over to the history could still turn a relayed 200 into a 502, the symptom BUG-0550 listed (item 3)
+- **What:** BUG-0550 identified "a write that failed raised into the proxied connection's handler (a 502 for that client)". HIST25 moved the write to a thread but left `ProxyEngine._record`'s hand-over (`history.submit`, whose first call starts a thread) uncontained. Any exception there reached the flow and became a 502, or replaced the upstream's own error. The lane fixed the instance it measured (a store write), not the class (an observing side channel failing the flow).
+- **Evidence:** `tests/test_proxy_rules_and_scope.py::test_a_history_failure_never_changes_the_clients_answer` fails on d83876f's `server.py` (relayed 200 -> 502). It was found when AU-PROXY's fake history without `submit` made four framing tests 502.
+- **Impact:** rare in production (a thread that cannot start, or a custom history), but it changes what a client receives for a flow the upstream answered. The Repeater's synchronous record has the same class.
+- **Status:** fixed for the engine on `integ/proxy-r1`; fixed for the Repeater on `integ/proxy-r2` (see the round-2 entry below); PA-0550(8) proposed.
+
+### F-195 — The integration lane fixed the engine's history hand-over and pinned the Repeater's identical one, in its own component, as "known and not fixed"
+- **What:** round 1 of lane INTEG wrote the rule "a history failure never changes the answer" (I1) and applied it at `ProxyEngine._record`. Its sweep found `Repeater.send` recording synchronously after the send, with the same failure: a store error replaced the response, and the web route answered 500 for a request the target had received. It pinned this with a strict xfail ("owner PROXY"), although the Repeater is the proxy component's own code, the lane held CC-PROXY-0029, and the fix was the same containment. This is the conduct F-162 records for the core seam, in the same round.
+- **Evidence:** `review_round2.md` P2-2 (the checker: `OperationalError: database is locked` after 10.1 s, route 500); `tests/test_proxy_repeater.py::test_a_history_failure_never_loses_the_repeaters_response` and `tests/test_web_repeater.py::test_a_history_failure_answers_the_repeaters_response_and_says_so` fail on 4e0c2c6's product files (lane INTEG round-2 proof run).
+- **Impact:** none pushed. The operator could be shown an error for a request the target had answered, and might resend it.
+- **Status:** fixed on `integ/proxy-r2` (CC-PROXY-0029 review round 2; BUG-0543 "Review round 2"; PA-0550(8) amended to every caller and to "fix, never pin, the lane's own instance").
+
+### F-196 — HIST25 registered its writer thread for the exit drain before starting it, so one failed start stopped the drain of every other writer
+- **What:** `_Pump.__init__` added the pump to `_LIVE` before `thread.start()`. When the start failed, the pump stayed in `_LIVE`, and at interpreter exit `_close_live_pumps` raised "cannot join thread before it is started" from it. The loop stopped, and the writers after it were never drained: their pending flows were lost uncounted. HIST25's review round 1 re-checked every requested stop (PA-0550(5)) but not a writer thread that fails to start, and the exit loop did not contain one writer's failure (PA-0086(2) applied to handlers, not to teardown).
+- **Evidence:** `review_round2.md` P2-3 (the checker's real `HistoryWriter` whose thread cannot start); `tests/test_proxy_history_writer_thread.py::test_a_writer_thread_that_cannot_start_never_stops_the_exit_drain` fails on 4e0c2c6's `history.py` (the refused pump is live) in the lane's round-2 proof run.
+- **Impact:** none pushed. It needs a thread start that fails (a host out of threads), and it loses other writers' flows at exit.
+- **Status:** fixed on `integ/proxy-r2` (CC-PROXY-0030 review round 2; BUG-0550 "Review round 2"; PA-0550(9) proposed).
+
+### F-197 — F-162's seam regression was wider than recorded: over TLS another request's answer was handed to a send at once, with no late timing
+- **What:** F-162 records the core seam's pooling regression as "a later stray answer is handed to the next send" (the checker's 300 ms late stray). The round-2 measurement through the real seam (urllib3 2.8.0) found that late timing is not needed. Behind a 10 000-byte answer in one TLS record, the stray stayed in the SSL object (43 bytes pending, the socket not readable, the reader's buffer empty), urllib3 kept the connection, and the very next send's answer was the stray. A plain stray in the answer's segment, a chunked, empty or 204 answer followed by another, and a lone CRLF were each dropped with the reader, and the connection was kept. POOL24 had relied on urllib3's reuse rule without measuring what it observes (CLAUDE.md rule 8).
+- **Evidence:** `scratchpad/lanes/INTEG/measure_seam_r2.before.log` (export of 4e0c2c6: `TLS: 10000-byte answer then stray, one record: ... '/after': b'stray'`); `tests/test_http_pooling.py::test_a_stray_answer_held_by_tls_never_leaves_its_pooled_connection` fails on 4e0c2c6's `bodyread.py` (lane INTEG round-2 proof run).
+- **Impact:** none pushed. Had it shipped, any TLS target that answers once too often would hand one probe's or identity's answer to the next send of the same pool.
+- **Status:** fixed on `integ/proxy-r2` (CC-CORE-0075 review round 2; BUG-0549 "Review round 2": SP-60's pools keep a connection only after an exactly framed exchange). This closes F-162's open status; PA-0549(3b), (3c) proposed.
+
+### F-198 — The round-2 fix defined a function named like SP-56's owner, and the first targeted run failed the owner-defined-once guard
+- **What:** to hook http.client's response creation, the round-2 fix wrote `def response_class(...)` in SP-60's watched connection class (the attribute name http.client calls). `response_class` is also the name of SP-56's owner (`core/comparability.py::response_class`), and `tests/test_shared_primitives.py::test_every_owner_is_defined_once` fails on any function so named outside its owner's module. I knew the guard was in the selection (I added it for this change) but did not run it on the code before committing 5078fc5.
+- **Evidence:** `scratchpad/lanes/INTEG/targeted_r2.log` (5078fc5: 1 failed, 2340 passed, 10 xfailed; `fuzzlab/core/bodyread.py:593: response_class (owned by fuzzlab/core/comparability.py)`); fixed in d897885 (the factory is `_framed_response`, bound to the attribute); `targeted_r2b.log`.
+- **Impact:** none pushed; one extra targeted run on the shared test host.
+- **Status:** fixed on `integ/proxy-r2` (d897885).
+
+### F-199 — The crawl batch's merge kept AU-DISCO's per-worker generation counter for the execution key, against DISCO4's statement that the slot reads the run-wide session generation
+- **What:** resolving DISCO4 onto AU-DISCO, the merge agent moved AU-DISCO's `self._generation += 1` into `_replace_context` and kept feeding that per-worker counter to `execution_key`. DISCO4's CC-CRAWL-0060 note said the slot reads `_Shared.auth.generation` (the context's `_ctx_generation`). A reinstall of one session split it into two state spaces for one worker, and a worker adopting a session another worker recovered could read under a key recorded on the lost generation, so the live session's states passed as known and were not explored. My merge brief asked both sides' behaviour to hold but did not name the contract each lane stated for the other.
+- **Evidence:** the crawl batch's semantic review (`wf_14ec135b-1c2`, `scratchpad/audit/sim/gen_slot.py`); `tests/test_disco_session_loss.py::test_the_execution_keys_generation_is_the_session_each_worker_carries` fails on f025c2c at the reinstall step.
+- **Impact:** none pushed; authenticated runs with more than one worker only.
+- **Status:** fixed at the merge (6fe84ed: `Explorer.reading` keys by `_ctx_generation`); BUG-0552's merge section, CC-CRAWL-0060, FR-CRAWL-31 amended.
+
+### F-200 — INTEG's round-2 sweep of a writer thread that cannot start covered the exit drain but not the web proxy's stop
+- **What:** round 2 (1fdd618) fixed `_Pump` registering before its thread started and contained the exit loop (PA-0550(9)), but `HistoryWriter.aclose`, which starts the thread for a writer that buffered flows with `record`, still let the start's `RuntimeError` out: the buffered flows and the run's end were lost to the stop. The round's sweep listed exit registries and threads registered before start, not every caller of `_start_pump`.
+- **Evidence:** the round-2 fix check (`wf_23479582-8cb`, P2-3); `tests/test_proxy_history_writer_thread.py::test_a_stop_whose_writer_thread_cannot_start_still_writes_what_it_buffered` fails on 910047a.
+- **Impact:** none pushed; it needs a host out of threads.
+- **Status:** fixed at the merge (0cbae9c: `aclose` closes on the caller's thread); BUG-0550's merge section, CC-PROXY-0030.
