@@ -64,6 +64,13 @@ Newest first.
   - [x] FR-CRAWL-42 added; §5 `discovered_requests` edited in place; FR-AUD-22 edited in
     place — done
 - Effectiveness (assessed <date> or pending): pending.
+- Review round 1 (2026-10-21, one reviewer and a skeptic on 43231dc; applied by the
+  orchestrator at merge): `_record_dry` (the FR-CRAWL-26 dry-submit and blocked path)
+  ignored the writer's returned reason, so a refused dry write was neither stored nor
+  counted. It now counts it in `requests_not_recorded` and logs it, as `_observe` does.
+  Test: `tests/test_capture_surrogates.py::test_a_dry_write_the_store_refuses_is_counted_never_lost`
+  (count 0 on 43231dc, 1 after). The writer's helper named in the placement line was
+  folded back into `record_request` (43231dc).
 
 ### CC-CRAWL-0058 — The capture proxy builds records off its event loop, bounds its queue in bytes with backpressure, and counts every loss (BUG-0548, audit defect 22) (2026-10-21)
 - Placement: pre-assigned to lane DISCO22 (audit defect 22); independent of AU-DISCO's

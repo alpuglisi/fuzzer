@@ -18,6 +18,18 @@ Format per entry:
 
 ---
 
+## 2026-10-21 — crawler and auditor, captured requests (a body holding a lone surrogate was lost at the write, and the import failed on one; BUG-0554)
+- **Symptom:** `StorageManager.record_request` raised `UnicodeEncodeError` for `{"a\ud800": 1}`, `{"action": "x\ud800"}` and `{"q": "\ud800"}` (lane SPIDER9's reproduction, on 33b423e). navguard's observer catch logged it at info; the request was not stored and not counted in `requests_not_recorded`. `store_adapter.import_spider` raised on a `discovered_requests` row holding such a body, and `import_disco` on such a captured body, failing the whole import.
+- **Root cause:** `json.loads` decodes a lone `\udXXX` escape to a surrogate code point, which SQLite's bind and a strict UTF-8 encode refuse. The writer bound `json.dumps(..., ensure_ascii=False)` text (the body, and `apiop.operation_key`'s text through the signature prefix) and digested key paths with a strict encode (`apiop.row_signature`, the GraphQL digest), under a totality claim tested only with well-formed text. The writer had no reason for a failed write, so the exception reached a guard that logs instead of counting. The importer bound such leaves (`jsonbody.encode_entries`, the parameter name and example).
+- **Remediation:**
+  - `apiop.storable_json` (each surrogate as its JSON escape; other text byte-identical) for `body_json` and the operation key; `apiop._digest` (`surrogatepass`) for every digest. No stored text or signature changes for a body that could be stored before.
+  - `record_request` never raises: a refused write is rolled back and returned as `write failed (<error class>)`, counted by `_observe`. The marker scrub still reads the raw text.
+  - `store_adapter.captured_request` refuses a body with a field holding a lone surrogate, counted `request_refused`, for both importers.
+  - Guards: no SQLite bind takes `ensure_ascii=False` text or a strict encode (whole package, two reviewed allowances); no strict encode in `tools/apiop.py` or the writer; every row of BUG-0554's sweep is settled or pinned.
+  - Pinned (strict xfail, owner CORE): `core.redaction.redact_json_body` raises on a body with a sensitive field and a lone surrogate.
+  - References: CC-CRAWL-0061, CC-AUD-0057, FR-CRAWL-42, FR-AUD-22, BUG-0554, PA-0554.
+- **Status:** Fixed (one pinned instance in the redaction boundary, open)
+
 ## 2026-10-21 — host (the disk filled while twelve lanes ran; harness runs died with ENOSPC)
 - **Symptom:** from about 06:00Z `df /` showed 0-130 MB free; harness runs of the POOL24 merge, DISCO4, HIST25 and SURROGATE died writing their junit report (`OSError: [Errno 28] No space left on device`), one at 48% with mass failures.
 - **Root cause:** twelve concurrent lanes and their reviewers each kept scratch copies of the tree, measurement captures (one lane's 1.6 GB), pytest temp directories and finished worktrees, with no one watching free space; package and build caches (go-build, uv, composer, pip) took another 1.9 GB.

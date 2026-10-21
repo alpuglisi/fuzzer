@@ -1323,7 +1323,8 @@ tracked in the requirements files, not here.
       `discovered_requests`, lane I; absent in old spider DBs). Refused at import:
       DELETE and other methods, PUT/PATCH without `--fuzz-json-writes`, destructive and
       transaction URLs, credential-change bodies (`credential_change_rule`, shared with
-      forms), settings fields. Password leaves are never points, are sent `""` and
+      forms), settings fields, and a body with a field holding a lone surrogate (no store row
+      can hold it; BUG-0554, both importers). Password leaves are never points, are sent `""` and
       isolate the path (FR-FUZZ-44); object selectors, sensitive and identifier-like
       leaves are pinned. Every sender refuses a non-enumerated DELETE at send;
     - an SPA hash route's query (`/#/search?q=`) is a `fragment` point on the endpoint
@@ -1390,7 +1391,11 @@ tracked in the requirements files, not here.
       a body whole); an AST guard keeps every writer of the table on this key
       (PA-0546). The importer still binds a parameter name to the first captured
       request of its endpoint (audit defect 8, pinned), so an input a second operation
-      shares by name is not its own point yet;
+      shares by name is not its own point yet. Since FR-CRAWL-42 (CC-CRAWL-0061,
+      BUG-0554) the writer is total: a body holding a lone surrogate is stored
+      losslessly (`apiop.storable_json`: each surrogate as its JSON escape, any other
+      text byte-identical), every key digest encodes with `surrogatepass`, and a write
+      the store refuses is returned as a reason and counted in `requests_not_recorded`;
     - `--submit-spa-forms [ROUTE …]` (off by default) fills and clicks eligible forms
       once (`spa.form_refusal`, 50 per crawl); a password form only in a fresh
       unauthenticated context of the same guarded browser; in an authenticated crawl

@@ -2222,6 +2222,10 @@ class LocalSpider:
         if why is None:
             self.spa_counts["requests_captured_dry" if source == "dry-submit"
                             else "requests_captured_blocked"] += 1
+        elif why != "duplicate":            # counted, as `_observe` does (BUG-0554)
+            self.spa_counts["requests_not_recorded"] += 1
+            logging.info(f"captured request {request.method} "
+                         f"{request.url.split('?', 1)[0]} not recorded ({why})")
 
     def _fill_controls(self, page, form):
         """Fill ``form``'s typed controls with the fillers (a sensitive non-password

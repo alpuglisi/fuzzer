@@ -3,6 +3,36 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0057 — The captured-request import refuses and counts a body holding a lone surrogate instead of failing the import (FR-AUD-22, BUG-0554) (2026-10-21)
+- Placement: lane SURROGATE (item AU-REQID78), base 33b423e, with CC-CRAWL-0061 (the
+  same change). The lane held no AUD number; CC-AUD-0057 was assigned at merge.
+- Change: `tools/store_adapter.py::captured_request` (the one import decision, for
+  `import_spider` and `import_disco`) refuses a body whose field name or string value
+  holds a lone surrogate, with the reason "a field holding a lone surrogate (not
+  storable text)", counted in `request_refused`. New private `_storable_text(value)`:
+  False for a string a strict UTF-8 encode refuses.
+- Impact (other components / project):
+  - Before, `_store_request` bound such a leaf (`jsonbody.encode_entries`'s
+    `ensure_ascii=False` text into `form.entries`, the name and example into
+    `parameter`) and raised `UnicodeEncodeError`, failing the whole import:
+    `import_disco` on a captured body holding one (disco's capture keeps the body as
+    sent), and `import_spider` once CC-CRAWL-0061 stores such a row.
+  - Now such a request is not imported (counted), and the rest of the import proceeds.
+    No other refusal or stored value changes. The point set changes only for runs whose
+    import failed before.
+  - CRAWL: CC-CRAWL-0061 stores such bodies losslessly (FR-CRAWL-42).
+- Risk (low): one more refusal, on input no store row can hold. The input is lost to
+  fuzzing but counted; carrying it would need the store's text columns to hold the
+  escape (`jsonbody`, the parameter name and example, the senders), which is not done
+  here.
+- Deliverables:
+  - [x] `captured_request` refusal and `_storable_text` — done
+  - [x] tests: `tests/test_capture_surrogates.py::test_the_spider_import_refuses_and_counts_a_captured_lone_surrogate`
+    and `::test_the_disco_import_refuses_and_counts_a_lone_surrogate_instead_of_failing`
+    (the disco one fails on 33b423e with `UnicodeEncodeError`) — done
+  - [x] FR-AUD-22 edited in place (the refusal list) — done
+- Effectiveness (assessed <date> or pending): pending.
+
 ### CC-AUD-0053 — The auditor ends a failed load through SP-01's owner (BUG-0522) (2026-10-19)
 - Placement: pre-assigned before CC-AUD-0054 and CC-AUD-0055 were written (PA-0031), so it lands above those higher-numbered entries.
 - Change: `fuzzlab/tools/fetcher.py` `ContentFetcher.fetch`'s `except` calls

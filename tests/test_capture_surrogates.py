@@ -182,6 +182,31 @@ def test_a_write_the_store_refuses_is_counted_never_raised(tmp_path, caplog):
         == [API, API + "/2"]
 
 
+def test_a_dry_write_the_store_refuses_is_counted_never_lost(tmp_path, caplog):
+    """The FR-CRAWL-26 dry-submit path (`_record_dry`) counts a write the store refuses
+    as `_observe` does: ``requests_not_recorded`` with its reason, logged (BUG-0554
+    review round 1). Before, the returned reason was ignored and the request lost."""
+    import logging
+
+    from fuzzlab.tools.spider import LocalSpider
+    db = str(tmp_path / "s.db")
+    sp = LocalSpider(PAGE, db_name=db, engine="requests")
+    other = sqlite3.connect(db, isolation_level=None)
+    try:
+        sp._record_dry(PAGE, _Req(API, b'{"q": "\\ud800"}'), "dry-submit")
+        assert sp.spa_counts["requests_captured_dry"] == 1
+        sp.storage.conn.execute("PRAGMA busy_timeout = 0")
+        other.execute("BEGIN EXCLUSIVE")
+        with caplog.at_level(logging.INFO):
+            sp._record_dry(PAGE, _Req(API + "/2", b'{"n": 1}'), "dry-submit")
+        assert sp.spa_counts["requests_not_recorded"] == 1
+        assert "not recorded (write failed (OperationalError))" in caplog.text
+        other.execute("ROLLBACK")
+    finally:
+        other.close()
+        sp.storage.close()
+
+
 # --- the consumers of the rows the fix lets through -----------------------------------
 
 def test_the_spider_import_refuses_and_counts_a_captured_lone_surrogate(store, tmp_path):

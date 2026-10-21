@@ -1340,3 +1340,21 @@ Juice Shop lab is complete.
 - **Evidence:** `df /` at 07:30Z: 86 MB free of 252 GB (39 GB used); the POOL24 merge verification (`scratchpad/vpush7.log`: junit ParseError) and the DISCO4, HIST25 and SURROGATE lane reports (ENOSPC); ERROR_LOG 2026-10-21 host entry.
 - **Impact:** four harness runs lost (one about 25 minutes in) on a serialised test host; two lanes' revisions left without a verdict.
 - **Status:** space freed (4.9 GB); the lost verifications are re-run at merge. Practice: a dispatch of many lanes includes a disk check at each merge and a cleanup rule for lanes.
+
+### F-155 — F-134 fixed: the capture writer is total, and a lone surrogate is stored losslessly
+- **What:** status update for F-134. `StorageManager.record_request` now writes `body_json` and the operation key with `apiop.storable_json` and every digest with `surrogatepass`, and returns a failed write as a counted reason instead of raising.
+- **Evidence:** `tests/test_capture_surrogates.py`; the defect tests fail on 33b423e (BUG-0554, CC-CRAWL-0061).
+- **Impact:** as F-134.
+- **Status:** fixed in CC-CRAWL-0061 (BUG-0554, PA-0554).
+
+### F-156 — The captured-request importer failed the whole import on a body holding a lone surrogate, and the agent's apiop claimed totality without a test
+- **What:** the importer the agent built (forms phase 3, CC-AUD-0035; disco import, D70) bound a captured leaf's text into the store without checking it could be stored: `_store_request` binds `jsonbody.encode_entries` (`ensure_ascii=False`) and the leaf's name and example. A captured body holding a lone surrogate made `import_disco` raise `UnicodeEncodeError` and lose the whole import; `import_spider` would have done the same the moment the capture writer stored such a row (BUG-0554's own fix, before its consumer check). Separately, CC-CRAWL-0057 (lane SPIDER9) wrote "Everything here is total on its input" in `apiop`'s docstring and made one digest total with `surrogatepass`, while two strict encodes in the same module (`row_signature`, the GraphQL digest) and the writer's binds stayed as they were: a sweep by function, not by mechanism.
+- **Evidence:** `scratchpad/lanes/SURROGATE/scripts/importer.py` on 33b423e (import raises); `tests/test_capture_surrogates.py::test_the_disco_import_refuses_and_counts_a_lone_surrogate_instead_of_failing` fails on 33b423e; BUG-0554's root-cause analysis (why 3).
+- **Impact:** a disco run whose capture held such a body could not be imported at all (no points, no findings from that run). The spider path was silent loss instead (F-134). Found by lane SURROGATE while checking BUG-0554's fix against its consumer.
+- **Status:** fixed in CC-CRAWL-0061 and CC-AUD-0057: the import decision refuses and counts such a body. The redaction boundary's strict re-encode (`core.redaction.redact_json_body`) is pinned, not fixed: open, owner CORE.
+
+### F-157 — Lane SURROGATE's first commit renamed the capture writer's work function and broke the PA-0100 guard's non-vacuity check
+- **What:** the first commit of BUG-0554's fix (e3182d2) moved `StorageManager.record_request`'s work into a new `_record_request` and kept a thin total wrapper. `tests/test_storage_redaction.py::test_the_spiders_capture_writer_is_seen_by_the_guard` proves the PA-0100 guard on the real writer by removing its redactor and expecting the guard to name `record_request`; it named `_record_request`. The lane's targeted run did not include that test file; the harness did.
+- **Evidence:** `scratchpad/lanes/SURROGATE/vc` (first run): `TOTAL 104 file(s): 3915 passed, 1 failed, 0 errors, 5 skipped, 33 xfailed`, the one failure that test.
+- **Impact:** none outside the lane: caught by the harness before merge. The guard itself still covered the new function; only its non-vacuity check named the old one.
+- **Status:** fixed in the lane's second commit: the work stays in `record_request`, inside one `try` (the writer is still one function, as the PA-0100 and PA-0546 guards expect). The second harness run (vc3) was aborted by the host's full disk (ENOSPC from 36%), so this commit has no green harness verdict yet.

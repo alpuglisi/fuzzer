@@ -1060,8 +1060,8 @@ fuzzer.
     escape: an escape's hex digits would end the token before a marker.
   - **Never raises.** A write the store still refuses (a lock, a full disk, anything
     raised on the way) is rolled back and returned as `write failed (<error class>)`;
-    the passive capture counts it in `requests_not_recorded` and logs it, as every other
-    reason. Nothing reaches the browser guard's observer catch, which only logs.
+    the passive capture and the dry-submit path (`_record_dry`) count it in
+    `requests_not_recorded` and log it, as every other reason. Nothing reaches the browser guard's observer catch, which only logs.
   - **Its reader.** The importer refuses such a body, counted (FR-AUD-22); a field
     holding a lone surrogate cannot be a store row.
   - **Known gap, pinned** (strict xfail in `tests/test_capture_surrogates.py`): a body
