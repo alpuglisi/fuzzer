@@ -37,8 +37,11 @@ def discovered(tmp_path_factory):
     with DiscoApp() as other, DiscoApp(other=other.url) as app:
         with CaptureProxy([app.url], out=out / "capture.jsonl", profile="anon") as proxy:
             try:
+                # bounded by its 80 actions; the deadline is only a safety net (BUG-0539:
+                # each state's own work takes the 80, measured 229 s unloaded, so 240 s
+                # could cut the harvest under the harness's parallel load)
                 report = Explorer(app.url, scope_urls=[app.url], proxy=proxy.endpoint,
-                                  options=ExploreOptions(max_actions=80, deadline_s=240),
+                                  options=ExploreOptions(max_actions=80, deadline_s=480),
                                   actions_log=out / "actions.jsonl").run()
             except PlaywrightError as exc:
                 if "Executable doesn't exist" in str(exc) or "launch" in str(exc).lower():
@@ -64,23 +67,33 @@ def test_the_hidden_api_surface_is_reached(discovered):
     assert discovered["report"].submissions >= 1
     assert "/help" in paths                     # a page that navigates away under the reads
     # one-time and dismissed UI, a hash router and state classes never make a state
-    # unrestorable (BUG-0501: Juice Shop's start page was, and nothing was explored)
-    assert discovered["report"].unrestorable == 0
-    assert discovered["report"].transient_dropped >= 1
+    # unrestorable (BUG-0501: Juice Shop's start page was, and nothing was explored).
+    # FR-CRAWL-33 (BUG-0539): the welcome dialog is declared optional from a fresh
+    # second load, the notice once its own control removed it -- never by shrinking a
+    # recorded contract; the only unresolved states are those a POST reached (explored
+    # in place, never replayed)
+    report = discovered["report"]
+    assert report.budget_hit != "deadline", report.budget_hit
+    assert set(report.unresolved) <= {"unsafe-step"}, report.unresolved
+    assert report.optional_declared.get("first-visit", 0) >= 1
+    assert report.optional_declared.get("dismissed", 0) >= 1
+    assert report.live_states >= 1
 
 
 def test_a_search_box_is_submitted_by_enter_and_chrome_is_acted_on_once(discovered):
     """BUG-0502: a form-less search box (no submit control) is filled and Enter pressed;
     the toolbar holding it is on every route, and its button -- which shares the search
-    box's container, so it looks like a submitter -- is acted on once in the whole run,
-    not once per state. A submission counts as sent only when the filled values reach a
-    request."""
+    box's container, so it looks like a submitter -- is not acted on once per state.
+    FR-CRAWL-32 (BUG-0539): it is deprioritised where it was taken before, and skipped
+    once states on two routes gave it the same effect: at most twice in the run. A
+    submission counts as sent only when the filled values reach a request."""
     searches = [p for p in discovered["app"].paths() if p == "/api/search"]
     assert searches
     actions = [json.loads(ln) for ln in (discovered["out"] / "actions.jsonl").open()]
     assert any(a["kind"] == "enter" for a in actions)
     theme = [a for a in actions if a["label"] == "Theme"]
-    assert len(theme) == 1, theme
+    assert 1 <= len(theme) <= 2, theme
+    assert len({a["route"] for a in theme}) == len(theme)       # never twice on a route
     report = discovered["report"]
     assert 1 <= report.submissions_sent < report.submissions
     assert report.chrome_skipped >= 1
@@ -267,9 +280,10 @@ def test_the_run_directory_feeds_auto(discovered, tmp_path):
 
 def test_two_workers_reach_the_same_surface_without_repeating_a_step(tmp_path):
     """`ExploreOptions.workers` (PAR-DISCO): two browsers share one frontier. Every
-    endpoint the one-worker run reaches is reached, no state is lost to a restore, no
-    (route, element, step) is taken twice, and every captured request carries an action
-    id one of the workers issued."""
+    endpoint the one-worker run reaches is reached, no state is lost to a restore (but
+    the ones a POST reached, FR-CRAWL-33), no work item -- (state, element, step),
+    FR-CRAWL-32 -- is taken twice, and every captured request carries an action id one
+    of the workers issued."""
     _require_real()
     from playwright.sync_api import Error as PlaywrightError
 
@@ -292,9 +306,11 @@ def test_two_workers_reach_the_same_surface_without_repeating_a_step(tmp_path):
         assert any(p.startswith("/api/tasks/") for p in app.paths("PUT"))
         assert "/api/hooks/notify" in app.paths("POST") and "/api/search" in paths
         assert "/api/account/remove" not in paths and other.hits == []
-    assert report.unrestorable == 0 and report.errors == 0
+    assert set(report.unresolved) <= {"unsafe-step"}, report.unresolved
+    assert report.errors == 0
     actions = [json.loads(ln) for ln in (tmp_path / "actions.jsonl").open()]
-    steps = [(a["route"], a["signature"], a["occurrence"], a["kind"]) for a in actions]
+    steps = [(a["state"], a["signature"], a["occurrence"], a["kind"]) for a in actions
+             if a["kind"] != "load"]                 # a harvest load is no work item
     assert len(steps) == len(set(steps))
     # one shared counter: two workers never log the same action id
     assert len({a["seq"] for a in actions}) == len(actions)

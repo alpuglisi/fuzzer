@@ -3,6 +3,117 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0055 — Disco: a state is its execution key, work is per state and survives a failure, and a restore never accepts or weakens a wrong state (BUG-0539) (2026-10-21)
+- Placement: pre-assigned to AU-DISCO (audit defects 1, 2 and 3), with FR-CRAWL-31..33
+  and SP-62; base 08e3eaa.
+- Change:
+  - **`disco/fingerprint.py` (defect 1, FR-CRAWL-31).**
+    - New `execution_key` (SP-62): hash of `execution_route` (origin, the path as
+      served, every query pair with its value, a SPA route's query pairs; a sensitive
+      name's value replaced), `element_multiset` (signature counts),
+      `workflow_markers` (an element's `sel`: a select's value, checked state,
+      `aria-selected` / `aria-current` / `aria-checked`; a named hidden input's short,
+      non-token value; a non-interactive `aria-current`'s position) and the session
+      generation.
+    - `state_fingerprint` is unchanged and documented as the structural key, for
+      scheduling and folding only.
+  - **`disco/explore.py`.**
+    - The enumerator reads each element's `sel`; `_MARKS_JS` reads the page-level
+      markers. `Explorer.reading` / `fingerprint` return a `Reading` (both keys, the
+      elements, the multiset, the markers). `known` holds execution keys; `structures`
+      holds structural keys for the harvest alias.
+    - `Frontier`: a new route, then a new layout, then a variant of a known layout; the
+      per-route bound counts refusals in `excluded`, reported as `coverage_excluded`
+      (with `route_capped`); `admit` counts a state explored in place. States past
+      `max_states`, or drained when `max_actions` is spent: `states_over_budget`.
+    - **Work (defect 2, FR-CRAWL-32):** `work_key` = (execution key, signature,
+      occurrence, kind); `WorkLedger` holds each item's status (pending, running,
+      succeeded, refused, retryable, failed, equivalent) and each step's observed
+      effects. `_pending` puts steps taken in another state last (`deprioritised`). A
+      step is skipped (`chrome_skipped`, `equivalent`) only after equal effects
+      (requests by method and folded route; transition) in states on two folded routes.
+      A Playwright error, a step that could not act, or a missing element is a failed
+      attempt: retried after a restore, up to `max_action_attempts` (3), then `failed`
+      (`actions_retried`, `actions_failed`). `act` returns `ACTED` / `ACT_REFUSED` /
+      `ACT_FAILED`. `seen`, `done` and `sig_routes` are gone.
+    - **Restore (defect 3, FR-CRAWL-33):** `State` records its contract (`core` as a
+      multiset, `markers`) and never changes it; `contract_mismatch` refuses a route,
+      core (a proper subset, or fewer of a control) or marker mismatch. `restore`
+      refuses a path holding an unsafe step before navigating, fails on a missing replay
+      step unless its element is declared optional (`replay_skipped_optional`), and on
+      a replay that issued a non-idempotent request (`replay-mutated`). Each step
+      records `safe` from the requests issued while it ran (`_watch`, filled by
+      `_on_request`); a state reached by an unsafe step, or with one in its path, is
+      explored in place (`_admit` live, `max_live_depth` 3, `live_states`). A failed
+      restore marks the state `unresolved` (`unresolved` by reason, `unrestorable`;
+      `steps_abandoned`).
+    - **Declared optional features:** `_seed` reads a fresh second load of the start
+      URL (`_first_visit`: `restore` with an empty path) and declares what only the
+      first load held (`first-visit`); `_dismissal` declares what a click removed
+      altogether, with no navigation and nothing new, when the clicked element was
+      among it (`dismissed`). `optional_declared` counts them.
+    - The rebuilt context after a lost session bumps the worker's session generation.
+    - A step's effect and its "changed the page" are judged against the page just
+      before it (`_observe`, `now`), and a page a restore accepted is added to `known`
+      (`_seen_as`): measured on the e2e fixture, the start state recorded with its
+      first-visit dialog made every step on its restored page a "transition" to a new
+      state, and the header buttons' effects never matched.
+    - Scheduling: once no new route or layout is queued, up to `HARVEST_PER_VARIANT`
+      (4) harvest loads and one variant of a known layout take turns (`_next_state`,
+      `Frontier.priority`, `_Shared.harvest_credit`). Measured on the e2e fixture: with
+      the multiset, a list growing a row per click (another tasks box, another dialog)
+      filled the frontier with variants and the 240 s deadline came before the harvest
+      started; with one load per variant it came after two script routes.
+    - A perturbation pass is keyed on the form's field *set* (measured: a second
+      identical dialog started a whole new pass of six submissions).
+    - `_gather` marks a body read only after reading it, and `_seed` gathers the first
+      load's bodies before its second load (measured: the second load let the first
+      load's script go, its read failed and consumed it, and no script route or code
+      segment was found).
+    - `actions.jsonl` lines carry `replay_safe`; `explore.json` gains the counters
+      above and `work`, and loses `transient_dropped`.
+  - **Tests.** New `tests/test_disco_state_identity.py` (pure: both keys, markers, the
+    frontier's bound and order, the ledger, the contract, the replay on fakes, the
+    SP-62 AST guard and its synthetic offenders) and
+    `tests/test_disco_state_identity_browser.py` (five real-browser flows on loopback
+    pages). Changed: `tests/test_disco_e2e.py` (the old contract's assertions:
+    `transient_dropped`, Theme once, no unrestorable state, per-route step uniqueness;
+    the module run's safety deadline 240 -> 480 s, with an assertion that the deadline
+    did not end it: the run is bounded by its 80 actions, which each state's own work
+    now uses up, measured 229 s unloaded) and `tests/test_disco_harvest.py` (the alias
+    reads `structures` and a `Reading`).
+- Impact (other components / project):
+  - Store and file contracts: no store table changes. `actions.jsonl` gains a key and
+    `explore.json` gains and loses report keys; their readers
+    (`store_adapter.import_disco`, `tools.observe`, `disco.livetrace`) read none of the
+    changed keys (searched: `new_state`, `"state"`, `transient_dropped`,
+    `chrome_skipped`, `route_capped`, `unrestorable` over `fuzzlab/` and `tests/`). An
+    older run directory imports as before.
+  - AUD (FR-AUD-28's trace) reads `actions.jsonl` through `observe.DiscoActionLines`:
+    unchanged.
+  - A run takes more actions per state than before (each state's own work, then
+    deprioritised repeats) and makes more states (multiset, markers); the per-route
+    bound and the budgets cap both, and every cap is reported.
+- Risk (medium): exploration order and counts change for every disco run.
+  - Mitigation: the e2e fixture (third-party SPA shapes, BUG-0501/0502/0505) still
+    reaches every endpoint it did; a state reached by a POST is explored in place
+    rather than lost.
+  - Residuals (BUG-0539): R1 data held in a closure; R2 background non-idempotent
+    requests make steps unsafe (not measured on a third-party app: no lab in this
+    lane, PA-0501(1)); R3 restores do not reset server state or storage; R4 first-visit
+    UI off the start URL; R5 a list growing per submission fills its route's bound.
+- Deliverables:
+  - [x] `fingerprint.execution_key` and its parts; `state_fingerprint` documented as
+    structural — done
+  - [x] `WorkLedger`, `work_key`, retries, deprioritising, equivalence by effect — done
+  - [x] the recorded contract, declared optional features, strict replay, unsafe steps
+    never replayed, in-place exploration, unresolved reasons — done
+  - [x] the two new test files; the e2e and harvest tests moved to the new contract —
+    done
+  - [x] FR-CRAWL-19 amended in place; FR-CRAWL-31..33 added; section 5's file
+    contracts — done
+- Effectiveness (assessed <date> or pending): pending.
+
 ### CC-CRAWL-0054 — The JSONL tail caps a line while reading it; the contract runner reads bounded and matches contract patterns in a killable worker (BUG-0536) (2026-10-20)
 - Placement: pre-assigned to AU-BOUNDED (audit defects 23 and 27, with the disco and
   spider half of 21); the core reader is CC-CORE-0072, the senders CC-FUZZ-0109.
