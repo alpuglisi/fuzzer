@@ -126,6 +126,16 @@ class Request:
     #: identity's session: ``"anonymous (out of origin)"`` (FR-SESS-20, CC-CORE-0054).
     #: Set by ``prepare``; the sender that built the request reads it after the send.
     session_decision: str | None = None
+    #: The generation of the session state ``prepare`` applied to this request
+    #: (FR-SESS-23, CC-CORE-0070): the session addon's ``observe`` ignores an answer from
+    #: another generation. None: no session was applied, or the addon does not say.
+    session_generation: int | None = None
+    #: True when ``prepare`` applied a session it already knew to be lost and could not
+    #: yet recover (FR-SESS-23's re-login budget spent on an identity with no stable
+    #: protected resource; CC-CORE-0070). The sender that built the request carries it
+    #: to its reader, and the oracle reads any answer to such a request as not
+    #: comparable (FR-FUZZ-65). The seam itself never reads or changes either field.
+    session_lost: bool = False
 
 
 @dataclass

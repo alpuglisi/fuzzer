@@ -36,7 +36,16 @@ plugin registry. It is the layer that makes the store the integration bus.
   FR-SESS-20:)* `Request.session_decision: str | None = None` is a declared field: the
   session addon's `prepare` sets it (`"anonymous (out of origin)"` when it withheld the
   identity's session) and the sender that built the request reads it after the send.
-  The seam itself never reads or changes it.
+  The seam itself never reads or changes it. *(CC-CORE-0070, FR-SESS-23, BUG-0533:)*
+  `Request.session_generation: int | None = None` is a declared field beside
+  `session_decision`: the session addon's `prepare` sets it to the generation of the
+  session state it applied, and the addon's `observe` reads it to ignore an answer from
+  another generation. *(CC-CORE-0070, FR-FUZZ-65, decision D′:)* `Request.session_lost:
+  bool = False` is declared beside it: `prepare` sets it when the state it applied is one
+  it already knew to be lost and could not yet recover (FR-SESS-23's D window), and the
+  sender that built the request carries it to its reader (`Probe.session_lost`), whose
+  layer 1 reads any answer to it as not comparable. The seam itself never reads or
+  changes either field.
 - **FR-CORE-7** Provide a plugin registry (entry points plus hooks).
 - **FR-CORE-8** Provide a generic cross-run scalar time-series sink,
   `metric_series(run_id, source, key, step, ts, value)`, for per-step

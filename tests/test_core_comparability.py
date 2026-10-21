@@ -129,18 +129,12 @@ CLASSIFIED = frozenset({401, 403, 407, 429, 451, 502, 503, 504})
 #: it decides (FR-CORE-507). Keyed by module and enclosing qualified name; a new site
 #: fails until it is either routed through SP-56 or reviewed here, and a stale row fails.
 ALLOWED = {
-    ("fuzzlab/session/manager.py", "SessionManager.verify_live"):
-        ({401, 403}, "the liveness probe after a login (defect 6's item routes it)"),
     ("fuzzlab/session/manager.py", "SessionManager._login"):
         ({401, 403}, "a Basic challenge, and a failed login response"),
     ("fuzzlab/session/manager.py", "SessionManager._discover_login_form"):
         ({401}, "a 401 at the base URL means Basic auth"),
-    ("fuzzlab/session/manager.py", "SessionManager._verify_authenticated"):
-        ({401, 403}, "session verification (defect 6's item routes it)"),
     ("fuzzlab/session/detect.py", "detect_session_credential"):
         ({401}, "a Basic ``WWW-Authenticate`` challenge"),
-    ("fuzzlab/session/detect.py", "detect_logout"):
-        ({401, 403}, "logout detection, until defect 6's item routes it through SP-56"),
     ("fuzzlab/oracle/strategies.py", "JwtAlgNoneConfusionStrategy.confirm"):
         ({401, 403}, "its control's rejection is the evidence, not a comparison"),
     ("fuzzlab/tools/blind_sqli_fuzzer.py", "run_fuzzing_cycle"):

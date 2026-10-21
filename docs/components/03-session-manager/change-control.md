@@ -3,6 +3,130 @@
 Component code: **SESS**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SESS-0029 — A forbidden answer is never, by itself, a lost session (FR-SESS-23, BUG-0533) (2026-10-20)
+- Placement: AU-SESS403 (audit defect 6); design record
+  `DRAFT-AU-SESS403.md` (revision 3, the owner's decisions D and D′, review round 4's
+  follow-ups; §13 records the implementation's verification).
+- Change: `fuzzlab/session/detect.py`, `fuzzlab/session/manager.py`,
+  `fuzzlab/session/state.py` (about +700 / -90 lines with docstrings).
+  - **`detect_logout`** decides through SP-56 (`core.comparability.response_class`):
+    an auth failure for the request as sent and not for an uncredentialed one (a
+    credentialed 401, a login redirect; never a 407), or this session's login form at
+    200 (never for Basic). No classified status literal. New keywords `credentialed`,
+    `credential_submission`. **`request_entry_names`** (query, urlencoded, JSON leaves;
+    64 KiB; total).
+  - **`health_verdict`** (public, total), **`check_health`** (single flight under a
+    per-(host, identity) health lock; the cover taken at the GET's **send**; a TTL cache
+    keyed by generation and URL key, bypassed by a foreign header; compare-and-set on
+    the current state after the GET, STALE recording nothing), **`_health_get`** (the
+    seam's plain `requests` per hop, 15 s per hop, `_navigate(stop_at=)`, a live answer's
+    rotated cookie adopted, an unapproved hop raising).
+  - *(Review round 5, blocker 2.)* The cache is two dict lookups, only the latest live
+    generation's entries kept: a loss shape is covered by a live verdict of its
+    generation and URL key unless it carries a foreign header; a **policy block** (403,
+    451, no loss shape; `check_health(policy=)`) by any live verdict of its generation
+    within `health_ttl_s`, whatever its URL or headers. Measured at f1d31dd behind a WAF
+    that 403s every probe: 20 path payloads made 20 health GETs and 20
+    `X-Forwarded-For` payloads 20 more; now one per window (T14p).
+  - **`_mark_lost`**: the only writer of `valid = False`; compare-and-set on the current
+    state and generation, its row persisted **inside** the same critical section.
+    **`_install`**: every login's and `adopt`'s state is numbered (`generation`),
+    installed and persisted under that same lock (review round 4, follow-up 2: the
+    persist moved out of `_established`, `_basic_login` and `_browser_login_state`).
+  - **The stable protected resource**: `_spa_probe` is extended into the one owner
+    (returns `(url, refusal_status, refusal_digest)`): the credentialed arm live by
+    `health_verdict` on the stopping walk; anonymous and corrupted arms agreeing as lost,
+    as one admitted status (`admitted_refusal`: a non-2xx below 500 that SP-56 calls the
+    application's or a policy block), or as one stable body. HTTP logins use it through
+    `_record_resource` (rule 2: the operator's base, every kind; rule 3: the landing);
+    `adopt(protected_probe=, refusal_status=)`.
+  - **`observe`**: classification first, generations, the check with a resource, an
+    unconfirmed loss without one; listeners told after the health lock is released.
+  - **The pause** (`_wait_out_pause`, 5 s doubling to 60 s, `Retry-After`), **sticky
+    unknown** (`SessionHealthUnknown`, `IsolatedHealthUnknown`), the run's shared budgets
+    (`_RunBudget`, handed to every isolated copy), **the re-login bucket**
+    (`_draw_relogin`, under the login lock, the login in `_log_in_locked`) with
+    **decision D** (no resource and no token: carry on at once on the session it has),
+    **`verify_live`**'s own bounded wait and budget, `_verify_authenticated` through
+    `health_verdict`, `health_report()`, credential POSTs per account. One warning,
+    naming the identity and never a credential, when an identity enters D's window, once
+    per window (review round 5); `ensure`'s docstring states that it can return a state
+    known to be lost (D).
+  - **`prepare`** records `Request.session_generation` from the state it applied and
+    **`Request.session_lost`** in D's window (decision D′; CC-CORE-0070, CC-FUZZ-0107).
+  - `SessionState.generation`, `SessionState.probe_refusal_status` (in memory).
+  - New keywords on `SessionManager` (copied to copies): `health_ttl_s`,
+    `relogin_burst`, `relogin_refill_s`, `max_pause_s`, `pause_budget_s`, `clock`,
+    `sleep`, `health_fetch_factory`.
+- Impact (other components / project):
+  - **CORE** (CC-CORE-0070): `Request.session_generation` and `Request.session_lost`;
+    SP-56's guard allowance list loses three rows (8 to 5).
+  - **FUZZ** (CC-FUZZ-0107): `Probe.session_lost` and layer 1's lost-session rule. Every
+    `SeamProbeSender` (the run's, the peer's, the mutation's, the blind-SQLi
+    confirmer's) stops re-logging in on forbidden answers. `SessionHealthUnknown` ends a
+    run as the `max_reauth` cap does; a no-resource identity never raises it from the
+    bucket (D). `_verify_main` is unchanged: `verify_live` now returns False only for a
+    real loss. A copy's health-unknown counts toward the failed-logins breaker; a copy
+    shares the run's pause budget and credential-POST account.
+  - **AUD**: `audit_page`'s catch-all swallows a sticky unknown per page, without
+    traffic. **CRAWL**: `verify_live`'s API is unchanged; its waits have their own
+    budget; the login's resource selection sends a corrupted credential to the base once
+    or twice (seen by `tests/test_session_origin_scope.py`'s crawl test).
+  - **MUT** (CC-MUT-0404) and the FUZZ blind-SQLi builder (CC-FUZZ-0110) read D′'s
+    mark (review round 5), as does every compared send of the oracle (CC-FUZZ-0107).
+  - Login cost (R13): rule 2 or 3 costs up to 3 GETs per candidate (6 with the byte
+    rule) at every HTTP login, isolated copies included.
+  - Consumers found by grep (PA-0152): `detect_logout`, `observe`, `.valid`,
+    `verify_live`, `_spa_probe`, `adopt`, `_persist` (BUG-0533's sweep).
+  - Existing expectations re-derived (PA-0073(3)), each with its cause:
+    - `tests/test_session_manager.py::test_single_flight_logs_in_once`: before, 1
+      fetcher created; after, 1 login attempt and 1 POST (the factory is also asked for
+      the resource selection's fetches).
+    - `tests/test_session_origin_scope.py::test_another_ports_login_page_never_logs_the_session_out`:
+      before, A's own login page at 200 logged a live session out; after, the session is
+      ended on A and A's 401 is confirmed (a login page shown to a live session is no
+      loss).
+    - `tests/test_session_origin_scope.py::test_the_probe_differential_never_fetches_another_port`:
+      `_spa_probe` returns three values, not two.
+    - `tests/test_session_origin_scope.py::test_an_authenticated_crawl_never_hands_the_session_to_another_port`:
+      A also receives the login's corrupted-credential arm (one random id, on `/`).
+    - `tests/test_login_form_isolation.py::test_a_logout_seen_by_a_copy_is_not_passed_to_the_main_listener`:
+      the copy's session is ended on the server before its 401 (now confirmed).
+    - `tests/test_logout_listener.py`: one module-level `Request` shared across tests
+      carried an earlier manager's generation; a fresh request per use.
+    - `tests/test_session_forbidden_answers.py` T14 (this module): its "another URL"
+      was a 403, which a live verdict now covers whatever its URL (T14p); it is a scope
+      401 on `/api/r1`, so T14 keeps its meaning (a loss shape's URL rule).
+  - Four new base-URL functions registered in `tests/test_base_url_subpath_registry.py`
+    (`check_health`, `_health_get`, `_log_in_locked`, `_record_resource`), each pointer
+    traced to a call with a sub-path base.
+- Risk (medium):
+  - A missed real loss: mitigated by the true-positive pins (TP1-TP6), T M7d (a loss
+    during a check) and unconfirmed losses without a resource.
+  - A run that now ends loudly on an unknown identity: bounded and sticky (R4).
+  - A no-resource identity sending on a dead session in D's window: bounded by the
+    bucket, and its answers are not comparable at the oracle (D′, R16); not yet at the
+    blind-SQLi builder or the live filter (pinned).
+  - Lock order (login → health → observe lock): T24. A login's install waits for an
+    in-flight check of its key (at most 6 hops × 15 s).
+  - A wrong resource (a public page, a throttled one): the corrupted arm, M4(a) and the
+    admission (B1), with T9, T2b, TP5, TP6.
+- Deliverables:
+  - [x] detect.py — done
+  - [x] manager.py — done
+  - [x] state.py — done
+  - [x] tests (29 strict xfails turned into passing tests; R6's pin kept; new tests for
+    the split compare-and-sets, the install atomicity, a copy's shared budget and
+    account, D′ and its sweep; review round 5: the policy-block cache (T14p), the peer
+    replay (TD4), the D window's log line (TD5), the two sweep pins closed) — done
+  - [x] every named revert re-proven on the implementation (DRAFT §13) — done
+  - [x] the prototype deleted — done
+  - [x] FR-SESS-23 and the amendments (FR-SESS-5, -15, -16, -17, -18, -19,
+    NFR-SESS-single-flight) — done
+  - [x] the sweep recorded in BUG-0533 — done
+- Effectiveness (assessed <date> or pending): pending (no live lab run; the measured
+  numbers are the loopback fixtures', DRAFT §1).
+
 ### CC-SESS-0028 — SP-16 login facts for one exchange: credential submission and redirect to a login page (FR-SESS-22, BUG-0529) (2026-10-20)
 - Change: `fuzzlab/session/detect.py` gains `LoginFacts` and `login_facts(url,
   headers=None, *, response_url=None, login_url=None, entry_names=())` (+79 lines).

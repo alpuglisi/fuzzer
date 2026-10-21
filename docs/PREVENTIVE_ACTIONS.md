@@ -2764,3 +2764,34 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
   4. **Slots carry the metric**: at most one of three concurrent items is work that does not move the owner's metric, and an eligible queued item is dispatched the moment a slot frees.
   5. **A gate is weighed against the goal's clock**: when an item passes its budget or review cap, the orchestrator stops sending it rounds and tells the owner the cost so far and the options (ship with residuals, narrow, drop), the same turn the trigger fires.
   - Enforced by: none — orchestration behaviour, not code; its check is the guard's stall, budget and review-cap triggers (`scripts/orchestration_guard.py report`, PA-0141..PA-0147) read at every checkpoint.
+- **PA-0533** — Strengthens `PA-0007`, `PA-0113`, `PA-0122`, `PA-0134` and `PA-0529(3)`,
+  after BUG-0533: a 403 logged the session in again. Each earlier rule constrained one
+  signal, one reader or one send path; none constrained the state change, and PA-0134 bound
+  a session's evidence to its origin only.
+  1. **An identity's state changes only on evidence about that session.** SP-56
+     classifies first: a throttle, gateway, 407 or incomplete answer never changes it, and
+     is never recorded or matched as a resource's refusal. A loss shape, a credentialed
+     policy block or a submission's loss shape triggers a check of the session's stable
+     protected resource, and the resource's answer decides. Without a resource, only a
+     non-submission loss shape counts, as an unconfirmed loss.
+  2. **Evidence is bound to the session it is about:** to its origins (PA-0134), to its
+     generation and the state object judged, and to the time it was taken (a verdict
+     covers only the signals seen before its request was sent). Every write
+     compare-and-sets on the current state and that generation, and is atomic with every
+     install: the invalidation's row and every install's row are written under one lock.
+  3. **Re-logins draw on a refilling budget.** With it spent, an identity with a resource
+     waits within its bounds or goes sticky unknown; an identity without one carries on at
+     once, never sleeping or aborting. An unknown identity pauses, then goes sticky; it
+     never logs in or out on an inconclusive check.
+  4. **Enforced at the actor.** `_mark_lost` is the only writer of `valid = False`, and
+     `detect_logout` is the one loss predicate: a whole-package AST guard, proven on
+     synthetic offenders. The loss decisions leave SP-56's allowance list.
+  5. **An answer to a request sent on a session known to be lost is never evidence**
+     (the owner's decision D′): the session layer marks the request, the sender carries
+     the mark, and **every consumer reads it**: the oracle's layer 1, applied to every
+     compared send whichever sender made it, reads any answer to it as not comparable,
+     whatever its class; the live WAF filter never records it as an allow or a block; the
+     blind-SQLi builder never takes it as a sample or a row. A consumer found not reading
+     it is fixed in the same change, or pinned by a strict xfail naming its owner
+     (`PA-0531(4)`). (from BUG-0533)
+  - Enforced by: tests/test_session_forbidden_answers.py::test_a_forbidden_answer_never_logs_in_and_checks_at_most_once, tests/test_session_forbidden_answers.py::test_a_throttled_answer_never_triggers_anything, tests/test_session_forbidden_answers.py::test_a_throttle_is_never_a_resources_refusal_status_nor_a_loss, tests/test_session_forbidden_answers.py::test_health_verdict_never_matches_a_throttle_gateway_407_or_incomplete_answer, tests/test_session_forbidden_answers.py::test_detect_logout_keeps_its_loss_signals_and_never_reads_a_throttle, tests/test_session_forbidden_answers.py::test_a_suspected_loss_on_a_live_session_is_checked_once_and_never_logs_in, tests/test_session_forbidden_answers.py::test_a_credential_submissions_answer_is_checked_never_an_unconfirmed_loss, tests/test_session_forbidden_answers.py::test_a_late_answer_from_an_earlier_session_is_ignored, tests/test_session_forbidden_answers.py::test_a_pause_found_for_an_older_generation_never_pauses_the_new_one, tests/test_session_forbidden_answers.py::test_a_pause_of_a_replaced_generation_never_delays_its_replacement, tests/test_session_forbidden_answers.py::test_a_lost_verdict_for_a_replaced_session_tells_no_listener_and_writes_no_row, tests/test_session_forbidden_answers.py::test_a_loss_seen_while_a_check_is_in_flight_is_still_acted_on, tests/test_session_forbidden_answers.py::test_verify_live_asked_about_a_session_replaced_while_it_checked_answers_live, tests/test_session_forbidden_answers.py::test_mark_lost_on_a_replaced_state_changes_nothing_and_writes_no_row, tests/test_session_forbidden_answers.py::test_an_adopt_between_the_checks_compare_and_the_mark_tells_no_listener, tests/test_session_forbidden_answers.py::test_a_slow_row_write_never_leaves_a_replaced_sessions_row_last, tests/test_session_forbidden_answers.py::test_an_unknown_session_is_sticky_and_costs_nothing_after, tests/test_session_forbidden_answers.py::test_relogins_draw_on_a_refilling_budget, tests/test_session_forbidden_answers.py::test_a_no_resource_identity_whose_budget_is_spent_carries_on_at_once, tests/test_session_forbidden_answers.py::test_an_answer_on_a_session_known_lost_is_never_evidence, tests/test_session_forbidden_answers.py::test_a_resource_backed_identity_never_sends_on_a_lost_session, tests/test_session_forbidden_answers.py::test_layer_one_reads_any_answer_on_a_lost_session_as_not_comparable, tests/test_session_forbidden_answers.py::test_a_peer_replay_on_a_session_known_lost_is_never_evidence, tests/test_session_forbidden_answers.py::test_the_live_waf_filter_never_reads_an_answer_on_a_lost_session, tests/test_session_forbidden_answers.py::test_the_blind_sqli_builder_never_admits_an_answer_on_a_lost_session, tests/test_session_forbidden_answers.py::test_only_the_owner_decides_a_session_loss, tests/test_session_forbidden_answers.py::test_the_loss_decision_guard_catches_synthetic_offenders, tests/test_core_comparability.py::test_no_module_classifies_a_throttle_or_refusal_but_the_owner

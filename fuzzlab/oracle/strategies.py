@@ -37,7 +37,7 @@ from fuzzlab.oracle.oob import OobListener
 from fuzzlab.core.comparability import APPLICATION, POLICY_BLOCK
 from fuzzlab.oracle.probe import (APPLICATION_ONLY, PRG_UNOBSERVED, Candidate, NotComparable,
                                   Probe, ProbeUnobserved, Sender, UnplaceableLocation,
-                                  Verdict, require_comparable)
+                                  Verdict, require_comparable, require_observed)
 
 #: What a control may answer when its strategy declares the application's own denial a
 #: comparable answer too (FR-FUZZ-63): an API that hides a foreign id with 403 (the
@@ -314,7 +314,13 @@ class ConfirmationStrategy:
         `_observed`). Otherwise `NotComparable`: the mechanism gives no verdict. Marks the
         send's ``role`` (FR-FUZZ-60). ``location``/``content_type`` place a raw body
         (NoSQL's JSON); ``credentialed`` overrides the probe's own fact (a replay's
-        sender is known by its role); ``label`` names it in the reason."""
+        sender is known by its role); ``label`` names it in the reason.
+
+        Layer 1 (`require_observed`, FR-FUZZ-63, FR-FUZZ-65) is applied here too, before
+        the class is read: the oracle wraps only the run's own sender in `_ObservedOnly`,
+        and a compared send may go through another one (a cross-account replay's peer or
+        anonymous sender). So an answer to a request sent on a session known to be lost
+        is not comparable whichever sender made it (CC-FUZZ-0107)."""
         with trace.role(role):
             if location is not None or content_type is not None:
                 probe = sender.send(candidate.url, candidate.param, value, timing=timing,
@@ -323,6 +329,7 @@ class ConfirmationStrategy:
                                     content_type=content_type)
             else:
                 probe = cls._send(sender, candidate, value, timing=timing)
+        require_observed(probe, timing=timing)
         judged = _observed(probe)
         if credentialed is None and getattr(judged, "credentialed", None) is None:
             # a PRG follow-up is sent by the same sender as its request: its fact

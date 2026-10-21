@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-20 — session manager (a forbidden answer logged the session in again; BUG-0533, a recurrence of BUG-0134's and BUG-0113's class)
+- **Symptom:** a 403 (and a scope 401, a privilege-gated login redirect, a password check's 401) invalidated the session and the next send logged in again: N such probes made N logins, each probe on a new session, the peer re-logging in on each denied replay; a late answer from an earlier session logged the current one out.
+- **Root cause:** `detect_logout`'s `status in (401, 403)`, acted on by `observe` at once: a session-state change decided from one answer's surface feature, without positive evidence about that session or a binding to it.
+- **Remediation:** one loss predicate through SP-56; a check of the session's stable protected resource, a policy block covered by any live verdict of its generation for the cache window; generations and compare-and-set on the current state, atomic with installs; a pause and sticky unknown; a refilling re-login budget, with decision D for an identity with no resource and D′ (an answer sent on a session known lost is never evidence: not comparable at the oracle through any sender, never an allow or block at the live WAF filter, never a sample or row at the blind-SQLi builder) (CC-SESS-0029, CC-CORE-0070, CC-FUZZ-0107, CC-FUZZ-0110, CC-MUT-0404); BUG-0533, PA-0533.
+- **Status:** Fixed
+
 ## 2026-10-20 — orchestration (the audit stalled 19 hours; BUG-0541)
 - **Symptom:** no audit defect closed from 05:00Z to past 23:54Z while three lanes and reviewers were busy; the owner asked three times why.
 - **Root cause:** each defect ran through a design-first, multi-gate pipeline (a measured draft and up to four two-reviewer rounds before code, then three or more harness runs and proof matrices), only one audit item was in work from 10:50Z to 21:34Z, and runs and merges were not planned around the one host-wide pytest lock (BUG-0532).

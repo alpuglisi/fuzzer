@@ -880,7 +880,10 @@ class SeamProbeSender(_ExplicitAllowance):
                      session=self._session_note(req),
                      credentialed=identity != "anonymous" and self._session_note(req) is None,
                      attempts=[attempt_record(1, "response", status=r.status,
-                                              elapsed=r.elapsed_ms / 1000.0)])
+                                              elapsed=r.elapsed_ms / 1000.0)],
+                     # FR-FUZZ-65: what `prepare` recorded on this request, read, never
+                     # recomputed (core.http.Request's field, CC-CORE-0070)
+                     session_lost=getattr(req, "session_lost", False) is True)
 
     @staticmethod
     def _session_note(req) -> str | None:

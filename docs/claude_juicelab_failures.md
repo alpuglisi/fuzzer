@@ -1112,3 +1112,27 @@ Juice Shop lab is complete.
 - **Evidence:** the AU-SITETREE reviews of 01192c3..eb95cd4 (2026-10-20, ~23:40Z): Chromium probe `scratchpad/rev-sitetree-b-probe/probe3.py` (refreshes +1, 0 of 3 rows, no retry over five polls); `scratchpad/reva/m4` (pre-fix: `prev is None`, epoch changes, assertions pass).
 - **Impact:** none merged to the remote; one revision round.
 - **Status:** sent back with both as required fixes (a non-200 Contents fetch is a failure, an injected-500 browser test; K4 asserts the side files, `prev`, and an unchanged epoch, proven on the pre-fix code with the hook disarmed).
+
+### F-117 — AU-SESS403's Phase 1 predicted the existing session tests unchanged; six expectations changed when it was built
+- **What:** DRAFT-AU-SESS403 §5.9 said the existing session tests "behave as today" (their fixtures have no resource) except where it listed, and §12 reported the harness green as the revision's verification. That harness run checked the committed tree without the prototype, so no existing test ever ran against the design. At Phase 2 six existing expectations changed: `test_session_manager::test_single_flight_logs_in_once` (it counted fetchers, and every login now also fetches its resource), `test_session_origin_scope::test_another_ports_login_page_never_logs_the_session_out` (its positive control, A's own login page at 200, was shown to a live session: the false loss BUG-0533 removes), `…::test_the_probe_differential_never_fetches_another_port` (`_spa_probe` returns three values), `…::test_an_authenticated_crawl_never_hands_the_session_to_another_port` (the login's corrupted arm reaches A), `test_login_form_isolation::test_a_logout_seen_by_a_copy_is_not_passed_to_the_main_listener` (the copy's 401 is now checked, and its session was live), and `test_logout_listener` (a module-level `Request` carried one manager's generation into the next test). The origin-scope fixture's `/` even has a body differential, so §5.9's "no resource" premise was false for it.
+- **Evidence:** CC-SESS-0029's re-derived expectations (each with before, after and cause); commit 6b41dd0.
+- **Impact:** none landed: each was found by running the affected files before the harness, and re-derived with its cause (PA-0073(3)). Reviewers relied on a verification that could not see these.
+- **Status:** Phase 2's harness ran the design over 157 files. A prototype-phase claim about existing tests needs those tests run against the prototype.
+
+### F-118 — The AU-SESS403 lane stopped its own revert runner and killed it
+- **What:** to let `verify_change.py` find a quiet host, I sent SIGSTOP to my own revert runner (its PID recorded and checked first). The non-interactive shell that ran it as a background job read the stop as the job's end (exit 147, 128 + SIGSTOP) and exited; the orphaned, stopped runner was then hung up and died. The PA-0533 matrix stopped after 14 of 33 rows, and one revert was left applied in the runner's scratch tree.
+- **Evidence:** `scratchpad/au-sess403/impl/reverts_d79d846.log` (ends `exit 147`), `reverts_parent.pid`.
+- **Impact:** lost run time only: no other process was touched, the scratch tree was reset, and the remaining 19 rows were re-run (`matrix_rest_d79d846.log`).
+- **Status:** never stop a process that runs under a shell wrapper; to make room for the harness, let a runner finish or give it its own pause control.
+
+### F-119 — The AU-SESS403 draft called round 5's reverts proven by a matrix that never ran them
+- **What:** at 21f5788, DRAFT-AU-SESS403 §10.2's table was headed "each proven by the PA-0533 matrix on the implementation, §13", but round 5's seven new reverts (`compared_skips_layer1`, `livefilter_reads_lost`, `bsqli_nomark`, `bsqli_class_ignores_lost`, `bsqli_504_kept`, `policy_cache_by_url`, `no_window_log`) were never run: the chain was stopped under the new test budget (PA-0541) at 0 of 67.
+- **Evidence:** `scratchpad/au-sess403/impl/r5/chain.log` ("67 reverts" then `exit 143`); the lane's hand-back flagged it.
+- **Impact:** none landed: the caption was corrected at merge.
+- **Status:** fixed at merge: the caption names the matrix's 33 rows at d79d846, and round 5's tests as each shown failing on f1d31dd in one invocation.
+
+### F-120 — I ran AU-SESS403 and AU-BOUNDED concurrently without telling the session lane that a body-reader owner was coming, and its new health GET read bodies unbounded
+- **What:** AU-SESS403 added the health check's fetcher (`_requests_fetch_factory`'s `_PlainFetcher.get`) as a bare `requests.request` reading `r.text` whole -- defect 21's class -- while AU-BOUNDED was building the one bounded reader (SP-60) and its AST guard in parallel. My dispatches told each lane only about a shared file (`blind_sqli_fuzzer.py`), not about the new owner. The merged tree would have failed SP-60's guard (`fuzzlab/session/manager.py`: 2 unbounded sites, 1 allowed).
+- **Evidence:** the AU-SESS403 merge onto 08e3eaa (`git diff 08e3eaa -- fuzzlab/session/manager.py`); `tests/test_bounded_reads.py::test_every_requests_session_fuzzlab_makes_is_bounded`.
+- **Impact:** none landed: caught at merge.
+- **Status:** fixed in the merge: the health GET reads through `bodyread.bound(requests.Session())`, an incomplete body is INCONCLUSIVE through `_transport_errors`. A dispatch of concurrent lanes names every new owner one lane introduces that the other's code must use.

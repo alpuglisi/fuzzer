@@ -416,20 +416,81 @@ def login_facts(url: str, headers=None, *, response_url: str | None = None,
 
 def detect_logout(status: int, headers: dict[str, str], body: str,
                   login_url: str | None = None, page_url: str | None = None,
-                  content_check: bool = True, login_fields=None) -> bool:
-    """Detect that a response indicates an expired/absent session."""
-    if status in (401, 403):
-        return True
-    low = _lower_headers(headers)
-    location = low.get("location", "")
-    if location and redirect_is_logout(location, page_url, login_url):
+                  content_check: bool = True, login_fields=None, *,
+                  credentialed: bool = True, credential_submission: bool = False) -> bool:
+    """Is this answer a **loss shape** for the session the request carried? The one
+    predicate (SP-16; FR-SESS-23, BUG-0533) the session manager's `observe` (the
+    signal) and `health_verdict` (the verdict) decide through. True in two cases only:
+
+    - **An auth failure that is this session's:** SP-56 (`core.comparability`) classes
+      the answer as an auth failure for the request as sent (a credentialed 401, or a
+      redirect to this session's login page or an anchored login URL, FR-SESS-18) and
+      *not* for the same answer to an uncredentialed request -- so an intermediary's 407
+      never is one. A credential submission's own refusal is its endpoint's answer
+      (FR-SESS-22), never a loss.
+    - **This session's login form, shown again at 200** to a credentialed request that
+      is not a submission (BUG-0113's form rules). ``content_check=False`` (a Basic
+      session) never reads page content.
+
+    A policy block (403, 451), a throttle, a gateway answer or any other status is
+    never a loss shape: SP-56 classifies first, and no status is written here."""
+    from fuzzlab.core.comparability import AUTH_FAILURE, response_class
+    location = ""
+    try:
+        location = next((str(v) for k, v in dict(headers or {}).items()
+                         if str(k).lower() == "location"), "")
+    except (TypeError, ValueError):
+        location = ""
+    try:
+        to_login = bool(location) and redirect_is_logout(location, page_url, login_url)
+    except (TypeError, ValueError):
+        to_login = False
+    carried = credentialed is not False
+    as_sent, _why = response_class(status, headers, complete=True, credentialed=carried,
+                                   credential_submission=credential_submission is True,
+                                   redirect_to_login=to_login)
+    to_anyone, _why = response_class(status, headers, complete=True, credentialed=False,
+                                     credential_submission=credential_submission is True,
+                                     redirect_to_login=to_login)
+    if as_sent == AUTH_FAILURE and to_anyone != AUTH_FAILURE:
         return True
     # A protected page that came back as *the* login page means we were logged out.
     # With a known login form and page, only that form counts: an app page with a
-    # password field of its own is not a logout (BUG-0113). ``content_check=False``
-    # (a Basic session) logs out by 401/403 only.
-    if status == 200 and content_check:
+    # password field of its own is not a logout (BUG-0113).
+    if status == 200 and content_check and carried and credential_submission is not True:
         if login_url and page_url:
             return shows_login_form(body, page_url, login_url, login_fields)
         return is_login_page(body)
     return False
+
+
+#: The most body bytes `request_entry_names` reads (FR-SESS-23).
+ENTRY_NAMES_MAX_BODY = 65536
+
+
+def request_entry_names(url, body, content_type) -> tuple[str, ...]:
+    """The entry names a request carries (SP-16; FR-SESS-23): its query's names, a
+    urlencoded body's names, and a JSON body's leaves by `jsonbody.display_name`. At
+    most `ENTRY_NAMES_MAX_BODY` bytes of body are read; a multipart body is not read
+    (a stated residual). `login_facts(entry_names=)` reads them to tell a credential
+    submission. Total: odd input reads as ``()``."""
+    from fuzzlab.core import jsonbody
+    names: list = []
+    try:
+        names += [k for k, _v in parse_qsl(urlsplit(url or "").query,
+                                          keep_blank_values=True)]
+    except (ValueError, TypeError):
+        pass
+    if isinstance(body, (bytes, bytearray)) and body:
+        raw, ctype = bytes(body[:ENTRY_NAMES_MAX_BODY]), str(content_type or "").lower()
+        try:
+            if "json" in ctype:
+                doc = jsonbody.loads(raw.decode("utf-8"))
+                names += [jsonbody.display_name(path)
+                          for path, _v in (jsonbody.leaves(doc) or [])]
+            elif "multipart" not in ctype:
+                names += [k for k, _v in parse_qsl(raw.decode("latin-1"),
+                                                  keep_blank_values=True)]
+        except (ValueError, TypeError, UnicodeDecodeError, RecursionError):
+            pass
+    return tuple(n for n in names if isinstance(n, str) and n)

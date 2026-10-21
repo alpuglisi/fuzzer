@@ -44,13 +44,16 @@ from fuzzlab.core.urls import place_query_param    # the one query placement (SP
 class Answer(tuple):
     """``(latency, status, size)`` plus ``.headers`` and ``.credentialed``."""
 
-    def __new__(cls, latency, status, size, headers=None, credentialed=None):
+    def __new__(cls, latency, status, size, headers=None, credentialed=None,
+                session_lost=False):
         self = super().__new__(cls, (latency, status, size))
         try:
             self.headers = dict(headers or {})
         except (TypeError, ValueError):
             self.headers = {}
         self.credentialed = credentialed
+        #: sent on a session its manager knew to be lost (FR-FUZZ-65, CC-FUZZ-0110)
+        self.session_lost = session_lost is True
         return self
 
 
@@ -67,6 +70,8 @@ def answer_class(answer, url: str) -> tuple[str, str, bool]:
     (fail closed)."""
     from fuzzlab.core.comparability import response_class
     from fuzzlab.session.detect import login_facts
+    if getattr(answer, "session_lost", False) is True:      # FR-FUZZ-65 (CC-FUZZ-0110)
+        return "lost-session", "sent on a lost session", False
     headers = getattr(answer, "headers", None)
     facts = login_facts(url, headers)
     cls, why = response_class(answer[1], headers, complete=True,
@@ -124,9 +129,11 @@ class SeamSender:
         try:
             resp = self._client.send(req)
         except requests.Timeout:
-            return Answer(float(timeout), 504, 0, credentialed=credentialed)
+            return Answer(float(timeout), 504, 0, credentialed=credentialed,
+                          session_lost=req.session_lost)
         return Answer(resp.elapsed_ms / 1000.0, resp.status, len(resp.body),
-                      getattr(resp, "headers", None), credentialed=credentialed)
+                      getattr(resp, "headers", None), credentialed=credentialed,
+                      session_lost=req.session_lost)
 
 
 # --- Payload catalog -------------------------------------------------------
@@ -220,6 +227,11 @@ def run_fuzzing_cycle(sender, url, param, baseline, payloads, args):
             cls, why, _to_login = answer_class(answer, url)
             if cls != APPLICATION and answer[1] != 504:
                 print(f"[-] Not comparable on {payload[:24]!r}: {why}; no row")
+                latencies = []
+                break
+            if getattr(answer, "session_lost", False):    # FR-FUZZ-65: its 504 too
+                print(f"[-] Not comparable on {payload[:24]!r}: sent on a lost session; "
+                      f"no row")
                 latencies = []
                 break
             latency, status, size = answer

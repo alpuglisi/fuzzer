@@ -23,13 +23,19 @@ never a silent unauthenticated run.
 from __future__ import annotations
 
 import base64
+import dataclasses
 import json
 import logging
 import threading
+import time
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Callable, Sequence
 from urllib.parse import urljoin, urlparse
 
+from fuzzlab.core.comparability import (APPLICATION, AUTH_FAILURE, GATEWAY, INCOMPLETE,
+                                        POLICY_BLOCK, THROTTLE_OR_UNAVAILABLE,
+                                        response_class)
 from fuzzlab.core.redaction import is_sensitive_name, looks_like_identifier
 from fuzzlab.core.urls import canonical_origin, origin_scope, url_key
 from fuzzlab.session import detect
@@ -141,6 +147,238 @@ class LoginCapReached(IsolatedLoginFailed):
     """A manager built with ``max_logins`` has used them all for this host/identity."""
 
 
+class SessionHealthUnknown(SessionAuthError):
+    """An identity's session state stayed unknown past the pause bound, the run's pause
+    budget or the re-login budget (FR-SESS-23). Sticky: every later `prepare` for that
+    (host, identity) raises at once, with no clock and no network, until a check gives a
+    definite answer. It ends a run as the ``max_reauth`` cap does."""
+
+
+class IsolatedHealthUnknown(IsolatedLoginFailed):
+    """An isolated copy's session state stayed unknown (FR-SESS-23): FR-SESS-17's one
+    class a sender catches, so the copy is released and its path goes anonymous."""
+
+
+# --- session health (FR-SESS-23, CC-SESS-0029, BUG-0533) ----------------------------------
+#: A health verdict's states. STALE: the state judged was replaced (or moved to another
+#: generation) before the verdict could be recorded, so it records nothing.
+LIVE, LOST, INCONCLUSIVE, STALE = "live", "lost", "inconclusive", "stale"
+_HEALTH_LOG = logging.getLogger("fuzzlab.session.health")
+#: The first pause after an inconclusive check, doubling up to `PAUSE_MAX_STEP_S`; a
+#: ``Retry-After`` is honoured up to the same bound.
+PAUSE_FIRST_S = 5.0
+PAUSE_MAX_STEP_S = 60.0
+#: A redirect status the health walk may stop at (a login redirect) or follow.
+_REDIRECTS = frozenset({301, 302, 303, 307, 308})
+#: `_draw_relogin`'s answer for D: no token and no stable protected resource, so the
+#: identity carries on at once on the session it has (FR-SESS-23).
+_SKIP_RELOGIN = object()
+
+
+@dataclass(frozen=True)
+class Health:
+    """A health check's verdict for one session generation (FR-SESS-23). ``reason``
+    names a class and a status only, never a URL, header value or body."""
+    state: str
+    reason: str = ""
+    generation: int | None = None
+    retry_after_s: float | None = None
+
+
+@dataclass
+class _HealthRecord:
+    """One manager's health bookkeeping for one (host, identity), in memory."""
+    #: the health lock: single flight of the check, and every write below but the
+    #: bucket's (which the login lock guards)
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    #: (generation, url key) -> when a live verdict for it was taken (the TTL cache for
+    #: loss shapes); only the latest live generation's entries are kept
+    live: dict = field(default_factory=dict)
+    #: generation -> when its latest live verdict was taken, whatever its URL (the TTL
+    #: cache for policy blocks)
+    live_any: dict = field(default_factory=dict)
+    #: generation -> the sequence number at which a live verdict's GET was **sent**
+    live_seq: dict = field(default_factory=dict)
+    verdict: tuple | None = None                  # (generation, state), the last one
+    pause: dict | None = None                     # gen, until, step, began
+    unknown: str | None = None                    # the sticky reason
+    tokens: float | None = None                   # the re-login bucket (login lock)
+    refill_at: float = 0.0
+    relogin_due: bool = False                     # set by `_mark_lost`
+    in_window: bool = False                       # in D's window (logged once per window)
+    report: Counter = field(default_factory=Counter)
+
+
+@dataclass
+class _RunBudget:
+    """What a run's manager shares with its isolated copies (FR-SESS-23): the pause
+    budgets and the credential POSTs per account. A peer identity has its own manager,
+    so its own budget."""
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    prepare_s: float = 0.0       # spent by `prepare`'s pauses and the bucket's waits
+    verify_s: float = 0.0        # spent by `verify_live`'s own waits, never `prepare`'s
+    credential_posts: dict = field(default_factory=dict)       # account -> Counter
+
+
+def _answer_classes(status, headers) -> tuple[str, str, str]:
+    """SP-56's class of an answer to the credentialed health GET, the same answer's
+    class to an uncredentialed request (a 407 is an auth failure either way), and the
+    first one's reason."""
+    as_sent, why = response_class(status, headers, complete=True, credentialed=True,
+                                  credential_submission=False, redirect_to_login=False)
+    to_anyone, _why = response_class(status, headers, complete=True, credentialed=False,
+                                     credential_submission=False, redirect_to_login=False)
+    return as_sent, to_anyone, why
+
+
+def _not_the_applications(status, headers) -> bool:
+    """B1: an incomplete, throttle, gateway or 407 answer is never evidence about the
+    session (SP-56 classifies first)."""
+    as_sent, to_anyone, _why = _answer_classes(status, headers)
+    return as_sent in (INCOMPLETE, THROTTLE_OR_UNAVAILABLE, GATEWAY) or \
+        (as_sent == AUTH_FAILURE and to_anyone == AUTH_FAILURE)
+
+
+def admitted_refusal(status) -> bool:
+    """Can ``status`` be a stable protected resource's recorded refusal status (M5, B1)?
+    A non-2xx status below 500 that SP-56 classes as the application's answer or a
+    policy block, read as the credentialed health GET will be read: never a throttle, a
+    gateway or a 407. The one rule for a login's resource and for `adopt`."""
+    if isinstance(status, bool) or not isinstance(status, int) or status <= 0 or \
+            200 <= status < 300 or status >= 500:
+        return False
+    return _answer_classes(status, {})[0] in (APPLICATION, POLICY_BLOCK)
+
+
+def _retry_after(headers) -> float | None:
+    """A ``Retry-After`` in seconds, clipped to [0, `PAUSE_MAX_STEP_S`]; None when absent
+    or not a number of seconds."""
+    for name, value in (headers or {}).items():
+        if str(name).lower() == "retry-after":
+            try:
+                return max(0.0, min(PAUSE_MAX_STEP_S, float(str(value).strip())))
+            except ValueError:
+                return None
+    return None
+
+
+def _header_value(headers, wanted: str) -> str:
+    for name, value in (headers or {}).items():
+        if str(name).lower() == wanted:
+            return str(value)
+    return ""
+
+
+def health_verdict(state: SessionState, status, headers, body, page_url, *,
+                   stopped_at_login: bool = False, refusal: bool = True) -> Health:
+    """Is the answer to a credentialed GET of ``state``'s stable protected resource a
+    live session, a lost one, or neither (FR-SESS-23)? Public and total over any state
+    it is handed. The first row that holds decides:
+
+    1. the walk stopped at a login redirect: LOST;
+    2. SP-56 classes the answer incomplete, throttle-or-unavailable or gateway, or an
+       auth failure for an uncredentialed request too (a 407): INCONCLUSIVE, its
+       ``Retry-After`` kept -- before any refusal status is matched (B1);
+    3. `detect.detect_logout`, credentialed and not a submission (Basic: no content):
+       LOST;
+    4. the resource's recorded refusal status, or a 2xx whose body hashes to its
+       recorded refusal body: LOST (``refusal=False`` skips this row: a resource being
+       chosen has none yet);
+    5. any other 2xx: LIVE;
+    6. anything else (a policy block that is not the recorded refusal, another status):
+       INCONCLUSIVE."""
+    gen = getattr(state, "generation", None)
+    if stopped_at_login:
+        return Health(LOST, f"a login redirect ({status})", gen)
+    if _not_the_applications(status, headers):
+        return Health(INCONCLUSIVE, _answer_classes(status, headers)[2], gen,
+                      _retry_after(headers))
+    if detect.detect_logout(status, headers, body or "", login_url=state.login_url,
+                            page_url=page_url, content_check=state.kind != "basic",
+                            login_fields=state.login_fields, credentialed=True,
+                            credential_submission=False):
+        return Health(LOST, f"an auth failure ({status})", gen)
+    recorded = getattr(state, "probe_refusal_status", None)
+    if refusal and recorded is not None and status == recorded:
+        return Health(LOST, f"the resource's refusal status ({status})", gen)
+    if 200 <= status < 300:
+        if refusal and state.probe_refusal_digest and \
+                _digest(body) == state.probe_refusal_digest:
+            return Health(LOST, f"the resource's refusal body ({status})", gen)
+        return Health(LIVE, "", gen)
+    why = _answer_classes(status, headers)[2]
+    return Health(INCONCLUSIVE, why or f"another status ({status})", gen,
+                  _retry_after(headers))
+
+
+def _plain_fetch_factory() -> Callable[[], Fetcher]:
+    """The health GET's fetcher (FR-SESS-23): a fresh session per hop, as the seam
+    sends (no browser header set), with the manager's 15 s timeout per hop (connect and
+    read), its body read bounded (SP-60, BUG-0536: an incomplete one raises
+    `bodyread.BodyIncomplete`, a `RequestException`). It keeps the cookies each answer
+    set, so a live answer's rotated session id can be adopted. It never posts."""
+    def factory():
+        import requests
+
+        from fuzzlab.core import bodyread
+
+        class _PlainFetcher:
+            def __init__(self):
+                self._jar: dict[str, str] = {}
+
+            def get(self, url, headers=None, allow_redirects=True):
+                with bodyread.bound(requests.Session()) as sess:
+                    r = sess.request("GET", url, headers=headers, timeout=15,
+                                     allow_redirects=allow_redirects)
+                self._jar.update(r.cookies.get_dict())
+                return FetchResponse(r.status_code, dict(r.headers), r.text, r.url,
+                                     _hops(r))
+
+            def post(self, url, data=None, headers=None, allow_redirects=True):
+                raise SessionAuthError("a health fetcher never posts")
+
+            def cookies(self):
+                return dict(self._jar)
+        return _PlainFetcher()
+    return factory
+
+
+def _adopt_rotation(state: SessionState, jar) -> None:
+    """A live answer that set a new value for one of the session's own cookies (a
+    rotating id) is adopted, so a check never kills its own session. Only a cookie the
+    state already holds, never a new name."""
+    for name, value in (jar or {}).items():
+        if name in (state.cookies or {}) and value and state.cookies[name] != value:
+            state.cookies[name] = value
+
+
+def _transport_errors() -> tuple:
+    import requests
+    return (requests.RequestException,)
+
+
+def _stopped_at_login(resp) -> bool:
+    """Did a ``stop_at`` walk (`SessionManager._navigate`) stop at a login redirect? It
+    returns a redirect that carries a ``Location`` only when it stopped there."""
+    return resp.status in _REDIRECTS and bool(_header_value(resp.headers, "location"))
+
+
+#: The headers a session owns (FR-SESS-23, M6): with the state's own header names, a
+#: request carrying only these is not a header probe, and may be covered by the cache.
+#: The body's framing headers are exempt on purpose: otherwise every POST probe would
+#: bypass it.
+_SESSION_OWNED_HEADERS = frozenset({"cookie", "authorization", "content-type",
+                                    "content-length"})
+
+
+def _foreign_header(request, state: SessionState) -> bool:
+    """Does ``request`` carry a header the session does not own (a header probe such as
+    ``User-Agent`` or ``Referer``)? Such a request bypasses the live cache (M6)."""
+    own = _SESSION_OWNED_HEADERS | {str(k).lower() for k in (state.headers or {})}
+    return any(str(k).lower() not in own
+               for k in (getattr(request, "headers", None) or {}))
+
+
 #: An equal credential value at least this long is never accepted as distinct, whatever
 #: its shape: distinctness-specific policy, OR-ed with the shared
 #: `core.redaction.looks_like_identifier` (FR-SESS-17). A false "not distinct" only
@@ -210,7 +448,21 @@ class SessionManager:
                  fetch_factory: Callable[[], Fetcher] | None = None,
                  identities: list[str] | None = None, max_reauth: int = 3,
                  logger=None, store=None, auth_origins: list[str] | None = None,
-                 max_logins: int | None = None, browser_login: bool | None = None):
+                 max_logins: int | None = None, browser_login: bool | None = None,
+                 health_ttl_s: float = 30.0, relogin_burst: int = 5,
+                 relogin_refill_s: float = 120.0, max_pause_s: float = 300.0,
+                 pause_budget_s: float = 600.0, clock: Callable[[], float] | None = None,
+                 sleep: Callable[[float], None] | None = None,
+                 health_fetch_factory: Callable[[], Fetcher] | None = None):
+        """FR-SESS-23's keywords (CC-SESS-0029): ``health_ttl_s`` (a live verdict's
+        cache window), ``relogin_burst`` and ``relogin_refill_s`` (the loss-driven
+        re-login bucket), ``max_pause_s`` (one pause's bound) and ``pause_budget_s`` (the
+        run's: `prepare`'s pauses and bucket waits share one, `verify_live`'s waits
+        another), the injectable ``clock`` and ``sleep`` (monotonic seconds), and
+        ``health_fetch_factory`` (the health GET's fetcher: by default the seam's plain
+        `requests` per hop when the manager fetches from the network, else the injected
+        ``fetch_factory``). An isolated copy takes the run's values and shares its
+        budgets."""
         self._creds = credentials
         # FR-SESS-19: the browser login fallback for single-page apps. Default: on when
         # the manager's fetches go to the network (the default fetcher), off when a
@@ -258,6 +510,22 @@ class SessionManager:
         self._out_of_origin = 0
         self._out_of_origin_seen: set[tuple[str, str]] = set()
         self._persisted: dict[tuple[str, str], dict] = {}
+        # FR-SESS-23: session health (the check, the pause, the re-login bucket)
+        self._clock = clock or time.monotonic
+        self._sleep = sleep or time.sleep
+        self._health_ttl_s = float(health_ttl_s)
+        self._relogin_burst = int(relogin_burst)
+        self._relogin_refill_s = float(relogin_refill_s)
+        self._max_pause_s = float(max_pause_s)
+        self._pause_budget_s = float(pause_budget_s)
+        self._health_ff = health_fetch_factory or \
+            (_plain_fetch_factory() if fetch_factory is None else self._fetch_factory)
+        self._run_budget = _RunBudget()
+        self._health: dict[tuple[str, str], _HealthRecord] = {}
+        self._generations: dict[tuple[str, str], int] = {}
+        self._seq_lock = threading.Lock()
+        self._seq = 0
+        self._login_tl = threading.local()       # the login in progress on this thread
         if self._store is not None:
             for rec in self._store.all_session_states():
                 self._persisted[(rec["host"], rec["identity"])] = rec
@@ -285,7 +553,8 @@ class SessionManager:
         if self._store is not None:
             self._store.upsert_session_state(state.non_secret_state())
 
-    def adopt(self, state: SessionState) -> SessionState:
+    def adopt(self, state: SessionState, *, protected_probe: str | None = None,
+              refusal_status: int | None = None) -> SessionState:
         """Adopt an externally-captured session (FR-SESS-11).
 
         The escape hatch for logins detection can't parse (MFA, CAPTCHA, multi-step,
@@ -298,6 +567,13 @@ class SessionManager:
         The state must name the origins it was observed on (``state.origins``,
         FR-SESS-20; `proxy.SessionCapture` records them): a session with none is
         refused loudly, since it could be sent nowhere.
+
+        *(FR-SESS-23.)* ``protected_probe`` gives the session a stable protected
+        resource, with an optional ``refusal_status`` held to the login's admission
+        (`admitted_refusal`: never a throttle, gateway or 407; refused loudly
+        otherwise). The adopted state gets the next generation before it is installed,
+        and it is installed and persisted under the lock `_mark_lost` compare-and-sets
+        under, so a replaced state's row never lands after this one's.
         """
         if self._isolated_from is not None:
             raise SessionAuthError("an isolated session never adopts a captured one "
@@ -307,15 +583,37 @@ class SessionManager:
                 f"refusing to adopt the captured session of {state.identity}@{state.host}: "
                 f"no origin was observed for it, so it could be sent nowhere (capture "
                 f"its requests with their URLs; FR-SESS-20)")
+        if refusal_status is not None and not admitted_refusal(refusal_status):
+            raise SessionAuthError(
+                f"refusing to adopt the captured session of {state.identity}@{state.host} "
+                f"with refusal status {refusal_status!r}: a refusal status must be the "
+                f"application's answer or a policy block below 500 (SP-56), never a "
+                f"throttle, a gateway or a 407 (FR-SESS-23)")
+        if protected_probe is not None:
+            state.protected_probe = protected_probe
+            state.probe_refusal_status = refusal_status
         # the operator's authorised auth origins are this session's too (R5, A-N2)
         state.origins = frozenset(state.origins) | frozenset(self._auth_origins)
         state.valid = True
         self._scope.add(state.host)
-        self._state[(state.host, state.identity)] = state
-        self._persist(state)
+        self._install(state)
         if self._log:
             self._log.info("adopted captured session", extra=state.redacted())
         return state
+
+    def _install(self, state: SessionState) -> None:
+        """Make ``state`` the current state of its (host, identity) (FR-SESS-23, B3 and
+        review round 4): number it with the next generation, install it and persist its
+        non-secret row, all under `_observe_guard` -- the lock `_mark_lost`
+        compare-and-sets and persists under. So an invalidation of the state this one
+        replaces either lands wholly before it (its row first) or finds it replaced
+        (no row): the rows' last word is always the current state's."""
+        key = (state.host, state.identity)
+        with self._observe_guard:
+            state.generation = self._next_generation(key)
+            self._state[key] = state
+            self._persist(state)
+            self._health_record(*key).relogin_due = False
 
     # -- addon interface used by the HTTP seam ----------------------------
     def prepare(self, request, identity: str) -> None:
@@ -326,11 +624,28 @@ class SessionManager:
         goes out **without** the session, as that app's anonymous visitor: it never
         triggers a login there, is logged once per (origin, identity) and counted
         (`out_of_origin_sends`); the decision is recorded on the request itself
-        (``request.session_decision = OUT_OF_ORIGIN``, R6) for its sender."""
+        (``request.session_decision = OUT_OF_ORIGIN``, R6) for its sender.
+
+        *(FR-SESS-23.)* Before anything else: a sticky unknown identity raises
+        `SessionHealthUnknown` at once (no clock, no network), and a pause of the
+        current generation is waited out and re-checked (`_wait_out_pause`). The request
+        then records the generation of the state applied (``session_generation``, set
+        from that state, never re-read), and ``session_lost`` when that state is one
+        this manager knows to be lost and could not yet recover (the re-login budget of
+        an identity with no stable protected resource is spent)."""
         host = urlparse(request.url).hostname or ""
         identity = self._own_identity(identity)
         if identity == ANONYMOUS or host not in self._scope:
             return
+        current = self._state_for(request.url, identity)
+        if current is not None:
+            key = (current.host, identity)
+            rec = self._health_record(*key)
+            if rec.unknown is not None:
+                raise self._unknown(key, rec.unknown)          # sticky: no network
+            pause = rec.pause
+            if pause is not None and pause["gen"] == current.generation:
+                self._wait_out_pause(current, identity)
         origin = canonical_origin(request.url)
         state = self._state_for(request.url, identity)
         if state is None:
@@ -356,6 +671,10 @@ class SessionManager:
             self._withhold(origin, identity, request)  # FR-SESS-20: before any secret
             return
         request.headers = state.apply(request.headers)
+        # FR-SESS-23 (F4): from the state just applied, never re-read from the manager
+        request.session_generation = state.generation
+        # D' (FR-FUZZ-65): a session known lost and not yet recovered (D's window)
+        request.session_lost = not state.valid
 
     def authorize(self, request, identity: str, prepared_host: str | None = None) -> None:
         """Re-check an authenticated request after something (a plugin) edited it:
@@ -385,6 +704,22 @@ class SessionManager:
             _check_transport(state, request.url)
 
     def observe(self, request, response, identity: str) -> None:
+        """Read one answer to a request this manager prepared (FR-SESS-23, BUG-0533). A
+        forbidden answer is never, by itself, a lost session:
+
+        - SP-56 classifies first: a throttle, gateway, 407, incomplete or other
+          application answer changes nothing (counted by class).
+        - A request from another generation (``session_generation``) says nothing about
+          the current one; a signal on an invalid or paused generation is ignored.
+        - **With a stable protected resource**, a loss shape (`detect.detect_logout`), a
+          credentialed policy block (403, 451) or a credential submission's loss shape
+          (`detect.login_facts` with `detect.request_entry_names`) triggers
+          `check_health`; the resource's answer decides.
+        - **With none**, only a loss shape that is not a submission counts: an
+          unconfirmed loss (`_mark_lost`), whose re-login draws on the bucket.
+
+        Listeners are told once per valid -> invalid transition seen on this send
+        (FR-SESS-16), after the health lock is released."""
         if self._label is not None:
             if identity != self._label:
                 return              # prepare() already refused it; nothing of ours
@@ -394,20 +729,60 @@ class SessionManager:
         state = self._state_for(request.url, identity)
         if state is None:
             return
-        origin = canonical_origin(request.url)
+        seen_seq = self._next_seq()           # B2: the signal is seen now
+        key = (state.host, identity)
+        rec = self._health_record(*key)
+        carried = getattr(request, "session_decision", None) != OUT_OF_ORIGIN
         body = _text(response.body)
-        if detect.detect_logout(response.status, response.headers, body,
-                                login_url=state.login_url, page_url=request.url,
-                                content_check=state.kind != "basic",
-                                login_fields=state.login_fields):
-            with self._observe_guard:
-                was_valid = state.valid
-                state.valid = False  # next prepare() re-authenticates
-            self._persist(state)
-            if was_valid:
-                # inside the observing send; a listener's error propagates (PA-0106)
-                for listener in list(self._logout_listeners):
-                    listener(origin, identity)
+        shape = detect.detect_logout(response.status, response.headers, body,
+                                     login_url=state.login_url, page_url=request.url,
+                                     content_check=state.kind != "basic",
+                                     login_fields=state.login_fields, credentialed=carried,
+                                     credential_submission=False)
+        cls, _why = response_class(response.status, response.headers, complete=True,
+                                   credentialed=carried, credential_submission=False,
+                                   redirect_to_login=False)
+        self._count(rec, f"class:{cls}")
+        policy = cls == POLICY_BLOCK and carried
+        if not shape and not policy:
+            return
+        generation = getattr(request, "session_generation", None)
+        if generation is None:
+            generation = state.generation           # unstated: the current one (fail closed)
+        if generation != state.generation:
+            self._count(rec, "stale_signals")
+            return
+        if not state.valid:
+            return                                  # already lost (D's window included)
+        pause = rec.pause
+        if pause is not None and pause["gen"] == generation:
+            return                                  # paused: prepare re-checks
+        facts = detect.login_facts(request.url, response.headers, login_url=state.login_url,
+                                   entry_names=detect.request_entry_names(
+                                       request.url, request.body,
+                                       _header_value(request.headers, "content-type")))
+        submission = facts.credential_submission
+        origin = canonical_origin(request.url)
+        if not state.protected_probe:
+            if shape and not submission:
+                self._count(rec, "unconfirmed")
+                if self._mark_lost(state, generation):
+                    self._tell(origin, identity)
+            return
+        self._count(rec, "suspected" if shape else "policy_checks")
+        _health, moved = self.check_health(state.host, identity, self._bases.get(key),
+                                           generation=generation, signal_url=request.url,
+                                           seen_seq=seen_seq,
+                                           foreign=_foreign_header(request, state),
+                                           policy=not shape)
+        if moved:
+            self._tell(origin, identity)
+
+    def _tell(self, origin: str | None, identity: str) -> None:
+        """Tell the logout listeners (FR-SESS-16): inside the observing send, after the
+        health lock is released; a listener's error propagates (PA-0106)."""
+        for listener in list(self._logout_listeners):
+            listener(origin, identity)
 
     def add_logout_listener(self, listener: Callable[[str, str], None]) -> None:
         """Call ``listener(origin, identity)`` each time `observe` sees a valid session
@@ -432,7 +807,16 @@ class SessionManager:
         one of the existing ``(host, identity)`` session's origins -- never from a base
         derived from a request on another origin. An operator base whose origin is not
         one of the existing session's (or of an earlier operator base's) is refused
-        loudly (`SessionAuthError`), naming the remedy: a distinct identity per app."""
+        loudly (`SessionAuthError`), naming the remedy: a distinct identity per app.
+
+        *(FR-SESS-23.)* A loss-driven re-login draws a token from the (host, identity)
+        bucket under the login lock. With none left, an identity with a stable
+        protected resource waits for the next token (holding no lock) or raises
+        `SessionHealthUnknown`; an identity **without** one (decision D) gets the
+        current state back **still invalid** -- a session known to be lost -- with no
+        login, no wait and no error, and `prepare` marks each request it sends on it
+        (`Request.session_lost`). One warning is logged when an identity enters that
+        window."""
         if identity != ANONYMOUS:
             self._check_base(host, identity, base_url, operator=operator)
         if operator:
@@ -446,43 +830,101 @@ class SessionManager:
             return state
         if host not in self._scope:
             raise SessionAuthError(f"host {host!r} not in scope {sorted(self._scope)}")
-        lock = self._lock_for(host, identity)
-        with lock:  # single-flight: concurrent expiry -> one login
-            state = self._state.get((host, identity))
-            if state is not None and state.valid and not state.is_time_expired():
-                return state
-            # again under the lock: a concurrent login may have anchored it meanwhile
-            self._check_base(host, identity, base_url, operator=operator)
-            if self._failures.get((host, identity), 0) >= self._max_reauth:
-                raise SessionAuthError(
-                    f"re-auth cap ({self._max_reauth}) reached for {identity}@{host}"
-                )
-            if self._max_logins is not None and \
-                    self._attempts.get((host, identity), 0) >= self._max_logins:
-                raise LoginCapReached(
-                    f"login cap ({self._max_logins}) reached for the isolated session "
-                    f"{self._label or identity}@{host}", reason="isolated login cap reached")
-            self._attempts[(host, identity)] = self._attempts.get((host, identity), 0) + 1
-            from fuzzlab.core.credentials import CredentialError
-            try:
-                state = self._login(host, identity, base_url)
-                if self._isolated_from is not None:
-                    self._check_isolated(host, identity, state)   # FR-SESS-17
-            except SessionAuthError as exc:
-                self._failures[(host, identity)] = self._failures.get((host, identity), 0) + 1
-                if self._isolated_from is not None and \
-                        not isinstance(exc, IsolatedLoginFailed):
-                    raise IsolatedLoginFailed(str(exc)) from exc
-                raise
-            except CredentialError as exc:
-                if self._isolated_from is None:
-                    raise                                         # unchanged for a run
-                self._failures[(host, identity)] = self._failures.get((host, identity), 0) + 1
-                raise IsolatedLoginFailed(
-                    str(exc), reason="isolated login: no credentials") from exc
-            self._failures[(host, identity)] = 0
-            self._state[(host, identity)] = state
-            return state
+        while True:
+            # single-flight: concurrent expiry -> one login; the re-login token is drawn
+            # in the same critical section as the login (FR-SESS-23, F5)
+            with self._lock_for(host, identity):
+                state = self._state.get((host, identity))
+                if state is not None and state.valid and not state.is_time_expired():
+                    return state
+                # again under the lock: a concurrent login may have anchored it meanwhile
+                self._check_base(host, identity, base_url, operator=operator)
+                draw = self._draw_relogin((host, identity), state)
+                if draw is _SKIP_RELOGIN:
+                    return state      # D: no token, no resource: send on what there is
+                if draw is None:
+                    return self._log_in_locked(host, identity, base_url)
+            self._sleep(draw)         # an empty bucket's wait holds no lock
+            self._charge("prepare_s", draw)
+
+    def _log_in_locked(self, host: str, identity: str, base_url: str) -> SessionState:
+        """`ensure`'s login, under the (host, identity) login lock: the caps, the login,
+        the isolated copy's distinctness, then the install (`_install`), which ends the
+        old generation's pause first (login lock -> health lock)."""
+        if self._failures.get((host, identity), 0) >= self._max_reauth:
+            raise SessionAuthError(
+                f"re-auth cap ({self._max_reauth}) reached for {identity}@{host}"
+            )
+        if self._max_logins is not None and \
+                self._attempts.get((host, identity), 0) >= self._max_logins:
+            raise LoginCapReached(
+                f"login cap ({self._max_logins}) reached for the isolated session "
+                f"{self._label or identity}@{host}", reason="isolated login cap reached")
+        self._attempts[(host, identity)] = self._attempts.get((host, identity), 0) + 1
+        from fuzzlab.core.credentials import CredentialError
+        try:
+            state = self._login(host, identity, base_url)
+            if self._isolated_from is not None:
+                self._check_isolated(host, identity, state)   # FR-SESS-17
+        except SessionAuthError as exc:
+            self._failures[(host, identity)] = self._failures.get((host, identity), 0) + 1
+            if self._isolated_from is not None and \
+                    not isinstance(exc, IsolatedLoginFailed):
+                raise IsolatedLoginFailed(str(exc)) from exc
+            raise
+        except CredentialError as exc:
+            if self._isolated_from is None:
+                raise                                         # unchanged for a run
+            self._failures[(host, identity)] = self._failures.get((host, identity), 0) + 1
+            raise IsolatedLoginFailed(
+                str(exc), reason="isolated login: no credentials") from exc
+        self._failures[(host, identity)] = 0
+        rec = self._health_record(host, identity)
+        with rec.lock:                 # login -> health: a new generation ends a pause
+            rec.pause = None
+        self._count(rec, "logins")
+        self._install(state)
+        return state
+
+    def _draw_relogin(self, key: tuple[str, str], state: SessionState | None):
+        """The loss-driven re-login bucket (FR-SESS-23, M10, D), under the login lock.
+
+        Returns None when the login may go ahead (the first login, a JWT refresh, or a
+        token was drawn), `_SKIP_RELOGIN` when an identity with no stable protected
+        resource has no token (D: it carries on at once on the session it has), or the
+        seconds to wait for the next token (an identity with a resource, within the
+        pause bound and the run's budget; otherwise `SessionHealthUnknown`)."""
+        rec = self._health_record(*key)
+        if state is None or state.valid or not rec.relogin_due:
+            return None
+        now = self._clock()
+        if rec.tokens is None:
+            rec.tokens, rec.refill_at = float(self._relogin_burst), now
+        gained = (now - rec.refill_at) / self._relogin_refill_s
+        if gained > 0:
+            rec.tokens = min(float(self._relogin_burst), rec.tokens + gained)
+            rec.refill_at = now
+        if rec.tokens >= 1.0:
+            rec.tokens -= 1.0
+            rec.in_window = False
+            self._count(rec, "relogins")
+            return None
+        if not state.protected_probe:
+            self._count(rec, "relogins_skipped")
+            if not rec.in_window:                  # one warning per window (no secret)
+                rec.in_window = True
+                _HEALTH_LOG.warning(
+                    "%s@%s: the re-login budget is spent and the session has no stable "
+                    "protected resource: sending on the session marked lost until a token "
+                    "refills (FR-SESS-23 D); answers sent meanwhile are not comparable "
+                    "(FR-FUZZ-65)", self._label or key[1], key[0])
+            return _SKIP_RELOGIN
+        wait = (1.0 - rec.tokens) * self._relogin_refill_s
+        with self._run_budget.lock:
+            left = self._pause_budget_s - self._run_budget.prepare_s
+        if wait > self._max_pause_s or wait > left:
+            raise self._unknown(key, "re-login budget")
+        return wait
 
     def session_header(self, host: str, identity: str, base_url: str, *,
                        operator: bool = False) -> str:
@@ -550,7 +992,16 @@ class SessionManager:
                               fetch_factory=self._fetch_factory,
                               identities=list(self._identities),
                               max_reauth=self._max_reauth, logger=self._log, store=None,
-                              max_logins=max_logins, browser_login=self._browser_login)
+                              max_logins=max_logins, browser_login=self._browser_login,
+                              health_ttl_s=self._health_ttl_s,
+                              relogin_burst=self._relogin_burst,
+                              relogin_refill_s=self._relogin_refill_s,
+                              max_pause_s=self._max_pause_s,
+                              pause_budget_s=self._pause_budget_s, clock=self._clock,
+                              sleep=self._sleep, health_fetch_factory=self._health_ff)
+        # FR-SESS-23: the run's pause budgets and credential-POST count, shared (its
+        # health records, generations and re-login bucket are its own)
+        copy._run_budget = self._run_budget
         copy._auth_origins = set(self._auth_origins)
         copy._bases = dict(self._bases)
         copy._operator_bases = set(self._operator_bases)
@@ -606,44 +1057,292 @@ class SessionManager:
                     reason=f"isolated session {why}")
 
     def verify_live(self, host: str, identity: str, base_url: str) -> bool:
-        """Is the run's session for ``identity`` still logged in? One GET of ``base_url``
-        (the operator's base) with a fresh fetcher carrying the session's cookies and
-        headers, walked hop by hop inside the approved origins (`_navigate`). It fails on
-        401/403 or on this session's login form, as `_verify_authenticated` does. On a
-        failure the state is marked invalid (and persisted), so the next send re-logs in
-        once; listeners are not told (the caller decides). The session's cookies and
-        headers go only to the session's own origins (FR-SESS-20, O5): a hop to any
-        other origin -- another port of the same host, or an approved in-scope one -- is
-        never fetched and raises `SessionAuthError`, as does an unapproved hop (the
-        caller treats both as "cannot verify"). A browser-login session (FR-SESS-19) is
-        checked on its protected probe instead of the base URL: 2xx with the
-        credential, and not the anonymous body when that was 2xx too."""
+        """Is the run's session for ``identity`` still logged in? A fresh health check
+        (`check_health`, never the live cache): one GET of the session's stable
+        protected resource (else ``base_url``, the operator's base) carrying the
+        session's cookies and headers, walked hop by hop inside the session's origins,
+        stopping at a login redirect, and judged by `health_verdict` (FR-SESS-23):
+
+        - LIVE: True, and any sticky unknown is cleared (a definite answer);
+        - LOST: False; the state is marked lost (`_mark_lost`, persisted) without telling
+          listeners (the caller decides), and any sticky unknown is cleared;
+        - an unapproved or other-origin hop: `SessionAuthError` ("cannot verify",
+          FR-SESS-20, O5), as before;
+        - INCONCLUSIVE: it waits **on its own** (5 s doubling to 60 s, ``Retry-After``
+          honoured), at most ``max_pause_s`` per call and within its own run budget
+          (never `prepare`'s), and checks again; still inconclusive, it returns True
+          (today's "not lost"), logged once. It never records a pause for the identity
+          and never sets or clears a sticky unknown;
+        - STALE (the state was replaced while it checked): True, logged."""
         state = self._state.get((host, identity))
         if state is None or not state.valid:
             return False
-        fetcher = self._fetch_factory()
-        floor = bool(state.secure_only) or urlparse(base_url).scheme.lower() == "https"
-        if state.protected_probe:
-            # a browser login's protected probe (FR-SESS-19): the app's own shell is
-            # public, so only the probe tells a live session from a revoked one
-            probe, _page, _floor = self._navigate(fetcher, state.protected_probe, base_url,
-                                                  floor, headers=state.apply({}),
-                                                  session_origins=state.origins)
-            ok = 200 <= probe.status < 300 and (
-                state.probe_refusal_digest is None
-                or _digest(probe.text) != state.probe_refusal_digest)
-        else:
-            probe, page, _floor = self._navigate(fetcher, base_url, base_url, floor,
-                                                 headers=state.apply({}),
-                                                 session_origins=state.origins)
-            ok = probe.status not in (401, 403) and (
-                state.kind == "basic" or not detect.shows_login_form(
-                    probe.text, page, state.login_url, state.login_fields))
-        if not ok:
-            with self._observe_guard:
-                state.valid = False
+        rec = self._health_record(host, identity)
+        generation = state.generation
+        began, step = self._clock(), PAUSE_FIRST_S
+        while True:
+            health, _moved = self.check_health(host, identity, base_url,
+                                               generation=generation, use_cache=False,
+                                               pause=False)
+            if health.state != INCONCLUSIVE:
+                break
+            left = self._max_pause_s - (self._clock() - began)
+            with self._run_budget.lock:
+                budget_left = self._pause_budget_s - self._run_budget.verify_s
+            wait = min(max(step, health.retry_after_s or 0.0), left, budget_left)
+            if wait <= 0:
+                break
+            self._sleep(wait)
+            self._charge("verify_s", wait)
+            step = min(PAUSE_MAX_STEP_S, step * 2)
+        if health.state in (LIVE, LOST):
+            with rec.lock:
+                rec.unknown = None                    # a definite answer
+            return health.state == LIVE
+        _HEALTH_LOG.warning("verify_live: session health %s; read as live (%s)",
+                            health.state, health.reason)
+        return True
+
+    # -- session health (FR-SESS-23, CC-SESS-0029, BUG-0533) ---------------------------
+    def check_health(self, host: str, identity: str, base_url: str | None = None, *,
+                     generation: int | None = None, signal_url: str | None = None,
+                     seen_seq: int | None = None, foreign: bool = False,
+                     policy: bool = False, use_cache: bool = True,
+                     pause: bool = True) -> tuple[Health, bool]:
+        """Is (host, identity)'s session of ``generation`` (default: the current one)
+        live? The one owner of the answer (FR-SESS-23). Returns ``(Health,
+        transitioned)``: ``transitioned`` is whether this call marked a valid session
+        lost (its caller tells the listeners when the loss was seen on a send).
+
+        - **Single flight** under the per-(host, identity) health lock; the verdict is
+          recorded before the lock is released. A waiter re-checks under the lock.
+        - **The cover (B2):** a live verdict covers a signal only when the signal was
+          seen (``seen_seq``) before that verdict's GET was **sent**; a signal seen
+          while the GET was in flight makes its own check. So N concurrent signals make
+          at most two GETs.
+        - **The cache (M6):** for ``health_ttl_s``, a live verdict also covers later
+          loss shapes of the same generation and URL key (``signal_url``), unless the
+          request carried a header the session does not own (``foreign``); and it covers
+          a **policy block** (``policy``: a 403 or 451 that is no loss shape) of the
+          same generation whatever its URL or headers (review round 5: a WAF that
+          blocks every path or header payload costs one check per window, not one per
+          path). ``use_cache=False`` (a pause re-check, `verify_live`) reads neither.
+        - **Compare-and-set (B3):** after the GET, still under the lock, the verdict
+          counts only if the judged object is still the current state of its key and of
+          the generation judged; otherwise it is STALE and records nothing (no live
+          mark, no pause, no `_mark_lost`, no row, no listener).
+        - LOST calls `_mark_lost` (its own compare-and-set). INCONCLUSIVE pauses the
+          identity for that generation unless ``pause=False`` (`verify_live`).
+        - An unapproved hop raises `SessionAuthError` (fail fast, never a pause)."""
+        key = (host, identity)
+        state = self._state.get(key)
+        if state is None:
+            return Health(STALE, "no session", generation), False
+        rec = self._health_record(*key)
+        gen = state.generation if generation is None else generation
+        signal_key = url_key(signal_url) if signal_url else None
+        with rec.lock:
+            if state.generation != gen:
+                return Health(STALE, "another generation", gen), False
+            if rec.verdict == (gen, LOST):
+                return Health(LOST, "already lost", gen), False
+            now = self._clock()
+            if use_cache:
+                last = rec.live_seq.get(gen)
+                if seen_seq is not None and last is not None and last > seen_seq:
+                    self._count(rec, "covered")
+                    return Health(LIVE, "covered", gen), False
+                if policy:                        # a policy block: any URL, any header
+                    at = rec.live_any.get(gen)
+                elif signal_key is not None and not foreign:
+                    at = rec.live.get((gen, signal_key))
+                else:
+                    at = None
+                if at is not None and now - at < self._health_ttl_s:
+                    self._count(rec, "cached")
+                    return Health(LIVE, "cached", gen), False
+            sent_seq = self._next_seq()           # B2: the cover point is the send
+            started = self._clock()
+            health = self._health_get(state, base_url or self._bases.get(key))
+            health = dataclasses.replace(health, generation=gen)
+            self._count(rec, "checks")
+            self._count(rec, health.state)
+            if not self._is_current(state, gen):
+                self._count(rec, "stale_verdicts")       # B3: replaced while in flight
+                return Health(STALE, "replaced while its check was in flight", gen), False
+            moved = False
+            if health.state == LIVE:
+                # only this generation's entries are kept: an older one never covers
+                rec.live = {k: at for k, at in rec.live.items() if k[0] == gen}
+                rec.live_seq = {gen: max(rec.live_seq.get(gen, 0), sent_seq)}
+                rec.live_any = {gen: started}
+                if signal_key is not None:
+                    rec.live[(gen, signal_key)] = started
+            elif health.state == LOST:
+                if rec.pause is not None and rec.pause["gen"] == gen:
+                    rec.pause = None
+                moved = self._mark_lost(state, gen)
+            elif health.state == INCONCLUSIVE and pause:
+                current = rec.pause
+                if current is None or current["gen"] != gen:
+                    rec.pause = {"gen": gen,
+                                 "until": now + max(PAUSE_FIRST_S, health.retry_after_s or 0),
+                                 "step": PAUSE_FIRST_S, "began": now}
+                    self._count(rec, "pauses")
+                    _HEALTH_LOG.warning("session health unknown; pausing the identity "
+                                        "(%s)", health.reason)
+            rec.verdict = (gen, health.state)     # recorded before the lock is released
+        return health, moved
+
+    def _health_get(self, state: SessionState, base_url: str | None) -> Health:
+        """One GET of ``state``'s stable protected resource (else ``base_url``) with the
+        session's own material, sent as the seam sends (`health_fetch_factory`), walked
+        inside the session's origins and stopping at a login redirect, judged by
+        `health_verdict`. A transport failure (a timeout included) is no response:
+        INCONCLUSIVE. An unapproved hop raises (fail fast). A live answer's rotated
+        session cookie is adopted."""
+        target = state.protected_probe or base_url
+        if not target:
+            return Health(INCONCLUSIVE, "no resource and no base", state.generation)
+        floor = bool(state.secure_only) or urlparse(target).scheme.lower() == "https"
+        fetcher = self._health_ff()
+        try:
+            resp, page, _floor = self._navigate(fetcher, target, base_url or target, floor,
+                                                headers=state.apply({}),
+                                                session_origins=frozenset(state.origins),
+                                                stop_at=state)
+        except _transport_errors() as exc:
+            return Health(INCONCLUSIVE, f"no response ({type(exc).__name__})",
+                          state.generation)
+        stopped = _stopped_at_login(resp)
+        health = health_verdict(state, resp.status, resp.headers, resp.text, page,
+                                stopped_at_login=stopped)
+        if health.state == LIVE:
+            cookies = getattr(fetcher, "cookies", None)
+            _adopt_rotation(state, cookies() if callable(cookies) else None)
+        return health
+
+    def _is_current(self, state: SessionState, generation: int | None) -> bool:
+        """B3: ``state`` is still the current object for its key, of ``generation``."""
+        return self._state.get((state.host, state.identity)) is state and \
+            state.generation == generation
+
+    def _mark_lost(self, state: SessionState, generation: int | None) -> bool:
+        """The one place a session is invalidated (FR-SESS-23; T19). Under
+        `_observe_guard` it compare-and-sets on the **current state**: it changes nothing
+        and returns False unless ``state`` is still the current object of its key and of
+        ``generation``, and valid. Then it marks it invalid, makes the next login a
+        loss-driven one (the bucket) and persists its row -- the persist inside the same
+        critical section, so a replacement installed by `_install` writes its row after
+        this one, never before. Returns whether it made the transition; its caller tells
+        the listeners when the loss was seen on a send."""
+        with self._observe_guard:
+            if not self._is_current(state, generation):
+                return False
+            if not state.valid:
+                return False
+            state.valid = False
+            self._health_record(state.host, state.identity).relogin_due = True
             self._persist(state)
-        return ok
+        return True
+
+    def _wait_out_pause(self, state: SessionState, identity: str) -> Health | None:
+        """Wait a paused identity's pause out on the injectable sleep, holding no lock,
+        then check again, until it is live, lost or unknown past the pause bound or the
+        run's budget (`prepare`'s only; `verify_live` has its own wait). A loss found
+        here has no culprit send: it is marked lost without telling the listeners.
+        Returns the last verdict (None: the pause had ended)."""
+        key = (state.host, identity)
+        rec = self._health_record(*key)
+        while True:
+            pause = rec.pause
+            if pause is None or pause["gen"] != state.generation:
+                return None
+            now = self._clock()
+            with self._run_budget.lock:
+                spent = self._run_budget.prepare_s
+            over_budget = spent >= self._pause_budget_s
+            if now - pause["began"] >= self._max_pause_s or over_budget:
+                raise self._unknown(key, "pause budget" if over_budget else "pause bound")
+            if now < pause["until"]:
+                wait = min(pause["until"] - now, pause["began"] + self._max_pause_s - now,
+                           max(0.0, self._pause_budget_s - spent))
+                self._sleep(wait)
+                self._charge("prepare_s", wait)
+                continue
+            health, _moved = self.check_health(state.host, identity, self._bases.get(key),
+                                               generation=pause["gen"], use_cache=False)
+            if health.state == STALE:
+                with rec.lock:
+                    if rec.pause is pause:
+                        rec.pause = None
+                return health
+            if health.state == INCONCLUSIVE:
+                with rec.lock:
+                    pause["step"] = min(PAUSE_MAX_STEP_S, pause["step"] * 2)
+                    pause["until"] = self._clock() + max(pause["step"],
+                                                         health.retry_after_s or 0)
+                continue
+            with rec.lock:
+                if rec.pause is pause:
+                    rec.pause = None
+            return health
+
+    def _unknown(self, key: tuple[str, str], why: str) -> SessionAuthError:
+        """Make (host, identity) sticky unknown and return the error to raise:
+        `SessionHealthUnknown`, or `IsolatedHealthUnknown` for an isolated copy."""
+        rec = self._health_record(*key)
+        # no health lock: the bucket's caller holds the login lock, and an in-flight
+        # check holds the health lock for its GET; a sticky identity reads no pause
+        rec.unknown = why
+        rec.pause = None
+        self._count(rec, "unknown")
+        if self._isolated_from is not None:
+            return IsolatedHealthUnknown(f"isolated session health unknown ({why})",
+                                         reason="isolated session health unknown")
+        return SessionHealthUnknown(f"the session of {key[1]}@{key[0]} stayed unknown "
+                                    f"({why}; FR-SESS-23)")
+
+    def health_report(self) -> dict:
+        """FR-SESS-23's counts: per ``"<host>/<identity>"`` the classes seen, signals,
+        checks and their outcomes, pauses, re-logins drawn and skipped; plus the run's
+        credential POSTs per account (``credential_posts``: ``submitted``, ``control``)
+        and the seconds `prepare`'s and `verify_live`'s waits spent (``paused_s``,
+        ``verify_paused_s``). No URL, header value or body."""
+        with self._locks_guard:
+            out: dict = {f"{h}/{i}": dict(r.report) for (h, i), r in self._health.items()}
+        with self._run_budget.lock:
+            out["credential_posts"] = {account: dict(kinds) for account, kinds in
+                                       self._run_budget.credential_posts.items()}
+            out["paused_s"] = self._run_budget.prepare_s
+            out["verify_paused_s"] = self._run_budget.verify_s
+        return out
+
+    def _health_record(self, host: str, identity: str) -> _HealthRecord:
+        with self._locks_guard:
+            rec = self._health.get((host, identity))
+            if rec is None:
+                rec = self._health[(host, identity)] = _HealthRecord()
+            return rec
+
+    def _count(self, rec: _HealthRecord, name: str, n: int = 1) -> None:
+        with self._locks_guard:
+            rec.report[name] += n
+
+    def _next_seq(self) -> int:
+        with self._seq_lock:
+            self._seq += 1
+            return self._seq
+
+    def _next_generation(self, key: tuple[str, str]) -> int:
+        with self._locks_guard:
+            n = self._generations.get(key, 0) + 1
+            self._generations[key] = n
+            return n
+
+    def _charge(self, which: str, seconds: float) -> None:
+        with self._run_budget.lock:
+            setattr(self._run_budget, which, getattr(self._run_budget, which) + seconds)
 
     def is_auth_endpoint(self, url: str) -> bool:
         """Is ``url`` one of this manager's sessions' auth endpoints (login page, form
@@ -799,6 +1498,7 @@ class SessionManager:
                 f"{canonical_origin(form.action_url)}: a downgrade from https to http, "
                 f"or not the login page's origin, an in-scope host, or an authorised auth "
                 f"origin; {auth_origin_advice(canonical_origin(form.action_url))}")
+        self._count_credential_post(host, identity, "submitted")       # FR-SESS-23
         resp = self._post_credentials(fetcher, form.action_url,
                                       form.fill(cred.username, cred.password), base_url,
                                       floor_https=floor_https, seen=seen)
@@ -844,7 +1544,8 @@ class SessionManager:
 
         # Record auth endpoints so fuzzing excludes them (T1.8).
         return self._established(fetcher, host, identity, base_url, state, seen,
-                                 (form.action_url, login_page_url, state.logout_url))
+                                 (form.action_url, login_page_url, state.logout_url),
+                                 landing=getattr(resp, "url", None))
 
     # -- JSON login from the page's own script (FR-SESS-21) ---------------------------
     def _json_login(self, fetcher: Fetcher, host: str, identity: str, base_url: str,
@@ -871,11 +1572,13 @@ class SessionManager:
         def body(password: str) -> bytes:
             return json.dumps(dict(form.fill(cred.username, password))).encode()
         control = self._fetch_factory()
+        self._count_credential_post(host, identity, "control")         # FR-SESS-23
         wrong = self._post_credentials(control, url, body(cred.password + WRONG_SUFFIX),
                                        base_url, floor_https=floor_https, seen=seen,
                                        headers=headers)
         wrong_cookies = set(control.cookies())
         before = fetcher.cookies()
+        self._count_credential_post(host, identity, "submitted")
         resp = self._post_credentials(fetcher, url, body(cred.password), base_url,
                                       floor_https=floor_https, seen=seen, headers=headers)
         if not 200 <= resp.status < 300:
@@ -909,9 +1612,12 @@ class SessionManager:
 
     def _established(self, fetcher: Fetcher, host: str, identity: str, base_url: str,
                      state: SessionState, seen: set[str] | None,
-                     auth_endpoints: tuple) -> SessionState:
+                     auth_endpoints: tuple, *, landing: str | None = None) -> SessionState:
         """The common end of an HTTP login: the follow-up probe, then the session is
-        valid, its auth endpoints recorded and its non-secret state persisted."""
+        valid, its auth endpoints recorded and its stable protected resource chosen
+        (FR-SESS-23: the operator's base, else the post-login ``landing``). Its
+        non-secret row is written when `ensure` installs it (`_install`), under the
+        lock `_mark_lost` writes under (B3)."""
         if not self._verify_authenticated(fetcher, base_url, state, seen=seen):
             raise SessionAuthError(
                 f"login for {identity}@{host} did not result in an authenticated "
@@ -920,10 +1626,33 @@ class SessionManager:
         state.valid = True
         self._warn_other_origins(identity, host, seen, state.origins)      # O12
         self._record_auth_endpoints(*auth_endpoints)
-        self._persist(state)   # NON-SECRET metadata only (T1.7)
+        self._record_resource(state, base_url, (landing,))
         if self._log:
             self._log.info("authenticated", extra=state.redacted())
         return state
+
+    def _record_resource(self, state: SessionState, base_url: str,
+                         extra: Sequence[str | None] = ()) -> None:
+        """Choose an HTTP login's stable protected resource (FR-SESS-23, M4, M5) through
+        the one owner (`_spa_probe`): the operator's base URL (rule 2, every session
+        kind), then the post-login landing (rule 3). None when no candidate proves a
+        live session apart from a lost one: its losses are then unconfirmed."""
+        if state.protected_probe:
+            return
+        url, status, digest = self._spa_probe(state.host, base_url, state,
+                                              [base_url, *extra])
+        state.protected_probe, state.probe_refusal_status = url, status
+        if digest is not None:
+            state.probe_refusal_digest = digest
+
+    def _count_credential_post(self, host: str, identity: str, kind: str) -> None:
+        """Count one credential POST of the account (the credential store's key, D12):
+        ``submitted`` (a login's) or ``control`` (a JSON login's wrong-password control).
+        A run's isolated copies count into the same account (FR-SESS-23, R15)."""
+        with self._run_budget.lock:
+            kinds = self._run_budget.credential_posts.setdefault(f"{host}/{identity}",
+                                                                Counter())
+            kinds[kind] += 1
 
     # -- browser login for single-page apps (FR-SESS-19, CC-SESS-0021) -------------
     def _browser_login_state(self, host: str, identity: str, base_url: str,
@@ -943,6 +1672,7 @@ class SessionManager:
                 f"could not log {identity}@{host} in: no server-rendered login form or "
                 f"Basic challenge at {base_url}, and the browser login failed: {exc}"
             ) from None
+        self._count_credential_post(host, identity, "submitted")       # FR-SESS-23
         if not self._credential_destination_ok(obs.login_url, base_url,
                                                floor_https=obs.floor_https):
             raise SessionAuthError(                    # the route refused it already
@@ -978,13 +1708,15 @@ class SessionManager:
                                      set(jar) - set(detected.cookies))),
                                  # FR-SESS-20: the login page is the base URL itself
                                  origins=self._origins_of(base_url, obs.login_url))
-            probe, refusal_digest = self._spa_probe(host, base_url, state, obs.probes)
+            probe, refusal_status, refusal_digest = self._spa_probe(host, base_url, state,
+                                                                    obs.probes)
             if probe is None:
                 continue
-            state.protected_probe, state.probe_refusal_digest = probe, refusal_digest
+            state.protected_probe, state.probe_refusal_status = probe, refusal_status
+            state.probe_refusal_digest = refusal_digest
             state.valid = True
             self._record_auth_endpoints(obs.login_url, state.logout_url)
-            self._persist(state)   # NON-SECRET metadata only
+            # its non-secret row is written when `ensure` installs it (`_install`, B3)
             if self._log:
                 self._log.info("authenticated (browser login)", extra=state.redacted())
             return state
@@ -998,23 +1730,30 @@ class SessionManager:
             f"the credential ({len(obs.probes)} candidate(s); FR-SESS-5)")
 
     def _spa_probe(self, host: str, base_url: str, state: SessionState,
-                   candidates) -> tuple[str | None, str | None]:
-        """FR-SESS-5's differential for a browser login (reviewers A3, A-M1): the first
-        in-scope GET the app made after the click (already scope- and
-        destructive-checked; 2xx in the browser, no password in its URL) that answers
-        2xx when replayed with the credential, and whose answers **without** it (only the
-        ambient jar cookies, reviewer A-S1) and with a **corrupted** credential
-        (`_corrupted`) agree with each other and not with the
-        credentialed one: the same non-2xx (non-5xx) status, or the same body, stable
-        over two fetches each, that differs from the credentialed body (also stable).
-        The corrupted arm keeps an endpoint that only reacts to the *presence* of an
-        Authorization header or cookie (an echo, a header-keyed cache, a "token present
-        but invalid" body) from confirming a login. Returns ``(url, sha256 of the
-        corrupted credential's body when it was 2xx)`` -- `verify_live`'s "not live"
-        reference -- or ``(None, None)``. Each replay uses a fresh fetcher, walked by
-        `_navigate` inside the session's origins only (FR-SESS-20, O5): a candidate on
-        another origin is never fetched, and a hop out of the origins is refused before
-        it is fetched."""
+                   candidates) -> tuple[str | None, int | None, str | None]:
+        """The one owner of "this URL tells a live session from a lost one" (FR-SESS-5,
+        FR-SESS-19, FR-SESS-23; PA-0507(2)): a browser login's post-click GETs (rule 1)
+        and an HTTP login's operator base and post-login landing (rules 2 and 3,
+        `_record_resource`) are judged by the same test. The first candidate (at most
+        eight) that is in the session's origins, approved by the operator's anchor and
+        not an auth endpoint, and:
+
+        - whose **credentialed** answer is LIVE by `health_verdict` on the walk that
+          stops at a login redirect (M4(a));
+        - whose **anonymous** answer (only the ambient jar cookies, reviewer A-S1) and
+          **corrupted** answer (`_corrupted`, M4(b): an endpoint that only reacts to
+          the *presence* of a credential is never one) agree as a refusal: both LOST by
+          `health_verdict`; or the same status that `admitted_refusal` admits (a
+          non-2xx below 500 that SP-56 classes as the application's or a policy block,
+          never a throttle, gateway or 407; B1), recorded; or the same body, stable over
+          two fetches each, that differs from the credentialed body (also stable),
+          recorded as its sha256.
+
+        Returns ``(url, refusal status, refusal digest)``, or ``(None, None, None)``.
+        Each fetch uses a fresh login fetcher, walked by `_navigate` inside the
+        session's origins only (FR-SESS-20, O5): a candidate on another origin is never
+        fetched, and a hop out of the origins is refused before it is fetched. A live
+        credentialed answer's rotated session cookie is adopted."""
         floor = bool(state.secure_only)
         good, bad_headers = state.apply({}), _corrupted(state).apply({})
         # the anonymous arm carries the same ambient jar cookies the corrupted arm
@@ -1022,42 +1761,68 @@ class SessionManager:
         ambient = SessionState(state.host, state.identity, cookies={
             n: v for n, v in (state.cookies or {}).items()
             if not credential_cookie(n, str(v), state)}).apply({}) or None
-
-        def ok(resp) -> bool:
-            return 200 <= resp.status < 300
+        # the state as a candidate is judged: no refusal recorded yet
+        bare = dataclasses.replace(state, browser_state=None, probe_refusal_status=None,
+                                   probe_refusal_digest=None)
         origins = frozenset(state.origins)
+
+        def verdict(arm) -> str:
+            resp, page, stopped, _fetcher = arm
+            return health_verdict(bare, resp.status, resp.headers, resp.text, page,
+                                  stopped_at_login=stopped, refusal=False).state
+
+        seen: set[str] = set()
         for url in list(candidates)[:8]:
+            if not url or url in seen:
+                continue
+            seen.add(url)
             if canonical_origin(url) not in origins or \
-                    not self._navigation_ok(url, base_url, floor):
+                    not self._navigation_ok(url, base_url, floor) or \
+                    self.is_auth_endpoint(url):
                 continue
             try:
-                authed = self._probe_fetch(url, base_url, floor, origins, good)
-                if not ok(authed):
-                    continue
-                anon = self._probe_fetch(url, base_url, floor, origins, ambient)
-                bad = self._probe_fetch(url, base_url, floor, origins, bad_headers)
-                if anon.status >= 500 or bad.status >= 500:
-                    continue
-                if not ok(anon) or not ok(bad):
-                    if anon.status == bad.status:
-                        return url, None                  # e.g. 401 both ways
-                    continue
-                anon2 = self._probe_fetch(url, base_url, floor, origins, ambient)
-                bad2 = self._probe_fetch(url, base_url, floor, origins, bad_headers)
-                authed2 = self._probe_fetch(url, base_url, floor, origins, good)
-            except SessionAuthError:
-                continue                                  # an unapproved hop: not this one
-            stable = anon.text == anon2.text and bad.text == bad2.text and \
-                authed.text == authed2.text and ok(authed2)
-            if stable and bad.text == anon.text and authed.text != bad.text:
-                return url, _digest(bad.text)
-        return None, None
+                authed = self._probe_fetch(url, base_url, floor, origins, good, state)
+                if verdict(authed) != LIVE:
+                    continue                                      # M4(a)
+                cookies = getattr(authed[3], "cookies", None)
+                _adopt_rotation(state, cookies() if callable(cookies) else None)
+                arms = [self._probe_fetch(url, base_url, floor, origins, ambient, state),
+                        self._probe_fetch(url, base_url, floor, origins, bad_headers,
+                                          state)]
+            except (SessionAuthError, *_transport_errors()):
+                continue                          # an unapproved hop: not this one
+            if all(verdict(arm) == LOST for arm in arms):
+                return url, None, None
+            statuses = {arm[0].status for arm in arms}
+            if len(statuses) != 1:
+                continue
+            status = statuses.pop()
+            if admitted_refusal(status):
+                return url, status, None
+            if not 200 <= status < 300:
+                continue
+            try:
+                again = [self._probe_fetch(url, base_url, floor, origins, ambient, state),
+                         self._probe_fetch(url, base_url, floor, origins, bad_headers,
+                                           state)]
+                authed2 = self._probe_fetch(url, base_url, floor, origins, good, state)
+            except (SessionAuthError, *_transport_errors()):
+                continue
+            texts = {arm[0].text for arm in arms + again}
+            if len(texts) == 1 and authed[0].text == authed2[0].text and \
+                    200 <= authed2[0].status < 300 and authed[0].text not in texts:
+                return url, None, _digest(texts.pop())
+        return None, None, None
 
     def _probe_fetch(self, url: str, base_url: str, floor: bool,
-                     origins: frozenset[str], headers):
-        resp, _page, _floor = self._navigate(self._fetch_factory(), url, base_url, floor,
-                                             headers=headers, session_origins=origins)
-        return resp
+                     origins: frozenset[str], headers, state: SessionState):
+        """One fresh-fetcher walk of a resource candidate that stops at a login
+        redirect: ``(response, page_url, stopped_at_login, fetcher)``."""
+        fetcher = self._fetch_factory()
+        resp, page, _floor = self._navigate(fetcher, url, base_url, floor,
+                                            headers=headers, session_origins=origins,
+                                            stop_at=state)
+        return resp, page, _stopped_at_login(resp), fetcher
 
     def _discover_login_form(self, fetcher: Fetcher, base_url: str, *,
                              seen: set[str] | None = None):
@@ -1095,7 +1860,7 @@ class SessionManager:
     def _navigate(self, fetcher: Fetcher, url: str, base_url: str, floor_https: bool,
                   headers: dict | None = None,
                   session_origins: frozenset[str] | None = None,
-                  seen: set[str] | None = None):
+                  seen: set[str] | None = None, stop_at: SessionState | None = None):
         """GET ``url`` following at most `MAX_LOGIN_HOPS` redirects by hand. Every hop
         must pass `_navigation_ok` **before** it is fetched. A fetcher that cannot be
         told not to follow redirects must report a final URL equal to the one asked
@@ -1103,8 +1868,12 @@ class SessionManager:
         ``session_origins`` (`verify_live`, the probe differential), a hop to any origin
         outside them -- another port of the same host included -- is refused before it
         is fetched, so ``headers`` (a session) reach those origins only (FR-SESS-20,
-        O5). ``seen`` collects the canonical origin of every hop fetched (O12). Returns
-        ``(response, page_url, floor_https)``."""
+        O5). ``seen`` collects the canonical origin of every hop fetched (O12). With
+        ``stop_at`` (a session state; FR-SESS-23's health walk), the walk stops at the
+        first hop whose ``Location`` `detect.redirect_is_logout` judges a login redirect
+        for that session, and returns that redirect: a login on another origin (an IdP)
+        is judged at its hop and never fetched. Returns ``(response, page_url,
+        floor_https)``."""
         current = url
         for _ in range(MAX_LOGIN_HOPS + 1):
             if not self._navigation_ok(current, base_url, floor_https):
@@ -1128,7 +1897,10 @@ class SessionManager:
                     f"the login fetcher cannot refuse redirects and did not report that "
                     f"{current} was not redirected; refusing (it may have left scope)")
             location = {k.lower(): v for k, v in resp.headers.items()}.get("location")
-            if resp.status in (301, 302, 303, 307, 308) and location:
+            if resp.status in _REDIRECTS and location:
+                if stop_at is not None and detect.redirect_is_logout(
+                        location, current, stop_at.login_url):
+                    return resp, current, floor_https          # a login redirect: stop
                 current = urljoin(current, location)
                 continue
             return resp, current, floor_https
@@ -1235,7 +2007,9 @@ class SessionManager:
                 f"HTTP Basic login for {identity}@{host} was rejected (credentials "
                 f"wrong: the base URL still challenges)")
         state.valid = True
-        self._persist(state)
+        # rule 2 for Basic too (M4(b)): the base URL that challenged; its non-secret row
+        # is written when `ensure` installs it (`_install`, B3)
+        self._record_resource(state, base_url)
         if self._log:
             self._log.info("authenticated", extra=state.redacted())
         return state
@@ -1252,6 +2026,12 @@ class SessionManager:
         ``base_url`` (often public), so it is a guard against an outright-broken
         session, not proof of authentication on its own — hence the POST-response
         check upstream carries the weight (BUG-0008).
+
+        *(FR-SESS-23, R8.)* Judged by `health_verdict` (the one loss predicate), with
+        today's acceptance kept: LOST (an auth failure such as a credentialed 401, or
+        this session's login form) fails it; a policy block (403, 451) fails it; any
+        other answer -- a throttle or a 5xx included -- accepts it. This decides login
+        success, not session loss.
         """
         # the probe walks redirects hop by hop too, inside the approved origins and over
         # the transport floor, carrying the session's headers (BUG-0097)
@@ -1261,14 +2041,15 @@ class SessionManager:
         probe, page, _floor = self._navigate(fetcher, base_url, base_url, floor,
                                              headers=state.headers or None, seen=seen,
                                              session_origins=state.origins)
-        if probe.status in (401, 403):
+        # Basic: no page content is read (BUG-0113); only this session's login form
+        # means "not logged in", never any password field (BUG-0113)
+        if health_verdict(state, probe.status, probe.headers, probe.text, page,
+                          refusal=False).state == LOST:
             return False
-        if state.kind == "basic":       # Basic: 401/403 only, as in observe (BUG-0113)
-            return True
-        # only the login form itself means "not logged in": the base may be an app page
-        # that has a password field of its own (BUG-0113)
-        return not detect.shows_login_form(probe.text, page, state.login_url,
-                                           state.login_fields)
+        cls, _why = response_class(probe.status, probe.headers, complete=True,
+                                   credentialed=True, credential_submission=False,
+                                   redirect_to_login=False)
+        return cls != POLICY_BLOCK
 
 
 def _credential_items(state: SessionState) -> dict[tuple[str, str], str]:

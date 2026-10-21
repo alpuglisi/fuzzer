@@ -265,6 +265,15 @@ REGISTRY = {
     "fuzzlab.session.manager:SessionManager.verify_live":
         Covered("tests/test_json_points.py::"
                 "test_a_json_login_sqli_is_confirmed_on_an_isolated_session_only"),
+    # CC-SESS-0029 (FR-SESS-23); each traced: the pointed test hands it the sub-path base
+    "fuzzlab.session.manager:SessionManager.check_health":
+        Covered("tests/test_json_points.py::"
+                "test_a_json_login_sqli_is_confirmed_on_an_isolated_session_only"),
+    "fuzzlab.session.manager:SessionManager._health_get":
+        Covered("tests/test_json_points.py::"
+                "test_a_json_login_sqli_is_confirmed_on_an_isolated_session_only"),
+    "fuzzlab.session.manager:SessionManager._log_in_locked": Covered(_SUB_LOGIN),
+    "fuzzlab.session.manager:SessionManager._record_resource": Covered(_SUB_LOGIN),
     "fuzzlab.session.manager:SessionManager._login": Covered(_SUB_LOGIN),
     "fuzzlab.session.manager:SessionManager._browser_login_state": Covered(_SPA_SUBPATH),
     "fuzzlab.session.manager:SessionManager._spa_probe": Covered(_SPA_SUBPATH),

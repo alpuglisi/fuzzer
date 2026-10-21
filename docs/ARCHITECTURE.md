@@ -1437,7 +1437,18 @@ tracked in the requirements files, not here.
   session out (CC-SESS-0017; since CC-SESS-0023 the listener receives the logout's
   canonical origin, not a host). `isolated_copy` gives a throwaway manager with its own
   login and no store, for probing in-app login forms; `verify_live` re-checks the run's
-  session (CC-SESS-0018, FR-SESS-17). Internally the
+  session (CC-SESS-0018, FR-SESS-17).
+  A forbidden answer is never, by itself, a lost session (FR-SESS-23, CC-SESS-0029,
+  BUG-0533): `observe` classifies an answer through SP-56 first, and a suspected loss is
+  confirmed by one health check of the session's stable protected resource (chosen at
+  login by one owner, `_spa_probe`), bound to the session's generation and current state
+  (`check_health`, `health_verdict`, `_mark_lost`; every install under the same lock).
+  Re-logins draw on a refilling budget; an unknown identity pauses, then fails loudly
+  (`SessionHealthUnknown`); an identity with no resource carries on when the budget is
+  spent, and every request it sends then is marked lost (`Request.session_lost`), whose
+  answer no consumer takes as evidence: the oracle (any sender), the live WAF filter and
+  the blind-SQLi builder (FR-FUZZ-65; CC-FUZZ-0107, CC-FUZZ-0110, CC-MUT-0404).
+  Internally the
   detected mechanism maps to an auth handler (cookie/form, JSON+token, Basic,
   header-key) — implementation detail, not user config. Post-Phase 6, logins
   detection can't crack are handled by **adopting a session the proxy captures

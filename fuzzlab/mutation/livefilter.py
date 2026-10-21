@@ -28,7 +28,8 @@ class DestructiveRefused(Exception):
 
 class FilterUnobserved(Exception):
     """The live filter's answer was not an observation of the WAF (FR-MUT-401): a
-    throttle, a gateway or no complete answer. Like `DestructiveRefused`, never counted
+    throttle, a gateway, no complete answer, or an answer sent on a session known to be
+    lost (FR-FUZZ-65, CC-MUT-0404). Like `DestructiveRefused`, never counted
     as a block or an allow; `run.run_mutation` ends that base's search on it. The
     message names a class and a status, never the payload."""
 
@@ -72,6 +73,10 @@ class HttpFilter:
             raise DestructiveRefused(payload)
         probe = self._sender.send(self._url, self._param, payload,
                                   method=self._method, location=self._location)
+        if getattr(probe, "session_lost", False) is True:
+            # FR-FUZZ-65 / FR-MUT-401 (CC-MUT-0404): sent on a session its manager knew to
+            # be lost: never an allow or a block, whatever it answered
+            raise FilterUnobserved("the live filter's answer was sent on a lost session")
         status = getattr(probe, "status", None)
         if status != self._block:
             # SP-56: the classes refused here depend on no credential or login fact

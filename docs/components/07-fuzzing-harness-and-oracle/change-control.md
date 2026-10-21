@@ -3,6 +3,33 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0110 — The blind-SQLi builder never admits an answer sent on a session known to be lost (FR-FUZZ-65, FR-FUZZ-63, BUG-0533; decision D′) (2026-10-20)
+- Placement: AU-SESS403 (audit defect 6), review round 5; the owner's decision D′ covers
+  every consumer, so BUG-0533's sweep pin for this builder was closed instead of queued.
+- Change: `fuzzlab/tools/blind_sqli_fuzzer.py` (+15 / -3), each edit local to the mark:
+  - `Answer` carries `session_lost`; `SeamSender.get` sets it from the request it sent
+    (`core.http.Request.session_lost`, CC-CORE-0070), its client-timeout 504 included.
+  - `answer_class` returns `("lost-session", "sent on a lost session", False)` for such
+    an answer before any SP-56 class is read: the baseline excludes it (counted under
+    `lost-session`; `BaselineNotComparable` when no sample remains), and the cycle's
+    not-comparable branch writes no row for it.
+  - The cycle's one exception -- a 504 stays a timing observation -- does not apply to a
+    lost session's 504: `latencies = []`, no row (the same discipline as the timing
+    path).
+- Impact (other components / project): no row is written and no sample enters the
+  baseline from D's window (FR-SESS-23). AU-BOUNDED edits the same file near the cycle's
+  request-error branch; this change touches `Answer`, `answer_class`, `SeamSender.get`
+  and four lines after the not-comparable branch, so the two merge apart.
+- Risk (low): it can only drop a sample or a row.
+- Deliverables:
+  - [x] the mark carried and read — done
+  - [x] FR-FUZZ-65 lists the builder — done
+  - [x] `tests/test_session_forbidden_answers.py::test_the_blind_sqli_builder_never_admits_an_answer_on_a_lost_session`
+    (the strict xfail turned into a passing test, extended to the baseline, the cycle and
+    a lost 504; it fails on f1d31dd and against `bsqli_nomark`,
+    `bsqli_class_ignores_lost`, `bsqli_504_kept`) — done
+- Effectiveness (assessed <date> or pending): pending.
+
 ### CC-FUZZ-0109 — The probe senders and the static fetch read bodies bounded; an incomplete body is "not observed" (BUG-0536) (2026-10-20)
 - Placement: pre-assigned to AU-BOUNDED (audit defect 21); CC-FUZZ-0107 and CC-FUZZ-0108
   are other lanes'. The reader is CC-CORE-0072.
@@ -56,6 +83,52 @@ Newest first.
     connection dropped; review round 1: greybox's run loop with incomplete baseline
     and variants, and the blind-SQLi failed repeat — done
   - [x] FR-FUZZ-50 and FR-FUZZ-8 edited in place — done
+
+### CC-FUZZ-0107 — An answer on a session known to be lost is never evidence (FR-FUZZ-65, BUG-0533; decision D′) (2026-10-20)
+- Placement: AU-SESS403 (audit defect 6), the oracle part of the owner's decision D′
+  after review round 4's probe Q1. Design record: `docs/components/03-session-manager/
+  DRAFT-AU-SESS403.md`.
+- Change:
+  - `fuzzlab/oracle/probe.py`: `Probe.session_lost: bool = False`; `LOST_SESSION`;
+    `require_observed` (layer 1, SP-56's oracle reader) raises `NotComparable("... sent
+    on a lost session")` for a marked probe or a marked PRG follow-up, **before** any
+    class is read, whatever the class (+20 lines).
+  - `fuzzlab/tools/probesender.py::SeamProbeSender._dispatch` carries
+    `Request.session_lost` (CC-CORE-0070), read and never recomputed, onto the probe it
+    returns (+3 lines). A follow-up is built by the same `_dispatch`, so it carries its
+    own request's mark.
+  - *(Review round 5, blocker 1.)* `fuzzlab/oracle/strategies.py::ConfirmationStrategy.
+    _compared` calls `require_observed` before `require_comparable` (+7 lines with the
+    docstring). The oracle wraps only the run's own sender in `_ObservedOnly`; the
+    cross-account replay sends through the peer's (and the anonymous) sender, so a peer
+    replay on the peer's lost session was admitted: measured at f1d31dd, a guest view
+    gave a negative and an open object a `cross-account-replay` confirmation. Every
+    compared send now meets layer 1 whichever sender made it.
+- Impact (other components / project):
+  - Every strategy run goes through `_ObservedOnly`, so payloads, controls, baselines,
+    compared slots, replays and the correlated send all read the rule; a candidate with
+    such answers is inconclusive (`not-comparable`), never a pass, a negative or a
+    finding. The scheduler is charged as for any not-comparable arm.
+  - The mark fires only in FR-SESS-23's D window (a no-resource identity with its
+    re-login budget spent); a resource-backed identity never sends on a lost state.
+  - The live WAF filter (CC-MUT-0404) and the blind-SQLi builder (CC-FUZZ-0110) read
+    the mark too (review round 5: the decision covers every consumer). The auditor's and
+    crawler's fetches use such answers for discovery only (stated).
+  - R6 (a comparison that straddles a re-login, `Probe.session_generation`) stays a
+    stated residual with its strict xfail.
+- Risk (low): an additive field read in one place; it can only turn an answer into no
+  verdict, never into a confirmation. The cost: a candidate probed in D's window is
+  inconclusive instead of decided.
+- Deliverables:
+  - [x] `Probe.session_lost`, the layer-1 rule, the sender's carry — done
+  - [x] FR-FUZZ-65 — done
+  - [x] tests: the guest view in D's window ends inconclusive through the oracle (Q1's
+    shape; reverts `nolostmark`, `oracle_ignores_lost`); a peer replay on the peer's
+    lost session ends inconclusive, never a negative or a confirmation (TD4; revert
+    `compared_skips_layer1`); layer 1 on every class and a follow-up (the timing case
+    synthetic: `SeamProbeSender` re-raises a timeout); a resource-backed identity never
+    marked (`d_for_all`) — done
+
 - Effectiveness (assessed <date> or pending): pending.
 
 ### CC-FUZZ-0106 — Every sender places a query value through one owner (BUG-0531) (2026-10-20)
