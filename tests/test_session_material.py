@@ -133,3 +133,19 @@ def test_only_the_first_prepare_inside_a_frame_settles_it():
         _adopt(mgr)
         mgr.prepare(Request("GET", ORIGIN + "/b", identity="alice"), "alice")
     assert frame.prepared and frame.applied == fetched
+
+
+def test_an_ipv6_sessions_jar_cookies_and_host_matches_are_kept():
+    """BUG-0559 round-2 sweep (BB-2 item 5), fixed at the gaps merge: the manager built a
+    URL from a bare host as ``f"http://{host}/"``; for ``::1`` (what ``urlparse`` gives)
+    that is no URL, so a [::1] session's browser-jar cookies were dropped while the IPv4
+    control kept them."""
+    from fuzzlab.session.manager import _jar_cookies
+    v6 = {"cookies": [{"name": "sid", "value": "1", "domain": "[::1]", "path": "/",
+                       "expires": -1, "secure": False}]}
+    v4 = {"cookies": [{"name": "sid", "value": "v", "domain": "127.0.0.1", "path": "/",
+                       "expires": -1, "secure": False}]}
+    assert _jar_cookies(v4, "127.0.0.1", secure_ok=False) == {"sid": "v"}   # control
+    assert _jar_cookies(v6, "::1", secure_ok=False) == {"sid": "1"}
+    assert _jar_cookies(v6, "[::1]", secure_ok=False) == {"sid": "1"}
+    assert _jar_cookies(v6, "10.0.0.1", secure_ok=False) == {}            # another host

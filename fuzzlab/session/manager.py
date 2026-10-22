@@ -1548,7 +1548,7 @@ class SessionManager:
         """Every recorded auth endpoint on ``host`` (any port; loopback aliases one
         host)."""
         from fuzzlab.session.browserlogin import canonical_host
-        mine = canonical_host(f"http://{host}/")
+        mine = canonical_host(_host_url(host))
         return {u for origin, urls in self._auth_endpoints.items()
                 if canonical_host(origin + "/") == mine for u in urls}
 
@@ -1579,7 +1579,7 @@ class SessionManager:
         """``identity``'s sessions with an origin on ``host`` (canonical: loopback aliases
         one host): those a request prepared for ``host`` may have carried."""
         from fuzzlab.session.browserlogin import canonical_host
-        mine = canonical_host(f"http://{host}/")
+        mine = canonical_host(_host_url(host))
         return [s for (_h, i), s in list(self._state.items())
                 if i == identity and any(canonical_host(o + "/") == mine
                                          for o in s.origins)]
@@ -2490,6 +2490,14 @@ def credential_cookie(name: str, value: str, state: SessionState) -> bool:
     return value in _header_tokens(state) or _identifier_like(name, value)
 
 
+
+def _host_url(host: str) -> str:
+    """A URL for a bare ``host`` (an IPv6 literal bracketed, as a URL spells it), for
+    `canonical_host` (BUG-0559: ``f"http://{host}/"`` is no URL for ``::1``)."""
+    name = str(host or "").strip()
+    return f"http://[{name.strip('[]')}]/" if ":" in name else f"http://{name}/"
+
+
 def _jar_cookies(storage: dict | None, host: str, *, secure_ok: bool,
                  now: float | None = None) -> dict[str, str]:
     """The browser jar's cookies a requests-based send of this session may carry
@@ -2507,7 +2515,7 @@ def _jar_cookies(storage: dict | None, host: str, *, secure_ok: bool,
     from fuzzlab.session.browserlogin import canonical_host
     import ipaddress
     now = time.time() if now is None else now
-    mine = canonical_host(f"http://{host}/")
+    mine = canonical_host(_host_url(host))
     try:                    # an IP host has no parent domain: exact match only (A-N2)
         ipaddress.ip_address((mine or "").strip("[]"))
         is_ip = True
@@ -2515,7 +2523,7 @@ def _jar_cookies(storage: dict | None, host: str, *, secure_ok: bool,
         is_ip = False
     out: dict[str, str] = {}
     for c in (storage or {}).get("cookies", []) or []:
-        domain = canonical_host("http://" + str(c.get("domain") or "").lstrip(".") + "/")
+        domain = canonical_host(_host_url(str(c.get("domain") or "").lstrip(".")))
         if not domain or not mine or not (
                 mine == domain or (not is_ip and mine.endswith("." + domain))):
             continue
