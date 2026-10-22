@@ -92,7 +92,20 @@ that shares the store, never a mandatory pipeline (D5).
     read it (`url=`, `url = `, quoted, or bare after the delay); the request target is
     read whitespace-tolerantly (after the method and its run of spaces or tabs, up to
     the run before a final `HTTP/` version), so a malformed request line is redacted
-    too;
+    too. *(r6, BUG-0556, the owner's design, `CC-PROXY-0031`:)* **layered on the pushed
+    redactor**: 7393c90's own `redact` (`core.redaction_floor.redact`, frozen verbatim)
+    runs first on the raw message -- the sensitive headers, the request target's query,
+    `Location`'s and `Content-Location`'s query and `Refresh`'s every `url=` run (quotes
+    and the tail after them included), a duplicate of a `Location` or `Content-Location`
+    it rewrites collapsed into the rewritten value (as `RawMessage.with_header` did),
+    and the bodies -- and the walk above runs only on its output, so nothing the pushed
+    tree redacted is kept. Where the floor raises (a URL `urlsplit` rejects in the
+    request line or one of those headers), `redact` raises and the history writer stores
+    the flow with every body `OMIT_FAILED` and its URL cut at the `?`
+    (`_prepare_contained`), as on 7393c90. Pinned (owner CORE, BUG-0556 r6 family (a)):
+    a name the floor's `urlsplit` reading joins across a removed tab (`?token=a&x<TAB>
+    password=<w>`, which the floor returns as `xpassword=<w>`) in the request line,
+    `Location` or `Content-Location`, kept on 7393c90 too;
   - form, JSON (any depth) and multipart (non-file) request and response bodies. *(CC-PROXY-0020,
     BUG-0090:)* a sensitive JSON key's **whole value** is replaced, whatever its type
     (scalar, list, object or nested), and plural names are sensitive

@@ -155,7 +155,14 @@ def test_every_nested_spelling_of_a_secret_is_redacted_and_the_url_stays_a_url()
 
     The leak, clean-page and shape failures are asserted first, so the pre-fix code
     fails on the secret found, never on a function it lacked (review round 1, RU-5;
-    PA-0545(6))."""
+    PA-0545(6)). The top-level names kept are the URL's, or the pushed tree's own
+    redactor's (BUG-0556 r6: it runs first, reads a query's ``&`` parts only and blanks a
+    part whose value, read across its ``;``, is identifier-like: ``u=bob;a=1;k=<jwt>``
+    becomes ``u=``, as on 7393c90)."""
+    try:
+        from fuzzlab.core.redaction_floor import redact_url_identifiers as pushed
+    except ImportError:                               # a tree before r6: no floor
+        pushed = None
     failures, values = [], []
     for case in CASES:
         url = _case_url(case)
@@ -163,12 +170,14 @@ def test_every_nested_spelling_of_a_secret_is_redacted_and_the_url_stays_a_url()
         before, after = urlsplit(url), urlsplit(out)
         names = [p.partition("=")[0] for p in re.split(r"[&;]", before.query)]
         kept = [p.partition("=")[0] for p in re.split(r"[&;]", after.query)]
+        floor = ([p.partition("=")[0] for p in re.split(r"[&;]", urlsplit(pushed(url)).query)]
+                 if pushed is not None else names)
         if "next=" in before.query:
             values.append((case, before.query.split("next=", 1)[1]))
         if (_leaks(out, case[2]) or R.page_url_is_clean(url)
                 or (after.scheme, after.netloc, after.path)
                 != (before.scheme, before.netloc, before.path)
-                or kept[:2] != names[:2]):
+                or kept[:2] not in (names[:2], floor[:2])):
             failures.append((case, out))
     assert failures == []
     holds = _api("value_holds_secret")
@@ -745,6 +754,231 @@ def test_a_records_spaced_userinfo_never_reaches_a_later_pair():
     url = f"http://127.0.0.1:3000/app/?next=//x q&password=Hunter@{_WORD}"
     out = R.redact_for_record("target", url)
     assert _WORD not in out and "password=" in out, out
+
+
+# --- r6: layered on the pushed redactor (BUG-0556, the owner's design) -------------------
+#: The independent check of 144d234 found five classes 144d234 kept that 7393c90 redacted
+#: (journal wf_9a1e5879-609; regenerated in `scratchpad/lanes/REDACTURL/r6/checkwork/`):
+#: R1 `safe_ref` ran the walk before the record rule's userinfo regexes, so a userinfo
+#: password holding a ';' or '&' before a piece the walk redacted lost its '@' and kept
+#: its start; R2 the record redactor (and `safe_ref`) returned a URL holding a tab, CR or
+#: LF cleaned, merging the pieces 7393c90 split on that whitespace; R3 the proxy read a
+#: quoted ``Refresh`` URL only inside its quotes, and only the first ``url=``; A1 a URL
+#: ``urlsplit`` rejects made 7393c90 raise, and its callers withheld it; A2 7393c90
+#: collapsed a duplicate ``Location`` / ``Content-Location`` into the one it rewrote. r6
+#: runs the pushed tree's own redactor first, frozen (`core.redaction_floor`), and the
+#: walk on its output: each case below fails on 144d234 at its own assertion.
+_R1_USERINFO = [
+    f"http://h/app/p.php?u=1&next=https://bob:{_PASS};a70000000123f3e9c1b5d2@host/x",
+    f"http://h/app/p.php?u=1&next=https://bob:{_PASS}&a70000000123f3e9c1b5d2@host/x",
+    f"http://h/go/https://bob:{_PASS};sid=x@host/x",
+    f"http://h/p#https://bob:{_PASS}%26x%3Da70000000123f3e9c1b5d2@host/x",
+    f"http://h/app/p.php?u=1&next=%2Fcb%3Ftoken%3DX%26a%3D1 bob:{_PASS}@host",
+    f"http://h/app/p.php?u=bob#next=https://bob:{_PASS};Zx81mQ2vT9kLw3nB@host/x",
+]
+
+
+@pytest.mark.parametrize("url", _R1_USERINFO)
+def test_r6_r1_the_evidence_reference_keeps_no_userinfo_the_pushed_tree_removed(url):
+    """R1: 7393c90's `safe_ref` removed the whole userinfo (its record rule's regex ran
+    on its URL redactor's output); 144d234's walk ran first, cut the ``@`` and kept
+    ``bob:<password>;``. The floor runs first now."""
+    from fuzzlab.core.trace import safe_ref
+    assert _leaks(url, _PASS)                                # not vacuous
+    out = safe_ref(url)
+    assert not _leaks(out, _PASS), out
+
+
+def test_r6_r1_import_spider_under_a_trace_recorder_stores_no_such_userinfo(tmp_path):
+    """R1 through the store: `fuzzlab auto` imports a crawl with its run's trace recorder
+    active, and `tools.observe` cites each page by `safe_ref` in ``trace_event`` and
+    ``dg_flow`` rows; 144d234 stored the password's start there (146 URLs of the
+    check's corpus), 7393c90 none. Two spellings are left out, each kept by both trees
+    elsewhere, not this class: a userinfo in the page's own path (``/go/https://bob:<pw>
+    @…``: ``page.url``, `store_url`) and one cut by a raw ``&`` of the page's query
+    (``next=https://bob:<pw>&…``: the pair's value holds no ``@``; pinned)."""
+    from fuzzlab.core import trace
+    from fuzzlab.tools.store_adapter import import_spider
+    urls = [u.replace("/app/", f"/a{i}/", 1).replace("http://h/p#", f"http://h/a{i}/p#", 1)
+            for i, u in enumerate(_R1_USERINFO)
+            if "/go/" not in u and f"{_PASS}&" not in u]
+    _spider_db(tmp_path / "s.db", urls)
+    with Store(tmp_path / "u.db") as store:
+        run = store.start_run("auto", "h")
+        recorder = trace.TraceRecorder(store, run)
+        with trace.recording(recorder):
+            import_spider(tmp_path / "s.db", store, run)
+        recorder.close()
+        events = store.conn.execute("SELECT COUNT(*) FROM trace_event").fetchone()[0]
+        dump = _dump(store)
+    assert events > 0 and "/a5/p.php" in dump                # not vacuous: traced pages
+    assert not _leaks(dump, _PASS)
+
+
+_R2_MERGED = [tpl.format(ws=ws, W=_WORD) for ws, tpl in [
+    ("\t", "http://h/app/p.php?u=bob&n{ws}ext=/cb?password=v;{W}"),
+    ("\r", "http://h/app/p.php?u=bob{ws}next=/cb?sid=pw;{W}"),
+    ("\n", "http://h/app/p.php?u=bob&n{ws}ext=https://host/cb?pwd=a;b;{W}"),
+    ("\r\n", "http://h/app/p.php?u=b{ws}ob&next=cb.php?password=v;{W}"),
+    ("\t\t", "http://h/app/p.php?u=bob{ws}next=/cb?sid=pw;{W}"),
+    ("\r", "http://h/app/p.php?u=bob&n{ws}ext=/cb?password=v;{W}"),
+    ("\n", "http://h/app/p.php?u=b{ws}ob&next=cb.php?password=v;{W}"),
+    ("\t", "http://h/app/p.php?u=bob&n{ws}ext=https://host/cb?pwd=a;b;{W}"),
+]]
+
+
+@pytest.mark.parametrize("url", _R2_MERGED)
+def test_r6_r2_a_tab_cr_or_lf_never_merges_what_the_pushed_tree_split(url):
+    """R2: 7393c90's record redactor split a value on whitespace and read
+    ``ext=/cb?password=v;<word>`` as a URL of its own, its value running past the ``;``;
+    144d234's walk returned the whole value with the tab removed, the nested query cut at
+    the ``;``, and kept the word (450 of the check's 2 268 variants), in the record
+    redactor and in `safe_ref`."""
+    from fuzzlab.core.trace import safe_ref
+    assert _leaks(url, _WORD)                                # not vacuous
+    kept = [name for name, out in (("redact_for_record", R.redact_for_record("target", url)),
+                                   ("safe_ref", safe_ref(url))) if _leaks(out, _WORD)]
+    assert kept == []
+
+
+@pytest.mark.parametrize("value", [
+    f'0;url="http://h/?a=1"&password={_WORD}',
+    f'0;url="http://a/" ; url=http://b/?password={_WORD}',
+    f"0; url='http://h/x?a=1'&token={_WORD}",
+    f'0;URL="/x?a=1"&x=1&token={_WORD}',
+])
+def test_r6_r3_a_quoted_refresh_url_keeps_nothing_the_pushed_tree_redacted(value):
+    """R3: 7393c90 passed every ``url=`` run of ``Refresh`` -- quotes and the tail after
+    them included -- to its URL redactor; 144d234 walked only the quoted URL and only the
+    first ``url=``, and kept the rest (384 of the check's 1 410 secret-bearing values)."""
+    from fuzzlab.proxy.redact import redact
+    raw = f"HTTP/1.1 200 OK\r\nRefresh: {value}\r\nContent-Length: 0\r\n\r\n".encode()
+    assert _WORD.encode() in raw                             # not vacuous
+    out = redact(raw).decode("latin-1")
+    assert not _leaks(out, _WORD), out
+
+
+#: A URL ``urlsplit`` rejects (an unclosed or invalid bracketed host, a netloc that
+#: NFKC-normalises to a delimiter), holding a secret 144d234's walk keeps (the pinned
+#: ``/``-led value, `tests/test_redaction_residual_pins.py`).
+_A1_REJECTED = [
+    f"http://[h/app/p.php?u=bob&next=%2F%5Cx%26password%3D{_WORD}",
+    f"http://[::1]x/app/p.php?u=bob&next=%2F%5Cx%26password%3D{_WORD}",
+    f"http://h＠x/app/p.php?u=bob&next=%2F%5Cx%26password%3D{_WORD}",
+]
+
+
+def _withheld_or(fn, *args):
+    """``fn(*args)``, or None when it raises ``ValueError`` (its caller withholds)."""
+    try:
+        return fn(*args)
+    except ValueError:
+        return None
+
+
+@pytest.mark.parametrize("url", _A1_REJECTED)
+def test_r6_a1_a_url_urlsplit_rejects_is_withheld_by_every_consumer(url):
+    """A1: 7393c90's URL redactors raised on such a URL and every caller withheld it
+    (`safe_ref`'s ``(unparseable URL withheld)``, the history writer's
+    ``_prepare_contained``); 144d234's walk never raised and kept the secret it keeps
+    (1 329 URLs of the check's corpus). The floor raises again: each redactor raises
+    ``ValueError`` or keeps nothing, `page_url_is_clean` never answers True, and the
+    proxy's request line, ``Location``, ``Content-Location`` and ``Refresh`` too."""
+    from urllib.parse import urlsplit as _urlsplit
+
+    from fuzzlab.core.trace import safe_ref
+    from fuzzlab.proxy.redact import redact
+    assert _leaks(url, _WORD)                                # not vacuous
+    with pytest.raises(ValueError):
+        _urlsplit(url)
+    outs = [("redact_url", _withheld_or(R.redact_url, url)),
+            ("redact_url_identifiers", _withheld_or(R.redact_url_identifiers, url)),
+            ("safe_ref", safe_ref(url))]
+    if "＠" not in url:                  # the proxy reads latin-1: a byte-level URL
+        for name, raw in (("request line", f"GET {url} HTTP/1.1\r\nHost: h\r\n\r\n"),
+                          ("Location", f"HTTP/1.1 302 Found\r\nLocation: {url}\r\n\r\n"),
+                          ("Content-Location",
+                           f"HTTP/1.1 200 OK\r\nContent-Location: {url}\r\n\r\n"),
+                          ("Refresh", f"HTTP/1.1 200 OK\r\nRefresh: 0;url={url}\r\n\r\n")):
+            out = _withheld_or(redact, raw.encode("latin-1"))
+            outs.append((name, None if out is None else out.decode("latin-1")))
+    kept = [name for name, out in outs if out is not None and _leaks(out, _WORD)]
+    if _withheld_or(R.page_url_is_clean, url) is True:
+        kept.append("page_url_is_clean")
+    assert kept == []
+
+
+def test_r6_a1_proxy_history_withholds_a_flow_whose_url_its_floor_rejects(tmp_path):
+    """A1 through the store: the history writer contains a redaction failure per flow
+    (``_prepare_contained``: every body `OMIT_FAILED`, the URL cut at its ``?``), as on
+    7393c90; 144d234 stored the raw request line's secret."""
+    from fuzzlab.core.redaction import OMIT_FAILED
+    from fuzzlab.proxy.history import FlowRecord, HistoryWriter
+    url = _A1_REJECTED[0]
+    rq = f"GET {url} HTTP/1.1\r\nHost: h\r\n\r\n".encode()
+    rs = f"HTTP/1.1 302 Found\r\nLocation: {url}\r\n\r\n".encode()
+    with Store(tmp_path / "s.db") as store:
+        h = HistoryWriter(store, store.start_run("proxy", "x"), batch_size=5)
+        h.record(FlowRecord("GET", url, "h", 302, raw_request=rq, raw_response=rs))
+        assert h.flush() == 1                                # not vacuous: one flow stored
+        dump = _dump(store)
+    assert not _leaks(dump, _WORD)
+    assert OMIT_FAILED.decode() in dump
+
+
+@pytest.mark.parametrize("target", _A1_REJECTED[:2])
+def test_r6_a1_import_audit_withholds_a_target_its_floor_rejects_and_imports_the_rest(
+        tmp_path, target):
+    """A1 on the one caller the batch added that 7393c90 did not have (`import_audit`'s
+    target identifier, which 7393c90 and 144d234 stored raw, the secret with it): where
+    the floor raises, the import never fails -- the target is withheld, as `safe_ref`
+    withholds a URL it cannot parse (`store_adapter`'s own marker), and every other
+    finding is imported. r6's first draft let the floor's ``ValueError`` propagate and
+    failed the whole import (the first assertion below)."""
+    from fuzzlab.tools import fetcher as F
+    from fuzzlab.tools.store_adapter import import_audit
+    page = "http://h/app/p.php?u=bob"
+    db = F.setup_results_db(str(tmp_path / "a.db"))
+    for rule, ident in (("rule_a", target), ("rule_b", "u")):
+        db.execute("INSERT INTO findings (page_url, category, transaction_type, "
+                   "target_identifier, html_context) VALUES (?,?,?,?,?)",
+                   (page, "cat", rule, ident, f"value 'bob' reflected ({rule})"))
+    db.commit()
+    db.close()
+    assert _leaks(target, _WORD)                             # not vacuous
+    with Store(tmp_path / "u.db") as store:
+        failed = None
+        try:
+            counts = import_audit(tmp_path / "a.db", store, store.start_run("auditor", "h"))
+        except ValueError as exc:                            # the floor's raise, unhandled
+            failed, counts = exc, {}
+        targets = sorted(json.loads(e)["target_identifier"] for (e,) in store.conn.execute(
+            "SELECT evidence FROM candidate").fetchall())
+        dump = _dump(store)
+    assert failed is None, f"the import failed: {failed!r}"
+    assert not _leaks(dump, _WORD)
+    from fuzzlab.tools.store_adapter import AUDIT_TEXT_WITHHELD
+    assert counts == {"candidate": 2} and targets == sorted([AUDIT_TEXT_WITHHELD, "u"])
+
+
+@pytest.mark.parametrize("headers", [
+    f"Location: http://h/?token=a\r\nLocation: http://user:{_WORD}@h/app",
+    f"Location: http://h/?token=a\r\nLocation: http://h/app/p.php?u=bob&next=%2F%5Cx%26"
+    f"password%3D{_WORD}",
+    f"Content-Location: /x?sid=a\r\nContent-Location: http://user:{_WORD}@h/app",
+    f"Content-Location: /x?sid=a\r\nContent-Location: /y?u=1&next=%2F%5Cx%26password%3D"
+    f"{_WORD}",
+])
+def test_r6_a2_a_duplicate_url_header_keeps_nothing_the_pushed_tree_dropped(headers):
+    """A2: when 7393c90 rewrote a ``Location`` or ``Content-Location`` it replaced every
+    occurrence by the one rewritten value (``RawMessage.with_header``), dropping a
+    duplicate holding a secret its walk keeps (a userinfo, the pinned ``/``-led value);
+    144d234 kept every duplicate and walked each. The floor collapses it again."""
+    from fuzzlab.proxy.redact import redact
+    raw = f"HTTP/1.1 302 Found\r\n{headers}\r\nContent-Length: 0\r\n\r\n".encode()
+    assert _WORD.encode() in raw                             # not vacuous
+    out = redact(raw).decode("latin-1")
+    assert not _leaks(out, _WORD), out
 
 
 # --- what reaches the store -------------------------------------------------------------
@@ -1506,9 +1740,24 @@ def test_a_value_past_the_size_bound_is_redacted_whole(monkeypatch):
     "http://h/p?next=/%zz%3F" + "/%2F%3F" * 400, "http://h/p?next=https://a@b@c%40/",
 ])
 def test_the_redactors_are_total(url):
-    for fn in (R.redact_url, R.redact_url_identifiers):
-        assert isinstance(fn(url), str)
-    assert isinstance(R.page_url_is_clean(url), bool)
+    """Total on every URL ``urlsplit`` accepts. On one it rejects (``http://[::1/x?…``)
+    the URL redactors and `page_url_is_clean` raise ``ValueError``, as the pushed tree's
+    did (BUG-0556 r6: the floor raises, and every caller withholds the value,
+    `test_r6_a1_a_url_urlsplit_rejects_is_withheld_by_every_consumer`); nothing else
+    raises."""
+    try:
+        urlsplit(url)
+        rejected = False
+    except ValueError:
+        rejected = True
+    for fn, kind in ((R.redact_url, str), (R.redact_url_identifiers, str),
+                     (R.page_url_is_clean, bool)):
+        try:
+            out = fn(url)
+        except ValueError:
+            assert rejected, (fn.__name__, url)
+            continue
+        assert isinstance(out, kind), fn.__name__
     assert R.redact_url(None) is None and R.page_url_is_clean(None) is False
     assert _api("value_holds_secret")(None) is False
 

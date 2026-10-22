@@ -1241,3 +1241,182 @@ Proof files are under `scratchpad/lanes/REDACTURL/r5b/`.
   against the pushed tree (the last revision users have), and its corpus drives the
   pushed code's own parsing -- each library parse it called (`urlsplit`'s removal of
   tabs, CRs and LFs) and each separator it split on (`&` only) -- on both sides.
+
+### r6 (layered on the pushed redactor; branch `lane/REDACTURL-r6` from 144d234)
+
+**Why a sixth fix round.** An independent check of 144d234 (journal `wf_9a1e5879-609`;
+its corpus regenerated in `scratchpad/lanes/REDACTURL/r6/checkwork/`: 101 005 URLs,
+100 504 holding a secret, through every URL consumer) found **2 104 URLs that 144d234
+kept and the pushed tree 7393c90 redacted** (`diff.144d234_vs_7393c90.txt`: 1 253
+case-consumer pairs where 7393c90 redacted, 6 256 where it raised and its caller withheld
+the value), in five classes r5's differential never drove:
+
+- **R1** `core.trace.safe_ref` ran the walk first and the record rule's userinfo
+  regexes after it; where a userinfo password held a `;` or `&` before a piece the walk
+  redacted, the walk cut the `@` the regex needed and `bob:<password>;` was kept
+  (7393c90 ran its URL redactor, then the record rule, which removed the whole userinfo);
+  775 URLs, 146 stored by `import_spider` through `fuzzlab auto`'s trace recorder.
+- **R2** `redact_for_record` (and `safe_ref`) walked the whole value with a tab, CR or
+  LF removed, merging the pieces 7393c90 split on that whitespace
+  (`n<TAB>ext=/cb?password=v;<w>`: 7393c90 read `ext=/cb?password=v;<w>` as a URL of its
+  own, its value running past the `;`); 450 of the check's 2 268 tab/CR/LF variants.
+- **R3** the proxy read a quoted `Refresh` URL only inside its quotes and only the first
+  `url=`; 7393c90 passed every `url=` run, quotes and tail included, to its redactor; 384
+  of 1 410.
+- **A1** 7393c90's URL redactors raised `ValueError` on a URL `urlsplit` rejects
+  (`http://[h/…`, a bad bracketed host, a netloc that NFKC-normalises to a delimiter),
+  and every caller withheld the value (`safe_ref`'s `(unparseable URL withheld)`, the
+  history writer's `_prepare_contained`); the walk never raised and kept the secrets it
+  keeps; 1 329 URLs.
+- **A2** when 7393c90 rewrote a `Location` or `Content-Location` it replaced every
+  duplicate by the one rewritten value (`RawMessage.with_header`); 144d234 kept every
+  duplicate and walked each, keeping a secret its walk keeps.
+
+**The design (the owner's, for audit gap 5).** Never replace the pushed redactor: layer
+on it. `fuzzlab/core/redaction_floor.py` holds 7393c90's own redaction code verbatim
+(73 definitions from `core/redaction.py`, `core/urls.py::is_spa_route_fragment`,
+`core/trace.py::safe_ref` and its blanking, `tools/store_adapter.py::redact_sibling`,
+`proxy/message.py::RawMessage` and `proxy/redact.py::redact`; the only edits point four
+function-local imports at the floor itself, and it imports nothing of `fuzzlab` at
+module level). Every URL redaction consumer runs its floor first on its input as
+received and the batch's walk (144d234's code, unchanged) on the floor's output only, so
+nothing the pushed tree redacted reaches the walk and the walk can only remove more.
+Per consumer (`core.redaction.LAYERED`):
+
+| Consumer | Floor (frozen 7393c90) | Then |
+| --- | --- | --- |
+| `redact_url` | `redact_url` | `_walk_names` (the walk, names) |
+| `redact_url_identifiers` | `redact_url_identifiers`; with `placeholder=True`, `redact_url` (the floor's identifier rule blanks a value, and a blank in a sent query is what PA-0544(3) forbids) | `_walk_url(identifiers=True)` |
+| `redact_spa_fragment` | `redact_spa_fragment` | `_walk_spa_fragment` |
+| `page_url_is_clean` | its verdict must be True first | the walk's verdict (`_walk_url` unchanged, no placeholder, no blank) |
+| `redact_for_record` | `redact_for_record` | `_walk_record` |
+| `stored_value` | `redact_sibling` (7393c90's sibling rule) | `""` too when the walk's `value_holds_secret` holds |
+| `core.trace.safe_ref` | `safe_ref`; a value it withholds stays withheld | `_walk_url(identifiers=True)`, `_walk_record`, `_blank_identifiers` |
+| `proxy.redact.redact` | `redact` (restores A2's collapse, R3's every `url=` run) | `_walk` |
+| `strip_secret_path_params`, `value_holds_secret` | none: 7393c90 had no counterpart (it stored a path as `to_path` gave it) | `FLOORLESS` / `WALK_PREDICATES` |
+
+**A1 (where a floor raises).** The consumer raises `ValueError`, as on 7393c90, and each
+caller behaves as it did there: the proxy history writer stores the flow with every body
+`OMIT_FAILED` and the URL cut at its `?` (`_prepare_contained`); `safe_ref` returns
+`(unparseable URL withheld)`; `page_url_is_clean`'s callers (the oracle's binder,
+`_source_page`) and the importers' other URL steps raise where 7393c90's own
+`store_url` / `urlparse` of the same URL raised (measured: `import_spider` over the
+check's corpus raises on the same 7 URLs on 7393c90, 144d234 and r6). The one caller the
+batch added where 7393c90 did not raise is `import_audit`'s target identifier (7393c90
+stored it raw): r6's first draft let the floor's raise fail the whole import; now
+`store_adapter._audit_text` returns its own marker `AUDIT_TEXT_WITHHELD` ("(unparseable
+URL withheld)", as `safe_ref` withholds) for a text whose URL the floor rejects and the
+import goes on (CC-AUD-0059, r6 sub-bullet). A finding *page* `urlsplit` rejects still
+fails the import, in `_main_origin` / `store_url`, as 7393c90's `to_path` did (not a
+floor; unchanged).
+
+**The guards** (`tests/test_redaction_floor.py`, each proven on synthetic offenders,
+PA-0034(2)): `test_the_floor_is_the_pushed_trees_code_verbatim` (each definition hashes
+to `git show 7393c90`'s text after the recorded import substitutions, and the module holds
+exactly those definitions) with `test_the_frozen_check_flags_an_edited_floor`;
+`test_every_url_redaction_consumer_runs_its_floor_first` (by AST: the first statement of
+each `LAYERED` function calls its floor on its own parameters as given, and the function
+never reads its text parameter again) with
+`test_the_layering_check_flags_a_consumer_that_skips_its_floor` (a consumer that skips
+its floor, runs the walk first -- 144d234's `safe_ref`, R1 --, changes the floor's input
+or reads its raw input after it); `test_no_function_runs_the_walk_or_the_floor_unregistered`
+(every call of the walk is from a `LAYERED`, `WALK_HELPERS` or registered predicate
+function, every call of the floor from a `LAYERED` consumer) with
+`test_the_registry_scan_flags_an_unregistered_walk_or_floor_call`. The defined-once
+guards (`tests/test_identifier_predicate.py::test_defined_once`,
+`tests/test_shared_primitives.py::test_every_owner_is_defined_once`) exempt only the
+frozen floor, naming its guard; `tests/test_query_placement.py` allows the floor's five
+query builders, 7393c90's own entries moved with them.
+
+**Counts, against the pushed tree 7393c90 (the owner's criterion: nothing 7393c90
+redacted may leak; a 7393c90 raise or withhold counts as redacted).** Every corpus: **0
+URLs leak at r6 that 7393c90 redacted.**
+- The check's corpus (`r6/checkwork/diff.r6_vs_7393c90.txt`; every consumer, the proxy's
+  request line, `Location`, `Content-Location` and `Refresh` and
+  `redact_url_identifiers(placeholder=True)` included): 0 regressed; 39 852 leak at
+  both; 68 297 fixed. 144d234 on the same corpus: 2 104 regressed.
+- The tab/CR/LF merge set (`diff.tm_r6_vs_7393c90.txt`, 2 268 URLs): 0 regressed; 1 512
+  at both; 522 fixed.
+- r5b's corpus (`r6/r5b_rerun/diff_r6_vs_7393c90.txt`, 234 112 URLs, r5b's own scripts):
+  0 regressed; 78 135 at both (as r5); 153 720 fixed; 7 benign outputs differ from
+  7393c90's, as on 290fcfb and 144d234 (r5's over-redaction of `next=a=//host=1/x;a=1`).
+- `import_spider` under a trace recorder (`impdiff.r6_vs_7393c90.txt`, 99 449 URLs,
+  87 932 imported, 7 raising on all three trees): 0 regressed; 36 070 at both; 48 080
+  fixed.
+- The generated family-(a) set (`r6/checkwork/gen_tabboundary.py`, 480 URLs): 0
+  regressed.
+
+**The 144d234 deltas (information only: the owner dropped "0 against 144d234", the
+orchestrator's own bar against an unpushed round).** The check's corpus: 3 URLs (4
+pairs, all `safe_ref`; family (b)); r5b's corpus: 146 URLs, all `safe_ref` (family (b));
+`import_spider`: 1 URL (family (b), through `trace_event` / `dg_flow`); the family-(a)
+set: 100 URLs, 500 pairs (family (a)); the tab/CR/LF merge set: 0 (all 450 of 144d234's
+regressions there fixed). Benign: 0 of the check's 500 and 1 of r5b's 19 760 outputs
+differ from 144d234's (an over-redaction:
+`http://h/app/p.php;next=a%3D%2F%2Fhost%3D1%2Fx?u=bob`). Each of the three families
+leaks at 7393c90 too.
+
+**The three families, pinned** (`tests/test_redaction_residual_pins.py`, "r6"; strict,
+`raises=AssertionError`, reasons naming BUG-0556, owner CORE, the family and its
+consumers; each case fails on its stated assertion on r6 and on 7393c90's export and
+passes on 144d234's, which proves the family is one 144d234 redacted:
+`scratchpad/lanes/REDACTURL/r6b/pins_r6new_plain_{wt,t7393c90,t144d234}.log`: 16 xfail,
+16 xfail, 16 XPASS). The candidate rules are stated, not built.
+- **(a)** `test_a_name_joined_by_a_tab_cr_or_lf_in_the_floors_output_is_redacted` (7
+  cases): the floor reads a query through `urlsplit`, which removes every tab, CR and LF,
+  and returns the URL so cleaned whenever it redacts another pair, so
+  `?token=a&x<TAB>password=<w>` reaches the walk as `xpassword=<w>`, one token; kept by
+  `redact_url`, `redact_url_identifiers` (both modes), `safe_ref` and the proxy's request
+  line, `Location` and `Content-Location` (in a top-level pair, a raw or encoded nested
+  query, a fragment pair and a route's query). Candidate: the walk judges a name holding
+  a tab, CR or LF from the raw input.
+- **(b)** `test_the_floors_userinfo_rule_never_lets_the_evidence_reference_keep_a_secret`
+  (5) and `test_import_spider_under_a_trace_recorder_stores_no_identifier_behind_the_floors_userinfo`
+  (1): the floor's `safe_ref` runs the record rule (`***@`) before the walk, which then
+  sees no pair name (`;next=is:open label:bug&password=H@<w>` becomes `;next=is:open
+  ***@<w>`) or no userinfo to redact a nested URL whole for (`#https://%26bob@<id>`
+  becomes `#https://***@<id>`): kept by `safe_ref` and stored in `trace_event` and
+  `dg_flow` (the record redactor's own reading of the rule is N7's pin). Candidate: the
+  walk redacts whole any value holding the floor's `***@`.
+- **(c)** `test_a_nested_userinfo_cut_by_the_records_size_bound_keeps_no_password` (3):
+  the floor's record redactor cuts at 4096 characters after its userinfo rule and before
+  the walk, so a percent-encoded nested userinfo straddling the cut loses its `%40` and
+  the start of its password is kept by `redact_for_record` and `safe_ref` (10 cut
+  positions each of `r6/probe3.py`'s 60). Candidate: when the floor truncated, the walk
+  redacts the cut piece whole.
+
+**Tests** (`tests/test_redaction_nested.py`, "r6"): 29 cases -- R1 6 and its store path
+1, R2 8, R3 4, A1 3 and the history writer 1 and `import_audit` 2, A2 4. The plain runner
+on 144d234's `fuzzlab/`: all 29 fail, each an `AssertionError` at its own assertion
+(`scratchpad/lanes/REDACTURL/r6b/r6_tests_plain_t144d234.log`); on r6 all pass
+(`r6_tests_plain_wt.log`); on 7393c90's, 26 pass and 3 fail on their leak assertion
+(`import_audit`'s two: 7393c90 stored the target raw; R1's store path: 7393c90 stored the
+password in `form.entries` and `parameter.example`, which the batch's first commit
+fixed). The `import_audit` case fails on r6's first draft at "the import failed:
+ValueError" (`a1_import_audit_plain_r6pre.log`). Edited for the floor:
+`test_the_redactors_are_total` (a URL `urlsplit` rejects may raise `ValueError`, nothing
+else) and the every-nested-spelling sweep (the top-level names kept may be the floor's:
+`u=bob;a=1;k=<jwt>` becomes `u=`, as on 7393c90). After the last change the whole file
+passes (`r6b/nested_wt.log`: 621 ok, 0 bad), the pins file holds (`pins_wt.log`: 101
+strict xfails, none passing) and the floor's guards pass (`floor_wt.log`: 6 ok).
+
+**Recurrence review.** The lane's seventh pass at the class, and a recurrence of r5's
+defect (a regression against the pushed tree its own differential did not see). Prior
+occurrences: r3 (BUG-0556 "Residuals after the owner's final round"; PA-0556(8)), r4
+(PA-0556(9)) and r5 (PA-0556(10)). **Prior-preventive-action failure analysis:
+PA-0556(10) was followed and was the wrong layer.** r5 ran its differential against
+7393c90 with a corpus that drove the pushed code's parsing (`urlsplit`'s removal of tabs,
+CRs and LFs, the `&`-only split), as item 10 asks, and found 0. The check found five more
+behaviours of the replaced code: its order of steps (`safe_ref`'s URL redactor before
+the record rule), a caller's split (the record redactor's whitespace split), a header's
+grammar (`Refresh`'s every `url=` run), its exceptions as a withholding signal (A1) and
+its container's side effect (A2). Items 8, 9 and 10 each extended a differential's
+enumeration of what the replaced code did, and each round the next unenumerated
+behaviour regressed: an enumeration of a replaced implementation's behaviours cannot be
+proven complete. The new item 11 (in the lane's doc texts) removes the enumeration: a
+redactor's fix is layered on the pushed redactor -- the pushed code is kept, frozen and
+run first, and the change runs only on its output -- so no secret the pushed code
+redacted can leak by construction, and `tests/test_redaction_floor.py`'s guards hold the
+structure. What the walk then cannot see (information the floor's output lost: families
+(a)-(c)) leaks at 7393c90 too and is pinned, never another design round (the owner's
+rule).

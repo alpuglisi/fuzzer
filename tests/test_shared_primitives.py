@@ -146,9 +146,23 @@ def test_every_owner_exists(row):
     assert _defines(_parse(path), dotted), f"{row.sp}: {rel} defines no {dotted}"
 
 
+#: A module allowed to define an owner's name again, with why. The redaction floor is
+#: the pushed tree's redactors frozen at 7393c90 (BUG-0556 r6; SP-17's owner includes
+#: it): only the owner's layered consumers call it, and it is pinned verbatim, so it is
+#: not a second implementation (`tests/test_redaction_floor.py`).
+FROZEN_COPIES = {
+    "fuzzlab/core/redaction_floor.py":
+        "tests/test_redaction_floor.py::test_the_floor_is_the_pushed_trees_code_verbatim",
+}
+
+
 def test_every_owner_is_defined_once():
     owners = {dotted.split(".")[-1]: rel for rel, dotted in (r.owner for r in ROWS)}
-    assert second_definitions(owners, _package_trees()) == []
+    trees = {rel: tree for rel, tree in _package_trees().items() if rel not in FROZEN_COPIES}
+    assert second_definitions(owners, trees) == []
+    for rel, guard in FROZEN_COPIES.items():           # each exemption names its guard
+        path, name = guard.split("::")
+        assert (ROOT / rel).is_file() and name in _test_names(ROOT / path), guard
 
 
 def test_route_aborts_happen_only_in_navguard():

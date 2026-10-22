@@ -191,6 +191,10 @@ def origin_id(origin: str) -> str:
     return f"origin:{origin}"
 
 
+#: What `safe_ref` returns for a URL it cannot parse (as 7393c90's did).
+_WITHHELD = "(unparseable URL withheld)"
+
+
 def safe_ref(url: str) -> str:
     """A URL fit for a diagram or an export (BUG-0514):
 
@@ -204,13 +208,26 @@ def safe_ref(url: str) -> str:
     - an identifier-like path segment (a JWT, a reset token, a UUID) replaced by
       `REDACTED_SEGMENT`, which an interface groups as ``{id}``.
 
-    Total: a URL it cannot parse is withheld whole."""
-    from fuzzlab.core.redaction import redact_for_record, redact_url_identifiers
+    Layered (BUG-0556 r6, `core.redaction.LAYERED`): the pushed tree's own `safe_ref`
+    runs first (`core.redaction_floor.safe_ref`, frozen at 7393c90: its URL redactor,
+    then its record redactor's userinfo rule, then this blanking) and the walk's steps
+    above run on its output only. 144d234 ran the walk first, and where a userinfo
+    password held a ``;`` or ``&`` before a redacted piece the walk cut the ``@`` the
+    record rule needed, keeping the password's start (R1, 775 URLs; 146 stored by
+    `import_spider` through the trace recorder).
+
+    Total: a URL it cannot parse is withheld whole (the floor withholds what 7393c90
+    withheld: a URL ``urlsplit`` rejects)."""
+    from fuzzlab.core import redaction_floor as _floor
+    from fuzzlab.core.redaction import _walk_record, _walk_url
+    text = _floor.safe_ref(url)
+    if text == _WITHHELD:
+        return text
     try:
-        text = redact_for_record("", redact_url_identifiers(url or ""))
+        text = _walk_record("", _walk_url(text, identifiers=True))
         return _blank_identifiers(text)
     except Exception:  # noqa: BLE001 - never let a malformed URL leak through
-        return "(unparseable URL withheld)"
+        return _WITHHELD
 
 
 def _blank_identifiers(url: str) -> str:

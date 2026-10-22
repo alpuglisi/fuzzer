@@ -848,7 +848,28 @@ plugin registry. It is the layer that makes the store the integration bus.
     - `test_a_response_already_read_is_its_kept_body_never_an_empty_one`.
 - **FR-CORE-537** *(a secret in a URL is redacted wherever it sits; `CC-CORE-0076`,
   2026-10-22, BUG-0556, audit Gap 5; SP-17).* `core.redaction` judges a URL's values
-  as possibly structured, through one walk (`_UrlWalk`) that both URL redactors are.
+  as possibly structured, through one walk (`_UrlWalk`) that both URL redactors run.
+  - **Layered on the pushed redactor** *(r6, the owner's design)*: every URL redaction
+    consumer (`core.redaction.LAYERED`: `redact_url`, `redact_url_identifiers`,
+    `redact_spa_fragment`, `page_url_is_clean`, `redact_for_record`, `stored_value`,
+    `core.trace.safe_ref`, `proxy.redact.redact`) first runs its **floor** -- the pushed
+    tree's own code for it, frozen verbatim at 7393c90 in `core.redaction_floor` and
+    never edited -- on its input as received, and the walk below only on the floor's
+    output, so nothing the pushed tree redacted can be kept and the walk only removes
+    more. `redact_url_identifiers(url, placeholder=True)`'s floor is the pushed
+    `redact_url` (the pushed identifier rule blanks a value, which a sent query must
+    never hold, PA-0544(3)); `page_url_is_clean` holds only when the pushed verdict and
+    the walk's both hold; `stored_value`'s floor is the pushed `redact_sibling`.
+    `strip_secret_path_params` and `value_holds_secret` have no floor (the pushed tree
+    had no counterpart: it stored a path as `to_path` gave it). Where a floor raises
+    `ValueError` (a URL `urlsplit` rejects: `http://[h/…`, a bracketed host it does not
+    accept, a netloc that NFKC-normalises to a delimiter), the consumer raises it, as the
+    pushed tree did, and its caller withholds the value as it did then (the proxy
+    history writer's `_prepare_contained`, `safe_ref`'s `(unparseable URL withheld)`,
+    `import_audit`'s `AUDIT_TEXT_WITHHELD`, FR-AUD-31). Held by
+    `tests/test_redaction_floor.py` (the floor hashes to 7393c90's text; each consumer
+    calls its floor first on its own parameters and never reads its raw text again;
+    nothing calls the walk or the floor unregistered).
   - **Where a value sits:** a query pair, `&` or `;` separated; a `;name=value` (or
     bare `;value`) path parameter in any segment; a query-shaped fragment (`#…?a=b`,
     `#a=b`) and a fragment route's path parameters; and, inside any of those values, a
@@ -909,7 +930,8 @@ plugin registry. It is the layer that makes the store the integration bus.
     `MAX_VALUE_CHARS` (64 KiB) per value. A value past either bound, one with a layer
     still undecoded at the last level, or one the walk fails on is redacted whole at
     its top level (`""` with identifiers, `PLACEHOLDER` otherwise; a path parameter
-    `PLACEHOLDER`). Total; linear per level. *(Review rounds 1-2, PA-0135(2):)* the walk
+    `PLACEHOLDER`). Total on every URL `urlsplit` accepts (one it rejects raises
+    `ValueError` from the floor, *r6*); linear per level. *(Review rounds 1-2, PA-0135(2):)* the walk
     exposes its operation counts (`WalkCounter`: `steps`, the characters every step was
     given, and `calls`), and its linearity oracle also counts the C-level work of every
     call the module makes (the characters each percent-decode, re-encode, pair split,
@@ -984,7 +1006,22 @@ plugin registry. It is the layer that makes the store the integration bus.
     sensitive (`?u=bob;password;x=<word>`, a path parameter's `;password;x=<word>`); an
     identifier-like value under a benign name in the name-only consumers (`redact_url`,
     the record redactor, the proxy), by this requirement's own rule.
-  - Enforced by: `tests/test_redaction_nested.py` (a generated sweep over depth,
+    *(r6: what the walk cannot see in the floor's output; each leaks at 7393c90 too and
+    is pinned in the same file, owner CORE, its candidate rule stated, not built.)*
+    `test_a_name_joined_by_a_tab_cr_or_lf_in_the_floors_output_is_redacted` (family (a):
+    the floor returns a URL it redacted with its tabs, CRs and LFs removed, so
+    `x<TAB>password` reaches the walk as `xpassword`; both URL redactors, `safe_ref` and
+    the proxy's request line, `Location` and `Content-Location`);
+    `test_the_floors_userinfo_rule_never_lets_the_evidence_reference_keep_a_secret` and
+    `test_import_spider_under_a_trace_recorder_stores_no_identifier_behind_the_floors_userinfo`
+    (family (b): `safe_ref`'s floor turns a userinfo into `***@` before the walk, deleting
+    a pair's name or the userinfo that made the walk redact a nested URL whole);
+    `test_a_nested_userinfo_cut_by_the_records_size_bound_keeps_no_password` (family (c):
+    the floor's record redactor cuts at 4096 characters before the walk, so a nested
+    `%40` userinfo straddling the cut keeps its password's start; `redact_for_record`,
+    `safe_ref`).
+  - Enforced by: `tests/test_redaction_floor.py` (the layering, r6) and
+    `tests/test_redaction_nested.py` (a generated sweep over depth,
     encoding -- raw, single and double percent, `+`, `quote(safe="/")` single and
     double, `quote(safe="/:")` -- separator, nested shape -- a path, an absolute URL, a
     query string, a URL's userinfo -- credential names and identifier shapes, searched in

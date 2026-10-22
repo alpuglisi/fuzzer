@@ -1065,6 +1065,12 @@ def _audit_endpoint(store: Store, run_id: int, page: str, main: str | None, *,
 #: value's: replaced, wherever and however long the rule cut it (`_secret_spans`).
 _AUDIT_RUN = 8
 
+#: What `_audit_text` stores for a text the redaction owner cannot judge: a URL that
+#: ``urlsplit`` rejects (``http://[h/…``), on which the owner raises ``ValueError`` as
+#: the pushed tree's redactor did (its floor, BUG-0556 r6, A1). Withheld whole, as
+#: `core.trace.safe_ref` withholds such a URL, and the import goes on.
+AUDIT_TEXT_WITHHELD = "(unparseable URL withheld)"
+
 
 def _secret_spans(text: str, secrets: list[str]) -> list[tuple[int, int]]:
     """The spans of ``text`` that repeat a run of `_AUDIT_RUN` or more characters of any
@@ -1102,7 +1108,9 @@ def _audit_text(text, page_url, *, url: bool = False):
     which may name another URL: a form action, a link) also passes
     `strip_secret_path_params` and `redact_url_identifiers` itself. The rest of a quoted
     HTML snippet is body redaction's (audit defect 26). Total: a non-string is returned
-    as it is."""
+    as it is, and a text whose URL the owner rejects (``ValueError``: its floor, the
+    pushed tree's redactor, raises on a URL ``urlsplit`` rejects) is `AUDIT_TEXT_WITHHELD`
+    -- never stored, never failing the import (BUG-0556 r6, A1)."""
     import re
 
     from fuzzlab.core.redaction import (PLACEHOLDER, redact_url_identifiers, stored_value,
@@ -1112,7 +1120,10 @@ def _audit_text(text, page_url, *, url: bool = False):
     swaps: dict[str, str] = {}
     secrets: list[str] = []
     if isinstance(page_url, str):
-        clean = redact_url_identifiers(page_url)
+        try:
+            clean = redact_url_identifiers(page_url)
+        except ValueError:                  # the owner's floor rejects it (A1): withheld
+            return AUDIT_TEXT_WITHHELD
         if clean != page_url:
             swaps[page_url] = clean
         parts = urlparse(page_url)
@@ -1144,7 +1155,10 @@ def _audit_text(text, page_url, *, url: bool = False):
         out = "".join(pieces + [out[last:]])
     if url:
         cut = min([i for i in (out.find("?"), out.find("#")) if i >= 0] or [len(out)])
-        out = redact_url_identifiers(strip_secret_path_params(out[:cut]) + out[cut:])
+        try:
+            out = redact_url_identifiers(strip_secret_path_params(out[:cut]) + out[cut:])
+        except ValueError:                  # the owner's floor rejects it (A1): withheld
+            return AUDIT_TEXT_WITHHELD
     return out
 
 

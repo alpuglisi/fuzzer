@@ -459,6 +459,13 @@ budget where a vulnerability is plausible.
     spider's absolute form for a page off its main origin, its path for one on it), else
     `store_url(page, main)` with `base_url`'s origin or the first finding page's, so an
     off-origin first finding no longer splits the main origin's pages.
+    *(r6, `CC-AUD-0059`:)* the owner's URL redactors run the pushed tree's redactor
+    first, which raises `ValueError` on a URL `urlsplit` rejects (FR-CORE-537); such a
+    target identifier (or a text whose page URL is so rejected) is stored as
+    `store_adapter.AUDIT_TEXT_WITHHELD` (`(unparseable URL withheld)`, as
+    `core.trace.safe_ref` withholds) and the import goes on with every other finding --
+    never failed by it, never storing it raw (7393c90 stored the target raw). A finding
+    *page* `urlsplit` rejects still fails the import at its endpoint, as on 7393c90.
   - `audit.engine.evaluate` writes each candidate's request fields through
     `core.reqctx.point_evidence` and stamps `identity_scope` and `context_id` (SP-57,
     FR-FUZZ-66). `InjectionPoint` carries `bindings` and `replay_refusal`.

@@ -78,6 +78,26 @@ Newest first.
       registered in `tests/test_base_url_subpath_registry.py` with
       `test_import_audit_under_a_subpath_base_stores_the_spiders_paths` (the app under
       `http://h/app/`), and `_audit_endpoint` takes a `spider_form` flag, not the base.
+  - *(r6, 2026-10-22, branch `lane/REDACTURL-r6` from 144d234; BUG-0556 "r6 (layered on
+    the pushed redactor)", A1.)*
+    - **`import_audit` withholds a target the floor rejects and imports the rest.** The
+      owner's URL redactors now run 7393c90's redactor first (CC-CORE-0076), which
+      raises `ValueError` on a URL `urlsplit` rejects; `import_audit`'s target
+      identifier is the one caller the batch added where 7393c90 did not raise (it
+      stored the target raw, and 144d234 stored the secret its walk keeps), and r6's
+      first draft let the raise fail the whole import. `_audit_text` now returns
+      `AUDIT_TEXT_WITHHELD` (`(unparseable URL withheld)`, its own marker, as
+      `core.trace.safe_ref` withholds such a URL) where the owner raises -- on the
+      target's own redaction or on the page URL's -- so the finding is stored with its
+      target withheld and every other finding is imported. A finding *page* `urlsplit`
+      rejects still fails the import at its endpoint (`_main_origin`, `store_url`), as
+      7393c90's `to_path` did; the other batch-added URL steps of the importer (a POST
+      action's query, a captured request's URL) raise only where their own
+      `store_url` / `urlparse` of the same URL raised on 7393c90.
+    - Test: `tests/test_redaction_nested.py::test_r6_a1_import_audit_withholds_a_target_its_floor_rejects_and_imports_the_rest`
+      (2 cases, through `import_audit`): fails on r6's first draft at "the import
+      failed: ValueError" and on 7393c90 and 144d234 at its leak assertion; passes on
+      the revision.
 - Impact (other components / project):
   - **FUZZ (point builder, oracle):** a crawled form whose hidden value is identifier-
     like or holds a nested token now has that name in `form.fresh`, so its points are
@@ -125,6 +145,8 @@ Newest first.
     `_audit_endpoint`; FR-AUD-31 amended in place; the two round-2 importer tests, each
     failing on f939778 on its own assertion; `import_audit`'s base-URL registry entry
     and sub-path test; R5's strict xfail — done
+  - [x] *(r6)* `_audit_text` total over the floor's raise (`AUDIT_TEXT_WITHHELD`);
+    FR-AUD-31 amended in place; the A1 import test — done
 - Effectiveness (assessed 2026-10-22): `scratchpad/lanes/REDACTURL/exp/repro2.py` found
   the token in `endpoint.url`, `parameter.example` and `form.entries` (spider forms and
   disco captures) before, and only R1's two rows after; the harness result is in the
@@ -138,7 +160,12 @@ Newest first.
   on the revision it stores none and adds none (the two
   round-2 tests fail on f939778 on their own assertions, `r2_prefix.log`); the targeted
   run's base-URL registry failure was this entry's (round 1) and is fixed (BUG-0556
-  "Review round 2").
+  "Review round 2"). *(r6:)* a finding whose target `urlsplit` rejects failed the whole
+  import on r6's first draft
+  (`scratchpad/lanes/REDACTURL/r6b/a1_import_audit_plain_r6pre.log`), was stored raw
+  with its secret on 7393c90 and 144d234 (`r6_tests_plain_t{7393c90,144d234}.log`), and
+  is stored withheld with the other finding imported on the revision
+  (`a1_import_audit_plain_wt.log`).
 
 ### CC-AUD-0057 — The captured-request import refuses and counts a body holding a lone surrogate instead of failing the import (FR-AUD-22, BUG-0554) (2026-10-21)
 - Placement: lane SURROGATE (item AU-REQID78), base 33b423e, with CC-CRAWL-0061 (the

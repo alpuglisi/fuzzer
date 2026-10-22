@@ -16,7 +16,9 @@ redacts:
   ``X-Original-URL``, ``X-Rewrite-URL``, ``Ping-From``, ``Ping-To``, any other header
   whose value is a URL (a scheme's ``://`` or a ``/`` first), each ``<URI>`` of
   ``Link``, and ``Refresh``'s URL as the HTML declarative-refresh steps read it
-  (``url=``, ``url = ``, quoted, or bare after the delay);
+  (``url=``, ``url = ``, quoted, or bare after the delay). Layered (BUG-0556 r6): the
+  pushed tree's own `redact` runs first (`core.redaction_floor`, frozen at 7393c90),
+  and this walk on its output only;
 - **bodies:** sensitively named fields of form-urlencoded, JSON (any depth) and
   multipart (non-file) bodies, in requests and responses alike. A sensitive JSON key's
   **whole value** is replaced, whatever its type (list, object, scalar; BUG-0090).
@@ -43,10 +45,12 @@ from __future__ import annotations
 import re
 import zlib
 
-from fuzzlab.core.redaction import (MAX_REDACT_BYTES, OMIT_UNSAFE, PLACEHOLDER, body_kind,
-                                    is_sensitive_name, mentions_sensitive_name,
-                                    redact_body, redact_url)
+from fuzzlab.core import redaction_floor as _floor
+from fuzzlab.core.redaction import (MAX_REDACT_BYTES, OMIT_UNSAFE, PLACEHOLDER, _walk_names,
+                                    body_kind, is_sensitive_name, mentions_sensitive_name,
+                                    redact_body)
 from fuzzlab.core.redaction import redact_query  # noqa: F401  (re-exported: one boundary)
+from fuzzlab.core.redaction import redact_url  # noqa: F401  (re-exported: history's URL)
 from fuzzlab.proxy.message import RawMessage
 
 REDACTED = PLACEHOLDER.encode()
@@ -80,27 +84,30 @@ _REFRESH_PREFIX = re.compile(
 
 
 def _redact_refresh(value: str) -> str:
-    """``Refresh``'s URL passed to `redact_url`, whichever spelling holds it (review
-    round 2, N6: only ``url=`` with no spaces was read)."""
+    """``Refresh``'s URL passed to the walk (`_walk_names`), whichever spelling holds it
+    (review round 2, N6: only ``url=`` with no spaces was read). It reads the quoted URL
+    only; what 7393c90 read (every ``url=`` run to whitespace, a closing quote and the
+    tail after it included) its floor has redacted first (BUG-0556 r6, R3)."""
     prefix = _REFRESH_PREFIX.match(value).group(0)
     rest = value[len(prefix):]
     if rest[:1] in ("'", '"'):
         end = rest.find(rest[0], 1)
         end = len(rest) if end < 0 else end
-        return prefix + rest[0] + redact_url(rest[1:end]) + rest[end:]
+        return prefix + rest[0] + _walk_names(rest[1:end]) + rest[end:]
     url = rest.rstrip(" \t")
-    return prefix + redact_url(url) + rest[len(url):]
+    return prefix + _walk_names(url) + rest[len(url):]
 
 
 def _redact_header_value(name: str, value: str) -> str:
-    """One header value with the URL it bears passed to `redact_url` (unchanged when the
-    header bears none, or the URL holds no sensitively named value)."""
+    """One header value with the URL it bears passed to the walk (`_walk_names`;
+    unchanged when the header bears none, or the URL holds no sensitively named
+    value)."""
     if name == "refresh":
         return _redact_refresh(value)
     if name == "link":
-        return _LINK_URI.sub(lambda m: "<" + redact_url(m.group(1)) + ">", value)
+        return _LINK_URI.sub(lambda m: "<" + _walk_names(m.group(1)) + ">", value)
     if name in _URL_HEADERS or _URL_VALUE.match(value):
-        return redact_url(value)
+        return _walk_names(value)
     return value
 
 
@@ -199,7 +206,21 @@ def _header(msg: RawMessage, name: str) -> str:
 
 def redact(raw: bytes, extra_headers: tuple[str, ...] = ()) -> bytes:
     """Return ``raw`` with its secrets replaced by a placeholder (see the module
-    docstring). Benign headers, parameters and fields are left untouched."""
+    docstring). Benign headers, parameters and fields are left untouched.
+
+    Layered (BUG-0556 r6, `core.redaction.LAYERED`): the pushed tree's own `redact`
+    runs first (`core.redaction_floor.redact`, frozen at 7393c90: the sensitive headers,
+    the request target's query, ``Location``, ``Content-Location`` and ``Refresh``'s
+    every ``url=`` run, a duplicate of a rewritten one collapsed into it, the bodies),
+    then the walk (`_walk`) on its output only. Where the floor raises (a URL
+    ``urlsplit`` rejects in the request line or one of those headers), so does this:
+    the history writer withholds the flow (``_prepare_contained``), as on 7393c90."""
+    out = _floor.redact(raw, extra_headers)
+    return _walk(out, extra_headers)
+
+
+def _walk(raw: bytes, extra_headers: tuple[str, ...] = ()) -> bytes:
+    """`redact`'s walk (the 144d234 redactor), on its floor's output."""
     msg = RawMessage.from_bytes(raw)
     names = set(SENSITIVE_HEADERS) | {h.lower() for h in extra_headers}
     for line in msg.header_lines():
@@ -214,15 +235,16 @@ def redact(raw: bytes, extra_headers: tuple[str, ...] = ()) -> bytes:
             for _ in range(n):
                 msg = msg.with_appended_header(name, REDACTED)
     # the request target (a response's start line has none) and every URL-bearing
-    # header value, each passed whole to `redact_url`, never gated on a '?': a
+    # header value, each passed whole to the walk (`_walk_names`: `redact_url` past its
+    # floor, which `redact` ran on the whole message first), never gated on a '?': a
     # ';jsessionid=' path parameter or a query-shaped fragment holds a secret with no
-    # query (Tomcat URL rewriting; BUG-0556 review round 1). `redact_url` returns a URL
+    # query (Tomcat URL rewriting; BUG-0556 review round 1). The walk returns a URL
     # holding no value byte-identical, so a clean message is unchanged.
     line = msg.start_line
     if not line.startswith(b"HTTP/"):
         start, end = _target_span(line)
         target = line[start:end].decode("latin-1")
-        new_target = redact_url(target)
+        new_target = _walk_names(target)
         if new_target != target:
             msg = msg.with_request_line(line[:start] + new_target.encode("latin-1")
                                         + line[end:])

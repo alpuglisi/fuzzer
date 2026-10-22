@@ -1045,6 +1045,19 @@ ALLOWED: dict[tuple[str, str, str], tuple[int, str]] = {
             "opener's (FR-CORE-508, CC-CORE-0071)"),
     ("fuzzlab/core/redaction.py", "redact_query", 'S5 "&".join'):
         (1, "storage redaction of a recorded URL, never sent (AU-REDACT's file)"),
+    # the pushed tree's redactors frozen at 7393c90, the floor every URL redaction
+    # consumer runs first (BUG-0556 r6): 7393c90's own entries above, moved with them
+    ("fuzzlab/core/redaction_floor.py", "redact_query", 'S5 "&".join'):
+        (1, "storage redaction of a recorded URL, never sent (the frozen floor)"),
+    ("fuzzlab/core/redaction_floor.py", "_redact_query_identifiers", 'S5 "&".join'):
+        (1, "storage redaction of a recorded URL, never sent (the frozen floor)"),
+    ("fuzzlab/core/redaction_floor.py", "redact_url", "S6 _replace(query/fragment=)"):
+        (1, "storage redaction of a recorded URL, never sent (the frozen floor)"),
+    ("fuzzlab/core/redaction_floor.py", "redact_url_identifiers",
+     "S6 _replace(query/fragment=)"):
+        (1, "storage redaction of a recorded URL, never sent (the frozen floor)"),
+    ("fuzzlab/core/redaction_floor.py", "_blank_identifiers", 'S5 "&".join'):
+        (1, "trace redaction, never sent (the frozen floor)"),
     ("fuzzlab/core/trace.py", "_blank_identifiers", 'S5 "&".join'):
         (1, "trace redaction, never sent"),
     ("fuzzlab/disco/fingerprint.py", "normalise_route", "S4 string built onto a query"):

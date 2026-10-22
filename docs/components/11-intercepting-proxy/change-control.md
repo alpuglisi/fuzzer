@@ -35,6 +35,28 @@ Newest first.
       `msg.target` (`split(b" ")[1]`) gave an empty target for a doubled space or a tab,
       and cut a raw space's target short.
   - Module docstring updated.
+  - *(r6, 2026-10-22, branch `lane/REDACTURL-r6` from 144d234; BUG-0556 "r6 (layered on
+    the pushed redactor)", with CC-CORE-0076.)* `redact` runs 7393c90's own `redact`
+    first (`core.redaction_floor.redact`, frozen verbatim with 7393c90's
+    `RawMessage`), then the walk above (`_walk`, the 144d234 code) on its output only.
+    The check of 144d234 found three classes the pushed `redact` redacted and the walk
+    kept: R3, `Refresh`'s every `url=` run, quotes and the tail after them included (the
+    walk read only the quoted URL, and only the first `url=`); A1, a URL `urlsplit`
+    rejects in the request line, `Location`, `Content-Location` or `Refresh` (7393c90
+    raised, and the history writer stored the flow `OMIT_FAILED` with its URL cut at the
+    `?`; the walk kept the secret); A2, a duplicate `Location` / `Content-Location`
+    (7393c90's `with_header` collapsed it into the value it rewrote). Each is redacted
+    again by the floor; `_redact_refresh` and `_redact_header_value` call the walk
+    (`_walk_names`), never `redact_url` (its floor has run on the whole message). Tests:
+    `tests/test_redaction_nested.py::test_r6_r3_a_quoted_refresh_url_keeps_nothing_the_pushed_tree_redacted`
+    (4), `::test_r6_a1_a_url_urlsplit_rejects_is_withheld_by_every_consumer` (3, the
+    proxy's four places among the consumers),
+    `::test_r6_a1_proxy_history_withholds_a_flow_whose_url_its_floor_rejects` and
+    `::test_r6_a2_a_duplicate_url_header_keeps_nothing_the_pushed_tree_dropped` (4), each
+    failing on 144d234 at its own assertion. Pinned (owner CORE, family (a)): a name the
+    floor's `urlsplit` reading joins across a removed tab in the request line, `Location`
+    or `Content-Location`
+    (`tests/test_redaction_residual_pins.py::test_a_name_joined_by_a_tab_cr_or_lf_in_the_floors_output_is_redacted`).
 - Impact (other components / project): proxy history's stored raw request and response
   and their full-text index no longer keep a `;jsessionid=` (or any sensitively named)
   value in a URL with no query (round 1), in a duplicate URL header, `Referer`, `Origin`,
@@ -49,6 +71,11 @@ Newest first.
   `Report-To`'s JSON) -- BUG-0556 residual R4, pinned by the strict xfail
   `tests/test_redaction_nested.py::test_proxy_history_redacts_a_url_inside_a_structured_header`
   -- and an obs-folded header continuation line (obsolete in HTTP/1.1, RFC 9112 §5.2).
+  *(r6:)* a duplicate `Location` or `Content-Location` is collapsed again when the floor
+  rewrites one (as on 7393c90; the walk still rewrites every other URL header's every
+  value in place), and a flow whose URL `urlsplit` rejects is stored `OMIT_FAILED` again
+  (visible, never unredacted, as on 7393c90). Cost: the pushed `redact` runs once more
+  per message before the walk.
 - Deliverables:
   - [x] the `?` gates removed (round 1) — done
   - [x] every value of every URL-bearing header, `Refresh` and `Link` parsing, the
@@ -58,13 +85,20 @@ Newest first.
     (fails on c3a13f7 on its own assertion) and
     `::test_proxy_history_redacts_every_url_bearing_header_and_any_request_line` (fails
     on f939778 on its own assertion); R4's strict xfail — done
+  - [x] *(r6)* `redact` layered on the frozen pushed `redact`; FR-PROXY-11 amended in
+    place; the R3, A1 and A2 tests (each failing on 144d234 at its own assertion) —
+    done
 - Effectiveness (assessed 2026-10-22): the round-1 probe (`rev1probe/proxy_probe.py`)
   found the canary in `body`, `flow_fts` and `flow_fts_content` on c3a13f7; on f939778
   the round-2 test's messages (duplicates, `Referer`, `Origin`, `Link`, a custom header,
   three `Refresh` spellings, a doubled space, a tab and a raw space in the request line,
   a nested URL's userinfo in the target and `Location`) kept it in `redact()`'s output;
   on the revision none does, in the output or in a `HistoryWriter` store, and a clean
-  message is byte-identical.
+  message is byte-identical. *(r6:)* the check's corpus through the proxy's request
+  line, `Location`, `Content-Location` and `Refresh` (`scratchpad/lanes/REDACTURL/r6/
+  checkwork/diff.r6_vs_7393c90.txt`): 0 URLs kept that 7393c90 redacted or withheld
+  (144d234: 878 per place, all A1); the "r6" proxy cases fail on 144d234 and pass on
+  the revision (`r6b/r6_tests_plain_{t144d234,wt}.log`).
 
 ### CC-PROXY-0030 — The flow history is written off the proxy's event loop (BUG-0550, FR-PROXY-404) (2026-10-21)
 - Change:

@@ -38,6 +38,10 @@ import math
 import re
 from urllib.parse import quote, unquote, unquote_plus
 
+# the pushed tree's own redactors, frozen at 7393c90: every URL consumer runs its floor
+# first and the walk on the floor's output (`LAYERED`; BUG-0556 r6, PA-0556 item 11)
+from fuzzlab.core import redaction_floor as _floor
+
 #: Whole tokens that mark a secret on their own.
 SENSITIVE_TOKENS = frozenset({
     "password", "passwd", "pwd", "pw", "pass", "passcode", "passphrase", "secret",
@@ -230,15 +234,81 @@ def redact_query(query: str) -> str:
 
 def redact_url(url: str) -> str:
     """``url`` (absolute or origin-form) with every sensitively named value replaced by
-    `PLACEHOLDER`, wherever it sits (FR-CORE-537, BUG-0556): a query pair (``&`` or
-    ``;`` separated), a ``;name=value`` path parameter, a query-shaped fragment, and a
-    URL, query string or ``;`` pair nested in any of those values (raw or
-    percent-encoded, walked by `_UrlWalk`); a nested URL's userinfo is replaced too
-    (BUG-0556 review round 1). An ``&`` part holding a ``;`` is also read as one pair,
-    as `redact_query` reads it, and a name or URL holding a tab, CR or LF also as
-    ``urlsplit`` reads it, those removed (BUG-0556 r5: the pushed tree's readings).
+    `PLACEHOLDER`, wherever it sits (FR-CORE-537, BUG-0556), in two layers (r6, the
+    owner's design: `LAYERED`):
+
+    1. **the floor**: the pushed tree's own `redact_url` (`core.redaction_floor`, frozen
+       at 7393c90): a sensitively named query value, the query read through
+       ``urlsplit`` and split on ``&`` only. It raises ``ValueError`` where 7393c90
+       raised (a URL ``urlsplit`` rejects: ``http://[h/…?…``), and so does this
+       function: every caller withholds the value then, as it did on the pushed tree
+       (proxy history's ``_prepare_contained``; `core.trace.safe_ref`);
+    2. **the walk** (`_UrlWalk`) on the floor's output only: a query pair (``&`` or
+       ``;`` separated), a ``;name=value`` path parameter, a query-shaped fragment, and
+       a URL, query string or ``;`` pair nested in any of those values (raw or
+       percent-encoded), a nested URL's userinfo too (BUG-0556 review round 1); an
+       ``&`` part holding a ``;`` also read as one pair, and a name or URL holding a
+       tab, CR or LF also read with them removed (r5).
+
+    So nothing the pushed tree redacted can be kept, and the walk only removes more.
     Byte-identical when it holds none; a value past the walk's bounds is replaced
-    whole. Total: a non-string is returned as is."""
+    whole. ``None`` is returned as is."""
+    out = _floor.redact_url(url)
+    return _walk_url(out, identifiers=False)
+
+
+#: Every URL redaction consumer, layered on the pushed tree's redactor (BUG-0556 r6, the
+#: owner's design; PA-0556 item 11): ``(module, function) -> (its floor(s) in
+#: `core.redaction_floor`, the parameter that holds the text it redacts)``. The function
+#: calls its floor first, on its own parameters as given, and never reads that parameter
+#: again: the walk sees only the floor's output (`tests/test_redaction_floor.py` checks
+#: each by AST, and that every other call of the walk is one of `WALK_HELPERS`).
+LAYERED = {
+    ("fuzzlab/core/redaction.py", "redact_url"): (("redact_url",), "url"),
+    ("fuzzlab/core/redaction.py", "redact_url_identifiers"):
+        (("redact_url_identifiers", "redact_url"), "url"),
+    ("fuzzlab/core/redaction.py", "redact_spa_fragment"): (("redact_spa_fragment",), "url"),
+    ("fuzzlab/core/redaction.py", "page_url_is_clean"): (("page_url_is_clean",), None),
+    ("fuzzlab/core/redaction.py", "redact_for_record"): (("redact_for_record",), "value"),
+    ("fuzzlab/core/redaction.py", "stored_value"): (("redact_sibling",), "value"),
+    ("fuzzlab/core/trace.py", "safe_ref"): (("safe_ref",), "url"),
+    ("fuzzlab/proxy/redact.py", "redact"): (("redact",), "raw"),
+}
+#: The walk's own text-returning steps, each called only by a `LAYERED` consumer after
+#: its floor or by another of these (`tests/test_redaction_floor.py`): ``(module,
+#: function) -> its role``. Calling one from anywhere else would run the walk without the
+#: floor (BUG-0556 r6: 144d234's `core.trace.safe_ref` ran the walk before the record
+#: redactor's userinfo rule and kept a password 7393c90 removed).
+WALK_HELPERS = {
+    ("fuzzlab/core/redaction.py", "_walk_url"): "the walk over a whole URL",
+    ("fuzzlab/core/redaction.py", "_walk_names"): "`redact_url`'s walk",
+    ("fuzzlab/core/redaction.py", "_walk_record"): "`redact_for_record`'s walk",
+    ("fuzzlab/core/redaction.py", "_redact_piece"): "`_walk_record`'s per-piece step",
+    ("fuzzlab/core/redaction.py", "_walk_spa_fragment"): "`redact_spa_fragment`'s walk",
+    ("fuzzlab/proxy/redact.py", "_walk"): "the proxy's walk",
+    ("fuzzlab/proxy/redact.py", "_redact_refresh"): "`_walk`'s ``Refresh`` step",
+    ("fuzzlab/proxy/redact.py", "_redact_header_value"): "`_walk`'s header step",
+}
+#: A predicate that runs the walk and returns no text, callable anywhere: its callers
+#: decide with it (the layered `stored_value` runs the pushed tree's rule first).
+WALK_PREDICATES = {
+    ("fuzzlab/core/redaction.py", "value_holds_secret"):
+        "whether a value holds a secret anywhere (`stored_value`, "
+        "`strip_secret_path_params`)",
+}
+#: A consumer of the walk (through a predicate) that returns text with no floor, because
+#: the pushed tree redacted nothing there: its floor is the identity, so the walk alone
+#: cannot keep anything 7393c90 removed.
+FLOORLESS = {
+    ("fuzzlab/core/redaction.py", "strip_secret_path_params"):
+        "7393c90 stored a path as `core.urls.to_path` gave it (`store_url`): nothing of it "
+        "was redacted there",
+}
+
+
+def _walk_names(url):
+    """The walk with names only: `redact_url` without its floor (the 144d234 redactor),
+    called only on a floor's output by a `LAYERED` consumer."""
     return _walk_url(url, identifiers=False)
 
 
@@ -724,10 +794,13 @@ def stored_value(name, raw_value, value):
     (`tools.store_adapter.redact_sibling`) or a parameter's example: ``""`` when
     ``name`` `is_sensitive_name` or ``raw_value`` (percent-decoded once) holds a secret
     anywhere (`value_holds_secret`), else ``value`` as given. The one rule for every
-    stored sibling value and example (PA-0003, PA-0100; BUG-0556)."""
+    stored sibling value and example (PA-0003, PA-0100; BUG-0556). Layered (r6,
+    `LAYERED`): the pushed tree's rule first (`core.redaction_floor.redact_sibling`: a
+    sensitive name, or an identifier-like raw value), then the walk's on its result."""
+    kept = _floor.redact_sibling(name, raw_value, value)
     if (isinstance(name, str) and is_sensitive_name(name)) or value_holds_secret(raw_value):
         return ""
-    return value
+    return kept
 
 
 def strip_secret_path_params(path):
@@ -897,7 +970,14 @@ def redact_spa_fragment(url: str) -> str:
     ``#!/x?id=...``) redacted like a URL query (`_UrlWalk`): sensitive names replaced,
     identifier-like values blanked, nested URLs and ``;`` pairs walked. A fragment that
     is not a route (``#top``) is left alone. The crawler keeps such fragments as pages
-    (FR-CRAWL-12), so they pass this boundary."""
+    (FR-CRAWL-12), so they pass this boundary. Layered (r6, `LAYERED`): the pushed
+    tree's `redact_spa_fragment` first, the walk on its output."""
+    out = _floor.redact_spa_fragment(url)
+    return _walk_spa_fragment(out)
+
+
+def _walk_spa_fragment(url):
+    """`redact_spa_fragment`'s walk (the 144d234 redactor), on its floor's output."""
     head, sep, frag = (url or "").partition("#")
     from fuzzlab.core.urls import is_spa_route_fragment    # the one definition (PA-0003)
     if not sep or not is_spa_route_fragment(frag) or "?" not in frag:
@@ -925,8 +1005,13 @@ def page_url_is_clean(url: str) -> bool:
     once already, and a placeholder survives a second pass; a nested one is redacted as
     `PLACEHOLDER`, never as a blank), and no query value (``&`` or ``;`` separated) is
     empty (a value blanked upstream looks exactly like that). Fails closed: any doubt
-    keeps the page out."""
-    if not isinstance(url, str) or redact_url_identifiers(url) != url:
+    keeps the page out. Layered (r6, `LAYERED`): the pushed tree's `page_url_is_clean`
+    must hold first -- it raises ``ValueError`` where 7393c90 raised (a URL ``urlsplit``
+    rejects), as this does -- and then the walk's (which, the floor having found the URL
+    unchanged by 7393c90's strongest redactor, is `redact_url_identifiers`' walk)."""
+    if not _floor.page_url_is_clean(url):
+        return False
+    if not isinstance(url, str) or _walk_url(url, identifiers=True) != url:
         return False
     if holds_placeholder(url):
         return False
@@ -947,9 +1032,18 @@ def redact_url_identifiers(url: str, *, placeholder: bool = False) -> str:
     own query is stored, so a point never sends it (PA-0544(1); BUG-0556 review round
     1) -- and a nested one, and a path parameter's, becomes `PLACEHOLDER`, re-encoded so
     the URL stays a URL. How the crawler stores an XHR URL and a captured request's URLs
-    (FR-CRAWL-12/13) and what `page_url_is_clean` compares against. Total; a URL holding
-    no secret is returned byte-identical."""
-    return _walk_url(url, identifiers=True, placeholder=placeholder)
+    (FR-CRAWL-12/13) and what `page_url_is_clean` compares against. A URL holding no
+    secret is returned byte-identical.
+
+    Layered (r6, `LAYERED`): the pushed tree's `redact_url_identifiers` first
+    (`core.redaction_floor`, frozen at 7393c90) and the walk on its output, so nothing
+    7393c90 redacted is kept; with ``placeholder``, the pushed tree's `redact_url`
+    instead (its identifier rule blanks a value, and a blank in a sent query is what
+    PA-0544(3) forbids: the walk replaces an identifier-like value by `PLACEHOLDER`).
+    Either floor raises ``ValueError`` where 7393c90 raised (a URL ``urlsplit`` rejects),
+    and so does this function: its caller withholds the value, as on the pushed tree."""
+    out = _floor.redact_url(url) if placeholder else _floor.redact_url_identifiers(url)
+    return _walk_url(out, identifiers=True, placeholder=placeholder)
 
 
 def _blank(value):
@@ -1150,7 +1244,20 @@ def redact_for_record(dest: str, value):
       N7: a piece after the space was walked alone), then in each whitespace-separated
       piece.
 
+    Layered (r6, `LAYERED`): the pushed tree's `redact_for_record` runs first
+    (`core.redaction_floor`, frozen at 7393c90: userinfo, the whitespace split, each
+    piece's query and fragment pairs read ``&``-only and through ``urlsplit``), and the
+    walk above (`_walk_record`) on its output only. 144d234 kept what 7393c90 removed
+    where the walk's whole-value pass dropped a tab the pushed tree split on
+    (``n<TAB>ext=/cb?password=v;<word>``; BUG-0556 r6, R2).
+
     Non-strings are returned unchanged (counts, booleans). Never raises on a string."""
+    out = _floor.redact_for_record(dest, value)
+    return _walk_record(dest, out)
+
+
+def _walk_record(dest, value):
+    """`redact_for_record`'s walk (the 144d234 redactor), on its floor's output."""
     if not isinstance(value, str):
         return value
     if dest and is_sensitive_name(dest):
@@ -1164,7 +1271,7 @@ def redact_for_record(dest: str, value):
     out = _URL_USERINFO.sub(lambda m: m.group(1) + USERINFO_PLACEHOLDER, value)
     out = _URL_USERINFO_SPACED.sub(lambda m: m.group(1) + USERINFO_PLACEHOLDER, out)
     out = _BARE_USERINFO.sub(lambda m: m.group(1) + USERINFO_PLACEHOLDER, out)
-    out = redact_url(out)
+    out = _walk_names(out)
     if len(out) > MAX_RECORD_CHARS:
         out = out[:MAX_RECORD_CHARS] + " …(truncated)"
     pieces = re.split(r"(\s+)", out)
@@ -1173,11 +1280,12 @@ def redact_for_record(dest: str, value):
 
 def _redact_piece(piece: str) -> str:
     """One whitespace-separated piece: a sensitive ``;name=value`` anywhere, then the
-    name walk (`redact_url`): the query, ``;`` pairs, path parameters, a query-shaped or
-    route fragment and every value nested in them (BUG-0556 review round 1: the
+    name walk (`_walk_names`): the query, ``;`` pairs, path parameters, a query-shaped
+    or route fragment and every value nested in them (BUG-0556 review round 1: the
     fragment's query was judged flat, so a credential nested in ``#/r?next=…`` was
-    kept). `redact_url` is total, so no fallback is needed."""
+    kept). The walk is total, so no fallback is needed (the floor's own pass, which
+    reads the piece through ``urlsplit``, has its fallback: `redact_for_record`)."""
     piece = _MATRIX_PARAM.sub(
         lambda m: f";{m.group(1)}={PLACEHOLDER}" if is_sensitive_name(m.group(1))
         else m.group(0), piece)
-    return redact_url(piece)
+    return _walk_names(piece)

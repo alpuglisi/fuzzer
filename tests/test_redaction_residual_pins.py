@@ -354,6 +354,157 @@ def test_proxy_history_redacts_a_url_holding_a_raw_lf(raw):
     assert _WORD.encode() not in redact(message)
 
 
+# --- r6: layered on the pushed redactor (the floor runs first, the walk on its output) ----
+# r6 runs 7393c90's own redactor first (`core.redaction_floor`) and the walk on its output
+# only, so nothing the pushed tree redacted can be kept (`tests/test_redaction_floor.py`).
+# Three families the walk cannot see in the floor's output were redacted by 144d234 (which
+# ran the walk on the raw input) and are kept by r6 and by 7393c90 alike: under the
+# owner's criterion (nothing the pushed tree redacted may leak) each is pinned here, never
+# another design round. Each case fails on its stated assertion on r6 and on 7393c90's
+# export, every consumer the pin names existing there but `redact_url_identifiers`'
+# ``placeholder`` mode (the batch's own; checked where the code has it).
+_ON_7393_R6 = ("on 7393c90 too: not a regression against the pushed tree; 144d234 "
+               "redacted it, reading the raw input")
+
+
+def _layered_consumers_keeping(url: str, secret: str) -> list[str]:
+    """The URL consumers that keep ``secret`` of ``url`` after their floor: both URL
+    redactors (``placeholder`` mode too, where the code has it), the evidence reference,
+    and, for a URL holding no raw CR or LF (one ends an HTTP line: the PROXY pin above),
+    the proxy's request line, ``Location`` and ``Content-Location``."""
+    import inspect
+
+    from fuzzlab.core.trace import safe_ref
+    from fuzzlab.proxy.redact import redact
+    outs = [("redact_url", R.redact_url(url)),
+            ("redact_url_identifiers", R.redact_url_identifiers(url)),
+            ("safe_ref", safe_ref(url))]
+    if "placeholder" in inspect.signature(R.redact_url_identifiers).parameters:
+        outs.append(("redact_url_identifiers(placeholder=True)",
+                     R.redact_url_identifiers(url, placeholder=True)))
+    if "\r" not in url and "\n" not in url:
+        target = "/" + url.split("://", 1)[1].partition("/")[2]
+        for name, raw in (("proxy request line", f"GET {target} HTTP/1.1\r\nHost: h\r\n\r\n"),
+                          ("proxy Location", f"HTTP/1.1 302 Found\r\nLocation: {url}\r\n\r\n"),
+                          ("proxy Content-Location",
+                           f"HTTP/1.1 200 OK\r\nContent-Location: {url}\r\n\r\n")):
+            outs.append((name, redact(raw.encode("latin-1")).decode("latin-1")))
+    return [name for name, out in outs if _leaks(out, secret)]
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
+    "BUG-0556 residual r6, family (a) (owner CORE, core.redaction: the floor "
+    "`core.redaction_floor.redact_url` / `redact_url_identifiers` read a query through "
+    "`urlsplit`, which removes every tab, CR and LF, and return the URL so cleaned "
+    "whenever they redact another pair; the walk then sees one token): "
+    "`?token=a&x<TAB>password=<word>` becomes `?token=__REDACTED__&xpassword=<word>`, "
+    "`xpassword` is not a sensitive name, and the word is kept by `redact_url`, "
+    "`redact_url_identifiers` (both modes), `core.trace.safe_ref` and the proxy's "
+    "request line, `Location` and `Content-Location` (`proxy.redact.redact`); in a "
+    "top-level pair, a raw or encoded nested query, a fragment pair and a route's query "
+    "(r6: 100 of 480 generated URLs, 500 consumer pairs, all with a second pair the floor "
+    f"redacts; {_ON_7393_R6} as two tokens). Candidate rule, not built: the walk judges a "
+    "name holding a tab, CR or LF from the raw input"))
+@pytest.mark.parametrize("url", [
+    f"http://h/app/p.php?token=a&x\tpassword={_WORD}",
+    f"http://h/app/p.php?token=a&u=b&next=/cb?my\ttoken={_WORD}",
+    f"http://h/app/p.php?token=a&u=b&next=%2Fcb%3Fq\tsecret%3D{_WORD}",
+    f"http://h/app/p.php?token=a&u=b#a\tsid={_WORD}",
+    f"http://h/app/p.php?token=a&u=b#/r?user\tapi_key={_WORD}",
+    f"http://h/app/p.php?token=a&x\rsid={_WORD}",
+    f"http://h/app/p.php?token=a&u=b&next=/cb?q\r\nsecret={_WORD}",
+])
+def test_a_name_joined_by_a_tab_cr_or_lf_in_the_floors_output_is_redacted(url):
+    assert _leaks(url, _WORD)                                # not vacuous
+    assert _layered_consumers_keeping(url, _WORD) == []
+
+
+_ID22 = "a70000000123f3e9c1b5d2"
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
+    "BUG-0556 residual r6, family (b) (owner CORE: the floor `core.redaction_floor."
+    "safe_ref` runs 7393c90's record rule, `_URL_USERINFO` / `_BARE_USERINFO` to `***@`, "
+    "before the walk sees the URL): the `***@` deletes a pair's name "
+    "(`;next=is:open label:bug&password=H@<word>` becomes `;next=is:open ***@<word>`) or "
+    "the userinfo that made the walk redact a nested URL whole (`#https://%26bob@<id>` "
+    "becomes `#https://***@<id>`), so `core.trace.safe_ref` keeps the word or the "
+    "identifier, in a diagram, an export and, through `tools.observe` under `fuzzlab "
+    "auto`'s trace recorder, `trace_event` and `dg_flow` rows (r6: 146 URLs of r5b's "
+    "corpus, 3 of the check's, 1 imported; the record redactor's own reading of the "
+    f"same rule is N7's pin above; {_ON_7393_R6}). Candidate rule, not built: the walk "
+    "redacts whole any value that holds the floor's `***@`"))
+@pytest.mark.parametrize("url,secret", [
+    (f"http://h/app/p.php;next=is:open label:bug&password=H@{_WORD}?u=bob", _WORD),
+    (f"http://h/app/#next=is:open label:bug&password=H@{_WORD}", _WORD),
+    (f"http://h/app/#next=https://is:open label:bug&password=H@{_WORD}/x", _WORD),
+    (f"http://h/app/p.php#https://%26bob@{_ID22}", _ID22),
+    (f"http://h/app/p.php?u=1#//%26bob@{_ID22}/x", _ID22),
+])
+def test_the_floors_userinfo_rule_never_lets_the_evidence_reference_keep_a_secret(url,
+                                                                                    secret):
+    from fuzzlab.core.trace import safe_ref
+    assert _leaks(url, secret)                               # not vacuous
+    out = safe_ref(url)
+    assert not _leaks(out, secret), out
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
+    "BUG-0556 residual r6, family (b) through the store (owners CORE and AUD: "
+    "`core.trace.safe_ref`'s floor, and `tools.store_adapter.import_spider`, whose "
+    "pages `tools.observe` cites by `safe_ref` under a trace recorder): a page whose "
+    "fragment holds `https://%26bob@<id>` stores the identifier in `trace_event` and "
+    f"`dg_flow` (r6: the 1 imported URL of the check's corpus; {_ON_7393_R6})"))
+def test_import_spider_under_a_trace_recorder_stores_no_identifier_behind_the_floors_userinfo(
+        tmp_path):
+    from fuzzlab.core import trace
+    from fuzzlab.tools.store_adapter import import_spider
+    _spider_db(tmp_path / "s.db", [f"http://h/a1/x&bobtoken#https://%26bob@{_ID22}",
+                                   f"http://h/a2/p.php#https://%26bob@{_ID22}"])
+    with Store(tmp_path / "u.db") as store:
+        run = store.start_run("auto", "h")
+        recorder = trace.TraceRecorder(store, run)
+        with trace.recording(recorder):
+            import_spider(tmp_path / "s.db", store, run)
+        recorder.close()
+        events = store.conn.execute("SELECT COUNT(*) FROM trace_event").fetchone()[0]
+        dump = _dump(store)
+    assert events > 0 and "/a2/p.php" in dump                # not vacuous: traced pages
+    assert not _leaks(dump, _ID22)
+
+
+_CUT_PASS = "SecretPassWord99"
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
+    "BUG-0556 residual r6, family (c) (owner CORE: the floor `core.redaction_floor."
+    "redact_for_record` cuts a value at `MAX_RECORD_CHARS` (4096) after its userinfo "
+    "rule and before the walk sees it): a nested, percent-encoded userinfo "
+    "(`next=https%3A%2F%2Fbob%3A<pw>%40host`) that straddles the cut loses its `%40`, so "
+    "neither the floor's rule nor the walk reads a userinfo and the start of the password "
+    "is kept by `redact_for_record` (`launch.argv`, `launch.target`, `project.targets`) "
+    "and `core.trace.safe_ref` (r6: 20 of 120 probes, 10 cut positions per consumer; "
+    f"{_ON_7393_R6}, before its cut). Candidate rule, not built: when the floor "
+    "truncated, the walk redacts the cut piece whole"))
+@pytest.mark.parametrize("pad", [0, 4, 9])
+def test_a_nested_userinfo_cut_by_the_records_size_bound_keeps_no_password(pad):
+    from urllib.parse import unquote
+
+    from fuzzlab.core.trace import safe_ref
+    url = ("http://h/p?a=" + "x" * 4040 + "&next=" + "y" * pad + "https%3A%2F%2Fbob%3A"
+           + _CUT_PASS + "%40host%2Fx")
+    assert _CUT_PASS in url and len(url) > R.MAX_RECORD_CHARS   # not vacuous
+
+    def keeps(out):
+        seen = [out]
+        for _ in range(4):
+            seen.append(unquote(seen[-1]))
+        return any(_CUT_PASS[:8] in t for t in seen)
+    kept = [name for name, out in (("redact_for_record", R.redact_for_record("target", url)),
+                                   ("safe_ref", safe_ref(url))) if keeps(out)]
+    assert kept == []
+
+
 # --- N3: `fuzzlab audit --append --store` ------------------------------------------------
 @pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
     "BUG-0556 residual after the final round, N3 neighbour 2 (owner AUD, "
