@@ -248,6 +248,50 @@ Newest first.
       record rule `***@` deleting a pair's name or the walk's trigger in `safe_ref`;
       (c) the floor's 4096-character cut before the walk. Their candidate rules are
       stated, not built.
+  - *(r6 review, 2026-10-22, branch `lane/REDACTURL-r6` after 3615cfb; BUG-0556 "r6
+    review", R1, R2 and R5. A records-and-code review of 3615cfb found the floor's
+    guards bypassable.)*
+    - **R1 -- the frozen check now hashes a definition's decorators.** It hashed
+      `ast.get_source_segment(node)`, which starts at `def` / `class`, so
+      `@dataclass(frozen=True)` made `@dataclass` on `RawMessage`, or
+      `@lambda f: (lambda url: url)` above the floor's `redact_url` or `safe_ref`,
+      passed while the floor stopped redacting. `_segment` hashes from the first
+      decorator's `@`; `RawMessage`'s recorded digest is retaken from 7393c90's text
+      with its decorator (`0602e778…`); `test_the_frozen_check_flags_an_edited_floor`
+      gains a decorator changed, removed and added (on `redact_url`, `safe_ref`).
+    - **R2 -- the layering guards close the bypasses found.** Guard 2: each `LAYERED`
+      consumer is bound once in its module, by its undecorated `def` (a later
+      `redact_spa_fragment = _walk_spa_fragment`, `redact_url = _walk_names`, a second
+      `def`, an import, a `global` assignment or a decorator replaced the consumer
+      unseen), a name bound to the floor is bound to nothing else, and a consumer reads
+      none of its **text parameters** -- every str parameter, now listed in full in
+      `LAYERED` and checked against the signature (`stored_value`'s entry named only
+      `value`, so `return raw_value if kept else kept` passed) -- after its floor except
+      as a predicate's argument (`isinstance`, `is_sensitive_name`, `WALK_PREDICATES`).
+      `redact_for_record` now passes `""` to its walk instead of `dest` (the floor
+      applied the option-name rule; the walk keeps `PLACEHOLDER` as it is: the same
+      output as 3615cfb's on 24 430 corpus URLs under seven option names and a
+      non-string, `scratchpad/lanes/REDACTURL/r6c/rfr_equiv.py`).
+      Guard 3 (`unregistered_uses`, was `unregistered_calls`): any reference to the walk
+      or the floor is a use, not only a call (`map(_walk_names, …)`,
+      `functools.partial(_walk_url, …)`, `filter(looks_like_identifier, …)`), resolved
+      through unaliased dotted chains (`import fuzzlab.core.redaction` then
+      `fuzzlab.core.redaction._walk_names`), relative imports and `getattr` / `setattr`
+      with a literal name; a decorator's or default's use is module level; an assignment
+      to a `LAYERED`, walk or floor attribute from another module is flagged. **Stated
+      limit:** a name computed at run time (`getattr` with a computed name,
+      `globals()`, `vars()`, `sys.modules`, `importlib`, `exec`) is not visible to a
+      static guard; the guard's docstring and FR-CORE-537 say so instead of claiming it.
+      Each new offender is in the guard tests and passes 3615cfb's guards
+      (`scratchpad/lanes/REDACTURL/r6c/proof_guards_offenders.log`: 27 offenders); each
+      of the reviewer's real edits, applied to a copy of the tree, passes 3615cfb's guard
+      file and fails the revision's (`proof_guards_tree.log`).
+    - **R5 -- the records.** BUG-0556's r6 recurrence review now reconciles r6's pins
+      with PA-0549(3c) (3c concerns regressions against the pushed tree: the owner's
+      rule and F-226) and names F-226 and why its correction did not hold in the r6 brief
+      (F-248); the pins' reasons say the same (`_ON_7393_R6`); the corrective action
+      names CC-CORE-0076, CC-PROXY-0031, CC-AUD-0059, the commits and PA-0556(11), whose
+      header (the lane's doc texts) now states that it narrows PA-0549(3c).
 - Impact (other components / project):
   - Every producer that calls `redact_url` now redacts nested credential names, `;`
     pairs, path parameters and query-shaped fragments: **PROXY** (flow history's URL,
@@ -385,6 +429,11 @@ Newest first.
     differentials against 7393c90 (0) and 144d234 (information); families (a)-(c)
     pinned (16 cases); FR-CORE-537 amended in place; BUG-0556 "r6"; PA-0556 item 11,
     SP-17 and the doc texts amended ("r6 changes") — done
+  - [x] *(r6 review)* the frozen check over decorators (R1); the layering guards over
+    re-binding, decorators, every text parameter and every use (R2), their limit
+    stated; `redact_for_record`'s walk given `""`; FR-CORE-537 amended in place;
+    BUG-0556 "r6 review"; PA-0556 item 11's header and Enforced-by, SP-17 and the doc
+    texts amended ("r6 review changes") — done
 - Effectiveness (assessed 2026-10-22): the six reported spellings stored their token
   before (measured by `scratchpad/lanes/REDACTURL/exp/repro.py` on 7393c90) and store
   none after; the new tests fail on the pre-fix product files in one invocation and pass
@@ -437,7 +486,18 @@ Newest first.
   revision and on 7393c90 and passes on 144d234 (`pins_r6new_plain_*.log`); the
   differentials: 0 leaks the pushed tree redacted, on every corpus (BUG-0556 "r6").
   The round's run is `scripts/verify_change.py --base 144d234` on the committed tree
-  (its TOTAL line in the lane report).
+  (its TOTAL line in the lane report). *(r6 review:)* the plain runner (pytest imported only as a library;
+  `scratchpad/lanes/REDACTURL/r6c/`): the 27 new guard offenders (R1's 4, R2's 23) each
+  pass 3615cfb's guard functions and fail the revision's (`proof_guards_offenders.log`);
+  the reviewer's 13 real edits (three of the floor, four of `core/redaction.py`, six new
+  modules) each pass 3615cfb's guard file on a copy of 3615cfb and fail the revision's on
+  a copy of the revision (`proof_guards_tree.log`); the revision's guard file fails on
+  3615cfb's tree at `test_every_url_redaction_consumer_runs_its_floor_first`'s assertion
+  (`floor_plain_t3615cfb.log`). After the last change the whole of
+  `tests/test_redaction_nested.py` passes (`nested_wt.log`: 629 ok), every pin holds
+  (`pins_wt.log`: 105 strict xfails, none passing) and the floor's guards pass
+  (`floor_wt.log`: 6 ok). The round's run is `scripts/verify_change.py --base 3615cfb`
+  on the committed tree (its TOTAL line in the lane report).
 
 ### CC-CORE-0075 — The seam keeps its connections per identity and session generation (FR-CORE-509, BUG-0549) (2026-10-21)
 - Placement: pre-assigned to POOL24 (audit defect 24); CC-CORE-0073 and CC-CORE-0074 are

@@ -178,11 +178,12 @@ def import_spider(spider_db: str | Path, store: Store, run_id: int, *,
     return counts
 
 
-def _main_origin(base_url: str | None, urls) -> str | None:
-    """The run's main origin: ``base_url``'s, else the first crawled URL's that has one."""
+def _main_origin(base_url: str | None, urls, *, origin_of=canonical_origin) -> str | None:
+    """The run's main origin: ``base_url``'s, else the first crawled URL's that has one
+    (each read by ``origin_of``; `import_audit` passes `_readable_origin`)."""
     if base_url:
         return canonical_origin(base_url)
-    return next((o for o in map(canonical_origin, urls) if o is not None), None)
+    return next((o for o in map(origin_of, urls) if o is not None), None)
 
 
 def _import_page_url(store: Store, run_id: int, raw: str, status, source: str,
@@ -995,7 +996,16 @@ def import_audit(audit_db: str | Path, store: Store, run_id: int, *,
     rows already hold it (`_audit_endpoint`: the run's main origin is the spider's, not
     the first finding page's; review round 2, N3), else by the run's main origin
     (``base_url``'s, else the first finding page's); its ``target_identifier`` and
-    ``html_context`` (stored as ``sink_context``) pass `_audit_text`."""
+    ``html_context`` (stored as ``sink_context``) pass `_audit_text`.
+
+    Total over a finding page no origin can be read from (BUG-0556 r6 review, D1 and
+    R4): the main origin is the first page's that `_readable_origin` reads; a page whose
+    authority ``urlsplit`` rejects once `canonical_origin` reads it as a URL
+    (``x[y/app/p.php``, ``h]/…``, ``\\u3000http://[h/…``) is stored by its path, as
+    7393c90's ``to_path`` stored every finding page; one ``to_path`` rejects too
+    (``http://[h/…``, where 7393c90's import raised) gets no endpoint (the candidate's
+    ``parameter_id`` is NULL) and its texts are `AUDIT_TEXT_WITHHELD` (`_audit_text`).
+    Such a finding is imported, never failing the import."""
     src = sqlite3.connect(str(audit_db))
     src.row_factory = sqlite3.Row
     counts = {"candidate": 0}
@@ -1006,16 +1016,16 @@ def import_audit(audit_db: str | Path, store: Store, run_id: int, *,
         ).fetchall()
     except sqlite3.Error:
         rows = []
-    main = _main_origin(base_url, (r["page_url"] for r in rows))
+    main = _main_origin(base_url, (r["page_url"] for r in rows),
+                        origin_of=_readable_origin)
     for row in rows:
         page = row["page_url"]
-        endpoint_id = _upsert_endpoint(
-            store, run_id,
-            _audit_endpoint(store, run_id, page, main, spider_form=not base_url), "GET",
-            "audit")
+        endpoint = _audit_endpoint(store, run_id, page, main, spider_form=not base_url)
+        endpoint_id = (None if endpoint is None
+                       else _upsert_endpoint(store, run_id, endpoint, "GET", "audit"))
         target = _audit_text(row["target_identifier"], page, url=True)
         # the legacy auditor names a parameter only: its first row of that name
-        found = store.conn.execute(
+        found = None if endpoint_id is None else store.conn.execute(
             "SELECT id FROM parameter WHERE run_id=? AND endpoint_id=? AND name=? "
             "ORDER BY id", (run_id, endpoint_id, target)).fetchone()
         param_id = int(found["id"]) if found else None
@@ -1038,8 +1048,19 @@ def import_audit(audit_db: str | Path, store: Store, run_id: int, *,
     return counts
 
 
+def _readable_origin(url) -> str | None:
+    """`canonical_origin` of a finding page, or ``None`` where it raises ``ValueError``
+    (an authority ``urlsplit`` rejects once read as a URL: ``x[y/app/p.php``, to which
+    `canonical_origin` prefixes ``http://``; ``http://[h/…``): such a page names no
+    origin (BUG-0556 r6 review, D1)."""
+    try:
+        return canonical_origin(url)
+    except ValueError:
+        return None
+
+
 def _audit_endpoint(store: Store, run_id: int, page: str, main: str | None, *,
-                    spider_form: bool) -> str:
+                    spider_form: bool) -> str | None:
     """A legacy-auditor finding page's endpoint as this run's spider rows hold the same
     page (review round 2, N3): `import_spider` and `import_audit` each took the run's
     main origin from their own first row (the seed; the first page with a finding), so
@@ -1047,10 +1068,26 @@ def _audit_endpoint(store: Store, run_id: int, page: str, main: str | None, *,
     spider's paths. ``store_url`` gives a page on another origin absolute only, so the
     spider's absolute form names a page off the main origin and its path form one on it.
     With neither stored, or without ``spider_form`` (the caller was given the operator's
-    base URL, whose origin is the main one), the run's ``main`` decides."""
-    if spider_form:
+    base URL, whose origin is the main one), the run's ``main`` decides.
+
+    A page no origin can be read from (`_readable_origin` is ``None`` because
+    `canonical_origin` raised: BUG-0556 r6 review, D1) is stored by its path, as
+    ``store_url`` stores a URL whose origin is unknown and as 7393c90's ``to_path``
+    stored every finding page (a ``;`` path parameter holding a secret dropped,
+    `core.redaction.strip_secret_path_params`): r6's import raised there, 7393c90's
+    did not. ``None`` -- no endpoint -- where the page's path cannot be read either
+    (``to_path`` raises: ``http://[h/…``, ``//[h/…``; 7393c90's import raised there)."""
+    from fuzzlab.core.redaction import strip_secret_path_params
+    from fuzzlab.core.urls import to_path
+    try:
         origin = canonical_origin(page)
-        if origin is not None:
+    except ValueError:
+        try:
+            return strip_secret_path_params(to_path(page))
+        except ValueError:
+            return None
+    try:
+        if spider_form and origin is not None:
             path = store_url(page, origin)
             for stored in (origin + path, path):
                 if store.conn.execute(
@@ -1058,7 +1095,9 @@ def _audit_endpoint(store: Store, run_id: int, page: str, main: str | None, *,
                         "SELECT 1 FROM endpoint WHERE run_id=? AND url=? AND source != "
                         "'audit' LIMIT 1", (run_id, stored, run_id, stored)).fetchone():
                     return stored
-    return store_url(page, main)
+        return store_url(page, main)
+    except ValueError:                  # its path is unreadable (``//[h/x``: no origin)
+        return None
 
 
 #: A run of a secret value this long or longer that a finding's text holds is the

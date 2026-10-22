@@ -1420,3 +1420,220 @@ redacted can leak by construction, and `tests/test_redaction_floor.py`'s guards 
 structure. What the walk then cannot see (information the floor's output lost: families
 (a)-(c)) leaks at 7393c90 too and is pinned, never another design round (the owner's
 rule).
+
+### r6 review (3615cfb; branch `lane/REDACTURL-r6`, one more commit)
+
+Two independent checks of 3615cfb (journal `wf_ef48570e-267`: a differential against
+7393c90 over 70 888 generated URLs, and a review of the code and the records; evidence in
+`scratchpad/checks-r6b-evidence/`) found no leak the pushed tree redacted, and six
+defects: one functional regression of the batch against 7393c90 (D1), two holes in the
+floor's guards (R1, R2), a family the floor-first design keeps that no record named (R3),
+a record claiming an unreachable branch (R4) and an incomplete recurrence review (R5).
+The owner's criterion stands: nothing 7393c90 redacted may leak; a regression of the
+batch against 7393c90 (a leak or a broken import) is fixed in the batch; anything 7393c90
+also leaks is pinned by a strict xfail. Each fix below has a test failing on 3615cfb at
+its own assertion (a guard fix: its synthetic offenders pass 3615cfb's guard), proven by
+the plain runner (pytest imported only as a library) in
+`scratchpad/lanes/REDACTURL/r6c/`.
+
+- **D1 -- `import_audit` failed where the pushed tree imported** (owner AUD,
+  CC-AUD-0059 "r6 review"). *Finding:* `import_audit` raised `ValueError("Invalid IPv6
+  URL")` for a finding page that is not an absolute URL and holds `[` or `]` in its first
+  segment (`x[y/app/p.php?u=1&token=…`, `h]/app/p.php`, `[h/app/p.php`) or after a
+  leading Unicode space (`\u3000http://[h/…`, `\xa0http://h]/…`), and stored nothing;
+  7393c90 (`to_path` only) imported each (28 of the check's 888-URL supplement, 0 of its
+  70 000 random URLs; out of reach of `fuzzlab audit --store`'s chain, whose
+  `import_spider` fails on such a page first, but not of a standalone import or an
+  `--append` findings DB). *Cause:* review round 2's `_main_origin` / `_audit_endpoint`
+  (N3) read each finding page's origin with `core.urls.canonical_origin`, which strips
+  whitespace and prefixes `http://` to a URL holding no `://`, so `urlsplit` judges the
+  first segment as a netloc and rejects the bracket; r6's records said such a page
+  "still fails the import, as 7393c90's `to_path` did", inferring from the absolute
+  spelling (`http://[h/…`, which `to_path` rejects too) that the two reject the same
+  strings -- a claim read from the code, never measured (PA-0556(4)), and no differential
+  had run `import_audit` (the checks drove the consumers and `import_spider`). *Fix:*
+  such a page names no origin: the run's main origin is read by `_readable_origin`
+  (`canonical_origin`, `None` where it raises), and `_audit_endpoint` stores the page by
+  its path, as `store_url` stores a URL whose origin is unknown and as 7393c90's
+  `to_path` stored it (a `;` path parameter holding a secret dropped); the texts pass
+  `_audit_text` as any other's. *Test:*
+  `tests/test_redaction_nested.py::test_r6_review_d1_import_audit_imports_a_page_no_origin_reads_as_the_pushed_tree_did`
+  (6 cases): on 3615cfb each fails at its first assertion ("the import failed:
+  ValueError('Invalid IPv6 URL')"); on the revision each passes (the endpoint is
+  `to_path` of the page, no secret stored); on 7393c90 each imports, three failing at the
+  leak assertion (7393c90 stored the page URL's token raw in `sink_context`).
+  *Measured:* The check's own import runner (`checks-r6b-evidence/run_imports.py`, an `import_audit` per URL under a trace recorder) on the revision, against its 7393c90 outputs (`scratchpad/lanes/REDACTURL/r6c/imp_compare.txt`, `extra_imp_compare.txt`): 0 import failures where 7393c90 imported (3615cfb: 28 of the 888-URL supplement) and 0 URLs leaking what 7393c90 redacted, on the 70 000 and the 888; the findings on a page 7393c90's import raised on (3 463 and 27, a page `urlsplit` rejects as written; 3615cfb raised too) are imported, no secret stored.
+- **R1 -- the frozen check missed a decorator** (owner CORE, CC-CORE-0076 "r6 review").
+  *Finding:* `frozen_problems` hashed `ast.get_source_segment(node)`, which starts at
+  `def` / `class`, so `@dataclass(frozen=True)` made `@dataclass` on the floor's
+  `RawMessage`, or `@lambda f: (lambda url: url)` above its `redact_url` or `safe_ref`,
+  passed the guard while the floor stopped redacting. *Cause:* the guard hashed the AST
+  node's span, which since Python 3.8 excludes its decorators, and its synthetic
+  offenders were edit kinds its author listed (a constant, a line, an appended statement,
+  a removed definition, an import, the docstring), not every part of a definition that
+  changes what it does. *Fix:* `_segment` hashes from the first decorator's `@`;
+  `RawMessage`'s digest is retaken from 7393c90's text with its decorator. *Test:*
+  `tests/test_redaction_floor.py::test_the_frozen_check_flags_an_edited_floor` gains a
+  decorator changed, removed and added (on `redact_url`, `safe_ref`); each of the four
+  passes 3615cfb's `frozen_problems` and fails the revision's
+  (`r6c/proof_guards_offenders.log`), and the reviewer's three real floor edits, applied
+  to a copy of each tree, pass 3615cfb's guard file and fail the revision's
+  (`r6c/proof_guards_tree.log`).
+- **R2 -- the layering guards were bypassable** (owner CORE, CC-CORE-0076 "r6 review").
+  *Finding:* a module-level re-binding of a `LAYERED` name after its `def`
+  (`redact_spa_fragment = _walk_spa_fragment`, `redact_url = _walk_names`) or a
+  decorator on a `LAYERED` def passed guards 2 and 3 while the live consumer skipped its
+  floor (the first in `tools/spider.py`'s path); a new module using the walk or the floor
+  without a call by an imported name -- `map(_walk_names, …)`,
+  `functools.partial(_walk_url, …)`, `getattr(redaction, '_walk_names')`, `import
+  fuzzlab.core.redaction` then `fuzzlab.core.redaction._walk_names(u)`, an unaliased
+  import of the floor, `filter(looks_like_identifier, …)` from the floor -- passed guard
+  3; and `stored_value`'s entry named only `value`, so `return raw_value if kept else
+  kept` passed guard 2. *Cause:* guard 2 modelled a consumer as its function body and
+  guard 3 a use as a `Call` by a name bound by `from … import` or an alias: the module's
+  namespace (a later binding, a decorator) and Python's other references (a function
+  passed as a value, a dotted chain, `getattr`) were outside the model; `LAYERED` named
+  "the parameter that holds the text it redacts" -- one -- and `stored_value` has three.
+  Its offenders, like R1's, were the shapes its author thought of. *Fix:* guard 2 checks
+  that each `LAYERED` name is bound once in its module, by its undecorated `def`, never
+  re-bound (assignment, import, `global`, a second `def`), that a name bound to the floor
+  is bound to nothing else, and that no **text parameter** -- every str parameter, now
+  listed in `LAYERED` and checked against the signature -- is read after the floor except
+  as a predicate's argument (`isinstance`, `is_sensitive_name`, `WALK_PREDICATES`);
+  `redact_for_record` passes `""` to its walk instead of `dest` (the floor applied the
+  option-name rule; the same output as 3615cfb's on 24 430 corpus URLs under seven option
+  names, `r6c/rfr_equiv.py`). Guard 3 (`unregistered_uses`) counts any reference as a
+  use, resolves unaliased dotted chains, relative imports and `getattr` / `setattr` with
+  a literal name, treats a decorator's or default's use as module level, and flags an
+  assignment to a `LAYERED`, walk or floor attribute from another module. *Stated
+  limit*, in the guard's docstring and FR-CORE-537 instead of a claim: a name computed at
+  run time (`getattr` with a computed name, `globals()`, `vars()`, `sys.modules`,
+  `importlib`, `exec`) is not visible to a static guard. *Test:*
+  `tests/test_redaction_floor.py::test_the_layering_check_flags_a_consumer_that_skips_its_floor`
+  (11 new offenders: four re-bindings, a decorator, the floor alias re-bound or made a
+  parameter, an import shadowing the parameter, `stored_value` returning or walking
+  `raw_value`) and `::test_the_registry_scan_flags_an_unregistered_walk_or_floor_call`
+  (12 new: each form above, a relative import, the floor module passed on, a walk in a
+  decorator and in a default, a `LAYERED` consumer assigned and `setattr` from another
+  module); all 23 pass 3615cfb's guard functions (`r6c/proof_guards_offenders.log`), and
+  the reviewer's real edits (three re-bindings and decorators of `core/redaction.py`,
+  `stored_value` returning `raw_value`, six new modules) each pass 3615cfb's guard file
+  on a copy of 3615cfb and fail the revision's on a copy of the revision
+  (`r6c/proof_guards_tree.log`). On 3615cfb's own tree the revision's guard file fails at
+  `test_every_url_redaction_consumer_runs_its_floor_first`'s assertion (3615cfb's
+  `LAYERED` names one text parameter per consumer: `stored_value`'s `value` of three,
+  `redact_for_record`'s `value` of two; `r6c/floor_plain_t3615cfb.log`).
+- **R3 -- family (d): what the proxy history writer stores where the floor raises**
+  (owner PROXY, CC-PROXY-0031 "r6 review"; pinned, not fixed: 7393c90 stores the same).
+  *Finding:* `_prepare_contained` stores a flow whose redaction raised with every body
+  `OMIT_FAILED` and its URL cut at the first `?` (`rec.url.split('?', 1)[0]`), in
+  `flow.url` and its `errors` line, so what precedes that `?` is stored as received:
+  `http://[h/app;jsessionid=<hex>/p.php?u=1` keeps the session id on 3615cfb and on
+  7393c90, where 144d234's walk (which never raised) stored `;jsessionid=__REDACTED__`.
+  CC-PROXY-0031 r6 said such a flow is stored "never unredacted" and FR-PROXY-11 r6 that
+  its URL is cut at the `?`, without what that keeps; the writer's docstring (7393c90's)
+  said "never stored unredacted". *Cause:* the r6 differential counted any raise as
+  redacted (the owner's criterion counts 7393c90's raise or withhold so) and never
+  measured what the raising consumer's caller then stores; the records took the
+  docstring's word for it. *Measured* (`r6c/fam_d.py` over the four corpora, 406 005
+  URLs; `famd_compare.txt`, `famd_classify.txt`): the writer falls back on the same
+  15 190 URLs on r6 and 7393c90 and on none on 144d234; it stores a secret in 651 of them
+  on both (the r6b check's corpus; 225 in a `;` path parameter, 411 in a path segment,
+  15 in a fragment written before the `?`), 0 at r6 that 7393c90 redacted; **144d234
+  delta: 183 URLs** (171 path parameter, 12 fragment; the 411 path segments 144d234 kept
+  too, as the proxy's name redactor reads no path segment on any tree). *Pin:*
+  `tests/test_redaction_residual_pins.py::test_proxy_history_stores_no_path_parameter_of_a_flow_its_floor_rejects`
+  (strict, `raises=AssertionError`, owner PROXY, 4 cases: xfail on the revision, on
+  3615cfb and on 7393c90, XPASS on 144d234); candidate rule, not built: the fallback
+  cuts the URL at its first `;`, `?` or `#`. The records (CC-PROXY-0031, FR-PROXY-11,
+  FR-CORE-537, the writer's docstring) now say what is stored.
+- **R4 -- a record claimed an unreachable branch** (owner AUD, CC-AUD-0059 "r6 review").
+  *Finding:* FR-AUD-31 r6, CC-AUD-0059 r6 and 3615cfb's commit message said a text whose
+  *page* URL the floor rejects is stored `AUDIT_TEXT_WITHHELD` and the import goes on;
+  `_main_origin` / `_audit_endpoint` raised first, so `_audit_text`'s page-URL branch was
+  unreachable through `import_audit`, untested, and the same records' next sentence
+  contradicted the claim. *Cause:* the claim was written from `_audit_text`'s code, not
+  from a test through its only caller (r6's test drove a rejected target on a good page
+  only). *Fix:* with D1's fix the import is total: a page `urlsplit` rejects as written
+  (`http://[h/…`, `//[h/…`, where `to_path` rejects it too and 7393c90's import raised)
+  gets no endpoint (`_audit_endpoint` returns `None`; `parameter_id` NULL), and its
+  target and context are `AUDIT_TEXT_WITHHELD`; the branch is reached and tested, and
+  FR-AUD-31 says exactly this. *Test:*
+  `tests/test_redaction_nested.py::test_r6_review_r4_import_audit_withholds_the_texts_of_a_page_its_floor_rejects`
+  (2 cases): fail on 3615cfb at "the import failed: ValueError('Invalid IPv6 URL')", pass
+  on the revision; on 7393c90 they fail at the same assertion (its `to_path` raised).
+- **R5 -- r6's recurrence review was incomplete** (records only). *Finding:* it did not
+  mention PA-0549(3c), though r6 pins 16 cases the batch's own unpushed 144d234 redacted
+  (what 3c forbids on its face: "a defect a sweep finds in an unpushed change of the same
+  batch is fixed in that batch, never pinned"); it did not name F-226, of whose class the
+  r6 brief's extra bar was a recurrence; its corrective action named only CC-AUD-0059.
+  *Cause:* the review was written for the design change (items 8-10 to item 11) and
+  checked against PA-0556 only, not against every rule the round's pins touch. *Fix:*
+  the completed review below; the pins' shared reason (`_ON_7393_R6`) and PA-0556(11)'s
+  header (the lane's doc texts) state the reconciliation.
+
+**Proofs** (plain runner, `scratchpad/lanes/REDACTURL/r6c/`): the 8 D1 and R4 cases fail
+on 3615cfb and on 144d234 at "the import failed" and pass on the revision
+(`r6review_tests_plain_{t3615cfb,t144d234,wt}.log`); family (d)'s 4 pin cases xfail on the
+revision, 3615cfb and 7393c90 and XPASS on 144d234 (`pins_famd_plain_*.log`); the guard
+proofs are in `proof_guards_offenders.log` and `proof_guards_tree.log`. After the last
+change the whole of `tests/test_redaction_nested.py` passes (`nested_wt.log`: 629 ok),
+the pins file holds (`pins_wt.log`: 105 strict xfails, none passing) and the floor's
+guards pass (`floor_wt.log`: 6 ok).
+
+**The r6 recurrence review, completed (R5).**
+- *PA-0549(3c).* r6 pins 16 cases (and this review 4 more, family (d)) that the
+  unpushed 144d234 redacted. PA-0549(3c) says a defect a sweep finds in an unpushed change
+  of the same batch is fixed in that batch, never pinned. Its owner's reading -- the rule
+  the owner gave for this batch (nothing the pushed 7393c90 redacted may leak; a
+  regression against it is fixed in the batch; anything it also leaks is pinned) and
+  F-226's correction (the owner's rule and PA-0549(3c) concern what a batch makes worse
+  than what ships: the pushed tree) -- is that 3c's "defect" is a regression against the
+  pushed tree. A leak 7393c90 has too is not one, whichever unpushed revision redacted it
+  in between: the pins are within 3c so read, and each states it (`_ON_7393_R6`: "not a
+  regression against the pushed tree, so pinned, not fixed in the batch -- PA-0549(3c)
+  concerns regressions against the pushed tree (the owner's rule; F-226)").
+  PA-0556(11)'s header now says it narrows PA-0549(3c) to that reading.
+- *F-226.* F-226 recorded that briefing REDACTURL's follow-ups against an unpushed
+  revision (f939778) made them chase intermediate states; its correction settled the lane
+  against 7393c90 in one workflow (`wf_9a1e5879-609`). The r6 brief set an unpushed
+  revision as a bar again ("0 leaks against 144d234"; F-248 in the stack, the doc texts'
+  "The r6 brief added a bar the owner had not set"), and the lane blocked on it.
+  **Why F-226's correction did not hold:** it corrected one brief, not the rule the
+  briefs are written from. PA-0549(3c)'s text still says "an unpushed change of the same
+  batch", which the r6 brief applied literally, and no rule says the regression bar is
+  the pushed tree only (PA-0556(10) requires a differential against the pushed tree but
+  does not forbid a second bar against an unpushed revision). PA-0556(11)'s header now
+  narrows 3c in the rule's own text, so the next brief written from it reads the pushed
+  tree; a brief's bar is not code, so no test enforces it (its Enforced-by line names
+  the layering's tests).
+- *Corrective action of r6, complete.* CC-CORE-0076 (the floor, `core/redaction_floor.py`,
+  and every core consumer layered on it), CC-PROXY-0031 (the proxy's `redact` layered on
+  the frozen pushed `redact`), CC-AUD-0059 (`import_audit` withholding a text the floor
+  rejects), each in its "r6" sub-bullet, in commit
+  3615cfb1bba77480371657873e09cb6139080729; PA-0556 item 11. This review: the same three
+  entries' "r6 review" sub-bullets (D1 and R4: CC-AUD-0059; R1, R2 and R5: CC-CORE-0076;
+  R3: CC-PROXY-0031), one commit on `lane/REDACTURL-r6` after 3615cfb, and PA-0556(11)
+  amended (header and text, Enforced-by gaining the D1 and R4 tests).
+
+**Recurrence review of this round.** D1 is the class r6 itself fixed for the target
+identifier (A1): a URL step the batch added to a caller raises where the pushed tree's
+caller did not, and so is R4's unreachable branch; both were missed because r6's A1
+sweep of `import_audit` was read, not measured (PA-0556(4), followed for the target and
+not for the page). R1 and R2 followed PA-0034(2) (each guard was proven on synthetic
+offenders malformed the way it claims to catch) and recur PA-0556(9)'s class one layer
+over: a guard's offenders, like a differential's inputs, were the shapes its author
+chose rather than derived from the mechanism (every way Python binds a name or refers to
+a function, every part of a definition). R3
+is A1's caller side: a raise counted as redacted without measuring what the raising
+consumer's caller stores. **Prior-preventive-action failure analysis:** PA-0556(4)
+("a sweep of an owner's callers is measured, not read") was not followed for
+`import_audit`'s page step (not enforced: its Enforced-by tests drive the target only);
+PA-0556(11) required the floor's guards but not that their model cover every binding and
+reference, nor that a raise's caller fallback be measured. PA-0556(11) is amended (the
+lane's doc texts): a layered consumer's guards model every binding and every reference
+the language allows, state what they cannot see, and are proven on offenders of each
+kind; where the floor raises, each caller's fallback is measured for what it stores,
+never counted as redacted; and the round's sweep drives every URL a caller the batch
+changed reads (each `import_audit` text and page) through that caller. Enforced by the
+guard tests above and the D1 and R4 tests.

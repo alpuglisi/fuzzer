@@ -865,11 +865,20 @@ plugin registry. It is the layer that makes the store the integration bus.
     `ValueError` (a URL `urlsplit` rejects: `http://[h/…`, a bracketed host it does not
     accept, a netloc that NFKC-normalises to a delimiter), the consumer raises it, as the
     pushed tree did, and its caller withholds the value as it did then (the proxy
-    history writer's `_prepare_contained`, `safe_ref`'s `(unparseable URL withheld)`,
+    history writer's `_prepare_contained`: every body `OMIT_FAILED` and the URL cut at
+    its first `?`, what precedes it stored as received -- a `;` path parameter or a
+    fragment there is kept, family (d) below; `safe_ref`'s `(unparseable URL withheld)`;
     `import_audit`'s `AUDIT_TEXT_WITHHELD`, FR-AUD-31). Held by
-    `tests/test_redaction_floor.py` (the floor hashes to 7393c90's text; each consumer
-    calls its floor first on its own parameters and never reads its raw text again;
-    nothing calls the walk or the floor unregistered).
+    `tests/test_redaction_floor.py`: the floor's every definition, its decorators
+    included, hashes to 7393c90's text; each consumer is bound once in its module, by
+    its undecorated `def`, and never re-bound, calls its floor first on its own
+    parameters, and reads none of its text parameters (every str parameter, `LAYERED`)
+    again except as a predicate's argument (`isinstance`, `is_sensitive_name`,
+    `WALK_PREDICATES`); nothing uses the walk or the floor unregistered -- a call or any
+    other reference, by an imported, aliased, relative or unaliased dotted name, or
+    `getattr` / `setattr` with a literal name. *(r6 review, R1-R2.)* A name computed at
+    run time (`getattr` with a computed name, `globals()`, `sys.modules`, `importlib`,
+    `exec`) is beyond these static guards: review is the only control for it.
   - **Where a value sits:** a query pair, `&` or `;` separated; a `;name=value` (or
     bare `;value`) path parameter in any segment; a query-shaped fragment (`#…?a=b`,
     `#a=b`) and a fragment route's path parameters; and, inside any of those values, a
@@ -1019,7 +1028,10 @@ plugin registry. It is the layer that makes the store the integration bus.
     `test_a_nested_userinfo_cut_by_the_records_size_bound_keeps_no_password` (family (c):
     the floor's record redactor cuts at 4096 characters before the walk, so a nested
     `%40` userinfo straddling the cut keeps its password's start; `redact_for_record`,
-    `safe_ref`).
+    `safe_ref`). *(r6 review, R3:)* family (d), what a caller stores where the floor
+    raises: `test_proxy_history_stores_no_path_parameter_of_a_flow_its_floor_rejects`
+    (owner PROXY: the history writer's fallback keeps what precedes the URL's first `?`,
+    a `;name=value` path parameter or a query-shaped fragment there).
   - Enforced by: `tests/test_redaction_floor.py` (the layering, r6) and
     `tests/test_redaction_nested.py` (a generated sweep over depth,
     encoding -- raw, single and double percent, `+`, `quote(safe="/")` single and

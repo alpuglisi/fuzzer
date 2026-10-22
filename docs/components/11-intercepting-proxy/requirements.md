@@ -101,8 +101,14 @@ that shares the store, never a mandatory pipeline (D5).
     and the bodies -- and the walk above runs only on its output, so nothing the pushed
     tree redacted is kept. Where the floor raises (a URL `urlsplit` rejects in the
     request line or one of those headers), `redact` raises and the history writer stores
-    the flow with every body `OMIT_FAILED` and its URL cut at the `?`
-    (`_prepare_contained`), as on 7393c90. Pinned (owner CORE, BUG-0556 r6 family (a)):
+    the flow with every body `OMIT_FAILED` and its URL cut at its first `?`
+    (`_prepare_contained`), as on 7393c90: what precedes that `?` is stored as received,
+    in `flow.url` and its `errors` line -- a `;name=value` path parameter, a fragment
+    written before it, a path segment (*r6 review*, R3: not "never unredacted"). Pinned
+    (owner PROXY, BUG-0556 r6 family (d), kept on 7393c90 too): such a path parameter or
+    query-shaped fragment
+    (`test_proxy_history_stores_no_path_parameter_of_a_flow_its_floor_rejects`; candidate
+    rule, not built: cut at the first `;`, `?` or `#`). Pinned (owner CORE, BUG-0556 r6 family (a)):
     a name the floor's `urlsplit` reading joins across a removed tab (`?token=a&x<TAB>
     password=<w>`, which the floor returns as `xpassword=<w>`) in the request line,
     `Location` or `Content-Location`, kept on 7393c90 too;

@@ -6,22 +6,41 @@ consumer the batch changed; each consumer (`core.redaction.LAYERED`) runs its fl
 its input as received and the batch's walk on the floor's output only, so nothing the
 pushed tree redacted can be kept again. Three guards hold the design:
 
-1. **the floor is frozen**: each of its definitions hashes to 7393c90's text (a SHA-256
-   taken from ``git show 7393c90:<file>`` when this guard was written, recorded below),
-   after the recorded substitutions (a function-local import of a live module pointed at
-   the floor, so the frozen code never calls a layered redactor), and the module holds
-   exactly those definitions after its pinned docstring and imports;
-2. **every consumer runs its floor first**: by AST, the first statement of each
-   `LAYERED` function (after its docstring and imports) calls its floor on its own
-   parameters as given, calls nothing else, and the function never reads its text
-   parameter again;
-3. **nothing runs the walk or the floor unregistered**: across ``fuzzlab/``, every call
+1. **the floor is frozen**: each of its definitions -- from its first decorator's ``@``
+   (r6 review, R1: a decorator was never hashed) to its end -- hashes to 7393c90's text
+   (a SHA-256 taken from ``git show 7393c90:<file>`` when this guard was written,
+   recorded below), after the recorded substitutions (a function-local import of a live
+   module pointed at the floor, so the frozen code never calls a layered redactor), and
+   the module holds exactly those definitions after its pinned docstring and imports;
+2. **every consumer runs its floor first**: by AST, each `LAYERED` function is bound
+   once in its module, by its undecorated ``def``, and never re-bound there (r6 review,
+   R2: a module-level ``redact_url = _walk_names`` or a decorator replaced it unseen);
+   a name the module binds to the floor is bound to nothing else; the function's first
+   statement (after its docstring and imports) calls its floor on its own parameters as
+   given and calls nothing else; and the function reads none of its text parameters
+   (every one, R2: `stored_value`'s three) again, except as the argument of a predicate
+   (``isinstance``, `is_sensitive_name`, a `WALK_PREDICATES` one), which returns no text;
+3. **nothing uses the walk or the floor unregistered**: across ``fuzzlab/``, every use
    of the walk (`_UrlWalk`, a `WALK_HELPERS` step, a `WALK_PREDICATES` predicate) is made
-   from a registered function, and every call of the floor from a `LAYERED` consumer.
+   from a registered function, and every use of the floor from a `LAYERED` consumer. A
+   use is any reference, not only a call (R2: ``map(_walk_names, …)``,
+   ``functools.partial(_walk_url, …)``, ``filter(looks_like_identifier, …)``), reached
+   by a name the module imports or defines, an alias, or an unaliased dotted chain
+   (``import fuzzlab.core.redaction`` then ``fuzzlab.core.redaction._walk_names``), a
+   relative import, or ``getattr`` with a literal name; a module-level use, and an
+   assignment to a `LAYERED`, walk or floor attribute from another module, are flagged.
 
-Each check is proven on synthetic offenders (PA-0034(2)): an edited floor, a consumer
-that skips its floor, runs the walk first, gives the floor a changed input or reads its
-raw input after it (144d234's `core.trace.safe_ref`, R1), and an unregistered caller.
+**The stated limit.** The guards read source; they cannot see a name computed at run
+time: ``getattr`` / ``setattr`` with a computed name, ``globals()``, ``vars()``,
+``sys.modules``, ``importlib`` / ``__import__`` of a computed or literal module name,
+``exec`` and ``eval``. Such access is not checked here (nor anywhere else); review is the
+only control for it.
+
+Each check is proven on synthetic offenders (PA-0034(2)): an edited floor (a decorator
+added, removed or changed among them), a consumer that skips its floor, runs the walk
+first, gives the floor a changed input, reads its raw input after it (144d234's
+`core.trace.safe_ref`, R1), is decorated, re-bound or returns a text parameter it only
+judged, and an unregistered use of each kind above.
 """
 
 from __future__ import annotations
@@ -160,8 +179,8 @@ FROZEN = [
      "e7d6f2d97066c0db2601e5b7b910ac0262fd8a12bdf04a5d38dfdb5661b173f0"),
     ("_split_head_body", "fuzzlab/proxy/message.py",
      "7fafeb5d371ea8d93747a96ccd307b0567be18809bcb12cc0fdf02e7dee1f606"),
-    ("RawMessage", "fuzzlab/proxy/message.py",
-     "85537f5044cfa1bd50a3908a664bb3c93a81ffb1d57f8ed1d087097fc515964d"),
+    ("RawMessage", "fuzzlab/proxy/message.py",                 # with its @dataclass
+     "0602e7781a3d8eb90d91b72239378208741a0cdbf1930cee331ae8d56a598baa"),
     ("_as_bytes", "fuzzlab/proxy/message.py",
      "5d0487bb9b88bc353b29e088d5f3559cecc64147e053df201927aea9a9b31166"),
     ("REDACTED", "fuzzlab/proxy/redact.py",
@@ -218,6 +237,10 @@ EXPECTED_LAYERED = {
 FLOOR_CONSUMERS = {"redact_url", "redact_url_identifiers", "redact_spa_fragment",
                    "page_url_is_clean", "redact_for_record", "redact_sibling", "safe_ref",
                    "redact"}
+#: A consumer's positional parameters that hold no text (r6 review, R2): every other one is
+#: a text parameter its `LAYERED` entry must name, so no entry checks fewer than all
+#: (`stored_value`'s named only ``value``, and returning ``raw_value`` passed).
+NOT_TEXT = {("fuzzlab/proxy/redact.py", "redact"): {"extra_headers"}}   # header names
 
 
 def _sha(text: str) -> str:
@@ -233,11 +256,36 @@ def _defined(node) -> str | None:
     return None
 
 
+def _offset(text: str, lineno: int, col: int) -> int:
+    """The character offset of an AST position (``col`` counts UTF-8 bytes), lines split
+    as `ast.get_source_segment` splits them."""
+    start = 0
+    for _ in range(lineno - 1):
+        start = text.index("\n", start) + 1
+    line = text[start:text.find("\n", start) if "\n" in text[start:] else len(text)]
+    return start + len(line.encode("utf-8")[:col].decode("utf-8"))
+
+
+def _segment(text: str, node) -> str:
+    """A definition's text as guard 1 hashes it: from its first decorator's ``@`` to its
+    end (r6 review, R1: `ast.get_source_segment` starts at ``def`` / ``class``, so an
+    added, removed or edited decorator was never hashed -- ``@dataclass(frozen=True)``
+    made ``@dataclass``, or ``@lambda f: (lambda url: url)`` above ``def redact_url``,
+    passed while the floor stopped redacting)."""
+    decorators = getattr(node, "decorator_list", None)
+    if not decorators:
+        return ast.get_source_segment(text, node)
+    first = min(decorators, key=lambda d: (d.lineno, d.col_offset))
+    start = text.rfind("@", 0, _offset(text, first.lineno, first.col_offset))
+    return text[start:_offset(text, node.end_lineno, node.end_col_offset)]
+
+
 # --- guard 1: the floor is the pushed tree's code, verbatim ------------------------------
 def frozen_problems(text: str) -> list[str]:
     """How a floor module's ``text`` differs from the pinned 7393c90 code: ``[]`` when
-    every definition is 7393c90's (after `SUBS`), they are exactly `FROZEN`'s in order,
-    and nothing but the pinned head precedes them or follows."""
+    every definition, its decorators included (`_segment`), is 7393c90's (after `SUBS`),
+    they are exactly `FROZEN`'s in order, and nothing but the pinned head precedes them
+    or follows."""
     tree = ast.parse(text)
     problems = []
     body = list(tree.body)
@@ -256,7 +304,7 @@ def frozen_problems(text: str) -> list[str]:
         name = _defined(node)
         if name not in expected:
             continue
-        seg = ast.get_source_segment(text, node)
+        seg = _segment(text, node)
         for floor_text, pushed_text in SUBS.get(name, ()):
             if seg.count(floor_text) != 1:
                 problems.append(f"{name}: its import of the floor changed")
@@ -277,8 +325,12 @@ def test_the_floor_is_the_pushed_trees_code_verbatim():
 def test_the_frozen_check_flags_an_edited_floor():
     """Guard 1 on synthetic offenders: a changed constant, a changed line of a frozen
     function, a statement added after the definitions (a monkeypatch), a definition
-    removed, an import pointed back at the live (layered) module, a docstring edit."""
+    removed, an import pointed back at the live (layered) module, a docstring edit; and
+    (r6 review, R1) a decorator changed (``RawMessage`` no longer frozen), removed, or
+    added above a frozen function so that it stops redacting (``redact_url``,
+    ``safe_ref``) -- each passed the check that hashed from ``def`` / ``class``."""
     text = (ROOT / FLOOR_REL).read_text(encoding="utf-8")
+    identity = "@lambda f: (lambda url: url)\n"
     offenders = {
         "constant": text.replace('PLACEHOLDER = "__REDACTED__"', 'PLACEHOLDER = "__R__"'),
         "function": text.replace("    if not query:\n        return query\n",
@@ -290,6 +342,14 @@ def test_the_frozen_check_flags_an_edited_floor():
             f"from {FLOOR_MODULE} import redact_for_record, redact_url_identifiers",
             "from fuzzlab.core.redaction import redact_for_record, redact_url_identifiers"),
         "docstring": text.replace("NEVER EDITED", "edited", 1),
+        "decorator changed": text.replace("@dataclass(frozen=True)\nclass RawMessage",
+                                          "@dataclass\nclass RawMessage", 1),
+        "decorator removed": text.replace("@dataclass(frozen=True)\nclass RawMessage",
+                                          "class RawMessage", 1),
+        "decorator added (redact_url)": text.replace("\ndef redact_url(",
+                                                     "\n" + identity + "def redact_url(", 1),
+        "decorator added (safe_ref)": text.replace("\ndef safe_ref(",
+                                                   "\n" + identity + "def safe_ref(", 1),
     }
     for label, edited in offenders.items():
         assert edited != text, label
@@ -309,37 +369,145 @@ def _floor_aliases(tree: ast.AST) -> set[str]:
     return out
 
 
+def _is_floor_import(node, name: str) -> bool:
+    """Whether the import ``node`` binds ``name`` to the floor module."""
+    if isinstance(node, ast.ImportFrom):
+        return node.module == "fuzzlab.core" and any(
+            a.name == "redaction_floor" and (a.asname or a.name) == name for a in node.names)
+    return isinstance(node, ast.Import) and any(
+        a.name == FLOOR_MODULE and a.asname == name for a in node.names)
+
+
+def _import_binds(node, name: str) -> bool:
+    """Whether the import ``node`` binds ``name`` (a star import may bind any name)."""
+    if isinstance(node, ast.Import):
+        return any((a.asname or a.name.split(".")[0]) == name for a in node.names)
+    return any(a.name == "*" or (a.asname or a.name) == name for a in node.names)
+
+
+def _module_scope(tree: ast.Module):
+    """Every node evaluated in the module's own namespace: not inside a function, lambda
+    or class body (a definition's decorators and defaults, a class's bases, are)."""
+    stack = list(tree.body)
+    while stack:
+        node = stack.pop()
+        yield node
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            args = node.args
+            stack += list(getattr(node, "decorator_list", [])) + list(args.defaults) \
+                + [d for d in args.kw_defaults if d is not None]
+        elif isinstance(node, ast.ClassDef):
+            stack += list(node.decorator_list) + list(node.bases) \
+                + [k.value for k in node.keywords]
+        else:
+            stack += list(ast.iter_child_nodes(node))
+
+
+def _module_bindings(tree: ast.Module, name: str) -> list[int]:
+    """The line of every binding of ``name`` in the module's namespace: a definition, an
+    assignment, augmented or annotated assignment, ``for`` / ``with`` / walrus / ``except``
+    / ``match`` target, ``del``, an import (a star import too), and any function's
+    ``global`` declaration of it."""
+    lines = []
+    for node in _module_scope(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            hit = node.name == name
+        elif isinstance(node, ast.Name):
+            hit = node.id == name and isinstance(node.ctx, (ast.Store, ast.Del))
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            hit = _import_binds(node, name)
+        elif isinstance(node, (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)):
+            hit = node.name == name
+        elif isinstance(node, ast.MatchMapping):
+            hit = node.rest == name
+        else:
+            hit = False
+        if hit:
+            lines.append(node.lineno)
+    lines += [n.lineno for n in ast.walk(tree)
+              if isinstance(n, ast.Global) and name in n.names]
+    return sorted(lines)
+
+
+def _alias_rebindings(tree: ast.Module, aliases: set[str]) -> list[str]:
+    """Each binding, anywhere in the module (any scope), of a name the module binds to
+    the floor, to anything but the floor: then ``_floor.redact_url(url)`` would not be
+    the floor."""
+    out = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            bad = [a for a in aliases if _import_binds(node, a) and not _is_floor_import(node, a)]
+        elif isinstance(node, ast.Name):
+            bad = [node.id] if node.id in aliases and not isinstance(node.ctx, ast.Load) else []
+        elif isinstance(node, ast.arg):
+            bad = [node.arg] if node.arg in aliases else []
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
+                               ast.ExceptHandler, ast.MatchAs, ast.MatchStar)):
+            bad = [node.name] if node.name in aliases else []
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            bad = [n for n in node.names if n in aliases]
+        else:
+            bad = []
+        out += [f"{a}: bound to something besides the floor (line {node.lineno})"
+                for a in bad]
+    return out
+
+
 def _is_floor_call(node, aliases: set[str], floors) -> bool:
     return (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
             and isinstance(node.func.value, ast.Name) and node.func.value.id in aliases
             and node.func.attr in floors)
 
 
-def layering_problems(source: str, func: str, floors, text_param) -> list[str]:
-    """How the function ``func`` of ``source`` breaks the layering: ``[]`` when its first
-    statement (after its docstring and imports) calls one of ``floors`` (of the floor
-    module) on the function's own leading parameters as received -- ``x = floor(...)``,
-    ``x = floor_a(...) if flag else floor_b(...)``, or ``if not floor(...): return
-    False`` -- and calls nothing else, and ``text_param`` (when given) is never read
-    after that statement, so the walk sees only the floor's output."""
+def _predicates() -> set[str]:
+    """What a consumer may call on a text parameter after its floor: predicates, which
+    return no text -- ``isinstance``, the name rule both trees share
+    (`is_sensitive_name`, identical in 7393c90) and the walk's own `WALK_PREDICATES`."""
+    return {"isinstance", "is_sensitive_name"} | {name for _rel, name in R.WALK_PREDICATES}
+
+
+def layering_problems(source: str, func: str, floors, text_params) -> list[str]:
+    """How the function ``func`` of ``source`` breaks the layering: ``[]`` when
+
+    - ``func`` is bound once in the module, by its own ``def``, undecorated, and never
+      re-bound (no later assignment, import, ``global`` or second ``def``: r6 review,
+      R2), and every name the module binds to the floor is bound to nothing else;
+    - its first statement (after its docstring and imports, which bind none of its
+      parameters) calls one of ``floors`` (of the floor module) on the function's own
+      leading parameters as received -- ``x = floor(...)``, ``x = floor_a(...) if flag
+      else floor_b(...)``, or ``if not floor(...): return False`` -- and calls nothing
+      else;
+    - after that statement no parameter in ``text_params`` (a name, or every name in a
+      tuple; ``None`` for a verdict) is read, except as a positional argument of a
+      `_predicates` call, so the walk sees only the floor's output."""
     tree = ast.parse(source)
+    problems = []
     fn = next((n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == func),
               None)
     if fn is None:
         return [f"{func}: not defined"]
+    bindings = _module_bindings(tree, func)
+    if bindings != [fn.lineno]:
+        problems.append(f"{func}: bound more than once in its module (lines {bindings}): a "
+                        "re-binding replaces the layered consumer")
+    if fn.decorator_list:
+        problems.append(f"{func}: decorated (line {fn.decorator_list[0].lineno}): a "
+                        "decorator replaces the layered consumer")
     aliases = _floor_aliases(tree)
     if not aliases:
-        return [f"{func}: the module binds no floor"]
+        return problems + [f"{func}: the module binds no floor"]
+    problems += _alias_rebindings(tree, aliases)
     params = [a.arg for a in fn.args.posonlyargs + fn.args.args]
     body = list(fn.body)
     if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant):
         body = body[1:]
     while body and isinstance(body[0], (ast.Import, ast.ImportFrom)):
+        problems += [f"{func}: an import before its floor binds its parameter {p}"
+                     for p in params if _import_binds(body[0], p)]
         body = body[1:]
     if not body:
-        return [f"{func}: empty"]
+        return problems + [f"{func}: empty"]
     first, after = body[0], body[1:]
-    problems = []
     calls = [n for n in ast.walk(first) if isinstance(n, ast.Call)]
     floor_calls = [c for c in calls if _is_floor_call(c, aliases, floors)]
     if not floor_calls:
@@ -367,31 +535,48 @@ def layering_problems(source: str, func: str, floors, text_param) -> list[str]:
         shape_ok = True
     if not shape_ok:
         problems.append(f"{func}: its first statement is not a floor call's result")
-    if text_param is not None:
-        if text_param not in params:
-            problems.append(f"{func}: has no parameter {text_param}")
-        for stmt in after:
-            for node in ast.walk(stmt):
-                if isinstance(node, ast.Name) and node.id == text_param:
-                    problems.append(f"{func}: reads {text_param} after its floor (line "
-                                    f"{node.lineno}): the walk would see the raw input")
-                    break
+    texts = (text_params,) if isinstance(text_params, str) else tuple(text_params or ())
+    problems += [f"{func}: has no parameter {p}" for p in texts if p not in params]
+    allowed = _predicates()
+    for stmt in after:
+        parent = {c: n for n in ast.walk(stmt) for c in ast.iter_child_nodes(n)}
+        for node in ast.walk(stmt):
+            if not (isinstance(node, ast.Name) and node.id in texts):
+                continue
+            up = parent.get(node)
+            if isinstance(up, ast.Call) and any(a is node for a in up.args) \
+                    and isinstance(up.func, ast.Name) and up.func.id in allowed:
+                continue                                    # a predicate: no text out
+            problems.append(f"{func}: reads {node.id} after its floor (line {node.lineno}): "
+                            "the walk or the result would see the raw input")
     return problems
 
 
+def _text_params(rel: str, func: str, source: str) -> tuple[str, ...]:
+    """A consumer's positional parameters that hold text: all but `NOT_TEXT`'s."""
+    fn = next(n for n in ast.parse(source).body
+              if isinstance(n, ast.FunctionDef) and n.name == func)
+    skip = NOT_TEXT.get((rel, func), set())
+    return tuple(a.arg for a in fn.args.posonlyargs + fn.args.args if a.arg not in skip)
+
+
 def test_every_url_redaction_consumer_runs_its_floor_first():
-    """Guard 2: each `LAYERED` consumer runs the pushed tree's redactor on its input as
-    received, then the walk on the floor's output only; the registry holds every
-    consumer the batch changed and names every floor consumer."""
+    """Guard 2: each `LAYERED` consumer is bound once, undecorated, runs the pushed
+    tree's redactor on its input as received, then the walk on the floor's output only;
+    the registry holds every consumer the batch changed, names every floor consumer, and
+    names every text parameter of each (r6 review, R2)."""
     assert set(R.LAYERED) == EXPECTED_LAYERED
     assert {f for floors, _p in R.LAYERED.values() for f in floors} == FLOOR_CONSUMERS
     from fuzzlab.core import redaction_floor as F
     for floors, _param in R.LAYERED.values():
         assert all(callable(getattr(F, f, None)) for f in floors), floors
     problems = []
-    for (rel, func), (floors, param) in sorted(R.LAYERED.items()):
+    for (rel, func), (floors, params) in sorted(R.LAYERED.items()):
         source = (ROOT / rel).read_text(encoding="utf-8")
-        problems += [f"{rel}: {p}" for p in layering_problems(source, func, floors, param)]
+        if params is not None and tuple(params) != _text_params(rel, func, source):
+            problems.append(f"{rel}: {func}: LAYERED names {params}, its text parameters "
+                            f"are {_text_params(rel, func, source)}")
+        problems += [f"{rel}: {p}" for p in layering_problems(source, func, floors, params)]
     assert problems == []
 
 
@@ -399,115 +584,220 @@ def test_the_layering_check_flags_a_consumer_that_skips_its_floor():
     """Guard 2 on synthetic offenders, each a way a consumer can keep what the pushed
     tree removed: no floor (144d234's `safe_ref`: the walk, then the record rule -- R1),
     the walk first, the floor given a changed input, the raw input read after the floor,
-    a call before the floor; and the accepted shapes pass."""
+    a call before the floor; and (r6 review, R2) the consumer re-bound after its ``def``
+    (``redact_spa_fragment = _walk_spa_fragment``, ``redact_url = _walk_names``, a second
+    ``def``, an import, a ``global`` assignment), decorated, its floor alias re-bound, a
+    text parameter it only judged returned (`stored_value` returning ``raw_value``), an
+    import before the floor shadowing its parameter. Each re-binding, decorator and
+    ``raw_value`` offender passed the check before the r6 review. The accepted shapes
+    pass."""
     head = "from fuzzlab.core import redaction_floor as _floor\n"
+    url_floors = ("redact_url", "safe_ref")
+    good_url = ("def redact_url(url):\n    out = _floor.redact_url(url)\n"
+                "    return _walk_names(out)\n")
+    good_sv = ("def stored_value(name, raw_value, value):\n"
+               "    kept = _floor.redact_sibling(name, raw_value, value)\n"
+               "    if (isinstance(name, str) and is_sensitive_name(name)) "
+               "or value_holds_secret(raw_value):\n        return ''\n    return kept\n")
     offenders = {
-        "no floor": "def safe_ref(url):\n    text = redact_for_record('', "
-                    "redact_url_identifiers(url))\n    return _blank(text)\n",
-        "walk first": "def redact_url(url):\n    out = _walk_url(url, identifiers=False)\n"
-                      "    return _floor.redact_url(out)\n",
-        "changed input": "def redact_url(url):\n    out = _floor.redact_url(url.strip())\n"
-                         "    return _walk_url(out, identifiers=False)\n",
-        "raw read after": "def redact_url(url):\n    out = _floor.redact_url(url)\n"
-                          "    return _walk_url(url, identifiers=False)\n",
-        "call before": "def redact_url(url):\n    out = _floor.redact_url(_walk_url(url))\n"
-                       "    return out\n",
-        "floor discarded": "def redact_url(url):\n    _floor.redact_url(url)\n"
-                           "    return _walk_url(url, identifiers=False)\n",
+        "no floor": (head + "def safe_ref(url):\n    text = redact_for_record('', "
+                     "redact_url_identifiers(url))\n    return _blank(text)\n", "url"),
+        "walk first": (head + "def redact_url(url):\n    out = _walk_url(url, "
+                       "identifiers=False)\n    return _floor.redact_url(out)\n", "url"),
+        "changed input": (head + "def redact_url(url):\n    out = _floor.redact_url("
+                          "url.strip())\n    return _walk_url(out, identifiers=False)\n",
+                          "url"),
+        "raw read after": (head + "def redact_url(url):\n    out = _floor.redact_url(url)\n"
+                           "    return _walk_url(url, identifiers=False)\n", "url"),
+        "call before": (head + "def redact_url(url):\n    out = _floor.redact_url("
+                        "_walk_url(url))\n    return out\n", "url"),
+        "floor discarded": (head + "def redact_url(url):\n    _floor.redact_url(url)\n"
+                            "    return _walk_url(url, identifiers=False)\n", "url"),
+        "re-bound to the walk": (head + good_url + "redact_url = _walk_names\n", "url"),
+        "re-bound in a block": (head + good_url + "if True:\n    redact_url = _walk_names\n",
+                                "url"),
+        "defined twice": (head + good_url + "def redact_url(url):\n    return url\n", "url"),
+        "re-bound by an import": (head + good_url
+                                  + "from fuzzlab.core.redaction import _walk_names as "
+                                    "redact_url\n", "url"),
+        "re-bound by a global": (head + good_url + "def _swap():\n    global redact_url\n"
+                                 "    redact_url = _walk_names\n", "url"),
+        "decorated": (head + "@lambda f: (lambda url: _walk_names(url))\n" + good_url,
+                      "url"),
+        "floor alias re-bound": (head + good_url + "_floor = _identity_module\n", "url"),
+        "floor alias as a parameter": (head + "def redact_url(url, _floor=None):\n"
+                                       "    out = _floor.redact_url(url)\n"
+                                       "    return _walk_names(out)\n", "url"),
+        "import shadows the parameter": (head + "def redact_url(url):\n"
+                                         "    from os import sep as url\n"
+                                         "    out = _floor.redact_url(url)\n"
+                                         "    return _walk_names(out)\n", "url"),
+        "a judged parameter returned": (head + good_sv.replace(
+            "    return kept\n", "    return raw_value if kept else kept\n"),
+            ("name", "raw_value", "value")),
+        "a judged parameter walked": (head + good_sv.replace(
+            "    return kept\n", "    return _walk_names(raw_value)\n"),
+            ("name", "raw_value", "value")),
     }
-    for label, src in offenders.items():
-        func = src.split("(", 1)[0][4:]
-        assert layering_problems(head + src, func, ("redact_url", "safe_ref"), "url"), label
+    floors = url_floors + ("redact_sibling",)
+    for label, (src, params) in offenders.items():
+        func = src.split("\ndef ", 1)[1].split("(", 1)[0]
+        assert layering_problems(src, func, floors, params), label
     good = {
-        "assign": "def redact_url(url):\n    out = _floor.redact_url(url)\n"
-                  "    return _walk_url(out, identifiers=False)\n",
-        "choice": "def rui(url, *, placeholder=False):\n    \"\"\"Doc.\"\"\"\n"
-                  "    out = _floor.redact_url(url) if placeholder else "
-                  "_floor.redact_url_identifiers(url)\n    return _walk_url(out)\n",
-        "verdict": "def clean(url):\n    if not _floor.page_url_is_clean(url):\n"
-                   "        return False\n    return _walk_url(url) == url\n",
+        "assign": (good_url, "redact_url", ("url",)),
+        "choice": (("def rui(url, *, placeholder=False):\n    \"\"\"Doc.\"\"\"\n"
+                    "    out = _floor.redact_url(url) if placeholder else "
+                    "_floor.redact_url_identifiers(url)\n    return _walk_url(out)\n"),
+                   "rui", ("url",)),
+        "verdict": (("def clean(url):\n    if not _floor.page_url_is_clean(url):\n"
+                     "        return False\n    return _walk_url(url) == url\n"), "clean",
+                    None),
+        "predicates": (good_sv, "stored_value", ("name", "raw_value", "value")),
     }
-    floors = ("redact_url", "redact_url_identifiers", "page_url_is_clean")
-    assert layering_problems(head + good["assign"], "redact_url", floors, "url") == []
-    assert layering_problems(head + good["choice"], "rui", floors, "url") == []
-    assert layering_problems(head + good["verdict"], "clean", floors, None) == []
+    floors = ("redact_url", "redact_url_identifiers", "page_url_is_clean", "redact_sibling")
+    for label, (src, func, params) in good.items():
+        assert layering_problems(head + src, func, floors, params) == [], label
 
 
-# --- guard 3: nothing runs the walk or the floor unregistered ----------------------------
+# --- guard 3: nothing uses the walk or the floor unregistered ----------------------------
 def _dotted(rel: str) -> str:
     return rel[:-3].replace("/", ".")
 
 
-def unregistered_calls(files: dict[str, str]) -> list[str]:
-    """Every call, in ``files`` (``{path: source}``, the floor itself left out), of the
-    walk -- `_UrlWalk`, a `WALK_HELPERS` step or a `WALK_PREDICATES` predicate, by name in
-    its own module, imported from it, or through an alias of it -- from a function that
-    no registry names (`LAYERED`, `WALK_HELPERS`, `WALK_PREDICATES`, `FLOORLESS`), and
-    of the floor from a function that is not `LAYERED`; module-level calls of either."""
-    walk_defs: dict[str, set[str]] = {}
-    for rel, name in list(R.WALK_HELPERS) + list(R.WALK_PREDICATES):
-        walk_defs.setdefault(rel, set()).add(name)
-    walk_defs.setdefault("fuzzlab/core/redaction.py", set()).add("_UrlWalk")
+def _bound_paths(rel: str, tree: ast.Module) -> dict[str, str]:
+    """Each name the module ``rel`` binds to a dotted path: its module-level definitions
+    (``fuzzlab.core.redaction._walk_names`` in that module), and every import anywhere in
+    the file (``import a.b`` binds ``a``; ``import a.b as x`` and ``from a import b as
+    x`` bind ``x``; a relative import resolved against the module's package)."""
+    own = _dotted(rel)
+    package = own.rsplit(".", 1)[0]          # a module's package; an __init__'s own one
+    out = {n.name: f"{own}.{n.name}" for n in tree.body
+           if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                if a.asname:
+                    out[a.asname] = a.name
+                else:
+                    top = a.name.split(".")[0]
+                    out[top] = top
+        elif isinstance(node, ast.ImportFrom):
+            base = node.module or ""
+            if node.level:
+                parts = package.split(".")
+                parts = parts[:len(parts) - (node.level - 1)]
+                base = ".".join(parts + ([node.module] if node.module else []))
+            for a in node.names:
+                if a.name != "*":
+                    out[a.asname or a.name] = f"{base}.{a.name}"
+    return out
+
+
+def _resolve(node, names: dict[str, str]) -> str | None:
+    """The dotted path a ``Name`` or attribute chain refers to, or None."""
+    parts = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name) and node.id in names:
+        return ".".join([names[node.id]] + parts[::-1])
+    return None
+
+
+def unregistered_uses(files: dict[str, str]) -> list[str]:
+    """Every use, in ``files`` (``{path: source}``, the floor itself left out), of the
+    walk -- `_UrlWalk`, a `WALK_HELPERS` step or a `WALK_PREDICATES` predicate -- from a
+    function or class that no registry names (`LAYERED`, `WALK_HELPERS`,
+    `WALK_PREDICATES`, `FLOORLESS`, the walk's own class), and of the floor (the module or
+    anything in it) from one that is not `LAYERED`; a module-level use of either (a
+    definition's decorators and defaults are module level); and an assignment, from any
+    module, to a `LAYERED` consumer, a walk step or anything in the floor.
+
+    A use is any reference, not only a call (r6 review, R2): ``map(_walk_names, …)``,
+    ``functools.partial(_walk_url, …)``, ``filter(looks_like_identifier, …)`` with the
+    floor's predicate, a name imported, aliased, defined in the walk's own module, an
+    unaliased dotted chain (``fuzzlab.core.redaction_floor.looks_like_identifier``), a
+    relative import, and ``getattr`` / ``setattr`` with a literal name on such a module.
+    **Limit:** a name computed at run time (``getattr(R, name)``, ``globals()``,
+    ``vars()``, ``sys.modules``, ``importlib``, ``exec``) is not visible to this scan."""
+    walk_defs = {f"{_dotted(rel)}.{name}"
+                 for rel, name in list(R.WALK_HELPERS) + list(R.WALK_PREDICATES)}
+    walk_defs.add("fuzzlab.core.redaction._UrlWalk")
+    layered = {f"{_dotted(rel)}.{name}" for rel, name in R.LAYERED}
     registered = (set(R.LAYERED) | set(R.WALK_HELPERS) | set(R.WALK_PREDICATES)
-                  | set(R.FLOORLESS))
-    by_dotted = {_dotted(rel): names for rel, names in walk_defs.items()}
+                  | set(R.FLOORLESS) | {("fuzzlab/core/redaction.py", "_UrlWalk")})
+
+    def kind(dotted: str | None) -> str | None:
+        if dotted is None:
+            return None
+        if dotted == FLOOR_MODULE or dotted.startswith(FLOOR_MODULE + "."):
+            return "floor"
+        if any(dotted == w or dotted.startswith(w + ".") for w in walk_defs):
+            return "walk"
+        return None
+
     problems = []
     for rel, source in sorted(files.items()):
         if rel == FLOOR_REL:
             continue
         tree = ast.parse(source)
-        walk_names = set(walk_defs.get(rel, ()))
-        module_aliases: dict[str, set[str]] = {}
-        floor_names, floor_aliases = set(), _floor_aliases(tree)
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and node.module:
-                if node.module in by_dotted:
-                    walk_names |= {a.asname or a.name for a in node.names
-                                   if a.name in by_dotted[node.module]}
-                if node.module == FLOOR_MODULE:
-                    floor_names |= {a.asname or a.name for a in node.names}
-                for a in node.names:
-                    full = f"{node.module}.{a.name}"
-                    if full in by_dotted:
-                        module_aliases[a.asname or a.name] = by_dotted[full]
-            elif isinstance(node, ast.Import):
-                for a in node.names:
-                    if a.name in by_dotted and a.asname:
-                        module_aliases[a.asname] = by_dotted[a.name]
+        names = _bound_paths(rel, tree)
 
-        def kind(call: ast.Call) -> str | None:
-            f = call.func
-            if isinstance(f, ast.Name):
-                if f.id in walk_names:
-                    return "walk"
-                if f.id in floor_names:
-                    return "floor"
-            if isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name):
-                if f.value.id in floor_aliases:
-                    return "floor"
-                if f.attr in module_aliases.get(f.value.id, ()):
-                    return "walk"
-            return None
+        def report(node, k, owner):
+            if k == "walk" and (rel, owner) not in registered:
+                problems.append(f"{rel}:{node.lineno}: {owner or '<module>'} uses the walk "
+                                "unregistered")
+            if k == "floor" and (rel, owner) not in R.LAYERED:
+                problems.append(f"{rel}:{node.lineno}: {owner or '<module>'} uses the floor "
+                                "and is not a LAYERED consumer")
+
+        def stored(node, target: str | None):
+            if target is not None and (target in layered or kind(target)):
+                problems.append(f"{rel}:{node.lineno}: assigns {target} from outside")
 
         def visit(node, owner):
+            if isinstance(node, (ast.Name, ast.Attribute)):
+                dotted = _resolve(node, names)
+                if isinstance(node.ctx, ast.Load):
+                    k = kind(dotted)
+                    if k:
+                        report(node, k, owner)
+                        return                          # its chain is this one use
+                elif isinstance(node, ast.Attribute):
+                    stored(node, dotted)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+                    and node.func.id in ("getattr", "setattr", "delattr") \
+                    and len(node.args) >= 2 and isinstance(node.args[1], ast.Constant) \
+                    and isinstance(node.args[1].value, str):
+                base = _resolve(node.args[0], names)
+                if base is not None:
+                    target = f"{base}.{node.args[1].value}"
+                    if node.func.id == "getattr":
+                        k = kind(target)
+                        if k:
+                            report(node, k, owner)
+                    else:
+                        stored(node, target)
             for child in ast.iter_child_nodes(node):
-                here = owner
-                if owner is None and isinstance(child, (ast.FunctionDef,
-                                                        ast.AsyncFunctionDef)):
-                    here = child.name
-                elif owner is None and isinstance(child, ast.ClassDef):
-                    visit(child, None)
-                    continue
-                if isinstance(child, ast.Call):
-                    k = kind(child)
-                    if k == "walk" and (rel, here) not in registered:
-                        problems.append(f"{rel}:{child.lineno}: {here or '<module>'} runs "
-                                        "the walk unregistered")
-                    if k == "floor" and (rel, here) not in R.LAYERED:
-                        problems.append(f"{rel}:{child.lineno}: {here or '<module>'} calls "
-                                        "the floor and is not a LAYERED consumer")
-                visit(child, here)
-        visit(tree, None)
+                visit(child, owner)
+
+        for top in tree.body:
+            if owner_of := (top.name if isinstance(top, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                                         ast.ClassDef)) else None):
+                outer = list(top.decorator_list)
+                if isinstance(top, ast.ClassDef):
+                    outer += list(top.bases) + [k.value for k in top.keywords]
+                    inner = list(top.body)
+                else:
+                    a = top.args
+                    outer += list(a.defaults) + [d for d in a.kw_defaults if d is not None]
+                    inner = list(top.body)
+                for node in outer:
+                    visit(node, None)
+                for node in inner:
+                    visit(node, owner_of)
+            else:
+                visit(top, None)
     return problems
 
 
@@ -518,23 +808,28 @@ def _package_sources() -> dict[str, str]:
 
 
 def test_no_function_runs_the_walk_or_the_floor_unregistered():
-    """Guard 3 (whole package): the walk runs only inside a registered function -- a
-    `LAYERED` consumer after its floor, a walk step only those call, or a predicate --
-    and the floor only inside a `LAYERED` consumer; every registry entry is defined."""
+    """Guard 3 (whole package): the walk is used only inside a registered function -- a
+    `LAYERED` consumer after its floor, a walk step only those use, or a predicate -- and
+    the floor only inside a `LAYERED` consumer; every registry entry is defined."""
     sources = _package_sources()
     for registry in (R.LAYERED, R.WALK_HELPERS, R.WALK_PREDICATES, R.FLOORLESS):
         for rel, name in registry:
             tree = ast.parse(sources[rel])
             assert any(isinstance(n, ast.FunctionDef) and n.name == name
                        for n in tree.body), (rel, name)
-    assert unregistered_calls(sources) == []
+    assert unregistered_uses(sources) == []
 
 
 def test_the_registry_scan_flags_an_unregistered_walk_or_floor_call():
     """Guard 3 on synthetic offenders: a new consumer running the walk directly (by
     name, imported, or through a module alias), one calling a walk step, one calling the
-    floor itself, and a module-level walk; a function of the same name in an unrelated
-    module is not the walk."""
+    floor itself, and a module-level walk; and (r6 review, R2) each use the scan of calls
+    missed -- ``map(_walk_names, …)``, ``functools.partial(_walk_url, …)``, an unaliased
+    ``import fuzzlab.core.redaction`` then ``fuzzlab.core.redaction._walk_names(u)``, an
+    unaliased import of the floor, ``filter(looks_like_identifier, …)`` from the floor, a
+    relative import, ``getattr`` with a literal name, the floor module passed on, a walk
+    in a decorator or a default, an assignment to a `LAYERED` consumer from another
+    module. A function of the same name in an unrelated module is not the walk."""
     offenders = {
         "fuzzlab/tools/a.py": "from fuzzlab.core.redaction import _walk_url\n"
                               "def leak(u):\n    return _walk_url(u, identifiers=True)\n",
@@ -545,9 +840,40 @@ def test_the_registry_scan_flags_an_unregistered_walk_or_floor_call():
         "fuzzlab/tools/d.py": "from fuzzlab.core import redaction_floor as _floor\n"
                               "def leak(u):\n    return _floor.redact_url(u)\n",
         "fuzzlab/tools/e.py": "from fuzzlab.proxy.redact import _walk\nX = _walk(b'')\n",
+        # r6 review, R2: each passed the scan of calls
+        "fuzzlab/tools/m.py": "from fuzzlab.core.redaction import _walk_names\n"
+                              "def leak(urls):\n    return list(map(_walk_names, urls))\n",
+        "fuzzlab/tools/n.py": "import functools\nfrom fuzzlab.core.redaction import _walk_url\n"
+                              "def leak(u):\n    return functools.partial(_walk_url, "
+                              "identifiers=True)(u)\n",
+        "fuzzlab/tools/o.py": "import fuzzlab.core.redaction\n"
+                              "def leak(u):\n    return fuzzlab.core.redaction._walk_names(u)\n",
+        "fuzzlab/tools/p.py": "import fuzzlab.core.redaction_floor\n"
+                              "def leak(v):\n    return fuzzlab.core.redaction_floor."
+                              "looks_like_identifier(v)\n",
+        "fuzzlab/tools/q.py": "from fuzzlab.core.redaction_floor import looks_like_identifier\n"
+                              "def leak(vs):\n    return list(filter(looks_like_identifier, "
+                              "vs))\n",
+        "fuzzlab/core/r.py": "from .redaction import _walk_names\n"
+                             "def leak(u):\n    return _walk_names(u)\n",
+        "fuzzlab/tools/s.py": "from fuzzlab.core import redaction\n"
+                              "def leak(u):\n    return getattr(redaction, '_walk_names')(u)\n",
+        "fuzzlab/tools/t.py": "from fuzzlab.core import redaction_floor\n"
+                              "def leak():\n    return redaction_floor\n",
+        "fuzzlab/tools/u.py": "from fuzzlab.core.redaction import _walk_names\n"
+                              "@lambda f: _walk_names\ndef leak(u):\n    return u\n",
+        "fuzzlab/tools/v.py": "from fuzzlab.core.redaction import _walk_names\n"
+                              "def leak(u, w=_walk_names):\n    return w(u)\n",
+        "fuzzlab/tools/w.py": "from fuzzlab.core import redaction as R\n"
+                              "def swap():\n    R.redact_url = R.redact_query\n",
+        "fuzzlab/tools/x.py": "import fuzzlab.core.redaction\n"
+                              "def swap(f):\n    setattr(fuzzlab.core.redaction, "
+                              "'stored_value', f)\n",
     }
-    found = unregistered_calls(offenders)
-    assert [p.split(":", 1)[0] for p in found] == sorted(offenders), found
+    found = unregistered_uses(offenders)
+    assert sorted({p.split(":", 1)[0] for p in found}) == sorted(offenders), found
     unrelated = {"fuzzlab/tools/f.py": "def _walk(t):\n    return t\n"
-                                       "def use(t):\n    return _walk(t)\n"}
-    assert unregistered_calls(unrelated) == []
+                                       "def use(t):\n    return _walk(t)\n",
+                 "fuzzlab/tools/g.py": "from fuzzlab.core import redaction as R\n"
+                                       "def use(u):\n    return R.redact_url(u)\n"}
+    assert unregistered_uses(unrelated) == []

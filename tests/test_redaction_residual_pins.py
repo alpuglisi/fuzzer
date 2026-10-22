@@ -357,14 +357,20 @@ def test_proxy_history_redacts_a_url_holding_a_raw_lf(raw):
 # --- r6: layered on the pushed redactor (the floor runs first, the walk on its output) ----
 # r6 runs 7393c90's own redactor first (`core.redaction_floor`) and the walk on its output
 # only, so nothing the pushed tree redacted can be kept (`tests/test_redaction_floor.py`).
-# Three families the walk cannot see in the floor's output were redacted by 144d234 (which
-# ran the walk on the raw input) and are kept by r6 and by 7393c90 alike: under the
-# owner's criterion (nothing the pushed tree redacted may leak) each is pinned here, never
-# another design round. Each case fails on its stated assertion on r6 and on 7393c90's
-# export, every consumer the pin names existing there but `redact_url_identifiers`'
-# ``placeholder`` mode (the batch's own; checked where the code has it).
-_ON_7393_R6 = ("on 7393c90 too: not a regression against the pushed tree; 144d234 "
-               "redacted it, reading the raw input")
+# Four families were redacted by 144d234 (which ran the walk on the raw input) and are
+# kept by r6 and by 7393c90 alike: three the walk cannot see in the floor's output, (a)-(c),
+# and (d), what a caller stores where the floor raises (the r6 review's R3). Under the
+# owner's criterion (nothing the pushed tree redacted may leak; anything it also leaks is
+# pinned) each is pinned here, never another design round. Each case fails on its stated
+# assertion on r6 and on 7393c90's export, every consumer the pin names existing there but
+# `redact_url_identifiers`' ``placeholder`` mode (the batch's own; checked where the code
+# has it). PA-0549(3c) ("a defect a sweep finds in an unpushed change of the same batch is
+# fixed in that batch") concerns regressions against the pushed tree (the owner's rule, and
+# F-226's correction): 144d234 is unpushed, and these leaks are 7393c90's too.
+_ON_7393_R6 = ("on 7393c90 too: not a regression against the pushed tree, so pinned, not "
+               "fixed in the batch -- PA-0549(3c) concerns regressions against the pushed "
+               "tree (the owner's rule; F-226); 144d234, unpushed, redacted it, reading the "
+               "raw input")
 
 
 def _layered_consumers_keeping(url: str, secret: str) -> list[str]:
@@ -503,6 +509,44 @@ def test_a_nested_userinfo_cut_by_the_records_size_bound_keeps_no_password(pad):
     kept = [name for name, out in (("redact_for_record", R.redact_for_record("target", url)),
                                    ("safe_ref", safe_ref(url))) if keeps(out)]
     assert kept == []
+
+
+_JSESSION = "a70000000123f3e9c1b5d2e4f6a8b0c1"
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
+    "BUG-0556 residual r6, family (d) (owner PROXY, proxy.history "
+    "`HistoryWriter._prepare_contained`; the r6 review's R3): where the floor raises (a URL "
+    "`urlsplit` rejects: `http://[h/…`, `http://[::1]x/…`), `redact` raises and the writer "
+    "stores the flow with every body `OMIT_FAILED` and its URL cut at the first '?' "
+    "(`rec.url.split('?', 1)[0]`), in `flow.url` and its `errors` line, so a `;name=value` "
+    "path parameter, or a query-shaped fragment, before the '?' is stored whole "
+    "(`http://[h/app;jsessionid=<hex>/p.php?u=1` keeps the session id; 144d234's walk "
+    "stored `;jsessionid=__REDACTED__`; r6 review: 651 of the r6b check's 70 000 URLs "
+    "store a secret so, 183 of them redacted by 144d234 -- 171 in a path parameter, 12 "
+    f"in a fragment; {_ON_7393_R6}). Candidate rule, not built: the fallback stores the "
+    "URL cut at its first ';', '?' or '#'"))
+@pytest.mark.parametrize("url,secret", [
+    (f"http://[h/app;jsessionid={_JSESSION}/p.php?u=1", _JSESSION),
+    (f"http://[::1]x/app;token={_JSESSION}/p.php?u=1", _JSESSION),
+    (f"http://[h/app/p.php;sid={_WORD}?u=1", _WORD),
+    (f"http://[h/app/p.php#a=1;password={_WORD}?u=bob", _WORD),
+])
+def test_proxy_history_stores_no_path_parameter_of_a_flow_its_floor_rejects(tmp_path, url,
+                                                                           secret):
+    from urllib.parse import urlsplit
+
+    from fuzzlab.proxy.history import FlowRecord, HistoryWriter
+    with pytest.raises(ValueError):                          # not vacuous: the floor raises
+        urlsplit(url)
+    rq = f"GET {url} HTTP/1.1\r\nHost: h\r\n\r\n".encode()
+    rs = b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"
+    with Store(tmp_path / "s.db") as store:
+        h = HistoryWriter(store, store.start_run("proxy", "x"), batch_size=5)
+        h.record(FlowRecord("GET", url, "h", 200, raw_request=rq, raw_response=rs))
+        assert h.flush() == 1                                # not vacuous: one flow stored
+        dump = _dump(store)
+    assert not _leaks(dump + "\n".join(h.errors), secret)
 
 
 # --- N3: `fuzzlab audit --append --store` ------------------------------------------------

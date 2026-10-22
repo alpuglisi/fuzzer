@@ -98,6 +98,39 @@ Newest first.
       (2 cases, through `import_audit`): fails on r6's first draft at "the import
       failed: ValueError" and on 7393c90 and 144d234 at its leak assertion; passes on
       the revision.
+  - *(r6 review, 2026-10-22, branch `lane/REDACTURL-r6` after 3615cfb; BUG-0556 "r6
+    review", D1 and R4.)*
+    - **D1 -- `import_audit` failed where the pushed tree imported (a functional
+      regression of the batch against 7393c90).** The batch's import rework read each
+      finding page's origin (`_main_origin` and `_audit_endpoint` -> `canonical_origin`,
+      and `store_url`), which raises `ValueError("Invalid IPv6 URL")` on a page that is
+      not an absolute URL and holds `[` or `]` in its first segment (`x[y/app/p.php?…`,
+      `h]/app/p.php`, `[h/app/p.php`) or after a leading Unicode space
+      (`\u3000http://[h/…`, `\xa0http://h]/…`): `canonical_origin` strips whitespace and
+      prefixes `http://`, and `urlsplit` rejects the netloc. 7393c90 called only
+      `to_path` and imported each. Now such a page names no origin: the main origin is
+      read by `_readable_origin` (`canonical_origin`, `None` where it raises), and
+      `_audit_endpoint` stores the page by its path, as `store_url` stores a URL whose
+      origin is unknown and as 7393c90's `to_path` stored it (a `;` path parameter
+      holding a secret dropped by `strip_secret_path_params`); nothing the pushed
+      import redacted is stored (its `to_path` dropped the query; `_audit_text` redacts
+      the texts).
+    - **R4 -- the r6 sub-bullet above was not true on 3615cfb.** It said a text whose
+      *page* URL the floor rejects is stored `AUDIT_TEXT_WITHHELD` and the import goes
+      on; `_main_origin` raised first, so `_audit_text`'s page-URL branch was unreachable
+      and untested, and the same bullet's next sentence ("a finding *page* `urlsplit`
+      rejects still fails the import") said so. Now that branch is reached through
+      `import_audit`: a page `urlsplit` rejects as written (`http://[h/…`, `//[h/…`,
+      where `to_path` rejects it too and 7393c90's import raised) gets no endpoint
+      (`_audit_endpoint` returns `None`; the candidate's `parameter_id` is NULL), its
+      target and context are `AUDIT_TEXT_WITHHELD` whole, and every other finding is
+      imported. FR-AUD-31 says exactly this, in place.
+    - Tests: `tests/test_redaction_nested.py::test_r6_review_d1_import_audit_imports_a_page_no_origin_reads_as_the_pushed_tree_did`
+      (6 cases) and `::test_r6_review_r4_import_audit_withholds_the_texts_of_a_page_its_floor_rejects`
+      (2), each failing on 3615cfb at its own first assertion ("the import failed:
+      ValueError('Invalid IPv6 URL')"), passing on the revision; on 7393c90, D1's six
+      import (three fail at the leak assertion: 7393c90 stored the page URL's token raw
+      in `sink_context`) and R4's two fail at the import (`to_path` raised there).
 - Impact (other components / project):
   - **FUZZ (point builder, oracle):** a crawled form whose hidden value is identifier-
     like or holds a nested token now has that name in `form.fresh`, so its points are
@@ -147,6 +180,9 @@ Newest first.
     and sub-path test; R5's strict xfail — done
   - [x] *(r6)* `_audit_text` total over the floor's raise (`AUDIT_TEXT_WITHHELD`);
     FR-AUD-31 amended in place; the A1 import test — done
+  - [x] *(r6 review)* `import_audit` total over a finding page no origin or path is
+    read from (`_readable_origin`, `_audit_endpoint` -> path or `None`); FR-AUD-31
+    corrected in place; the D1 and R4 import tests — done
 - Effectiveness (assessed 2026-10-22): `scratchpad/lanes/REDACTURL/exp/repro2.py` found
   the token in `endpoint.url`, `parameter.example` and `form.entries` (spider forms and
   disco captures) before, and only R1's two rows after; the harness result is in the
@@ -165,7 +201,9 @@ Newest first.
   (`scratchpad/lanes/REDACTURL/r6b/a1_import_audit_plain_r6pre.log`), was stored raw
   with its secret on 7393c90 and 144d234 (`r6_tests_plain_t{7393c90,144d234}.log`), and
   is stored withheld with the other finding imported on the revision
-  (`a1_import_audit_plain_wt.log`).
+  (`a1_import_audit_plain_wt.log`). *(r6 review:)* the eight D1 and R4 cases fail on 3615cfb at "the
+  import failed" and pass on the revision (`scratchpad/lanes/REDACTURL/r6c/
+  r6review_tests_plain_{t3615cfb,wt}.log`); the check's own import runner (`checks-r6b-evidence/run_imports.py`, an `import_audit` per URL under a trace recorder) on the revision, against its 7393c90 outputs (`scratchpad/lanes/REDACTURL/r6c/imp_compare.txt`, `extra_imp_compare.txt`): 0 import failures where 7393c90 imported (3615cfb: 28 of the 888-URL supplement) and 0 URLs leaking what 7393c90 redacted, on the 70 000 and the 888; the findings on a page 7393c90's import raised on (3 463 and 27, a page `urlsplit` rejects as written; 3615cfb raised too) are imported, no secret stored.
 
 ### CC-AUD-0057 — The captured-request import refuses and counts a body holding a lone surrogate instead of failing the import (FR-AUD-22, BUG-0554) (2026-10-21)
 - Placement: lane SURROGATE (item AU-REQID78), base 33b423e, with CC-CRAWL-0061 (the

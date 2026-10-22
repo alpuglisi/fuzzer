@@ -459,13 +459,27 @@ budget where a vulnerability is plausible.
     spider's absolute form for a page off its main origin, its path for one on it), else
     `store_url(page, main)` with `base_url`'s origin or the first finding page's, so an
     off-origin first finding no longer splits the main origin's pages.
-    *(r6, `CC-AUD-0059`:)* the owner's URL redactors run the pushed tree's redactor
-    first, which raises `ValueError` on a URL `urlsplit` rejects (FR-CORE-537); such a
-    target identifier (or a text whose page URL is so rejected) is stored as
-    `store_adapter.AUDIT_TEXT_WITHHELD` (`(unparseable URL withheld)`, as
-    `core.trace.safe_ref` withholds) and the import goes on with every other finding --
-    never failed by it, never storing it raw (7393c90 stored the target raw). A finding
-    *page* `urlsplit` rejects still fails the import at its endpoint, as on 7393c90.
+    *(r6, `CC-AUD-0059`; corrected by the r6 review, D1 and R4:)* the owner's URL
+    redactors run the pushed tree's redactor first, which raises `ValueError` on a URL
+    `urlsplit` rejects (FR-CORE-537). **`import_audit` never fails on a finding's URL
+    and stores nothing the pushed tree's import redacted:**
+    - a target identifier the owner rejects is stored as
+      `store_adapter.AUDIT_TEXT_WITHHELD` (`(unparseable URL withheld)`, as
+      `core.trace.safe_ref` withholds), never raw (7393c90 stored it raw);
+    - a finding **page** no origin can be read from -- `canonical_origin` raises, as it
+      does on a page that is not an absolute URL and holds `[` or `]` in its first
+      segment (`x[y/app/p.php`, `h]/…`, `[h/…`) or after a leading Unicode space
+      (`\u3000http://[h/…`), to which it prefixes `http://` -- is not used for the run's
+      main origin (`_readable_origin`) and is stored by its path, as `store_url` stores a
+      URL whose origin is unknown and as 7393c90's `to_path` stored every finding page (a
+      `;` path parameter holding a secret dropped); its texts pass `_audit_text` as any
+      other's. r6 (3615cfb) failed the whole import there, where 7393c90 imported it;
+    - a finding **page** `urlsplit` rejects as written (`http://[h/…`, `//[h/…`: `to_path`
+      rejects it too, and 7393c90's import raised) gets no endpoint (the candidate's
+      `parameter_id` is NULL), and its target and context are `AUDIT_TEXT_WITHHELD`
+      whole (`_audit_text`: they may quote the page URL the owner cannot read); every
+      other finding is imported. r6's record that such a text was withheld was not true
+      on 3615cfb: `_main_origin` raised before `_audit_text` ran.
   - `audit.engine.evaluate` writes each candidate's request fields through
     `core.reqctx.point_evidence` and stamps `identity_scope` and `context_id` (SP-57,
     FR-FUZZ-66). `InjectionPoint` carries `bindings` and `replay_refusal`.

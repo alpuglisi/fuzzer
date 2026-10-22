@@ -259,26 +259,33 @@ def redact_url(url: str) -> str:
 
 #: Every URL redaction consumer, layered on the pushed tree's redactor (BUG-0556 r6, the
 #: owner's design; PA-0556 item 11): ``(module, function) -> (its floor(s) in
-#: `core.redaction_floor`, the parameter that holds the text it redacts)``. The function
-#: calls its floor first, on its own parameters as given, and never reads that parameter
-#: again: the walk sees only the floor's output (`tests/test_redaction_floor.py` checks
-#: each by AST, and that every other call of the walk is one of `WALK_HELPERS`).
+#: `core.redaction_floor`, every parameter that holds text: a str it redacts or judges)``.
+#: The function is defined once, undecorated, and never re-bound in its module; it calls
+#: its floor first, on its own parameters as given, and reads no text parameter again
+#: except as the argument of a predicate (``isinstance``, `is_sensitive_name`, a
+#: `WALK_PREDICATES` one), so the walk sees only the floor's output
+#: (`tests/test_redaction_floor.py` checks each by AST, and that every other use of the
+#: walk is one of `WALK_HELPERS`). ``None``: a verdict, returning no text.
 LAYERED = {
-    ("fuzzlab/core/redaction.py", "redact_url"): (("redact_url",), "url"),
+    ("fuzzlab/core/redaction.py", "redact_url"): (("redact_url",), ("url",)),
     ("fuzzlab/core/redaction.py", "redact_url_identifiers"):
-        (("redact_url_identifiers", "redact_url"), "url"),
-    ("fuzzlab/core/redaction.py", "redact_spa_fragment"): (("redact_spa_fragment",), "url"),
+        (("redact_url_identifiers", "redact_url"), ("url",)),
+    ("fuzzlab/core/redaction.py", "redact_spa_fragment"):
+        (("redact_spa_fragment",), ("url",)),
     ("fuzzlab/core/redaction.py", "page_url_is_clean"): (("page_url_is_clean",), None),
-    ("fuzzlab/core/redaction.py", "redact_for_record"): (("redact_for_record",), "value"),
-    ("fuzzlab/core/redaction.py", "stored_value"): (("redact_sibling",), "value"),
-    ("fuzzlab/core/trace.py", "safe_ref"): (("safe_ref",), "url"),
-    ("fuzzlab/proxy/redact.py", "redact"): (("redact",), "raw"),
+    ("fuzzlab/core/redaction.py", "redact_for_record"):
+        (("redact_for_record",), ("dest", "value")),
+    ("fuzzlab/core/redaction.py", "stored_value"):
+        (("redact_sibling",), ("name", "raw_value", "value")),
+    ("fuzzlab/core/trace.py", "safe_ref"): (("safe_ref",), ("url",)),
+    ("fuzzlab/proxy/redact.py", "redact"): (("redact",), ("raw",)),
 }
-#: The walk's own text-returning steps, each called only by a `LAYERED` consumer after
-#: its floor or by another of these (`tests/test_redaction_floor.py`): ``(module,
-#: function) -> its role``. Calling one from anywhere else would run the walk without the
-#: floor (BUG-0556 r6: 144d234's `core.trace.safe_ref` ran the walk before the record
-#: redactor's userinfo rule and kept a password 7393c90 removed).
+#: The walk's own text-returning steps, each used only by a `LAYERED` consumer after its
+#: floor or by another of these (`tests/test_redaction_floor.py`): ``(module, function)
+#: -> its role``. Using one anywhere else -- a call, or any reference, ``map(_walk_names,
+#: …)`` -- would run the walk without the floor (BUG-0556 r6: 144d234's
+#: `core.trace.safe_ref` ran the walk before the record redactor's userinfo rule and kept
+#: a password 7393c90 removed).
 WALK_HELPERS = {
     ("fuzzlab/core/redaction.py", "_walk_url"): "the walk over a whole URL",
     ("fuzzlab/core/redaction.py", "_walk_names"): "`redact_url`'s walk",
@@ -1253,7 +1260,9 @@ def redact_for_record(dest: str, value):
 
     Non-strings are returned unchanged (counts, booleans). Never raises on a string."""
     out = _floor.redact_for_record(dest, value)
-    return _walk_record(dest, out)
+    # the floor applied the option-name rule (`dest` sensitive: `PLACEHOLDER`, which the
+    # walk keeps as it is); the walk reads the floor's output only (r6 review, R2)
+    return _walk_record("", out)
 
 
 def _walk_record(dest, value):

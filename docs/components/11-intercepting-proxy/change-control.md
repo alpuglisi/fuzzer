@@ -57,6 +57,27 @@ Newest first.
     floor's `urlsplit` reading joins across a removed tab in the request line, `Location`
     or `Content-Location`
     (`tests/test_redaction_residual_pins.py::test_a_name_joined_by_a_tab_cr_or_lf_in_the_floors_output_is_redacted`).
+  - *(r6 review, 2026-10-22, branch `lane/REDACTURL-r6` after 3615cfb; BUG-0556 "r6
+    review", R3.)* **Correction: a flow whose URL the floor rejects is not "never
+    stored unredacted".** The r6 Impact line said the history writer stores such a flow
+    `OMIT_FAILED` "visible, never unredacted, as on 7393c90", and the r6 sub-bullet above
+    said "with its URL cut at the `?`" without saying what that keeps. What
+    `_prepare_contained` stores is every body `OMIT_FAILED` and the flow's URL cut at
+    its first `?` (`rec.url.split('?', 1)[0]`), in `flow.url` and in its `errors` line:
+    whatever precedes that `?` is stored as received -- a `;name=value` path parameter
+    (`http://[h/app;jsessionid=<hex>/p.php?u=1` keeps the session id), a query-shaped
+    fragment written before the `?`, a path segment. 7393c90 stores the same (its
+    fallback is this code, unchanged), so under the owner's rule it is **pinned, not
+    fixed**: family (d), `tests/test_redaction_residual_pins.py::test_proxy_history_stores_no_path_parameter_of_a_flow_its_floor_rejects`
+    (strict, `raises=AssertionError`, owner PROXY; 4 cases: xfail on r6 and on 7393c90,
+    XPASS on 144d234, whose walk did not raise and stored `;jsessionid=__REDACTED__`).
+    Measured over the four corpora (`scratchpad/lanes/REDACTURL/r6c/famd_compare.txt`,
+    406 005 URLs): the writer falls back on the same 15 190 URLs on r6 and on 7393c90
+    (none on 144d234), stores a secret in 651 of them on both (225 in a path parameter,
+    411 in a path segment, 15 in a fragment), 183 of which 144d234 redacted (171 path
+    parameter, 12 fragment); 0 leak at r6 that 7393c90 redacted. Candidate rule, not
+    built: the fallback cuts the URL at its first `;`, `?` or `#`. The writer's
+    docstring, which made the same claim (7393c90's text), now says what is stored.
 - Impact (other components / project): proxy history's stored raw request and response
   and their full-text index no longer keep a `;jsessionid=` (or any sensitively named)
   value in a URL with no query (round 1), in a duplicate URL header, `Referer`, `Origin`,
@@ -75,7 +96,9 @@ Newest first.
   rewrites one (as on 7393c90; the walk still rewrites every other URL header's every
   value in place), and a flow whose URL `urlsplit` rejects is stored `OMIT_FAILED` again
   (visible, never unredacted, as on 7393c90). Cost: the pushed `redact` runs once more
-  per message before the walk.
+  per message before the walk. *(r6 review, R3: "never unredacted" was wrong -- such a
+  flow's URL is stored cut at its first `?`, keeping a path parameter or fragment before
+  it, as on 7393c90; pinned, family (d), see the r6 review sub-bullet.)*
 - Deliverables:
   - [x] the `?` gates removed (round 1) — done
   - [x] every value of every URL-bearing header, `Refresh` and `Link` parsing, the
@@ -88,6 +111,8 @@ Newest first.
   - [x] *(r6)* `redact` layered on the frozen pushed `redact`; FR-PROXY-11 amended in
     place; the R3, A1 and A2 tests (each failing on 144d234 at its own assertion) —
     done
+  - [x] *(r6 review)* family (d) pinned (owner PROXY); FR-PROXY-11 and the writer's
+    `_prepare_contained` docstring corrected to what is stored — done
 - Effectiveness (assessed 2026-10-22): the round-1 probe (`rev1probe/proxy_probe.py`)
   found the canary in `body`, `flow_fts` and `flow_fts_content` on c3a13f7; on f939778
   the round-2 test's messages (duplicates, `Referer`, `Origin`, `Link`, a custom header,

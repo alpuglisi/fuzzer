@@ -961,6 +961,107 @@ def test_r6_a1_import_audit_withholds_a_target_its_floor_rejects_and_imports_the
     assert counts == {"candidate": 2} and targets == sorted([AUDIT_TEXT_WITHHELD, "u"])
 
 
+# --- r6 review: what the independent checks of 3615cfb found ------------------------------
+def _audit_findings(tmp_path, rows) -> Path:
+    """A legacy auditor's results DB holding ``rows`` (page URL, rule, target, context)."""
+    from fuzzlab.tools import fetcher as F
+    db = F.setup_results_db(str(tmp_path / "a.db"))
+    for page, rule, ident, context in rows:
+        db.execute("INSERT INTO findings (page_url, category, transaction_type, "
+                   "target_identifier, html_context) VALUES (?,?,?,?,?)",
+                   (page, "cat", rule, ident, context))
+    db.commit()
+    db.close()
+    return tmp_path / "a.db"
+
+
+def _import_audit_or_failure(tmp_path, audit_db):
+    """`import_audit` into a fresh store: ``(counts, the failure or None, endpoint urls,
+    candidate rows, the store's dump)``."""
+    from fuzzlab.tools.store_adapter import import_audit
+    with Store(tmp_path / "u.db") as store:
+        failed, counts = None, {}
+        try:
+            counts = import_audit(audit_db, store, store.start_run("auditor", "h"))
+        except ValueError as exc:
+            failed = exc
+        endpoints = [u for (u,) in store.conn.execute("SELECT url FROM endpoint")]
+        candidates = [tuple(r) for r in store.conn.execute(
+            "SELECT parameter_id, evidence, sink_context FROM candidate ORDER BY id")]
+        return counts, failed, endpoints, candidates, _dump(store)
+
+
+#: A finding page that is not an absolute URL and holds ``[`` or ``]`` in its first
+#: segment (or holds them after a leading Unicode space): `core.urls.canonical_origin`
+#: strips whitespace and prefixes ``http://``, and ``urlsplit`` then rejects the netloc.
+#: 7393c90's `import_audit` stored ``to_path`` of each and imported it.
+_D1_PAGES = [
+    f"x[y/app/p.php?u=1&token={_WORD}",
+    "h]/app/p.php?u=1",
+    "[h/app/p.php",
+    f"x[1]/app/p.php?u=1&password={_WORD}",
+    f"\u3000http://[h/app/p.php?token={_WORD}",
+    "\xa0http://h]/app/p.php",
+]
+
+
+@pytest.mark.parametrize("page", _D1_PAGES)
+def test_r6_review_d1_import_audit_imports_a_page_no_origin_reads_as_the_pushed_tree_did(
+        tmp_path, page):
+    """D1 (the differential check of 3615cfb): the batch's `import_audit` read each
+    finding page's origin (`_main_origin`, `_audit_endpoint` -> `canonical_origin`,
+    `store_url`), which raises ``ValueError("Invalid IPv6 URL")`` on such a page, and
+    failed the whole import where 7393c90's (``to_path`` only) imported it. The page
+    names no origin now: it is stored by its path, as 7393c90 stored it, and nothing
+    7393c90 redacted is stored (its ``to_path`` dropped the query)."""
+    from fuzzlab.core.urls import to_path
+    good = "http://h/app/q.php?u=1"
+    audit_db = _audit_findings(tmp_path, [
+        (page, "rule_a", "u", f"called from {page}"),
+        (good, "rule_b", "u", "value reflected")])
+    counts, failed, endpoints, _candidates, dump = _import_audit_or_failure(tmp_path,
+                                                                            audit_db)
+    assert failed is None, f"the import failed: {failed!r}"
+    assert counts == {"candidate": 2}
+    assert sorted(endpoints) == sorted([to_path(page), "/app/q.php"])
+    assert not _leaks(dump, _WORD)
+
+
+#: A finding page ``urlsplit`` rejects as written, so ``to_path`` rejects it too: 7393c90's
+#: `import_audit` raised there, and r6's raised at `_main_origin` before `_audit_text`'s
+#: page-URL branch could withhold anything.
+_R4_PAGES = [
+    f"http://[h/app/p.php?u=bob&password={_PASS}",
+    f"//[h/app/p.php?u=bob&token={_PASS}",
+]
+
+
+@pytest.mark.parametrize("page", _R4_PAGES)
+def test_r6_review_r4_import_audit_withholds_the_texts_of_a_page_its_floor_rejects(
+        tmp_path, page):
+    """R4 (the records review of 3615cfb): FR-AUD-31, CC-AUD-0059 and the r6 commit said
+    a text whose page URL the floor rejects is stored as `AUDIT_TEXT_WITHHELD` and the
+    import goes on, but `_main_origin` raised first, so `_audit_text`'s page-URL branch
+    was unreachable. Through `import_audit`: such a finding is imported with no endpoint
+    (its ``parameter_id`` NULL), its target and context withheld whole (they may quote
+    the page URL the owner cannot read), and every other finding is imported."""
+    good = "http://h/app/q.php?u=1"
+    audit_db = _audit_findings(tmp_path, [
+        (page, "rule_a", "u", f"called from {page}"),
+        (good, "rule_b", "u", "value reflected")])
+    counts, failed, endpoints, candidates, dump = _import_audit_or_failure(tmp_path,
+                                                                           audit_db)
+    assert failed is None, f"the import failed: {failed!r}"
+    assert counts == {"candidate": 2} and endpoints == ["/app/q.php"]
+    from fuzzlab.tools.store_adapter import AUDIT_TEXT_WITHHELD
+    withheld = candidates[0]
+    assert withheld[0] is None
+    assert json.loads(withheld[1])["target_identifier"] == AUDIT_TEXT_WITHHELD
+    assert withheld[2] == AUDIT_TEXT_WITHHELD
+    assert json.loads(candidates[1][1])["target_identifier"] == "u"
+    assert not _leaks(dump, _PASS)
+
+
 @pytest.mark.parametrize("headers", [
     f"Location: http://h/?token=a\r\nLocation: http://user:{_WORD}@h/app",
     f"Location: http://h/?token=a\r\nLocation: http://h/app/p.php?u=bob&next=%2F%5Cx%26"
