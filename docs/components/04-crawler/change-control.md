@@ -444,7 +444,13 @@ Newest first.
     touched: `session/manager.py` (`_jar_cookies`'s IPv6 host is the coordinator's at
     the merge; BB-2's last item), `probesender.py`, `value_shape.py`,
     `core/redaction.py`.
-  - Targeted run: TARGETED-RUN-PENDING.
+  - Targeted run on a51ca33 (one pytest invocation, the harness's selection for this
+    change computed by its own `select_tests`: 101 files, `-n 3 --dist loadfile`, the
+    three `FUZZLAB_REQUIRE_*` flags, `FUZZLAB_PYTEST_LOCK_WAIT=7000`;
+    `scratchpad/lanes/BROWSERALIAS/r3proof/targeted.log`): **4063 passed, 0 failed,
+    1 skipped** (`test_packaging.py:179`, bdist_wheel unavailable here), **55 xfailed**
+    in 18 min 29 s. `scripts/verify_change.py` was not run: the orchestrator verifies
+    at the merge.
 
 ### CC-CRAWL-0061 — The capture writer is total: a body holding a lone surrogate is stored losslessly, and a write the store refuses is counted (FR-CRAWL-42, BUG-0554) (2026-10-21)
 - Placement: pre-assigned to lane SURROGATE (item AU-REQID78), base 33b423e (after

@@ -703,7 +703,12 @@ accepts; every strict-decoding body accessor.
 
 ### Corrective action
 Commit 1c337dd (CC-CRAWL-0063, CC-CRAWL-0064, CC-AUD-0060 "Review round 3"; FR-CRAWL-43,
-FR-CRAWL-34, FR-CRAWL-11, NFR-CRAWL-safe and NFR-AUD-safe's clause edited in place):
+FR-CRAWL-34, FR-CRAWL-11, NFR-CRAWL-safe and NFR-AUD-safe's clause edited in place).
+Pre-fix proof: one pytest invocation with 1b05e3f's `navguard.py` and `explore.py` in
+place, then restored -- the ten round-3 tests failed, each as stated
+(`scratchpad/lanes/BROWSERALIAS/r3proof/proof.log`). Targeted run on a51ca33 (the
+harness's own selection, 101 files, one invocation): 4063 passed, 0 failed, 1 skipped,
+55 xfailed (`r3proof/targeted.log`).
 - **BB-4:** `decoded_text` treats a label as unknown when it names no text encoding
   (`_text_codec`: unknown to the registry, or `_is_text_encoding` false) or names a
   codec that refuses the document (strict decode raises anything but
