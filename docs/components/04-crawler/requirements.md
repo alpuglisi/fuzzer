@@ -80,7 +80,9 @@ fuzzer.
   landing page is requested twice, the second time unrouted (Playwright never routes
   it): the enforcer forwards that one checked landing (a ticket the route issues;
   BUG-0559 review round 2), and a further hop its second answer names is refused there;
-  a 307/308
+  an `https` landing's ticket admits a tunnel (and the browser's retry after a
+  certificate error, a second `CONNECT`) that carries that one exchange and is closed
+  at the browser's next request on it (BUG-0559 review round 3); a 307/308
   navigation keeps its first URL as `page.url`; walked hops carry the context's headers,
   not the browser's; a browser in a proxy-only container cannot reach an external
   target (the driver fetches directly; fails safe).
@@ -1156,7 +1158,8 @@ fuzzer.
     a speculation-rules preload, whatever the page's markup -- is refused by the
     enforcer every launch names *(review round 2, BB-3; round 1's page layers, which
     keep a rule set from being registered where a script can see it, are defence in
-    depth)*: a
+    depth; review round 3: over `https` too, an admitted landing's tunnel carrying its
+    one exchange)*: a
     redirect hop to such a host is never fetched and
     the load is stored `failed` with the cause (never the landing's page, no static
     fallback); a selector form's submission there (`_isolated_submit`'s browser branch)
@@ -1636,11 +1639,30 @@ fuzzer.
     proxy, loopback forced through it; it refuses every request Chromium sends itself
     (`enforcer_refusals`, logged by host) but a WebSocket the guard's socket handler
     admitted (`admit_socket`) and the re-request of a redirect landing the route
-    checked (`admit_landing`: Playwright never routes it), each once, never a preload;
-    chained to disco's capture proxy when there is one. So no preload, whatever the
-    page's markup (a rule set in a closed shadow root with a character-referenced type,
-    one a handler inserts into its closed root, one an opener gives an `about:blank`
-    popup), reaches any host. **Defence in depth** *(round 1)*: every guarded
+    checked (`admit_landing`: Playwright never routes it), never a preload; chained to
+    disco's capture proxy when there is one. An `http` landing is forwarded once. A
+    tunnel -- a WebSocket's, an `https` landing's -- is admitted by a ticket for its host
+    and port until one tunnel carries the traffic, within 3 s of the first: the
+    browser's retry after a certificate error is a second `CONNECT` (*review round 3*:
+    with `ignore_https_errors`, as disco runs a self-signed target, a redirected
+    navigation failed with `ERR_TUNNEL_CONNECTION_FAILED` and a `wss` socket never
+    opened). An `https` landing's tunnel carries **one exchange**: the enforcer reads
+    the TLS record layer only (nothing decrypted or re-signed; verification untouched)
+    and closes the tunnel at the browser's next request on it, counted `reuse`
+    (*review round 3*: Chromium kept the landing's tunnel in its pool and a later
+    same-origin speculation-rules prefetch rode it with the session, past the route and
+    the enforcer); Chromium's own traffic is kept on HTTP/1.1 (`--disable-http2`: a
+    multiplexed tunnel would carry a prefetch beside the landing; measured, Chromium
+    chose `h2` inside the tunnel when offered). So no preload, whatever the page's
+    markup (a rule set in a closed shadow root with a character-referenced type, one a
+    handler inserts into its closed root, one an opener gives an `about:blank` popup),
+    reaches any host, over `http` or `https`. *Residual (round 3, stated):* a ticket
+    cannot tell whose `CONNECT` it admits -- another request of the browser to the same
+    host and port in the milliseconds before the browser's own connection (or its
+    retry) could take it; a WebSocket's and an `https` landing's tickets admitted at the
+    same moment for one host and port may be matched in the other order; what a
+    WebSocket's tunnel carries after its upgrade is not seen; measured on a local TLS
+    server (TLS 1.2 and 1.3), no https lab. **Defence in depth** *(round 1)*: every guarded
     context, with or without a session, never registers a rule set a script can see: `guard_page`
     installs `navguard.PRELOAD_OFF_JS` before any page script runs (every
     `<script type=speculationrules>` taken out as it is inserted -- by the parser, a
@@ -1657,7 +1679,13 @@ fuzzer.
     byte-order mark's, the `Content-Type`'s, a `<meta>`'s; never raising) -- an
     ISO-8859-1 page read as strict UTF-8 raised out of the route handler and its load
     never completed -- and a page whose rule sets are made inert is given in that
-    charset.
+    charset. *(Review round 3, BB-4:)* whatever label the target writes: one naming no
+    text encoding in Python's registry (`hex`, `base64`, `rot13`, `zlib`, `bz2`, `uu`,
+    `quopri`) or a codec that refuses the document (`idna`, `undefined`) is an unknown
+    label, as a browser treats one -- the next label decides, else the undeclared order
+    (round 2's decoder raised `LookupError` past the handler and a page that loaded at
+    c6296bc hung). A request body is read the same way (disco's `carries_value`, never
+    Playwright's strict `post_data`).
   - **The document a load committed** is checked before anything of it is read
     (`navguard.committed_session_refusal`, defence in depth behind the route): a main
     frame on a host the session's cookies do not reach is never read as the session's.
@@ -1686,7 +1714,8 @@ fuzzer.
   - **One comparison** *(review round 2, BB-2)*: no module but `navguard` compares a
     cookie's domain with a host (`browserlogin.filter_storage_state` asks
     `cookie_reaches` for every spelling a scope origin folds); `session/manager.py`'s
-    `_jar_cookies` is the one flagged exception (BUG-0559 round 2).
+    `_jar_cookies` is the one flagged exception (BUG-0559 round 2; its unbracketed IPv6
+    host is the coordinator's at the merge, round 3).
   - **The auditor's browser fetcher** (FR-AUD, CC-AUD-0060) does the same for its pages.
   - Enforced by: `tests/test_browser_session_reach.py` -- the predicate (the IPv6 held
     form included) and the route on doubles; real Chromium on loopback for a redirect
@@ -1726,7 +1755,20 @@ fuzzer.
     in a legacy charset (`test_a_response_body_is_read_by_its_own_charset_never_raising`,
     `test_a_guarded_page_loads_a_document_in_a_legacy_charset`,
     `test_no_module_reads_a_response_body_as_strict_utf8`). Each fails on c6296bc as
-    stated (`scratchpad/lanes/BROWSERALIAS/r2proof/proof.log`).
+    stated (`scratchpad/lanes/BROWSERALIAS/r2proof/proof.log`). *(Review round 3:)* every
+    codec name Python registers, as a header and a `<meta>` label, decodes and loads
+    through the route (`test_no_charset_label_a_target_writes_makes_the_decoder_raise`,
+    `test_a_guarded_page_loads_a_document_whatever_charset_it_names`, generated); a
+    Latin-1 form's submission carries its value
+    (`test_a_legacy_charset_forms_submission_is_seen_carrying_its_value`; the strict-read
+    guard also bans `.post_data`); an `https` redirect landing and a `wss` socket load
+    from a self-signed target with `ignore_https_errors`, both binaries
+    (`test_an_https_landing_and_socket_load_from_a_self_signed_target`); no request
+    rides an `https` landing's tunnel after its exchange, both binaries, verification on
+    (`test_no_request_rides_an_https_landings_tunnel_after_its_exchange`); the tickets
+    and the one-exchange rule on raw TLS sockets, TLS 1.2 and 1.3
+    (`test_the_enforcer_holds_an_https_tunnel_to_its_ticket`). Each fails on 1b05e3f as
+    stated (`scratchpad/lanes/BROWSERALIAS/r3proof/proof.log`).
 
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default
@@ -1756,6 +1798,10 @@ fuzzer.
   nothing the browser sends itself reaches the target: the enforcer every launch names
   refuses it (FR-CRAWL-43) --
   `tests/test_browser_session_reach.py::test_no_preload_a_page_hides_from_the_guard_leaves_the_browser`.
+  *(Review round 3:)* over `https` too: a prefetch of `/logout` with the session rode the
+  tunnel admitted for a redirect landing, so that tunnel carries its one exchange and is
+  closed at the next request (FR-CRAWL-43) --
+  `tests/test_browser_session_reach.py::test_no_request_rides_an_https_landings_tunnel_after_its_exchange`.
   *(CC-CRAWL-0028, BUG-0136:)* **how** a request is refused is one rule: every abort
   of a document request (a navigation, top-level or frame, and each of its redirect
   hops), whatever the reason -- scope, destructive, refused method or body, the reveal

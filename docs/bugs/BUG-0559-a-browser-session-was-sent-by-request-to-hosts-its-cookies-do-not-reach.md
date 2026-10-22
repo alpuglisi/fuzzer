@@ -602,3 +602,185 @@ proven on synthetic offenders); (10) a credential set derived from material is t
 its boundary (none of the material is a credential) as well as its cases, and the empty
 set never stands for "all". Enforced by the round-2 tests in
 `tests/test_browser_session_reach.py` and `tests/test_browser_scope.py`.
+
+## Review round 3, final (2026-10-22, on 1b05e3f; BB-4's uncovered labels, the https redirect regression, BB-3's https neighbour)
+
+The owner made this the final round: anything a later check finds is pinned with a
+strict xfail and reported. The fix check of 1b05e3f confirmed round 2's repros fixed
+(BB-3's every named shape on both binaries and through the real capture proxy; BB-4's
+Latin-1 page) and found three defects of round 2's own making on inputs it had not
+covered. BB-2's remaining item -- `session/manager.py::_jar_cookies` and the manager's
+unbracketed IPv6 host (`manager.py:1359`, `:1390`) -- is not this round's: the
+coordinator fixes `_jar_cookies`'s IPv6 bracket at the merge, and the file is not
+touched here (the AST guard's named exemption stays until then). Each finding below has
+a test that fails on 1b05e3f for its stated reason and passes after (commit 1c337dd on
+`lane/BROWSERALIAS-r3`; CC-CRAWL-0063, CC-CRAWL-0064 and CC-AUD-0060 "Review round 3").
+
+### What each was
+- **BB-4, a charset label that is not a text encoding hung the route** (a regression of
+  round 2 against the pushed code). `decoded_text` ran `codecs.lookup()` on the label
+  the target declares and then `data.decode(codec)`, catching `UnicodeDecodeError` only.
+  Python's registry also names codecs that are not text encodings (`hex`, `base64`,
+  `rot13`, `zlib`, `bz2`, `uu`, `quopri`: `bytes.decode` raises `LookupError`) and text
+  codecs that refuse a document (`idna`, `undefined`: `UnicodeError`, with `replace`
+  too). `_note_received` caught `(AttributeError, Error, TypeError, ValueError)`, and
+  `LookupError` is none of them: a page served `charset=hex`, or naming only `<meta
+  charset=base64>`, raised out of the route handler, was never answered and its `goto`
+  timed out -- pages that loaded at c6296bc. `charset=idna` raised out of `navigate`
+  itself through `response_text`, which claimed never to raise and did not catch a
+  decoder's error (two consumers, `explore.py:978` and `spider.py:2494`, did not catch
+  it either). And a neighbouring strict read the round-2 sweep missed: disco's
+  `carries_value` read Playwright's `req.post_data` (strict UTF-8) and dropped a Latin-1
+  form's body on the error, so a submission carrying the filled value counted as not
+  sent (BB-4(4)).
+- **The https redirect regression** (round 2's enforcer). With a self-signed target and
+  `ignore_https_errors=True` -- as disco runs -- a redirected navigation failed on both
+  binaries with `net::ERR_TUNNEL_CONNECTION_FAILED`: `admit_landing` turned an https
+  landing into one `admit_socket` ticket, the browser's first `CONNECT` used it, and
+  Chromium's retry after the certificate error is a second `CONNECT`, which was refused.
+  At c6296bc the landing loaded. Round 3's sweep found the same on the socket ticket: a
+  `wss` WebSocket to a self-signed target never opened (`WS-ERR`; it opened at c6296bc).
+- **The https tunnel reuse** (BB-3's neighbour). The tunnel admitted for a landing
+  stayed in Chromium's keep-alive pool; a later same-origin speculation-rules prefetch
+  (the charref closed-root rule set on the landing) rode it -- `GET /logout?tls` with
+  `sid=S` and `Sec-Purpose: prefetch` on the landing's own client port -- past the route
+  and past the enforcer, which judged the `CONNECT` only. The module doc's and
+  `browser_launch_args`' claim that a destructive preload "is refused there whatever the
+  page's markup" was false for https, and the landing re-requested through the tunnel
+  also skipped the route's text layer. Plain http is not affected (`_forward` sends
+  `Connection: close` and closes).
+
+### Measured before the design (`scratchpad/lanes/BROWSERALIAS/r3meas`)
+- `https_landing.py` (a TLS server on 127.0.0.1 with HTTP/1.1 keep-alive, its leaf from
+  the test's own `LocalCA`; `/start` -> 302 -> `/land` carrying the charref closed-root
+  rule set for `/logout?tls` and the alias; a context guarded with `sid@127.0.0.1`;
+  Chromium 141.0.7390.37, both binaries). At 1b05e3f: `ignore` (self-signed,
+  `ignore_https_errors=True`) -- `net::ERR_TUNNEL_CONNECTION_FAILED`; `nss` (the CA
+  trusted in an NSS db under a scratch `HOME`, the driver trusting it through
+  `NODE_EXTRA_CA_CERTS`) and `spki` (Chromium trusting the leaf key alone, TLS
+  verification otherwise on) -- the landing loads and `/logout?tls` arrives with `sid=S`
+  on the landing's client port, TLS 1.3 and TLS 1.2 (`tls12`); with the server offering
+  `h2` Chromium chose it inside the tunnel (`net::ERR_HTTP2_PROTOCOL_ERROR` against the
+  HTTP/1.1-only server); `wss` -- `WS-ERR` at 1b05e3f, `WS-OPEN` at c6296bc. No
+  `--ignore-certificate-errors` was needed: the review's stand-in, never used here.
+- `... trace`: the retry's `CONNECT` comes 4-12 ms after the first; a TLS 1.3 client
+  abandoning a handshake on a certificate sends its alert as a small application-data
+  record.
+- `every_codec.py`: an ASCII page labelled with each of the 455 codec names Python
+  registers, in the header and in a `<meta>`, through the guard: after the fix all 910
+  loads reached their load state (36.7 s); at 1b05e3f `hex`, `base64`, `rot13`, `zlib`
+  timed out or raised and `undefined` raised.
+- Options for the reuse, measured against the review's repro: **closing an admitted
+  landing tunnel once its one exchange is done**, read at the TLS record layer (chosen:
+  the repro passes, both binaries, TLS 1.2 and 1.3, direct and through the capture
+  proxy); **the route fetching and fulfilling an https landing itself** (not chosen:
+  answered without the redirect the page shows the first URL -- `page.url` and relative
+  links wrong, what the redirect exists to keep right -- and a trampoline navigation
+  instead changes what `goto` returns to every consumer). Terminating TLS in the
+  enforcer was ruled out: the browser would have to trust our CA (never weaken TLS).
+
+### Root cause analysis (Five Whys)
+1. *Why did round 2 break https redirects and leave the tunnel open?* Its tickets were
+   designed and measured on plain http; for https it wrote "a tunnel is judged by its
+   host and port only ... not measured (no https lab here)" as a flag.
+2. *Why does "one `CONNECT` per ticket" not fit https?* Chromium opens and reuses a
+   connection in ways the ticket did not model: a certificate error's retry is a new
+   connection, and a finished exchange leaves the tunnel in the keep-alive pool for the
+   next request to that origin (and HTTP/2 would multiplex it).
+3. *Why was that not measured?* "No https lab" was taken as a reason not to measure,
+   though a local TLS server is a few lines (the review built one).
+4. *Why did the decoder raise?* Round 2 enumerated the charsets of its test pages, not
+   the domain of its input: a label the target writes, looked up in a registry that
+   also holds non-text codecs and codecs that refuse documents. Its AST guard banned
+   the instance found (`.text()`), not the class (any strict decode of a Playwright
+   body), so `post_data` stayed.
+
+**Root cause:** round 2 measured its new mechanisms on the inputs it had in hand --
+plain http, its test pages' charsets, the response-body accessor -- instead of
+enumerating each mechanism's input domain: every scheme the enforcer carries and every
+way the browser opens and reuses what a ticket admits; every label the codec registry
+accepts; every strict-decoding body accessor.
+
+### Corrective action
+Commit 1c337dd (CC-CRAWL-0063, CC-CRAWL-0064, CC-AUD-0060 "Review round 3"; FR-CRAWL-43,
+FR-CRAWL-34, FR-CRAWL-11, NFR-CRAWL-safe and NFR-AUD-safe's clause edited in place):
+- **BB-4:** `decoded_text` treats a label as unknown when it names no text encoding
+  (`_text_codec`: unknown to the registry, or `_is_text_encoding` false) or names a
+  codec that refuses the document (strict decode raises anything but
+  `UnicodeDecodeError`, or `replace` raises); the next label decides, else the
+  undeclared order (UTF-8, else windows-1252, else byte for byte). Nothing a codec
+  raises leaves it; `response_text` never raises; `_note_received` also catches
+  `LookupError`. `carries_value` reads `post_data_buffer` through `decoded_text`.
+- **The tunnels:** one ticket class (`_TunnelTicket`) for a WebSocket's and an https
+  landing's tunnel: `CONNECT`s to its host and port are admitted until one tunnel
+  carries the browser's traffic (`_claim`), at most four, the later ones within
+  `_TICKET_RETRY_WINDOW_S` (3 s) of the first -- the retry after a certificate error
+  is covered, and nothing later. `_HeldTunnel` reads the TLS record layer only (nothing
+  decrypted or re-signed; TLS verification untouched): an alert-sized application-data
+  record carries nothing (a TLS 1.3 client's alert on an abandoned handshake); a
+  WebSocket's tunnel is claimed by its first larger record or plain byte and then
+  relayed whole; an https landing's tunnel carries one exchange -- its request claims
+  the ticket, the server answers, and the browser's next request on it is never
+  forwarded: the tunnel is closed and counted (`enforcer_refusals()["reuse"]`), and
+  the browser's retry finds no ticket. The ServerHello's `supported_versions` says
+  whether the client's first application-data record is its TLS 1.3 `Finished`
+  (unreadable: taken as TLS 1.2, which errs towards closing). `browser_launch_args`
+  adds `--disable-http2`, so Chromium's own traffic is one request at a time on a
+  connection (routed requests are the driver's and never see it). The module doc and
+  `browser_launch_args`' doc now say what a tunnel is held to.
+
+**PA-0002 sweeps:**
+- *Every caller of a tunnel ticket* (`admit_socket`: `make_ws_handler`; `admit_landing`:
+  `make_route_handler`'s redirect fulfil): both on the one ticket class; the socket's
+  certificate retry was the same defect (fixed, tested). Every launch takes
+  `browser_launch_args` (held by `test_every_browser_path_in_fuzzlab_is_scoped`), so
+  every tool gets the switch and the tunnels.
+- *Every reader of a charset label*: `decoded_text` is the one decoder (AST guard);
+  its callers -- `_note_received`, `response_text` (`response_html`, the spider's and
+  disco's harvests), disco's health check, and now `carries_value` -- inherit it.
+- *Every strict decode of a Playwright body* (grep of `.text()`, `.post_data`,
+  `.post_data_json` over `fuzzlab/`): `explore.py:761` (fixed); the AST guard now bans
+  all three, proven on synthetic offenders. `session/browserlogin.py`'s reads with
+  UTF-8 `replace` are lossy but never raise: not changed (the review did not count them).
+
+**Residuals, stated (FR-CRAWL-43):** a ticket cannot tell whose `CONNECT` it admits: a
+request of the browser to the same host and port in the milliseconds before the
+browser's own connection (or within its retry window, before the exchange claims the
+ticket) could take it -- round 2's one-`CONNECT` ticket had the same window; a
+WebSocket's and an https landing's tickets admitted at the same moment for one host and
+port may be matched in the other order; a landing request larger than one TLS record
+whose later record follows a server record would be cut (fail closed); TLS 1.3 early
+data is not read (off by default in Chromium 141); what a WebSocket's tunnel carries
+after its upgrade is not seen; measured on a local TLS server only (no https lab).
+
+### Recurrence review
+- **BUG-0559 round 2 (PA-0559(8), (9)) -- the same bug class recurring on the same
+  carrier:** the enforcer's exception (a ticket) let a preload through on the https
+  scheme round 2 did not measure; the strict-decode guard round 2 wrote held the one
+  accessor it had seen.
+- **BUG-0559 round 1 (PA-0559(7)) -- the same root cause on another input:** round 1's
+  rule that a predicate's inputs are enumerated from the carrier was not applied to the
+  decoder's input, a label the target writes.
+
+### Prior-preventive-action failure analysis
+- **PA-0559(8): too narrow.** It placed the guard at the browser's egress and required
+  each exception to be a ticket issued where the guard checked the request; it did not
+  require the ticket to be measured against how the browser uses what it admits -- a
+  certificate retry, the keep-alive pool, multiplexing -- on every scheme, so the https
+  ticket admitted too little (the retry) and too much (the pool).
+- **PA-0559(9): followed for the instance, not the class.** The guard banned `.text()`;
+  `.post_data` is the same strict read of a Playwright body.
+- **PA-0559(7): not applied beyond cookies.** "Inputs enumerated from the carrier" was
+  read as cookie forms; the decoder's label domain is an input of the same kind.
+
+### Preventive action
+PA-0559 strengthened (texts in the lane's doc_texts, items 11 and 12): (11) an exception
+a guard grants (a ticket) is measured against every way the browser uses what it admits
+-- a certificate error's retry, the keep-alive pool, multiplexing -- on every scheme the
+tools carry, against a local server of that scheme when no lab has one ("no lab" is
+never a reason to flag instead of measure), and is bound to the one exchange it was
+granted for; (12) code fed a value the target writes (a charset label) is tested over
+the whole domain the library accepts, generated (every codec name the registry knows),
+through the real path; a guard against a hazardous call bans the class (every strict
+decode of a Playwright body), each proven on a synthetic offender. Enforced by the
+round-3 tests in `tests/test_browser_session_reach.py`.

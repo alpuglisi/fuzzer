@@ -65,6 +65,18 @@ Newest first.
   `::test_a_guarded_page_loads_a_document_in_a_legacy_charset`); the launch path is held
   by `tests/test_browser_scope.py::test_every_browser_path_in_fuzzlab_is_scoped`.
   NFR-AUD-safe's clause edited in place.
+- Review round 3, final (2026-10-22; branch `lane/BROWSERALIAS-r3`, commit 1c337dd; no
+  change to `tools/fetcher.py`): the fetcher's guarded browser takes the owner's round-3
+  changes (CC-CRAWL-0063 round 3) through `navguard`: on an `https` target a tunnel the
+  enforcer admitted for a redirect landing carries that one exchange (a later
+  same-origin prefetch with the session rode it, measured on the guard), a self-signed
+  target's redirected page loads under `ignore_https_errors` again (the certificate
+  retry is admitted), and a page labelled with any codec name is answered by the route
+  (a `charset=hex` page had hung its load). Tests: the owner's
+  (`tests/test_browser_session_reach.py::test_no_request_rides_an_https_landings_tunnel_after_its_exchange`,
+  `::test_an_https_landing_and_socket_load_from_a_self_signed_target`,
+  `::test_a_guarded_page_loads_a_document_whatever_charset_it_names`). NFR-AUD-safe's
+  clause edited in place.
 
 ### CC-AUD-0057 — The captured-request import refuses and counts a body holding a lone surrogate instead of failing the import (FR-AUD-22, BUG-0554) (2026-10-21)
 - Placement: lane SURROGATE (item AU-REQID78), base 33b423e, with CC-CRAWL-0061 (the

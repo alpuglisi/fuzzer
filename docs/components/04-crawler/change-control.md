@@ -101,6 +101,28 @@ Newest first.
     `{} == {'Cookie': 'sid=v'}` for `http://[::1]:8000/`). Pre-fix proof:
     `scratchpad/lanes/BROWSERALIAS/r2proof/proof.log`.
   - FR-CRAWL-43's disco clause edited in place.
+- Review round 3, final (2026-10-22; BB-4(4), the strict read the round-2 sweep missed;
+  branch `lane/BROWSERALIAS-r3`, commit 1c337dd):
+  - Change: `explore.carries_value` read Playwright's `req.post_data` -- a strict UTF-8
+    decode of the request body -- and on a decode error dropped the body: an
+    ISO-8859-1 page's multipart form carrying `h=café` and the filled `q=zzfiller1`
+    counted as not having sent the value (measured by the review, real Chromium). It
+    now reads `post_data_buffer` and decodes it with `navguard.decoded_text` (the one
+    decoder; a body the driver cannot give: the URL alone). Disco's health check
+    (`_protected_get`) and body harvest take the owner's decoder fix (any charset
+    label; CC-CRAWL-0063 round 3), and disco's browser the https tunnel rules.
+  - Impact: a legacy-charset form's submission is seen carrying its value (the
+    explorer's `_values_sent`); an https target's redirected pages load in
+    `disco capture` with a self-signed certificate (the capture's
+    `ignore_https_errors`) and nothing rides a landing's tunnel after its exchange --
+    measured through the capture proxy (`r3meas/https_landing.py ... capture`).
+  - Tests: `tests/test_browser_session_reach.py::test_a_legacy_charset_forms_submission_is_seen_carrying_its_value`
+    (real Chromium; on 1b05e3f `carries_value(req, ['zzfiller1'])` was False);
+    `::test_no_module_reads_a_response_body_as_strict_utf8` now also bans `.post_data` /
+    `.post_data_json` (on 1b05e3f `fuzzlab/disco/explore.py:761`);
+    `tests/test_disco_synth.py::test_a_submission_is_sent_only_when_a_distinctive_filled_value_reaches_a_request`'s
+    request double gives `post_data_buffer` (adjusted, same assertions).
+  - FR-CRAWL-43 edited in place (a request body is read by `decoded_text`).
 
 ### CC-CRAWL-0063 — The browser guard owns where a session's cookies reach: every request, hop, socket and API request to a host they do not reach is refused, and the spider files such a load failed (FR-CRAWL-43, FR-CRAWL-34, BUG-0559, SP-74) (2026-10-22)
 - Placement: pre-assigned to lane BROWSERALIAS (item GAP-BROWSER), base 7393c90.
@@ -343,6 +365,86 @@ Newest first.
     re-evaluated on d5c867f outside pytest (`r2meas/guards_check.py`: no extra, no stale,
     no offender); the brief allowed one pytest invocation, so the run of record on
     d5c867f is the orchestrator's harness.
+- Review round 3, final (2026-10-22; the fix check of 1b05e3f: BB-4's uncovered labels,
+  the https redirect regression and BB-3's https neighbour, the tunnel reuse; branch
+  `lane/BROWSERALIAS-r3` from 1b05e3f, commit 1c337dd):
+  - Change, **BB-4** (navguard, the decoder): round 2's `decoded_text` took any label
+    `codecs.lookup` knows for a text encoding and caught `UnicodeDecodeError` only, so a
+    target's `charset=hex` (or `base64`, `rot13`, `zlib`, `bz2`, `uu`, `quopri`: not text
+    encodings, `LookupError`) raised past `_note_received` and the route never answered
+    -- a page that loaded at c6296bc hung -- and `idna` / `undefined` (`UnicodeError`,
+    `replace` too) raised out of `response_text` into `navigate`. Now such a label is
+    unknown (`_text_codec`: unknown, or `_is_text_encoding` false; a codec that refuses
+    the document even with replacement is skipped), the next label decides, else the
+    undeclared order; nothing a codec raises leaves `decoded_text`, and `response_text`
+    never raises. `_note_received` also catches `LookupError`.
+  - Change, **the tunnels** (navguard, SP-04's owner): one ticket class for a tunnel
+    (`_TunnelTicket`: a WebSocket's from `admit_socket`, an https landing's from
+    `admit_landing`), admitting `CONNECT`s to its host and port until one tunnel carries
+    the browser's traffic (`_claim`), at most four, the later ones within
+    `_TICKET_RETRY_WINDOW_S` (3 s) of the first -- the browser's retry after a
+    certificate error is a second `CONNECT`, 4-12 ms later (measured,
+    `r3meas/https_landing.py ... trace`); round 2's one-`CONNECT` ticket refused it, so
+    with `ignore_https_errors` (disco's configuration) a redirected https navigation
+    failed (`net::ERR_TUNNEL_CONNECTION_FAILED`) and a `wss` socket never opened (the
+    socket case found by this round's sweep; both opened at c6296bc). `_HeldTunnel`
+    reads the TLS record layer only, never decrypts or re-signs: a TLS 1.3 client's
+    alert on an abandoned handshake (an application-data record of alert size,
+    `_TLS_CONTROL_MAX`) carries nothing; a WebSocket's tunnel is claimed by its first
+    larger application-data record (or plain byte) and then relayed whole; an https
+    landing's tunnel carries one exchange -- its request claims the ticket, the server
+    answers, and the browser's next request on it is never forwarded: the tunnel is
+    closed and counted (`enforcer_refusals()["reuse"]`), and the retry on a new tunnel
+    finds no ticket (round 2's tunnel stayed in Chromium's pool and a later same-origin
+    speculation-rules prefetch rode it with `sid=S`, past the route and the enforcer;
+    measured by the review and here, TLS 1.2 and 1.3, both binaries, direct and through
+    the capture proxy). The ServerHello's `supported_versions` says whether the
+    client's first application-data record is its `Finished` (unreadable: TLS 1.2, so
+    the tunnel errs towards closing). `browser_launch_args` adds `--disable-http2`:
+    Chromium chose `h2` inside the tunnel when the server offered it (measured), and a
+    multiplexed tunnel would carry a prefetch beside the landing; the routed requests
+    are the driver's and never see the switch. TLS verification is untouched: no launch
+    gets `--ignore-certificate-errors`; the tests trust their own leaf key only
+    (Chromium's `--ignore-certificate-errors-spki-list`, test launches only) and their
+    own CA in the driver (`NODE_EXTRA_CA_CERTS`).
+  - Options measured for the reuse: closing the admitted tunnel after its one exchange
+    (chosen: the review's repro passes on both binaries); the route fetching and
+    fulfilling an https landing itself (not chosen: without the redirect the page would
+    show the first URL, `page.url` and relative links wrong -- what the redirect exists
+    to keep right -- or need a trampoline navigation that changes what `goto` returns to
+    every consumer). Terminating TLS in the enforcer was not an option (the browser would
+    have to trust our CA).
+  - Impact: an https target's redirected navigations and `wss` sockets load with a
+    self-signed certificate under `ignore_https_errors`, as at c6296bc; nothing rides a
+    landing's tunnel after its exchange; Chromium's own traffic (landings, sockets) is
+    HTTP/1.1; a page labelled with any codec name loads under the guard. Residuals
+    (stated in FR-CRAWL-43 and BUG-0559): a ticket cannot tell whose `CONNECT` it admits
+    in the milliseconds before the browser's own (or its retry); two tickets of the two
+    kinds admitted at once for one host and port may be matched in the other order; a
+    landing request over one TLS record whose second record follows a server record
+    would be cut (fail closed); what a WebSocket's tunnel carries after its upgrade is
+    not seen; no https lab -- measured on a local TLS server.
+  - Tests (`tests/test_browser_session_reach.py`):
+    `test_no_charset_label_a_target_writes_makes_the_decoder_raise` (every codec name
+    Python registers, header, `<meta>`, both; on 1b05e3f 58 `LookupError`s and more),
+    `test_a_guarded_page_loads_a_document_whatever_charset_it_names` (real Chromium,
+    generated over every registered name, and the review's `hex`, `<meta base64>` and
+    `idna` pages; on 1b05e3f `Page.goto: Timeout 5000ms exceeded` for `hex`),
+    `test_an_https_landing_and_socket_load_from_a_self_signed_target[full|shell]` (on
+    1b05e3f `net::ERR_TUNNEL_CONNECTION_FAILED`),
+    `test_no_request_rides_an_https_landings_tunnel_after_its_exchange[full|shell]` (on
+    1b05e3f `/logout?tls` with `sid=S` and `Sec-Purpose: prefetch` on the landing's
+    client port), `test_the_enforcer_holds_an_https_tunnel_to_its_ticket[tls1.3|tls1.2]`
+    (raw TLS sockets; on 1b05e3f "the retry was refused"). Pre-fix proof: one pytest
+    invocation with 1b05e3f's `navguard.py` and `explore.py` in place, then restored
+    (`scratchpad/lanes/BROWSERALIAS/r3proof/proof.log`: 10 failed, each as stated).
+  - FR-CRAWL-43, FR-CRAWL-34, FR-CRAWL-11 and NFR-CRAWL-safe edited in place; BUG-0559
+    "Review round 3"; PA-0559 (items 11, 12), SP-04, SP-74 and SP-76 rows, CHANGELOG,
+    ERROR_LOG, ARCHITECTURE and failure-record texts in the lane's doc_texts. Not
+    touched: `session/manager.py` (`_jar_cookies`'s IPv6 host is the coordinator's at
+    the merge; BB-2's last item), `probesender.py`, `value_shape.py`,
+    `core/redaction.py`.
+  - Targeted run: TARGETED-RUN-PENDING.
 
 ### CC-CRAWL-0061 — The capture writer is total: a body holding a lone surrogate is stored losslessly, and a write the store refuses is counted (FR-CRAWL-42, BUG-0554) (2026-10-21)
 - Placement: pre-assigned to lane SURROGATE (item AU-REQID78), base 33b423e (after
