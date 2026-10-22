@@ -587,3 +587,212 @@ lab's expected-vulnerable answer-key point unrefused; (7) a guard asserts its st
 reason first, its pre-fix record names what it found, and a guard of a guard is never
 counted as a reproduction. Enforced by the review tests above, added to PA-0555's
 `Enforced by:` line.
+
+## Review round 2 (added in review round 2, 2026-10-22; the owner's final round)
+One review of d3cb339 (`scratchpad/lanes/LABAUTH/review_round2.md`); each finding was
+reproduced by the reviewer on d3cb339 and 7393c90 in plain Python. The owner approved
+this round as the final one and chose its scope, exactly: (1) a special scheme and `:`
+after any character that cannot be part of a scheme is an authority mark, in every
+reader text, raw and percent-decoded; (2) an IPv6 literal ends at any character outside
+its alphabet, and the raw value is judged as well as WHATWG's texts; (3) a JSON decimal
+is no host: a number leaf is judged only when it is an integer, and the float residual
+is stated with its measured per-point gain. Anything a check finds after this round is
+pinned by a strict xfail, never a further fix. Fixed on `lane/LABAUTH-r2` (CC-AUD-0058,
+review round 2; FR-AUD-20 amended in place). This section supersedes the paragraphs
+above where they disagree.
+
+### What the fix still let through
+- **N1 (LA-1's neighbouring path): a special scheme and `:` or `:/` after a prefix was
+  sent and bound.** Round 1's `_AUTHORITY_MARKS` (`://`, `:\`, `:/\`) held the
+  backslashed spellings WHATWG reads as `//` after a special scheme, but not the others
+  it reads the same way: `https:evil.top`, `https:/evil.top` and `https:\evil.top` are
+  all https://evil.top/, `ws:evil.top` is ws://evil.top/ (node 22). So
+  `?next=https:evil.top`, `go=https:/evil.top/x`, `/login?next=https:evil.example/`,
+  `see https:evil.top`, `url=ws:evil.top`, `(https:evil.top)`,
+  `{"u":"https:/evil.top"}`, `?next=https%3Aevil.top` and `?next=https%3A%2Fevil.top`
+  were sent verbatim, left their request rebuildable and were bound at d3cb339, while
+  `http://127.0.0.1/?next=https:evil.top` was outside: LA-1's relative-versus-absolute
+  inconsistency, and FR-AUD-20 itself listed `?next=https:evil.example` as outside.
+  The same at 7393c90 (not a regression).
+- **N2 (LA-2/LA-5's neighbouring paths): an IPv6 literal before a tab, LF or CR, or
+  beside a character outside a closed delimiter list, was the lab.** `_ipv6_shaped`
+  ended the literal at `/ ? # \ ;` or whitespace, but it read only `_reader_texts`,
+  which had already removed tab, LF and CR the way WHATWG does; the readers the rule
+  exists for (`getaddrinfo`, `ping6`, a shell, `str.split`) keep them, so
+  `2001:db8::1\tis the server` (read `2001:db8::1is`) was the lab while the space form
+  was outside. Any other neighbour kept it from being a literal at all:
+  `dns=2001:4860:4860::8888`, `2001:4860:4860::8888,2001:4860:4860::8844` (a DNS-server
+  list), `"2001:4860:4860::8888"`, `(2001:4860:4860::8888)`, `2001:4860:4860::8888|id`,
+  `2001:4860:4860::8888&` were the lab while their IPv4 forms were outside (the
+  reviewer's battery: 1,634 such pairs), against FR-AUD-20's claim that anything else
+  names no host. The same at 7393c90 (not a regression).
+- **The owner's third item: a JSON decimal was judged as a host.** Round 1 judged every
+  JSON float by its text, so the leaf `2.5` (2.0.0.5 to WHATWG) was outside and 140
+  recorded points beside it were unbound -- an accepted false positive round 1 stated
+  and measured. The owner chose to judge a number leaf only when it is an integer.
+
+### Root cause (Five Whys)
+1. *Why were `?next=https:evil.top` and `dns=2001:4860:4860::8888` sent at d3cb339?*
+   The authority marks were `://`, `:\`, `:/\`, and the IPv6 literal ended only at
+   `/ ? # \ ;` or whitespace, on WHATWG's texts.
+2. *Why those lists?* Each rule was written from the spellings at hand -- the old
+   gate's `://`, the review's backslashed spellings, the delimiters the author knew a
+   reader cuts at -- not from the reader's rule (WHATWG's special-scheme states take
+   `//`, `/`, `\` or nothing before the host) or from the complement of the literal's
+   alphabet (a reader that extracts an address stops at any character not in it).
+3. *Why was the tab missed?* The rule for address parsers was applied to the texts
+   `_reader_texts` makes for WHATWG, whose preprocessing removes tab, LF and CR; the
+   raw value was not among them.
+4. *Why did no test catch either?* The round-1 sweeps varied the delimiter and the
+   prefix over the same closed lists the rules used (`_SWEEP_POSITIONS`, the bare-IPv6
+   positions, the old-rule corpus's `://` only), so they confirmed each rule against
+   itself.
+5. *Why did the preventive action not stop it?* PA-0555(4) asked the sweep to vary
+   "the delimiter after it" and "the prefix before it", and did not say over what; and
+   no rule said a token's end is the complement of its alphabet.
+
+**Root cause:** a token boundary and an authority mark were written as closed lists of
+known spellings -- a recogniser of delimiters, the same class as a recogniser of hosts
+(BUG-0544, BUG-0555) one level down -- applied to one reader's preprocessed text, and
+swept over the same lists. The JSON decimal is not a defect of that class: it was a
+stated, measured false positive that the owner chose to trade the other way.
+
+### Corrective action
+`fuzzlab/audit/value_shape.py` (fffc66b, its docstring 8d8c270; CC-AUD-0058 review round 2;
+FR-AUD-20 amended in place):
+- **N1:** `_special_scheme_mark` -- one of `_SPECIAL_SCHEMES` (`http`, `https`, `ws`,
+  `wss`, `ftp`, `file`, any case) and `:` at the text's start or after any character
+  outside `_SCHEME_CHARS` (ASCII letters, digits, `+`, `-`, `.`) -- is an authority
+  mark in `_authority_shaped`, so only `_names_only_lab` can admit such a value, and it
+  admits none (no spelling of this mark is in its proof). `xhttps:`, `web+https:` and
+  `1https:` are not marks (another scheme, or none: WHATWG reads no host from
+  `?next=xhttps:evil.example`). Linear: each `:` is checked against six schemes.
+- **N2:** `_ipv6_shaped` reads a run of `_IPV6_CHARS` (hex digits, `:`, `.`) ended at
+  either side by any other character, holding `::` or at least six `:` -- so any `::`
+  is a literal -- and `_reader_texts` now starts with the raw value (and adds the raw
+  percent-decoded value), so every rule reads the text a non-WHATWG reader parses too.
+  `_IPV6_ENDS` and the `@` split are gone (subsumed).
+- **The JSON decimal:** `_judged_text` judges an int, and a float with an integral
+  value as that int (JavaScript's `JSON.parse` reads `134744072.0` as 134744072,
+  8.8.8.8 after `http://`, measured in node 22 while making this change); any other
+  float is the lab, the stated residual.
+- Checked against the real readers (`scratchpad/lanes/LABAUTH/r2/check_tables_r2.py`,
+  `check_tables_r2.txt`: 38 readings, 0 mismatches -- node 22 for the special-scheme
+  rows, the controls and the floats, `getaddrinfo(AI_NUMERICHOST)` after each named
+  reader for the IPv6 rows; round 1's 113 readings re-checked, 0 mismatches).
+
+**Measured cost, per point, against 7393c90 and d3cb339**
+(`scratchpad/lanes/LABAUTH/r2/measure_points_r2.py`, round 1's script with the versions
+7393c90, d3cb339 and the tree; `point_cost.txt`; the host now holds more stores):
+- Recorded stores (4,216 stores, 13,684 parameter rows with sibling entries): unbound
+  992 at 7393c90, 1,300 at d3cb339, 1,104 now. Against d3cb339: none newly unbound,
+  196 newly bound, every one beside the JSON float leaf `2.5` -- the float residual's
+  gain (140 when round 1 measured it on 9,562 points), all from 14 stores of
+  `tests/test_json_points.py`'s adversarial body (`float_points.txt`). The special-scheme
+  mark and the IPv6 rule cost no recorded point. Against 7393c90: 126 newly unbound
+  (beside percent-encoded URLs naming `host.example`, round 1's decoding), 14 newly
+  bound (`db.lab.example`).
+- Lab answer keys (22, 352 points with writes on and off): none refused at any of the
+  three; the guard test stays green.
+- External labs' sources (`.cache`, 733 files): 123 form-field points, none unbound; 62
+  of 2,095 URL-query points unbound, as at d3cb339 (third-party Maps/Fonts URLs).
+- Test literals (`r2/literal_scan_r2.py` over all 452 test files, `literal_scan_r2.txt`):
+  152 string literals move outside against d3cb339 -- pytest node ids and messages
+  holding `::` or ` file:` (`tests/x.py::test_y`, `a SQLite file: URI`), none a value a
+  test sends through `harness.auto` or the binder (the targeted run below) -- and 116
+  float literals move to the lab.
+
+**Accepted false positives and residuals, as amended** (FR-AUD-20 holds the full
+list): new false positives are text naming a special scheme and `:` after a non-scheme
+character (`Upload a file: x.pdf`, `see http: below`) and any `::` (a scope operator
+`use std::string`, a CSS `a::before`); the hex-string false positive is now any run of
+the IPv6 alphabet with `::` or six `:`. New residual: a JSON float leaf that is not an
+integer (`2.5`, `8.8` -- 8.0.0.8 to an app that puts `http://` before it). The
+free-text residual is restated: free text with whitespace is the lab unless an IPv6
+literal or a mark is in it, though a reader that splits it may take an IPv4 address or
+a name from it (`8.8.8.8\tx`, `8.8.8.8 is the server`, `evil.top foo`); the owner's
+scope made only the IPv6 rule stricter.
+
+**Tests** (`tests/test_replay_bindings.py`; each fails on d3cb339 at its own assertion,
+recorded below):
+- N1: `test_a_value_holding_an_authority_mark_anywhere_is_outside_the_lab` gains 16
+  values (the review's eleven, `?next=HTTPS:evil.top`, `?next=ftp:evil.top`,
+  `?next=wss:/evil.top`, `next=Http:8.8.8.8`, and `go to\thttps:evil.top`, whose mark
+  only the raw value holds), through `_send_value`, `_outside_lab` and the binder;
+  `test_a_special_scheme_after_a_non_scheme_character_is_outside_the_lab` (generated:
+  20 prefixes -- nothing, separators, a space, a tab, LF, brackets, quotes, `é`,
+  `%20` -- by 8 scheme spellings by `//`-less separators `""`, `/`, `\`, `%2F`, `%5C`
+  by 5 hosts, loopback ones included, by 4 tails, and each again with `%3A`: 31,200
+  values, every one outside with loopback in its place; four controls the lab, sent and
+  bound as given).
+- N2: `test_a_bare_ipv6_literal_is_outside_the_lab` gains `_IPV6_BESIDE_READ` (13
+  values, each with the reader that takes the literal from it and the address
+  `getaddrinfo` reads), `test_an_ipv6_literal_ends_at_any_character_outside_its_alphabet`
+  (generated: the 16 bare literals beside each of the 80 characters outside the
+  alphabet -- printable ASCII, tab, LF, CR, VT, FF, NUL, NBSP, U+3000, `é` -- before,
+  after, both and between words: 5,120 values outside, the binder refusing 156; a time
+  of day, a date-time and a MAC address beside a space, tab, LF, parenthesis, quote or
+  comma stay the lab), and both sweeps gain `_IPV6_BESIDE_POSITIONS`.
+- The JSON decimal: `test_a_json_float_leaf_is_the_lab_a_stated_residual` (`2.5`, `8.8`,
+  `19.99`, `0.5`, `134744072.5`: sent as given, a JSON body holding one rebuilt);
+  `_JSON_LEAVES` loses its two floats and gains `134744072.0` (judged as 134744072).
+- The guard: `test_the_lab_predicate_reaches_no_recogniser_of_hosts` names
+  `_special_scheme_mark` among the helpers it must reach (a guard: on d3cb339 it fails
+  at that helper-presence assertion, its stated reason holding there; not a
+  reproduction).
+
+**Pre-fix proof**: one pytest invocation of `tests/test_replay_bindings.py` whole on fffc66b, with
+d3cb339's `value_shape.py` copied in place of the fix and then the fix restored (digest
+checked, `git status` clean; `scratchpad/lanes/LABAUTH/r2/prefix_r2.txt`): 38 failed, 376
+passed, 3 xfailed, each failure at its test's own assertion -- N1: 16 of the 30
+`_AUTHORITY_ANYWHERE` values (the 16 added) at `assert names_outside_lab(value)`, and
+the generated special-scheme test at `kept == []`; N2: 12 of the 13 `_IPV6_BESIDE_READ`
+values at `assert names_outside_lab(value)` (`2001:4860:4860::8888;id` was outside
+already: `;` was in round 1's list), the generated IPv6 test at `kept == []`, and both
+sweeps at `kept == []` and `bound == []`; the JSON decimal: the 5 float-residual cases
+at `assert not names_outside_lab(value)`. The recogniser guard fails at its
+helper-presence assertion (`_special_scheme_mark` is new): a guard, not counted as a
+reproduction. The passes are the earlier tests and the controls (`134744072.0` in
+`_JSON_LEAVES` was outside on d3cb339 too, by its text).
+
+**Targeted run**: one pytest invocation on 8d8c270 (`FUZZLAB_PYTEST_LOCK_WAIT=7000`, `-n 3 --dist
+loadfile`; `scratchpad/lanes/LABAUTH/r2/targeted_r2.txt`) of 50 files: every test file
+that reaches FR-AUD-20's predicate or its callers (46: the importers of `value_shape`,
+`harness.auto` and the binder, so the callers' tests that round 1's import-based
+selection missed are held), packaging, lint, traceability and the shared-primitives
+table: 2600 passed, 0 failed, 5 skipped (four live external-lab tests without
+`FUZZLAB_LIVE_EXTERNAL_LABS=1`, `bdist_wheel` unavailable), 18 xfailed, in 12 min 29 s.
+`scripts/verify_change.py` was not run here: the orchestrator verifies at the merge.
+
+### Recurrence review (added in review round 2)
+Checked `docs/bugs/` and `docs/PREVENTIVE_ACTIONS.md` again: N1 and N2 recur this bug's
+root cause (FR-AUD-20's predicate admitted what its model of a reader did not list) for
+the sixth time -- BUG-0544 rounds 1 to 3, BUG-0555, its review round 1, and now -- this
+time in the delimiters and marks rather than the hosts. No other bug doc records a
+closed delimiter list in a safety predicate.
+
+### Prior-preventive-action failure analysis (added in review round 2)
+- **PA-0555(2)** ("the shape decision ... on every text every reader of the value
+  parses (... an address parser such as `getaddrinfo`)") was not followed for the IPv6
+  rule: a rule written for `getaddrinfo` was applied to WHATWG's preprocessed texts.
+  Wrong layer: `_reader_texts` was taken for every reader's texts.
+- **PA-0555(4)** ("a generated sweep varies every part of the value -- ... the
+  delimiter after it, the prefix before it ...") was followed over the delimiters and
+  prefixes the rules themselves listed. Too narrow: it did not say over what a part
+  varies, so a closed list satisfied it.
+- **PA-0555(5)** (a non-regression corpus of the old rule) does not apply: neither
+  finding regressed from 7393c90; both are neighbours no version held.
+
+### Preventive action (added in review round 2)
+**PA-0555 strengthened in place** (no new number; its text is handed over in
+`scratchpad/lanes/LABAUTH/doc_texts.md`, "r2 changes"): (4) a delimiter or prefix
+varies over every character (printable ASCII, whitespace with tab, LF and CR, NUL,
+non-ASCII), never over the list the rule uses; new (8) a token's boundary is the
+complement of its alphabet, a mark is the reader's whole rule (a special scheme with
+`//`, `/`, `\` or nothing), and a rule written for a reader reads that reader's text
+(the raw value for an address parser, a shell or a splitting application). Enforced by
+`test_a_special_scheme_after_a_non_scheme_character_is_outside_the_lab` and
+`test_an_ipv6_literal_ends_at_any_character_outside_its_alphabet`, added to PA-0555's
+`Enforced by:` line. The sweep for this round was itself done by character, not by
+list: the IPv6 test iterates the complement of the alphabet, the special-scheme test
+every class of preceding character.

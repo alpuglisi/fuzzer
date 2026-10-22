@@ -184,6 +184,75 @@ Newest first.
     FR-AUD-32 added; [x] BUG-0555's review section; [ ] PA-0555 (strengthened), SP-73,
     CHANGELOG, ERROR_LOG and failure-record texts handed over for the merge
     (`scratchpad/lanes/LABAUTH/doc_texts.md`, "r1 changes").
+- Review round 2 of d3cb339 (2026-10-22; the owner's final round: anything a later check
+  finds is pinned by a strict xfail; one review, `scratchpad/lanes/LABAUTH/review_round2.md`;
+  branch `lane/LABAUTH-r2`, item GAP-VALUES; the lane's numbers only, no new number):
+  - Findings fixed, in the owner's scope: N1 (a special scheme and `:` or `:/` after a
+    prefix -- `?next=https:evil.top`, `go=https:/evil.top/x`, `url=ws:evil.top`,
+    `?next=https%3Aevil.top` -- was sent and bound: round 1's marks were `://`, `:\`,
+    `:/\` only), N2 (an IPv6 literal before a tab, LF or CR, or beside `=`, `,`, a quote,
+    a parenthesis, `|` or `&` -- `2001:db8::1\tis the server`,
+    `dns=2001:4860:4860::8888`, `2001:4860:4860::8888,2001:4860:4860::8844` -- was the lab
+    while its IPv4 form was outside); and the owner's third item, a JSON decimal leaf
+    (`2.5`) judged as a host. N1 and N2 were the lab at 7393c90 too.
+  - Change (`audit/value_shape.py`): new `_special_scheme_mark` (`_SPECIAL_SCHEMES`
+    http, https, ws, wss, ftp, file, any case, and `:` at the start or after any
+    character outside `_SCHEME_CHARS`) is an authority mark in `_authority_shaped`;
+    `_ipv6_shaped` reads a run of `_IPV6_CHARS` ended at either side by any other
+    character, with `::` or six `:` (`_IPV6_ENDS` and the `@` split removed);
+    `_reader_texts` starts with the raw value and adds the raw percent-decoded value;
+    `_judged_text` judges an int, and a float with an integral value as that int
+    (`134744072.0`: JavaScript reads it as 134744072, node 22), and leaves any other float
+    the lab (the stated residual). `neutral_value`'s docstring follows.
+  - Impact (measured per point against 7393c90 and d3cb339,
+    `scratchpad/lanes/LABAUTH/r2/point_cost.txt`): recorded stores, 13,684 points in
+    4,216 stores: unbound 992 at 7393c90, 1,300 at d3cb339, 1,104 now -- against d3cb339
+    none newly unbound and 196 newly bound, all beside the JSON float `2.5` (the float
+    residual's gain, every one from `tests/test_json_points.py`'s adversarial body,
+    `float_points.txt`); against 7393c90 +126 (percent-encoded URLs) and -14
+    (`db.lab.example`). Lab answer keys, 352 points: none refused at any version.
+    External labs' sources: unchanged from d3cb339 (none of 123 form-field points, 62 of
+    2,095 URL-query points). New accepted false positives: free text naming a special
+    scheme and `:` after a non-scheme character (`Upload a file: x.pdf`), any `::` (`use
+    std::string`); new residual: a JSON decimal leaf. No store, wire or CLI contract
+    change; no new dependency.
+  - Tests (`tests/test_replay_bindings.py`): new
+    `::test_a_special_scheme_after_a_non_scheme_character_is_outside_the_lab` (31,200
+    generated values, controls), `::test_an_ipv6_literal_ends_at_any_character_outside_its_alphabet`
+    (5,120 generated values, 156 binder refusals, controls),
+    `::test_a_json_float_leaf_is_the_lab_a_stated_residual`; amended:
+    `::test_a_value_holding_an_authority_mark_anywhere_is_outside_the_lab` (+16 values),
+    `::test_a_bare_ipv6_literal_is_outside_the_lab` (+13, `_IPV6_BESIDE_READ`), both
+    generated sweeps (`_IPV6_BESIDE_POSITIONS`), `::test_a_json_number_leaf_is_judged_by_its_json_text`
+    (floats moved out, `134744072.0` in), and the recogniser guard (names
+    `_special_scheme_mark`). Embedded readings checked against node 22 and
+    `getaddrinfo` (`r2/check_tables_r2.txt`: 38, 0 mismatches; round 1's 113 re-checked,
+    0 mismatches).
+  - Pre-fix proof: one pytest invocation of `tests/test_replay_bindings.py` whole on fffc66b, with
+    d3cb339's `value_shape.py` copied in place of the fix and then the fix restored (digest
+    checked, `git status` clean; `scratchpad/lanes/LABAUTH/r2/prefix_r2.txt`): 38 failed, 376
+    passed, 3 xfailed, each failure at its test's own assertion -- N1: 16 of the 30
+    `_AUTHORITY_ANYWHERE` values (the 16 added) at `assert names_outside_lab(value)`, and
+    the generated special-scheme test at `kept == []`; N2: 12 of the 13 `_IPV6_BESIDE_READ`
+    values at `assert names_outside_lab(value)` (`2001:4860:4860::8888;id` was outside
+    already: `;` was in round 1's list), the generated IPv6 test at `kept == []`, and both
+    sweeps at `kept == []` and `bound == []`; the JSON decimal: the 5 float-residual cases
+    at `assert not names_outside_lab(value)`. The recogniser guard fails at its
+    helper-presence assertion (`_special_scheme_mark` is new): a guard, not counted as a
+    reproduction. The passes are the earlier tests and the controls (`134744072.0` in
+    `_JSON_LEAVES` was outside on d3cb339 too, by its text).
+  - Targeted run: one pytest invocation on 8d8c270 (`FUZZLAB_PYTEST_LOCK_WAIT=7000`, `-n 3 --dist
+    loadfile`; `scratchpad/lanes/LABAUTH/r2/targeted_r2.txt`) of 50 files: every test file
+    that reaches FR-AUD-20's predicate or its callers (46: the importers of `value_shape`,
+    `harness.auto` and the binder, so the callers' tests that round 1's import-based
+    selection missed are held), packaging, lint, traceability and the shared-primitives
+    table: 2600 passed, 0 failed, 5 skipped (four live external-lab tests without
+    `FUZZLAB_LIVE_EXTERNAL_LABS=1`, `bdist_wheel` unavailable), 18 xfailed, in 12 min 29 s.
+    `scripts/verify_change.py` was not run here: the orchestrator verifies at the merge.
+  - Deliverables: [x] the fixes above; [x] tests; [x] FR-AUD-20 amended in place
+    (FR-AUD-32 unchanged); [x] BUG-0555's review-round-2 section; [ ] PA-0555
+    (strengthened: (4), new (8)), SP-73, CHANGELOG, ERROR_LOG and failure-record texts
+    handed over for the merge (`scratchpad/lanes/LABAUTH/doc_texts.md`, "r2 changes").
 
 ### CC-AUD-0057 — The captured-request import refuses and counts a body holding a lone surrogate instead of failing the import (FR-AUD-22, BUG-0554) (2026-10-21)
 - Placement: lane SURROGATE (item AU-REQID78), base 33b423e, with CC-CRAWL-0061 (the
