@@ -122,6 +122,31 @@ Newest first.
       is set with `raising=False`; N5); the linearity oracle counts every C-level call
       on one URL per part of the walk, both modes, proven on seven quadratic variants;
       the R2 pin covers greybox too.
+  - *(After the owner's final round, 2026-10-22, branch `lane/REDACTURL-r3` from 111b6fb;
+    the round-2 fix check; BUG-0556 "Residuals after the owner's final round". The
+    owner's rule: what is found after the final round is pinned, except a regression the
+    batch introduced, fixed in the batch, PA-0549(3c).)*
+    - **The check's in-batch regression (N2 item 1 = N7 neighbour 2):** `_AUTHORITY_AT`'s
+      authority runs to `/`, `\`, `?` or `#` only, no longer stopping at whitespace
+      (measured on Node 22: `https://bob:correct horse@host/x` has password
+      `correct%20horse`); a passphrase f939778 redacted was kept by every consumer.
+    - **Three more in-batch regressions, found by a differential sweep against f939778
+      and fixed:** `_UrlWalk.userinfo` raises `_Whole` for a userinfo holding a pair
+      separator raw or encoded at any depth (`_USERINFO_PAIR`; its replacement deleted
+      the pair's name, `a=//x&password=…@<word>`); `_UrlWalk.path` walks a nested
+      authority holding a raw `=`, `&` or `;` as a value (`_AUTHORITY_PAIRS`;
+      `a=https://x%26password%3D…`, and the check's N1 (B), the same mechanism, with
+      it); `_url_shaped` takes only an authority's `\\` or `\/`, not a single leading
+      `\`, for a URL (`/\host%26token%3D…` was walked as a path).
+    - **`redact_for_record`:** `_URL_USERINFO_SPACED` strips a top-level userinfo whose
+      span crosses whitespace and holds no pair separator (`http://bob:pw <pw>@…`, kept on
+      f939778 too); `_URL_USERINFO` is unchanged, so no span it matched changes.
+    - Tests: `tests/test_redaction_nested.py` gains the four classes through every URL
+      consumer and `import_spider`, the record's spaced userinfo and its guard, and three
+      benign spellings; N5's fixture and R5 fallback, `raises=AssertionError` on R1, R2,
+      R4 and R5; new `tests/test_redaction_residual_pins.py` pins the rest (N1 (A), N2
+      items 2-3, the backslash value, N3's `--append`, N6, N7 neighbour 1 across `&` and
+      `%26`, a spaced userinfo holding `&`, N8's three oracle blind spots).
 - Impact (other components / project):
   - Every producer that calls `redact_url` now redacts nested credential names, `;`
     pairs, path parameters and query-shaped fragments: **PROXY** (flow history's URL,
@@ -173,6 +198,14 @@ Newest first.
     way). Cost: the userinfo scan is one linear regex pass per nested value; measured
     on the new oracle, at most 10.3 steps and 15.4 C-level characters per URL
     character.
+  - *(After the final round:)* over-redaction (fail closed, accepted): a nested value
+    whose userinfo holds a pair separator (a password with `&`, `;` or `%26`) is now
+    redacted whole, not only its userinfo; a nested userinfo's span now crosses
+    whitespace (`q=see //docs and me@x`), as the WHATWG parser reads it. A benign
+    differential of 20 160 URLs holding no secret is identical to 111b6fb's, and the
+    leak differential (90 720 + 12 600 URLs) regresses none against f939778 or 111b6fb.
+    The new branches are one linear pass each; the linearity oracle passes at 500 and
+    4000 items.
 - Deliverables:
   - [x] `_UrlWalk`, `_walk_url`, `value_holds_secret`, `stored_value`,
     `strip_secret_path_params`; `redact_url`, `redact_url_identifiers`,
@@ -196,6 +229,11 @@ Newest first.
     f939778's oracle); FR-CORE-537, FR-CORE-32, FR-AUD-31, FR-FUZZ-67 and FR-PROXY-11
     amended in place; BUG-0556 "Review round 2"; PA-0556 item 7 and the doc texts
     amended — done
+  - [x] *(After the final round)* the four in-batch regressions and N1 (B) in the
+    owner, `_URL_USERINFO_SPACED`; their tests proven on 111b6fb; N5's test fixes swept
+    on four revisions; the residual pins file; FR-CORE-537 amended in place (the stated
+    gaps name the pins); BUG-0556 "Residuals after the owner's final round"; PA-0556
+    item 8, SP-17 and the doc texts amended ("r3 changes") — done
 - Effectiveness (assessed 2026-10-22): the six reported spellings stored their token
   before (measured by `scratchpad/lanes/REDACTURL/exp/repro.py` on 7393c90) and store
   none after; the new tests fail on the pre-fix product files in one invocation and pass
@@ -215,6 +253,12 @@ Newest first.
   base-URL registry guard (round 1's `import_audit` keyword, fixed after the run:
   CC-AUD-0059) and a writer-thread counter race in a PROXY test outside this lane
   (root-caused and flagged, BUG-0556 "Review round 2"). The harness result is the
+  orchestrator's at merge. *(After the final round:)* the round's 41 new test cases fail
+  on 111b6fb's `fuzzlab/` on their own assertions and pass on the revision (plain runner,
+  `scratchpad/lanes/REDACTURL/r3/plain_111b6fb.log`); each of the 37 pin cases fails on
+  its stated assertion on the revision (`r3/pins_plain.log`); the round's run
+  (`r3_run.log`, one invocation of 17 files): 1502 passed, 42 xfailed (the 37 pins, R1,
+  R2, R4, R5 and BUG-0554's), no failure or skip. The harness result is the
   orchestrator's at merge.
 
 ### CC-CORE-0075 — The seam keeps its connections per identity and session generation (FR-CORE-509, BUG-0549) (2026-10-21)

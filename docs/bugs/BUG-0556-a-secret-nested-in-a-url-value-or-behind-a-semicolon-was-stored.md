@@ -772,3 +772,196 @@ owner sees a value) and each gets a test that fails on the pre-fix code.
   `tests/test_redaction_nested.py::test_import_audit_stores_no_userinfo_of_the_finding_page`
   (strict xfail; confirmed failing on the revision by the plain runner, added after the
   targeted run).
+
+## Residuals after the owner's final round (111b6fb; branch `lane/REDACTURL-r3`)
+
+The fix check of review round 2 (`scratchpad/lanes/REDACTURL/final_check_findings.md`)
+found each N1..N8 repro fixed on 111b6fb and neighbouring paths still open. The owner's
+rule for the final round: anything found after it is pinned by a strict xfail, never
+fixed in another round -- **except a regression the batch itself introduced, which is
+fixed in the batch** (PA-0549(3c)). The check named one such regression; a differential
+sweep of the fix against f939778 and 111b6fb found three more beside it, each fixed here
+under the same rule. Everything else is pinned in a new file,
+`tests/test_redaction_residual_pins.py` (strict, `raises=AssertionError`, each reason
+naming BUG-0556 and its owner). The owner's changes are CC-CORE-0076's "after the final
+round" sub-bullet; FR-CORE-537 is amended in place and names the pins.
+
+### The in-batch regressions, fixed
+
+1. **A userinfo holding whitespace (the check's N2 item 1 = N7 neighbour 2).**
+   - **What failed.** Round 2's `_AUTHORITY_AT` took the authority as `([^/\\?#\s]*)`,
+     stopping at whitespace, where round 1's `userinfo` ran to the next `/`. A passphrase
+     was kept that f939778 redacted: `next=https%3A%2F%2Fbob%3Acorrect%20<pw>%40host%2Fx`
+     (encodeURIComponent of `https://bob:correct <pw>@host/x`) by both redactors,
+     `page_url_is_clean`, `safe_ref`, `redact_for_record` and the proxy's request line,
+     `Referer` and `Location`; the raw `next=https://bob:correct%20<pw>@host/x`, a `%09`,
+     an NBSP and the `/go/…` nested-path forms by `value_holds_secret`, so `import_spider`
+     stored the password in `parameter.example`, `form.entries` and (encoded)
+     `form.source_page`; `?next=https://bob:pw <word>@host/x` and the same in
+     `#/r?next=` by every consumer.
+   - **Measured.** Node 22's `URL` (`scratchpad/lanes/REDACTURL/r3/whatwg_ws.js`):
+     `https://bob:correct horse@host/x` has password `correct%20horse`; a VT, FF, NBSP or
+     U+3000 is kept and encoded, a tab or newline removed; `http://bob:Canary Word@h/` (a
+     top-level URL) has password `Canary%20Word`.
+   - **Fix.** `_AUTHORITY_AT`'s authority runs to `/`, `\`, `?` or `#` only.
+2. **A userinfo that is also a pair list (found by the r3 sweep).**
+   - **What failed.** Round 2 runs `userinfo` on a value before the walk splits it or
+     decodes its layer, so in `next=a%3D%2F%2Fx%26password%3DHunter%40<word>` (and with
+     `;`, `quote(safe="/")`, a route fragment, double encoding) the span `x&password=
+     Hunter` became `PLACEHOLDER@` and the pair's name went with it:
+     `a=//__REDACTED__@<word>` kept the password's tail in both redactors, `safe_ref`,
+     `redact_for_record` and the proxy. f939778 split the pairs first and redacted it.
+     Item 1's wider authority would have widened this to `a=//x b&password=…`, clean on
+     111b6fb.
+   - **Fix.** `_UrlWalk.userinfo` raises `_Whole` when a userinfo holds a pair separator
+     raw or percent-encoded at any depth (`_USERINFO_PAIR`: `&`, `;`, `%26`, `%3B`,
+     `%2526`, ...): the value is redacted whole, under both readings (fail closed).
+3. **A nested authority holding raw pair structure (found by the r3 sweep; N1 (B)).**
+   - **What failed.** Round 2's `_url_shaped` (N1) sends `a=https://x%26password%3D
+     <word>` to the pair walk, whose value `https://x%26password%3D<word>` is decoded
+     whole to `https://x&password=<word>`; `_UrlWalk.path` walked a nested authority only
+     when it held an escape, so the decoded one was never read (f939778 had walked
+     `a=https://…` as one URL and decoded its segment). The check's N1 (B) -- a `;` pair
+     in a nested authority never walked once decoded (`next=https%3A%2F%2Fhost%3B
+     jsessionid%3D<hex>`, Tomcat's encodeURL of a bare origin, encoded) -- is the same
+     mechanism (it leaked on f939778 too), so it is fixed with it, not pinned.
+   - **Fix.** `_UrlWalk.path` walks a nested authority holding a raw `=`, `&` or `;` as a
+     value (`_AUTHORITY_PAIRS`); one holding an escape is decoded as before.
+4. **A value led by one backslash (found by the r3 sweep).**
+   - **What failed.** Round 2's `_url_shaped` took any leading `\` for a URL, so the
+     layer `\host&token=<word>` of `next=/\host%26token%3D<word>?y=1` was walked as a
+     URL whose path is never split: every URL consumer kept the token f939778 redacted.
+   - **Fix.** Only an authority's `\\` or `\/` makes a value a URL; a single `\` leaves
+     it a pair list.
+
+Not a regression, changed with item 1 as the task asked (the same measurement holds for a
+top-level URL): `redact_for_record`'s `_URL_USERINFO` stops at whitespace, so `http://bob:
+pw <pw>@127.0.0.1:3000/app/` kept its password in `launch.argv`, `launch.target` and
+`project.targets` (on f939778 too). A second pattern, `_URL_USERINFO_SPACED`, strips a
+userinfo whose span crosses whitespace and holds no pair separator (raw or encoded once);
+every span `_URL_USERINFO` matches is matched as before, and a space never lets a span
+reach a later pair (`?next=//x q&password=…@…` stays a pair; widening `_URL_USERINFO`
+itself would have deleted that name, clean on 111b6fb).
+
+**Tests** (`tests/test_redaction_nested.py`, "after the owner's final round"):
+`test_an_in_batch_regression_spelling_is_redacted_by_every_url_consumer` (21 spellings:
+both redactors, `safe_ref`, `redact_for_record`, the proxy's request line, `Referer` and
+`Location`, `page_url_is_clean`, `value_holds_secret`, collected before one assertion),
+`test_an_in_batch_regression_spelling_stores_no_secret_through_import_spider` (16: the
+spellings `import_spider` stored on 111b6fb; item 2's it stored clean there),
+`test_a_raw_single_backslash_pair_list_is_redacted_by_every_url_redactor`,
+`test_a_project_record_strips_a_top_level_userinfo_holding_a_space` (3, through
+`insert_launch` and `add_target`) and the guard
+`test_a_records_spaced_userinfo_never_reaches_a_later_pair`; three benign spellings
+(a nested authority's clean `;v=2`, a backslash-led clean pair list, a `%20` in a nested
+path) stay byte-identical.
+
+**Proof.** A plain runner (no pytest session: parametrize expanded, `tmp_path` and the real
+`MonkeyPatch` supplied, xfail honoured; `scratchpad/lanes/REDACTURL/r3/run_plain.py`) ran
+the new tests against a `git archive` of 111b6fb's `fuzzlab/`: all 41 fail there, each an
+`AssertionError` on its own assertion (the guard passes, as a guard must), and pass on the
+revision. The differential sweeps (`r3/sweep.py`, 12 600 URLs; `r3/sweep2.py`, 90 720:
+every authority shape the walk reads, six encodings, six positions, through both
+redactors, `safe_ref`, `redact_for_record`, `page_url_is_clean` and `value_holds_secret`)
+count, per URL, the consumers that keep the secret: 111b6fb regressed 6 313 of the 90 720
+against f939778; the revision regresses none against either, and improves 39 051 against
+f939778 and 22 169 against 111b6fb. A benign differential (`r3/benign.py`, 20 160 URLs
+holding no secret) is identical between 111b6fb and the revision. The linearity oracle
+passes the revision at 500 and 4000 items (the new branches are one linear pass each).
+
+### N5: the tests' own pre-fix paths, fixed (no pin)
+
+The check found the round's file failing on old code for the wrong reason again:
+`_audit_store` passed `base_url=None` to `import_audit`, which has had the keyword only
+since round 1, so three tests stopped on 7393c90 and c3a13f7 with a `TypeError` before any
+assertion; and R5's strict xfail "held" there on an `ImportError` of `_audit_text`. Now the
+fixture passes `base_url` only when given and to `import_audit` only where its signature
+takes it; R5 looks `_audit_text` up with a fallback (the pre-round-1 writer stored the
+text as it was); R1, R2, R4 and R5 are `raises=AssertionError`. Swept with the plain runner
+over the whole file on four trees (`r3/plain_<rev>.log`): 7393c90 469 failed, c3a13f7 401,
+f939778 60, 111b6fb 41, each an `AssertionError` on the test's own assertion except, on
+7393c90, `test_the_redactors_are_total[http://[::1/x?token=a;b=%2F%3F]` (the old redactor
+raised `ValueError: Invalid IPv6 URL`, the totality failure the test names); every xfail
+fails on its `AssertionError` on every tree. The revision: 526 passed, 4 strict xfails.
+
+### Pinned (`tests/test_redaction_residual_pins.py`; each proven failing on its stated assertion on the revision by the plain runner, `r3/pins_plain.log`)
+
+- **N1 (A)** (owner CORE): `::test_an_encoded_authoritys_userinfo_is_redacted` (4 cases:
+  `next=https://bob%253A<pw>%2540host%252Fx?y=1`, `#https://bob%3A<pw>%40host%2Fx?y=1`,
+  `#//bob%3A…`, `#https://bob%3A<pw>%40host`): both redactors return the URL unchanged.
+- **N2 item 2** (owner CORE):
+  `::test_a_userinfo_the_whatwg_parser_reads_after_a_space_or_a_stripped_tab_is_redacted`
+  (6: `+https:bob:<pw>@`, `+http:/bob:<pw>@`, `+https%3Abob%3A<pw>%40host%2Fx`,
+  `https:/%0A/`, `https:/%09/`, `https:%2F/…?y=1`): both redactors keep the password.
+- **N2 item 3, R3** (owners CORE and AUD):
+  `::test_a_userinfo_in_the_top_level_fragment_route_is_redacted` (2: `#/go/https://bob:
+  <pw>@host/x`, `#https://bob:<pw>@host/x`; both redactors keep it),
+  `::test_a_userinfo_in_a_top_level_pair_name_is_never_stored` (2: `out.php?https://bob:
+  <pw>@host/x?a=1` and the nameless form; `parameter.name` holds it) and
+  `::test_a_userinfo_in_a_top_level_path_segment_is_never_stored`
+  (`/app/redirect/https%3A%2F%2Fbob%3A<pw>%40host%2Fx`; `page` and `endpoint` hold it).
+- **r3's sweep, item 4's raw spelling decoded once** (owner CORE):
+  `::test_a_backslash_led_pair_list_decoded_once_is_held_secret` (`value_holds_secret(
+  "/\host&token=<word>?y=1")` is False: `_authority_start` reads `/\` as a path, the
+  WHATWG parser as an authority; `import_spider` stores the token; on f939778 too).
+- **N3 neighbour 2, `fuzzlab audit --append --store`** (owner AUD):
+  `::test_import_audit_after_an_appended_audit_stores_each_page_as_the_spider_does`: the
+  audit adds `['/v1/q.php', 'http://h:80/app/old.php']` (the API page on the wrong host,
+  a main-origin page absolute) where `['/app/old.php', 'http://api.h:8081/v1/q.php']` is
+  the spider's form.
+- **N6** (owner PROXY):
+  `::test_proxy_history_redacts_a_url_in_a_malformed_or_folded_message` (9: an empty line
+  or a leading space before the request line, `;jsessionid` and `?token`; folded
+  `Referer` and `Location`; `Link`'s `anchor`; `X-Redirect` holding `?token=`,
+  `app/;jsessionid=` and a quoted URL): `redact` returns the secret.
+- **N7 neighbour 1 and `_URL_USERINFO` across a separator** (owner CORE):
+  `::test_a_record_never_deletes_a_pair_name_with_a_userinfo_pattern` (5: `q=is:open
+  label:bug&password=Hunter@<word>` -> `?q=is:open ***@<word>`; the route form;
+  `q=a b:c&token=@<word>`; `?next=//x&password=Hunter@<word>` -> `?next=//__REDACTED__@
+  <word>`; the same across `%26`, found by r3's sweep) and
+  `::test_a_record_strips_a_top_level_userinfo_holding_a_space_and_a_pair_separator`
+  (`http://bob:pw x&<word>@…`, kept: the spaced pattern stops at `&` by design).
+- **N8** (owner CORE, the oracle):
+  `::test_the_linearity_oracle_flags_c_level_work_outside_the_counted_names` (3: a
+  per-pair `re.split` with an uncompiled pattern, `urllib.parse.unquote` called directly,
+  `str.split`), `::test_the_linearity_oracle_runs_the_userinfo_loop` (a per-authority
+  rescan never runs: no oracle URL holds `@`) and
+  `::test_the_linearity_oracle_runs_the_redaction_path` (a per-redacted-pair re-split never
+  runs: every oracle URL is clean); `_linearity_violations(100)` returns `[]` for each.
+
+**The round's run** (one pytest invocation, `FUZZLAB_PYTEST_LOCK_WAIT=7000`, `-n 3 --dist
+loadfile`, of `tests/test_redaction_nested.py`, `tests/test_redaction_residual_pins.py`,
+`tests/test_proxy_redaction.py`, `tests/test_store_adapter.py` and every test file
+importing `fuzzlab.core.redaction`; `scratchpad/lanes/REDACTURL/r3_run.sh`,
+`r3_run.log`), 17 files: `1502 passed, 42 xfailed, 3 warnings in 505.69s` (exit 0; the
+42 xfails are the 37 pin cases, R1, R2, R4, R5 and BUG-0554's
+`test_capture_surrogates.py` pin; no skip, no failure; the warnings are a starlette
+deprecation and a `fork()` notice in other files' tests).
+
+**Why the final round introduced regressions.** Round 2 followed PA-0556(7): it
+enumerated each finding's neighbouring paths and gave each a test failing on f939778.
+Every such test asserts that something *more* is redacted; none compared what the changed
+walk returns with what f939778 returned on the same inputs, so the places round 2
+narrowed a reading -- a class that stopped at whitespace, a replacement moved before the
+split, a value shape (`a=`, `\`) routed elsewhere -- were seen by no test. The check found
+one by reading the regex; a generated differential (clean on the pre-fix code, kept after)
+found 6 313 cases in four classes in minutes.
+
+**Recurrence review.** The same lane's fourth pass at the class. Prior-preventive-action
+failure analysis: **PA-0556(7) (fix the mechanism; neighbouring paths each with a test
+failing on the pre-fix code): too narrow.** It is forward-only: it proves the fix adds
+what it claims and never that it removes nothing. PA-0549(3c) was followed (the batch's
+regressions are fixed here). PA-0556 gains item 8 (in the lane's doc texts): before a
+round is reported, the change is diffed against the pre-fix code by a generated
+differential over every consumer of the changed owner -- a case clean before and kept
+after is a regression of the batch, fixed in it -- and each regression class found gets a
+test that fails on the round's own pre-fix revision.
+
+### The PA-0002 sweep after the final round (rows that changed)
+
+| Caller (file:function) | Calls | What it stores or sends | Disposition |
+|---|---|---|---|
+| every URL redactor's walk (`_UrlWalk`) | itself | every caller of `redact_url`, `redact_url_identifiers`, `page_url_is_clean`, `value_holds_secret`, `stored_value` | **fixed after the final round** (the four in-batch regressions and N1 (B)); the rest pinned (N1 (A), N2 items 2-3, the backslash value) |
+| `core/redaction.py` `redact_for_record` | `_URL_USERINFO`, `_URL_USERINFO_SPACED`, `_BARE_USERINFO`, `redact_url` | `launch.argv`, `launch.target`, `project.targets` | a spaced top-level userinfo **fixed**; the pre-pass deleting a pair name (N7 neighbour 1, across `&` and `%26`) and a spaced userinfo holding `&` **pinned** |
+| `store_adapter.import_audit` / `_audit_endpoint` | `store_url` | `endpoint.url` | the `--append` fallback **pinned** (N3) |
+| `proxy/redact.py` `redact` | `redact_url` | stored raw messages, `flow_fts` | malformed and folded messages, `Link`'s `anchor`, relative custom URL headers **pinned** (N6) |

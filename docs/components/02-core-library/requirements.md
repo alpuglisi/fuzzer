@@ -852,15 +852,18 @@ plugin registry. It is the layer that makes the store the integration bus.
   - **Where a value sits:** a query pair, `&` or `;` separated; a `;name=value` (or
     bare `;value`) path parameter in any segment; a query-shaped fragment (`#…?a=b`,
     `#a=b`) and a fragment route's path parameters; and, inside any of those values, a
-    nested URL (a leading scheme `://`, `/` or `\`, or a `?` or `#` before any `=`, `&`
-    or `;`: its path parameters, query and fragment), a nested query string (`=`, `&`
+    nested URL (a leading scheme `://`, `/`, or an authority's `\\` or `\/` -- a single
+    leading `\` is not one, *after the final round* -- or a `?` or `#` before any `=`,
+    `&` or `;`: its path parameters, query and fragment), a nested query string (`=`, `&`
     or `;`: its pairs, a URL in a pair's value included), or a percent-encoding layer
     (decoded one layer, then walked again). A layer is decoded wherever it remains
     inside any piece the walk reads *(review rounds 1-2, BUG-0556)*: a value with a
     percent-escape and no raw `?`, `#`, `=`, `&` or `;` (`quote(safe="/")`,
     `quote(safe="/:")`, Django's `redirect_to_login`: `/` and `:` raw at every layer) is
     decoded first, as a whole; a nested URL's authority and each path segment still
-    encoded are decoded and walked, whatever raw delimiter sits elsewhere in the value;
+    encoded are decoded and walked, whatever raw delimiter sits elsewhere in the value
+    (and a nested authority holding a raw `=`, `&` or `;` is walked as a value, *after
+    the final round*: `https://host;jsessionid=…` decoded from a layer);
     so is each segment of a fragment's route, the top-level fragment's included (its
     raw segments stay the page's identity); a value is decoded first or split first,
     never both. A URL's userinfo (`user[:password]@`, its `@` raw or `%40`) is a
@@ -870,6 +873,11 @@ plugin registry. It is the layer that makes the store the integration bus.
     after two or more of them anywhere (a nested URL's path segment or fragment route,
     a value after a space), as `redact_for_record` and `core.trace.safe_ref` already
     judged it. A URL's own scheme and `//` (its path walk) count only at its start.
+    *(After the final round:)* the authority runs to `/`, `\`, `?` or `#` only, so a
+    userinfo holding whitespace (a passphrase; Node 22: `correct%20horse`) is a
+    credential; a userinfo holding a pair separator, raw or percent-encoded at any depth
+    (`&`, `;`, `%26`, `%3B`, `%2526`, ...), is also a pair list and redacts its value
+    whole (`_Whole`), so its replacement never deletes a pair's name.
   - **The rule at every level:** a sensitively named pair or path parameter
     (`is_sensitive_name`, name form-decoded) gets `PLACEHOLDER`. With identifiers
     (`redact_url_identifiers`), an identifier-like value (`looks_like_identifier`,
@@ -913,15 +921,40 @@ plugin registry. It is the layer that makes the store the integration bus.
     every value of every URL-bearing header, duplicates included, and reads the request
     target whitespace-tolerantly (FR-PROXY-11); the project-record redactor walks the
     whole value before any whitespace split, then each piece (`redact_for_record`, RU-9,
-    N7: a URL holding a raw space).
+    N7: a URL holding a raw space); its userinfo pre-pass also strips a userinfo whose
+    span crosses whitespace and holds no pair separator (`_URL_USERINFO_SPACED`, *after
+    the final round*).
+  - **Stated gaps, pinned** *(after the owner's final round; BUG-0556 "Residuals after
+    the owner's final round")*, each a strict xfail in
+    `tests/test_redaction_residual_pins.py` naming its owner:
+    `test_an_encoded_authoritys_userinfo_is_redacted` (a userinfo decoded from a nested
+    authority's or a top-level fragment route's layer, N1 (A));
+    `test_a_userinfo_the_whatwg_parser_reads_after_a_space_or_a_stripped_tab_is_redacted`
+    (`+https:bob:pw@`, `https:/%0A/`, `https:%2F/`, N2 item 2);
+    `test_a_userinfo_in_the_top_level_fragment_route_is_redacted`,
+    `test_a_userinfo_in_a_top_level_pair_name_is_never_stored` and
+    `test_a_userinfo_in_a_top_level_path_segment_is_never_stored` (R3: the top-level
+    route, a pair's name and a path segment are the page's identity, N2 item 3);
+    `test_a_backslash_led_pair_list_decoded_once_is_held_secret` (`/\host&token=…` read
+    as a path by `_authority_start`);
+    `test_a_record_never_deletes_a_pair_name_with_a_userinfo_pattern` and
+    `test_a_record_strips_a_top_level_userinfo_holding_a_space_and_a_pair_separator`
+    (`redact_for_record`'s userinfo pre-pass runs before the walk, N7 neighbour 1);
+    `test_the_linearity_oracle_flags_c_level_work_outside_the_counted_names`,
+    `test_the_linearity_oracle_runs_the_userinfo_loop` and
+    `test_the_linearity_oracle_runs_the_redaction_path` (the oracle's blind spots, N8).
+    The callers' gaps are pinned in the same file: `import_audit` after `--append` (AUD,
+    N3) and malformed or folded proxy messages (PROXY, N6).
   - Enforced by: `tests/test_redaction_nested.py` (a generated sweep over depth,
     encoding -- raw, single and double percent, `+`, `quote(safe="/")` single and
     double, `quote(safe="/:")` -- separator, nested shape -- a path, an absolute URL, a
     query string, a URL's userinfo -- credential names and identifier shapes, searched in
     the store, proxy history, the HTTP recorder, `safe_ref` and the project records; the
     review rounds' neighbouring spellings through every URL redactor and the store; the
-    benign list byte-identical; bounds and totality; an operation-count linearity
-    oracle proven on quadratic variants).
+    in-batch regressions after the final round through every URL consumer and the store;
+    the benign list byte-identical; bounds and totality; an operation-count linearity
+    oracle proven on quadratic variants); the stated gaps by
+    `tests/test_redaction_residual_pins.py` (strict xfails).
 - **FR-CORE-508** *(one read-only opener; a SQLite file is touched only through
   SQLite; `CC-CORE-0071`, 2026-10-20, BUG-0535).*
   - `core.store.open_read_only(path, *, timeout, fold_on_close=False, any_thread=False)`

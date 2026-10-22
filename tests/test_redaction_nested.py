@@ -326,6 +326,188 @@ def test_the_review_round_2_spellings_store_no_secret_through_import_spider(tmp_
     assert not _leaks(dump, _PASS) and not _leaks(dump, _WORD)
 
 
+# --- after the owner's final round: the batch's own regressions (BUG-0556) ---------------
+#: A passphrase: Node 22's ``URL`` reads ``https://bob:correct horse@host/x`` as password
+#: ``correct%20horse`` (`scratchpad/lanes/REDACTURL/r3/whatwg_ws.js`; a VT, FF, NBSP or
+#: U+3000 is kept and encoded too, a tab or newline removed).
+_PHRASE = "correct " + _PASS
+#: Spellings f939778's URL redactors redacted and 111b6fb kept in at least one consumer
+#: (``(url, secret)``): the fix check's regression after the final round (N2 item 1 = N7
+#: neighbour 2: `_AUTHORITY_AT`'s authority stopped at whitespace) and the three the r3
+#: differential sweep found beside it (a userinfo that is also a pair list, replaced
+#: before the walk split it; a nested authority holding raw pair structure, never walked
+#: once round 2's `_url_shaped` sent ``a=https://…`` to it; a value led by one backslash
+#: taken for a URL); and N1 (B) (kept on f939778 too), the same mechanism as the third,
+#: fixed with it.
+#:
+#: 1. a userinfo holding whitespace: encodeURIComponent's spelling, raw, a tab, an NBSP,
+#: in a nested path segment, a raw space at the top and in a route's query
+_SPACED_USERINFO = [
+    ("http://h/app/p.php?u=bob&next=" + quote(f"https://bob:{_PHRASE}@host/x", safe=""),
+     _PASS),
+    (f"http://h/app/p.php?u=bob&next=https://bob:{quote(_PHRASE)}@host/x", _PASS),
+    ("http://h/app/p.php?u=bob&next=" + quote(f"https://bob:correct\t{_PASS}@host/x",
+                                              safe=""), _PASS),
+    (f"http://h/app/p.php?u=bob&next=https://bob:correct%09{_PASS}@host/x", _PASS),
+    ("http://h/app/p.php?u=bob&next=" + quote(f"https://bob:pw {_PASS}@host/x",
+                                              safe=""), _PASS),
+    ("http://h/app/p.php?u=bob&next=/go/" + quote(f"https://bob:{_PHRASE}@host/x", safe=""),
+     _PASS),
+    (f"http://h/app/p.php?u=bob&next=/go/https://bob:{quote(_PHRASE)}@host/x", _PASS),
+    (f"http://h/app/q.php?u=bob&next=https://bob:pw {_WORD}@host/x", _WORD),
+    (f"http://h/app/r.php?u=bob#/r?next=https://bob:pw {_WORD}@host/x", _WORD),
+]
+#: 2. a userinfo holding a pair separator, raw or encoded: the pair reading's name was
+#: deleted with it (``a=//__REDACTED__@<word>``)
+_PAIR_LIST_USERINFO = [
+    ("http://h/app/p.php?u=bob&next=" + quote(f"a=//x&password=Hunter@{_WORD}", safe=""),
+     _WORD),
+    ("http://h/app/p.php?u=bob&next=" + quote(f"a=//x;token=Hunter@{_WORD}", safe=""),
+     _WORD),
+    ("http://h/app/p.php?u=bob&next=" + quote(f"/v?a=//x&password=Hunter@{_WORD}"), _WORD),
+    ("http://h/app/#/r?next=" + quote(f"a=https://x&password=Hunter@{_WORD}", safe=""),
+     _WORD),
+    ("http://h/app/p.php?u=bob&next="
+     + quote(f"a=https://x%26password%3DHunter@{_WORD}/x"), _WORD),
+]
+#: 3. a nested authority holding raw pair structure once its layer is decoded, and N1 (B)
+_NESTED_AUTHORITY_PAIRS = [
+    (f"http://h/app/p.php?u=bob&next=a=https://x%26password%3D{_WORD}", _WORD),
+    ("http://h/app/p.php?u=bob&next=" + quote(f"a=https://x%26password%3D{_WORD}", safe=""),
+     _WORD),
+    # ... and N1 (B), the same mechanism (Tomcat's encodeURL of a bare origin, encoded)
+    ("http://h/app/c1.php?u=bob&next=" + quote(f"https://host;jsessionid={_HEX}", safe=""),
+     _HEX),
+    ("http://h/app/c1.php?u=bob&next=" + quote(f"https://host;token={_WORD}", safe=""),
+     _WORD),
+    ("http://h/app/c1.php?u=bob&next=" + quote(f"https://host;token={_WORD}/app", safe=""),
+     _WORD),
+    ("http://h/app/c1.php?u=bob&next=" + quote(f"//host;token={_WORD}", safe=""), _WORD),
+]
+#: 4. a value led by one backslash (not an authority) holding a pair list, one layer
+#: below the page's (the raw spelling, whose value decoded once leaves the pair list in
+#: a raw ``/\`` segment, has its own test,
+#: `test_a_raw_single_backslash_pair_list_is_redacted_by_every_url_redactor`: its
+#: `value_holds_secret` and `import_spider` kept it on f939778 too, pinned in
+#: `tests/test_redaction_residual_pins.py`)
+_BACKSLASH_PAIRS = [
+    ("http://h/app/p.php?u=bob&next=" + quote(f"/\\host%26token%3D{_WORD}?y=1", safe=""),
+     _WORD),
+]
+_AFTER_FINAL = (_SPACED_USERINFO + _PAIR_LIST_USERINFO + _NESTED_AUTHORITY_PAIRS
+                + _BACKSLASH_PAIRS)
+
+
+def _next_value(url: str) -> str:
+    """The ``next`` value of a page URL (its query's, or its route fragment's)."""
+    return re.split(r"[?&]next=", url, maxsplit=1)[1]
+
+
+@pytest.mark.parametrize("url,secret", _AFTER_FINAL)
+def test_an_in_batch_regression_spelling_is_redacted_by_every_url_consumer(url, secret):
+    """BUG-0556 after the final round (PA-0549(3c): a regression the batch introduced is
+    fixed in the batch): each spelling is redacted by both URL redactors, the evidence
+    reference, the record redactor, the proxy's request line, ``Referer`` and
+    ``Location``, is never a clean page, and its value is one `value_holds_secret` holds
+    for. Every consumer is checked before the one assertion, so 111b6fb fails there,
+    naming what kept the secret."""
+    from fuzzlab.core.trace import safe_ref
+    from fuzzlab.proxy.redact import redact
+    assert _leaks(url, secret)                               # not vacuous
+    target = url.split("://", 1)[1].partition("/")[2]
+    request = f"GET /{target} HTTP/1.1\r\nHost: h\r\nReferer: {url}\r\n\r\n".encode()
+    response = f"HTTP/1.1 302 Found\r\nLocation: {url}\r\n\r\n".encode()
+    kept = [name for name, out in (
+        ("redact_url", R.redact_url(url)),
+        ("redact_url_identifiers", R.redact_url_identifiers(url)),
+        ("safe_ref", safe_ref(url)),
+        ("redact_for_record", R.redact_for_record("target", url)),
+        ("proxy request line and Referer", redact(request).decode("latin-1")),
+        ("proxy Location", redact(response).decode("latin-1"))) if _leaks(out, secret)]
+    if R.page_url_is_clean(url):
+        kept.append("page_url_is_clean")
+    holds = getattr(R, "value_holds_secret", None)       # judged where the code has it
+    if holds is not None and not holds(unquote(_next_value(url))):
+        kept.append("value_holds_secret")
+    assert kept == []
+    _api("value_holds_secret")
+
+
+def test_a_raw_single_backslash_pair_list_is_redacted_by_every_url_redactor():
+    """Group 4's raw spelling: round 2 took ``/\\host%26token%3D…`` for a URL and its
+    segment's layer ``\\host&token=…`` for another, whose path is never split, so every
+    URL redactor, the evidence reference, the record redactor and the proxy kept the
+    token f939778 redacted. (Its value decoded once is pinned, see `_BACKSLASH_PAIRS`.)"""
+    from fuzzlab.core.trace import safe_ref
+    from fuzzlab.proxy.redact import redact
+    url = f"http://h/app/p.php?u=bob&next=/\\host%26token%3D{_WORD}?y=1"
+    response = f"HTTP/1.1 302 Found\r\nLocation: {url}\r\n\r\n".encode()
+    kept = [name for name, out in (
+        ("redact_url", R.redact_url(url)),
+        ("redact_url_identifiers", R.redact_url_identifiers(url)),
+        ("safe_ref", safe_ref(url)),
+        ("redact_for_record", R.redact_for_record("target", url)),
+        ("proxy Location", redact(response).decode("latin-1"))) if _leaks(out, _WORD)]
+    if R.page_url_is_clean(url):
+        kept.append("page_url_is_clean")
+    assert kept == []
+
+
+#: The spellings `import_spider` stored a secret of on 111b6fb (``parameter.example``,
+#: ``form.entries``, ``form.source_page``; measured, `scratchpad/lanes/REDACTURL/r3/
+#: probe_after_final.py`). It stored group 2 clean there: the replaced userinfo changed
+#: the value, so `stored_value` blanked it and the page was not clean.
+_AFTER_FINAL_STORED = _SPACED_USERINFO + _NESTED_AUTHORITY_PAIRS + _BACKSLASH_PAIRS
+
+
+@pytest.mark.parametrize("url,secret", _AFTER_FINAL_STORED)
+def test_an_in_batch_regression_spelling_stores_no_secret_through_import_spider(
+        tmp_path, url, secret):
+    """The same spellings through the spider's rows and `import_spider`: no secret in
+    ``page``, ``endpoint``, ``parameter.example``, ``form.entries`` or
+    ``form.source_page`` (the page the binder fetches, BUG-0544)."""
+    from fuzzlab.tools.store_adapter import import_spider
+    _spider_db(tmp_path / "s.db", [url])
+    with Store(tmp_path / "u.db") as store:
+        import_spider(tmp_path / "s.db", store, store.start_run("auto", "h"))
+        pages = [r[0] for r in store.conn.execute("SELECT url FROM page").fetchall()]
+        dump = _dump(store)
+    assert any(p.startswith(urlsplit(url).path) for p in pages)    # not vacuous
+    assert not _leaks(dump, secret)
+
+
+@pytest.mark.parametrize("value", [
+    f"http://bob:pw {_PASS}@127.0.0.1:3000/app/",
+    f"http://bob:pw {_PASS}@127.0.0.1:3000/app/?q=1",
+    f"//bob:pw {_PASS}@127.0.0.1:3000/app/",
+])
+def test_a_project_record_strips_a_top_level_userinfo_holding_a_space(tmp_path, value):
+    """BUG-0556 after the final round: `_URL_USERINFO` stopped at whitespace, so a
+    top-level userinfo holding a space (Node 22: password ``pw%20<word>``) was kept in
+    ``launch.argv``, ``launch.target`` and ``project.targets`` (on f939778 too); a span
+    crossing whitespace is now matched when it holds no pair separator. Through the real
+    writers too."""
+    from fuzzlab.core import project
+    assert _PASS not in R.redact_for_record("target", value)
+    with Store(tmp_path / "s.db") as store:
+        project.ensure_metadata(store, "s")
+        project.insert_launch(store, "auto", [("", "fuzzlab"), ("url", value)], value)
+        project.add_target(store, value)
+        dump = _dump(store)
+    assert "127.0.0.1:3000/app/" in dump                    # not vacuous
+    assert _PASS not in dump
+
+
+def test_a_records_spaced_userinfo_never_reaches_a_later_pair():
+    """The guard on the spaced userinfo: a span crossing whitespace stops at a pair
+    separator, so ``?next=//x q&password=…@…`` stays a pair the walk redacts (a span
+    crossing it would delete the name ``password``: residual pinned for the no-space
+    form, `tests/test_redaction_residual_pins.py`)."""
+    url = f"http://127.0.0.1:3000/app/?next=//x q&password=Hunter@{_WORD}"
+    out = R.redact_for_record("target", url)
+    assert _WORD not in out and "password=" in out, out
+
+
 # --- what reaches the store -------------------------------------------------------------
 def _dump(store: Store) -> str:
     out = []
@@ -569,7 +751,8 @@ def test_proxy_history_redacts_every_url_bearing_header_and_any_request_line(tmp
                    "owner PROXY): a URL inside another structured header's grammar (a "
                    "CSP `report-uri`, `Reporting-Endpoints`, `Report-To`'s JSON) is not "
                    "parsed, so a sensitively named value there is kept in proxy history; "
-                   "the URL-bearing headers whose value is a URL are covered (N6)")
+                   "the URL-bearing headers whose value is a URL are covered (N6)",
+                   raises=AssertionError)
 def test_proxy_history_redacts_a_url_inside_a_structured_header():
     from fuzzlab.proxy.redact import redact
     raw = (f"HTTP/1.1 200 OK\r\nContent-Security-Policy: default-src 'self'; report-uri "
@@ -726,7 +909,15 @@ def _audit_store(tmp_path, rows, fetcher, base_url=None):
     """The real chain: the spider's rows, `load_urls`, `audit_page` with every rule,
     `import_spider`, then `import_audit` (no ``base_url`` by default, as `fuzzlab audit
     --store` calls them). ``(candidates' sink contexts, the endpoint urls after the
-    spider's import, the endpoint urls after the audit's, dump)``."""
+    spider's import, the endpoint urls after the audit's, dump)``.
+
+    ``base_url`` is passed only when given, and to `import_audit` only where it takes
+    the keyword (since review round 1): passing ``base_url=None`` stopped the pre-fix
+    code (7393c90, c3a13f7) on a ``TypeError`` before any assertion, masking the leaks
+    and the endpoint split the tests assert (the fix check after the final round, N5;
+    PA-0545(6))."""
+    import inspect
+    kw = {"base_url": base_url} if base_url else {}
     from fuzzlab.tools import fetcher as F
     from fuzzlab.tools.spider import StorageManager
     from fuzzlab.tools.store_adapter import import_audit, import_spider
@@ -743,9 +934,10 @@ def _audit_store(tmp_path, rows, fetcher, base_url=None):
     db.close()
     with Store(tmp_path / "u.db") as store:
         run = store.start_run("auditor", "h")
-        import_spider(tmp_path / "s.db", store, run, base_url=base_url)
+        import_spider(tmp_path / "s.db", store, run, **kw)
         spider = {r[0] for r in store.conn.execute("SELECT url FROM endpoint").fetchall()}
-        import_audit(tmp_path / "a.db", store, run, base_url=base_url)
+        takes_base = "base_url" in inspect.signature(import_audit).parameters
+        import_audit(tmp_path / "a.db", store, run, **(kw if takes_base else {}))
         after = {r[0] for r in store.conn.execute("SELECT url FROM endpoint").fetchall()}
         contexts = [r[0] for r in store.conn.execute(
             "SELECT sink_context FROM candidate").fetchall()]
@@ -801,11 +993,16 @@ def test_import_audit_under_a_subpath_base_stores_the_spiders_paths(tmp_path):
                    "owners CORE and AUD): a page URL's own userinfo is kept by both URL "
                    "redactors (R3), so `import_audit`'s `called from <url>` text keeps it "
                    "in `candidate.sink_context`; R3's reason (the store keeps no top-level "
-                   "userinfo) does not hold for this writer")
+                   "userinfo) does not hold for this writer", raises=AssertionError)
 def test_import_audit_stores_no_userinfo_of_the_finding_page():
-    from fuzzlab.tools.store_adapter import _audit_text
+    # the writer's text redactor where the code has one; before review round 1
+    # `import_audit` stored the rules' texts as they were (the fix check after the final
+    # round, N5: the import of `_audit_text` failed there, so the pin "held" for an
+    # ImportError, not for the userinfo it kept)
+    from fuzzlab.tools import store_adapter
+    audit_text = getattr(store_adapter, "_audit_text", lambda text, _page, **_k: text)
     url = f"http://bob:{_PASS}@h/app/x.php?u=bob"
-    assert _PASS not in _audit_text(f"called from {url}", url)
+    assert _PASS not in audit_text(f"called from {url}", url)
 
 
 # --- the endpoint's own query is never sent redacted (review round 1, RU-4; PA-0544) -----
@@ -952,7 +1149,7 @@ def test_greybox_never_sends_a_point_the_builder_refused_or_a_placeholder(tmp_pa
                    "send `id=` -- through `harness.auto` and greybox alike (review round "
                    "2, N4: every caller of the point builder); the fix is the writer "
                    "recording a placeholder (PA-0544(1)) in `tools/spider.py`, held by "
-                   "lane BROWSERALIAS this round")
+                   "lane BROWSERALIAS this round", raises=AssertionError)
 def test_a_spider_captured_request_query_redaction_is_never_sent(tmp_path):
     from fuzzlab.greybox import run as gbrun
     from fuzzlab.tools import store_adapter
@@ -998,6 +1195,11 @@ BENIGN = [
     "http://h/app/p.php?u=bob&next=/users/%40bob/profile",
     "http://h/app/p.php?u=bob&next=https://www.example.org/a/b@c",
     "http://h/app/p.php?u=bob&next=/a%20b/c%2Fd",
+    # after the final round: a nested authority's pairs and a backslash-led pair list
+    # are walked, and a clean one comes back byte-identical
+    "http://h/app/p.php?u=bob&next=https%3A%2F%2Fhost%3Bv%3D2%2Fx",
+    "http://h/app/p.php?u=bob&next=%5Cdocs%26lang%3Den",
+    "http://h/app/p.php?u=bob&next=https://www.example.org/a%20b/c%20d",
 ]
 
 
@@ -1282,7 +1484,7 @@ def test_the_linearity_oracle_flags_a_quadratic_walk(monkeypatch):
 @pytest.mark.xfail(strict=True, reason="BUG-0556 residual R1: a captured body's leaf "
                    "holding a nested token is judged by the flat leaf rule "
                    "(`redact_leaf`); body redaction is paused by the owner (audit defect "
-                   "26, AU-REDACT) and this lane may not change it")
+                   "26, AU-REDACT) and this lane may not change it", raises=AssertionError)
 def test_a_captured_body_leaf_holding_a_nested_token_is_never_stored(tmp_path):
     from fuzzlab.disco.capture import append_record, make_record
     from fuzzlab.tools import store_adapter

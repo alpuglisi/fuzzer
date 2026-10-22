@@ -284,21 +284,36 @@ _RAW_QUERY = re.compile(r"[?#=&;]")
 #: any run of ``/`` or ``\`` -- none included (``https://``, ``https:///``, ``https:\\``,
 #: ``http:/``, ``http:``) -- or after two or more of them anywhere (``//``, ``/\``,
 #: ``\\``; a value nested in a path segment, ``/go/https://…``; one after a space,
-#: ``+https://…``). The authority (group 1) runs to the next ``/``, ``\``, ``?``,
-#: ``#`` or whitespace (as `_URL_USERINFO`). Linear: the scheme alternative cannot start
-#: inside a run of scheme characters, and the classes on either side are disjoint.
+#: ``+https://…``). The authority (group 1) runs to the next ``/``, ``\``, ``?`` or
+#: ``#`` only, whitespace included: Node 22's ``URL`` reads ``https://bob:correct
+#: horse@host/x`` as password ``correct%20horse`` (a space, VT, FF, NBSP or U+3000 in
+#: the userinfo is kept and encoded; a tab or newline is removed), so the round-2 class
+#: that also stopped at whitespace kept a passphrase f939778 had redacted (BUG-0556
+#: after the final round; ``scratchpad/lanes/REDACTURL/r3/whatwg_ws.js``). Linear: the
+#: scheme alternative cannot start inside a run of scheme characters, and the classes on
+#: either side are disjoint.
 _AUTHORITY_AT = re.compile(
-    r"(?i)(?:(?<![a-z0-9+.\-])(?:https?|wss?|ftp|file):[/\\]*|[/\\]{2,})([^/\\?#\s]*)")
+    r"(?i)(?:(?<![a-z0-9+.\-])(?:https?|wss?|ftp|file):[/\\]*|[/\\]{2,})([^/\\?#]*)")
+#: A pair separator in a userinfo, raw or percent-encoded at any depth (``&``, ``%26``,
+#: ``%2526``, ...): such a userinfo is also a pair list once decoded, and the walk redacts
+#: its value whole (`_UrlWalk.userinfo`).
+_USERINFO_PAIR = re.compile(r"[&;]|%(?:25)*(?:26|3[Bb])")
+#: Pair structure in a nested URL's authority: it is walked as a value (`_UrlWalk.path`).
+_AUTHORITY_PAIRS = re.compile(r"[=&;]")
 
 
 def _url_shaped(text: str) -> bool:
     """Whether a nested value is a URL (`_UrlWalk.nested_url`) rather than a pair list:
-    it starts with a scheme's ``://``, a ``/`` or a ``\\``, or its first raw ``?``, ``#``,
-    ``=``, ``&`` or ``;`` is a ``?`` or a ``#`` (``view.php?id=…``). A ``://`` further in
-    belongs to a value of a pair (``next=https://…``, ``a=1&token=…&next=https://…``),
-    so such a text is split into pairs first (review round 2, N1: a pair list holding a
-    URL was walked as one URL and its pairs never split)."""
-    if _SCHEME.match(text) or text.startswith(("/", "\\")):
+    it starts with a scheme's ``://``, a ``/``, or an authority's ``\\\\`` or ``\\/``, or
+    its first raw ``?``, ``#``, ``=``, ``&`` or ``;`` is a ``?`` or a ``#``
+    (``view.php?id=…``). A ``://`` further in belongs to a value of a pair
+    (``next=https://…``, ``a=1&token=…&next=https://…``), so such a text is split into
+    pairs first (review round 2, N1: a pair list holding a URL was walked as one URL and
+    its pairs never split). A single leading backslash is not an authority, so
+    ``\\host&token=…`` is a pair list as f939778 walked it (BUG-0556 after the final
+    round: round 2 took any leading backslash for a URL, whose path segments are never
+    split into pairs)."""
+    if _SCHEME.match(text) or text.startswith(("/", "\\\\", "\\/")):
         return True
     m = _RAW_QUERY.search(text)
     return m is not None and m.group(0) in "?#"
@@ -333,7 +348,10 @@ class _UrlWalk:
       start, in a nested URL's path segment or fragment route, after a space, behind
       ``https:///`` or a backslash) is a credential in both modes: it becomes
       ``PLACEHOLDER@`` (review round 1, RU-2; review round 2, N2: as `_URL_USERINFO` and
-      `core.trace.safe_ref` already judged it);
+      `core.trace.safe_ref` already judged it), its authority running to ``/``, ``\\``,
+      ``?`` or ``#`` only (a passphrase's space included); one holding a pair separator
+      (``&``, ``;``, ``%26``, ``%3B``, at any encoding depth) is a pair list too, and
+      redacts the value whole (BUG-0556 after the final round);
     - a value with a percent-escape and no raw query structure (no ``?``, ``#``, ``=``,
       ``&`` or ``;``: at most ``/`` and ``:`` raw) is percent-decoded one layer before it
       is split, and walked again; when that changes it, the result is percent-encoded
@@ -384,11 +402,13 @@ class _UrlWalk:
 
     def path(self, head: str, depth: int, nested: bool = False) -> str:
         """``head``'s ``;`` path parameters walked; in a nested URL or a fragment's
-        route (``nested``) also its authority and each segment still percent-encoded
-        (`layer`). A top-level URL's own authority and segments are its identity, never
-        decoded (BUG-0556 R3)."""
+        route (``nested``) also its authority -- decoded (`layer`) when it holds an
+        escape, walked as a value when it holds a raw ``=``, ``&`` or ``;`` -- and each
+        segment still percent-encoded (`layer`). A top-level URL's own authority and
+        segments are its identity, never decoded (BUG-0556 R3)."""
         self.tick(head)
-        if ";" not in head and not (nested and "%" in head):
+        if ";" not in head and not (nested and ("%" in head or "&" in head
+                                                or "=" in head)):
             return head
         authority = _authority_start(head)
         if authority is None:
@@ -402,6 +422,16 @@ class _UrlWalk:
                 # (``https://host%2Fcb%3Faccess_token%3D…?y=1``; review round 2, N1); a
                 # host's own escapes decode to host characters and come back unchanged
                 auth = self.layer(head[authority:start], depth)
+            elif nested and _AUTHORITY_PAIRS.search(head, authority, start):
+                # ... and one holding pair structure raw is walked as a value: a layer
+                # the value's walk decoded whole leaves it raw (``next=https%3A%2F%2Fx
+                # %26password%3D…`` -> ``https://x&password=…``), and round 2's
+                # `_url_shaped` sent ``a=https://x%26password%3D…`` here, which f939778
+                # had walked as one URL and redacted (BUG-0556 after the final round)
+                auth = self.value(head[authority:start], depth + 1, top=False)
+            else:
+                auth = None
+            if auth is not None:
                 head = head[:authority] + auth + head[start:]
                 start = authority + len(auth)
             if start >= len(head):
@@ -529,7 +559,16 @@ class _UrlWalk:
         ``@`` or ``%40`` (as URL parsers split it); a text holding none is returned as
         it is (review round 1, RU-2; review round 2, N2: only a URL at the start of a
         nested head was judged, so one in a nested URL's path segment, after a space,
-        behind ``https:///`` or a backslash was kept)."""
+        behind ``https:///`` or a backslash was kept).
+
+        A userinfo holding a pair separator, raw or percent-encoded at any depth (``&``,
+        ``;``, ``%26``, ``%3B``, ``%2526``, ...; `_USERINFO_PAIR`), is also a pair list
+        (``a=//x&password=Hunter@<word>``, or the same encoded: the URL reading's host is
+        the pair reading's password), and replacing it would delete the pair's name
+        before the walk splits or decodes it (BUG-0556 after the final round: round 2
+        made this replacement run before the split and the layer's decode, and f939778
+        had redacted the pair). It raises `_Whole`: the value is redacted whole, under
+        both readings (fail closed, PA-0101)."""
         self.tick(text)
         if "@" not in text and "%40" not in text:
             return text
@@ -538,6 +577,8 @@ class _UrlWalk:
             auth = m.group(1)
             at = max(auth.rfind("@"), auth.rfind("%40"))
             if at > 0:
+                if _USERINFO_PAIR.search(auth, 0, at):
+                    raise _Whole
                 out.append(text[last:m.start(1)])
                 out.append(PLACEHOLDER)
                 last = m.start(1) + at
@@ -966,6 +1007,18 @@ def redact_captured_body(body: bytes, content_type: str):
 #: value, up to the **last** ``@`` of the authority (a password may contain ``@``; URL
 #: parsers split at the last one; code review B).
 _URL_USERINFO = re.compile(r"(?i)((?:(?<![a-z0-9+.\-])[a-z][a-z0-9+.\-]*:)?//)[^/?#\s]*@")
+#: ... and, after it, a userinfo whose authority runs **through whitespace**, as Node 22's
+#: ``URL`` reads one (``http://bob:Canary Word@h/`` has password ``Canary%20Word``;
+#: BUG-0556 after the final round, ``scratchpad/lanes/REDACTURL/r3/whatwg_ws.js``): a
+#: span crossing whitespace and holding no pair separator, raw or percent-encoded once
+#: (``&``, ``;``, ``%26``, ``%3B``), so a space never lets the span reach a later pair
+#: (``?next=//x q&password=…@…`` stays a pair for the walk). Every span `_URL_USERINFO`
+#: matches is matched as before (a span crossing ``&`` with no space is pinned,
+#: `tests/test_redaction_residual_pins.py`). Linear: each repetition consumes a
+#: character its predecessor cannot, and the span stops at ``/``, ``?`` or ``#``.
+_URL_USERINFO_SPACED = re.compile(
+    r"(?i)((?:(?<![a-z0-9+.\-])[a-z][a-z0-9+.\-]*:)?//)"
+    r"(?:[^/?#\s&;%]|%(?!26|3b))*\s(?:[^/?#&;%]|%(?!26|3b))*@")
 #: A scheme-less ``user:password@host`` at the start of a value or of a whitespace-
 #: separated piece, also up to the authority's last ``@``.
 _BARE_USERINFO = re.compile(r"(^|\s)[^\s/@:?#]+:[^\s/?#]*@(?=[^\s@/])")
@@ -982,8 +1035,9 @@ def redact_for_record(dest: str, value):
     (``launch.argv``, ``launch.target``, ``project.targets``; PA-0100: one boundary).
 
     - a value whose option name (``dest``) `is_sensitive_name` flags → `PLACEHOLDER`;
-    - URL userinfo (``http://user:pw@``, ``//user:pw@``) and a scheme-less ``user:pw@``
-      → ``***@`` (through the authority's last ``@``);
+    - URL userinfo (``http://user:pw@``, ``//user:pw@``; one holding a space too,
+      `_URL_USERINFO_SPACED`) and a scheme-less ``user:pw@`` → ``***@`` (through the
+      authority's last ``@``);
     - sensitive values of the query, of a query-shaped fragment (``#access_token=…``,
       ``#/route?token=…``) and of ``;name=value`` path parameters, and of every URL,
       query string or ``;`` pair nested in their values (raw or percent-encoded;
@@ -998,12 +1052,13 @@ def redact_for_record(dest: str, value):
     if dest and is_sensitive_name(dest):
         return PLACEHOLDER
     # Userinfo is stripped from the **whole** value before it is cut (BUG-0455: a cut
-    # between a password and its ``@`` left the password unmatched); both patterns are
+    # between a password and its ``@`` left the password unmatched); the patterns are
     # linear. The URL walk then runs on the whole value too, before any cut or split
     # (BUG-0556 review round 2, N7: ``#/r?next=/v?q=a b&token=…`` kept its token, the
     # piece ``b&token=…`` read alone); it is total and linear (`redact_url`). The cut
     # then bounds the per-piece work and the stored size (PA-0095/0096).
     out = _URL_USERINFO.sub(lambda m: m.group(1) + USERINFO_PLACEHOLDER, value)
+    out = _URL_USERINFO_SPACED.sub(lambda m: m.group(1) + USERINFO_PLACEHOLDER, out)
     out = _BARE_USERINFO.sub(lambda m: m.group(1) + USERINFO_PLACEHOLDER, out)
     out = redact_url(out)
     if len(out) > MAX_RECORD_CHARS:
