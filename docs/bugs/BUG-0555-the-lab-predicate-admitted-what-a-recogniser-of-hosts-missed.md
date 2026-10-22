@@ -810,3 +810,22 @@ by strict xfails, not fixed in another round (PA-0531(4)):
   space, a soft hyphen, a variation selector, a word joiner) that getaddrinfo's idna
   nameprep reads as the ASCII address, as the IPv4 forms are already judged. Pinned:
   `tests/test_lab_predicate_pins.py::test_a_unicode_spelling_of_an_ipv6_address_is_outside`.
+
+## At the gaps merge's verification (coordinator, 2026-10-22)
+
+- **Found by** the full verification of the merged stack (c222c92, 155 files, `--base
+  7393c90`): `tests/test_web_store_locks.py::test_no_web_process_module_opens_a_store_file_except_through_sqlite`
+  reported `('fuzzlab/audit/value_shape.py', '_delegated_tlds', '.read_text()'): 1 raw
+  open(s), not allowed`.
+- **Defect:** review round 1 (e0f4210) made the lab predicate read the bundled IANA
+  snapshot (`importlib.resources ... .read_text()`). `audit.value_shape` is in the web
+  process's import closure, where PA-0535 holds every raw open to a reviewed site. The
+  round's targeted run selected the importers of the changed module, not this
+  whole-package guard, and no `verify_change.py` run was made before the merge (the
+  orchestrator verifies there, as the round recorded).
+- **Fix:** the read never touches a store's files (it is package data), so it is a
+  reviewed `ALLOWED` entry, the guard's own mechanism. No product code changed.
+- **Recurrence review:** PA-0040 (run the whole suite before a push) held: the push gate
+  caught it. What failed is the commit-level check, the same gap as the coordinator's own
+  `_host_url` fix (BUG-0559, "At the gaps merge's verification"); PA-0559(15) closes it for
+  both.

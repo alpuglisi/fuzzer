@@ -388,6 +388,8 @@ _LAB = " (lab generation; the web process imports it for the lab page's command 
 ALLOWED: dict[tuple[str, str, str], tuple[int, str]] = {
     ("fuzzlab/audit/rules.py", "load_rules", ".read_text()"): (
         2, _NOT_A_STORE + "the packaged default rules, or a rules JSON the operator names"),
+    ("fuzzlab/audit/value_shape.py", "_delegated_tlds", ".read_text()"): (
+        1, _NOT_A_STORE + "the packaged IANA TLD snapshot (FR-AUD-32, `audit/tld_data`)"),
     ("fuzzlab/core/config.py", "load_config", ".read_text()"): (
         1, _NOT_A_STORE + "a JSON config file"),
     ("fuzzlab/core/credentials.py", "_CryptographyFileBackend._load", ".read_bytes()"): (

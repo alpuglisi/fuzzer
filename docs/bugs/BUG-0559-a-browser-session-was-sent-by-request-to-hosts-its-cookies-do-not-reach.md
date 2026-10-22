@@ -1055,3 +1055,28 @@ orchestrator with their files (PA-0559(4)), never stated as residuals.
   `tests/test_disco_synth.py::test_a_script_with_a_long_whitespace_run_after_a_call_is_mined_in_linear_time`
   (each fails at its own assertion at a 5 s bound on 80 000 characters; its child takes
   0.1-0.25 s on 800). Preventive action: PA-0559(14).
+
+## At the gaps merge's verification (coordinator, 2026-10-22)
+
+- **Found by** the full verification of the merged stack (c222c92):
+  `tests/test_session_origin_scope.py::test_no_session_send_decision_compares_hosts`
+  flagged seven host compares in `session/manager.py` (`_adopt_rotation`, `_header_value`,
+  `_retry_after`, `credential_cookie`, `parse_auth_origins`' `as_url`, `_host_url`).
+- **Defect:** the coordinator's fix of this bug's flagged `_jar_cookies` IPv6 bracket
+  (b827781, CC-SESS-0030) added `_host_url`, whose `name = str(host or "").strip()`
+  assigns a name from a host. The guard (PA-0134) taints a name module-wide, so every
+  compare of a variable called `name` in the module became a host compare, the helper's
+  own `":" in name` included. The helper also duplicated `parse_auth_origins`' nested
+  `as_url`, the pushed tree's spelling of the same thing. b827781 was checked by its own
+  test only, not by the module's whole-package guards.
+- **Fix:** one module-level `_host_url` -- 7393c90's `as_url`, hoisted (`str(name)`, an
+  IPv6 literal bracketed) -- used by `parse_auth_origins` and by `auth_endpoints`,
+  `_states_on_host` and `_jar_cookies` (host and cookie domain). Behaviour equals
+  7393c90's for every non-IPv6 host and keeps the IPv6 fix
+  (`tests/test_session_material.py::test_an_ipv6_sessions_jar_cookies_and_host_matches_are_kept`);
+  the guard passes.
+- **Recurrence review:** BUG-0038 / PA-0040 (run the whole suite, not only the "relevant"
+  tests, before a push): the push gate held, so no defect was pushed, but a commit made
+  at a merge was checked by its own test only, as was LABAUTH's review round 1 (BUG-0555,
+  same section); each cost a full verification cycle. PA-0559(15) moves the whole-package
+  guards to the commit.

@@ -177,6 +177,7 @@ Newest first.
     prior-PA failure analysis — done
   - [ ] SP-73's row, PA-0555, CHANGELOG, ERROR_LOG and ARCHITECTURE texts — handed over
     for the merge (`scratchpad/lanes/LABAUTH/doc_texts.md`)
+  - [x] *(Coordinator, at the gaps merge's verification.)* `_delegated_tlds` reads the packaged IANA snapshot with `.read_text()`, a raw open in the web process's import closure: `tests/test_web_store_locks.py::test_no_web_process_module_opens_a_store_file_except_through_sqlite` (PA-0535) failed on the merged stack. The site never touches a store's files, so it is a reviewed `ALLOWED` entry (one read: the packaged snapshot). Review round 1 (e0f4210) added the read; its targeted run did not select the guard (BUG-0555, "At the gaps merge's verification") — done
 - Effectiveness (assessed <date> or pending): pending.
 - Review round 1 of 1338d7a (2026-10-22; one review, each finding confirmed by a skeptic
   on both commits, `scratchpad/lanes/LABAUTH/review_round1.md`; branch

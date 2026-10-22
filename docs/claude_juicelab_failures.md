@@ -1936,3 +1936,18 @@ Juice Shop lab is complete.
 - **Impact:** a test that enforces PA-0550 failed intermittently on correct code. It could have cost a lane a review round, or been waved off as flaky. No product impact.
 - **Cause:** the author treated "the batch is written" as one moment and waited on the earliest of the writer's publications. Nothing stated the writer's publication order, and nothing checked a read against the wait before it.
 - **Status:** fixed (BUG-0560, PA-0560, CC-PROXY-0032; commit 3f23ed6).
+
+### F-244 — My IPv6 fix at the gaps merge duplicated a pushed helper and tripped a whole-package guard, checked by its own test only
+- **What:** b827781 added `session/manager.py::_host_url` to bracket an IPv6 host. `parse_auth_origins` already had the same helper (`as_url`, pushed at 7393c90), and my version assigned `name` from `host`, which the host-compare guard taints module-wide: seven functions became offenders. I checked the commit with its own new test in plain Python and committed.
+- **Evidence:** `scratchpad/vpush9.log` (c222c92: 5153 passed, 2 failed; `test_no_session_send_decision_compares_hosts`); BUG-0559 "At the gaps merge's verification".
+- **Impact:** a full verification cycle (about 21 minutes) and a delayed push of gaps 1-4; nothing wrong was pushed.
+- **Cause:** I wrote a helper without searching the module for one, and did not run the module's whole-package guards before the commit, though PA-0040 and PA-0559(9) say a sweep or a change is checked by the package's guards, not only its own test.
+- **Status:** fixed (the pushed `as_url` hoisted as the one `_host_url`; PA-0559(15)).
+
+### F-245 — LABAUTH's review round 1 added a package-data read in the web process's closure without its reviewed allowance, and I merged it without the guard
+- **What:** e0f4210 made the lab predicate read the bundled IANA TLD snapshot with `.read_text()`. `audit.value_shape` is in the web process's import closure, where PA-0535's guard holds every raw open to a reviewed site. The round ran a targeted run that did not select that guard and left `verify_change.py` to the merge; I merged it (4543525) and applied its docs before running the full verification.
+- **Evidence:** `scratchpad/vpush9.log` (`test_no_web_process_module_opens_a_store_file_except_through_sqlite`); BUG-0555 "At the gaps merge's verification".
+- **Impact:** the same verification cycle as F-244; nothing wrong was pushed.
+- **Cause:** a lane's targeted run selects importers of the changed module, never the whole-package guards, and neither the lane nor I ran them before the merge commit.
+- **Status:** fixed (a reviewed `ALLOWED` entry; PA-0559(15)).
+
