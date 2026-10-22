@@ -303,3 +303,273 @@ what changed):
 - Other admit predicates for app-supplied values: none (grep of `names_outside_lab`,
   `neutral_value`, `is_loopback_origin` callers on values; `core.urls` scope predicates
   judge fuzzlab's own request URLs, PA-0123).
+
+## Review round 1 (added in review round 1, 2026-10-22)
+One review of 1338d7a; each finding below was confirmed by a skeptic with a run on both
+1338d7a and 7393c90 (`scratchpad/lanes/LABAUTH/review_round1.md`). LA-2 and LA-5 are one
+defect. Fixed on `lane/LABAUTH-r1` (CC-AUD-0058, review round 1; FR-AUD-20 amended in
+place; FR-AUD-32). This section supersedes the paragraphs above where they disagree.
+
+### What the fix still let through, or claimed without measuring
+- **LA-1 (a regression this fix introduced): a value holding `://` after a prefix that
+  is no scheme was sent and bound.** 7393c90's entry gate, `neutral_value(value) ==
+  value`, was a recogniser, but it held every value with `://` anywhere (SAFE_URL), so
+  only `_names_only_lab` could admit one. The rewrite removed the gate and put in its
+  place a shape test that saw a host only at a scheme-shaped start, a leading `//` or
+  `\`, or in a dotted leading token or `http://`-reader host. `/login?next=https://evil.example/`,
+  `?next=http://evil.top`, `url=http://evil.top`, `{"u":"http://evil.top"}`,
+  `see http://evil.top` and `(http://evil.top)` were outside at 7393c90 and the lab at
+  1338d7a, through `_send_value`, `_outside_lab` and `_bind_fresh`. Measured per point
+  (below): 326 recorded points newly sent beside `/go?ret=https://host.example/cb?x=1`.
+  The residual stated for "a value naming no host of its own whose tail does" was
+  justified by a token measurement whose alphabets hold no `:`, so it never covered this.
+- **LA-2 / LA-5 (a regression this fix introduced): an unbracketed IPv6 literal was the
+  lab.** At 7393c90 `value_shape` read `2001:4860:4860::8888` as `ip` (`ipaddress`), so
+  `neutral_value` changed it and it was outside. The rewrite's leading token and
+  `http://`-reader host cut at the first `:` (`2001`, `64`, or empty for `::ffff:8.8.8.8`),
+  which `_host_token` reads as a small number or nothing. Only literals starting with
+  a-f were caught, by the scheme rule. `getaddrinfo(AI_NUMERICHOST)` and `inet_pton`
+  read every one as its address (measured), `value_shape` still calls each `ip` (a
+  command-injection default), and WHATWG refuses each after `http://` -- so the round-0
+  soundness check against node, the only reader it ran, could not see them. The sweeps
+  held bracketed literals only.
+- **LA-3 (an unstated carve-out the fix kept): a JSON number was the lab without proof.**
+  `names_outside_lab` began `if not isinstance(value, str): return False`, so the JSON
+  number `134744072` (the text `134744072`, 8.8.8.8 to WHATWG: an app doing
+  `"http://" + body.host`, node 22) was sent as a sibling on the ground-truth, stored-XSS
+  and crawled JSON paths, while the string was outside. It predates this fix but is the
+  bug's own class on a path the fix names, and PA-0555(2) required such a carve-out to
+  be stated with its measurement; it was not, and the guard test hard-coded the early
+  return as the expected head.
+- **LA-4 (a pre-fix proof not on its own assertion).** On 7393c90
+  `test_the_lab_predicate_reaches_no_recogniser_of_hosts` failed at its helper-presence
+  assertion (`_lab_authority` and `_host_token` did not exist), so its stated reason --
+  the recognisers reached -- was never checked; and
+  `test_the_recogniser_guard_catches_a_synthetic_offender` failed at
+  `source.count(head) == 1`, a source-text precondition. CC-AUD-0058 and the Tests list
+  above still counted "both guard tests" among the reproductions (`prefix_run2.txt`).
+- **LA-6 (an unstated cost in a recorded lab result).** In ground-truth mode Mongection's
+  SDLMG-0002 (`/login` password, NoSQL injection, expected vulnerable) was refused
+  before any strategy ran: the answer key's JSON sibling `email=user@lab.test` was
+  outside, so the point was read inconclusive with no send (recall 2/2 to 1/2), and
+  `/register` name the same. The NoSQL strategy never sends that stored e-mail. The cost
+  statement missed it: it was measured per distinct value, on recorded stores and the
+  repo's HTML `value=` attributes and URL queries, never on the answer keys' `json_body`
+  leaves or `lab/external/*/.cache` (a `glob('**')` skips dot directories), and never per
+  point.
+
+### Corrections of the claims above (added in review round 1)
+- "15 distinct values ... move from the lab to outside, **none the other way**" holds
+  only for the recorded-store values that were measured. The rewrite also moved values
+  the other way (LA-1, LA-2: outside at 7393c90, the lab at 1338d7a); measured per point
+  below.
+- "**0 unsound admissions**" was measured against one reader, node's WHATWG parser.
+  Bare IPv6 literals, which WHATWG refuses and `getaddrinfo` reads, were admitted.
+- "Every reproduction fails: ... **both guard tests**" (CC-AUD-0058, and the Tests list
+  above): the recogniser guard failed on 7393c90 at its helper-presence assertion, not
+  at its stated reason, and the synthetic-offender test is a guard of the guard (on the
+  old code its head is not there), not a reproduction. Re-recorded below: on 7393c90
+  the guard now fails at its first assertion, naming
+  `FILE_EXTENSIONS, GENERIC_TLDS, _host_prefix, _is_filename, _is_hostname, _is_ip,
+  _is_path, _is_url, ipaddress, is_loopback_origin, neutral_value, value_shape`.
+- "Expected on bWAPP: BWAPP-0054 and BWAPP-0055 ... become inconclusive": no longer, a
+  bare `robots.txt` is the lab under the bare-token rule (below).
+- The accepted false positive "a dotted token (`robots.txt`, `lang_en.php`, ... a JWT)"
+  now holds before a path, query or fragment only; in a bare token, only a name under a
+  delegated TLD or a number WHATWG reads as IPv4 is outside.
+
+### Root cause of the review findings (added in review round 1)
+Five Whys, LA-1 and LA-2:
+1. *Why were `?next=http://evil.top` and `2001:4860:4860::8888` sent at 1338d7a and not
+   at 7393c90?* The rewrite removed the old gate, and the new shape test held neither a
+   `://` after a prefix nor an unbracketed IPv6 literal.
+2. *Why did the new shape test omit shapes the old gate held?* It was derived anew from
+   one reader's reading (WHATWG, with `http://` before the value), not from the set of
+   values the code it replaced put outside.
+3. *Why did no test catch the loss?* The sweeps were generated for the bypass classes
+   the rewrite targeted (authority spellings at the start, tails after a loopback
+   authority); none was generated from the old rule's coverage, and the IPv6 spellings
+   were bracketed only.
+4. *Why did the soundness and cost measurements not catch it?* Soundness was measured
+   against node alone, which refuses bare IPv6; cost was measured per distinct value,
+   and only in the direction the author expected.
+5. *Why one reader and one direction?* PA-0555(2) said "every text a reader parses",
+   and the rewrite read it as every *preprocessing* of the text by WHATWG, not every
+   reader of the value (an address parser, a percent-decoding application); and nothing
+   required a rewrite of a safety predicate to keep what the old one caught.
+
+**Root cause:** a safety predicate was rewritten from a model of one reader, and checked
+against that reader and the classes it targeted, with no non-regression against what
+the predicate it replaced held. LA-3 is the same failure of the entry (an input type
+the model did not cover, admitted by an early return), LA-4 a pre-fix proof read for
+its outcome and not its assertion (PA-0545(6) not followed), LA-6 a cost measured per
+value on the sources at hand instead of per point on every source of points.
+
+### Corrective action (added in review round 1)
+`fuzzlab/audit/value_shape.py` (CC-AUD-0058 review round 1; FR-AUD-20 amended in place;
+FR-AUD-32 new):
+- **LA-1:** `_authority_shaped` treats `://`, `:\` and `:/\` anywhere
+  (`_AUTHORITY_MARKS`) as an authority shape, so only `_names_only_lab` admits such a
+  value. `_reader_texts` also reads the value percent-decoded until stable (at most
+  eight times, `_percent_decoded`), so an encoded `https%3A%2F%2Fevil.top` is the same
+  shape: the bare-token rule below would otherwise have admitted the 54 recorded points
+  beside a triple-encoded `/go?ret=https://host.example/...` that 1338d7a's
+  `_host_text` decoding had caught (measured).
+- **LA-2 / LA-5:** `_ipv6_shaped`, syntactic (no address parser, PA-0555): the text up
+  to its first `/ ? # \ ;` or whitespace, before its first `@` or after its last, of hex
+  digits, `:` and `.` (a zone after `%`) with `::` or at least six `:`, also after
+  leading slashes. Proven like any authority, so only `[::1]` is the lab; `12:00:00`
+  and a MAC address are not shapes.
+- **LA-3:** `names_outside_lab` judges `_judged_text(value)`: a string as it is, an int
+  or float (never a bool) by its `json.dumps` text, anything else (bool, null, an empty
+  container) as naming nothing; `neutral_value` and so `_send_value` put `127.0.0.1` in
+  a number's place.
+- **LA-6, by design (the bare-token rule; no answer key edited):** a bare token (none of
+  `/ ? # \`, no scheme, no authority mark) is of an authority shape only when its
+  leading token or `http://`-reader host (`_named_host`) is an IP literal in any form
+  (bracketed; dotted with a numeric last label in any radix; a dotless number read as
+  0.0.0.0 or from 2^24 to 2^32 - 1), `localhost`, or a dotted name whose last label is a
+  TLD delegated in the DNS root (`_delegated_tlds`: IANA's root-zone list, bundled
+  verbatim with its date, FR-AUD-32; the label read up to its first non-LDH character; a
+  non-ASCII label taken for an IDN TLD). Reserved and undelegated names (`.test`,
+  `.example`, `.invalid`, `.localhost`, `.local`, `.corp`, file extensions) are not:
+  `robots.txt`, `lang_en.php` and `user@lab.test` are the lab, `evil.top`, `evil.zip`
+  and `user@gmail.com` outside. A value with a path, query or fragment keeps 1338d7a's
+  rule (any dotted leading token or reader host is proven).
+- **LA-4:** the guard asserts the recognisers reached first, with them in its message,
+  then the helpers' presence; the offender test's docstring says it is a guard of the
+  guard.
+
+**Measured cost, per point** (`scratchpad/lanes/LABAUTH/r1/measure_points.py`,
+`point_cost.txt`; each version's `value_shape` loaded in turn, the predicate applied as
+`harness.auto` applies it):
+- Recorded stores (2,953 stores on the test host, 9,562 parameter rows with sibling
+  entries: form, link-set and JSON-leaf points): unbound 843 at 7393c90, 705 at
+  1338d7a, 1,081 now. Against 7393c90: 248 newly unbound (140 JSON points beside the
+  float leaf `2.5`, LA-3; 108 beside a percent-encoded URL naming `host.example`), 10
+  newly bound (`db.lab.example`: `.example` is reserved). Against 1338d7a: 538 newly
+  unbound (326 beside `/go?ret=https://host.example/cb?x=1`, LA-1; 140 `2.5`; 72
+  encoded URLs), 162 newly bound (`robots.txt` 85, `a@lab.test` 50, `db.lab.example`
+  10, `lang_en.php`, `portal.php`, `message.txt` 5 each, a free text holding
+  `...@fuzzlab.lab)` 2).
+- Lab answer keys (22, 352 points with writes on and off, `points_from_ground_truth`):
+  none refused now; 1338d7a refused 4 (Mongection `/login` password, SDLMG-0002,
+  expected vulnerable, and `/register` name, each with writes on and off); 7393c90 none.
+- External labs' sources (`lab/external/*/.cache`, 733 files; node_modules and vendor
+  skipped): 123 HTML form-field points, none unbound; 2,095 URL-query points, 62
+  unbound now and at 1338d7a, none at 7393c90 -- third-party Google Maps and Fonts URLs
+  in amarelo-designs' templates (`28.659344,-81.187888`, `0.128789,0.264187`,
+  `Roboto:300,400,500`), which a lab crawl does not make points of (another origin).
+- Readings embedded in the tests, checked against the real readers
+  (`r1/check_tables_r1.py`): 114, 0 mismatches (node 22 for the WHATWG tables and the
+  JSON numbers, `getaddrinfo(AI_NUMERICHOST)` for the bare IPv6 table).
+
+**Accepted false positives and residuals, as amended** (FR-AUD-20 holds the full list):
+new false positives are a JSON float leaf WHATWG reads as IPv4 (`2.5`, `19.99`), a file
+name under a delegated TLD (`archive.zip`, `readme.md`, `script.py`), a bare `::1`, and
+a hex string with `::` or six `:`. New residuals: a bare dotted name under an
+undelegated TLD (`intranet.corp`, `printer.local`, `db.lab.example`) is the lab -- a host
+only to a private resolver, a hosts file or mDNS; a TLD delegated after the snapshot's
+date is the lab until it is refreshed (FR-AUD-32); a value percent-encoded more than
+eight times is read only that far. The bare-token rule decides a bare dotted name with
+one list, IANA's root zone: the owner's design for this round. It is the definition of
+the names a public resolver answers, bundled verbatim and dated, not a recogniser's
+closed list (`GENERIC_TLDS`, `FILE_EXTENSIONS` stay unreachable from the predicate); a
+test proves the decision is the file's, label for label.
+
+**Tests** (`tests/test_replay_bindings.py` unless named; each fails on the commit its
+finding names at its own assertion, recorded below):
+- LA-1: `test_a_value_holding_an_authority_mark_anywhere_is_outside_the_lab` (14 values
+  through `_send_value`, `_outside_lab` and `_bind_offered`) and
+  `test_every_value_the_old_scheme_anywhere_rule_put_outside_is_still_outside` (6,930
+  generated `scheme://` values after 15 prefixes; the expectation is written out, 7393c90's
+  rule: every one outside but the 48 loopback URLs its proof admitted; it passes on
+  7393c90 and fails on 1338d7a).
+- LA-2 / LA-5: `test_a_bare_ipv6_literal_is_outside_the_lab` (the measured
+  `getaddrinfo` table, with path, query, port, userinfo, leading slash and free-text
+  positions), and `_BARE_IPV6` added to both generated sweeps
+  (`test_every_authority_spelling_outside_the_lab_set_is_outside_the_lab`,
+  `test_the_binder_never_binds_an_authority_spelling_outside_the_lab_set`).
+- LA-3: `test_a_json_number_leaf_is_judged_by_its_json_text` (through `_send_value`,
+  `neutral_value` and `_outside_lab` on a JSON body's leaves; controls: small, negative
+  and 2^32 numbers, bools, null, empty containers) and
+  `test_an_answer_keys_json_number_sibling_leaves_its_point_unbound` (through
+  `points_from_ground_truth`); `tests/test_forms_phase2.py::test_neutral_value_errs_toward_loopback`
+  gains the number row.
+- LA-4: `test_the_lab_predicate_reaches_no_recogniser_of_hosts` (reordered).
+- LA-6: `test_no_expected_vulnerable_answer_key_point_is_unbound_by_the_lab_predicate`
+  (every lab answer key; no allowance list was needed),
+  `test_a_bare_token_naming_no_delegated_host_is_the_lab` (reserved and undelegated
+  names in every spelling, bare and as an e-mail's domain, sent and bound as given; the
+  same names in every structured position stay outside in the sweeps), and
+  `test_the_bare_token_rule_reads_ianas_root_zone_and_nothing_else` (FR-AUD-32). The
+  measured tables move `robots.txt`, `lang_en.php`, `Hello.`, `user@evil.example` and
+  `localhost.` to the lab table and add `evil.zip`, `user@gmail.com`, `com.`, an IDN TLD
+  and `19.99` to the outside one; `tests/test_forms_phase2.py::test_link_query_siblings_are_bound`
+  is back to 7393c90's expectation (`u=robots.txt` sent as given, no refusal) and
+  `::test_neutral_value_errs_toward_loopback` keeps `lang_en.php` and `user@lab.test` as
+  given and puts loopback in for `evil.zip`.
+
+**Pre-fix proof** (PA-0545(6): the failing assertion of every test in the two files,
+not only the review's): one pytest invocation, 1338d7a's `value_shape.py` in place of the
+fix and then restored (`scratchpad/lanes/LABAUTH/r1/prefix_r1.txt`): 63 failed, 591
+passed, 3 xfailed. Every failure is at its test's own assertion
+(`r1/assert_lines.py` maps each to its line): LA-1 11 of 14 values (the three
+percent-encoded ones were outside at 1338d7a, through `_host_text`'s decoding, and fail
+on 7393c90) and the old-rule corpus; LA-2/5 18 of 19 bare-IPv6 values (`fe80::1%eth0`
+was outside by the scheme reading) and both sweeps; LA-3 the six outside JSON leaves
+and the answer-key JSON test; LA-6 the answer-key guard (SDLMG-0002), the bare-token
+test, the TLD source test, 15 lab-table rows and four `test_forms_phase2` cases. On
+1338d7a the recogniser guard fails at its helper-presence assertion (the helpers it
+names are new in this round) and the synthetic-offender test at its precondition (a
+guard of the guard). The guard's stated reason is recorded on 7393c90, where the review
+said it belongs, by a plain-Python call of the test functions with 7393c90's module in
+place (no pytest session; `r1/prefix_7393c90_plain.txt`): it fails at its first
+assertion with "names_outside_lab reaches recognisers of hosts: ['FILE_EXTENSIONS',
+'GENERIC_TLDS', '_host_prefix', '_is_filename', '_is_hostname', '_is_ip', '_is_path',
+'_is_url', 'ipaddress', 'is_loopback_origin', 'neutral_value', 'value_shape']". The
+passes are the controls (the loopback set, the remaining lab-table rows, the JSON
+controls) and the earlier tests.
+
+### Recurrence review (added in review round 1)
+Checked `docs/bugs/` and `docs/PREVENTIVE_ACTIONS.md` again: the findings recur
+BUG-0544's and this bug's root cause (FR-AUD-20's predicate admitted what its model of a
+reader did not cover) for the fifth time, and LA-4 recurs BUG-0545's review finding B2
+(a test failing on the old code for another reason than its own; PA-0545(6)).
+
+### Prior-preventive-action failure analysis (added in review round 1)
+- **PA-0555(2)** ("the shape decision is a part ... on every text a reader parses ... a
+  carve-out that admits without proof is a stated residual") was followed in name: the
+  shape decision was made syntactic, but from one reader's texts (WHATWG's
+  preprocessing), not every reader of the value (an address parser, a decoding
+  application); and the non-string early return was kept unstated. Too narrow, and not
+  enforced: no test fed it a value type other than a string or a reader other than
+  WHATWG.
+- **PA-0555(4)** ("a generated sweep varies every part of the value") was enforced on the
+  classes the rewrite targeted; nothing generated values from the coverage of the code it
+  replaced, so a regression was invisible to it. Wrong layer: it tested the new design,
+  never the change.
+- **PA-0545(6)** ("a regression test's pre-fix proof is on its own assertion") was not
+  followed for the guard; its record showed the other assertion failing and the bug doc
+  cited the record as a reproduction.
+- **PA-0002 / step 8** (measure): the flip cost was measured per value and on the
+  sources at hand; the points a lab's answer key defines were not among them.
+
+### Preventive action (added in review round 1)
+**PA-0555 strengthened in place** (not yet merged: its text is handed over in
+`scratchpad/lanes/LABAUTH/doc_texts.md`, "r1 changes"; it now also strengthens
+PA-0545(6)): (1) names IANA's root zone (FR-AUD-32) as the one list the predicate may
+read, for a bare token, proven to decide label for label; (2) the shape decision reads
+every reader of the value (WHATWG with and without `http://`, an application's trim and
+percent-decoding, a C reader's NUL, an address parser) and every value type that
+reaches the predicate (a JSON number by its text), and soundness is measured against
+more than one reader; (4) the sweep holds bracketed and bare spellings; (5) a rewrite of
+a safety predicate keeps what the predicate it replaces held, proven by a non-regression
+corpus generated from the old rule's coverage with its expectation written out, or
+states each loss with its measured cost; (6) a predicate's cost is measured per point on
+every source of points (recorded stores, every lab answer key's leaves, the external
+labs' sources), against the base and the previous version, and a guard keeps every
+lab's expected-vulnerable answer-key point unrefused; (7) a guard asserts its stated
+reason first, its pre-fix record names what it found, and a guard of a guard is never
+counted as a reproduction. Enforced by the review tests above, added to PA-0555's
+`Enforced by:` line.

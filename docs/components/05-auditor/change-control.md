@@ -93,6 +93,78 @@ Newest first.
   - [ ] SP-73's row, PA-0555, CHANGELOG, ERROR_LOG and ARCHITECTURE texts — handed over
     for the merge (`scratchpad/lanes/LABAUTH/doc_texts.md`)
 - Effectiveness (assessed <date> or pending): pending.
+- Review round 1 of 1338d7a (2026-10-22; one review, each finding confirmed by a skeptic
+  on both commits, `scratchpad/lanes/LABAUTH/review_round1.md`; branch
+  `lane/LABAUTH-r1`, item GAP-VALUES; the lane's numbers only, FR-AUD-32 new):
+  - Findings fixed: LA-1 (`://` after a prefix was sent: the rewrite had dropped
+    7393c90's '://'-anywhere coverage), LA-2/LA-5 (an unbracketed IPv6 literal was the
+    lab), LA-3 (a JSON number was the lab by an unstated early return), LA-4 (the
+    recogniser guard failed on 7393c90 at its helper-presence assertion, not its stated
+    reason), LA-6 (Mongection's expected-vulnerable SDLMG-0002 was refused for its
+    answer key's sibling `email=user@lab.test`; the cost had been measured per value and
+    not on the answer keys).
+  - Change (`audit/value_shape.py`): `_authority_shaped` holds `://`, `:\` and `:/\`
+    anywhere (`_AUTHORITY_MARKS`) and an unbracketed IPv6 literal (`_ipv6_shaped`,
+    syntactic) as authority shapes; `_reader_texts` adds the value percent-decoded
+    until stable (`_percent_decoded`, at most eight rounds); `names_outside_lab` judges
+    `_judged_text(value)` (a JSON int or float by its JSON text; bool, null, empty
+    containers name nothing) and `neutral_value` puts `127.0.0.1` in a number's place;
+    a bare token (none of `/ ? # \`) is a shape only through `_named_host` -- an IP
+    literal in any form, `localhost`, or a dotted name whose last label is a TLD
+    delegated in the DNS root (`_delegated_tlds`, IANA's list bundled as
+    `fuzzlab/audit/tld_data/tlds-alpha-by-domain.txt`, version 2026102100, downloaded
+    2026-10-22; `DELEGATED_TLDS_SOURCE`, `_VERSION`, `_FETCHED`; FR-AUD-32). A value
+    with a path, query or fragment keeps the round-0 rule. No answer key was edited.
+  - Impact (measured per point, `scratchpad/lanes/LABAUTH/r1/point_cost.txt`): recorded
+    stores, 9,562 points in 2,953 stores: unbound 843 at 7393c90, 705 at 1338d7a, 1,081
+    now (vs 7393c90 +248: 140 beside the JSON float `2.5`, 108 beside a percent-encoded
+    URL; -10 `db.lab.example`. vs 1338d7a +538: 326 beside `/go?ret=https://...`, 140,
+    72; -162: `robots.txt` 85, `a@lab.test` 50, `db.lab.example` 10, file names 15, a
+    free text 2). Lab answer keys, 352 points: none refused (1338d7a: 4, two of them
+    SDLMG-0002); a guard test keeps every expected-vulnerable point unrefused, with no
+    allowance list. External labs' sources (`.cache`): 123 form-field points none; 62 of
+    2,095 URL-query points unbound, third-party Maps/Fonts URLs, as at 1338d7a. bWAPP's
+    BWAPP-0054/0055 are no longer expected to be inconclusive (`ParamUrl=robots.txt` is
+    the lab). New package data (shipped by the recursive package-data rule); no store,
+    wire or CLI contract change; no new dependency.
+  - Corrections of this entry (append-only): "none the other way" held only for the
+    recorded-store values measured; "0 unsound admissions" was against node's WHATWG
+    parser alone; "both guard tests" are not both reproductions -- the synthetic-offender
+    test is a guard of the guard (on 7393c90 it fails at its `source.count(head) == 1`
+    precondition), and the recogniser guard failed on 7393c90 at its helper-presence
+    assertion; reordered, it now fails there at its first assertion, naming
+    `neutral_value`, `value_shape`, `_host_prefix` and nine more (`r1/prefix_7393c90_plain.txt`).
+  - Tests: `tests/test_replay_bindings.py::test_a_value_holding_an_authority_mark_anywhere_is_outside_the_lab`,
+    `::test_every_value_the_old_scheme_anywhere_rule_put_outside_is_still_outside`,
+    `::test_a_bare_ipv6_literal_is_outside_the_lab`,
+    `::test_a_json_number_leaf_is_judged_by_its_json_text`,
+    `::test_an_answer_keys_json_number_sibling_leaves_its_point_unbound`,
+    `::test_a_bare_token_naming_no_delegated_host_is_the_lab`,
+    `::test_the_bare_token_rule_reads_ianas_root_zone_and_nothing_else`,
+    `::test_no_expected_vulnerable_answer_key_point_is_unbound_by_the_lab_predicate`;
+    amended: both generated sweeps (bare IPv6, reserved names), the measured tables, the
+    recogniser guard and its offender, `tests/test_forms_phase2.py::test_link_query_siblings_are_bound`
+    and `::test_neutral_value_errs_toward_loopback`.
+  - Pre-fix proof: one pytest invocation (`scratchpad/lanes/LABAUTH/r1/prefix_r1.txt`)
+    of `tests/test_replay_bindings.py` and `tests/test_forms_phase2.py` whole, with
+    1338d7a's `value_shape.py` in place of the fix (the bundled TLD data left: the old
+    code never reads it), then the fix restored (digest checked): 63 failed, 591 passed,
+    3 xfailed, each failure at its test's own assertion -- LA-1: 11 of 14 values at
+    `names_outside_lab` (the three percent-encoded ones were outside at 1338d7a and fail
+    on 7393c90) and the old-rule corpus at `wrong == []`; LA-2/5: 18 of 19 bare-IPv6
+    values (`fe80::1%eth0` read as a scheme) and both sweeps; LA-3: the 6 outside JSON
+    leaves (9 controls pass) and the answer-key JSON test; LA-6: the answer-key guard at
+    `refused == []`, the bare-token test, the TLD source test, 15 lab-table rows and the
+    four `test_forms_phase2` cases. On 1338d7a the recogniser guard fails at its
+    helper-presence assertion (the helpers it names are new) and the offender test at
+    its precondition; the guard's stated reason is recorded on 7393c90 by a plain-Python
+    call of the test functions with 7393c90's module in place (no pytest session,
+    `r1/prefix_7393c90_plain.txt`): it fails at its first assertion, naming the twelve
+    recognisers reached.
+  - Deliverables: [x] the fixes above; [x] tests; [x] FR-AUD-20 amended in place and
+    FR-AUD-32 added; [x] BUG-0555's review section; [ ] PA-0555 (strengthened), SP-73,
+    CHANGELOG, ERROR_LOG and failure-record texts handed over for the merge
+    (`scratchpad/lanes/LABAUTH/doc_texts.md`, "r1 changes").
 
 ### CC-AUD-0057 — The captured-request import refuses and counts a body holding a lone surrogate instead of failing the import (FR-AUD-22, BUG-0554) (2026-10-21)
 - Placement: lane SURROGATE (item AU-REQID78), base 33b423e, with CC-CRAWL-0061 (the
