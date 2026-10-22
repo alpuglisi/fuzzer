@@ -399,6 +399,7 @@ budget where a vulnerability is plausible.
     (`tests/test_replay_bindings.py::test_an_access_control_replay_never_reads_a_stand_in_for_its_own_value`).
     **Stated exception (FR-AUD-21, BUG-0124,
     operator-approved 2026-10-14):** the open-redirect retry probe.
+  - *(Stated gaps, pinned at the gaps merge.)* A '+' before a special scheme in a form-encoded value, or a JSON-escaped colon, and a Unicode spelling of an IPv6 address that getaddrinfo's nameprep reads as the ASCII address, are still the lab: strict xfails in `tests/test_lab_predicate_pins.py` (BUG-0555's final residuals).
 - **FR-AUD-21** *(open redirect and SSRF by value; `CC-AUD-0034`, 2026-10-14,
   BUG-0124).*
   - **Shape → categories.** `audit/value_shape.SHAPE_CATEGORIES` is the one table of

@@ -253,6 +253,7 @@ Newest first.
     (FR-AUD-32 unchanged); [x] BUG-0555's review-round-2 section; [ ] PA-0555
     (strengthened: (4), new (8)), SP-73, CHANGELOG, ERROR_LOG and failure-record texts
     handed over for the merge (`scratchpad/lanes/LABAUTH/doc_texts.md`, "r2 changes").
+  - *(Coordinator, at the gaps merge.)* The final round's fix check found two neighbouring spellings (a form-decoded '+' or JSON-escaped colon before a special scheme; Unicode IPv6 spellings under getaddrinfo's nameprep), neither a regression; per the owner they are pinned by 17 strict xfails in `tests/test_lab_predicate_pins.py` (17 xfailed), recorded in BUG-0555 and FR-AUD-20.
 
 ### CC-AUD-0057 — The captured-request import refuses and counts a body holding a lone surrogate instead of failing the import (FR-AUD-22, BUG-0554) (2026-10-21)
 - Placement: lane SURROGATE (item AU-REQID78), base 33b423e, with CC-CRAWL-0061 (the

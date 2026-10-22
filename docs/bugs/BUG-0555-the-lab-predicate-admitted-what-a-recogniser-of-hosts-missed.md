@@ -796,3 +796,17 @@ complement of its alphabet, a mark is the reader's whole rule (a special scheme 
 `Enforced by:` line. The sweep for this round was itself done by character, not by
 list: the IPv6 test iterates the complement of the alphabet, the special-scheme test
 every class of preceding character.
+
+## Residuals after the owner's final round (coordinator, at the gaps merge, 2026-10-22)
+The final round's fix check (a32f415) found two neighbouring spellings, neither a
+regression (7393c90 and d3cb339 admit them too). Per the owner's decision they are pinned
+by strict xfails, not fixed in another round (PA-0531(4)):
+- **A '+' before a special scheme in a form-encoded value, or a JSON `\u003a` escape of
+  its colon** (`?next=+https:evil.top`, `?a=1&next=+ws:evil.top`,
+  `{"u":"https\u003aevil.top"}`): a form reader decodes '+' to a space that WHATWG
+  trims; `JSON.parse` unescapes the colon. Pinned:
+  `tests/test_lab_predicate_pins.py::test_a_special_scheme_behind_a_form_decoded_plus_or_a_json_escape_is_outside`.
+- **A Unicode spelling of an IPv6 address** (fullwidth digits or colons, a zero-width
+  space, a soft hyphen, a variation selector, a word joiner) that getaddrinfo's idna
+  nameprep reads as the ASCII address, as the IPv4 forms are already judged. Pinned:
+  `tests/test_lab_predicate_pins.py::test_a_unicode_spelling_of_an_ipv6_address_is_outside`.
