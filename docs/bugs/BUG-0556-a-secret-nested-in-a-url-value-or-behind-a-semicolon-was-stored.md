@@ -1081,3 +1081,163 @@ A skeptic's check of the batch found one more regression the batch itself introd
   side of it, in every encoding the sweep has, listed in the round's report -- and a
   claim that a listed spelling was redacted before is measured on the pre-fix revision
   per spelling, never inferred from its group.
+
+### r5: the pushed tree's readings, against the owner's shipping criterion (branch `lane/REDACTURL-r4` from 290fcfb)
+
+**The shipping criterion (the owner's rule).** The redactor must leak nothing the
+**pushed** tree, 7393c90, redacted: a regression against the pushed code is fixed in this
+batch (PA-0549(3c)), and every leak the pushed code also had is pinned by a strict xfail,
+never fixed in another round. Every earlier round measured "no regression" against
+f939778 (the unpushed review-round-1 revision) or its own pre-fix revision; neither is the
+criterion, and both already held the walk that replaced the pushed tree's readings.
+Proof files are under `scratchpad/lanes/REDACTURL/r5b/`.
+
+- **The differential** (`r5b/gen_corpus.py`, `run_corpus.py`, `diff_corpus.py`; run on
+  `git archive` exports of 7393c90 and 290fcfb and on the revision's package): one corpus
+  of 234 112 distinct URLs -- r4's `sweep3.py` (152 880 cases, 116 466 distinct URLs; r3's
+  `sweep2.py` is a subset of it), r4's `benign2.py` (25 536 cases, 19 760 distinct URLs,
+  no secret), the r4 skeptic's two classes generated over leads, payloads, every
+  encoding and positions (class (a): a value led by `\\`, `\/`, `\\\`, `\\/`, `\//`,
+  `\/\` or `\\\\`, and neighbouring leads, whose pair list sits in a later path segment,
+  `next=%5C%5Cx%2Fp%26password%3D<w>`, raw and in thirteen encodings, in twelve
+  positions, routes included: 67 108 URLs; class (b): a top-level fragment holding a
+  backslash-led userinfo, `#\\user%3A<w>%40x%2Fp` and its spellings: 20 194), and three
+  classes derived from the pushed tree's own parsing (below: names split by a tab, CR or
+  LF and identifiers so split, 3 708 + 792; a `;` inside an `&`-only pair, 6 084). Each
+  URL goes through `redact_url`, `redact_url_identifiers`, `safe_ref`,
+  `redact_for_record`, `page_url_is_clean` (True keeps it), `value_holds_secret` of the
+  nested value decoded once (False keeps it; absent at 7393c90 and counted as kept
+  there), the proxy's `redact()` of a request line, a `Referer` and a `Location`, and
+  `import_spider` (batched, each URL its own secret variant and path). Oracle: the secret
+  in the output or in any of its 1-7 percent-decodings.
+- **Counts, 290fcfb against 7393c90** (`r5b/diff_290fcfb_vs_7393c90.txt`): **leaks at
+  290fcfb and redacted at 7393c90: 4 366 URLs** (19 255 case-consumer pairs: 600 in the
+  tab/CR/LF names, 3 288 in the `;` class, 478 in the tab combinations; none in sweep3,
+  class (a) or class (b), which 7393c90 kept too: it never looked inside a value);
+  **leaks at both: 83 209 URLs**; fixed: 150 996. Consumers that regressed: `safe_ref`
+  4 366, `redact_url_identifiers` 3 616, `redact_for_record` 2 700, `page_url_is_clean`
+  2 544, `redact_url` 2 289, the proxy's `Location` 2 038 and request line 1 702.
+- **What the defect was: two readings of the pushed tree the walk dropped.** (1) 7393c90's
+  `redact_query` split a query on `&` only, so a pair's name ran to its first `=` across a
+  `;` (`?u=bob&password;x=<w>`, `a;token;b=<w>`) and a sensitive pair's value ran to the
+  next `&` across one (`password=pw;<w>`); its record redactor read a fragment's pairs the
+  same way. The walk split on `;` first, judged `x`, and kept `<w>` as a bare piece.
+  (2) 7393c90 read the query through `urlsplit`, which removes every ASCII tab, CR and LF
+  (bpo-43882; the WHATWG parser does the same), so `p<TAB>assword=<w>` and
+  `%7<TAB>0assword=<w>` were `password=…` to it, a 16-hex token split by a tab was one
+  token, and the URL it returned (`urlunsplit`) was so cleaned whenever it redacted --
+  `safe_ref`'s record pass and identifier blanking then read a fragment's pairs, a path
+  parameter (`p.php;passwor<TAB>d=<w>?token=a`) and a matrix value with them removed too.
+  The walk judged each name and value as written: `p`, `assword`.
+- **Five whys.** The secrets were kept because the walk read names with `;` and tabs
+  where 7393c90 read them without. The walk replaced `redact_query` and `urlsplit` in the
+  batch's first commit (b6db14a), so every later revision -- f939778 included -- had
+  already dropped both readings. Every round's differential compared the round with
+  f939778 or its own pre-fix revision, so a regression the first commit introduced was on
+  both sides of every comparison and never showed. **Root cause:** the differential's
+  baseline was the batch's own history, not the pushed tree the users have, and its
+  inputs were derived from the walk's conditions (PA-0556(9)), not from the pushed code's
+  own parsing (each library parse it called and each separator it split on).
+- **Fix** (`fuzzlab/core/redaction.py`; CC-CORE-0076's r5 sub-bullet; FR-CORE-537 in
+  place). Fail closed on either reading. `_UrlWalk.pairs`: an `&` part holding a `;` is
+  also read as one pair, its name running to its first `=` (`amp_secret`); every `;`
+  pair is walked first, then, when that name is sensitive, the part's value to the next
+  `&` is replaced. `_secret_name` judges a pair's or path parameter's name as written and
+  with its tabs, CRs and LFs removed (before the form-decode, so `%7<TAB>0` is `%70`);
+  `_identifier_like` judges a value both ways too. `_walk_url`: a URL holding a tab, CR
+  or LF that either reading redacts (the stripped URL is walked as well) is returned with
+  them removed and walked again, as `urlunsplit` returned it, so `safe_ref` reads it as
+  7393c90's did. A clean URL is returned byte-identical.
+- **The first draft regressed against 290fcfb, caught by the differential before
+  commit.** It replaced the `;` reading of such a part by the `&` one: when the `&`
+  reading's name held a sensitive token only because a secret sat inside it
+  (`next=host%253Btoken%253D<w>%2Fx%3Ba%3D1`, decoded `host%3Btoken%3D<w>/x;a=1`), it
+  redacted the value after `=` and skipped the walk of the name's own pieces: 450 URLs
+  (3 150 pairs) of sweep3 that 290fcfb redacted (7393c90 kept them too). Both readings
+  now always apply; the guard
+  `test_the_amp_reading_never_replaces_the_semicolon_reading` holds it.
+- **Counts after the fix** (`r5b/diff_fix_vs_7393c90.txt`, `diff_fix_vs_290fcfb.txt`):
+  **leaks at the revision and redacted at 7393c90: 0 URLs** (0 pairs); **leaks at both:
+  78 135 URLs** (665 654 pairs; 73 251 with a consumer 7393c90 had, the other 4 884 kept
+  only by `value_holds_secret`); **fixed against 7393c90: 153 720 URLs**. Against 290fcfb:
+  0 regressed, 6 225 fixed, and the 19 760 benign URLs' outputs are identical in every
+  consumer. Against 7393c90, 7 benign outputs differ, as they did on 290fcfb (unchanged by
+  r5): `next=a=//host=1/x;a=1` and its spellings are blanked, because after the `;` split
+  the unchanged identifier rule judges `a=//host=1/x` an identifier (12 characters, a
+  digit, 36 bits); over-redaction of evidence, not a leak.
+- **Tests** (`tests/test_redaction_nested.py`, "r5"): `_PUSHED_TREE_READINGS` (23
+  spellings: the `&`-only reading in a query, a fragment and both route forms; a tab, CR
+  or LF in a name and inside its escape; after a query 7393c90 redacted, in a fragment's
+  pair, a route's query, a path parameter) through
+  `test_a_secret_the_pushed_tree_redacted_is_redacted_by_every_url_consumer` (both
+  redactors, `safe_ref`, `redact_for_record`, `page_url_is_clean`, and the proxy's
+  request line and `Location` for a URL an HTTP line can carry), and
+  `_PUSHED_TREE_IDENTIFIERS` (5) through
+  `test_an_identifier_the_pushed_tree_read_whole_is_redacted_by_every_identifier_consumer`;
+  the guards `test_the_amp_reading_never_replaces_the_semicolon_reading` (3) and
+  `test_a_clean_semicolon_part_or_tab_is_left_byte_identical` (5). The plain runner on
+  290fcfb's `fuzzlab/` (`r5b/r5_tests_plain_290fcfb.log`): all 28 new cases fail, each an
+  `AssertionError` on its own assertion, and the 8 guard cases pass; on the revision all
+  36 pass (`r5_tests_plain_fix.log`) and the whole file passes (`nested_plain_fix.log`:
+  592 ok, its strict xfails among them).
+- **Every leak present at both, assigned** (`r5b/assign.py`, `assign_fix.txt`: each of the
+  78 135 URLs to a family by the generator's coordinates; none unassigned). Pinned now in
+  `tests/test_redaction_residual_pins.py` (strict, `raises=AssertionError`, each reason
+  naming BUG-0556 and its owner; 11 tests, 43 cases, each failing on its stated assertion
+  on the revision, on 290fcfb and on 7393c90: `r5b/pins_plain_{fix,290fcfb,7393c90}.log`):
+  - class (a), `test_a_pair_list_in_a_nested_urls_later_path_segment_is_redacted` (CORE
+    `_UrlWalk.path`: a nested URL's later path segment is never split into pairs; a URL
+    nested in a segment, `/go/https://x&…`, too): 40 503 URLs;
+  - `test_a_path_parameter_value_holding_a_raw_slash_is_redacted` (CORE `_UrlWalk.path`:
+    a top-level path parameter's value is cut at its first raw `/`): 13 298;
+  - class (b), `test_a_backslash_led_userinfo_in_the_top_level_fragment_is_redacted`
+    (CORE `_authority_start` / `route`; 20cd466 redacted the encoded spellings): 6 580;
+  - `test_a_scheme_less_userinfo_in_a_value_is_redacted` (CORE `_AUTHORITY_AT`:
+    `next=bob:<pw>@host`): 2 365;
+  - `test_proxy_history_redacts_a_url_holding_a_raw_lf` (PROXY: a raw LF ends the
+    request line or URL header): 948;
+  - `test_a_top_level_userinfo_holding_a_raw_amp_is_redacted` (CORE `_UrlWalk.pairs`:
+    `next=//bob:p&w<pw>@host` cut by the query split): 910;
+  - `test_a_top_level_fragments_pairs_before_a_question_mark_are_redacted` (CORE
+    `_UrlWalk.fragment`: `#token=<w>?y=1` is a route): 864;
+  - `test_a_slash_run_after_a_scheme_before_a_pair_list_is_redacted` (CORE
+    `_authority_start`: `https:///x&password=<w>`, the r4 pin's sibling behind a scheme):
+    688;
+  - `test_the_amp_reading_of_a_nested_value_is_redacted` (CORE `_UrlWalk.pairs`: the `&`
+    reading's value across `;` is never walked whole, `next=/v?password;x=<w>`): 384;
+  - `test_an_identifier_as_a_top_level_path_segment_or_route_is_redacted` (CORE and AUD:
+    the page's identity, R3): 36;
+  - `test_a_top_level_urls_own_userinfo_is_redacted_by_the_url_redactors` (CORE
+    `_UrlWalk.url`: the URL's own authority is its identity): 4.
+  Pinned before: R3's `test_a_userinfo_in_the_top_level_fragment_route_is_redacted` and
+  N1 (A)'s `test_an_encoded_authoritys_userinfo_is_redacted` (the `//`, `///`,
+  `https://`, `https:\\` and `/\` leads of class (b)'s generator, raw and encoded: 3 022),
+  r4's `test_a_slash_led_authoritys_pair_list_encoded_once_is_redacted_by_redact_url`
+  (1 305) and N7's `test_a_record_never_deletes_a_pair_name_with_a_userinfo_pattern`
+  (732). **Stated, not pinned** (no reading of the pushed tree or of a URL parser makes
+  them a kept secret of a consumer that judges them; for the owner to overrule): 4 884
+  URLs kept only by `value_holds_secret`, which 7393c90 did not have (the stored consumer
+  it feeds, `import_spider`, is measured directly and stores none of them); 1 152 `;`
+  controls, in which no reading names the word's pair sensitive (`?u=bob;password;x=<w>`:
+  the word is `x`'s under `;` and `u`'s under `&`; `/a;password;x=<w>/` a path
+  parameter's); 460 identifiers kept only by the name-only consumers (`redact_url`,
+  `redact_for_record`, the proxy), which judge names only by specification (FR-CORE-537),
+  on 7393c90 too.
+- **The round's run** (one pytest invocation, `FUZZLAB_PYTEST_LOCK_WAIT=7000`, `-n 3
+  --dist loadfile`, of the same 17 files as r3 and r4 -- every test file importing
+  `fuzzlab.core.redaction` and `tests/test_store_adapter.py`;
+  `scratchpad/lanes/REDACTURL/r5_run.sh`, `r5_run.log`): `1564 passed, 90 xfailed, 3
+  warnings in 533.42s` (exit 0; no skip, no failure; +36 passed and +43 xfailed against
+  r4's run, the round's new cases and pins).
+- **Recurrence review.** The lane's sixth pass at the class and a recurrence of r3's and
+  r4's defect (a regression of the batch unseen by its tests), now against the pushed
+  tree. **Prior-preventive-action failure analysis: PA-0556(8) and (9) were followed and
+  were the wrong layer.** Item 8 asks for a differential "against the pre-fix revision"
+  and item 9 derives its inputs from the change's own conditions; r3 and r4 read the
+  baseline as the round's own pre-fix revision (f939778, 20cd466), so a reading the
+  batch's first commit dropped was absent on both sides of every comparison, and the
+  inputs came from the walk's branches, never from the parsing of the code it replaced.
+  PA-0556 gains item 10 (in the lane's doc texts): every round's differential also runs
+  against the pushed tree (the last revision users have), and its corpus drives the
+  pushed code's own parsing -- each library parse it called (`urlsplit`'s removal of
+  tabs, CRs and LFs) and each separator it split on (`&` only) -- on both sides.

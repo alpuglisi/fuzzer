@@ -574,6 +574,147 @@ def test_a_clean_backslash_led_value_is_left_byte_identical(url):
     assert R.page_url_is_clean(url)
 
 
+# --- r5: what the pushed tree (7393c90) redacted, by its own readings (BUG-0556) ---------
+#: The owner's shipping criterion for the batch: it leaks nothing the pushed tree
+#: redacted (PA-0549(3c)). r5's differential against 7393c90 (`scratchpad/lanes/
+#: REDACTURL/r5b/`: 214 352 secret-bearing URLs through every URL consumer) found two
+#: readings of the pushed tree that the walk dropped, so 290fcfb kept what 7393c90
+#: redacted in 4 366 URLs:
+#: (1) 7393c90's `redact_query` split a query on '&' only: a pair's name ran to its first
+#:     '=' across a ';' (``password;x=…``, ``a;token;b=…``) and a sensitive pair's value
+#:     ran to the next '&' across one (``password=pw;<word>``); its record redactor read a
+#:     fragment's pairs the same way. The walk split on ';' first and judged ``x`` alone.
+#: (2) 7393c90 read the query through ``urlsplit``, which removes every tab, CR and LF
+#:     (bpo-43882; the WHATWG parser does the same), so ``p<TAB>assword=…`` and
+#:     ``%7<TAB>0assword=…`` were ``password=…``, a 16-hex token split by a tab was one
+#:     token, and the URL it returned (``urlunsplit``) was so cleaned whenever it
+#:     redacted: `safe_ref`'s record pass and identifier blanking then read a fragment's
+#:     pairs, a path parameter and a matrix value with them removed too.
+_HALVES = "5b8add2a\t5d98b1a6"                   # 16 hex: two 8-character pieces as written
+_PUSHED_TREE_READINGS = [
+    # (1) the '&'-only reading
+    (f"http://h/app/p.php?password;x={_WORD}", _WORD),
+    (f"http://h/app/p.php?u=bob&a;token;b={_WORD}", _WORD),
+    (f"http://h/app/p.php?u=bob&api_key;={_WORD}#f", _WORD),
+    (f"http://h/app/p.php?jsessionid;x;y={_WORD}&u=bob", _WORD),
+    (f"http://h/app/p.php?u=bob&apikey=pw;{_WORD}#f", _WORD),
+    (f"http://h/app/p.php?pwd=a;b;{_WORD}&u=bob", _WORD),
+    (f"http://h/app/p.php?u=bob&api_key%3Bx=pw;x={_WORD}", _WORD),
+    (f"http://h/app/p.php?u=bob&x;password=a b;{_WORD}#f", _WORD),
+    (f"http://h/app/#password;x={_WORD}", _WORD),
+    (f"http://h/app/#u=1&x;access_token=pw;x={_WORD}", _WORD),
+    (f"http://h/app/#/r?secret;x;y=pw;x={_WORD}", _WORD),
+    (f"http://h/app/#!/r?u=1&a;access_token;b=pw;{_WORD}", _WORD),
+    # (2) a tab, CR or LF urlsplit removed: in a name, inside a name's escape, ...
+    (f"http://h/app/p.php?p\tassword={_WORD}", _WORD),
+    (f"http://h/app/p.php?u=bob&pa\rssword={_WORD}", _WORD),
+    (f"http://h/app/p.php?passw\nord={_WORD}&u=bob", _WORD),
+    (f"http://h/app/p.php?u=bob&%7\t0assword={_WORD}", _WORD),
+    (f"http://h/app/p.php?u=bob&%\r74oken=pw;{_WORD}", _WORD),
+    (f"http://h/app/p.php?access_toke\rn={_WORD}#/r?u=1", _WORD),
+    # ... after a query 7393c90 redacted, read again by `safe_ref` with them removed ...
+    (f"http://h/app/p.php?token=a&u=1#p\tassword={_WORD}", _WORD),
+    (f"http://h/app/p.php?token=a&u=1#%\r70assword={_WORD}", _WORD),
+    (f"http://h/app/p.php?token=a#!/r?u=1&toke\rn={_WORD}", _WORD),
+    (f"http://h/app/p.php;passwor\td={_WORD}?token=a", _WORD),
+    (f"http://h/app/a;s\rid={_WORD}/p.php?token=a", _WORD),
+]
+#: ... and an identifier split by one (judged by the identifier consumers only: the
+#: name-only ones never judged a value's shape, on either tree)
+_PUSHED_TREE_IDENTIFIERS = [
+    f"http://h/app/p.php?ref={_HALVES}",
+    f"http://h/app/p.php?u=bob&k={_HALVES.replace(chr(9), chr(13))}#f",
+    f"http://h/app/p.php?token=a#/r?k={_HALVES.replace(chr(9), chr(10))}",
+    f"http://h/app/p.php?p\tassword=a&k={_HALVES.replace(chr(9), chr(10))}",
+    f"http://h/app/a;k={_HALVES}/p.php?token=a",
+]
+
+
+def _pushed_consumers_keeping(url: str, secret: str) -> list[str]:
+    """Every consumer 7393c90 had of a page URL that keeps ``secret``: both URL
+    redactors, the evidence reference (`core.trace.safe_ref`), the record redactor,
+    `page_url_is_clean` (True) and, for a URL an HTTP message can carry on one line (no
+    LF), the proxy's request line and ``Location``."""
+    from fuzzlab.core.trace import safe_ref
+    from fuzzlab.proxy.redact import redact
+    outs = [("redact_url", R.redact_url(url)),
+            ("redact_url_identifiers", R.redact_url_identifiers(url)),
+            ("safe_ref", safe_ref(url)),
+            ("redact_for_record", R.redact_for_record("target", url))]
+    if "\n" not in url:
+        target = url.split("://", 1)[1].partition("/")[2]
+        for name, raw in (
+                ("proxy request line", f"GET /{target} HTTP/1.1\r\nHost: h\r\n\r\n"),
+                ("proxy Location", f"HTTP/1.1 302 Found\r\nLocation: {url}\r\n\r\n")):
+            outs.append((name, redact(raw.encode()).decode("latin-1")))
+    kept = [name for name, out in outs if _leaks(out, secret)]
+    if R.page_url_is_clean(url):
+        kept.append("page_url_is_clean")
+    return kept
+
+
+@pytest.mark.parametrize("url,secret", _PUSHED_TREE_READINGS)
+def test_a_secret_the_pushed_tree_redacted_is_redacted_by_every_url_consumer(url, secret):
+    """r5 (PA-0549(3c), the owner's shipping criterion): a secret 7393c90 redacted by
+    its '&'-only reading of a pair list or its ``urlsplit`` reading (tabs, CRs and LFs
+    removed) is redacted by every URL consumer: the walk reads each pair both ways and
+    each name and identifier both ways, and returns a URL holding a tab, CR or LF so
+    cleaned whenever either reading redacts (`_walk_url`). Every consumer is checked
+    before the one assertion, so 290fcfb fails there naming what kept it."""
+    assert _leaks(url, secret)                               # not vacuous
+    assert _pushed_consumers_keeping(url, secret) == []
+
+
+@pytest.mark.parametrize("url", _PUSHED_TREE_IDENTIFIERS)
+def test_an_identifier_the_pushed_tree_read_whole_is_redacted_by_every_identifier_consumer(
+        url):
+    """r5: a 16-hex token split by a tab, CR or LF is one token to ``urlsplit`` (7393c90
+    blanked it in a query and, after a query it redacted, `safe_ref` blanked it in a
+    route's query or a matrix value) and two 8-character pieces as written; the walk
+    judges a value both ways (`_identifier_like`). Checked in `redact_url_identifiers`,
+    `safe_ref` and `page_url_is_clean` before the one assertion."""
+    from fuzzlab.core.trace import safe_ref
+    assert _leaks(url, _HALVES)                              # not vacuous
+    kept = [name for name, out in (
+        ("redact_url_identifiers", R.redact_url_identifiers(url)),
+        ("safe_ref", safe_ref(url))) if _leaks(out, _HALVES)]
+    if R.page_url_is_clean(url):
+        kept.append("page_url_is_clean")
+    assert kept == []
+
+
+@pytest.mark.parametrize("url", [
+    f"http://h/app/p.php?u=bob&next=host%253Btoken%253D{_WORD}%2Fx%3Ba%3D1",
+    f"http://h/app/p.php?u=bob&host%3Btoken%3D{_WORD};a=1",
+    f"http://h/app/#/r?u=1&host%3Btoken%3D{_WORD};a=1",
+])
+def test_the_amp_reading_never_replaces_the_semicolon_reading(url):
+    """The guard beside r5's '&'-only reading: an '&' part whose name, read to its first
+    '=', holds a sensitive token only because a secret sits inside it
+    (``host%3Btoken%3D<word>;a=1``) still has each ``;`` pair walked first, so the
+    secret inside the name is redacted too (r5's first draft replaced the ``;`` reading
+    by the '&' one and kept 450 URLs of its differential that 290fcfb redacted)."""
+    assert _leaks(url, _WORD)                                # not vacuous
+    for fn in (R.redact_url, R.redact_url_identifiers):
+        assert not _leaks(fn(url), _WORD), fn.__name__
+
+
+@pytest.mark.parametrize("url", [
+    "http://h/app/p.php?u=bob&lang;x=en",
+    "http://h/app/p.php?u=bob&sort=asc;dir=up&next=/x",
+    "http://h/app/p.php?q=a\tb&u=1",
+    "http://h/app/p.php?u=bob#/r?lang;x=en",
+    "http://h/app/a;v=1\t2/p.php?u=1",
+])
+def test_a_clean_semicolon_part_or_tab_is_left_byte_identical(url):
+    """The guard beside r5's fix: a clean ``&`` part holding a ``;`` and a clean URL
+    holding a tab are left byte-identical (the cleaned reading is returned only when a
+    reading redacts) and the page stays clean."""
+    for fn in (R.redact_url, R.redact_url_identifiers):
+        assert fn(url) == url, fn.__name__
+    assert R.page_url_is_clean(url)
+
+
 @pytest.mark.parametrize("value", [
     f"http://bob:pw {_PASS}@127.0.0.1:3000/app/",
     f"http://bob:pw {_PASS}@127.0.0.1:3000/app/?q=1",

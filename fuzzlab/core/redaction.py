@@ -234,8 +234,11 @@ def redact_url(url: str) -> str:
     ``;`` separated), a ``;name=value`` path parameter, a query-shaped fragment, and a
     URL, query string or ``;`` pair nested in any of those values (raw or
     percent-encoded, walked by `_UrlWalk`); a nested URL's userinfo is replaced too
-    (BUG-0556 review round 1). Byte-identical when it holds none; a value past the
-    walk's bounds is replaced whole. Total: a non-string is returned as is."""
+    (BUG-0556 review round 1). An ``&`` part holding a ``;`` is also read as one pair,
+    as `redact_query` reads it, and a name or URL holding a tab, CR or LF also as
+    ``urlsplit`` reads it, those removed (BUG-0556 r5: the pushed tree's readings).
+    Byte-identical when it holds none; a value past the walk's bounds is replaced
+    whole. Total: a non-string is returned as is."""
     return _walk_url(url, identifiers=False)
 
 
@@ -300,6 +303,36 @@ _AUTHORITY_AT = re.compile(
 _USERINFO_PAIR = re.compile(r"[&;]|%(?:25)*(?:26|3[Bb])")
 #: Pair structure in a nested URL's authority: it is walked as a value (`_UrlWalk.path`).
 _AUTHORITY_PAIRS = re.compile(r"[=&;]")
+#: What the WHATWG URL parser and Python's ``urlsplit`` (bpo-43882) remove from a URL
+#: before reading it: every ASCII tab, CR and LF. The pushed tree (7393c90) read a URL's
+#: query through ``urlsplit``, so ``p<TAB>assword=…`` was ``password=…`` to it, and it
+#: returned the whole URL so cleaned (``urlunsplit``) whenever it redacted; the walk
+#: reads both spellings (`_secret_name`, `_identifier_like`, `_walk_url`; BUG-0556 r5).
+_URL_STRIP = str.maketrans("", "", "\t\r\n")
+
+
+def _strippable(text: str) -> bool:
+    """Whether ``text`` holds a character a URL parser removes (`_URL_STRIP`)."""
+    return "\t" in text or "\r" in text or "\n" in text
+
+
+def _secret_name(name: str) -> bool:
+    """Whether a pair's or path parameter's raw ``name`` (form-decoded here) is sensitive
+    as written or as a URL parser reads it, tabs, CRs and LFs removed (``p%7<TAB>0assword``
+    is ``password`` to ``urlsplit`` and a browser): fail closed on either reading
+    (BUG-0556 r5)."""
+    if is_sensitive_name(unquote_plus(name)):
+        return True
+    return _strippable(name) and is_sensitive_name(unquote_plus(name.translate(_URL_STRIP)))
+
+
+def _identifier_like(text: str) -> bool:
+    """`looks_like_identifier` of a raw value percent-decoded once, as written or with its
+    tabs, CRs and LFs removed (a 16-hex token split by a tab is two 8-character pieces
+    as written, one token to ``urlsplit``): either reading (BUG-0556 r5)."""
+    if looks_like_identifier(unquote(text)):
+        return True
+    return _strippable(text) and looks_like_identifier(unquote(text.translate(_URL_STRIP)))
 
 
 def _url_shaped(text: str) -> bool:
@@ -474,7 +507,7 @@ class _UrlWalk:
         """One path parameter (``name=value`` or bare): its own top level."""
         self.tick(part)
         name, eq, raw = part.partition("=")
-        if eq and is_sensitive_name(unquote_plus(name)):
+        if eq and _secret_name(name):
             return f"{name}={PLACEHOLDER}"
         text = raw if eq else part
         try:
@@ -486,18 +519,52 @@ class _UrlWalk:
         return f"{name}={new}" if eq else new
 
     def pairs(self, text: str, depth: int, top: bool) -> str:
+        """A pair list's ``&`` and ``;`` pairs, each walked (`pair`). An ``&`` part
+        holding a ``;`` is also read as one pair, its name running to its first ``=``
+        across the ``;`` and its value to the next ``&``, as `redact_query` and the pushed
+        tree's URL redactors (7393c90) read it, and as PHP and other servers that split
+        a query on ``&`` only do: when that name is sensitive (``password;x=…``) the
+        whole part's value is redacted, and a sensitive pair's value running past a
+        ``;`` (``password=pw;<word>``) goes with it. Both readings always apply: each
+        ``;`` pair is walked first (a secret inside the ``&`` reading's name is the ``;``
+        reading's), then the ``&`` reading's value is replaced. Fail closed on either
+        reading (BUG-0556 r5: the walk split on ``;`` only, so both kept what 7393c90
+        redacted)."""
         self.tick(text)
         parts = _PAIR_SEP.split(text)
-        for i in range(0, len(parts), 2):
-            parts[i] = self.pair(parts[i], depth, top)
+        i, n = 0, len(parts)
+        while i < n:
+            j = i                                   # parts[i..j]: one '&'-separated part
+            while j + 1 < n and parts[j + 1] == ";":
+                j += 2
+            k = self.amp_secret(parts, i, j) if j > i else None
+            for m in range(i, j + 1, 2):
+                parts[m] = self.pair(parts[m], depth, top)
+            if k is not None:                       # the '&' reading's value, redacted
+                parts[k] = parts[k].partition("=")[0] + "=" + PLACEHOLDER
+                for m in range(k + 1, j + 1):
+                    parts[m] = ""
+            i = j + 2
         return "".join(parts)
+
+    @staticmethod
+    def amp_secret(parts: list, i: int, j: int) -> int | None:
+        """``parts[i..j]`` (one ``&`` part holding a ``;``) read as one pair, its name
+        running to its first ``=``: the index of the piece holding that ``=`` when the
+        name is sensitive (`_secret_name`), else None (no ``=``, or a clean name). A
+        pair keeps its raw name when walked, so the index still names it after."""
+        for k in range(i, j + 1, 2):
+            name, eq, _raw = parts[k].partition("=")
+            if eq:
+                return k if _secret_name("".join(parts[i:k]) + name) else None
+        return None
 
     def pair(self, part: str, depth: int, top: bool) -> str:
         self.tick(part)
         if not part:
             return part
         name, eq, raw = part.partition("=")
-        if eq and is_sensitive_name(unquote_plus(name)):
+        if eq and _secret_name(name):
             return f"{name}={PLACEHOLDER}"
         text = raw if eq else part
         try:
@@ -539,7 +606,7 @@ class _UrlWalk:
         self.tick(text)
         if depth > MAX_VALUE_DEPTH or len(text) > MAX_VALUE_CHARS:
             raise _Whole
-        if self.identifiers and looks_like_identifier(unquote(text)):
+        if self.identifiers and _identifier_like(text):
             return self.blank if top else PLACEHOLDER
         text = self.userinfo(text)                  # wherever a URL starts in it (N2)
         if _PCT.search(text) and not _RAW_QUERY.search(text):
@@ -567,8 +634,8 @@ class _UrlWalk:
         self.tick(text)
         base, hashmark, frag = text.partition("#")
         head, qmark, query = base.partition("?")
-        if self.identifiers and looks_like_identifier(
-                unquote("/".join(seg.split(";", 1)[0] for seg in head.split("/")))):
+        if self.identifiers and _identifier_like(
+                "/".join(seg.split(";", 1)[0] for seg in head.split("/"))):
             raise _Whole                            # a token in its host or path
         head = self.path(head, depth, nested=True)
         if qmark:
@@ -615,11 +682,24 @@ class _UrlWalk:
 def _walk_url(url, identifiers: bool, counter: WalkCounter | None = None, *,
               placeholder: bool = False):
     """`_UrlWalk` over a whole URL; total. A URL with no ``?``, ``;`` or ``#`` holds no
-    value and is returned as it is. ``counter`` receives the walk's operation counts."""
+    value and is returned as it is. ``counter`` receives the walk's operation counts.
+
+    A URL holding a tab, CR or LF is also read as ``urlsplit`` and the WHATWG parser
+    read it, those removed (`_URL_STRIP`): when either reading redacts something, the
+    URL is returned so cleaned and walked again -- what the pushed tree (7393c90)
+    returned (``urlunsplit``) whenever it redacted, so a later reader (`core.trace.
+    safe_ref`'s identifier blanking of a path segment or fragment, the record
+    redactor) reads it as it did (BUG-0556 r5). A clean one is returned as it is."""
     if not isinstance(url, str) or not any(c in url for c in "?;#"):
         return url
     try:
-        return _UrlWalk(identifiers, counter, placeholder=placeholder).url(url)
+        walk = _UrlWalk(identifiers, counter, placeholder=placeholder)
+        out = walk.url(url)
+        if _strippable(url):
+            plain = url.translate(_URL_STRIP)
+            if out != url or walk.url(plain) != plain:
+                out = walk.url(out.translate(_URL_STRIP))
+        return out
     except Exception:                               # unreachable by construction; closed
         return re.split(r"[;?#]", url, maxsplit=1)[0] + "?" + PLACEHOLDER
 

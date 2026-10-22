@@ -883,7 +883,15 @@ plugin registry. It is the layer that makes the store the integration bus.
     (`&`, `;`, `%26`, `%3B`, `%2526`, ...), is also a pair list and redacts its value
     whole (`_Whole`), so its replacement never deletes a pair's name.
   - **The rule at every level:** a sensitively named pair or path parameter
-    (`is_sensitive_name`, name form-decoded) gets `PLACEHOLDER`. With identifiers
+    (`is_sensitive_name`, name form-decoded) gets `PLACEHOLDER`. *(r5: the pushed tree's
+    readings, fail closed on either.)* A name, and an identifier-like value, are judged
+    as written and with their tabs, CRs and LFs removed, as `urlsplit` and the WHATWG
+    parser read them (`p<TAB>assword=…`, `%7<TAB>0assword=…`, a token split by a tab);
+    an `&` part holding a `;` is also read as one pair, its name to its first `=` and its
+    value to the next `&`, as `redact_query` reads it (`password;x=…`,
+    `password=pw;<word>`), each `;` pair still walked; and a URL holding a tab, CR or LF
+    that either reading redacts is returned with them removed and walked again, as
+    `urlunsplit` returned it. With identifiers
     (`redact_url_identifiers`), an identifier-like value (`looks_like_identifier`,
     judged percent-decoded once) is blanked to `name=` at a URL's own query or fragment
     (as before), and is `PLACEHOLDER` when nested or in a path parameter; a token in a
@@ -953,6 +961,29 @@ plugin registry. It is the layer that makes the store the integration bus.
     `test_the_linearity_oracle_runs_the_redaction_path` (the oracle's blind spots, N8).
     The callers' gaps are pinned in the same file: `import_audit` after `--append` (AUD,
     N3) and malformed or folded proxy messages (PROXY, N6).
+    *(r5: every leak the pushed tree, 7393c90, also had -- the owner's shipping
+    criterion; BUG-0556 "r5")*, each a strict xfail in the same file:
+    `test_a_pair_list_in_a_nested_urls_later_path_segment_is_redacted` (class (a) of r4's
+    skeptic: a pair list in a nested URL's later path segment, `\\x/p&password=…`);
+    `test_a_backslash_led_userinfo_in_the_top_level_fragment_is_redacted` (class (b):
+    `#\\user%3A<pw>%40x%2Fp`); `test_a_path_parameter_value_holding_a_raw_slash_is_redacted`
+    (a top-level path parameter's value cut at its first `/`);
+    `test_a_scheme_less_userinfo_in_a_value_is_redacted` (`next=bob:<pw>@host`);
+    `test_a_top_level_userinfo_holding_a_raw_amp_is_redacted` (`next=//bob:p&w<pw>@host`);
+    `test_a_top_level_fragments_pairs_before_a_question_mark_are_redacted`
+    (`#token=<word>?y=1`, read as a route);
+    `test_a_slash_run_after_a_scheme_before_a_pair_list_is_redacted`
+    (`https:///x&password=…`); `test_the_amp_reading_of_a_nested_value_is_redacted`
+    (`next=/v?password;x=…`: the `&` reading's value is not walked whole);
+    `test_an_identifier_as_a_top_level_path_segment_or_route_is_redacted` and
+    `test_a_top_level_urls_own_userinfo_is_redacted_by_the_url_redactors` (the page's
+    identity, R3); and the proxy's `test_proxy_history_redacts_a_url_holding_a_raw_lf`
+    (PROXY). **Stated, not pinned** (no reading makes them a kept secret of a consumer
+    that judges them): a value `value_holds_secret` keeps where every consumer 7393c90
+    had redacts it (7393c90 had no such function); a word in a `;` pair no reading names
+    sensitive (`?u=bob;password;x=<word>`, a path parameter's `;password;x=<word>`); an
+    identifier-like value under a benign name in the name-only consumers (`redact_url`,
+    the record redactor, the proxy), by this requirement's own rule.
   - Enforced by: `tests/test_redaction_nested.py` (a generated sweep over depth,
     encoding -- raw, single and double percent, `+`, `quote(safe="/")` single and
     double, `quote(safe="/:")` -- separator, nested shape -- a path, an absolute URL, a

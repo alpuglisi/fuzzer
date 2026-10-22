@@ -177,6 +177,31 @@ Newest first.
       `////` leads, measured the same; on f939778 too) is pinned:
       `tests/test_redaction_residual_pins.py::test_a_slash_led_authoritys_pair_list_encoded_once_is_redacted_by_redact_url`
       (strict, `raises=AssertionError`, 5 cases).
+  - *(r5, 2026-10-22, branch `lane/REDACTURL-r4` from 290fcfb; BUG-0556 "r5". The owner's
+    shipping criterion: the redactor leaks nothing the pushed tree, 7393c90, redacted --
+    a regression against the pushed code is fixed in this batch, every leak it also had
+    is pinned. Earlier rounds compared against f939778 or their own pre-fix revision.)*
+    - **The pushed tree's two readings, restored (fail closed on either):** a
+      differential of 214 352 secret-bearing URLs through every URL consumer found 4 366
+      that 290fcfb kept and 7393c90 redacted. (1) `_UrlWalk.pairs` also reads an `&` part
+      holding a `;` as one pair, its name to its first `=` (`amp_secret`), as
+      `redact_query` did: `?u=bob&password;x=<w>`, `a;token;b=<w>` and a sensitive
+      pair's value running past a `;` (`password=pw;<w>`) are redacted again, in a query,
+      a fragment and a route; every `;` pair is still walked first. (2) `_secret_name`
+      and `_identifier_like` judge a name and a value as written and with their tabs, CRs
+      and LFs removed, as `urlsplit` read them (`p<TAB>assword=<w>`, `%7<TAB>0assword=…`,
+      a 16-hex token split by a tab), and `_walk_url` returns a URL holding one of them,
+      when either reading redacts, with them removed and walked again, as `urlunsplit`
+      did, so `core.trace.safe_ref` reads a fragment's pairs, a path parameter and a
+      matrix value as 7393c90's did. A clean URL is unchanged.
+    - Tests: `tests/test_redaction_nested.py` "r5": 23 spellings through every URL
+      consumer and 5 split identifiers through the identifier consumers, each failing on
+      290fcfb on its own assertion; two guards (an `&` reading never replaces the `;` one,
+      the first draft's own regression of 450 URLs against 290fcfb; a clean `;` part or
+      tab is byte-identical). Every family both trees keep is assigned (`r5b/assign.py`)
+      and pinned: 11 new strict xfails (43 cases) in
+      `tests/test_redaction_residual_pins.py`, classes (a) and (b) of r4's skeptic among
+      them; three families are stated with their reason, unpinned (BUG-0556 "r5").
 - Impact (other components / project):
   - Every producer that calls `redact_url` now redacts nested credential names, `;`
     pairs, path parameters and query-shaped fragments: **PROXY** (flow history's URL,
@@ -243,6 +268,14 @@ Newest first.
     leaks in 0 cases f939778 redacted and in 0 cases 20cd466 redacted; a benign one of
     25 536 URLs (`r4/benign2.py`) is identical to 20cd466's. `_SLASH_RUN` reads only the
     lead's run, once per nested head.
+  - *(r5:)* over-redaction (fail closed, accepted): an `&` part whose name to its first
+    `=` holds a sensitive token across a `;` (`?token;a=1`) has its whole value
+    redacted, and a URL holding a tab, CR or LF that either reading redacts is stored
+    with them removed (as 7393c90 stored it). The differential (`r5b/`, 234 112 URLs)
+    leaks in 0 cases 7393c90 redacted (and in 0 cases 290fcfb redacted); its 19 760
+    benign URLs' outputs are identical to 290fcfb's. Cost: one more name check per `&`
+    part holding a `;`, and for a URL holding a tab, CR or LF at most three walks; the
+    linearity oracle passes at 500 and 4000 items.
 - Deliverables:
   - [x] `_UrlWalk`, `_walk_url`, `value_holds_secret`, `stored_value`,
     `strip_secret_path_params`; `redact_url`, `redact_url_identifiers`,
@@ -276,6 +309,11 @@ Newest first.
     residual pinned, r3's `_AFTER_FINAL` comment and claim corrected; FR-CORE-537
     amended in place; BUG-0556 "r4"; PA-0556 item 9, SP-17 and the doc texts amended
     (in "r3 changes") — done
+  - [x] *(r5)* the pushed tree's two readings in the owner (`_UrlWalk.pairs`,
+    `_secret_name`, `_identifier_like`, `_walk_url`), their tests proven on 290fcfb, the
+    differential against 7393c90 and 290fcfb, every family both keep assigned and the
+    unpinned ones pinned (11 strict xfails); FR-CORE-537 amended in place; BUG-0556
+    "r5"; PA-0556 item 10, SP-17 and the doc texts amended (in "r3 changes") — done
 - Effectiveness (assessed 2026-10-22): the six reported spellings stored their token
   before (measured by `scratchpad/lanes/REDACTURL/exp/repro.py` on 7393c90) and store
   none after; the new tests fail on the pre-fix product files in one invocation and pass
@@ -307,7 +345,19 @@ Newest first.
   stated assertion (`r4/pins_plain_new.log`); the differential's counts are above; the
   round's run (`r4_run.log`, one invocation of the same 17 files): `1528 passed, 47
   xfailed, 3 warnings in 496.76s`, exit 0 (no skip, no failure). The harness result is
-  the orchestrator's at merge.
+  the orchestrator's at merge. *(r5:)* the 28 new cases fail on 290fcfb's `fuzzlab/` on
+  their own assertions while the 8 guard cases pass there, and all pass on the revision
+  (plain runner, `r5b/r5_tests_plain_290fcfb.log`, `r5_tests_plain_fix.log`; the whole
+  file, `nested_plain_fix.log`: 592 ok); each of the 43 new pin cases fails on its stated
+  assertion on the revision, 290fcfb and 7393c90 (`r5b/pins_plain_*.log`); the
+  differential against 7393c90: 0 leaks it redacted (290fcfb: 4 366); the round's run
+  (`r5_run.sh`, `r5_run.log`, one invocation, `FUZZLAB_PYTEST_LOCK_WAIT=7000`, `-n 3
+  --dist loadfile`, of the same 17 files: the 16 importing `fuzzlab.core.redaction` and
+  `tests/test_store_adapter.py`): `1564 passed, 90 xfailed, 3 warnings in 533.42s`,
+  exit 0 (no skip, no failure; +36 passed and +43 xfailed against r4's run, the round's
+  new cases and pins; the warnings are a starlette deprecation and a `fork()` notice in
+  other files' tests; the docs were edited during the run, no code or test file). The
+  harness result is the orchestrator's at merge.
 
 ### CC-CORE-0075 — The seam keeps its connections per identity and session generation (FR-CORE-509, BUG-0549) (2026-10-21)
 - Placement: pre-assigned to POOL24 (audit defect 24); CC-CORE-0073 and CC-CORE-0074 are

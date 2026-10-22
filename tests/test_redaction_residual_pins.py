@@ -150,6 +150,210 @@ def test_a_slash_led_authoritys_pair_list_encoded_once_is_redacted_by_redact_url
     assert not _leaks(R.redact_url(url), _WORD)
 
 
+# --- r5: what the pushed tree (7393c90) kept too (the owner's shipping criterion) --------
+# r5's differential (scratchpad/lanes/REDACTURL/r5b/: 214 352 secret-bearing URLs through
+# every URL consumer, 7393c90 against the revision) found 78 135 URLs both keep a secret
+# of; `r5b/assign.py` assigns every one to a family. Each family not already pinned above
+# is pinned here (the owner's rule: a leak the pushed code also had is pinned, never
+# fixed in another round); the rest are stated in BUG-0556 "r5" with their reason.
+_BS = "\\"
+_ON_7393 = "on 7393c90 too: not a regression against the pushed tree"
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
+    "BUG-0556 residual, class (a) of r4's skeptic (owner CORE, core.redaction "
+    "`_UrlWalk.path`): a nested URL's path segments are decoded and split on ';' only, "
+    "so a value led by `\\\\`, `\\/`, `\\\\\\`, `\\\\/`, `\\//`, `\\/\\` or `\\\\\\\\` (or "
+    "`/`, `//`, a scheme, a URL nested in a segment) whose pair list sits in a later path "
+    "segment (`\\\\x/p&password=<word>`) is never split into pairs; f939778 split such a "
+    f"value into pairs (r5: 40 503 URLs of the differential; {_ON_7393})"))
+@pytest.mark.parametrize("url", [
+    f"http://h/app/p.php?u=bob&next=%5C%5Cx%2Fp%26password%3D{_WORD}",
+    f"http://h/app/p.php?u=bob&next=%5C%2Fx%2Fp%26token%3D{_WORD}",
+    "http://h/app/p.php?u=bob&next=" + quote(f"{_BS * 2}x/a/b&password={_WORD}", safe="/"),
+    f"http://h/app/p.php?u=bob&next={_BS * 2}x/p%26password%3D{_WORD}",
+    f"http://h/app/#/r?next=%5C%5Cx%2Fp%26password%3D{_WORD}",
+    "http://h/app/p.php?u=bob&next=" + quote(f"{_BS}//x/p&password={_WORD}", safe=""),
+    "http://h/app/p.php?u=bob&next=" + quote(f"/x/p&password={_WORD}", safe=""),
+    "http://h/app/p.php?u=bob&next=" + quote(f"/go/https://x&password={_WORD}", safe=""),
+])
+def test_a_pair_list_in_a_nested_urls_later_path_segment_is_redacted(url):
+    assert _leaks(url, _WORD)                                # not vacuous
+    assert _both_redactors_kept(url, _WORD) == []
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
+    "BUG-0556 residual, class (b) of r4's skeptic (owner CORE, core.redaction "
+    "`_authority_start` / `_UrlWalk.route`): r4 starts a nested head's authority after its "
+    "backslash run, so the top-level fragment route's `\\\\user%3A<pw>%40x` reaches "
+    "`layer` without its lead; decoded, `user:<pw>@x` has no scheme or `//`, and "
+    "`userinfo` never matches (20cd466 redacted the encoded spellings; the raw ones are "
+    f"R3's identity; r5: 6 580 URLs; {_ON_7393})"))
+@pytest.mark.parametrize("url", [
+    f"http://h/app/p.php#{_BS * 2}user%3A{_WORD}%40x%2Fp",
+    f"http://h/app/p.php#{_BS * 2}user:{_WORD}%40x/p",
+    f"http://h/app/p.php#{_BS * 2}user%3A{_WORD}%40x?a=1",
+    f"http://h/app/p.php#{_BS * 2}user%3Acorrect%20{_WORD}%40x%2Fp",
+    f"http://h/app/p.php#{_BS * 3}user%3A{_WORD}%40x%2Fp",
+    f"http://h/app/p.php#{_BS * 4}user%3A{_WORD}%40x%2Fp",
+    f"http://h/app/p.php?u=bob#{_BS * 2}user:{_WORD}@x",
+])
+def test_a_backslash_led_userinfo_in_the_top_level_fragment_is_redacted(url):
+    assert _leaks(url, _WORD)                                # not vacuous
+    assert _both_redactors_kept(url, _WORD) == []
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
+    "BUG-0556 residual (owner CORE, core.redaction `_UrlWalk.path`): a top-level path is "
+    "split into segments on '/' before its ';' parameters are read, so a path "
+    "parameter's value holding a raw '/' (`;next=//x&password=<word>/x`, "
+    "`;next=/go/https://bob:<pw>@host`) is judged only up to its first '/' and the rest "
+    f"is a segment of the page's identity (r5: 13 298 URLs; {_ON_7393})"))
+@pytest.mark.parametrize("url", [
+    f"http://h/app/p.php;next=//x&password={_WORD}/x?u=bob",
+    f"http://h/app/p.php;next=/go/https://bob:{_WORD}@host?u=bob",
+    f"http://h/app/p.php;next=%20https://bob:{_WORD}@host?u=bob",
+    f"http://h/app/p.php;next={_BS * 2}x/p&password={_WORD}?u=bob",
+])
+def test_a_path_parameter_value_holding_a_raw_slash_is_redacted(url):
+    assert _leaks(url, _WORD)                                # not vacuous
+    assert _both_redactors_kept(url, _WORD) == []
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
+    "BUG-0556 residual (owner CORE, core.redaction `_AUTHORITY_AT` / `_UrlWalk.userinfo`): "
+    "a userinfo with no scheme, '//' or backslash before it (`next=bob:<pw>@host`, after "
+    "a space `x bob:<pw>@host`) is not a URL to the walk, though the record redactor's "
+    "`_BARE_USERINFO` calls it a credential at a piece's start "
+    f"(r5: 2 365 URLs; {_ON_7393})"))
+@pytest.mark.parametrize("url", [
+    f"http://h/app/p.php?u=bob&next=bob:{_WORD}@host",
+    f"http://h/app/p.php?u=bob&next=bob%3Apw%20{_WORD}%40host%3Fy%3D1",
+    f"http://h/app/#/r?next=bob:{_WORD}@host/x",
+    f"http://h/app/p.php?u=bob&next=x%20bob%3A{_WORD}%40host",
+])
+def test_a_scheme_less_userinfo_in_a_value_is_redacted(url):
+    assert _leaks(url, _WORD)                                # not vacuous
+    assert _both_redactors_kept(url, _WORD) == []
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
+    "BUG-0556 residual (owner CORE, core.redaction `_UrlWalk.pairs`): a userinfo holding a "
+    "raw '&' in a top-level query value (`next=//bob:p&w<pw>@host`) is cut by the query "
+    "split, and the piece after the '&' is a nameless pair (`w<pw>@host`) with no "
+    f"authority start, so its password is kept (r5: 910 URLs; {_ON_7393})"))
+@pytest.mark.parametrize("url", [
+    f"http://h/app/p.php?u=bob&next=//bob:p&w{_WORD}@host",
+    f"http://h/app/p.php?u=bob&next=https://bob:p&w{_WORD}@host/x",
+    f"http://h/app/p.php?u=bob&next=bob:p&w{_WORD}@host",
+])
+def test_a_top_level_userinfo_holding_a_raw_amp_is_redacted(url):
+    assert _leaks(url, _WORD)                                # not vacuous
+    assert _both_redactors_kept(url, _WORD) == []
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
+    "BUG-0556 residual (owner CORE, core.redaction `_UrlWalk.fragment`): a top-level "
+    "fragment is split at its first '?' into a route (the page's identity, never split "
+    "into pairs) and a query, so a pair list before the '?' (`#token=<word>?y=1`, "
+    "`#next=x&password=<word>?y=1`) is kept; 7393c90's record redactor split the "
+    f"fragment the same way (r5: 864 URLs; {_ON_7393})"))
+@pytest.mark.parametrize("url", [
+    f"http://h/app/#token={_WORD}?y=1",
+    f"http://h/app/#next=x&password={_WORD}?y=1",
+    f"http://h/app/#u=1&sid={_WORD}/x?y=1",
+])
+def test_a_top_level_fragments_pairs_before_a_question_mark_are_redacted(url):
+    assert _leaks(url, _WORD)                                # not vacuous
+    assert _both_redactors_kept(url, _WORD) == []
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
+    "BUG-0556 residual (owner CORE, core.redaction `_authority_start`): after a scheme, "
+    "Node 22's URL starts the authority after the whole run of '/' and '\\\\' "
+    "(`https:///x&password=<word>`: host `x&password=<word>`), the walk after exactly "
+    "'//', so the pair list is read as a path; the sibling of "
+    "`test_a_slash_led_authoritys_pair_list_encoded_once_is_redacted_by_redact_url` "
+    f"behind a scheme (r5: 688 URLs; {_ON_7393})"))
+@pytest.mark.parametrize("url", [
+    "http://h/app/p.php?u=bob&next=" + quote(f"https:///x&password={_WORD}", safe=""),
+    "http://h/app/p.php?u=bob&next=" + quote(f"https:////host&token={_WORD}", safe=""),
+    "http://h/app/#/r?next=" + quote(f"http:///x&sid={_WORD}", safe=""),
+])
+def test_a_slash_run_after_a_scheme_before_a_pair_list_is_redacted(url):
+    assert _leaks(url, _WORD)                                # not vacuous
+    assert _both_redactors_kept(url, _WORD) == []
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
+    "BUG-0556 residual (owner CORE, core.redaction `_UrlWalk.pairs`): r5 reads an '&' part "
+    "holding a ';' as one pair too (7393c90's reading), but only its name: its value "
+    "across the ';' is walked as ';' pieces, never whole, so `next=/v?password;x=<word>` "
+    "(the '&' reading's value of `next` is `/v?password;x=<word>`, whose query's '&' "
+    f"reading names `password;x`) is kept (r5: 384 URLs; {_ON_7393})"))
+@pytest.mark.parametrize("url", [
+    f"http://h/app/p.php?u=bob&next=/v?password;x={_WORD}",
+    f"http://h/app/p.php?u=bob&next=/v?a;token;b={_WORD}",
+    f"http://h/app/p.php?u=bob&next=/v?sid=pw;{_WORD}",
+])
+def test_the_amp_reading_of_a_nested_value_is_redacted(url):
+    assert _leaks(url, _WORD)                                # not vacuous
+    assert _both_redactors_kept(url, _WORD) == []
+
+
+_TOKEN16 = "0123abcd4567ef01"
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
+    "BUG-0556 residual (owners CORE and AUD: core.redaction `_UrlWalk.url` keeps a "
+    "top-level path segment and fragment route as the page's identity, R3, and "
+    "tools.store_adapter `import_spider` stores the path as the page): an identifier "
+    "there (`/app/<16 hex>/p.php`, `#<16 hex>`) is kept by `redact_url_identifiers`; "
+    "`core.trace.safe_ref` blanks it in a path segment, not as a bare fragment "
+    f"(r5: 36 URLs; {_ON_7393})"))
+@pytest.mark.parametrize("url", [
+    f"http://h/app/{_TOKEN16}/p.php?token=a",
+    f"http://h/app/p.php?token=a#{_TOKEN16}",
+])
+def test_an_identifier_as_a_top_level_path_segment_or_route_is_redacted(url):
+    assert _leaks(url, _TOKEN16)                             # not vacuous
+    assert not _leaks(R.redact_url_identifiers(url), _TOKEN16)
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
+    "BUG-0556 residual (owner CORE, core.redaction `_UrlWalk.url`): a top-level URL's own "
+    "authority is its identity and never walked, so its userinfo "
+    "(`http://user:<pw>@h/app/…`) is kept by both URL redactors, `page_url_is_clean` and "
+    "the proxy's `Location` / `Referer` (the record redactor and `safe_ref` strip it; "
+    f"r5: 4 URLs; {_ON_7393})"))
+@pytest.mark.parametrize("url", [
+    f"http://user:{_WORD}@h/app/p.php?u=1",
+    f"http://user:pw%20{_WORD}@h/app/p.php?u=1",
+    f"http://user:{_WORD}@h/app/#/r?u=1",
+])
+def test_a_top_level_urls_own_userinfo_is_redacted_by_the_url_redactors(url):
+    assert _leaks(url, _WORD)                                # not vacuous
+    assert _both_redactors_kept(url, _WORD) == []
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
+    "BUG-0556 residual (owner PROXY, proxy.redact `redact`): a raw LF inside a request "
+    "target or a URL header ends that line, so the rest of the URL "
+    "(`?p<LF>assword=<word>`'s `assword=<word> HTTP/1.1`) is a malformed line no URL "
+    "rule reads; it reaches history only through operator-supplied bytes, as N6's "
+    f"malformed messages (r5: 948 URLs; {_ON_7393})"))
+@pytest.mark.parametrize("raw", [
+    "GET /app/p.php?p\nassword={W} HTTP/1.1\r\nHost: h\r\n\r\n",
+    "GET / HTTP/1.1\r\nHost: h\r\nReferer: http://h/app/p.php?u=bob&passw\nord={W}\r\n\r\n",
+    "HTTP/1.1 302 Found\r\nLocation: http://h/app/#/r?t\noken={W}\r\n\r\n",
+])
+def test_proxy_history_redacts_a_url_holding_a_raw_lf(raw):
+    from fuzzlab.proxy.redact import redact
+    message = raw.format(W=_WORD).encode()
+    assert _WORD.encode() in message                         # not vacuous
+    assert _WORD.encode() not in redact(message)
+
+
 # --- N3: `fuzzlab audit --append --store` ------------------------------------------------
 @pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
     "BUG-0556 residual after the final round, N3 neighbour 2 (owner AUD, "
