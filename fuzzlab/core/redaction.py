@@ -261,24 +261,47 @@ class _Whole(Exception):
 class WalkCounter:
     """The operation counts of one URL walk (PA-0135(2); BUG-0556 review round 1).
     ``steps`` is the characters the walk's steps were given -- every call of a step adds
-    the length of its text, and every split, partition, percent-decode, re-encode and
-    identifier check a step makes is linear in that text -- and ``calls`` the number of
-    step calls. A complexity test asserts on these, never on a clock (PA-0135(1))."""
+    the length of its text -- and ``calls`` the number of step calls. The C-level work a
+    step does (its percent-decodes, re-encodes, pair splits, pattern searches and
+    identifier checks) is not assumed linear: the linearity oracle wraps each of those
+    functions and counts the characters each call is given (review round 2, N8). A
+    complexity test asserts on these, never on a clock (PA-0135(1))."""
 
     def __init__(self):
         self.steps = 0
         self.calls = 0
 
 
-#: A nested URL's userinfo ends at the authority's last ``@``, raw or percent-encoded
-#: (``https://bob:pw@h/``, ``https://bob:pw%40h/`` from ``quote(safe="/:")``).
-_USERINFO_END = re.compile(r"@|%40", re.IGNORECASE)
 #: A URL's own scheme and ``//`` (only at its start: a ``://`` further in belongs to a
 #: value nested in it, ``/go?ret=https://…`` with its ``?`` encoded).
 _SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.\-]*://")
 #: Raw query structure: a value holding none of these but a percent-escape is one layer
 #: encoded with ``/`` and ``:`` left raw (``quote(safe="/")``, ``quote(safe="/:")``).
+#: The first of them also decides whether a value is a URL or a pair list (`_url_shaped`).
 _RAW_QUERY = re.compile(r"[?#=&;]")
+#: Where a URL's authority starts *anywhere* in a value, as the WHATWG URL parser reads
+#: it (measured on Node 22's ``URL``, review round 2, N2): after a special scheme and
+#: any run of ``/`` or ``\`` -- none included (``https://``, ``https:///``, ``https:\\``,
+#: ``http:/``, ``http:``) -- or after two or more of them anywhere (``//``, ``/\``,
+#: ``\\``; a value nested in a path segment, ``/go/https://…``; one after a space,
+#: ``+https://…``). The authority (group 1) runs to the next ``/``, ``\``, ``?``,
+#: ``#`` or whitespace (as `_URL_USERINFO`). Linear: the scheme alternative cannot start
+#: inside a run of scheme characters, and the classes on either side are disjoint.
+_AUTHORITY_AT = re.compile(
+    r"(?i)(?:(?<![a-z0-9+.\-])(?:https?|wss?|ftp|file):[/\\]*|[/\\]{2,})([^/\\?#\s]*)")
+
+
+def _url_shaped(text: str) -> bool:
+    """Whether a nested value is a URL (`_UrlWalk.nested_url`) rather than a pair list:
+    it starts with a scheme's ``://``, a ``/`` or a ``\\``, or its first raw ``?``, ``#``,
+    ``=``, ``&`` or ``;`` is a ``?`` or a ``#`` (``view.php?id=…``). A ``://`` further in
+    belongs to a value of a pair (``next=https://…``, ``a=1&token=…&next=https://…``),
+    so such a text is split into pairs first (review round 2, N1: a pair list holding a
+    URL was walked as one URL and its pairs never split)."""
+    if _SCHEME.match(text) or text.startswith(("/", "\\")):
+        return True
+    m = _RAW_QUERY.search(text)
+    return m is not None and m.group(0) in "?#"
 
 
 def _authority_start(head: str) -> int | None:
@@ -299,13 +322,18 @@ class _UrlWalk:
       once, the callers' contract): ``""`` at the top level (a URL's own query or
       fragment pair, as before; `PLACEHOLDER` with ``placeholder``), `PLACEHOLDER` when
       nested inside another value;
-    - a value with structure of its own is walked: a nested URL (``://``, a leading
-      ``/``, a ``?`` or a ``#``: its userinfo, path parameters, query and fragment, and
-      each path segment still percent-encoded is decoded one layer and walked as a
-      value; with ``identifiers``, a token in its host or path redacts the whole outer
-      value) or a query string (``=``, ``&`` or ``;``: its pairs);
-    - a nested URL's userinfo (``//user[:password]@``, its ``@`` raw or ``%40``) is a
-      credential in both modes: it becomes ``PLACEHOLDER@`` (review round 1, RU-2);
+    - a value with structure of its own is walked: a nested URL (`_url_shaped`: a
+      leading scheme, ``/`` or a backslash, or a ``?`` or ``#`` before any ``=``, ``&`` or
+      ``;``: its path parameters, query and fragment, and its authority and each path
+      segment still percent-encoded decoded one layer and walked as a value; with
+      ``identifiers``, a token in its host or path redacts the whole outer value) or a
+      query string (``=``, ``&`` or ``;``: its pairs, a URL in a pair's value included);
+    - a URL's userinfo anywhere in a nested value (``//user[:password]@``, its ``@`` raw
+      or ``%40``; wherever a URL's authority starts, `_AUTHORITY_AT`: at the value's
+      start, in a nested URL's path segment or fragment route, after a space, behind
+      ``https:///`` or a backslash) is a credential in both modes: it becomes
+      ``PLACEHOLDER@`` (review round 1, RU-2; review round 2, N2: as `_URL_USERINFO` and
+      `core.trace.safe_ref` already judged it);
     - a value with a percent-escape and no raw query structure (no ``?``, ``#``, ``=``,
       ``&`` or ``;``: at most ``/`` and ``:`` raw) is percent-decoded one layer before it
       is split, and walked again; when that changes it, the result is percent-encoded
@@ -314,17 +342,18 @@ class _UrlWalk:
       left undecoded included), or one the walk fails on, raises `_Whole`: its
       top-level pair or path parameter is redacted whole, never kept raw.
 
-    So a percent-encoding layer is decoded wherever it remains (review round 1,
-    RU-1/RU-6): ``quote(safe="/")`` and Django's ``redirect_to_login`` leave ``/`` (and
-    ``quote(safe="/:")`` ``:``) raw at every layer and encode ``?``, ``=``, ``&``, ``;``,
-    ``#`` and ``@``, so such a value is decoded first, as a whole (a raw ``/`` may belong
-    to a value nested in it); in a value whose query structure is raw, each value is
-    decoded at its own level and each path segment of a nested URL still encoded is
-    decoded too. A value is either decoded first or split first, never both, and the
-    segments decoded are disjoint from the parts the raw walk descends into, so each
-    character is examined a bounded number of times per level (the design that walked
-    every value again decoded doubled per level: `tests/test_redaction_nested.py`'s
-    oracle flags it).
+    So a percent-encoding layer is decoded wherever it remains inside any piece the
+    walk reads (review round 1, RU-1/RU-6; review round 2, N1): ``quote(safe="/")`` and
+    Django's ``redirect_to_login`` leave ``/`` (and ``quote(safe="/:")`` ``:``) raw at
+    every layer and encode ``?``, ``=``, ``&``, ``;``, ``#`` and ``@``, so such a value
+    is decoded first, as a whole (a raw ``/`` may belong to a value nested in it); in a
+    value whose query structure is raw, each value is decoded at its own level, and a
+    nested URL's authority, each of its path segments and each segment of a fragment's
+    route (the top-level fragment's included) still encoded is decoded too. A value is
+    either decoded first or split first, never both, and the pieces decoded are disjoint
+    from the parts the raw walk descends into, so each character is examined a bounded
+    number of times per level (the design that walked every value again decoded doubled
+    per level: `tests/test_redaction_nested.py`'s oracle flags it).
 
     Unchanged text is returned byte-identical: only a value that held a secret is
     re-encoded. Linear in the value's length per level (PA-0095); its operation counts
@@ -354,15 +383,29 @@ class _UrlWalk:
         return head + qmark + query + hashmark + frag
 
     def path(self, head: str, depth: int, nested: bool = False) -> str:
-        """``head``'s ``;`` path parameters walked (the authority is left alone); in a
-        nested URL (``nested``) also each segment still percent-encoded (`layer`)."""
+        """``head``'s ``;`` path parameters walked; in a nested URL or a fragment's
+        route (``nested``) also its authority and each segment still percent-encoded
+        (`layer`). A top-level URL's own authority and segments are its identity, never
+        decoded (BUG-0556 R3)."""
         self.tick(head)
         if ";" not in head and not (nested and "%" in head):
             return head
         authority = _authority_start(head)
-        start = 0 if authority is None else head.find("/", authority)
-        if start < 0:
-            return head
+        if authority is None:
+            start = 0
+        else:
+            start = head.find("/", authority)
+            start = len(head) if start < 0 else start
+            if nested and "%" in head[authority:start]:
+                # a nested authority holding an escape is decoded and walked like any
+                # other piece, whatever raw delimiter sits elsewhere in the value
+                # (``https://host%2Fcb%3Faccess_token%3D…?y=1``; review round 2, N1); a
+                # host's own escapes decode to host characters and come back unchanged
+                auth = self.layer(head[authority:start], depth)
+                head = head[:authority] + auth + head[start:]
+                start = authority + len(auth)
+            if start >= len(head):
+                return head
         out = []
         for seg in head[start:].split("/"):
             first, semi, rest = seg.partition(";")
@@ -417,14 +460,26 @@ class _UrlWalk:
         self.tick(frag)
         if "?" in frag:                             # a route's query (``#/x?token=…``)
             route, q, query = frag.partition("?")
-            if not top:
-                route = self.path(route, depth, nested=True)
-            return route + q + self.pairs(query, depth, top)
+            return self.route(route, depth, top) + q + self.pairs(query, depth, top)
         if "=" in frag:                             # ``#access_token=…&state=…``
             return self.pairs(frag, depth, top)
         if top:
-            return frag                             # ``#top``, ``#/item/7``: no value
+            # ``#top``, ``#/item/7``: no value, kept; a layer left encoded in a route
+            # (``#/r%3Ftoken%3D…``, Python's quote() of a route) is decoded (N1)
+            return self.route(frag, depth, top)
         return self.value(frag, depth + 1, top=False)
+
+    def route(self, route: str, depth: int, top: bool) -> str:
+        """A fragment's route: its ``;`` path parameters and each segment still
+        percent-encoded walked (`path`, review round 2, N1: the top-level route's raw
+        segments stay the page's identity). At the top level a value the walk cannot
+        prove clean redacts the route whole; nested, it redacts the outer value."""
+        if not top:
+            return self.path(route, depth, nested=True)
+        try:
+            return self.path(route, depth, nested=True)
+        except Exception:                           # _Whole, or a failure: fail closed
+            return PLACEHOLDER
 
     def value(self, text: str, depth: int, top: bool) -> str:
         self.tick(text)
@@ -432,12 +487,13 @@ class _UrlWalk:
             raise _Whole
         if self.identifiers and looks_like_identifier(unquote(text)):
             return self.blank if top else PLACEHOLDER
+        text = self.userinfo(text)                  # wherever a URL starts in it (N2)
         if _PCT.search(text) and not _RAW_QUERY.search(text):
             # no raw query structure: at most '/' and ':' raw (a nested URL encoded by
             # quote(safe="/") or Django's redirect_to_login, its '/' raw at every layer),
             # so the layer is decoded before anything is split (review round 1, RU-1)
             return self.layer(text, depth)
-        if "://" in text or text.startswith("/") or "?" in text or "#" in text:
+        if _url_shaped(text):
             return self.nested_url(text, depth)
         if "=" in text or "&" in text or ";" in text:
             return self.pairs(text, depth, top=False)
@@ -457,7 +513,6 @@ class _UrlWalk:
         self.tick(text)
         base, hashmark, frag = text.partition("#")
         head, qmark, query = base.partition("?")
-        head = self.userinfo(head)
         if self.identifiers and looks_like_identifier(
                 unquote("/".join(seg.split(";", 1)[0] for seg in head.split("/")))):
             raise _Whole                            # a token in its host or path
@@ -468,22 +523,28 @@ class _UrlWalk:
             frag = self.fragment(frag, depth, top=False)
         return head + qmark + query + hashmark + frag
 
-    def userinfo(self, head: str) -> str:
-        """A nested URL's ``user[:password]@`` replaced by ``PLACEHOLDER@`` (through the
-        authority's last ``@`` or ``%40``, as URL parsers split it); a head without one
-        is returned as it is."""
-        self.tick(head)
-        start = _authority_start(head)
-        if start is None:
-            return head
-        end = head.find("/", start)
-        end = len(head) if end < 0 else end
-        last = None
-        for last in _USERINFO_END.finditer(head, start, end):
-            pass
-        if last is None:
-            return head
-        return head[:start] + PLACEHOLDER + head[last.start():]
+    def userinfo(self, text: str) -> str:
+        """Every ``user[:password]@`` of a URL that starts anywhere in ``text``
+        (`_AUTHORITY_AT`) replaced by ``PLACEHOLDER@``, through its authority's last
+        ``@`` or ``%40`` (as URL parsers split it); a text holding none is returned as
+        it is (review round 1, RU-2; review round 2, N2: only a URL at the start of a
+        nested head was judged, so one in a nested URL's path segment, after a space,
+        behind ``https:///`` or a backslash was kept)."""
+        self.tick(text)
+        if "@" not in text and "%40" not in text:
+            return text
+        out, last = [], 0
+        for m in _AUTHORITY_AT.finditer(text):
+            auth = m.group(1)
+            at = max(auth.rfind("@"), auth.rfind("%40"))
+            if at > 0:
+                out.append(text[last:m.start(1)])
+                out.append(PLACEHOLDER)
+                last = m.start(1) + at
+        if not out:
+            return text
+        out.append(text[last:])
+        return "".join(out)
 
 
 def _walk_url(url, identifiers: bool, counter: WalkCounter | None = None, *,
@@ -923,10 +984,13 @@ def redact_for_record(dest: str, value):
     - a value whose option name (``dest``) `is_sensitive_name` flags → `PLACEHOLDER`;
     - URL userinfo (``http://user:pw@``, ``//user:pw@``) and a scheme-less ``user:pw@``
       → ``***@`` (through the authority's last ``@``);
-    - in each whitespace-separated piece, sensitive values of the query, of a query-shaped
-      fragment (``#access_token=…``, ``#/route?token=…``) and of ``;name=value`` path
-      parameters, and of every URL, query string or ``;`` pair nested in their values
-      (raw or percent-encoded; `redact_url`, BUG-0556 review round 1) → `PLACEHOLDER`.
+    - sensitive values of the query, of a query-shaped fragment (``#access_token=…``,
+      ``#/route?token=…``) and of ``;name=value`` path parameters, and of every URL,
+      query string or ``;`` pair nested in their values (raw or percent-encoded;
+      `redact_url`, BUG-0556 review round 1) → `PLACEHOLDER`: walked over the **whole**
+      value first, so a URL holding a raw space is walked as one URL (review round 2,
+      N7: a piece after the space was walked alone), then in each whitespace-separated
+      piece.
 
     Non-strings are returned unchanged (counts, booleans). Never raises on a string."""
     if not isinstance(value, str):
@@ -935,9 +999,13 @@ def redact_for_record(dest: str, value):
         return PLACEHOLDER
     # Userinfo is stripped from the **whole** value before it is cut (BUG-0455: a cut
     # between a password and its ``@`` left the password unmatched); both patterns are
-    # linear. The cut then bounds the per-piece work and the stored size (PA-0095/0096).
+    # linear. The URL walk then runs on the whole value too, before any cut or split
+    # (BUG-0556 review round 2, N7: ``#/r?next=/v?q=a b&token=…`` kept its token, the
+    # piece ``b&token=…`` read alone); it is total and linear (`redact_url`). The cut
+    # then bounds the per-piece work and the stored size (PA-0095/0096).
     out = _URL_USERINFO.sub(lambda m: m.group(1) + USERINFO_PLACEHOLDER, value)
     out = _BARE_USERINFO.sub(lambda m: m.group(1) + USERINFO_PLACEHOLDER, out)
+    out = redact_url(out)
     if len(out) > MAX_RECORD_CHARS:
         out = out[:MAX_RECORD_CHARS] + " …(truncated)"
     pieces = re.split(r"(\s+)", out)

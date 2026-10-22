@@ -991,10 +991,11 @@ def import_audit(audit_db: str | Path, store: Store, run_id: int, *,
 
     Every stored text passes the redaction owner (BUG-0556 review round 1, PA-0100): a
     finding's endpoint is `core.urls.store_url` of its page -- a path parameter that
-    holds a secret dropped, as `import_spider` stores the same page, and another origin
-    kept (the run's main origin: ``base_url``'s, else the first finding page's) -- and
-    its ``target_identifier`` and ``html_context`` (stored as ``sink_context``) pass
-    `_audit_text`."""
+    holds a secret dropped, and another origin kept -- in the form this run's spider
+    rows already hold it (`_audit_endpoint`: the run's main origin is the spider's, not
+    the first finding page's; review round 2, N3), else by the run's main origin
+    (``base_url``'s, else the first finding page's); its ``target_identifier`` and
+    ``html_context`` (stored as ``sink_context``) pass `_audit_text`."""
     src = sqlite3.connect(str(audit_db))
     src.row_factory = sqlite3.Row
     counts = {"candidate": 0}
@@ -1008,8 +1009,9 @@ def import_audit(audit_db: str | Path, store: Store, run_id: int, *,
     main = _main_origin(base_url, (r["page_url"] for r in rows))
     for row in rows:
         page = row["page_url"]
-        endpoint_id = _upsert_endpoint(store, run_id, store_url(page, main), "GET",
-                                       "audit")
+        endpoint_id = _upsert_endpoint(
+            store, run_id, _audit_endpoint(store, run_id, page, main, base_url), "GET",
+            "audit")
         target = _audit_text(row["target_identifier"], page, url=True)
         # the legacy auditor names a parameter only: its first row of that name
         found = store.conn.execute(
@@ -1035,25 +1037,71 @@ def import_audit(audit_db: str | Path, store: Store, run_id: int, *,
     return counts
 
 
-#: The lengths the legacy auditor's rules cut a quoted value to (`tools.fetcher`:
-#: ``example value: v[:80]``, ``v[:60]``, ``value 'v[:40]' reflected``, ``supplied Nx:
-#: v[:20], …``).
-_AUDIT_CUTS = (80, 60, 40, 20)
+def _audit_endpoint(store: Store, run_id: int, page: str, main: str | None,
+                    base_url: str | None) -> str:
+    """A legacy-auditor finding page's endpoint as this run's spider rows hold the same
+    page (review round 2, N3): `import_spider` and `import_audit` each took the run's
+    main origin from their own first row (the seed; the first page with a finding), so
+    an off-origin first finding stored the main origin's pages absolute, beside the
+    spider's paths. ``store_url`` gives a page on another origin absolute only, so the
+    spider's absolute form names a page off the main origin and its path form one on it;
+    with neither stored (no spider import, or ``base_url`` given) the run's ``main``
+    decides."""
+    if not base_url:
+        origin = canonical_origin(page)
+        if origin is not None:
+            path = store_url(page, origin)
+            for stored in (origin + path, path):
+                if store.conn.execute(
+                        "SELECT 1 FROM page WHERE run_id=? AND url=? UNION ALL "
+                        "SELECT 1 FROM endpoint WHERE run_id=? AND url=? AND source != "
+                        "'audit' LIMIT 1", (run_id, stored, run_id, stored)).fetchone():
+                    return stored
+    return store_url(page, main)
+
+
+#: A run of a secret value this long or longer that a finding's text holds is the
+#: value's: replaced, wherever and however long the rule cut it (`_secret_spans`).
+_AUDIT_RUN = 8
+
+
+def _secret_spans(text: str, secrets: list[str]) -> list[tuple[int, int]]:
+    """The spans of ``text`` that repeat a run of `_AUDIT_RUN` or more characters of any
+    of ``secrets``: every window of that length found in a secret value is marked, and
+    overlapping windows join (review round 2, N3: the legacy rules quote a value's
+    substring -- ``rule_serialized_tokens``'s ``match.group(0)[:60]``, a JWT behind
+    ``Bearer `` -- not only a prefix at a known cut). Linear in the text and the values
+    (a set of fixed-length windows), never a search per cut."""
+    k = _AUDIT_RUN
+    grams = {s[i:i + k] for s in secrets for i in range(len(s) - k + 1)}
+    spans: list[tuple[int, int]] = []
+    if not grams:
+        return spans
+    for i in range(len(text) - k + 1):
+        if text[i:i + k] in grams:
+            if spans and spans[-1][1] >= i:
+                spans[-1] = (spans[-1][0], i + k)
+            else:
+                spans.append((i, i + k))
+    return spans
 
 
 def _audit_text(text, page_url, *, url: bool = False):
-    """A legacy-auditor finding's text as it may be stored (BUG-0556 review round 1,
+    """A legacy-auditor finding's text as it may be stored (BUG-0556 review rounds 1-2,
     PA-0100, D12). Its rules quote the finding page's URL (``called from <url>``), its
-    path (``<path>?<name>``, ``linked from <path>``) and its query values, whole or cut
-    (`_AUDIT_CUTS`). Each is replaced where it appears: the page URL by
-    `core.redaction.redact_url_identifiers`' form of it, the path by
-    `core.redaction.strip_secret_path_params`' form, and every query value the owner's
-    rule would not store (`core.redaction.stored_value`: a sensitive name, or a value
-    that holds a secret anywhere, nested included) by `PLACEHOLDER`, whole or cut. A
-    ``url`` text (the target identifier, which may name another URL: a form action, a
-    link) also passes `strip_secret_path_params` and `redact_url_identifiers` itself.
-    The rest of a quoted HTML snippet is body redaction's (audit defect 26). Total: a
-    non-string is returned as it is."""
+    path (``<path>?<name>``, ``linked from <path>``) and its query values: whole, cut to
+    a prefix, or a substring a pattern matched (``rule_serialized_tokens``). Each is
+    replaced where it appears: the page URL by `core.redaction.redact_url_identifiers`'
+    form of it, the path by `core.redaction.strip_secret_path_params`' form, and every
+    query value the owner's rule would not store -- judged **whole**
+    (`core.redaction.stored_value`: a sensitive name, or a value that holds a secret
+    anywhere, nested included) -- by `PLACEHOLDER` wherever the text repeats it whole or
+    any run of it `_AUDIT_RUN` characters or longer (`_secret_spans`; never by matching
+    the rules' cut lengths, review round 2, N3). A ``url`` text (the target identifier,
+    which may name another URL: a form action, a link) also passes
+    `strip_secret_path_params` and `redact_url_identifiers` itself. The rest of a quoted
+    HTML snippet is body redaction's (audit defect 26). Total: a non-string is returned
+    as it is."""
     import re
 
     from fuzzlab.core.redaction import (PLACEHOLDER, redact_url_identifiers, stored_value,
@@ -1061,6 +1109,7 @@ def _audit_text(text, page_url, *, url: bool = False):
     if not isinstance(text, str):
         return text
     swaps: dict[str, str] = {}
+    secrets: list[str] = []
     if isinstance(page_url, str):
         clean = redact_url_identifiers(page_url)
         if clean != page_url:
@@ -1069,19 +1118,29 @@ def _audit_text(text, page_url, *, url: bool = False):
         path = parts.path.lstrip("/")                     # as the auditor's page sees it
         if strip_secret_path_params(path) != path:
             swaps[path] = strip_secret_path_params(path)
-        for name, raw, value in query_pairs(parts.query):
+        for part in parts.query.split("&"):
+            name, _eq, rawest = part.partition("=")
+            name, raw, value = unquote_plus(name), unquote(rawest), unquote_plus(rawest)
             if not value or stored_value(name, raw, value) != "":
                 continue
-            for whole in (value, raw):
-                for cut in (len(whole),) + _AUDIT_CUTS:
-                    if whole[:cut]:
-                        swaps.setdefault(whole[:cut], PLACEHOLDER)
+            # the whole value, in every spelling a rule may quote it in (as crawled,
+            # percent-decoded, form-decoded as `parse_qsl` gives the rules)
+            for whole in {rawest, raw, value}:
+                if whole:
+                    swaps.setdefault(whole, PLACEHOLDER)
+                    secrets.append(whole)
     out = text
     if swaps:
         # longest first, each a whole run (never inside a longer word)
         alternation = "|".join(re.escape(k) for k in sorted(swaps, key=len, reverse=True))
         out = re.sub(f"(?<![A-Za-z0-9])(?:{alternation})(?![A-Za-z0-9])",
                      lambda m: swaps[m.group(0)], out)
+    if secrets:
+        pieces, last = [], 0
+        for start, end in _secret_spans(out, secrets):
+            pieces += [out[last:start], PLACEHOLDER]
+            last = end
+        out = "".join(pieces + [out[last:]])
     if url:
         cut = min([i for i in (out.find("?"), out.find("#")) if i >= 0] or [len(out)])
         out = redact_url_identifiers(strip_secret_path_params(out[:cut]) + out[cut:])

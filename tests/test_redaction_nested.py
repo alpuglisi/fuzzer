@@ -19,6 +19,11 @@ identifier shapes; each case is proven to store no secret byte, and the benign l
 proves ordinary nested values are left byte-identical. Review round 1 (BUG-0556) added
 the ``quote(safe="/")`` spellings, the userinfo shape, `import_audit`, the proxy's
 query-less messages, the project-record redactor and the endpoint query's replay.
+Review round 2 added each neighbouring path its check found: a layer left encoded in
+any piece, userinfo wherever a URL starts, a quoted substring in `import_audit`'s
+texts and its endpoint by the spider's main origin, greybox's refused points, every
+URL-bearing proxy header and request line, a record URL holding a raw space, the
+pre-fix fallbacks of every test, and an oracle counting the walk's C-level work.
 """
 
 from __future__ import annotations
@@ -55,13 +60,23 @@ def _runs(secret: str) -> list[str]:
     return [r for r in re.findall(r"[A-Za-z0-9]+", secret) if len(r) >= 8]
 
 
-def _leaks(text: str, secret: str) -> bool:
-    """Whether ``text`` -- or any percent-decoding of it, up to four layers -- holds a
-    run of ``secret``."""
+def _leaks(text: str, secret: str, layers: int = 4) -> bool:
+    """Whether ``text`` -- or any percent-decoding of it, up to ``layers`` layers --
+    holds a run of ``secret``."""
     seen = [text]
-    for _ in range(4):
+    for _ in range(layers):
         seen.append(unquote(seen[-1]))
     return any(r in t for t in seen for r in _runs(secret))
+
+
+def _api(name: str):
+    """A function of the owner this file names, asserted present (FR-CORE-537). A test
+    calls it only after its leak assertions, so the pre-fix code fails on the secret it
+    keeps, never on a function it lacked (PA-0545(6); review round 1, RU-5, and round 2,
+    N5: every test of the file swept)."""
+    fn = getattr(R, name, None)
+    assert fn is not None, f"core.redaction has no {name} (FR-CORE-537)"
+    return fn
 
 
 # --- the generated spellings ------------------------------------------------------------
@@ -156,8 +171,7 @@ def test_every_nested_spelling_of_a_secret_is_redacted_and_the_url_stays_a_url()
                 or kept[:2] != names[:2]):
             failures.append((case, out))
     assert failures == []
-    holds = getattr(R, "value_holds_secret", None)
-    assert holds is not None, "core.redaction has no value_holds_secret (FR-CORE-537)"
+    holds = _api("value_holds_secret")
     assert [case for case, value in values if not holds(unquote(value))] == []
 
 
@@ -217,7 +231,7 @@ def test_a_layer_left_encoded_behind_a_raw_slash_is_decoded_wherever_it_is_read(
     if named:
         assert not _leaks(R.redact_url(url), secret)
     value = urlsplit(url).query.rsplit("&", 1)[-1].partition("=")[2]
-    assert R.stored_value("next", unquote(value), unquote_plus(value)) == ""
+    assert _api("stored_value")("next", unquote(value), unquote_plus(value)) == ""
 
 
 _USERINFO = "https://bob:CanaryPassWord@host.example/x"
@@ -236,7 +250,80 @@ def test_a_nested_urls_userinfo_is_a_credential_in_both_redactors(value):
     for fn in (R.redact_url, R.redact_url_identifiers):
         assert "CanaryPassWord" not in unquote(unquote(fn(url))), fn.__name__
     assert not R.page_url_is_clean(url)
-    assert R.stored_value("next", unquote(value), unquote_plus(value)) == ""
+    assert _api("stored_value")("next", unquote(value), unquote_plus(value)) == ""
+
+
+_PASS = "CanaryPassWord"
+#: Review round 2's neighbouring spellings, each kept by a redactor on f939778 (``(url,
+#: secret)``; every secret is a sensitive name's value or a URL's password, so the
+#: name-only redactor must remove it too):
+_ROUND2 = [
+    # N1: an encoded layer in a nested URL's authority with a raw '?' elsewhere
+    f"http://h/app/q.php?u=bob&next=https://host%2Fcb%3Faccess_token%3D{_WORD}?y=1",
+    # N1: Werkzeug's url_for applied twice (measured by the review on werkzeug 3.1.9), a
+    # pair list holding a URL (raw, and decoded from a layer)
+    f"http://h/login?next=/login?next%3Dhttps://bob:{_PASS}@host/x",
+    f"http://h/app/p.php?u=bob&state=next=https://bob:{_PASS}@host/x",
+    "http://h/app/p.php?u=bob&next=" + quote(f"a=1&token={_WORD}&next=https://h/x", safe=""),
+    # N2: a URL's userinfo inside a nested URL's path segment, encoded and raw
+    f"http://h/app/p.php?u=bob&next=/go/https%3A%2F%2Fbob%3A{_PASS}%40host%2Fx",
+    f"http://h/app/p.php?u=bob&next=/go/https://bob:{_PASS}@host/x",
+    f"http://h/app/p.php?u=bob&next=https://proxy.example/go/https://bob:{_PASS}@host/x",
+    # N2: after a space; in a nested fragment route; the WHATWG parser's userinfo
+    # spellings (measured on Node 22's URL: 'https:///', 'https:\\\\', '/\\', 'http:/')
+    f"http://h/app/p.php?u=bob&next=+https://bob:{_PASS}@host/x",
+    f"http://h/app/p.php?u=bob&next=%20https://bob:{_PASS}@host/x",
+    f"http://h/app/p.php?u=bob&next=/a%23https://bob:{_PASS}@host/x?y=1",
+    f"http://h/app/p.php?u=bob&next=https:///bob:{_PASS}@host/x",
+    f"http://h/app/p.php?u=bob&next=https:\\\\bob:{_PASS}@host/x",
+    f"http://h/app/p.php?u=bob&next=/\\bob:{_PASS}@host/x",
+    f"http://h/app/p.php?u=bob&next=http:/bob:{_PASS}@host/x",
+    # N1 (N7's second neighbour): a layer left encoded in the top-level fragment's
+    # route (Python's quote() of a route, '#!', encodeURIComponent, a bare pair), and a
+    # route's path parameter before its query
+    f"http://h/app/#/r%3Ftoken%3D{_WORD}",
+    f"http://h/app/#!/r%3Ftoken%3D{_WORD}",
+    f"http://h/app/#%2Fr%3Ftoken%3D{_WORD}",
+    f"http://h/app/#token%3D{_WORD}",
+    f"http://h/app/#/r;jsessionid={_WORD}?x=1",
+]
+
+
+def _round2_secret(url: str) -> str:
+    return _PASS if _PASS in url else _WORD
+
+
+@pytest.mark.parametrize("url", _ROUND2)
+def test_a_review_round_2_spelling_is_redacted_by_every_url_redactor(url):
+    """Review round 2, N1 and N2: a layer left encoded in any piece (a nested URL's
+    authority, the top-level fragment's route) is decoded and walked; a pair list
+    holding a URL is split into pairs first; a URL's userinfo is a credential wherever
+    a URL starts in a value, as `redact_for_record` and `safe_ref` already judged it.
+    Each redactor, `page_url_is_clean`, the evidence reference and the record
+    redactor see the secret."""
+    from fuzzlab.core.trace import safe_ref
+    secret = _round2_secret(url)
+    assert _leaks(url, secret)                               # not vacuous
+    for fn in (R.redact_url, R.redact_url_identifiers):
+        assert not _leaks(fn(url), secret), fn.__name__
+    assert not R.page_url_is_clean(url)
+    assert not _leaks(safe_ref(url), secret)
+    assert not _leaks(R.redact_for_record("target", url), secret)
+
+
+def test_the_review_round_2_spellings_store_no_secret_through_import_spider(tmp_path):
+    """The same spellings through the spider's rows and `import_spider`: no secret in
+    ``page``, ``endpoint``, ``parameter.example``, ``form.entries`` or
+    ``form.source_page`` (on f939778 the nested userinfo and the encoded authority
+    reached ``form.source_page``, the page the binder fetches)."""
+    from fuzzlab.tools.store_adapter import import_spider
+    _spider_db(tmp_path / "s.db", _ROUND2)
+    with Store(tmp_path / "u.db") as store:
+        import_spider(tmp_path / "s.db", store, store.start_run("auto", "h"))
+        pages = {r[0] for r in store.conn.execute("SELECT url FROM page").fetchall()}
+        dump = _dump(store)
+    assert {"/app/q.php", "/login", "/app/p.php"} <= pages      # not vacuous
+    assert not _leaks(dump, _PASS) and not _leaks(dump, _WORD)
 
 
 # --- what reaches the store -------------------------------------------------------------
@@ -423,6 +510,83 @@ def test_proxy_history_redacts_a_path_parameter_in_a_message_with_no_query(tmp_p
         assert _WORD not in _dump(store)
 
 
+#: Review round 2, N6: ``(raw request, raw response)`` pairs whose secret sat in a URL
+#: the proxy's redactor never read: a duplicate URL header, ``Referer``, ``Origin``,
+#: ``Link``, a custom header holding a URL, ``Refresh`` spelled ``url = `` or bare or
+#: quoted, a request line with a doubled space, a tab or a raw space, and N2's nested
+#: userinfo in the target and ``Location``.
+_PROXY_ROUND2 = [
+    ("GET /app/b.php HTTP/1.1\r\nHost: h\r\nReferer: http://h/app/;jsessionid={W}\r\n"
+     "Origin: http://h/;jsessionid={W}\r\nX-Return-To: /a;jsessionid={W}\r\n\r\n",
+     "HTTP/1.1 302 Found\r\nLocation: /clean\r\nLocation: /app/;jsessionid={W}\r\n"
+     "Content-Location: /x\r\nContent-Location: /x;jsessionid={W}\r\n"
+     "Link: </app;jsessionid={W}>; rel=next\r\n\r\n"),
+    ("GET /app/b.php HTTP/1.1\r\nHost: h\r\nReferer: http://h/app/?token={W}\r\n\r\n",
+     "HTTP/1.1 302 Found\r\nLocation: /clean\r\nLocation: /app/?token={W}\r\n\r\n"),
+    ("GET  /app;jsessionid={W} HTTP/1.1\r\nHost: h\r\n\r\n",
+     "HTTP/1.1 200 OK\r\nRefresh: 0; url = /y;jsessionid={W}\r\n\r\n"),
+    ("GET\t/app;jsessionid={W}\tHTTP/1.1\r\nHost: h\r\n\r\n",
+     "HTTP/1.1 200 OK\r\nRefresh: 0; /y;jsessionid={W}\r\n\r\n"),
+    ("GET /a b;jsessionid={W} HTTP/1.1\r\nHost: h\r\n\r\n",
+     "HTTP/1.1 200 OK\r\nRefresh: 0;URL='/y;jsessionid={W}'\r\n\r\n"),
+    ("GET /app/p.php?u=bob&next=/go/https://bob:{P}@host/x HTTP/1.1\r\nHost: h\r\n\r\n",
+     "HTTP/1.1 302 Found\r\nLocation: http://h/app/p.php?u=bob&next=/go/https://bob:{P}@"
+     "host/x\r\n\r\n"),
+]
+
+
+def test_proxy_history_redacts_every_url_bearing_header_and_any_request_line(tmp_path):
+    """Review round 2, N6: `proxy.redact.redact` read only the first value of each URL
+    header (and a changed one replaced every duplicate), never ``Referer``, ``Origin``,
+    ``Link`` or another header holding a URL, ``Refresh`` only as ``url=``, and the
+    request target as ``split(b" ")[1]`` -- each kept the secret in the stored raw
+    messages and their full-text index. Every value is now read, in place."""
+    from fuzzlab.proxy.history import FlowRecord, HistoryWriter
+    from fuzzlab.proxy.redact import redact
+    pairs = [(rq.format(W=_WORD, P=_PASS).encode(), rs.format(W=_WORD, P=_PASS).encode())
+             for rq, rs in _PROXY_ROUND2]
+    for rq, rs in pairs:
+        for raw in (rq, rs):
+            out = redact(raw)
+            assert _WORD.encode() not in out and _PASS.encode() not in out, raw
+    with Store(tmp_path / "s.db") as store:
+        h = HistoryWriter(store, store.start_run("proxy", "x"), batch_size=50)
+        for rq, rs in pairs:
+            h.record(FlowRecord("GET", "http://h/app/b.php", "h", 302, raw_request=rq,
+                                raw_response=rs))
+        assert h.flush() == len(pairs)
+        dump = _dump(store)
+    assert _WORD not in dump and _PASS not in dump
+    # nothing else moves: the duplicate's clean value, the order and the clean headers
+    out = redact(pairs[0][1])
+    assert out.index(b"Location: /clean\r\n") < out.index(b"Location: /app/;jsessionid=")
+    clean = (b"GET /app/x?q=1 HTTP/1.1\r\nHost: h\r\nUser-Agent: Mozilla/5.0 (X11; Linux)"
+             b" +http://x/bot\r\nReferer: http://h/app/?q=hello\r\nRefresh: 5\r\n\r\n")
+    assert redact(clean) == clean
+
+
+@pytest.mark.parametrize("value", [
+    f"http://127.0.0.1:3000/app/#/r?next=/v?q=a b&token={_WORD}",
+    f"http://127.0.0.1:3000/app/#/r?next=/v?q=a b%26token%3D{_WORD}",
+    f"http://127.0.0.1:3000/app/?q=a b&token={_WORD}",
+    f"http://127.0.0.1:3000/app/#/r%3Ftoken%3D{_WORD}",
+])
+def test_a_project_record_walks_a_url_holding_a_raw_space_whole(tmp_path, value):
+    """Review round 2, N7: `redact_for_record` split the value on whitespace before the
+    walk, so a URL holding a raw space was walked a piece at a time and ``b&token=…``
+    was never read as part of the query; the walk now runs on the whole value first.
+    Through the real writers too: `add_target` and `insert_launch`."""
+    from fuzzlab.core import project
+    assert not _leaks(R.redact_for_record("target", value), _WORD)
+    with Store(tmp_path / "s.db") as store:
+        project.ensure_metadata(store, "s")
+        project.insert_launch(store, "auto", [("", "fuzzlab"), ("url", value)], value)
+        project.add_target(store, value)
+        dump = _dump(store)
+    assert "127.0.0.1:3000/app/" in dump                    # not vacuous
+    assert not _leaks(dump, _WORD)
+
+
 @pytest.mark.parametrize("case", [c for c in CASES if c[1] in dict(NAMED)][::3])
 def test_a_project_record_redacts_a_credential_nested_in_a_route_fragment(case):
     """Review round 1, RU-9: `redact_for_record` (``launch.argv``, ``launch.target``,
@@ -519,6 +683,92 @@ def test_import_audit_stores_the_spiders_endpoint_and_no_secret(tmp_path):
     assert audit <= spider, (audit, spider)     # the page as the spider stores it, never a second
 
 
+class _SilentFetcher:
+    """A page that echoes nothing of its query (so the rules quote the value from the
+    parameter itself, never from the body), and no XHR (no network)."""
+
+    def fetch(self, url):
+        return 200, "text/html", "<html><body>hello</body></html>", []
+
+
+#: Review round 2, N3: query values a legacy rule quotes as a substring, not a prefix at
+#: one of the cut lengths: a JWT behind ``Bearer `` and behind ``x.``, a short JWT with
+#: a tail, Java-serialized base64 holding a ``+`` (form-decoded to a space, so the
+#: match stops there) and a Python pickle behind ``v1:`` (`rule_serialized_tokens`'s
+#: ``match.group(0)[:60]``).
+_JWT2 = ("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJib2IiLCJzaWQiOiJDYW5hcnlKV1QifQ."
+         "Q2FuYXJ5U2lnbmF0dXJlOTg3NjU0MzIx")
+_SHORT_JWT = "eyJhbGciOiJ9.eyJzdWIiOiJ9.Zq9f8e7d6c5b"
+_JAVA = "rO0ABXNyABFqYXZhLnV0aWwuSGFz+aE1Q2FuYXJ5SmF2YVNlcg"
+_PICKLE = "gASVKAAAAAAAAACMCGJ1aWx0aW5zlIwFcHJpbnSUk5SMC0NhbmFyeVBpY2ts"
+_SUBSTRING_QUOTED = [
+    (f"http://h/app/j.php?u=bob&auth=Bearer%20{_JWT2}", _JWT2),
+    (f"http://h/app/k.php?u=bob&data=x.{_JWT2}", _JWT2),
+    (f"http://h/app/l.php?u=bob&k={_SHORT_JWT}~tail", _SHORT_JWT),
+    (f"http://h/app/m.php?u=bob&obj={_JAVA}", _JAVA),
+    (f"http://h/app/n.php?u=bob&state=v1:{_PICKLE}", _PICKLE),
+]
+
+
+def _audit_store(tmp_path, rows, fetcher):
+    """The real chain: the spider's rows, `load_urls`, `audit_page` with every rule,
+    `import_spider`, then `import_audit` (no ``base_url``, as `fuzzlab audit --store`
+    calls them). ``(candidates' sink contexts, the endpoint urls after the spider's
+    import, the endpoint urls after the audit's, dump)``."""
+    from fuzzlab.tools import fetcher as F
+    from fuzzlab.tools.spider import StorageManager
+    from fuzzlab.tools.store_adapter import import_audit, import_spider
+    sm = StorageManager(str(tmp_path / "s.db"))
+    sm.reset()
+    for url, depth, source in rows:
+        sm.mark_visited(url, 200, depth, source=source,
+                        found_from=None if depth == 0 else rows[0][0])
+    sm.close()
+    db = F.setup_results_db(str(tmp_path / "a.db"))
+    for target, source in F.load_urls(str(tmp_path / "s.db")):
+        F.audit_page(target, source, fetcher, [(k, "cat", None) for k in F.RULES], db,
+                     set(), verbose=False)
+    db.close()
+    with Store(tmp_path / "u.db") as store:
+        run = store.start_run("auditor", "h")
+        import_spider(tmp_path / "s.db", store, run)
+        spider = {r[0] for r in store.conn.execute("SELECT url FROM endpoint").fetchall()}
+        import_audit(tmp_path / "a.db", store, run)
+        after = {r[0] for r in store.conn.execute("SELECT url FROM endpoint").fetchall()}
+        contexts = [r[0] for r in store.conn.execute(
+            "SELECT sink_context FROM candidate").fetchall()]
+        dump = _dump(store)
+    return contexts, spider, after, dump
+
+
+def test_import_audit_redacts_a_quoted_substring_of_a_secret_value(tmp_path):
+    """Review round 2, N3: `_audit_text` swapped a secret value's prefixes at the rules'
+    cut lengths only, so `rule_serialized_tokens`' match (a substring of the value) was
+    stored in ``candidate.sink_context``; the round-1 test's fetcher echoed the query,
+    so the body's row won the dedupe and hid it. Every quoted run of a value the owner
+    would not store is now replaced, judged on the whole value."""
+    rows = [("http://h/app/start.php", 0, "link")] + [(u, 1, "link")
+                                                       for u, _s in _SUBSTRING_QUOTED]
+    contexts, _spider, _after, dump = _audit_store(tmp_path, rows, _SilentFetcher())
+    assert any(c and " found in parameter " in c for c in contexts)    # not vacuous
+    assert [s for _u, s in _SUBSTRING_QUOTED if _leaks(dump, s)] == []
+
+
+def test_import_audit_stores_a_page_as_the_spider_does_when_the_first_finding_is_off_origin(
+        tmp_path):
+    """Review round 2, N3 (RU-8's split in a new form): `import_spider` takes the run's
+    main origin from the seed and `import_audit` took it from its first finding's page,
+    so with an off-origin page (an XHR on an API origin) audited first the main
+    origin's page was stored absolute, a second endpoint beside the spider's path. The
+    audit endpoint is now the spider's form of the same page: no endpoint is added."""
+    rows = [("http://h/", 0, "link"), ("http://api.h:8081/v1/q.php?u=bob", 1, "xhr"),
+            ("http://h/app/z.php?id=7", 1, "link")]
+    contexts, spider, after, _dump_text = _audit_store(tmp_path, rows, _SilentFetcher())
+    assert {"/app/z.php", "http://api.h:8081/v1/q.php"} <= spider     # not vacuous
+    assert any(c and c.startswith("example value: ") for c in contexts)
+    assert after == spider, sorted(after - spider)
+
+
 # --- the endpoint's own query is never sent redacted (review round 1, RU-4; PA-0544) -----
 class _NothingSent:
     def __init__(self):
@@ -603,13 +853,69 @@ def test_an_endpoint_query_redaction_changed_is_never_sent(tmp_path):
     assert "446655440001" not in dump and _HEX not in dump
 
 
+class _RecordingSession:
+    """A requests-like session that records every request (nothing leaves)."""
+
+    def __init__(self):
+        self.sent = []
+
+    def request(self, method, url, **kwargs):
+        self.sent.append((method, url, kwargs.get("data")))
+
+        class _Resp:
+            status_code, text, headers = 200, "ok", {}
+        return _Resp()
+
+
+def test_greybox_never_sends_a_point_the_builder_refused_or_a_placeholder(tmp_path):
+    """Review round 2, N4 (PA-0530(5): every caller of the producer): greybox's
+    `points_from_store` rebuilt each point as a `GreyboxPoint` and dropped its
+    ``replay_refusal``, and `RequestsCorrelatingSender` had no placeholder gate, so the
+    form ``action='/app/edit.php?id=<uuid>'`` was sent as ``POST
+    /app/edit.php?id=__REDACTED__``. A refused point is now reported in ``skipped``, and
+    the sender refuses any URL holding a placeholder before anything is sent."""
+    from bs4 import BeautifulSoup
+
+    from fuzzlab.core.forms import form_record
+    from fuzzlab.greybox import run as gbrun
+    from fuzzlab.tools import store_adapter
+    from fuzzlab.tools.spider import StorageManager
+    sm = StorageManager(str(tmp_path / "s.db"))
+    sm.reset()
+    sm.record_form(form_record(BeautifulSoup(
+        f"<form method=post action='/app/edit.php?id={_UUID}'><input name=q></form>",
+        "html.parser").find("form"), "http://127.0.0.1:3000/app/f.php"))
+    sm.close()
+    with Store(tmp_path / "u.db") as store:
+        run = store.start_run("greybox", "h")
+        store_adapter.import_spider(tmp_path / "s.db", store, run)
+        skipped: list = []
+        points = gbrun.points_from_store(store, run, "http://127.0.0.1:3000/",
+                                         skipped=skipped)
+    session = _RecordingSession()
+    sender = gbrun.RequestsCorrelatingSender(session=session, id_factory=lambda: "c")
+    for p in points:
+        sender.send_correlated(p.url, p.param, "1'", method=p.method, location=p.location)
+    assert [u for _m, u, _d in session.sent if R.PLACEHOLDER in u or "id=" in u] == []
+    assert any(path == "/app/edit.php" and "redaction replaced" in why
+               for path, _m, _p, why in skipped), skipped
+    # the send-time gate, whoever built the point
+    with pytest.raises(ValueError, match="redaction replaced"):
+        sender.send_correlated(f"http://127.0.0.1:3000/app/edit.php?id={R.PLACEHOLDER}",
+                               "q", "1'", method="POST", location="body")
+    assert [u for _m, u, _d in session.sent if R.PLACEHOLDER in u] == []
+
+
 @pytest.mark.xfail(strict=True, reason="BUG-0556 residual R2 (narrowed in review round 1; "
                    "owner CRAWL): the spider's capture writer stores a request URL's "
                    "identifier-like query value as a blank (`redact_url_identifiers`), "
                    "which the importer cannot tell from an empty value, so its points "
-                   "send `id=`; the fix is the writer recording a placeholder "
-                   "(PA-0544(1)) in `tools/spider.py`, held by lane BROWSERALIAS this round")
+                   "send `id=` -- through `harness.auto` and greybox alike (review round "
+                   "2, N4: every caller of the point builder); the fix is the writer "
+                   "recording a placeholder (PA-0544(1)) in `tools/spider.py`, held by "
+                   "lane BROWSERALIAS this round")
 def test_a_spider_captured_request_query_redaction_is_never_sent(tmp_path):
+    from fuzzlab.greybox import run as gbrun
     from fuzzlab.tools import store_adapter
     from fuzzlab.tools.spider import StorageManager
     sm = StorageManager(str(tmp_path / "s.db"))
@@ -622,9 +928,14 @@ def test_a_spider_captured_request_query_redaction_is_never_sent(tmp_path):
         run = store.start_run("auto", "h")
         store_adapter.import_spider(tmp_path / "s.db", store, run)
         results = _points_and_verdicts(store, run)
+        greybox = gbrun.points_from_store(store, run, "http://127.0.0.1:3000/",
+                                          skipped=[])
     urls = [p.url for p, *_r in results]
     assert urls
-    assert [u for u in urls if "id=" in u and not R.PLACEHOLDER in u] == []
+    # neither caller of the point builder sends the blank as the request's own value
+    sent_blank = ([u for u in urls if "id=" in u and R.PLACEHOLDER not in u],
+                  [p.url for p in greybox if "id=" in p.url and R.PLACEHOLDER not in p.url])
+    assert sent_blank == ([], [])
 
 
 # --- what stays ---------------------------------------------------------------------------
@@ -659,7 +970,7 @@ def test_ordinary_nested_values_are_left_byte_identical(url):
     query = urlsplit(url).query
     for part in query.split("&"):
         name, _eq, raw = part.partition("=")
-        assert R.stored_value(name, unquote(raw), raw) == raw, part
+        assert _api("stored_value")(name, unquote(raw), raw) == raw, part
 
 
 def test_an_ordinary_nested_link_value_is_stored_as_crawled(tmp_path):
@@ -679,17 +990,27 @@ def test_an_ordinary_nested_link_value_is_stored_as_crawled(tmp_path):
 
 # --- bounds and totality ------------------------------------------------------------------
 def test_a_value_past_the_depth_bound_is_redacted_whole():
+    """A token nested past the walk's depth bound is redacted whole, never kept. The
+    leak is asserted first, and the bound falls back to the fix's value (12) where the
+    code has none, so the pre-fix redactors are given the same URL and fail on the hex
+    they keep, never on the missing constant (review round 2, N5; PA-0545(6))."""
+    depth = getattr(R, "MAX_VALUE_DEPTH", 12)
     value = f"/view?ticket={_HEX}"
-    for _ in range(R.MAX_VALUE_DEPTH + 2):
+    for _ in range(depth + 2):
         value = quote(value, safe="")
     url = f"http://h/app/p.php?u=bob&next={value}"
+    for fn in (R.redact_url_identifiers, R.redact_url):
+        assert not _leaks(fn(url), _HEX, layers=depth + 3), fn.__name__
+    assert not R.page_url_is_clean(url)
     assert R.redact_url_identifiers(url) == "http://h/app/p.php?u=bob&next="
     assert R.redact_url(url) == f"http://h/app/p.php?u=bob&next={R.PLACEHOLDER}"
-    assert R.value_holds_secret(unquote(value))
+    assert _api("value_holds_secret")(unquote(value))
 
 
 def test_a_value_past_the_size_bound_is_redacted_whole(monkeypatch):
-    monkeypatch.setattr(R, "MAX_VALUE_CHARS", 64)
+    # set even where the code has no bound (review round 2, N5): the pre-fix code then
+    # fails on the over-long value it keeps, never on the missing constant
+    monkeypatch.setattr(R, "MAX_VALUE_CHARS", 64, raising=False)
     ok, over = "a" * 64, "a" * 65
     assert R.redact_url_identifiers(f"http://h/p?u=bob&x={ok}") == f"http://h/p?u=bob&x={ok}"
     assert R.redact_url_identifiers(f"http://h/p?u=bob&x={over}") == "http://h/p?u=bob&x="
@@ -709,109 +1030,213 @@ def test_the_redactors_are_total(url):
         assert isinstance(fn(url), str)
     assert isinstance(R.page_url_is_clean(url), bool)
     assert R.redact_url(None) is None and R.page_url_is_clean(None) is False
-    assert R.value_holds_secret(None) is False
+    assert _api("value_holds_secret")(None) is False
 
 
-def _oracle_url(n: int) -> str:
-    """``4n`` pairs, ``&`` and ``;`` separated: a value encoded once, a plain one, one
-    behind a raw ``/`` (a layer left encoded in a path segment) and one nested three
-    levels deep, each level behind a raw ``/``."""
+def _oracle_urls(n: int) -> dict[str, str]:
+    """Clean URLs, each taking one part of the walk ``n`` times, so a quadratic step in
+    any part is most of its URL's work (review round 2, N8: the first oracle had only
+    query pairs -- no path parameter, nested path or fragment):
+
+    - ``path``: ``n`` top-level path segments, each with a path parameter;
+    - ``query``: ``5n`` query pairs, ``&`` and ``;`` separated: a value encoded once, a
+      plain one, one behind a raw ``/``, one nested three levels deep behind a raw ``/``
+      at each level, and a nested URL with a path parameter, encoded segments and an
+      encoded fragment route;
+    - ``nested``: one value holding a nested URL of ``n`` encoded path segments with
+      path parameters (at most 2 500: the value stays under `MAX_VALUE_CHARS`);
+    - ``fragment``: a fragment route of ``n`` encoded segments with ``n`` query pairs,
+      each a nested URL with a raw fragment route of its own."""
     def deep(i):
         return "/a" + quote("?b=/c" + quote("?d=/e" + quote(f"?f={i}", safe="/"),
                                             safe="/"), safe="/")
-    return "http://h/p?" + "&".join(
-        f"k{i}=%2Fv%3Fa%3D{i};b{i}=c;d{i}=/w%3Fe%3D{i};g{i}={deep(i)}" for i in range(n))
+
+    def nested(i):                      # a raw '#' would end the top-level query: %23
+        return f"/m/n{i};o=1/q%3Fr%3D{i}/s%3Bt%3D{i}?u={i}%23/v/w%3Fx%3D{i}"
+    return {
+        "path": "http://h" + "".join(f"/s{i};v{i}=x" for i in range(n)) + "?a=1",
+        "query": "http://h/p?" + "&".join(
+            f"k{i}=%2Fv%3Fa%3D{i};b{i}=c;d{i}=/w%3Fe%3D{i};g{i}={deep(i)}&h{i}={nested(i)}"
+            for i in range(n)),
+        "nested": "http://h/p?u=bob&next=/m" + "".join(
+            f"/q{i}%3Fr%3D{i};o{i}=1" for i in range(min(n, 2500))) + "?z=1",
+        "fragment": "http://h/p#/r/" + "/".join(f"t{i}%3Fu%3D{i}" for i in range(n))
+        + "?" + "&".join(f"f{i}=/g/j%3Fh%3D{i}?l={i}#/x/y%3Fz%3D{i}" for i in range(n)),
+    }
 
 
-#: The oracle's constants. Measured on the walk (review round 1): 8.3 steps and 1.6
-#: judged characters per URL character, 12 step calls per pair, the same at 500 and
-#: 4000 pairs; the bounds leave about 50% headroom. Variant B below measured 34 steps
-#: and 8.3 judged characters per character and 84 calls per pair at 500 pairs.
-_STEPS_PER_CHAR, _JUDGED_PER_CHAR, _CALLS_PER_PAIR = 12, 3, 20
+class _Ops:
+    """The C-level work of one walk, counted per call: the characters each wrapped
+    function or pattern method was given (review round 2, N8)."""
+
+    def __init__(self):
+        self.chars = 0
+        self.calls = 0
+
+    def add(self, text) -> None:
+        self.chars += len(text) if isinstance(text, (str, bytes)) else 0
+        self.calls += 1
+
+
+class _CountedPattern:
+    """A compiled pattern whose every search, match, split and substitution counts the
+    characters it is given."""
+
+    _FIRST = ("search", "match", "fullmatch", "split", "finditer", "findall")
+
+    def __init__(self, pattern, ops: _Ops):
+        self._pattern, self._ops = pattern, ops
+
+    def __getattr__(self, name):
+        attr = getattr(self._pattern, name)
+        if name in self._FIRST:
+            def counted(string, *a, **k):
+                self._ops.add(string)
+                return attr(string, *a, **k)
+            return counted
+        if name in ("sub", "subn"):
+            def counted_sub(repl, string, *a, **k):
+                self._ops.add(string)
+                return attr(repl, string, *a, **k)
+            return counted_sub
+        return attr
+
+
+#: The functions of `core.redaction` whose work is counted per call: the percent
+#: decodes and encodes, the identifier and name predicates.
+_COUNTED_FUNCTIONS = ("unquote", "unquote_plus", "quote", "looks_like_identifier",
+                      "is_sensitive_name")
+
+
+def _counted_walk(url: str, identifiers: bool, monkeypatch):
+    """``(output, WalkCounter, _Ops)`` of one walk with every C-level call of the
+    module counted: `_COUNTED_FUNCTIONS` and every compiled pattern (``_PAIR_SEP``'s
+    split, the escape and raw-structure searches, the authority scan, and the patterns
+    the predicates use) are wrapped for the walk and restored after it."""
+    ops = _Ops()
+    saved = {name: getattr(R, name) for name in _COUNTED_FUNCTIONS if hasattr(R, name)}
+    saved.update({name: obj for name, obj in vars(R).items()
+                  if isinstance(obj, re.Pattern)})
+    for name, obj in saved.items():
+        if isinstance(obj, re.Pattern):
+            monkeypatch.setattr(R, name, _CountedPattern(obj, ops))
+        else:
+            def wrapped(text, *a, _fn=obj, **k):
+                ops.add(text)
+                return _fn(text, *a, **k)
+            monkeypatch.setattr(R, name, wrapped)
+    counter = R.WalkCounter()
+    try:
+        out = R._walk_url(url, identifiers, counter)
+    finally:
+        for name, obj in saved.items():
+            monkeypatch.setattr(R, name, obj)
+    return out, counter, ops
+
+
+#: The oracle's constants, per URL character. Measured on the walk (review round 2:
+#: each URL of `_oracle_urls`, both modes, at 100, 500 and 4000 items), the worst part:
+#: 10.3 steps, 0.79 step calls, 15.4 counted C-level characters (8.5 with names only)
+#: and 1.9 C-level calls; the bounds leave about 50% headroom. Each quadratic variant
+#: of the oracle test measured at least 50 C-level characters per character on its
+#: part's URL at 100 items.
+_STEPS_PER_CHAR, _CALLS_PER_CHAR, _OPS_PER_CHAR, _OPS_CALLS_PER_CHAR = 15, 1.2, 23, 2.8
 
 
 def _linearity_violations(n: int, monkeypatch) -> list:
     """The linearity oracle (PA-0095(2), PA-0135(1)/(2)): an operation count, never a
-    timing. The walk's own steps (`WalkCounter`: the characters every step was given,
-    and the step calls) and the characters the identifier predicate reads each stay
-    under a constant times the URL's length, and the output is unchanged (the URL is
-    clean). An empty list when they hold."""
-    counter_type = getattr(R, "WalkCounter", None)
-    if counter_type is None:
+    timing. In both modes (``identifiers`` True, the strongest redactor; False,
+    `redact_url`: proxy history's flush) the walk's own steps (`WalkCounter`) and the
+    characters every C-level call of the module is given (`_counted_walk`: decodes,
+    encodes, pair splits, pattern searches, predicates) each stay under a constant times
+    the URL's length, the calls under a constant per item, and the output is unchanged
+    (the URL is clean). An empty list when they hold."""
+    if getattr(R, "WalkCounter", None) is None:
         return ["the walk exposes no operation count (PA-0135(2))"]
-    judged = []
-    real = R.looks_like_identifier
-    monkeypatch.setattr(R, "looks_like_identifier",
-                        lambda v: judged.append(len(v)) or real(v))
-    url = _oracle_url(n)
-    counter = counter_type()
-    try:
-        out = R._walk_url(url, True, counter)
-    finally:
-        monkeypatch.setattr(R, "looks_like_identifier", real)
     violations = []
-    if out != url:
-        violations.append("the clean URL changed")
-    if not 0 < counter.steps <= _STEPS_PER_CHAR * len(url):
-        violations.append(("steps", n, counter.steps, len(url)))
-    if not 0 < counter.calls <= _CALLS_PER_PAIR * 4 * n:
-        violations.append(("calls", n, counter.calls))
-    if not 0 < sum(judged) <= _JUDGED_PER_CHAR * len(url):
-        violations.append(("judged", n, sum(judged), len(url)))
+    for part, url in _oracle_urls(n).items():
+        for identifiers in (True, False):
+            out, counter, ops = _counted_walk(url, identifiers, monkeypatch)
+            size = len(url)
+            if out != url:
+                violations.append(("the clean URL changed", part, identifiers))
+            for what, count, bound in (
+                    ("steps", counter.steps, _STEPS_PER_CHAR),
+                    ("step calls", counter.calls, _CALLS_PER_CHAR),
+                    ("C-level characters", ops.chars, _OPS_PER_CHAR),
+                    ("C-level calls", ops.calls, _OPS_CALLS_PER_CHAR)):
+                if not 0 < count <= bound * size:
+                    violations.append((what, part, identifiers, n, count, size))
     return violations
 
 
 def test_the_walk_is_linear_in_the_values_length(monkeypatch):
     """PA-0095(2), PA-0135: the walk's operation counts (its own steps, review round 1,
-    RU-10, and the identifier predicate's reads) stay under a constant times the URL's
-    length at 500 pairs and at 4000 (a walk that re-read the whole query per pair would
-    read ~n times it)."""
+    RU-10, and the C-level work of every call it makes, review round 2, N8) stay under
+    a constant times the URL's length at 500 items and at 4000 (a walk that re-read the
+    whole query per pair would read ~n times it)."""
     assert _linearity_violations(500, monkeypatch) == []
     assert _linearity_violations(4000, monkeypatch) == []
 
 
 def test_the_linearity_oracle_flags_a_quadratic_walk(monkeypatch):
-    """PA-0135(3), PA-0034(2): the oracle is proven on deliberately quadratic variants
-    (review round 1, RU-10), each with the real walk's output: (A) a pair step that
-    percent-decodes the whole list once per pair -- which the first oracle, counting
-    only the identifier predicate's reads, passed; (B) a value step that walks every
+    """PA-0135(3), PA-0034(2): the oracle is proven on deliberately quadratic variants,
+    each with the real walk's output and the real walk's single ``tick`` per step, so
+    only the counted C-level work reveals them (review round 2, N8: the round-1 variant
+    A reported its own extra work through ``tick``, and a pair step decoding, splitting
+    or encoding the whole list once per pair passed that oracle unseen):
+    (A) a pair step that percent-decodes the whole list once per pair; (A2) one that
+    splits it; (A3) one that percent-encodes it; (B) a value step that walks every
     value's decoded layer again after the raw walk (2^depth: the design review round 1
-    rejected for RU-1); (C) a pair step that judges the whole query per pair."""
+    rejected for RU-1); (C) a pair step that judges the whole query per pair; (D) a path
+    step that decodes the whole head once per segment; (E) a fragment step that
+    re-encodes the whole fragment once per pair of its query."""
     assert getattr(R, "WalkCounter", None) is not None, \
         "the walk exposes no operation count (PA-0135(2))"
     assert _linearity_violations(100, monkeypatch) == []        # the real walk passes
     walk = R._UrlWalk
-    real_pairs, real_value = walk.pairs, walk.value
+    real = {attr: getattr(walk, attr) for attr in ("pairs", "value", "path", "fragment")}
 
-    def decode_whole_list_per_pair(self, text, depth, top):
-        parts = R._PAIR_SEP.split(text)
-        for i in range(0, len(parts), 2):
+    def per_pair(work):
+        def pairs(self, text, depth, top):
             self.tick(text)
-            unquote(text)
-            parts[i] = self.pair(parts[i], depth, top)
-        return "".join(parts)
+            parts = R._PAIR_SEP.split(text)
+            for i in range(0, len(parts), 2):
+                work(text)
+                parts[i] = self.pair(parts[i], depth, top)
+            return "".join(parts)
+        return pairs
 
     def walk_every_layer_again(self, text, depth, top):
-        new = real_value(self, text, depth, top)
+        new = real["value"](self, text, depth, top)
         if new == text and R._PCT.search(text) and depth <= R.MAX_VALUE_DEPTH:
             self.layer(text, depth)
         return new
 
-    def judge_whole_query_per_pair(self, text, depth, top):
-        parts = R._PAIR_SEP.split(text)
-        for i in range(0, len(parts), 2):
-            R.looks_like_identifier(text)
-            parts[i] = self.pair(parts[i], depth, top)
-        return "".join(parts)
+    def decode_whole_head_per_segment(self, head, depth, nested=False):
+        for _seg in head.split("/"):
+            R.unquote(head)
+        return real["path"](self, head, depth, nested)
 
-    for name, attr, variant in (("A", "pairs", decode_whole_list_per_pair),
-                                ("B", "value", walk_every_layer_again),
-                                ("C", "pairs", judge_whole_query_per_pair)):
+    def encode_whole_fragment_per_pair(self, frag, depth, top):
+        for _pair in frag.split("&"):
+            R.quote(frag, safe="")
+        return real["fragment"](self, frag, depth, top)
+
+    variants = (("A", "pairs", per_pair(lambda t: R.unquote(t))),
+                ("A2", "pairs", per_pair(lambda t: R._PAIR_SEP.split(t))),
+                ("A3", "pairs", per_pair(lambda t: R.quote(t, safe=""))),
+                ("B", "value", walk_every_layer_again),
+                ("C", "pairs", per_pair(lambda t: R.looks_like_identifier(t))),
+                ("D", "path", decode_whole_head_per_segment),
+                ("E", "fragment", encode_whole_fragment_per_pair))
+    for name, attr, variant in variants:
         monkeypatch.setattr(walk, attr, variant)
         found = _linearity_violations(100, monkeypatch)
-        monkeypatch.setattr(walk, "pairs", real_pairs)
-        monkeypatch.setattr(walk, "value", real_value)
-        assert found and "the clean URL changed" not in found, (name, found)
+        for real_attr, fn in real.items():
+            monkeypatch.setattr(walk, real_attr, fn)
+        assert found and not any("the clean URL changed" in str(v) for v in found), \
+            (name, found)
 
 
 # --- residuals pinned (PA-0054(3)): body redaction is paused by the owner -----------------
