@@ -852,9 +852,12 @@ _RECEIVED: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
 
 #: A charset a document names in its first bytes (``<meta charset>``, or ``http-equiv``'s
 #: ``content``), as HTML's prescan reads it.
-_META_CHARSET = re.compile(rb"""<meta[^>]*?charset\s*=\s*["']?\s*([A-Za-z0-9._:-]+)""",
+#: One character class between ``=`` and the label (never ``\s*["']?\s*``: two
+#: quantifiers over one whitespace run the target writes split it every way, quadratic
+#: in its length -- BUG-0559, after the owner's final round).
+_META_CHARSET = re.compile(rb"""<meta[^>]*?charset\s*=[\s"']*([A-Za-z0-9._:-]+)""",
                            re.IGNORECASE)
-_HEADER_CHARSET = re.compile(r"""charset\s*=\s*["']?\s*([A-Za-z0-9._:-]+)""", re.IGNORECASE)
+_HEADER_CHARSET = re.compile(r"""charset\s*=[\s"']*([A-Za-z0-9._:-]+)""", re.IGNORECASE)
 #: **The encodings a browser decodes a document by** (BUG-0559, after the owner's final
 #: round): the WHATWG Encoding Standard's, keyed by Python's name for a label
 #: (``codecs.lookup(label).name``: each browser encoding's own name -- else its Python

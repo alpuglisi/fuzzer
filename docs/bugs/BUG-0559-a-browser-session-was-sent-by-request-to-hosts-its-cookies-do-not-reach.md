@@ -1018,3 +1018,29 @@ time budget, through the real path.** Enforced by
 neighbour and the spider's static engine are pinned by strict xfails (PA-0531(4),
 PA-0550(7)); the other components' `requests` readers the sweep found are flagged to the
 orchestrator with their files (PA-0559(4)), never stated as residuals.
+
+## The label parser (coordinator, at the gaps merge, 2026-10-22)
+- **Found by** the check of 4db0189: `_HEADER_CHARSET` (and `_META_CHARSET`) read the
+  label as `charset\s*=\s*["']?\s*(...)`; two quantifiers over one whitespace run the
+  target writes split it every way, so a Content-Type of `charset=` and 16 000 spaces
+  took 4.7 s per read: 4.6 s per navigation through the route, and, in disco's
+  `carries_value` (no header-size cap), 44.5 s for a 48 KB request Content-Type. The
+  pushed tree (7393c90) read it at once: a regression this batch introduced in round 2
+  (PA-0549(3c)), fixed in the batch.
+- **Fix:** one character class between `=` and the label (`charset\s*=[\s"']*(...)`),
+  linear; the labels a header or a meta writes (quoted, spaced) parse as before.
+- **Test:** `tests/test_browser_session_reach.py::test_a_charset_label_after_a_long_whitespace_run_is_parsed_in_linear_time`
+  (a 200 000-character run in a child with a 60 s bound: fails on 4db0189 at the bound,
+  passes in 0.2 s).
+- **Correction:** the allow-list decodes by an allowed codec any label Python resolves to
+  it, including a few aliases Chromium does not know (`maccyrillic`, `mac_cyrillic`);
+  "every other label is unknown" holds for labels outside the allowed codecs only. No
+  WHATWG label reaches `mac-cyrillic` (Python cannot resolve `x-mac-cyrillic`): stated with
+  the decoder's measured deltas.
+- **Flagged, not pinned (pre-existing at 7393c90, outside the gap):** `requests`'
+  `Response.text` decodes by the declared charset with the same hazard (punycode slow,
+  idna raising) in the session manager, the probe sender, the auditor's fetcher,
+  greybox, the blind-SQLi fuzzer, labgen's identifier oracle and the external-lab
+  fixtures; the spider's static engine is pinned. One fix point is SP-60's
+  `bodyread.bound` setting `Response.encoding` from the same allow-list: a follow-up for
+  the owner.

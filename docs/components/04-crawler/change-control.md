@@ -528,6 +528,7 @@ Newest first.
     `scratchpad/lanes/BROWSERALIAS/r4proof/targeted.log`). Development used plain
     calls of the test functions (no other pytest session). `scripts/verify_change.py`
     was not run: the orchestrator verifies at the merge.
+- *(Coordinator, at the gaps merge.)* The header and meta charset patterns read a target-written whitespace run with two quantifiers (quadratic: 4.6 s per navigation at a 15 KB Content-Type, 44.5 s in disco's `carries_value` at 48 KB; 7393c90 read it at once): one character class now, linear. Test: `tests/test_browser_session_reach.py::test_a_charset_label_after_a_long_whitespace_run_is_parsed_in_linear_time` (fails on 4db0189 at its 60 s bound, passes in 0.2 s). BUG-0559's label-parser section.
 
 ### CC-CRAWL-0061 — The capture writer is total: a body holding a lone surrogate is stored losslessly, and a write the store refuses is counted (FR-CRAWL-42, BUG-0554) (2026-10-21)
 - Placement: pre-assigned to lane SURROGATE (item AU-REQID78), base 33b423e (after

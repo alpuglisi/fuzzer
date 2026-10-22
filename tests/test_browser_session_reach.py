@@ -2458,3 +2458,25 @@ def test_a_ticket_its_own_connection_never_uses_admits_no_prefetch(monkeypatch, 
     with site._lock:
         logouts = [s for s in site.seen if s[1].startswith("/logout")]
     assert logouts == [], logouts
+
+
+@pytest.mark.parametrize("pad", [" ", "\t", " \t"])
+def test_a_charset_label_after_a_long_whitespace_run_is_parsed_in_linear_time(pad):
+    """BUG-0559, after the owner's final round (found by its check): the header charset
+    pattern ``charset\\s*=\\s*["']?\\s*(...)`` split a whitespace run the target writes
+    between two quantifiers, so a Content-Type of ``charset=`` and 16 000 spaces took
+    4.7 s per read (quadratic) -- in the route on every navigation and in disco's
+    request handler on any request -- where the pushed code read it at once. Run in a
+    child with a bound so a quadratic parser is a failure, never a hung test: 200 000
+    characters take minutes quadratic and milliseconds linear."""
+    import subprocess
+    import sys
+    code = ("from fuzzlab.tools.navguard import decoded_text\n"
+            f"ct = 'text/html; charset=' + {pad!r} * 200000 + '!'\n"
+            "decoded_text(b'<p>x</p>', ct)\n"
+            "decoded_text(b'<meta charset=' + " + repr(pad.encode()) + " * 200000 + b'!>', None)\n")
+    try:
+        subprocess.run([sys.executable, "-c", code], check=True, timeout=60,
+                       cwd=str(Path(__file__).resolve().parents[1]))
+    except subprocess.TimeoutExpired:
+        pytest.fail("the charset label parser is super-linear in a whitespace run")
