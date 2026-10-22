@@ -2196,3 +2196,10 @@ Juice Shop lab is complete.
 - **Cause:** I fixed the class as reported (pages holding a `?`, where the floor raises) without asking what else makes `urlsplit` reject a page, and kept summary words ("no other", "every") the measurement did not cover.
 - **Status:** fixed in the follow-up's final commit (`_audit_text` judges the page by `urlparse` too; the claims scoped to what was measured).
 
+### F-281 — I ran a disk-heavy records check on the shared host during a harness run, and the harness failed on an I/O-sensitive browser race
+- **What:** while `verify_change.py` ran on e69bd1e, I had a checker agent driving large differential corpora on the same host (disk 95% full, PSI io some ~19%). `tests/test_disco_harvest.py::test_disco_harvest_and_restore_after_failed_loads[2]` failed: `restore`'s `about:blank` navigation, started before a failed load's error page had loaded, was dropped by Chromium and timed out after 15 s.
+- **Evidence:** `scratchpad/vverify14/parallel.log` (5180 passed, 1 failed; that case 19.1 s); the root-cause investigation `subagents/workflows/wf_133dd7c1-a2f/journal.jsonl` and `scratchpad/rca-restore/` (0/1 320 restores failed under CPU load only; ~1% under I/O load on 7393c90, 1ad0fd0 and e69bd1e alike; 0/720 with the error page's load awaited).
+- **Impact:** one failed harness cycle and a held push; the defect itself is pre-existing (a residual of BUG-0522 in `navguard._settle_failure`, present at 7393c90), surfaced, not caused, by the load.
+- **Cause:** I parallelised a verification and a heavy check on one shared host without accounting for the I/O they contend for.
+- **Status:** root-caused; the fix is the owner's decision (asked); verifications are no longer run beside a heavy check.
+
