@@ -199,10 +199,11 @@ def names_outside_lab(value) -> bool:
     D11). Such a value is never sent (FR-AUD-20) and never replaced by a stand-in either
     (FR-FUZZ-67, BUG-0544): a request that needs it cannot be rebuilt. A value naming
     only loopback names the lab itself and is sent as the app gave it. Total: a string
-    is judged as it is, a JSON integer (never a bool) by its JSON text (`_judged_text`:
-    ``134744072`` is the text ``134744072``, 8.8.8.8 to WHATWG; BUG-0555 review R3), and
-    anything else (a JSON float, a bool, null, an empty object or list) is False (a
-    float is the stated residual of review round 2).
+    is judged as it is, a JSON integer (never a bool; a float with an integral value as
+    that integer) by its JSON text (`_judged_text`: ``134744072`` is the text
+    ``134744072``, 8.8.8.8 to WHATWG; BUG-0555 review R3), and anything else (a JSON
+    decimal such as ``2.5``, a bool, null, an empty object or list) is False (a decimal
+    is the stated residual of review round 2).
 
     An allow-list (PA-0544(7), PA-0555; BUG-0544 residual N-R3-1, BUG-0555), decided on
     every text a reader parses (`_reader_texts`, the raw value among them): a value of a
