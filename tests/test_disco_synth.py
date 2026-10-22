@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from fuzzlab.core.redaction import PLACEHOLDER
 from fuzzlab.disco import formfill
 from fuzzlab.disco.capture import make_record
@@ -308,3 +310,33 @@ def test_redacted_truncated_and_form_bodies():
     assert big.req_truncated
     op = next(op for _t, _m, op in endpoints(synthesize([big])))
     assert "requestBody" not in op                       # no schema from half a document
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
+    "BUG-0559's PA-0002 sweep for super-linear patterns over a value the target writes "
+    "(PA-0559(14)); pre-existing at 7393c90, owner CRAWL: disco/synth.py::_JS_CALL "
+    "reads '\\s*\\(?\\s*' after a call name, two quantifiers over one whitespace run, "
+    "quadratic in a script body the target serves"))
+def test_a_script_with_a_long_whitespace_run_after_a_call_is_mined_in_linear_time():
+    """A captured script body is target-written, kept up to ``MAX_BODY_CHARS`` (200 000).
+    Measured at 7393c90: ``'fetch' + ' ' * n + 'x'`` takes 0.36 s at n = 8 000 and four
+    times that at twice n, so 80 000 characters take about 35 s and a whole body
+    minutes. Run in a child with a 5 s bound: a linear miner takes milliseconds."""
+    import subprocess
+    import sys
+    from pathlib import Path
+    code = ("from fuzzlab.disco.capture import make_record\n"
+            "from fuzzlab.disco.synth import synthesize\n"
+            "body = ('fetch' + ' ' * 80000 + 'x').encode()\n"
+            "synthesize([make_record(kind='http', t=0.0, action_id='act-1', method='GET',\n"
+            "    url='http://127.0.0.1:8080/static/app.js', req_headers={}, req_body=None,\n"
+            "    status=200, res_headers={'Content-Type': 'application/javascript'},\n"
+            "    res_body=body, latency_ms=5)])\n")
+    try:
+        done = subprocess.run([sys.executable, "-c", code], capture_output=True, timeout=5,
+                              cwd=str(Path(__file__).resolve().parents[1]))
+    except subprocess.TimeoutExpired:
+        done = None
+    if done is not None and done.returncode != 0:
+        pytest.fail(f"the child failed: {done.stderr[-400:]!r}")
+    assert done is not None, "disco's script miner is super-linear in a whitespace run"

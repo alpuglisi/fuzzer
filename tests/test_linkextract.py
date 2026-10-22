@@ -147,3 +147,28 @@ def test_a_base_under_a_subpath_keeps_its_path():
     assert lx.robots_urls("Disallow: private/\n", SUB) == ["http://h.test/app/private/"]
     assert lx.sitemap_urls("<urlset><loc>s.html</loc></urlset>", SUB) == \
         ["http://h.test/app/s.html"]
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
+    "BUG-0559's PA-0002 sweep for super-linear patterns over a value the target writes "
+    "(PA-0559(14)); pre-existing at 7393c90, owner CRAWL (SP-39): core/linkextract.py::_REFRESH "
+    "tries a lazy group against a trailing \\s*$ at every length, quadratic in a "
+    "whitespace run of a Refresh header's or a meta refresh's content"))
+def test_a_refresh_value_with_a_long_whitespace_run_is_read_in_linear_time():
+    """A refresh value is target-written (a ``Refresh`` header, a ``<meta http-equiv>``'s
+    content). Measured at 7393c90: ``'x' + ' ' * n + 'y'`` takes 0.27 s at n = 8 000 and
+    four times that at twice n, so 80 000 characters take about 27 s. Run in a child
+    with a 5 s bound: a linear reader takes milliseconds."""
+    import subprocess
+    import sys
+    from pathlib import Path
+    code = ("from fuzzlab.core.linkextract import refresh_url\n"
+            "refresh_url('x' + ' ' * 80000 + 'y', 'http://h.test/')\n")
+    try:
+        done = subprocess.run([sys.executable, "-c", code], capture_output=True, timeout=5,
+                              cwd=str(Path(__file__).resolve().parents[1]))
+    except subprocess.TimeoutExpired:
+        done = None
+    if done is not None and done.returncode != 0:
+        pytest.fail(f"the child failed: {done.stderr[-400:]!r}")
+    assert done is not None, "refresh_url is super-linear in a whitespace run"

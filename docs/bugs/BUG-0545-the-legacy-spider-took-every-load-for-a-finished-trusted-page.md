@@ -533,3 +533,4 @@ static send, the cookie jar for a browser -- decided at the one gate every load 
 by comparing the host the load goes to with the hosts that carrier reaches, never by an
 origin rule alone and never by an alias list; (6) now says *every* test of a regression
 test file, not only those a review names. Enforced by the new browser test as well.
+- *(Added at the BROWSERALIAS merge, 2026-10-22.)* Residual R8 (a browser load's redirect hop and selector form, and the round-2 check's client-side navigation) is closed by BUG-0559 (SP-74 in navguard; CC-CRAWL-0063). PA-0545(1) and (7) are strengthened by PA-0559.

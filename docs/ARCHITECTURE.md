@@ -1257,8 +1257,13 @@ tracked in the requirements files, not here.
     `tools/navguard.py`: a context-wide route that checks scope, then destructive
     tokens, and walks redirect chains hop by hop (Playwright never routes later hops),
     with WebSockets routed -- the only guard for routed requests, which the Playwright
-    driver fetches; and `browser_launch_args` (no proxy, resolver rules per
-    `host:port`, background networking off) for Chromium's own traffic. API-request clients are scope-checked
+    driver fetches; and `browser_launch_args` for Chromium's own traffic: a loopback
+    enforcer as its proxy, which refuses what Chromium sends past the route but a
+    WebSocket the guard admitted and a redirect landing the route checked (BUG-0559
+    review round 2: no launch switch stops a speculation-rules prefetch; round 3: an
+    https landing's tunnel carries one exchange, a certificate error's retry is
+    admitted, Chromium's own traffic is HTTP/1.1), resolver rules per `host:port`,
+    background networking off. API-request clients are scope-checked
     and never redirect. An AST guard covers every launch, guard and API-request site.
     A guarded navigation that fails with a network error raises only after the
     browser's own error page has committed (at most 3 s, judged by commits seen since
@@ -1477,7 +1482,20 @@ tracked in the requirements files, not here.
   route's `header_scope`/`cookie_scope`, `session_header(s)` -- checks membership;
   another port of the host is another app (FR-SESS-20, CC-SESS-0023, BUG-0134). In an
   authenticated browser context another origin's documents and WebSockets are aborted
-  and its subresources fetched through a cookie-less request context; the login itself
+  and its subresources fetched through a cookie-less request context, and on the
+  session's own origin a request to a host the session's cookies do not reach (a
+  loopback alias of a host-only cookie's host) is refused before it is sent -- in the
+  spider, the auditor's fetcher and disco alike (SP-74, navguard; BUG-0559). Nothing
+  the browser sends past the route reaches a host: every launch names a loopback
+  enforcer as Chromium's proxy, which refuses it but a WebSocket the guard admitted and
+  a redirect landing the route checked (SP-04; BUG-0559 review round 2) -- an https
+  landing's tunnel carrying its one exchange, read at the TLS record layer, never
+  decrypted (review round 3) -- a ticket whose own connection never comes is a known
+  gap, pinned after the owner's final round; behind it, as
+  defence in depth, a page's speculation-rules preloads are never registered where a
+  script can see them (`navguard.PRELOAD_OFF_JS`, the route's header and HTML layers, a
+  popup's first document through a trampoline), and each tool checks the document a
+  load committed before reading it (BUG-0559 review round 1); the login itself
   is anchored to the base origin, its same-host https upgrade and `--auth-origin` (the
   CLIs' repeatable flag; review round 1). `authorize(request,
   identity, prepared_host)` re-checks a request after a plugin edits it. Login
@@ -1637,7 +1655,12 @@ tracked in the requirements files, not here.
   included, and in an identity crawl a gate that refuses, before any navigation or
   send, a load whose host the session's carrier does not reach in that engine
   (`_session_host_refusal`: the manager's `prepare` for a static load, the browser
-  context's session cookies by domain match for a browser load). A page row is `pending` once answered,
+  context's session cookies by domain match for a browser load, SP-74); inside a
+  browser load every request, redirect hop and socket of the authenticated context,
+  and a selector form's API submission, pass the same check at the guard
+  (`navguard.session_host_refusal`): a load whose hop is refused, or whose main frame
+  is found committed on such a host before extraction, is `failed`, a page's own jump
+  there is refused and queued for the gate. A page row is `pending` once answered,
   `visited` once extracted, `failed` (retried with backoff, then unresolved, resumed by
   `--resume`) for a throttle, gateway, 5xx, incomplete answer (SP-56), transport failure,
   `BodyIncomplete` (SP-60), lost session or a host the session does not reach; page

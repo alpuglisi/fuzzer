@@ -1044,3 +1044,14 @@ orchestrator with their files (PA-0559(4)), never stated as residuals.
   fixtures; the spider's static engine is pinned. One fix point is SP-60's
   `bodyread.bound` setting `Response.encoding` from the same allow-list: a follow-up for
   the owner.
+- **PA-0002 sweep of the class (coordinator, at the gaps merge):** a search of `fuzzlab/`
+  for a pattern with adjacent quantifiers that can take the same characters, each hit
+  measured on a long run. Two pre-existing instances at 7393c90, outside the gap, are
+  pinned by strict xfails for their owner (CRAWL): `core/linkextract.py::_REFRESH` (a
+  lazy group before a trailing `\s*$`; `'x' + ' ' * 8000 + 'y'` takes 0.27 s, four times
+  that at twice the run) and `disco/synth.py::_JS_CALL` (`\s*\(?\s*` after a call name;
+  `'fetch' + ' ' * 8000 + 'x'` 0.36 s, on script bodies kept up to 200 000 characters).
+  Tests: `tests/test_linkextract.py::test_a_refresh_value_with_a_long_whitespace_run_is_read_in_linear_time`,
+  `tests/test_disco_synth.py::test_a_script_with_a_long_whitespace_run_after_a_call_is_mined_in_linear_time`
+  (each fails at its own assertion at a 5 s bound on 80 000 characters; its child takes
+  0.1-0.25 s on 800). Preventive action: PA-0559(14).

@@ -782,6 +782,7 @@ fuzzer.
   - `x-disco` provenance per operation (samples, actions, profiles, statuses, latency);
     path literals mined from captured JS bundles listed as `observed: false`
     candidates, never as operations.
+  - **Known gap (pinned; BUG-0559's PA-0002 sweep, PA-0559(14)):** the script miner's call pattern (`_JS_CALL`) is quadratic in a whitespace run after a call name in a captured script -- `tests/test_disco_synth.py::test_a_script_with_a_long_whitespace_run_after_a_call_is_mined_in_linear_time` (strict xfail).
 - **FR-CRAWL-21 (the legacy spider is deprecated, CC-CRAWL-0031, D70)** `fuzzlab crawl`
   (`tools/spider.py`) still runs, unchanged, and says on stderr that it is deprecated:
   `fuzzlab auto` reads its spider DB. `fuzzlab/disco` imports nothing from
@@ -823,6 +824,7 @@ fuzzer.
   in a script -- their method is a write or unknown; forms reach the target only through
   the gated submission paths, and a script's requests are what the browser was seen to
   make when the page ran or was acted on.
+  - **Known gap (pinned; BUG-0559's PA-0002 sweep, PA-0559(14)):** a refresh value's reader (`_REFRESH`) is quadratic in a whitespace run the target writes -- `tests/test_linkextract.py::test_a_refresh_value_with_a_long_whitespace_run_is_read_in_linear_time` (strict xfail).
 - **FR-CRAWL-24 (network quiet, CC-CRAWL-0041)** Every wait for a page's requests to
   finish -- the crawler's `_settle` / `_quiesce`, disco's `wait_quiet`, browser login's
   `_settle` -- counts them through `netquiet.Inflight` (SP-40) and never waits for a
