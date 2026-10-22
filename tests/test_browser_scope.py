@@ -462,7 +462,9 @@ def test_the_m6_browser_is_launched_scoped_and_plants_without_redirects(monkeypa
         ExecRequest(url="http://127.0.0.1:8090/view.php", param="q", value="x",
                     store=StoreStep(url="http://127.0.0.1:8090/post.php", param="c",
                                     value="x", location="body")), "tok")
-    assert "--no-proxy-server" in seen["launch"]["args"]
+    # Chromium's own traffic through the enforcer (BUG-0559 review round 2), no other proxy
+    assert _enforcer(seen["launch"]["args"]).startswith("127.0.0.1:")
+    assert "--proxy-bypass-list=<-loopback>" in seen["launch"]["args"]
     assert _resolver_rules(seen["launch"]["args"]).startswith("MAP 127.0.0.1:8090 ")
     assert seen["posts"] == [("http://127.0.0.1:8090/post.php",
                               {"method": "POST", "form": {"c": "x"}, "max_redirects": 0})]

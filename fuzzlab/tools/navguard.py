@@ -1569,8 +1569,8 @@ def _landing_key(url: str):
         return None
     if scheme != "http" or not parts.hostname:
         return None
-    target = unquote(parts.path or "/") + ("?" + unquote(parts.query) if parts.query else "")
-    return ("landing", parts.hostname.lower().strip("[]"), port or 80, target)
+    return ("landing", parts.hostname.lower().strip("[]"), port or 80,
+            unquote(parts.path or "/"), unquote(parts.query))
 
 
 def admit_landing(url: str) -> None:
@@ -1696,9 +1696,12 @@ class _EnforcerHandler(socketserver.BaseRequestHandler):
                 remote = socket.create_connection((upstream[0].strip("[]"), upstream[1]),
                                                   timeout=30)
             else:
+                # the target as Chromium sent it, in origin form: its own bytes after
+                # the authority, never rebuilt
                 parts = urlsplit(target)
-                first = (f"{method} {parts.path or '/'}"
-                         f"{'?' + parts.query if parts.query else ''} HTTP/1.1").encode()
+                after = target.split("://", 1)[-1]
+                origin_form = after[after.index("/"):] if "/" in after else "/"
+                first = f"{method} {origin_form} HTTP/1.1".encode()
                 remote = socket.create_connection((parts.hostname, parts.port or 80),
                                                   timeout=30)
             remote.sendall(b"\r\n".join([first, *kept, b"Connection: close", b"", b""]))

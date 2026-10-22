@@ -2492,8 +2492,10 @@ class LocalSpider:
                 # a Latin-1 stylesheet's or sitemap's URLs); None: a body the driver
                 # no longer holds
                 text = navguard.response_text(response)
-                if text is not None:
-                    more += response_urls(url, ct, text, {})
+                try:
+                    more += response_urls(url, ct, text, {}) if text is not None else []
+                except Exception:       # as before: a harvest never breaks the load
+                    pass
             links = list(dict.fromkeys(list(links) + more))
         # P4 (review B-N1): the navigation committed (a document, or a same-document
         # hash change), recorded after the navigation returned, never before it -- and

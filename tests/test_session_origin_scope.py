@@ -975,11 +975,6 @@ HOST_COMPARE_ALLOWED = {
         1, "selects the sessions a retargeted request may carry, to refuse (deny only)"),
     "fuzzlab/session/manager.py:_jar_cookies": (
         1, "which jar cookies the session carries (cookie domain match); sent by origin"),
-    "fuzzlab/session/browserlogin.py:filter_storage_state": (
-        1, "which jar cookies a browser context adopts (domain match); sent by origin "
-           "(the route's cookie_scope)"),
-    "fuzzlab/session/browserlogin.py:cookie_ok": (
-        1, "filter_storage_state's cookie-domain predicate (same reason)"),
     "fuzzlab/greybox/greybox_cli.py:_cookie_for": (
         1, "builds the scope list; the cookie goes by cookie_origins"),
     "fuzzlab/proxy/session_capture.py:_note_origin": (
