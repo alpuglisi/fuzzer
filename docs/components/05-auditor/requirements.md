@@ -224,40 +224,180 @@ budget where a vulnerability is plausible.
     (`value_shape.names_outside_lab`, the one predicate). A point's own value and the
     command-injection base value are the payload's slot and keep loopback. *(Review
     rounds 1 to 3, BUG-0544: the predicate fails closed, on the authority and on the
-    tail; the tail rule is an allow-list, the owner's decision of 2026-10-21.)* A value
-    is the lab only when it holds no `@`, `\`, `%`, control or non-ASCII character,
-    names no scheme but http(s), its whole authority is a loopback host with a numeric
-    port under both a manual split and `urlsplit`, and its path, query and fragment are
-    wholly in the **safe tail grammar** (`value_shape._tail_in_grammar`): the separators
-    `/`, `?`, `#`, `&`, `=` (never `/` twice in a row) between words of ASCII letters,
-    digits, `_`, `-`, `~` whose first character is not a digit. So no tail token holds
-    a `.` or a `:` (or any other character), and none is a number in any radix or of
-    any length. The rule never asks whether a token reads as a host: no shape
-    classifier, TLD list or address parser reads the tail. Anything else
-    `neutral_value` would change is outside the lab (`127.0.0.1:80@evil.example/`,
-    `localhost:1@evil.example`, `http://evil.example\@127.0.0.1/`,
-    `http://127.0.0.1/r?next=http://evil.example/`, `http://127.0.0.1/?next=evil.example:8080`,
-    `?next=8.8.8.8:53`, `?next=https:evil.example`, `#evil.example:8080`, `?next=evil.top`,
-    `#evil.zip`, `?next=134744072`, `?next=8.8.2056`, `?next=0x8080808` are outside).
-    The same predicate gates a fresh value the binder reads from a page (FR-FUZZ-67).
-    Accepted false positives (the owner's decision): a loopback value whose tail holds a
-    number, a dotted or colon-separated token or any other character outside the
-    grammar (`?page=2`, `/app.js?v=1.2.3`, `?at=10:30`, `?q=a+b`, `/2fa`) is outside --
-    wherever a stand-in is sent, plain loopback stands in for it, as at dcc7091, and a
-    request needing it as a sibling or a fresh value is unbound (FR-FUZZ-67). Stated
-    residual: a dotless word (`?next=intranet`) is in the grammar; only a resolver that
-    completes it from a search list reads it as a host. **Stated gap** (BUG-0544
-    residual N-R3-1, after the final round; owner AUD; SP-73): the proof above runs only
-    when `neutral_value` would change the value, and `neutral_value` recognises a
-    loopback authority with a recogniser (`_host_prefix` cuts only at `/` or `:`), so a
-    loopback value with no `/` before `?` or `#` (`127.0.0.1?next=evil.top`,
-    `localhost?u=134744072`) or a loopback authority it misses (`127.0.0.1./`,
-    `localhost./`, `127.1/`, `2130706433/`, `0x7f000001/` before `?next=evil.top`) is sent
-    and bound verbatim; pinned by the strict xfails
-    `tests/test_replay_bindings.py::test_a_loopback_authority_the_recogniser_misses_is_still_outside_the_lab`
-    and `::test_the_binder_never_binds_a_loopback_authority_the_recogniser_misses`.
-    Stated residual: an e-mail default
-    (`user@mail.example.com`) is sent as is and may trigger mail. **Stated exception (FR-AUD-21, BUG-0124,
+    tail; the tail rule is an allow-list, the owner's decision of 2026-10-21. Amended by
+    `CC-AUD-0058`, BUG-0555, 2026-10-22: the predicate is an allow-list from its entry;
+    no recogniser decides which values it proves. Amended by its review round 1, the
+    same day: an authority mark anywhere, an unbracketed IPv6 literal and a JSON number
+    are judged, and a bare token is outside only when it names an IP literal or a name
+    under a TLD delegated in the DNS root, FR-AUD-32. Amended by its review round 2, the
+    owner's final round, the same day: a special scheme and `:` after any character
+    that cannot be part of a scheme is an authority mark, an IPv6 literal ends at any
+    character outside its alphabet and the raw value is judged, and a JSON number is
+    judged only when it is an integer.)* `names_outside_lab` judges a string as it is
+    and a JSON integer (never a bool; a float with an integral value as that integer:
+    JavaScript reads `134744072.0` as 134744072) by its JSON text (`134744072` is the
+    text `134744072`, 8.8.8.8 to WHATWG); any other JSON float (a decimal: `2.5`), a
+    bool, null or empty object or list names nothing. It reads every text a reader
+    parses from the value -- the raw value (an address parser, `ping6`, a shell or an
+    application that splits the value keeps the tab, LF and CR that WHATWG removes),
+    WHATWG's tab and newline removal and C0-or-space trim, an application's Unicode
+    trim, a C reader's cut at the first NUL, and the value as an application that
+    percent-decodes it reads it, decoded until stable, at most eight times -- and never
+    asks whether `neutral_value` or `value_shape` would change it. A value is of a **URL
+    or authority shape** when, in any of those texts:
+    - it starts with a scheme and `:` (any scheme: `https:evil.example`, `mailto:`,
+      `sort:asc`) or with `//`, `\` or `/\`, or holds `://`, `:\` or `:/\` **anywhere**
+      (`?next=http://evil.top`, `see http://evil.top`, `url=http:\\evil.top`,
+      `/login?next=https://evil.example/`, and `http%3A%2F%2Fevil.top` decoded);
+    - it holds a **special scheme and `:`** (`http`, `https`, `ws`, `wss`, `ftp`, `file`,
+      in any case) at its start or **after any character that cannot be part of a
+      scheme** (anything but an ASCII letter, digit, `+`, `-` or `.`), whatever follows
+      the `:` (review round 2: WHATWG reads `https:evil.top` and `https:/evil.top` as
+      https://evil.top/ and `ws:evil.top` as ws://evil.top/, node 22):
+      `?next=https:evil.top`, `go=https:/evil.top/x`, `see https:evil.top`,
+      `(https:evil.top)`, `url=ws:evil.top`, `next=Http:8.8.8.8`, `?next=https%3Aevil.top`
+      decoded, `go to\thttps:evil.top` (a tab) raw. Not `?next=xhttps:evil.example`,
+      `?next=web+https:evil.example` (another scheme, no host to WHATWG) or
+      `?q=1https:evil.example` (no scheme);
+    - it holds an **unbracketed IPv6 literal**: a run of hex digits, `:` and `.`, ended
+      at either side by **any other character** (a zone's `%`, `/ ? # \ ;`, whitespace
+      with tab, LF and CR, `=`, `,`, a quote, a parenthesis, `|`, `&`, `@`, a letter past
+      `f`; review round 2), holding `::` or at least six `:` (`2001:4860:4860::8888`,
+      `::ffff:8.8.8.8`, `64:ff9b::808:808`, `fe80::1%eth0`, `::1`,
+      `dns=2001:4860:4860::8888`, `2001:4860:4860::8888,2001:4860:4860::8844`,
+      `"2001:4860:4860::8888"`, `2001:4860:4860::8888|id`, `2001:db8::1\tis the server`,
+      a tab), so any `::` is one. WHATWG reads none of them after `http://`;
+      `getaddrinfo(AI_NUMERICHOST)` reads each literal as that address, and `inet_pton`
+      each without a zone, and Python's `str.split`, a shell's word splitting, a
+      `key=value` reader, a list split at `,` and `json.loads` each hand that literal on
+      (measured), and `value_shape` calls each bare literal `ip`. A time of day
+      (`12:00:00`), a date-time (`2020-01-01T00:00:00`) and a MAC address (five `:`) are
+      not one;
+    - it holds a path, query or fragment (a `/`, `?`, `#` or `\`), and its leading token
+      (up to the first `/ ? # : @ ; \`) or the host a reader that puts `http://` before
+      the value takes (leading slashes skipped, userinfo cut at its last `@`:
+      `/evil.top` → evil.top) is a host to a reader: WHATWG reads it (no space or control
+      after percent-decoding and its mapping) and it holds a dot or an IDNA full stop, is
+      a bracketed literal, is `localhost`, or is a dotless number WHATWG reads as
+      0.0.0.0 or as an address of at least 2^24 (`robots.txt/x`, `/evil.top`);
+    - it is a **bare token** (none of `/ ? # \`), and the same leading token or reader
+      host is an **IP literal** in any form -- bracketed, dotted with a last label that
+      is a number in any radix (`8.8.2056`, `1.2.3`, `19.99`, `127.1`), or a dotless
+      number read as 0.0.0.0 or from 2^24 to 2^32 - 1 (`134744072`, `00:30`; a whole
+      value that is a dotless number below 2^24, `0` included, is not: nothing follows
+      the host) -- or `localhost`,
+      or a dotted name whose **last label is a TLD delegated in the DNS root**
+      (FR-AUD-32; the label read up to its first character outside letters, digits and
+      `-`, and a non-ASCII last label taken for an internationalised TLD): `evil.top`,
+      `evil.zip`, `user@gmail.com`, `a;b.top`, `com.`, `evil.рф`. A bare token whose host
+      is a reserved or undelegated name names no host a public resolver answers, and is
+      not of this shape: `robots.txt`, `lang_en.php`, `user@lab.test`, `a@b.example`,
+      `evil.example`, `intranet.corp`, `x.localhost`, `printer.local`, `Hello.`,
+      `localhost.`.
+
+    A value of a URL or authority shape is the lab only when its authority, up to the
+    first `/`, `?` or `#` after `http://`, `https://`, `//` or nothing, is one of the
+    **explicit loopback spellings**: `localhost` in any case, `[::1]`, or `127.a.b.c` in
+    canonical dotted decimal (four decimal parts, no leading zero: every reader reads
+    that spelling alike, 127.0.0.0/8 never leaves the host, and the lab's multi-origin
+    setups bind 127.0.0.2 and 127.0.0.3), with at most a port of one to five digits;
+    `urlsplit` reads the same host and port; no `@`, `\`, `%`, control, space or
+    non-ASCII character is anywhere; and its path, query and fragment are wholly in the
+    **safe tail grammar** (`value_shape._tail_in_grammar`): the separators `/`, `?`,
+    `#`, `&`, `=` (never `/` twice in a row) between words of ASCII letters, digits,
+    `_`, `-`, `~` whose first character is not a digit. So no tail token holds a `.` or
+    a `:` (or any other character), and none is a number in any radix or of any length;
+    the tail rule never asks whether a token reads as a host. Not admitted as an
+    authority, so outside wherever the value is of a URL or authority shape:
+    `localhost.` (WHATWG keeps it as another host, and a resolver may send a rooted name
+    to DNS) and every other spelling of a loopback address (`127.1`, `2130706433`,
+    `0x7f000001`, `0177.0.0.1`, `127.0.0.1.`, `[0:0:0:0:0:0:0:1]`, `[::ffff:127.0.0.1]`,
+    a bare `::1`: readers disagree on them). A value of no such shape names no host to
+    any reader but a single-label or an undelegated one (a pure word, a small number,
+    free text with a space, a reference to the page's own path, a file name, a lab's
+    e-mail address) and is the lab.
+
+    Outside, for example: `127.0.0.1:80@evil.example/`, `localhost:1@evil.example`,
+    `http://evil.example\@127.0.0.1/`, `http://127.0.0.1/r?next=http://evil.example/`,
+    `?next=evil.example:8080`, `?next=8.8.8.8:53`, `?next=https:evil.example`,
+    `#evil.example:8080`, `?next=evil.top`, `#evil.zip`, `?next=134744072` after a
+    loopback authority; BUG-0544's residual N-R3-1, fixed: `127.0.0.1?next=evil.top`,
+    `localhost?u=134744072`, `LOCALHOST?next=8.8.8.8:53`, and `127.0.0.1./`,
+    `localhost./`, `127.1/`, `2130706433/`, `0x7f000001/` before `?next=evil.top`; a bare
+    `evil.top`, `evil.shop:8080`, `evil.zip`, `user@gmail.com`, `134744072`,
+    `0x8080808`, `8.8.2056`, a fullwidth or percent-encoded `evil.top`, `/evil.top`,
+    `/8.8.8.8:53/x`; and (review round 1) `?next=http://evil.top`, `url=http://evil.top`,
+    `see http://evil.top`, `x=http:/\evil.top`, a percent-encoded URL,
+    `2001:4860:4860::8888`, `::ffff:8.8.8.8`, `64:ff9b::808:808`, `user@2001:db8::1`,
+    and the JSON integers `134744072`, `134744072.0` and `3232235777` (192.168.1.1); and
+    (review round 2) `?next=https:evil.top`, `?next=https:/evil.top`, `url=ws:evil.top`,
+    `see https:evil.top`, `{"u":"https:/evil.top"}`, `?next=https%3Aevil.top`,
+    `dns=2001:4860:4860::8888`, `2001:4860:4860::8888,2001:4860:4860::8844`,
+    `(2001:4860:4860::8888)`, `2001:4860:4860::8888|id` and `2001:db8::1\tis the server`.
+    The same predicate gates a fresh value the binder reads from a page (FR-FUZZ-67),
+    and `neutral_value` stands loopback in for every value it puts outside
+    (`127.0.0.1` for a JSON integer). Accepted false positives (the owner's decision for
+    the tail; BUG-0555 for the rest): a loopback value whose tail holds a number, a
+    dotted or colon-separated token or any other character outside the grammar
+    (`?page=2`, `/app.js?v=1.2.3`, `?at=10:30`, `?q=a+b`, `/2fa`); before a path, query
+    or fragment, any dotted token (`robots.txt/x`, `lang_en.php?x=1`, `/index.php`,
+    `../x`); in a bare token, a file name or word under a delegated TLD (`archive.zip`,
+    `readme.md`, `script.py`) and a decimal or version WHATWG reads as an IPv4 address
+    (`2.5`, `1.2.3`, `0.00`, `19.99`, as a string; a JSON float leaf is not judged, a
+    stated residual below); an e-mail address whose
+    domain is under a delegated TLD (`user@mail.example.com`; this supersedes the earlier
+    stated e-mail residual for such an address); a dotless number from 2^24 to 2^32 - 1
+    (an 8- to 10-digit id or timestamp, string or JSON number) and one read as 0.0.0.0
+    before a port or path (`00:30`, `0/x`); text starting with a word and `:` (a scheme
+    to WHATWG: `Note: x`, `intranet:8080/x`); text naming a special scheme and `:` after
+    a character that cannot be part of a scheme (`Upload a file: x.pdf`, `see http:
+    below`; review round 2); any `::` and any run of hex digits, `:` and `.` with six
+    `:` (a colon-separated fingerprint, a scope operator `use std::string`, a CSS
+    `a::before`; review round 2); and every loopback spelling outside the explicit set.
+    Wherever a stand-in is sent, plain loopback stands in for such a value, and a
+    request needing it as a sibling or a fresh value is unbound (FR-FUZZ-67).
+    **Measured cost, per point** (BUG-0555 review LA-6, re-measured in review round 2;
+    `scratchpad/lanes/LABAUTH/r2/measure_points_r2.py`, `point_cost.txt`, 2026-10-22):
+    over 13,684 parameter rows with sibling entries in 4,216 recorded stores on the
+    test host (form, link-set and JSON-leaf points; mostly the test suite's and the
+    lanes' runs), 1,104 points are unbound now against 992 at 7393c90 (126 more, beside
+    percent-encoded URLs naming `host.example`; 14 fewer: `db.lab.example`) and 1,300 at
+    d3cb339 (196 fewer, every one beside the JSON float leaf `2.5`: the float residual's
+    gain, all from one test fixture's runs; none more: the special-scheme mark and the
+    IPv6 rule of review round 2 cost no recorded point). Review round 1 measured the
+    same at 1338d7a (705 of 9,562 then: it had dropped the `://`-anywhere coverage).
+    Over every lab answer key (22 keys, 352 points with writes on and off), no point is
+    refused (at 1338d7a four were, two of them Mongection's expected-vulnerable
+    SDLMG-0002), and a test keeps it so
+    (`tests/test_replay_bindings.py::test_no_expected_vulnerable_answer_key_point_is_unbound_by_the_lab_predicate`).
+    In the external labs' sources (`lab/external/*/.cache`), no form-field point (123)
+    is unbound, and 62 of 2,095 URL-query points are (as at 1338d7a and d3cb339, none at
+    7393c90): third-party Google Maps and Fonts URLs (`28.659344,-81.187888`,
+    `Roboto:300,400,500`). Stated residuals: a JSON float leaf that is not an integer
+    (`2.5`, `8.8`, `19.99`: an app that puts `http://` before it reads `8.8` as 8.0.0.8,
+    node 22) is the lab (review round 2, the owner's decision; measured gain above); a
+    pure dotless word and a dotless number of 2^32 or more (`intranet`,
+    `?next=intranet`) are single-label names, a host only to a resolver that completes
+    them from a search list or a hosts file, whatever follows them
+    (`intranet/?next=evil.top`); a non-zero dotless number below 2^24 (`42` is 0.0.0.42
+    to WHATWG) is in 0.0.0.0/8 (RFC 6890: not forwardable; on the test host Linux routes
+    it to the default route and 0.0.0.0 to loopback, measured); free text with
+    whitespace is the lab unless a rule above holds (an IPv6 literal, an authority or
+    special-scheme mark), though a reader that splits it may take an IPv4 address or a
+    name from it (`8.8.8.8 is the server`, `8.8.8.8\tx`, `evil.top foo`: the IPv6 rule
+    of review round 2 is stricter, the owner's scope); a value naming no host of its own whose
+    path, query or fragment does (`/?next=evil.top`, `/go/evil.top`, `?next=evil.top`,
+    `#evil.zip`) is the lab: holding every such value to the tail grammar would put
+    99.9% of ASP.NET view states (`/wE...`) and 21.5% of standard base64 tokens outside
+    (measured, BUG-0555); a bare dotted name whose last label is not delegated at the
+    snapshot's date (`intranet.corp`, `printer.local`, `db.lab.example`) is the lab, a
+    host only to a private resolver, a hosts file or mDNS, and a TLD delegated after the
+    snapshot's date is the lab until the snapshot is refreshed (FR-AUD-32); a value
+    percent-encoded more than eight times is read only that far. Pinned neighbour (owner
+    FUZZ): the access-control replay reads a point's own stand-in as the object key and
+    records a negative
+    (`tests/test_replay_bindings.py::test_an_access_control_replay_never_reads_a_stand_in_for_its_own_value`).
+    **Stated exception (FR-AUD-21, BUG-0124,
     operator-approved 2026-10-14):** the open-redirect retry probe.
 - **FR-AUD-21** *(open redirect and SSRF by value; `CC-AUD-0034`, 2026-10-14,
   BUG-0124).*
@@ -437,6 +577,29 @@ budget where a vulnerability is plausible.
   - Stated gap: the crawler's own form signature merges contexts before the store sees
     them (CRAWL, pinned by a strict xfail). Its request signature keeps operations apart
     since SPIDER9 (BUG-0546, FR-CRAWL-37); that pin passes and was removed.
+- **FR-AUD-32** *(the delegated-TLD snapshot; `CC-AUD-0058` review round 1, 2026-10-22,
+  BUG-0555).* FR-AUD-20's bare-token rule reads which top-level domains are delegated in
+  the DNS root from one source: IANA's list
+  (https://data.iana.org/TLD/tlds-alpha-by-domain.txt), bundled verbatim as package data
+  (`fuzzlab/audit/tld_data/tlds-alpha-by-domain.txt`, read by
+  `value_shape._delegated_tlds`), never a hand-written list or a classifier's closed
+  list (`GENERIC_TLDS`, `FILE_EXTENSIONS`).
+  - The snapshot is dated: its first line holds IANA's version (2026102100, last
+    updated 2026-10-21 07:07:01 UTC; 1,437 TLDs), and `value_shape` records it
+    (`DELEGATED_TLDS_SOURCE`, `DELEGATED_TLDS_VERSION`, `DELEGATED_TLDS_FETCHED`:
+    downloaded 2026-10-22).
+  - A test checks that the file is that download byte for byte (its SHA-256), and that
+    the predicate's decision is the file's, label for label: every listed TLD, every
+    two-letter label, and reserved names and file extensions (`test`, `example`,
+    `invalid`, `localhost`, `local`, `corp`, `txt`, `php`, ...).
+  - Without the data (an unreadable package), every label counts as delegated: every
+    bare dotted name is outside (fail closed).
+  - Refresh: download the list again, replace the file byte for byte, update the
+    version, date and digest in `value_shape` and in the test, and measure the change
+    per point (FR-AUD-20).
+  - Stated residual: a TLD delegated after the snapshot's date is the lab in a bare
+    token until the refresh.
+  - Enforced by: `tests/test_replay_bindings.py::test_the_bare_token_rule_reads_ianas_root_zone_and_nothing_else`
 - **FR-AUD-30** *(a point's deciding mechanism, scoped to its category; `CC-AUD-0055`,
   2026-10-19, BUG-0523).* An `InjectionPoint` may name the one mechanism that decides
   it: `decided_by`, a `(category, arm)` pair, written by the point builder, never by
@@ -532,7 +695,8 @@ Reads `page`, `endpoint`, `parameter` (and, for crawl points, `form` sibling ent
 the importer writes them from the spider's `discovered_forms` and, since forms phase 3,
 `discovered_requests`, FR-AUD-22) from the store; writes `candidate` rows
 (rule evidence, `features_json` + `feature_version`) and `target` fingerprint
-data. Reads indicators/rules from the indicator DB & catalogs. Authenticates via
+data. Reads indicators/rules from the indicator DB & catalogs, and IANA's root-zone TLD
+list bundled as package data (`fuzzlab/audit/tld_data`, FR-AUD-32). Authenticates via
 the session manager: the static path through the `core/` seam; the rendered path's
 browser context adopts the session the crawl's way (`browserauth.browser_session`,
 then `browserauth.context_options`: a browser login's `storage_state`, cookies and

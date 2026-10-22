@@ -20,6 +20,7 @@ import itertools
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from urllib.parse import parse_qsl, urlsplit
 
 import pytest
@@ -1112,11 +1113,12 @@ def test_the_binder_never_binds_a_fresh_value_that_names_a_host_beyond_loopback(
         assert site.sends("/app/go.php") == []
 
 
-#: Residual N-R3-1 (after the final round, 8fee220; the same at dcc7091): a loopback
-#: authority the recogniser in `neutral_value` misses -- no '/' before '?' or '#', a
-#: trailing dot, a short-form or integer IPv4 spelling -- whose tail names another host.
-#: WHATWG (node 22) reads each host as loopback and the tail as naming evil.top,
-#: evil.example or 8.8.8.8; `names_outside_lab` returns early and they are sent verbatim.
+#: BUG-0544 residual N-R3-1 (after the final round, 8fee220; the same at dcc7091), fixed
+#: by BUG-0555: a loopback authority the recogniser in `neutral_value` missed -- no '/'
+#: before '?' or '#', a trailing dot, a short-form or integer IPv4 spelling -- whose tail
+#: names another host. WHATWG (node 22) reads each host as loopback and the tail as
+#: naming evil.top, evil.example or 8.8.8.8; `names_outside_lab` returned early on
+#: `neutral_value(value) == value` and they were sent verbatim.
 _OUTSIDE_LAB_N_R3_1 = [
     "127.0.0.1?next=evil.top", "localhost?next=evil.example",
     "127.0.0.1#evil.example:8080", "localhost?u=134744072",
@@ -1125,16 +1127,8 @@ _OUTSIDE_LAB_N_R3_1 = [
     "127.0.0.1./?next=evil.top", "localhost./?next=evil.example", "127.1/?next=evil.top",
     "2130706433/?next=evil.top", "0x7f000001/?next=evil.example:8080",
 ]
-_N_R3_1_PIN = pytest.mark.xfail(strict=True, reason=(
-    "BUG-0544 residual N-R3-1 (after the final round, 8fee220): `names_outside_lab` "
-    "returns False early when `neutral_value(value) == value`, and `neutral_value` "
-    "recognises the loopback authority with a recogniser (`_host_prefix` cuts only at "
-    "'/' or ':'), so these loopback spellings never reach the authority proof or the "
-    "`_tail_in_grammar` allow-list and are sent and bound verbatim; owned by AUD (an "
-    "FR-AUD-20 follow-up in `audit/value_shape.py`, which reaches all three callers)"))
 
 
-@_N_R3_1_PIN
 @pytest.mark.parametrize("value", _OUTSIDE_LAB_N_R3_1)
 def test_a_loopback_authority_the_recogniser_misses_is_still_outside_the_lab(value):
     from fuzzlab.audit.value_shape import names_outside_lab
@@ -1143,7 +1137,6 @@ def test_a_loopback_authority_the_recogniser_misses_is_still_outside_the_lab(val
     assert _send_value(value) != value                  # never sent as given
 
 
-@_N_R3_1_PIN
 @pytest.mark.parametrize("value", _OUTSIDE_LAB_N_R3_1)
 def test_the_binder_never_binds_a_loopback_authority_the_recogniser_misses(value):
     """N-R3-1 through `_FormBoundSender._bind_fresh`: a page offering such a value now is
@@ -1161,6 +1154,776 @@ def test_the_binder_never_binds_a_loopback_authority_the_recogniser_misses(value
     with pytest.raises(PrerequisiteUnavailable, match="outside the lab"):
         bound.send("http://h/app/go.php", "q", "M", method="POST", location="body")
     assert site.sends("/app/go.php") == []
+
+
+# --- FR-AUD-20's lab predicate is an allow-list of loopback authorities (BUG-0555) -------
+def _bind_offered(value) -> bool:
+    """`_FormBoundSender._bind_fresh` on a page whose form offers ``value`` now for the
+    fresh entry: True when it is bound and sent as given, False when it is refused as
+    outside the lab and nothing is sent."""
+    from fuzzlab.oracle.oracle import _FormBoundSender
+    from fuzzlab.oracle.probe import Candidate, PrerequisiteUnavailable
+    form = ("<html><form method=post action='/app/go.php'><input type=hidden name=next "
+            f"value=\"{html.escape(value, quote=True)}\"><input name=q></form></html>")
+    site = _Site({"/app/p.php": lambda s, n: form},
+                 lambda req, s: Probe(200, "<html>ok</html>"))
+    cand = Candidate(url="http://h/app/go.php", param="q", method="POST", location="body",
+                     base_entries=(("next", ""), ("q", "x")),
+                     bindings={"page": "http://h/app/p.php", "fresh": ["next"]})
+    try:
+        _FormBoundSender(site, cand).send("http://h/app/go.php", "q", "M", method="POST",
+                                          location="body")
+    except PrerequisiteUnavailable as exc:
+        assert "outside the lab" in str(exc) and site.sends("/app/go.php") == []
+        return False
+    assert [r["body"]["next"] for r in site.sends("/app/go.php")] == [value]
+    return True
+
+
+def _in_lab_set(host: str) -> bool:
+    """The explicit loopback set, restated: ``localhost`` in any case, ``[::1]``, and
+    ``127.a.b.c`` in canonical dotted decimal."""
+    parts = host.split(".")
+    return host.lower() in ("localhost", "[::1]") or (
+        len(parts) == 4 and parts[0] == "127"
+        and all(p.isdigit() and str(int(p)) == p and int(p) <= 255 for p in parts))
+
+
+def _name_spellings(name):
+    """``name`` in other cases, with a trailing dot or two, percent-encoded, with an IDNA,
+    fullwidth or halfwidth full stop, an ignorable character, and fullwidth letters."""
+    return {name, name.upper(), name.title(), name + ".", name + "..",
+            name.replace(".", "%2E"), name.replace(".", "%2e"),
+            name.replace(".", "。"), name.replace(".", "．"),
+            name.replace(".", "｡"), "%" + name[0].encode().hex() + name[1:],
+            name[:2] + "​" + name[2:], name[:2] + "­" + name[2:],
+            "".join(chr(ord(c) + 0xFEE0) if c.isalpha() else c for c in name)}
+
+
+#: Bare (unbracketed) IPv6 literals (BUG-0555 review R2/B1): global unicast, IPv4-mapped
+#: (``::ffff:8.8.8.8`` is 8.8.8.8), IPv4-compatible, NAT64 (``64:ff9b::808:808`` is
+#: 8.8.8.8 through a NAT64 gateway), the full form, link-local with a zone, loopback and
+#: the unspecified address. WHATWG reads none of them after ``http://`` (node 22: an
+#: invalid port); `getaddrinfo(AI_NUMERICHOST)` reads each as that address but
+#: ``fe80::1%25lo`` (a URL's encoded zone, kept for the syntax), and `inet_pton` each
+#: without a zone (measured on the test host).
+_BARE_IPV6 = ("2001:4860:4860::8888", "2606:4700:4700::1111", "2001:db8::1", "1::2",
+              "::ffff:8.8.8.8", "::ffff:808:808", "::8.8.8.8", "64:ff9b::808:808",
+              "2001:4860:4860:0:0:0:0:8888", "0:0:0:0:0:ffff:808:808", "fe80::1%eth0",
+              "fe80::1%25lo", "::ffff:127.0.0.1", "::1", "0:0:0:0:0:0:0:1", "::")
+
+
+def _authority_spellings():
+    """The host spellings of the BUG-0555 sweep: every one- to four-part, integer, hex
+    and octal IPv4 spelling of an outside address and of loopback (each also with a
+    trailing dot and upper case), names whose last label is a delegated TLD and
+    ``localhost`` in `_name_spellings` (``localhost.`` and ``localhost..`` are reserved
+    names, `_reserved_spellings`), IPv6 literals in brackets (IPv4-mapped included) and
+    bare (`_BARE_IPV6`, review R2)."""
+    out = set()
+    for quad in ((8, 8, 8, 8), (127, 0, 0, 1), (10, 0, 0, 1), (1, 2, 3, 4)):
+        for s in _ipv4_spellings(*quad):
+            out |= {s, s + ".", s.upper()}
+    for name in ("evil.top", "a.b.evil.top", "evil.zip", "localhost"):
+        out |= _name_spellings(name)
+    out -= {"localhost.", "localhost.."}
+    out |= {"[::1]", "[0:0:0:0:0:0:0:1]", "[::0:1]", "[::ffff:127.0.0.1]", "[::ffff:7f00:1]",
+            "[::ffff:8.8.8.8]", "[::ffff:808:808]", "[2001:db8::1]", "[::]",
+            "[::127.0.0.1]", "[fe80::1%25lo]", "[::1%25lo]", *_BARE_IPV6}
+    return sorted(out)
+
+
+def _reserved_spellings():
+    """Spellings of names whose last label is not delegated in the DNS root (reserved:
+    ``.example``, ``.test``, ``.invalid``, ``.localhost``, ``.local``; undelegated:
+    ``.corp``; a file extension, ``.txt``), and ``localhost.``: a host to WHATWG, but no
+    public resolver answers it."""
+    out = {"localhost.", "localhost..", "LOCALHOST."}
+    for name in ("evil.example", "intranet.corp", "lab.test", "a.b.evil.invalid",
+                 "evil.localhost", "printer.local", "robots.txt"):
+        out |= _name_spellings(name)
+    return sorted(out)
+
+
+#: The positions of the sweep where a spelling stands as a bare token (no path, query,
+#: fragment or scheme: BUG-0555 review, the bare-token rule).
+_BARE_POSITIONS = ("{}", "{};x")
+
+
+#: Where the sweep puts each spelling: bare, with a port, path, query or fragment,
+#: absolute in any case, scheme-relative, backslashed, a special scheme without '//', a
+#: lab authority as userinfo before it and it as userinfo before a lab authority.
+_SWEEP_POSITIONS = ("{}", "{}/", "{}/x", "{}?a=b", "{}#f", "{}:8080", "{}:8080/x",
+                    "{};x", "http://{}/", "https://{}:3000/x?y=z#w", "HTTP://{}",
+                    "//{}/x", "\\\\{}/x", "/\\{}/x", "http:\\\\{}/x", "https:{}/x",
+                    "http:/{}/", "user@{}/x", "user:pw@{}:80/", "127.0.0.1@{}/",
+                    "localhost:80@{}", "{}@127.0.0.1/", "{}\\@127.0.0.1/")
+#: Review round 2 (N2): where a bare IPv6 literal sits beside a character outside its
+#: alphabet (`_IPV6_BESIDE_READ`'s readers): after ``=``, in a list, quoted, in
+#: parentheses, before a shell operator, and before a word after a tab, LF or CR.
+_IPV6_BESIDE_POSITIONS = ("dns={}", "{0},{0}", '"{}"', "({})", "{}|id", "{}&", "{};id",
+                          "{}\tis the server", "{}\nis the server", "{}\ris the server",
+                          "{}\r\nis the server")
+
+
+def test_every_authority_spelling_outside_the_lab_set_is_outside_the_lab():
+    """BUG-0555 (N-R3-1's class): a value whose authority is not one of the explicit
+    loopback spellings is outside the lab, however the authority is spelled and wherever
+    it stands -- short, integer, hex and octal IPv4 forms (WHATWG reads ``127.1`` and
+    ``0x7f000001`` as 127.0.0.1, and ``0x08.0x08.0x0808`` as 8.8.8.8: node 22), trailing
+    dots, case, userinfo, percent-encoding, IDNA and fullwidth full stops, IPv6 literals
+    (``::ffff:127.0.0.1`` and ``::ffff:8.8.8.8``), scheme-relative and backslashed --
+    and loopback stands in for it. Loopback spellings outside the set are accepted false
+    positives. Review R2: an unbracketed IPv6 literal (`_BARE_IPV6`) in every position
+    too, and (review round 2) beside a character outside its alphabet
+    (`_IPV6_BESIDE_POSITIONS`). A reserved or undelegated name (`_reserved_spellings`)
+    is outside in every position but a bare token's (`_BARE_POSITIONS`, and before a
+    port, where WHATWG reads a letter-led name as a scheme)."""
+    from fuzzlab.audit.value_shape import SAFE_HOST, SAFE_URL, names_outside_lab
+    from fuzzlab.harness.auto import _send_value
+    spellings = _authority_spellings()
+    values = [pos.format(s) for s in spellings for pos in _SWEEP_POSITIONS
+              if not (_in_lab_set(s) and "@" not in pos and "\\" not in pos
+                      and pos not in ("{};x", "https:{}/x", "http:/{}/"))]
+    values += [pos.format(s) for s in _reserved_spellings() for pos in _SWEEP_POSITIONS
+               if pos not in _BARE_POSITIONS + ("{}:8080",)]
+    values += [pos.format(s) for s in _BARE_IPV6 for pos in _IPV6_BESIDE_POSITIONS]
+    assert len(spellings) > 150 and len(values) > 5000
+    kept = [v for v in values
+            if not names_outside_lab(v) or _send_value(v) not in (SAFE_URL, SAFE_HOST)]
+    assert kept == []
+
+
+def test_the_binder_never_binds_an_authority_spelling_outside_the_lab_set():
+    """BUG-0555 through `_FormBoundSender._bind_fresh`: a page offering any spelling of
+    the sweep outside the explicit set, bare, before a path and as an absolute URL, is
+    refused (unbound) and nothing is sent; a reserved name before a path or as an
+    absolute URL too. Review R2: bare IPv6 literals included; review round 2: beside a
+    character outside the IPv6 alphabet (`_IPV6_BESIDE_POSITIONS`, tab and newlines
+    included: an HTML attribute keeps them)."""
+    bound = [v for s in _authority_spellings() if not _in_lab_set(s)
+             for v in (s, s + "/x", f"http://{s}/") if v.isprintable() and _bind_offered(v)]
+    bound += [v for s in _reserved_spellings() for v in (s + "/x", f"http://{s}/")
+              if v.isprintable() and _bind_offered(v)]
+    bound += [v for s in _BARE_IPV6 for pos in _IPV6_BESIDE_POSITIONS
+              for v in (pos.format(s),) if _bind_offered(v)]
+    assert bound == []
+
+
+def test_a_bare_token_naming_no_delegated_host_is_the_lab():
+    """BUG-0555 review (LA-6), the bare-token rule: a bare token whose host (WHATWG,
+    after its mapping) is a dotted name whose last label is not delegated in the DNS root
+    -- a reserved name (``.example``, ``.test``, ``.invalid``, ``.localhost``,
+    ``.local``), an undelegated one (``.corp``) or a file name (``robots.txt``) -- names
+    no host a public resolver answers, and is the lab: sent and bound as given, however
+    it is spelled. So a lab's e-mail (``user@lab.test``) and a file name stay siblings
+    (Mongection's /login, bWAPP's ``ParamUrl=robots.txt``)."""
+    from fuzzlab.audit.value_shape import names_outside_lab
+    from fuzzlab.harness.auto import _outside_lab, _send_value
+    values = [pos.format(s) for s in _reserved_spellings() for pos in _BARE_POSITIONS]
+    values += [f"user@{s}" for s in _reserved_spellings()]
+    assert len(values) > 200
+    outside = [v for v in values if names_outside_lab(v) or _send_value(v) != v
+               or _outside_lab([("a", v), ("q", "x")], "q") is not None]
+    assert outside == []
+    unbound = [s for s in _reserved_spellings() if s.isprintable() and not _bind_offered(s)]
+    assert unbound == []
+
+
+#: The loopback controls of the sweep: every spelling in the explicit set, before only
+#: a port and a tail in the safe grammar, is the lab, sent and bound as given.
+_LAB_SET_CONTROLS = [pos.format(host) for host in (
+    "127.0.0.1", "127.0.0.2", "127.255.0.10", "localhost", "LOCALHOST", "LocalHost", "[::1]")
+    for pos in ("{}", "{}:3000", "{}/", "{}/a/b", "{}?next=home&tab=x", "{}#top",
+                "{}:8080/login?next=/account", "http://{}/", "HTTPS://{}:443/x?y=z#w",
+                "//{}/x")]
+
+
+@pytest.mark.parametrize("value", _LAB_SET_CONTROLS)
+def test_a_lab_set_authority_with_a_grammar_tail_is_the_lab(value):
+    from fuzzlab.audit.value_shape import names_outside_lab
+    from fuzzlab.harness.auto import _send_value
+    assert not names_outside_lab(value)
+    assert _send_value(value) == value
+    assert _bind_offered(value)
+
+
+#: Rule (2) of BUG-0555, each reading measured in node 22 (`new URL("http://" + v).host`,
+#: or `new URL(v).host` for a scheme): a value of no other shape whose token a reader
+#: takes for a non-loopback host -- an IPv4 address in any radix or short form, or, in a
+#: bare token, a name whose last label is delegated in the DNS root (the bare-token
+#: rule, BUG-0555 review: ``evil.zip``, ``gmail.com``, ``com.``, an internationalised TLD;
+#: before a path, query or fragment any dotted token) -- is outside the lab, whatever
+#: `value_shape`'s TLD list holds.
+_MEASURED_OUTSIDE = {
+    "evil.zip": "evil.zip", "user@gmail.com": "gmail.com", "user@evil.top": "evil.top",
+    "x@8.8.8.8": "8.8.8.8", "com.": "com.", "a;b.top": "a;b.top",
+    "evil.xn--p1ai": "evil.xn--p1ai", "evil.рф": "evil.xn--p1ai", "19.99": "19.0.0.99",
+    "1.": "0.0.0.1", "robots.txt/x": "robots.txt",
+    "evil.top": "evil.top", "evil.shop": "evil.shop", "a.b.evil.top": "a.b.evil.top",
+    "evil.top.": "evil.top.", "134744072": "8.8.8.8", "0x8080808": "8.8.8.8",
+    "8.8.2056": "8.8.8.8", "8.526344": "8.8.8.8", "0x08.0x08.0x0808": "8.8.8.8",
+    "8.8.8.8.": "8.8.8.8", "16777216": "1.0.0.0", "1.2.3": "1.2.0.3", "2.5": "2.0.0.5",
+    "ｅｖｉｌ．ｔｏｐ": "evil.top", "evil%2Etop": "evil.top",
+    "evil​.top": "evil.top", "evil。top": "evil.top", "evil.top\x00": "evil.top",
+    "disco.user@example.com": "example.com", "127.1": "127.0.0.1",
+    "2130706433": "127.0.0.1",
+    "0x7f000001": "127.0.0.1", "0177.0.0.1": "127.0.0.1", "127.0.0.1.": "127.0.0.1",
+    "[::ffff:8.8.8.8]": "[::ffff:808:808]", "[::ffff:127.0.0.1]": "[::ffff:7f00:1]",
+    "[2001:db8::1]": "[2001:db8::1]", "evil.top:8080": "evil.top:8080",
+    "https:evil.example": "evil.example", "/evil.top": "evil.top",
+    "\\\\evil.top/x": "evil.top", "/\\evil.top/x": "evil.top",
+    "0:3000/?next=evil.top": "0.0.0.0:3000", "/0:3000/x": "0.0.0.0:3000",
+    "/8.8.8.8:53/x": "8.8.8.8:53", "/127.0.0.1/?next=evil.top": "127.0.0.1",
+}
+
+
+@pytest.mark.parametrize("value", sorted(_MEASURED_OUTSIDE))
+def test_a_value_a_reader_takes_for_a_host_beyond_the_lab_set_is_outside(value):
+    from fuzzlab.audit.value_shape import SAFE_HOST, SAFE_URL, names_outside_lab
+    from fuzzlab.harness.auto import _send_value
+    assert names_outside_lab(value)
+    assert _send_value(value) in (SAFE_URL, SAFE_HOST)
+    if value.isprintable():
+        assert not _bind_offered(value)
+
+
+#: What stays the lab (BUG-0555, the stated residuals), measured in node 22: a pure word
+#: and a number of 2**32 or more are single-label names (`fuzzlab`, `intranet`; WHATWG
+#: refuses 4294967296), a small number reads as 0.0.0.0/8 (`42` is 0.0.0.42), free text
+#: with a space is no host (WHATWG refuses `hello world`), whatever follows such a
+#: single-label host (`text/html`, `12:00` is 0.0.0.12:0, `intranet/?next=evil.top`),
+#: and a reference to the page's own origin whose first segment is no host
+#: (`/account`; `/?next=evil.top` gives no host at all).
+_MEASURED_LAB = {
+    "fuzzlab": "fuzzlab", "intranet": "intranet", "42": "0.0.0.42", "0": "0.0.0.0",
+    "16777215": "0.255.255.255", "4294967296": None, "2000": "0.0.7.208",
+    "hello world": None, "a b.top": None, "The Fellowship of the Ring": None,
+    "text/html": "text", "12:00": "0.0.0.12:0", "N/A": "n", "and/or": "and",
+    "/account": "account", "/": None, "#top": None, "?": None, "John Smith": None,
+    "2020-01-01T00:00": "2020-01-01t00:0", "intranet/?next=evil.top": "intranet",
+    "42/?next=evil.top": "0.0.0.42", "docs/x.pdf": "docs", "/static/app.js": "static",
+    "/users/42": "users", "/?next=evil.top": None, "?page=2": None, "#evil.zip": None,
+    # BUG-0555 review (LA-6), the bare-token rule: a bare token whose host's last label is
+    # not delegated in the DNS root (reserved, undelegated, a file extension) names no
+    # host a public resolver answers
+    "lang_en.php": "lang_en.php", "robots.txt": "robots.txt", "Hello.": "hello.",
+    "portal.php": "portal.php", "message.txt": "message.txt",
+    "getting-started.html": "getting-started.html", "user@lab.test": "lab.test",
+    "a@b.example": "b.example", "user@evil.example": "evil.example",
+    "evil.example": "evil.example", "intranet.corp": "intranet.corp",
+    "evil.local": "evil.local", "evil.localhost": "evil.localhost",
+    "evil.invalid": "evil.invalid", "localhost.": "localhost.",
+    # and a time of day is no IPv6 literal (review R2: fewer than six ':' and no '::')
+    "12:00:00": None, "23:59:59": None,
+}
+
+
+@pytest.mark.parametrize("value", sorted(_MEASURED_LAB))
+def test_a_pure_word_a_small_number_and_free_text_are_the_lab(value):
+    from fuzzlab.audit.value_shape import names_outside_lab
+    from fuzzlab.harness.auto import _send_value
+    assert not names_outside_lab(value)
+    assert _send_value(value) == value
+    assert _bind_offered(value)
+
+
+#: An ASP.NET view state (its serialised form always starts ``/wE``) and standard base64
+#: holding a '/' or '+': no reader takes a host from them (BUG-0555's measured cost of
+#: holding a reference to the tail grammar: 99.9% of view states, 21.5% of tokens).
+_VIEW_STATE = "/wEPDwUKLTk2MjU2MjQ4MA9kFgJmD2QWAgIDD2QWAgIBDw8WAh4EVGV4dAUFSGVsbG9kZGTq+abc/de=="
+
+
+@pytest.mark.parametrize("value, outside", [
+    ("/evil.top", True), ("/8.8.8.8:53/x", True), ("/127.0.0.1/?next=evil.top", True),
+    ("/0:3000/x", True), ("//evil.top/x", True), ("/\\evil.top", True),
+    ("/127.0.0.1/", True), ("intranet:8080/x?y=z", True), ("Note: see x", True),
+    ("/account", False), ("/static/app.js", False), ("/users/42", False),
+    ("?page=2", False), ("#evil.zip", False), ("/?next=evil.top", False),
+    ("intranet/?next=evil.top", False), ("docs/x.pdf", False), (_VIEW_STATE, False),
+    ("Ab3+xYz/9kQ+abc/def=", False), ("text/html", False),
+])
+def test_a_reference_is_outside_only_when_a_reader_takes_a_host_from_it(value, outside):
+    """BUG-0555: a reader that puts ``http://`` before a value skips its leading slashes
+    (WHATWG reads ``/evil.top`` as evil.top and ``/8.8.8.8:53/x`` as 8.8.8.8:53, node 22),
+    so a reference whose first segment is a host token is an authority shape, proven or
+    outside (``/127.0.0.1/`` is an accepted false positive: no explicit authority). A word
+    before ``:`` is a URL scheme to WHATWG (``intranet:8080/x``, ``Note: see x``):
+    outside. Stated residual: a value naming no host of its own whose path, query or
+    fragment does (``/?next=evil.top``, ``intranet/?next=evil.top``) is the lab."""
+    from fuzzlab.audit.value_shape import names_outside_lab
+    assert names_outside_lab(value) is outside
+
+
+# --- BUG-0555 review round 1 ---------------------------------------------------------
+#: Review R1 (LA-1): a value holding ``://`` after a prefix that is no scheme. 7393c90's
+#: `neutral_value` gate put every one outside; 1338d7a sent and bound each verbatim
+#: (``_authority_shaped`` saw a host only at a scheme-shaped start). WHATWG resolves
+#: ``?next=http://evil.top`` against the lab to a lab URL whose query names evil.top
+#: (node 22), N-R3-1's own shape. With the backslashed spellings WHATWG reads as ``//``
+#: after a special scheme (``http:\\evil.top``, ``http:/\\evil.top``: node 22). And the
+#: same once percent-decoded, as an application that decodes the value reads it (a
+#: triple-encoded ``/go?ret=https://host.example/cb?x=1`` is in 54 recorded points).
+_AUTHORITY_ANYWHERE = [
+    "/login?next=https://evil.example/", "?next=http://evil.top", "url=http://evil.top",
+    '{"u":"http://evil.top"}', "see http://evil.top", "(http://evil.top)",
+    "/redirect?url=http://evil.top/", "return=https://8.8.8.8/",
+    "?next=http:\\\\evil.top", "x=http:/\\evil.top", "go=https:\\evil.top/x",
+    "http%3A%2F%2Fevil.top", "next=https%3A%2F%2F8.8.8.8%2F",
+    "%2Fgo%3Fret%3Dhttps%25253A%25252F%25252Fevil.top%25252Fcb",
+    # review round 2 (N1): a special scheme and ':' after a character that cannot be part
+    # of a scheme, with ':/' or nothing before the host. WHATWG reads `https:evil.top`
+    # and `https:/evil.top` as https://evil.top/, `ws:evil.top` as ws://evil.top/ and
+    # `ftp:evil.top` as ftp://evil.top/; each value's last piece, used as a Location
+    # against http://127.0.0.1/ or read on its own (`Http:8.8.8.8` is relative only to an
+    # http: base, and http://8.8.8.8/ on its own), goes there (node 22;
+    # `scratchpad/lanes/LABAUTH/r2/check_tables_r2.py`). Raw and percent-decoded: `go
+    # to\thttps:evil.top` holds the mark only
+    # in the raw value (WHATWG's tab removal joins `tohttps:`), and `https%3Aevil.top`
+    # only once decoded. Each was sent and bound verbatim at d3cb339.
+    "go=https:/evil.top/x", "go=https:evil.top/x", "?next=https:evil.top",
+    "?next=https:/evil.top", "/login?next=https:evil.example/", "see https:evil.top",
+    "url=ws:evil.top", "(https:evil.top)", '{"u":"https:/evil.top"}',
+    "?next=https%3Aevil.top", "?next=https%3A%2Fevil.top", "?next=HTTPS:evil.top",
+    "?next=ftp:evil.top", "?next=wss:/evil.top", "next=Http:8.8.8.8",
+    "go to\thttps:evil.top",
+]
+
+
+@pytest.mark.parametrize("value", _AUTHORITY_ANYWHERE)
+def test_a_value_holding_an_authority_mark_anywhere_is_outside_the_lab(value):
+    """Review R1 through all three callers of SP-73: `_send_value` stands loopback in,
+    `_outside_lab` refuses the request it is a sibling of, and the binder refuses it
+    (unbound, nothing sent)."""
+    from fuzzlab.audit.value_shape import SAFE_HOST, SAFE_URL, names_outside_lab
+    from fuzzlab.harness.auto import _outside_lab, _send_value
+    assert names_outside_lab(value)
+    assert _send_value(value) in (SAFE_URL, SAFE_HOST)
+    assert "sibling a names a host outside the lab" in _outside_lab([("a", value),
+                                                                     ("q", "x")], "q")
+    assert not _bind_offered(value)
+
+
+def _scheme_anywhere_corpus():
+    """Values holding ``scheme://`` after every kind of prefix, before every kind of host
+    and tail: 7393c90's '://'-anywhere rule put each one outside, but for the loopback
+    URLs its proof admitted (no prefix, an http(s) scheme, a loopback authority, a tail
+    in the grammar)."""
+    prefixes = ("", "/login?next=", "?next=", "#", "url=", "x=1&u=", "see ", "(", '{"u":"',
+                "/r/", "a", "/", "go to: ", "\t", "%20")
+    schemes = ("http", "https", "HTTP", "ftp", "javascript", "x-y")
+    hosts = ("evil.top", "evil.example", "lab.test", "8.8.8.8", "134744072",
+             "[::ffff:8.8.8.8]", "2001:db8::1", "127.0.0.1", "localhost", "[::1]",
+             "127.0.0.1:3000")
+    tails = ("", "/", "/x?y=z", "#f", ")", '"}', "/?next=evil.top")
+    lab_hosts = ("127.0.0.1", "localhost", "[::1]", "127.0.0.1:3000")
+    corpus = {}
+    for p in prefixes:
+        for s in schemes:
+            for h in hosts:
+                for t in tails:
+                    lab = (p == "" and s.lower() in ("http", "https")
+                           and h in lab_hosts and t in ("", "/", "/x?y=z", "#f"))
+                    corpus[f"{p}{s}://{h}{t}"] = lab
+    return corpus
+
+
+def test_every_value_the_old_scheme_anywhere_rule_put_outside_is_still_outside():
+    """Review R1's non-regression: every value of the corpus that 7393c90's
+    '://'-anywhere rule put outside is outside (loopback stands in for it), and the
+    loopback URLs it admitted are still the lab."""
+    from fuzzlab.audit.value_shape import SAFE_HOST, SAFE_URL, names_outside_lab
+    from fuzzlab.harness.auto import _send_value
+    corpus = _scheme_anywhere_corpus()
+    assert len(corpus) > 6000 and sum(corpus.values()) == 48
+    wrong = [v for v, lab in corpus.items()
+             if names_outside_lab(v) is lab
+             or (not lab and _send_value(v) not in (SAFE_URL, SAFE_HOST))]
+    assert wrong == []
+
+
+#: Review round 2 (N1): what may stand before a special scheme -- nothing, or any
+#: character that cannot be part of a scheme (a query or key separator, a space, a tab, a
+#: bracket, a quote, a slash, a non-ASCII letter) -- and every spelling of the mark.
+_SPECIAL_PREFIXES = ("", "?next=", "/login?next=", "go=", "x=1&u=", "see ", "(", '{"u":"',
+                     "#", "/r/", "go to\t", "a\n", "é", "%20", "[", "<", "'", ",", ";", "|")
+_SPECIAL_SPELLINGS = ("http", "https", "HTTPS", "Http", "ws", "WSS", "ftp", "file")
+_SPECIAL_AFTER = ("", "/", "\\", "%2F", "%5C")
+#: Controls: a scheme character right before it makes another scheme (``xhttps``,
+#: ``web+https``, ``a.ftp``: WHATWG reads no host from them, node 22) or none
+#: (``1https:`` is a path to WHATWG): the lab, sent and bound as given.
+_SPECIAL_CONTROLS = ["?next=xhttps:evil.example", "?next=web+https:evil.example",
+                     "?q=1https:evil.example", "?next=a.ftp:evil.example"]
+
+
+def test_a_special_scheme_after_a_non_scheme_character_is_outside_the_lab():
+    """Review round 2 (N1, the owner's scope): a special scheme (http, https, ws, wss,
+    ftp, file; any case) and ':' after any character that cannot be part of a scheme is
+    an authority mark in every reader text, raw and percent-decoded, so the value is
+    outside unless `_names_only_lab` proves it loopback -- whatever comes between the
+    ':' and the host (``//``, ``/``, ``\\``, nothing, or their percent-encodings), and
+    wherever the host names loopback (no spelling of this mark is in the proof's
+    grammar). Loopback stands in for each. A scheme character right before the scheme
+    makes another scheme, and is the lab."""
+    from fuzzlab.audit.value_shape import SAFE_HOST, SAFE_URL, names_outside_lab
+    from fuzzlab.harness.auto import _send_value
+    values = [f"{p}{s}:{a}{h}{t}" for p in _SPECIAL_PREFIXES for s in _SPECIAL_SPELLINGS
+              for a in _SPECIAL_AFTER
+              for h in ("evil.top", "8.8.8.8", "evil.example", "127.0.0.1", "localhost")
+              for t in ("", "/x", ")", '"}')]
+    values += [v.replace(":", "%3A", 1) for v in values if v.count(":") == 1]
+    assert len(values) > 30000
+    kept = [v for v in values
+            if not names_outside_lab(v) or _send_value(v) not in (SAFE_URL, SAFE_HOST)]
+    assert kept == []
+    controls = [v for v in _SPECIAL_CONTROLS
+                if names_outside_lab(v) or _send_value(v) != v or not _bind_offered(v)]
+    assert controls == []
+
+
+#: Review R2 (LA-2, LA-5): bare IPv6 literals as the measured readers take them
+#: (`getaddrinfo(v, None, flags=AI_NUMERICHOST)` on the test host; WHATWG refuses each
+#: after ``http://``: node 22), alone, before a path, query or port and after userinfo.
+_BARE_IPV6_READ = {
+    "2001:4860:4860::8888": "2001:4860:4860::8888", "::ffff:8.8.8.8": "::ffff:8.8.8.8",
+    "::ffff:808:808": "::ffff:8.8.8.8", "64:ff9b::808:808": "64:ff9b::808:808",
+    "2001:db8::1": "2001:db8::1", "::8.8.8.8": "::8.8.8.8", "1::2": "1::2",
+    "2606:4700:4700::1111": "2606:4700:4700::1111",
+    "2001:4860:4860:0:0:0:0:8888": "2001:4860:4860::8888", "fe80::1%eth0": "fe80::1",
+    "::1": "::1", "::": "::",
+}
+
+
+#: Review round 2 (N2): an IPv6 literal beside a character outside its alphabet, as a
+#: named reader takes it -- Python's ``str.split`` (tab, LF, CR), a shell's word
+#: splitting and operators (`shlex` with punctuation characters: tab, LF, a quote, a
+#: parenthesis, ``|``, ``&``, ``;``), a ``key=value`` reader, a DNS-server list split at
+#: ``,``, `json.loads` -- and `getaddrinfo(piece, None, flags=AI_NUMERICHOST)` reads
+#: the piece as the address (the test host; the whole value it refuses;
+#: `scratchpad/lanes/LABAUTH/r2/ipv6_readers.py`). Each was the lab at d3cb339 while its
+#: IPv4 form (``dns=8.8.8.8``, ``8.8.8.8,8.8.4.4``, ``"8.8.8.8"``, ``8.8.8.8|id``) was
+#: outside; WHATWG's tab and newline removal had joined the literal to the next word.
+_IPV6_BESIDE_READ = {
+    "2001:db8::1\tis the server": ("split", "2001:db8::1"),
+    "2001:db8::1\nis the server": ("split", "2001:db8::1"),
+    "2001:db8::1\ris the server": ("split", "2001:db8::1"),
+    "2001:db8::1\r\nis the server": ("split", "2001:db8::1"),
+    "2001:4860:4860::8888\tx": ("shell", "2001:4860:4860::8888"),
+    "2001:4860:4860::8888\nx": ("shell", "2001:4860:4860::8888"),
+    "dns=2001:4860:4860::8888": ("key=value", "2001:4860:4860::8888"),
+    "2001:4860:4860::8888,2001:4860:4860::8844": ("list", "2001:4860:4860::8888"),
+    '"2001:4860:4860::8888"': ("json", "2001:4860:4860::8888"),
+    "(2001:4860:4860::8888)": ("shell", "2001:4860:4860::8888"),
+    "2001:4860:4860::8888|id": ("shell", "2001:4860:4860::8888"),
+    "2001:4860:4860::8888&": ("shell", "2001:4860:4860::8888"),
+    "2001:4860:4860::8888;id": ("shell", "2001:4860:4860::8888"),
+}
+
+
+@pytest.mark.parametrize("value", sorted(
+    [*_BARE_IPV6_READ, *_IPV6_BESIDE_READ, "::/evil.top", "2001:db8::1/x",
+     "2001:4860:4860::8888?x=y", "2001:db8::1;x", "user@2001:db8::1", "/2001:db8::1/x",
+     "2001:db8::1 is the server"]))
+def test_a_bare_ipv6_literal_is_outside_the_lab(value):
+    """Review R2: a reader that is not WHATWG (``ping6``, ``getaddrinfo``, ``inet_pton``)
+    takes an unbracketed IPv6 literal for a host, and `value_shape` calls it ``ip`` (a
+    command-injection default): outside, through all three callers. Only ``[::1]`` is
+    the lab (``::1`` bare is an accepted false positive). Review round 2: beside any
+    character outside its alphabet too (`_IPV6_BESIDE_READ`), the raw value judged as
+    well as WHATWG's texts."""
+    from fuzzlab.audit.value_shape import SAFE_HOST, SAFE_URL, names_outside_lab
+    from fuzzlab.harness.auto import _outside_lab, _send_value
+    assert names_outside_lab(value)
+    assert _send_value(value) in (SAFE_URL, SAFE_HOST)
+    assert _outside_lab([("dns", value), ("q", "x")], "q") is not None
+    assert not _bind_offered(value)
+
+
+#: Every character outside the IPv6 alphabet (hex digits, ':' and '.'): printable ASCII,
+#: the whitespace and controls a reader may split at, NUL, and non-ASCII.
+_NOT_IPV6 = sorted({chr(i) for i in range(0x20, 0x7F)} - set("0123456789abcdefABCDEF:.")
+                   | set("\t\n\r\x0b\x0c\x00\xa0　é"))
+
+
+def test_an_ipv6_literal_ends_at_any_character_outside_its_alphabet():
+    """Review round 2 (N2, the owner's scope): an IPv6 literal ends at any character
+    outside its alphabet, on either side, so every bare literal (`_BARE_IPV6`) beside
+    every such character -- before it, after it, both, and between two words -- is
+    outside, like its IPv4 form, and loopback stands in for it; the binder refuses it.
+    Controls: a time of day, a date-time and a MAC address (no '::', fewer than six ':')
+    beside a space, a tab, LF, a parenthesis, a quote or a comma stay the lab."""
+    from fuzzlab.audit.value_shape import SAFE_HOST, SAFE_URL, names_outside_lab
+    from fuzzlab.harness.auto import _send_value
+    positions = ("{c}{v}", "{v}{c}", "{c}{v}{c}", "k{c}{v}{c}word")
+    values = [p.format(c=c, v=v) for v in _BARE_IPV6 for c in _NOT_IPV6 for p in positions]
+    assert len(values) > 4000
+    kept = [v for v in values
+            if not names_outside_lab(v) or _send_value(v) not in (SAFE_URL, SAFE_HOST)]
+    assert kept == []
+    bound = [v for c in _NOT_IPV6 if c not in "\x00\r"
+             for v in (f"dns{c}2001:4860:4860::8888", f"2001:4860:4860::8888{c}x")
+             if _bind_offered(v)]
+    assert bound == []
+    controls = [p.format(t) for t in ("12:00:00", "2020-01-01T00:00:00", "10:1a:2b:3c:4d:5e")
+                for p in ("{}", "{} x", "x {}", "({})", '"{}"', "{0},{0}", "{}\tx", "{}\nx")]
+    assert [v for v in controls if names_outside_lab(v)] == []
+
+
+#: Review R3 (LA-3): a JSON integer leaf, judged by its JSON text. Each reading measured
+#: in node 22 as an app that does ``"http://" + body.host`` takes the parsed number;
+#: ``2130706433`` (127.0.0.1) is a loopback spelling outside the explicit set (an
+#: accepted false positive, as the string is). The controls: a small number
+#: (0.0.0.0/8), a negative one or one of 2**32 or more names no host to any reader (as
+#: its string does), and a bool, null or empty container names nothing. A float with an
+#: integral value is that integer (review round 2: JavaScript's `JSON.parse` reads
+#: ``134744072.0`` as 134744072, 8.8.8.8 after ``http://``, node 22); any other JSON
+#: float is the stated residual of review round 2 (`_JSON_FLOAT_RESIDUAL`).
+_JSON_LEAVES = [(134744072, "8.8.8.8"), (3232235777, "192.168.1.1"),
+                (16777216, "1.0.0.0"), (2130706433, "127.0.0.1"), (134744072.0, "8.8.8.8"),
+                (42, None), (0, None), (-134744072, None), (4294967296, None),
+                (True, None), (False, None), (None, None), ([], None), ({}, None)]
+
+
+@pytest.mark.parametrize("value, reading", _JSON_LEAVES)
+def test_a_json_number_leaf_is_judged_by_its_json_text(value, reading):
+    """Review R3: the JSON number ``134744072`` is the text ``134744072`` to a reader,
+    8.8.8.8 to WHATWG. `_send_value` and `neutral_value` stand ``127.0.0.1`` in for it,
+    and a JSON body holding it as a sibling is never rebuilt (`_outside_lab` on the
+    body's leaves, as `points_from_ground_truth` and the crawled-JSON points read them).
+    A leaf naming no host is sent as given."""
+    from fuzzlab.audit.value_shape import SAFE_HOST, names_outside_lab, neutral_value
+    from fuzzlab.core import jsonbody
+    from fuzzlab.harness.auto import _outside_lab, _send_value
+    refusal = _outside_lab(jsonbody.leaves({"host": value, "q": "x"}), "q")
+    if reading is None:
+        assert not names_outside_lab(value)
+        assert _send_value(value) is value and neutral_value(value) is value
+        assert refusal is None
+    else:
+        assert names_outside_lab(value)
+        assert _send_value(value) == SAFE_HOST and neutral_value(value) == SAFE_HOST
+        assert refusal is not None
+        assert "sibling host names a host outside the lab" in refusal
+
+
+#: Review round 2 (the owner's decision): a JSON float leaf is a decimal (a price, a
+#: ratio, a coordinate), never judged as a host. Stated residual, with its WHATWG
+#: reading measured in node 22 (``"http://" + 2.5`` is http://2.0.0.5/): an app that
+#: builds a URL from a decimal leaf reads one. Measured gain, per point: 196 recorded
+#: points beside the float leaf ``2.5`` are bound again against d3cb339 (140 when review
+#: round 1 measured it), all from `tests/test_json_points.py`'s adversarial body; no lab
+#: answer key or external lab source holds one (`scratchpad/lanes/LABAUTH/r2/`
+#: `point_cost.txt`, `float_points.txt`).
+_JSON_FLOAT_RESIDUAL = [(2.5, "2.0.0.5"), (8.8, "8.0.0.8"), (19.99, "19.0.0.99"),
+                        (0.5, "0.0.0.5"), (134744072.5, None)]
+
+
+@pytest.mark.parametrize("value, reading", _JSON_FLOAT_RESIDUAL)
+def test_a_json_float_leaf_is_the_lab_a_stated_residual(value, reading):
+    """Review round 2: `names_outside_lab` judges a JSON number only when it is an integer
+    (an IPv4 integer form such as ``134744072``, or ``134744072.0``); a decimal leaf is
+    sent as given, and a JSON body holding it as a sibling is rebuilt."""
+    from fuzzlab.audit.value_shape import names_outside_lab, neutral_value
+    from fuzzlab.core import jsonbody
+    from fuzzlab.harness.auto import _outside_lab, _send_value
+    assert not names_outside_lab(value)
+    assert _send_value(value) is value and neutral_value(value) is value
+    assert _outside_lab(jsonbody.leaves({"price": value, "q": "x"}), "q") is None
+
+
+def test_an_answer_keys_json_number_sibling_leaves_its_point_unbound():
+    """Review R3 through `points_from_ground_truth` (a JSON-leaf point, FR-FUZZ-54): the
+    point beside a number leaf naming 8.8.8.8 carries a `replay_refusal`, and the
+    number's own point has loopback in its slot."""
+    from fuzzlab.harness.auto import points_from_ground_truth
+    from fuzzlab.labels.contract import GroundTruth, InjectionPoint
+    body = {"host": 134744072, "q": "x"}
+    gt = GroundTruth(target="t", points=[
+        InjectionPoint(url="/api/ping", method="POST", param=p, location="body",
+                       rendering="server", json_body=body) for p in ("host", "q")])
+    points, _skipped = points_from_ground_truth(gt, "http://127.0.0.1:4000")
+    by = {p.param: p for p in points}
+    refusal = by["q"].replay_refusal
+    assert refusal is not None and "sibling host names a host outside the lab" in refusal
+    assert by["host"].replay_refusal is None
+    assert dict((name[0], v) for name, v in by["q"].base_entries)["host"] == "127.0.0.1"
+
+
+#: IANA's root-zone TLD list as downloaded on 2026-10-22 (FR-AUD-32): the SHA-256 of
+#: https://data.iana.org/TLD/tlds-alpha-by-domain.txt, version 2026102100.
+_IANA_TLDS_SHA256 = "ef731da5bd52d570d5fdf7b8737e06ed661ed65fbef60f7ad9f26063a49efb6f"
+
+
+def test_the_bare_token_rule_reads_ianas_root_zone_and_nothing_else():
+    """The bare-token rule's delegation is the bundled IANA snapshot's, label for label:
+    every listed TLD is outside after a name, and every label it does not list -- each
+    two-letter label, reserved names, file extensions -- is the lab (so no hand-made rule,
+    two letters or `GENERIC_TLDS`, decides). The file is IANA's download byte for byte
+    (its digest and version line), and without it every label counts as delegated."""
+    import hashlib
+    import string
+    from importlib import resources
+
+    from fuzzlab.audit import value_shape as vs
+    raw = resources.files("fuzzlab.audit.tld_data").joinpath(
+        "tlds-alpha-by-domain.txt").read_bytes()
+    lines = raw.decode("ascii").splitlines()
+    tlds = {line.lower() for line in lines[1:]}
+    labels = tlds | {a + b for a in string.ascii_lowercase for b in string.ascii_lowercase}
+    labels |= {"test", "example", "invalid", "localhost", "local", "corp", "internal",
+               "lan", "home", "onion", "lab", "txt", "php", "html", "json", "js", "css",
+               "pdf", "png", "bak", "log", "ini", "xml", "aspx", "jsp"}
+    wrong = sorted(label for label in labels
+                   if vs.names_outside_lab("evil." + label) is not (label in tlds))
+    assert wrong == []
+    assert {"top", "zip", "com", "md", "py", "xn--p1ai"} <= tlds and len(tlds) > 1000
+    assert hashlib.sha256(raw).hexdigest() == _IANA_TLDS_SHA256
+    assert lines[0].startswith(f"# Version {vs.DELEGATED_TLDS_VERSION}, Last Updated ")
+    assert vs.DELEGATED_TLDS_SOURCE == "https://data.iana.org/TLD/tlds-alpha-by-domain.txt"
+    assert len(lines) - 1 == len(tlds) and lines[1:] == sorted(lines[1:])
+    saved = vs._DELEGATED_TLDS_FILE
+    vs._delegated_tlds.cache_clear()
+    vs._DELEGATED_TLDS_FILE = "missing.txt"
+    try:
+        assert vs.names_outside_lab("evil.test") and vs.names_outside_lab("robots.txt")
+    finally:
+        vs._DELEGATED_TLDS_FILE = saved
+        vs._delegated_tlds.cache_clear()
+    assert not vs.names_outside_lab("robots.txt")
+
+
+#: Every lab answer key (review LA-6: measured per point, not per value).
+_LAB = Path(__file__).resolve().parents[1] / "lab"
+
+
+def test_no_expected_vulnerable_answer_key_point_is_unbound_by_the_lab_predicate():
+    """Review LA-6: in ground-truth mode no point a lab's answer key marks
+    ``expected_vulnerable`` carries a `replay_refusal` from FR-AUD-20 (on 1338d7a,
+    Mongection's SDLMG-0002, /login password, was refused for its sibling
+    ``email=user@lab.test`` and read inconclusive without a send). With writes and
+    without, every answer key, JSON-leaf and stored-XSS store points included."""
+    from fuzzlab.harness.auto import points_from_ground_truth
+    from fuzzlab.labels.contract import load
+    base = "http://127.0.0.1:4000"
+    keys = sorted(p.parent for p in _LAB.glob("ground-truth*/labels.json"))
+    refused, checked = [], 0
+    for key in keys:
+        gt = load(key)
+        positive = {((c.origin or base) + (c.url if c.url.startswith("/") else "/" + c.url),
+                     c.method.upper(), c.param): c.case_id
+                    for c in gt.cases if c.expected_vulnerable}
+        for writes in (False, True):
+            points, _skipped = points_from_ground_truth(gt, base, browser_available=True,
+                                                        writes=writes)
+            for p in points:
+                checked += 1
+                case = positive.get((p.url, p.method.upper(), p.param))
+                if case and p.replay_refusal:
+                    refused.append((key.name, case, writes, p.replay_refusal))
+    assert len(keys) >= 20 and checked > 300
+    assert refused == []
+
+
+#: The recognisers of hosts that must never decide admission (PA-0544(7), PA-0555): the
+#: shape classifier and its closed lists, the stand-in, the scope predicate and the
+#: address parser. (`urlsplit` is read only to refuse: both splits must agree.)
+_HOST_RECOGNISERS = frozenset({
+    "value_shape", "neutral_value", "_host_prefix", "_is_hostname", "_is_ip", "_is_url",
+    "_is_filename", "_is_path", "GENERIC_TLDS", "FILE_EXTENSIONS", "is_loopback_origin",
+    "ipaddress", "redirect_seed"})
+
+
+def _reached_names(source: str, root: str) -> set[str]:
+    """Every name the module-level function ``root`` of ``source`` reads or imports,
+    followed through each module-level function of ``source`` it reaches."""
+    import ast
+    tree = ast.parse(source)
+    defs = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
+    names, seen, todo = set(), set(), [root]
+    while todo:
+        name = todo.pop()
+        if name in seen or name not in defs:
+            continue
+        seen.add(name)
+        for node in ast.walk(defs[name]):
+            if isinstance(node, ast.Name):
+                names.add(node.id)
+                todo.append(node.id)
+            elif isinstance(node, ast.Attribute):
+                names.add(node.attr)
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                names |= {a.asname or a.name for a in node.names}
+                if isinstance(node, ast.ImportFrom) and node.module:
+                    names.add(node.module.rsplit(".", 1)[-1])
+    return names
+
+
+def test_the_lab_predicate_reaches_no_recogniser_of_hosts():
+    """BUG-0555 (N-R3-1's root cause): admission was decided by `neutral_value`'s
+    recogniser (an early return). Nothing `names_outside_lab` reaches is one. The stated
+    reason is asserted first (review R4: on 7393c90 it fails naming `neutral_value`,
+    `value_shape` and `_host_prefix`); the one list the predicate reads is IANA's root
+    zone (`_delegated_tlds`, FR-AUD-32), whose source a test of its own checks."""
+    import inspect
+
+    from fuzzlab.audit import value_shape
+    names = _reached_names(inspect.getsource(value_shape), "names_outside_lab")
+    found = sorted(names & _HOST_RECOGNISERS)
+    assert found == [], f"names_outside_lab reaches recognisers of hosts: {found}"
+    assert {"_names_only_lab", "_lab_authority", "_tail_in_grammar", "_host_token",
+            "_named_host", "_delegated_tlds", "_ipv6_shaped", "_judged_text",
+            "_special_scheme_mark"} <= names
+
+
+def test_the_recogniser_guard_catches_a_synthetic_offender():
+    """The guard is proven on offenders: N-R3-1's own early return, and a recogniser
+    reached three calls down (`_names_only_lab` -> `_lab_authority` -> `_lab_ipv4`). A
+    guard of the guard, not a reproduction: on the old code its head is not there."""
+    import inspect
+
+    from fuzzlab.audit import value_shape
+    source = inspect.getsource(value_shape)
+    head = ("    text = _judged_text(value)\n    if text is None:\n        return False\n"
+            "    texts = _reader_texts(text)\n")
+    assert source.count(head) == 1
+    early = source.replace(head, "    text = _judged_text(value)\n"
+                                 "    if text is None or neutral_value(text) == text:\n"
+                                 "        return False\n    texts = _reader_texts(text)\n")
+    assert "neutral_value" in _reached_names(early, "names_outside_lab")
+    deep = source.replace("def _lab_ipv4(host: str) -> bool:\n",
+                          "def _lab_ipv4(host: str) -> bool:\n"
+                          "    return value_shape(host) == 'ip'\n")
+    assert deep != source
+    assert "value_shape" in _reached_names(deep, "names_outside_lab")
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
+    "BUG-0555 residual (pre-existing at 7393c90 for an ip or host-name id, wider now: an "
+    "8- to 10-digit id is an IPv4 address to WHATWG): the point builder puts loopback in "
+    "a point's own slot when its value names a host outside the lab (FR-AUD-20: the "
+    "payload's slot), but the access-control replay (`CrossAccountReplayStrategy`, a "
+    "SEED category) sends that slot as the object key, so it replays the stand-in and "
+    "reads the answer as a negative; owned by FUZZ (FR-FUZZ-67: such a replay is "
+    "inconclusive, never made with a stand-in)"))
+@pytest.mark.parametrize("own", ["10.0.0.5", "100000001"])
+def test_an_access_control_replay_never_reads_a_stand_in_for_its_own_value(tmp_path, own,
+                                                                           monkeypatch):
+    from fuzzlab.oracle.oracle import Oracle
+    from fuzzlab.oracle.probe import Candidate
+    from fuzzlab.oracle.strategies import CrossAccountReplayStrategy, PeerAccounts
+    from tests import test_cross_account as xa
+    from tests.test_forms_phase2 import _points
+    pts, _s, _c = _points(tmp_path, pages=[f"http://h/app/record.php?record_id={own}&v=a"])
+    point = next(p for p in pts if p.param == "record_id")
+    cand = Candidate(url=point.url, param="record_id", method="GET", location="query",
+                     category="access-control", base_entries=point.base_entries,
+                     replay_refusal=point.replay_refusal)
+    monkeypatch.setattr(xa, "RECORDS", {**xa.RECORDS, own: "alice"})   # alice's record
+    accounts = PeerAccounts(sender=xa._App("broken", "bob"), owner="alice",
+                            peer_name="bob", anonymous=xa._App("broken", None))
+    confirmed, inconclusive = Oracle(strategies=[CrossAccountReplayStrategy(
+        accounts)]).confirm_outcome(cand, xa._App("broken", "alice"))
+    assert confirmed is not None or inconclusive is not None    # never read as a negative
 
 
 # --- every send of the candidate's own request is bound or refused (review B4) -----------

@@ -117,15 +117,23 @@ def test_a_ground_truth_json_body_point_is_a_json_leaf_point(tmp_path):
 def test_auto_turns_a_json_body_point_into_a_json_leaf_candidate():
     from fuzzlab.harness.auto import points_from_ground_truth
     from fuzzlab.labels.contract import Case, GroundTruth, InjectionPoint
-    gt = GroundTruth(target="t", cases=[Case(
-        case_id="C1", url="/login", method="POST", param="email", location="body",
-        vuln_class="nosqli", sink_context="nosql", expected_vulnerable=True,
-        rendering="server-json")], points=[InjectionPoint(
-            url="/login", method="POST", param="email", location="body",
-            rendering="server-json", json_body={"email": "a@b.co", "password": "x"})])
-    (p,), _skipped = points_from_ground_truth(gt, "http://127.0.0.1:9/")
+    def point(email):
+        gt = GroundTruth(target="t", cases=[Case(
+            case_id="C1", url="/login", method="POST", param="email", location="body",
+            vuln_class="nosqli", sink_context="nosql", expected_vulnerable=True,
+            rendering="server-json")], points=[InjectionPoint(
+                url="/login", method="POST", param="email", location="body",
+                rendering="server-json", json_body={"email": email, "password": "x"})])
+        (p,), _skipped = points_from_ground_truth(gt, "http://127.0.0.1:9/")
+        return p
+
+    p = point("user@lab.test")
     assert p.location == "json" and p.body_content_type is None
-    assert dict(p.base_entries) == {("email",): "a@b.co", ("password",): "x"}
+    assert dict(p.base_entries) == {("email",): "user@lab.test", ("password",): "x"}
+    # BUG-0555 (FR-AUD-20): an e-mail whose domain is under a delegated TLD names a host
+    # outside the lab (`b.co`), so loopback holds the point's own slot -- the payload's,
+    # which the strategy replaces; a lab's e-mail (`.test`) is sent as given (review LA-6)
+    assert dict(point("a@b.co").base_entries) == {("email",): "127.0.0.1", ("password",): "x"}
 
 
 def test_nosqli_is_a_ruled_scoreable_class():
