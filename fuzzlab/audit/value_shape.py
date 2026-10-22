@@ -199,24 +199,28 @@ def names_outside_lab(value) -> bool:
     D11). Such a value is never sent (FR-AUD-20) and never replaced by a stand-in either
     (FR-FUZZ-67, BUG-0544): a request that needs it cannot be rebuilt. A value naming
     only loopback names the lab itself and is sent as the app gave it. Total: a string
-    is judged as it is, a JSON number (an int or float, never a bool) by its JSON text
-    (`_judged_text`: ``134744072`` is the text ``134744072``, 8.8.8.8 to WHATWG; BUG-0555
-    review R3), and anything else (a bool, null, an empty object or list) is False.
+    is judged as it is, a JSON integer (never a bool) by its JSON text (`_judged_text`:
+    ``134744072`` is the text ``134744072``, 8.8.8.8 to WHATWG; BUG-0555 review R3), and
+    anything else (a JSON float, a bool, null, an empty object or list) is False (a
+    float is the stated residual of review round 2).
 
     An allow-list (PA-0544(7), PA-0555; BUG-0544 residual N-R3-1, BUG-0555), decided on
-    every text a reader parses (`_reader_texts`): a value of a URL or authority shape
-    (`_authority_shaped`) is the lab only when `_names_only_lab` proves it -- its
-    authority one of the explicit loopback spellings of `_lab_authority` and its path,
-    query and fragment in `_tail_in_grammar`. A URL or authority shape is a scheme and
-    ``:``, a leading ``//`` or ``\\``, ``://``, ``:\\`` or ``:/\\`` anywhere (BUG-0555
-    review R1), an unbracketed IPv6 literal (`_ipv6_shaped`, review R2), or a leading
-    token or the host a reader that puts ``http://`` before the value takes that is a
-    host: before a path, query or fragment any `_host_token`, and in a bare token (no
-    ``/``, ``?``, ``#`` or ``\\``) a `_named_host` -- an IP literal in any form, or a
-    dotted name whose last label is a TLD delegated in the DNS root (`_delegated_tlds`,
-    IANA's list, FR-AUD-32). Anything else names no host but a single-label or an
-    undelegated one to any reader (a pure word, a small number, free text with a space,
-    a reference to the page's own path, ``robots.txt``, ``user@lab.test``) and is the lab.
+    every text a reader parses (`_reader_texts`, the raw value among them): a value of a
+    URL or authority shape (`_authority_shaped`) is the lab only when `_names_only_lab`
+    proves it -- its authority one of the explicit loopback spellings of `_lab_authority`
+    and its path, query and fragment in `_tail_in_grammar`. A URL or authority shape is
+    a scheme and ``:``, a leading ``//`` or ``\\``, ``://``, ``:\\`` or ``:/\\`` anywhere
+    (BUG-0555 review R1), a special scheme and ``:`` after any character that cannot be
+    part of a scheme (`_special_scheme_mark`, review round 2: ``?next=https:evil.top``),
+    an IPv6 literal unbracketed anywhere (`_ipv6_shaped`, review R2 and round 2: a run
+    of its alphabet, ended by any other character), or a leading token or the host a
+    reader that puts ``http://`` before the value takes that is a host: before a path,
+    query or fragment any `_host_token`, and in a bare token (no ``/``, ``?``, ``#`` or
+    ``\\``) a `_named_host` -- an IP literal in any form, or a dotted name whose last
+    label is a TLD delegated in the DNS root (`_delegated_tlds`, IANA's list,
+    FR-AUD-32). Anything else names no host but a single-label or an undelegated one to
+    any reader (a pure word, a small number, free text with a space, a reference to the
+    page's own path, ``robots.txt``, ``user@lab.test``) and is the lab.
 
     Nothing here asks whether `neutral_value` or `value_shape` would change the value:
     no recogniser of a host admits one (BUG-0555). Stated residuals: a value that names
@@ -235,16 +239,22 @@ def names_outside_lab(value) -> bool:
 
 def _judged_text(value) -> str | None:
     """The text `names_outside_lab` judges for ``value`` (BUG-0555 review R3): a string as
-    it is, and a JSON number -- an int or a float, never a bool -- as its JSON text
-    (`json.dumps`; ``134744072`` -> ``"134744072"``, ``8.8`` -> ``"8.8"``), the way
+    it is, and a JSON integer -- never a bool -- as its JSON text (`json.dumps`;
+    ``134744072`` -> ``"134744072"``, an IPv4 integer form, 8.8.8.8 to WHATWG), the way
     `core.redaction` judges a number leaf by its text, so a body's encoding never decides.
-    ``None`` (the lab) for a bool, null or an empty object or list (their JSON text is a
-    keyword or punctuation no reader takes a host from), any other type, and an int too
-    long to format (more than 4300 digits: never an address to any reader, as a number of
-    2**32 or more is not)."""
+    A float with an integral value is that integer (``134744072.0``: JavaScript's
+    `JSON.parse` reads it as 134744072, so ``"http://" + leaf`` is 8.8.8.8 in node 22).
+    ``None`` (the lab) for any other JSON float (review round 2, the owner's decision: a
+    decimal such as a price or a ratio, ``2.5``, is no host; stated residual: an app that
+    puts ``http://`` before a decimal leaf reads ``8.8`` as 8.0.0.8), a bool, null or an
+    empty object or list (their JSON text is a keyword or punctuation no reader takes a
+    host from), any other type, and an int too long to format (more than 4300 digits:
+    never an address to any reader, as a number of 2**32 or more is not)."""
     if isinstance(value, str):
         return value
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    if isinstance(value, bool) or not isinstance(value, int):
         return None
     try:
         return json.dumps(value)
@@ -267,14 +277,20 @@ _C0_OR_SPACE = "".join(chr(i) for i in range(0x21))
 #: 7393c90's `neutral_value` gate held it), and the backslashed spellings WHATWG reads as
 #: ``//`` after a special scheme (``http:\\evil.top``, ``http:/\\evil.top``).
 _AUTHORITY_MARKS = ("://", ":\\", ":/\\")
+#: WHATWG's special schemes (BUG-0555 review round 2): after any character that cannot be
+#: part of a scheme, one of them and ``:`` is an authority mark (`_special_scheme_mark`):
+#: WHATWG reads ``https:evil.top``, ``https:/evil.top`` and ``ws:evil.top`` as
+#: https://evil.top/ and ws://evil.top/ (node 22), so ``?next=https:evil.top`` names
+#: evil.top to the app that redirects to its ``next``.
+_SPECIAL_SCHEMES = ("http", "https", "ws", "wss", "ftp", "file")
+#: The characters a scheme may hold after its first letter (WHATWG's scheme state).
+_SCHEME_CHARS = frozenset(string.ascii_letters + string.digits + "+-.")
 #: What makes a value more than a bare token: a path, query or fragment (and ``\``, which
 #: WHATWG reads as ``/`` after a special scheme).
 _STRUCTURE = "/?#\\"
-#: The characters of an unbracketed IPv6 literal before its zone (BUG-0555 review R2).
+#: The alphabet of an unbracketed IPv6 literal before its zone (BUG-0555 review R2): any
+#: other character ends it (review round 2), `_ipv6_shaped`.
 _IPV6_CHARS = frozenset("0123456789abcdefABCDEF:.")
-#: Where a reader ends an unbracketed IPv6 literal: a path, query, fragment, backslash or
-#: path parameter (whitespace too, `_ipv6_shaped`).
-_IPV6_ENDS = "/?#\\;"
 #: IANA's list of the TLDs delegated in the DNS root zone (FR-AUD-32): bundled verbatim
 #: as package data, read by `_delegated_tlds`, refreshed by replacing the file.
 DELEGATED_TLDS_SOURCE = "https://data.iana.org/TLD/tlds-alpha-by-domain.txt"
@@ -286,23 +302,26 @@ _DELEGATED_TLDS_FILE = "tlds-alpha-by-domain.txt"
 
 
 def _reader_texts(value: str) -> tuple[str, ...]:
-    """The texts URL readers parse from ``value`` (BUG-0555), so a padded or NUL-cut
+    """The texts readers parse from ``value`` (BUG-0555), so a padded or NUL-cut
     ``evil.top`` is read as ``evil.top`` (fail closed: each proof itself reads the raw
-    value, which holds no control or space): `_reader_text` of the whole value, and of
-    the part before its first NUL (a C reader stops there); and the same of the value an
-    application that percent-decodes it reads (`_percent_decoded`: a
+    value, which holds no control or space): the raw value (review round 2: an address
+    parser, ``ping6``, a shell or an application that splits the value keeps the tab,
+    LF and CR that WHATWG removes: ``2001:db8::1\\tis the server``, ``go
+    to\\thttps:evil.top``), `_reader_text` of the whole value, and of the part before its
+    first NUL (a C reader stops there); and the same of the value an application that
+    percent-decodes it reads (`_percent_decoded`: a
     ``%2Fgo%3Fret%3Dhttps%253A%252F%252Fevil.top`` holds ``://`` once decoded; BUG-0555
     review, measured on recorded stores)."""
-    texts = (_reader_text(value),)
+    texts = [value, _reader_text(value)]
     if "\x00" in value:
-        texts += (_reader_text(value.partition("\x00")[0]),)
+        texts.append(_reader_text(value.partition("\x00")[0]))
     if "%" in value:
         decoded = _percent_decoded(value)
         if decoded != value:
-            texts += (_reader_text(decoded),)
+            texts += [decoded, _reader_text(decoded)]
             if "\x00" in decoded:
-                texts += (_reader_text(decoded.partition("\x00")[0]),)
-    return texts
+                texts.append(_reader_text(decoded.partition("\x00")[0]))
+    return tuple(dict.fromkeys(texts))
 
 
 #: How many times `_percent_decoded` decodes a value (stated bound: a value encoded more
@@ -469,10 +488,12 @@ def _authority_shaped(text: str) -> bool:
     scheme and ``:`` (any scheme: ``https:evil.example``, ``mailto:``, ``sort:asc``), a
     ``//`` or a ``\\`` (a network-path reference: WHATWG reads ``\\`` as ``/`` and
     ``/\\`` as ``//``); it holds `_AUTHORITY_MARKS` anywhere (``?next=http://evil.top``,
-    ``see http://evil.top``: BUG-0555 review R1); it is `_ipv6_shaped`
-    (``2001:4860:4860::8888``, ``::ffff:8.8.8.8``: review R2); or its leading token, or
-    the host a reader that puts ``http://`` before it takes, names a host -- before a
-    path, query or fragment (`_STRUCTURE`) a `_host_token` (any dotted token:
+    ``see http://evil.top``: BUG-0555 review R1) or a `_special_scheme_mark`
+    (``?next=https:evil.top``, ``url=ws:evil.top``: review round 2); it holds an IPv6
+    literal (`_ipv6_shaped`: ``2001:4860:4860::8888``, ``::ffff:8.8.8.8``,
+    ``dns=2001:4860:4860::8888``: review R2 and round 2); or its leading token, or the
+    host a reader that puts ``http://`` before it takes, names a host -- before a path,
+    query or fragment (`_STRUCTURE`) a `_host_token` (any dotted token:
     ``robots.txt/x``), and in a bare token a `_named_host` (an IP literal, or a name
     whose last label is delegated: ``evil.top``, ``user@gmail.com``, never
     ``robots.txt`` or ``user@lab.test``)."""
@@ -480,7 +501,7 @@ def _authority_shaped(text: str) -> bool:
         return False
     if (text.startswith(("\\", "//", "/\\")) or _scheme_shaped(text)
             or any(mark in text for mark in _AUTHORITY_MARKS)
-            or _ipv6_shaped(text) or _ipv6_shaped(text.lstrip("/\\"))):
+            or _special_scheme_mark(text) or _ipv6_shaped(text)):
         return True
     lead = _leading_token(text)
     if lead == text and _small_number(text):
@@ -490,21 +511,51 @@ def _authority_shaped(text: str) -> bool:
     return _named_host(lead) or _named_host(_reader_host(text))
 
 
+def _special_scheme_mark(text: str) -> bool:
+    """Whether ``text`` holds one of `_SPECIAL_SCHEMES` (in any case) and ``:`` at its start
+    or after a character that cannot be part of a scheme (`_SCHEME_CHARS`: anything but
+    an ASCII letter, digit, ``+``, ``-`` or ``.``) -- an authority mark (BUG-0555 review
+    round 2): WHATWG reads what follows as the host whether ``//``, ``/``, ``\\`` or
+    nothing comes next (``https:evil.top`` and ``https:/evil.top`` are https://evil.top/,
+    node 22), so ``?next=https:evil.top``, ``go=https:/evil.top/x``, ``see
+    https:evil.top``, ``(https:evil.top)`` and ``url=ws:evil.top`` hold one.
+    ``xhttps:``, ``web+https:`` and ``1https:`` do not (a longer scheme, or no scheme:
+    WHATWG reads no host from ``?next=xhttps:evil.example``). Linear: each ``:`` is
+    checked against the six schemes."""
+    colon = text.find(":")
+    while colon >= 0:
+        for scheme in _SPECIAL_SCHEMES:
+            start = colon - len(scheme)
+            if (start >= 0 and text[start:colon].lower() == scheme
+                    and (start == 0 or text[start - 1] not in _SCHEME_CHARS)):
+                return True
+        colon = text.find(":", colon + 1)
+    return False
+
+
 def _ipv6_shaped(text: str) -> bool:
-    """Whether a reader (``getaddrinfo``, ``inet_pton``, ``ping``) may take an unbracketed
-    IPv6 literal from ``text`` (BUG-0555 review R2; WHATWG reads none: measured, node 22):
-    the text up to its first `_IPV6_ENDS` character or whitespace -- before its first
-    ``@`` or after its last -- is hex digits, ``:`` and ``.`` (a zone after ``%``) holding
-    ``::`` or at least six ``:``. Syntactic, no address parser (PA-0555): ``12:00:00``
-    and a MAC address (five ``:``) are not, ``::1`` is (only ``[::1]`` is the lab)."""
-    cut = min((i for i in (text.find(c) for c in _IPV6_ENDS) if i >= 0), default=len(text))
-    words = text[:cut].split(None, 1)
-    segment = words[0] if words else ""
-    for part in (segment.partition("@")[0], segment.rpartition("@")[2]):
-        address = part.partition("%")[0]
-        if (address and all(ch in _IPV6_CHARS for ch in address)
-                and ("::" in address or address.count(":") >= 6)):
-            return True
+    """Whether a reader (``getaddrinfo``, ``inet_pton``, ``ping6``, a shell, an
+    application that splits the value) may take an unbracketed IPv6 literal from
+    ``text`` (BUG-0555 review R2; WHATWG reads none after ``http://``: measured, node 22):
+    a run of the IPv6 alphabet (`_IPV6_CHARS`: hex digits, ``:`` and ``.``), ended at
+    either side by any other character (review round 2: a zone's ``%``, a path, a space,
+    a tab, LF or CR, ``=``, ``,``, a quote, a parenthesis, ``|``, ``&``, ``@``, a letter
+    past ``f``), holding ``::`` or at least six ``:``. So any ``::`` is one
+    (``dns=2001:4860:4860::8888``, ``2001:4860:4860::8888,2001:4860:4860::8844``, ``::1``;
+    only ``[::1]`` is the lab). Syntactic, no address parser (PA-0555): ``12:00:00``,
+    ``2020-01-01T00:00:00`` and a MAC address (five ``:``) are not. Linear."""
+    if "::" in text:
+        return True                     # '::' lies in a run of the alphabet
+    if text.count(":") < 6:
+        return False
+    colons = 0
+    for ch in text:
+        if ch == ":":
+            colons += 1
+            if colons >= 6:
+                return True
+        elif ch not in _IPV6_CHARS:
+            colons = 0                  # the run ends here
     return False
 
 
@@ -716,9 +767,9 @@ def neutral_value(value):
     * any other value `names_outside_lab` puts outside the lab (BUG-0555) → loopback
       too: :data:`SAFE_URL` when it has a scheme, a path, a query or a fragment, else
       :data:`SAFE_HOST`;
-    * a JSON number `names_outside_lab` puts outside the lab by its JSON text
-      (``134744072``, ``8.8``; BUG-0555 review R3) → :data:`SAFE_HOST`; any other
-      non-string is returned as it is.
+    * a JSON integer `names_outside_lab` puts outside the lab by its JSON text
+      (``134744072``; BUG-0555 review R3) → :data:`SAFE_HOST`; any other non-string (a
+      JSON float among them: review round 2) is returned as it is.
 
     A caller exempts its own fillers first (``store_adapter.is_filler``: they never
     resolve at all)."""

@@ -1258,6 +1258,12 @@ _SWEEP_POSITIONS = ("{}", "{}/", "{}/x", "{}?a=b", "{}#f", "{}:8080", "{}:8080/x
                     "//{}/x", "\\\\{}/x", "/\\{}/x", "http:\\\\{}/x", "https:{}/x",
                     "http:/{}/", "user@{}/x", "user:pw@{}:80/", "127.0.0.1@{}/",
                     "localhost:80@{}", "{}@127.0.0.1/", "{}\\@127.0.0.1/")
+#: Review round 2 (N2): where a bare IPv6 literal sits beside a character outside its
+#: alphabet (`_IPV6_BESIDE_READ`'s readers): after ``=``, in a list, quoted, in
+#: parentheses, before a shell operator, and before a word after a tab, LF or CR.
+_IPV6_BESIDE_POSITIONS = ("dns={}", "{0},{0}", '"{}"', "({})", "{}|id", "{}&", "{};id",
+                          "{}\tis the server", "{}\nis the server", "{}\ris the server",
+                          "{}\r\nis the server")
 
 
 def test_every_authority_spelling_outside_the_lab_set_is_outside_the_lab():
@@ -1269,9 +1275,10 @@ def test_every_authority_spelling_outside_the_lab_set_is_outside_the_lab():
     (``::ffff:127.0.0.1`` and ``::ffff:8.8.8.8``), scheme-relative and backslashed --
     and loopback stands in for it. Loopback spellings outside the set are accepted false
     positives. Review R2: an unbracketed IPv6 literal (`_BARE_IPV6`) in every position
-    too. A reserved or undelegated name (`_reserved_spellings`) is outside in every
-    position but a bare token's (`_BARE_POSITIONS`, and before a port, where WHATWG reads
-    a letter-led name as a scheme)."""
+    too, and (review round 2) beside a character outside its alphabet
+    (`_IPV6_BESIDE_POSITIONS`). A reserved or undelegated name (`_reserved_spellings`)
+    is outside in every position but a bare token's (`_BARE_POSITIONS`, and before a
+    port, where WHATWG reads a letter-led name as a scheme)."""
     from fuzzlab.audit.value_shape import SAFE_HOST, SAFE_URL, names_outside_lab
     from fuzzlab.harness.auto import _send_value
     spellings = _authority_spellings()
@@ -1280,6 +1287,7 @@ def test_every_authority_spelling_outside_the_lab_set_is_outside_the_lab():
                       and pos not in ("{};x", "https:{}/x", "http:/{}/"))]
     values += [pos.format(s) for s in _reserved_spellings() for pos in _SWEEP_POSITIONS
                if pos not in _BARE_POSITIONS + ("{}:8080",)]
+    values += [pos.format(s) for s in _BARE_IPV6 for pos in _IPV6_BESIDE_POSITIONS]
     assert len(spellings) > 150 and len(values) > 5000
     kept = [v for v in values
             if not names_outside_lab(v) or _send_value(v) not in (SAFE_URL, SAFE_HOST)]
@@ -1290,11 +1298,15 @@ def test_the_binder_never_binds_an_authority_spelling_outside_the_lab_set():
     """BUG-0555 through `_FormBoundSender._bind_fresh`: a page offering any spelling of
     the sweep outside the explicit set, bare, before a path and as an absolute URL, is
     refused (unbound) and nothing is sent; a reserved name before a path or as an
-    absolute URL too. Review R2: bare IPv6 literals included."""
+    absolute URL too. Review R2: bare IPv6 literals included; review round 2: beside a
+    character outside the IPv6 alphabet (`_IPV6_BESIDE_POSITIONS`, tab and newlines
+    included: an HTML attribute keeps them)."""
     bound = [v for s in _authority_spellings() if not _in_lab_set(s)
              for v in (s, s + "/x", f"http://{s}/") if v.isprintable() and _bind_offered(v)]
     bound += [v for s in _reserved_spellings() for v in (s + "/x", f"http://{s}/")
               if v.isprintable() and _bind_offered(v)]
+    bound += [v for s in _BARE_IPV6 for pos in _IPV6_BESIDE_POSITIONS
+              for v in (pos.format(s),) if _bind_offered(v)]
     assert bound == []
 
 
@@ -1459,6 +1471,22 @@ _AUTHORITY_ANYWHERE = [
     "?next=http:\\\\evil.top", "x=http:/\\evil.top", "go=https:\\evil.top/x",
     "http%3A%2F%2Fevil.top", "next=https%3A%2F%2F8.8.8.8%2F",
     "%2Fgo%3Fret%3Dhttps%25253A%25252F%25252Fevil.top%25252Fcb",
+    # review round 2 (N1): a special scheme and ':' after a character that cannot be part
+    # of a scheme, with ':/' or nothing before the host. WHATWG reads `https:evil.top`
+    # and `https:/evil.top` as https://evil.top/, `ws:evil.top` as ws://evil.top/ and
+    # `ftp:evil.top` as ftp://evil.top/; each value's last piece, used as a Location
+    # against http://127.0.0.1/ or read on its own (`Http:8.8.8.8` is relative only to an
+    # http: base, and http://8.8.8.8/ on its own), goes there (node 22;
+    # `scratchpad/lanes/LABAUTH/r2/check_tables_r2.py`). Raw and percent-decoded: `go
+    # to\thttps:evil.top` holds the mark only
+    # in the raw value (WHATWG's tab removal joins `tohttps:`), and `https%3Aevil.top`
+    # only once decoded. Each was sent and bound verbatim at d3cb339.
+    "go=https:/evil.top/x", "go=https:evil.top/x", "?next=https:evil.top",
+    "?next=https:/evil.top", "/login?next=https:evil.example/", "see https:evil.top",
+    "url=ws:evil.top", "(https:evil.top)", '{"u":"https:/evil.top"}',
+    "?next=https%3Aevil.top", "?next=https%3A%2Fevil.top", "?next=HTTPS:evil.top",
+    "?next=ftp:evil.top", "?next=wss:/evil.top", "next=Http:8.8.8.8",
+    "go to\thttps:evil.top",
 ]
 
 
@@ -1514,6 +1542,45 @@ def test_every_value_the_old_scheme_anywhere_rule_put_outside_is_still_outside()
     assert wrong == []
 
 
+#: Review round 2 (N1): what may stand before a special scheme -- nothing, or any
+#: character that cannot be part of a scheme (a query or key separator, a space, a tab, a
+#: bracket, a quote, a slash, a non-ASCII letter) -- and every spelling of the mark.
+_SPECIAL_PREFIXES = ("", "?next=", "/login?next=", "go=", "x=1&u=", "see ", "(", '{"u":"',
+                     "#", "/r/", "go to\t", "a\n", "é", "%20", "[", "<", "'", ",", ";", "|")
+_SPECIAL_SPELLINGS = ("http", "https", "HTTPS", "Http", "ws", "WSS", "ftp", "file")
+_SPECIAL_AFTER = ("", "/", "\\", "%2F", "%5C")
+#: Controls: a scheme character right before it makes another scheme (``xhttps``,
+#: ``web+https``, ``a.ftp``: WHATWG reads no host from them, node 22) or none
+#: (``1https:`` is a path to WHATWG): the lab, sent and bound as given.
+_SPECIAL_CONTROLS = ["?next=xhttps:evil.example", "?next=web+https:evil.example",
+                     "?q=1https:evil.example", "?next=a.ftp:evil.example"]
+
+
+def test_a_special_scheme_after_a_non_scheme_character_is_outside_the_lab():
+    """Review round 2 (N1, the owner's scope): a special scheme (http, https, ws, wss,
+    ftp, file; any case) and ':' after any character that cannot be part of a scheme is
+    an authority mark in every reader text, raw and percent-decoded, so the value is
+    outside unless `_names_only_lab` proves it loopback -- whatever comes between the
+    ':' and the host (``//``, ``/``, ``\\``, nothing, or their percent-encodings), and
+    wherever the host names loopback (no spelling of this mark is in the proof's
+    grammar). Loopback stands in for each. A scheme character right before the scheme
+    makes another scheme, and is the lab."""
+    from fuzzlab.audit.value_shape import SAFE_HOST, SAFE_URL, names_outside_lab
+    from fuzzlab.harness.auto import _send_value
+    values = [f"{p}{s}:{a}{h}{t}" for p in _SPECIAL_PREFIXES for s in _SPECIAL_SPELLINGS
+              for a in _SPECIAL_AFTER
+              for h in ("evil.top", "8.8.8.8", "evil.example", "127.0.0.1", "localhost")
+              for t in ("", "/x", ")", '"}')]
+    values += [v.replace(":", "%3A", 1) for v in values if v.count(":") == 1]
+    assert len(values) > 30000
+    kept = [v for v in values
+            if not names_outside_lab(v) or _send_value(v) not in (SAFE_URL, SAFE_HOST)]
+    assert kept == []
+    controls = [v for v in _SPECIAL_CONTROLS
+                if names_outside_lab(v) or _send_value(v) != v or not _bind_offered(v)]
+    assert controls == []
+
+
 #: Review R2 (LA-2, LA-5): bare IPv6 literals as the measured readers take them
 #: (`getaddrinfo(v, None, flags=AI_NUMERICHOST)` on the test host; WHATWG refuses each
 #: after ``http://``: node 22), alone, before a path, query or port and after userinfo.
@@ -1527,14 +1594,43 @@ _BARE_IPV6_READ = {
 }
 
 
+#: Review round 2 (N2): an IPv6 literal beside a character outside its alphabet, as a
+#: named reader takes it -- Python's ``str.split`` (tab, LF, CR), a shell's word
+#: splitting and operators (`shlex` with punctuation characters: tab, LF, a quote, a
+#: parenthesis, ``|``, ``&``, ``;``), a ``key=value`` reader, a DNS-server list split at
+#: ``,``, `json.loads` -- and `getaddrinfo(piece, None, flags=AI_NUMERICHOST)` reads
+#: the piece as the address (the test host; the whole value it refuses;
+#: `scratchpad/lanes/LABAUTH/r2/ipv6_readers.py`). Each was the lab at d3cb339 while its
+#: IPv4 form (``dns=8.8.8.8``, ``8.8.8.8,8.8.4.4``, ``"8.8.8.8"``, ``8.8.8.8|id``) was
+#: outside; WHATWG's tab and newline removal had joined the literal to the next word.
+_IPV6_BESIDE_READ = {
+    "2001:db8::1\tis the server": ("split", "2001:db8::1"),
+    "2001:db8::1\nis the server": ("split", "2001:db8::1"),
+    "2001:db8::1\ris the server": ("split", "2001:db8::1"),
+    "2001:db8::1\r\nis the server": ("split", "2001:db8::1"),
+    "2001:4860:4860::8888\tx": ("shell", "2001:4860:4860::8888"),
+    "2001:4860:4860::8888\nx": ("shell", "2001:4860:4860::8888"),
+    "dns=2001:4860:4860::8888": ("key=value", "2001:4860:4860::8888"),
+    "2001:4860:4860::8888,2001:4860:4860::8844": ("list", "2001:4860:4860::8888"),
+    '"2001:4860:4860::8888"': ("json", "2001:4860:4860::8888"),
+    "(2001:4860:4860::8888)": ("shell", "2001:4860:4860::8888"),
+    "2001:4860:4860::8888|id": ("shell", "2001:4860:4860::8888"),
+    "2001:4860:4860::8888&": ("shell", "2001:4860:4860::8888"),
+    "2001:4860:4860::8888;id": ("shell", "2001:4860:4860::8888"),
+}
+
+
 @pytest.mark.parametrize("value", sorted(
-    [*_BARE_IPV6_READ, "::/evil.top", "2001:db8::1/x", "2001:4860:4860::8888?x=y",
-     "2001:db8::1;x", "user@2001:db8::1", "/2001:db8::1/x", "2001:db8::1 is the server"]))
+    [*_BARE_IPV6_READ, *_IPV6_BESIDE_READ, "::/evil.top", "2001:db8::1/x",
+     "2001:4860:4860::8888?x=y", "2001:db8::1;x", "user@2001:db8::1", "/2001:db8::1/x",
+     "2001:db8::1 is the server"]))
 def test_a_bare_ipv6_literal_is_outside_the_lab(value):
     """Review R2: a reader that is not WHATWG (``ping6``, ``getaddrinfo``, ``inet_pton``)
     takes an unbracketed IPv6 literal for a host, and `value_shape` calls it ``ip`` (a
     command-injection default): outside, through all three callers. Only ``[::1]`` is
-    the lab (``::1`` bare is an accepted false positive)."""
+    the lab (``::1`` bare is an accepted false positive). Review round 2: beside any
+    character outside its alphabet too (`_IPV6_BESIDE_READ`), the raw value judged as
+    well as WHATWG's texts."""
     from fuzzlab.audit.value_shape import SAFE_HOST, SAFE_URL, names_outside_lab
     from fuzzlab.harness.auto import _outside_lab, _send_value
     assert names_outside_lab(value)
@@ -1543,14 +1639,47 @@ def test_a_bare_ipv6_literal_is_outside_the_lab(value):
     assert not _bind_offered(value)
 
 
-#: Review R3 (LA-3): a JSON number leaf, judged by its JSON text. Each reading measured
+#: Every character outside the IPv6 alphabet (hex digits, ':' and '.'): printable ASCII,
+#: the whitespace and controls a reader may split at, NUL, and non-ASCII.
+_NOT_IPV6 = sorted({chr(i) for i in range(0x20, 0x7F)} - set("0123456789abcdefABCDEF:.")
+                   | set("\t\n\r\x0b\x0c\x00\xa0　é"))
+
+
+def test_an_ipv6_literal_ends_at_any_character_outside_its_alphabet():
+    """Review round 2 (N2, the owner's scope): an IPv6 literal ends at any character
+    outside its alphabet, on either side, so every bare literal (`_BARE_IPV6`) beside
+    every such character -- before it, after it, both, and between two words -- is
+    outside, like its IPv4 form, and loopback stands in for it; the binder refuses it.
+    Controls: a time of day, a date-time and a MAC address (no '::', fewer than six ':')
+    beside a space, a tab, LF, a parenthesis, a quote or a comma stay the lab."""
+    from fuzzlab.audit.value_shape import SAFE_HOST, SAFE_URL, names_outside_lab
+    from fuzzlab.harness.auto import _send_value
+    positions = ("{c}{v}", "{v}{c}", "{c}{v}{c}", "k{c}{v}{c}word")
+    values = [p.format(c=c, v=v) for v in _BARE_IPV6 for c in _NOT_IPV6 for p in positions]
+    assert len(values) > 4000
+    kept = [v for v in values
+            if not names_outside_lab(v) or _send_value(v) not in (SAFE_URL, SAFE_HOST)]
+    assert kept == []
+    bound = [v for c in _NOT_IPV6 if c not in "\x00\r"
+             for v in (f"dns{c}2001:4860:4860::8888", f"2001:4860:4860::8888{c}x")
+             if _bind_offered(v)]
+    assert bound == []
+    controls = [p.format(t) for t in ("12:00:00", "2020-01-01T00:00:00", "10:1a:2b:3c:4d:5e")
+                for p in ("{}", "{} x", "x {}", "({})", '"{}"', "{0},{0}", "{}\tx", "{}\nx")]
+    assert [v for v in controls if names_outside_lab(v)] == []
+
+
+#: Review R3 (LA-3): a JSON integer leaf, judged by its JSON text. Each reading measured
 #: in node 22 as an app that does ``"http://" + body.host`` takes the parsed number;
 #: ``2130706433`` (127.0.0.1) is a loopback spelling outside the explicit set (an
 #: accepted false positive, as the string is). The controls: a small number
 #: (0.0.0.0/8), a negative one or one of 2**32 or more names no host to any reader (as
-#: its string does), and a bool, null or empty container names nothing.
-_JSON_LEAVES = [(134744072, "8.8.8.8"), (3232235777, "192.168.1.1"), (8.8, "8.0.0.8"),
-                (16777216, "1.0.0.0"), (19.99, "19.0.0.99"), (2130706433, "127.0.0.1"),
+#: its string does), and a bool, null or empty container names nothing. A float with an
+#: integral value is that integer (review round 2: JavaScript's `JSON.parse` reads
+#: ``134744072.0`` as 134744072, 8.8.8.8 after ``http://``, node 22); any other JSON
+#: float is the stated residual of review round 2 (`_JSON_FLOAT_RESIDUAL`).
+_JSON_LEAVES = [(134744072, "8.8.8.8"), (3232235777, "192.168.1.1"),
+                (16777216, "1.0.0.0"), (2130706433, "127.0.0.1"), (134744072.0, "8.8.8.8"),
                 (42, None), (0, None), (-134744072, None), (4294967296, None),
                 (True, None), (False, None), (None, None), ([], None), ({}, None)]
 
@@ -1575,6 +1704,31 @@ def test_a_json_number_leaf_is_judged_by_its_json_text(value, reading):
         assert _send_value(value) == SAFE_HOST and neutral_value(value) == SAFE_HOST
         assert refusal is not None
         assert "sibling host names a host outside the lab" in refusal
+
+
+#: Review round 2 (the owner's decision): a JSON float leaf is a decimal (a price, a
+#: ratio, a coordinate), never judged as a host. Stated residual, with its WHATWG
+#: reading measured in node 22 (``"http://" + 2.5`` is http://2.0.0.5/): an app that
+#: builds a URL from a decimal leaf reads one. Measured gain, per point: 196 recorded
+#: points beside the float leaf ``2.5`` are bound again against d3cb339 (140 when review
+#: round 1 measured it), all from `tests/test_json_points.py`'s adversarial body; no lab
+#: answer key or external lab source holds one (`scratchpad/lanes/LABAUTH/r2/`
+#: `point_cost.txt`, `float_points.txt`).
+_JSON_FLOAT_RESIDUAL = [(2.5, "2.0.0.5"), (8.8, "8.0.0.8"), (19.99, "19.0.0.99"),
+                        (0.5, "0.0.0.5"), (134744072.5, None)]
+
+
+@pytest.mark.parametrize("value, reading", _JSON_FLOAT_RESIDUAL)
+def test_a_json_float_leaf_is_the_lab_a_stated_residual(value, reading):
+    """Review round 2: `names_outside_lab` judges a JSON number only when it is an integer
+    (an IPv4 integer form such as ``134744072``, or ``134744072.0``); a decimal leaf is
+    sent as given, and a JSON body holding it as a sibling is rebuilt."""
+    from fuzzlab.audit.value_shape import names_outside_lab, neutral_value
+    from fuzzlab.core import jsonbody
+    from fuzzlab.harness.auto import _outside_lab, _send_value
+    assert not names_outside_lab(value)
+    assert _send_value(value) is value and neutral_value(value) is value
+    assert _outside_lab(jsonbody.leaves({"price": value, "q": "x"}), "q") is None
 
 
 def test_an_answer_keys_json_number_sibling_leaves_its_point_unbound():
@@ -1717,7 +1871,8 @@ def test_the_lab_predicate_reaches_no_recogniser_of_hosts():
     found = sorted(names & _HOST_RECOGNISERS)
     assert found == [], f"names_outside_lab reaches recognisers of hosts: {found}"
     assert {"_names_only_lab", "_lab_authority", "_tail_in_grammar", "_host_token",
-            "_named_host", "_delegated_tlds", "_ipv6_shaped", "_judged_text"} <= names
+            "_named_host", "_delegated_tlds", "_ipv6_shaped", "_judged_text",
+            "_special_scheme_mark"} <= names
 
 
 def test_the_recogniser_guard_catches_a_synthetic_offender():

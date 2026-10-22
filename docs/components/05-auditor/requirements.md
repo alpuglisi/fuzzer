@@ -229,26 +229,50 @@ budget where a vulnerability is plausible.
     no recogniser decides which values it proves. Amended by its review round 1, the
     same day: an authority mark anywhere, an unbracketed IPv6 literal and a JSON number
     are judged, and a bare token is outside only when it names an IP literal or a name
-    under a TLD delegated in the DNS root, FR-AUD-32.)* `names_outside_lab` judges a
-    string as it is and a JSON number (an int or a float, never a bool) by its JSON text
-    (`134744072` is the text `134744072`, 8.8.8.8 to WHATWG); a bool, null or empty
-    object or list names nothing. It reads every text a URL reader parses from the value
-    (WHATWG's tab and newline removal and C0-or-space trim, an application's Unicode
+    under a TLD delegated in the DNS root, FR-AUD-32. Amended by its review round 2, the
+    owner's final round, the same day: a special scheme and `:` after any character
+    that cannot be part of a scheme is an authority mark, an IPv6 literal ends at any
+    character outside its alphabet and the raw value is judged, and a JSON number is
+    judged only when it is an integer.)* `names_outside_lab` judges a string as it is
+    and a JSON integer (never a bool; a float with an integral value as that integer:
+    JavaScript reads `134744072.0` as 134744072) by its JSON text (`134744072` is the
+    text `134744072`, 8.8.8.8 to WHATWG); any other JSON float (a decimal: `2.5`), a
+    bool, null or empty object or list names nothing. It reads every text a reader
+    parses from the value -- the raw value (an address parser, `ping6`, a shell or an
+    application that splits the value keeps the tab, LF and CR that WHATWG removes),
+    WHATWG's tab and newline removal and C0-or-space trim, an application's Unicode
     trim, a C reader's cut at the first NUL, and the value as an application that
-    percent-decodes it reads it, decoded until stable, at most eight times) and never
+    percent-decodes it reads it, decoded until stable, at most eight times -- and never
     asks whether `neutral_value` or `value_shape` would change it. A value is of a **URL
     or authority shape** when, in any of those texts:
     - it starts with a scheme and `:` (any scheme: `https:evil.example`, `mailto:`,
       `sort:asc`) or with `//`, `\` or `/\`, or holds `://`, `:\` or `:/\` **anywhere**
       (`?next=http://evil.top`, `see http://evil.top`, `url=http:\\evil.top`,
       `/login?next=https://evil.example/`, and `http%3A%2F%2Fevil.top` decoded);
-    - it is an **unbracketed IPv6 literal**: the text up to its first `/ ? # \ ;` or
-      whitespace, before its first `@` or after its last, is hex digits, `:` and `.` (a
-      zone after `%`) holding `::` or at least six `:` (`2001:4860:4860::8888`,
-      `::ffff:8.8.8.8`, `64:ff9b::808:808`, `fe80::1%eth0`, `::1`). WHATWG reads none of
-      them after `http://`; `getaddrinfo(AI_NUMERICHOST)` reads each as that address,
-      and `inet_pton` each without a zone (measured), and `value_shape` calls each `ip`.
-      A time of day (`12:00:00`) and a MAC address (five `:`) are not one;
+    - it holds a **special scheme and `:`** (`http`, `https`, `ws`, `wss`, `ftp`, `file`,
+      in any case) at its start or **after any character that cannot be part of a
+      scheme** (anything but an ASCII letter, digit, `+`, `-` or `.`), whatever follows
+      the `:` (review round 2: WHATWG reads `https:evil.top` and `https:/evil.top` as
+      https://evil.top/ and `ws:evil.top` as ws://evil.top/, node 22):
+      `?next=https:evil.top`, `go=https:/evil.top/x`, `see https:evil.top`,
+      `(https:evil.top)`, `url=ws:evil.top`, `next=Http:8.8.8.8`, `?next=https%3Aevil.top`
+      decoded, `go to\thttps:evil.top` (a tab) raw. Not `?next=xhttps:evil.example`,
+      `?next=web+https:evil.example` (another scheme, no host to WHATWG) or
+      `?q=1https:evil.example` (no scheme);
+    - it holds an **unbracketed IPv6 literal**: a run of hex digits, `:` and `.`, ended
+      at either side by **any other character** (a zone's `%`, `/ ? # \ ;`, whitespace
+      with tab, LF and CR, `=`, `,`, a quote, a parenthesis, `|`, `&`, `@`, a letter past
+      `f`; review round 2), holding `::` or at least six `:` (`2001:4860:4860::8888`,
+      `::ffff:8.8.8.8`, `64:ff9b::808:808`, `fe80::1%eth0`, `::1`,
+      `dns=2001:4860:4860::8888`, `2001:4860:4860::8888,2001:4860:4860::8844`,
+      `"2001:4860:4860::8888"`, `2001:4860:4860::8888|id`, `2001:db8::1\tis the server`,
+      a tab), so any `::` is one. WHATWG reads none of them after `http://`;
+      `getaddrinfo(AI_NUMERICHOST)` reads each literal as that address, and `inet_pton`
+      each without a zone, and Python's `str.split`, a shell's word splitting, a
+      `key=value` reader, a list split at `,` and `json.loads` each hand that literal on
+      (measured), and `value_shape` calls each bare literal `ip`. A time of day
+      (`12:00:00`), a date-time (`2020-01-01T00:00:00`) and a MAC address (five `:`) are
+      not one;
     - it holds a path, query or fragment (a `/`, `?`, `#` or `\`), and its leading token
       (up to the first `/ ? # : @ ; \`) or the host a reader that puts `http://` before
       the value takes (leading slashes skipped, userinfo cut at its last `@`:
@@ -305,49 +329,63 @@ budget where a vulnerability is plausible.
     `/8.8.8.8:53/x`; and (review round 1) `?next=http://evil.top`, `url=http://evil.top`,
     `see http://evil.top`, `x=http:/\evil.top`, a percent-encoded URL,
     `2001:4860:4860::8888`, `::ffff:8.8.8.8`, `64:ff9b::808:808`, `user@2001:db8::1`,
-    and the JSON numbers `134744072`, `3232235777` (192.168.1.1) and `8.8` (8.0.0.8).
+    and the JSON integers `134744072`, `134744072.0` and `3232235777` (192.168.1.1); and
+    (review round 2) `?next=https:evil.top`, `?next=https:/evil.top`, `url=ws:evil.top`,
+    `see https:evil.top`, `{"u":"https:/evil.top"}`, `?next=https%3Aevil.top`,
+    `dns=2001:4860:4860::8888`, `2001:4860:4860::8888,2001:4860:4860::8844`,
+    `(2001:4860:4860::8888)`, `2001:4860:4860::8888|id` and `2001:db8::1\tis the server`.
     The same predicate gates a fresh value the binder reads from a page (FR-FUZZ-67),
     and `neutral_value` stands loopback in for every value it puts outside
-    (`127.0.0.1` for a JSON number). Accepted false positives (the owner's decision for
+    (`127.0.0.1` for a JSON integer). Accepted false positives (the owner's decision for
     the tail; BUG-0555 for the rest): a loopback value whose tail holds a number, a
     dotted or colon-separated token or any other character outside the grammar
     (`?page=2`, `/app.js?v=1.2.3`, `?at=10:30`, `?q=a+b`, `/2fa`); before a path, query
     or fragment, any dotted token (`robots.txt/x`, `lang_en.php?x=1`, `/index.php`,
     `../x`); in a bare token, a file name or word under a delegated TLD (`archive.zip`,
     `readme.md`, `script.py`) and a decimal or version WHATWG reads as an IPv4 address
-    (`2.5`, `1.2.3`, `0.00`, `19.99`; also a JSON float leaf); an e-mail address whose
+    (`2.5`, `1.2.3`, `0.00`, `19.99`, as a string; a JSON float leaf is not judged, a
+    stated residual below); an e-mail address whose
     domain is under a delegated TLD (`user@mail.example.com`; this supersedes the earlier
     stated e-mail residual for such an address); a dotless number from 2^24 to 2^32 - 1
     (an 8- to 10-digit id or timestamp, string or JSON number) and one read as 0.0.0.0
     before a port or path (`00:30`, `0/x`); text starting with a word and `:` (a scheme
-    to WHATWG: `Note: x`, `intranet:8080/x`); a hex string with `::` or six `:` (a
-    colon-separated fingerprint); and every loopback spelling outside the explicit set.
+    to WHATWG: `Note: x`, `intranet:8080/x`); text naming a special scheme and `:` after
+    a character that cannot be part of a scheme (`Upload a file: x.pdf`, `see http:
+    below`; review round 2); any `::` and any run of hex digits, `:` and `.` with six
+    `:` (a colon-separated fingerprint, a scope operator `use std::string`, a CSS
+    `a::before`; review round 2); and every loopback spelling outside the explicit set.
     Wherever a stand-in is sent, plain loopback stands in for such a value, and a
     request needing it as a sibling or a fresh value is unbound (FR-FUZZ-67).
-    **Measured cost, per point** (BUG-0555 review LA-6; `scratchpad/lanes/LABAUTH/r1/`
-    `measure_points.py`, 2026-10-22): over 9,562 parameter rows with sibling entries in
-    2,953 recorded stores on the test host (form, link-set and JSON-leaf points; mostly
-    the test suite's and the lanes' runs), 1,081 points are unbound now against 843 at
-    7393c90 (248 more: 140 JSON points beside the float leaf `2.5`, 108 beside a
-    percent-encoded URL naming `host.example`; 10 fewer: `db.lab.example`) and 705 at
-    1338d7a (538 more: 326 beside `/go?ret=https://host.example/cb?x=1`, 140 beside
-    `2.5`, 72 beside a percent-encoded URL; 162 fewer: `robots.txt` 85, `a@lab.test` 50,
-    `db.lab.example` 10, `lang_en.php`, `portal.php`, `message.txt` 5 each, a free text
-    holding `...@fuzzlab.lab)` 2). Over
-    every lab answer key (22 keys, 352 points with writes on and off), no point is
+    **Measured cost, per point** (BUG-0555 review LA-6, re-measured in review round 2;
+    `scratchpad/lanes/LABAUTH/r2/measure_points_r2.py`, `point_cost.txt`, 2026-10-22):
+    over 13,684 parameter rows with sibling entries in 4,216 recorded stores on the
+    test host (form, link-set and JSON-leaf points; mostly the test suite's and the
+    lanes' runs), 1,104 points are unbound now against 992 at 7393c90 (126 more, beside
+    percent-encoded URLs naming `host.example`; 14 fewer: `db.lab.example`) and 1,300 at
+    d3cb339 (196 fewer, every one beside the JSON float leaf `2.5`: the float residual's
+    gain, all from one test fixture's runs; none more: the special-scheme mark and the
+    IPv6 rule of review round 2 cost no recorded point). Review round 1 measured the
+    same at 1338d7a (705 of 9,562 then: it had dropped the `://`-anywhere coverage).
+    Over every lab answer key (22 keys, 352 points with writes on and off), no point is
     refused (at 1338d7a four were, two of them Mongection's expected-vulnerable
     SDLMG-0002), and a test keeps it so
     (`tests/test_replay_bindings.py::test_no_expected_vulnerable_answer_key_point_is_unbound_by_the_lab_predicate`).
     In the external labs' sources (`lab/external/*/.cache`), no form-field point (123)
-    is unbound, and 62 of 2,095 URL-query points are (as at 1338d7a, none at 7393c90):
-    third-party Google Maps and Fonts URLs (`28.659344,-81.187888`,
-    `Roboto:300,400,500`). Stated residuals: a pure dotless word and a dotless number of
-    2^32 or more (`intranet`, `?next=intranet`) are single-label names, a host only to a
-    resolver that completes them from a search list or a hosts file, whatever follows
-    them (`intranet/?next=evil.top`); a non-zero dotless number below 2^24 (`42` is
-    0.0.0.42 to WHATWG) is in 0.0.0.0/8 (RFC 6890: not forwardable; on the test host
-    Linux routes it to the default route and 0.0.0.0 to loopback, measured); free text
-    with a space names no host to any reader; a value naming no host of its own whose
+    is unbound, and 62 of 2,095 URL-query points are (as at 1338d7a and d3cb339, none at
+    7393c90): third-party Google Maps and Fonts URLs (`28.659344,-81.187888`,
+    `Roboto:300,400,500`). Stated residuals: a JSON float leaf that is not an integer
+    (`2.5`, `8.8`, `19.99`: an app that puts `http://` before it reads `8.8` as 8.0.0.8,
+    node 22) is the lab (review round 2, the owner's decision; measured gain above); a
+    pure dotless word and a dotless number of 2^32 or more (`intranet`,
+    `?next=intranet`) are single-label names, a host only to a resolver that completes
+    them from a search list or a hosts file, whatever follows them
+    (`intranet/?next=evil.top`); a non-zero dotless number below 2^24 (`42` is 0.0.0.42
+    to WHATWG) is in 0.0.0.0/8 (RFC 6890: not forwardable; on the test host Linux routes
+    it to the default route and 0.0.0.0 to loopback, measured); free text with
+    whitespace is the lab unless a rule above holds (an IPv6 literal, an authority or
+    special-scheme mark), though a reader that splits it may take an IPv4 address or a
+    name from it (`8.8.8.8 is the server`, `8.8.8.8\tx`, `evil.top foo`: the IPv6 rule
+    of review round 2 is stricter, the owner's scope); a value naming no host of its own whose
     path, query or fragment does (`/?next=evil.top`, `/go/evil.top`, `?next=evil.top`,
     `#evil.zip`) is the lab: holding every such value to the tail grammar would put
     99.9% of ASP.NET view states (`/wE...`) and 21.5% of standard base64 tokens outside
