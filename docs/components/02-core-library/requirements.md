@@ -344,7 +344,11 @@ plugin registry. It is the layer that makes the store the integration bus.
     BUG-0544:)* `core.redaction.page_url_is_clean` is the one test of whether a page URL
     may be stored as `source_page` or fetched: the strongest URL redactor
     (`redact_url_identifiers`) leaves it unchanged, it holds no redaction placeholder and
-    no empty query value.
+    no empty query value. *(Amended by `CC-CORE-0076`, 2026-10-22, BUG-0556:)* the
+    redactor it compares against walks nested URLs, query strings, `;` pairs and path
+    parameters (FR-CORE-537), a nested redaction is a `PLACEHOLDER` (never a blank, so a
+    placeholder at any depth keeps the page out), and the empty-value test splits the
+    query on `&` and `;`.
   - **Header-point names:** `core.http.header_point_refusal` is the one rule
     (framing, routing, method-override and credential headers, and any name
     `is_sensitive_name` flags; whole names, case-insensitive). `check_send_header`
@@ -411,6 +415,9 @@ plugin registry. It is the layer that makes the store the integration bus.
     a bare `answer` is not one.
   - `redact_url_identifiers(url)`: `redact_url`, then identifier-like query values
     blanked to `name=`, and a SPA-route fragment's query redacted the same way.
+    *(Amended by `CC-CORE-0076`, 2026-10-22, BUG-0556:)* both redactors are one walk
+    that also judges `;` pairs, path parameters, query-shaped fragments and every value
+    nested inside them: FR-CORE-537.
   - `redact_spa_fragment(url)`: only that fragment step (`#/x?token=…`; a fragment that
     is not a route is left alone), for the crawler's stored route URLs.
 
@@ -677,6 +684,10 @@ plugin registry. It is the layer that makes the store the integration bus.
   either origin is unknown, else its canonical origin plus that path.
   *(Amended by `CC-CORE-0073`:)* `keep_query=True` keeps the URL's own query after the
   path (a sibling set's source page, FR-FUZZ-67).
+  *(Amended by `CC-CORE-0076`, 2026-10-22, BUG-0556:)* a `;` path parameter that holds
+  a secret, in any segment, is dropped from the stored path
+  (`redaction.strip_secret_path_params`, FR-CORE-537); `to_path` already drops the last
+  segment's parameters.
   `stored_absolute(stored, base_origin)` reads one back: a stored `http(s)://` URL as it
   is, else the path under `base_origin` (a path always starts with `/`, so one holding
   `://` stays a path). `is_loopback_origin` holds for 127.0.0.0/8, `localhost` and `::1`
@@ -832,6 +843,46 @@ plugin registry. It is the layer that makes the store the integration bus.
     - codings: `test_a_bounded_send_advertises_only_codings_it_can_bound`,
       `test_brotli_is_advertised_when_it_can_be_bounded`;
     - `test_a_response_already_read_is_its_kept_body_never_an_empty_one`.
+- **FR-CORE-537** *(a secret in a URL is redacted wherever it sits; `CC-CORE-0076`,
+  2026-10-22, BUG-0556, audit Gap 5; SP-17).* `core.redaction` judges a URL's values
+  as possibly structured, through one walk (`_UrlWalk`) that both URL redactors are.
+  - **Where a value sits:** a query pair, `&` or `;` separated; a `;name=value` (or
+    bare `;value`) path parameter in any segment; a query-shaped fragment (`#…?a=b`,
+    `#a=b`); and, inside any of those values, a nested URL (`://`, a leading `/`, a `?`
+    or a `#`: its path parameters, query and fragment), a nested query string (`=`, `&`
+    or `;`: its pairs), or a percent-encoding layer (decoded one layer, then walked
+    again).
+  - **The rule at every level:** a sensitively named pair or path parameter
+    (`is_sensitive_name`, name form-decoded) gets `PLACEHOLDER`. With identifiers
+    (`redact_url_identifiers`), an identifier-like value (`looks_like_identifier`,
+    judged percent-decoded once) is blanked to `name=` at a URL's own query or fragment
+    (as before), and is `PLACEHOLDER` when nested or in a path parameter; a token in a
+    nested URL's host or path redacts the whole outer value. `redact_url` applies the
+    name rule only.
+  - **Re-encoding:** only a value that held a secret changes; a decoded layer that
+    changed is percent-encoded again (`quote(safe="")`), so the URL stays a URL and the
+    value one value. Clean text is byte-identical.
+  - **Bounds, fail closed:** at most `MAX_VALUE_DEPTH` (12) levels and
+    `MAX_VALUE_CHARS` (64 KiB) per value. A value past either bound, one with a layer
+    still undecoded at the last level, or one the walk fails on is redacted whole at
+    its top level (`""` with identifiers, `PLACEHOLDER` otherwise; a path parameter
+    `PLACEHOLDER`). Total; linear per level.
+  - **Stored values:** `value_holds_secret(raw_value)` (percent-decoded once) is true
+    for an identifier-like value or one the walk would change; `stored_value(name,
+    raw_value, value)` is `""` when the name is sensitive or the value holds a secret,
+    else `value`: the one rule for a link set's entries (`store_adapter.redact_sibling`),
+    every `parameter.example` the importer writes from a URL or a crawled form, and a
+    crawled form's entries (FR-AUD-22/31, FR-FUZZ-67's `fresh`).
+    `strip_secret_path_params(path)` drops each path parameter that holds a secret;
+    `store_url` applies it (FR-CORE-504).
+  - **Not changed:** `looks_like_identifier` (FR-CORE-30, SP-18), `redact_query` and
+    the body redactors (`redact_body`, `redact_captured_body`, `redact_leaf`; body
+    redaction is paused by the owner, audit defect 26): a nested token in a captured
+    body's leaf is BUG-0556's pinned residual R1.
+  - Enforced by: `tests/test_redaction_nested.py` (a generated sweep over depth,
+    encoding, separator, credential names and identifier shapes, searched in the store,
+    proxy history, the HTTP recorder and `safe_ref`; the benign list byte-identical;
+    bounds and totality).
 - **FR-CORE-508** *(one read-only opener; a SQLite file is touched only through
   SQLite; `CC-CORE-0071`, 2026-10-20, BUG-0535).*
   - `core.store.open_read_only(path, *, timeout, fold_on_close=False, any_thread=False)`

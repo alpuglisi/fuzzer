@@ -100,12 +100,12 @@ def query_pairs(raw_query: str) -> list[tuple[str, str, str]]:
 
 def redact_sibling(name: str, raw_value: str, value: str) -> str:
     """A crawled link's sibling value as it may be stored and sent: ``""`` when its
-    name is sensitive or its raw value looks like an identifier (a token, an id), else
-    ``value`` (forms phase 2, FR-FUZZ-43; PA-0100)."""
-    from fuzzlab.core.redaction import is_sensitive_name, looks_like_identifier
-    if is_sensitive_name(name) or looks_like_identifier(raw_value):
-        return ""
-    return value
+    name is sensitive or its raw value holds a secret anywhere -- it looks like an
+    identifier (a token, an id), or a URL, query string or ``;`` pair nested in it holds
+    a sensitively named or identifier-like value (BUG-0556) -- else ``value`` (forms
+    phase 2, FR-FUZZ-43; PA-0100). The owner's rule, `core.redaction.stored_value`."""
+    from fuzzlab.core.redaction import stored_value
+    return stored_value(name, raw_value, value)
 
 
 def entries_refusal(entries, *, credential_names: bool = False) -> str | None:
@@ -249,14 +249,15 @@ def _import_path_templates(store: Store, run_id: int, urls, source: str,
     the crawl recorded them (FR-CRAWL-28): a value among them names a route, not data.
     Both importers call it once, after their URLs."""
     from fuzzlab.core.pathtemplate import path_templates
-    from fuzzlab.core.redaction import looks_like_identifier
+    from fuzzlab.core.redaction import stored_value, strip_secret_path_params
     for t in path_templates(urls, code=code):
-        stored = t.path if main is None or t.origin == main else t.origin + t.path
+        path = strip_secret_path_params(t.path)          # as `store_url` (BUG-0556)
+        stored = path if main is None or t.origin == main else t.origin + path
         endpoint_id = _upsert_endpoint(store, run_id, stored, "GET", source)
         if _get_parameter(store, run_id, endpoint_id, t.param, "path", None) is not None:
             continue
         counts["endpoint"] += 1
-        example = "" if looks_like_identifier(t.example) else t.example
+        example = stored_value("", t.example, t.example)     # the owner's rule
         store.conn.execute(
             "INSERT INTO parameter (run_id, endpoint_id, name, location, example) "
             "VALUES (?,?,?,?,?)", (run_id, endpoint_id, t.param, "path", example))
@@ -406,9 +407,10 @@ def _import_link_set(store: Store, run_id: int, endpoint_id: int, pairs, page,
     names = list(dict.fromkeys(name for name, _r, _v in pairs))
     if refused or len(names) < 2:
         counts["link_set_refused"] += 1 if refused else 0
-        for name, _raw, value in pairs:                  # lone points, as crawled
-            _insert_parameter(store, run_id, endpoint_id, name, "query", value, None,
-                              counts)
+        for name, raw, value in pairs:                   # lone points, as crawled
+            # the example is a stored value: through the owner's rule (BUG-0556)
+            _insert_parameter(store, run_id, endpoint_id, name, "query",
+                              redact_sibling(name, raw, value), None, counts)
         if refused:
             return
     entries = [(name, redact_sibling(name, raw, value)) for name, raw, value in pairs]
@@ -423,8 +425,8 @@ def _import_link_set(store: Store, run_id: int, endpoint_id: int, pairs, page,
         counts["link_set"] += 1
     if len(names) < 2:
         return
-    for name, _raw, value in pairs:
-        if _insert_parameter(store, run_id, endpoint_id, name, "query", value, form_id,
+    for name, kept in entries:                       # the example as the entry is stored
+        if _insert_parameter(store, run_id, endpoint_id, name, "query", kept, form_id,
                              counts):
             counts["link_set_bound"] += 1
 
@@ -666,7 +668,8 @@ def _import_forms(src, store: Store, run_id: int, counts: dict,
         verdicts = dict(src.execute("SELECT sig, verdict FROM selector_verdicts").fetchall())
     except sqlite3.Error:
         verdicts = {}                            # a spider DB from before FR-CRAWL-10
-    from fuzzlab.core.redaction import is_sensitive_name
+    from fuzzlab.core.redaction import (is_sensitive_name, redact_url_identifiers,
+                                        stored_value)
     from fuzzlab.tools.formnav import signature_key
     counts.setdefault("form", 0)
     counts.setdefault("form_skipped", 0)
@@ -694,20 +697,27 @@ def _import_forms(src, store: Store, run_id: int, counts: dict,
                 continue
             seen_selectors.add(same)
         kinds = dict(form["controls"])
-        form["entries"] = _filled(form["entries"], kinds)
+        filled = _filled(form["entries"], kinds)
+        # every stored value through the owner's rule (BUG-0556): one that holds a
+        # secret anywhere (an identifier, a token in a nested URL) is blanked and named
+        # in the replay recipe; a password control stays empty by policy (FR-FUZZ-44)
+        stored = [(name, value if kinds.get(name) == "password"
+                   else stored_value(name, value, value)) for name, value in filled]
         path = store_url(form["action_url"], main)
-        query = urlparse(form["action_url"]).query
+        # the action's query, as the strongest URL redactor stores it (BUG-0556)
+        query = urlparse(redact_url_identifiers(form["action_url"])).query
         url = path + ("?" + query if query and form["method"] == "POST" else "")
         endpoint_id = _upsert_endpoint(store, run_id, url, form["method"], "form")
-        fresh = [name for name, _v in form["entries"]
-                 if kinds.get(name) != "password" and is_sensitive_name(name)]
+        fresh = [name for (name, value), (_n, kept) in zip(filled, stored)
+                 if kinds.get(name) != "password"
+                 and (is_sensitive_name(name) or kept != value)]
         form_id = _insert_sibling_set(
-            store, run_id, endpoint_id, form["enctype"], json.dumps(form["entries"]),
+            store, run_id, endpoint_id, form["enctype"], json.dumps(stored),
             source_page=_source_page(row["page_url"], main),
             fresh=fresh, password_fields=json.dumps(password_fields(form)))
         counts["form"] += 1
         location = "body" if form["method"] == "POST" else "query"
-        for name, value in form["entries"]:
+        for name, value in stored:
             kind = kinds.get(name)
             if (kind in ("submit", "password") or is_sensitive_name(name)
                     or (kind == "hidden" and _object_selector(name))):
@@ -731,9 +741,10 @@ def _import_route_query(store: Store, run_id: int, raw: str, source, counts: dic
     endpoint_id = _upsert_endpoint(store, run_id, store_url(raw, main, route=True), "GET",
                                    source)
     counts["endpoint"] += 1
-    for name, value in parse_qsl(route[1], keep_blank_values=True):
-        if _insert_parameter(store, run_id, endpoint_id, name, "fragment", value, None,
-                             counts):
+    for name, raw, value in query_pairs(route[1]):
+        # the example is a stored value: through the owner's rule (BUG-0556)
+        if _insert_parameter(store, run_id, endpoint_id, name, "fragment",
+                             redact_sibling(name, raw, value), None, counts):
             counts["fragment_parameter"] += 1
 
 
@@ -944,7 +955,10 @@ def _store_request(store, run_id, counts, kind, method, url, leaves, *,
                   or (_object_selector(last) and last not in visible))
         if name not in passwords and not pinned and jsonbody.is_point_value(value):
             points.append((name, value))
-    parts = urlparse(url)
+    # the URL's query as the strongest URL redactor stores it (BUG-0556): a disco
+    # capture redacted names only; the spider's capture already passed it (idempotent)
+    from fuzzlab.core.redaction import redact_url_identifiers
+    parts = urlparse(redact_url_identifiers(url))
     endpoint_url = store_url(url, main) + ("?" + parts.query if parts.query else "")
     endpoint_id = _upsert_endpoint(store, run_id, endpoint_url, method, "request")
     enctype = jsonbody.ENCTYPE if kind == "json" else FORM_URLENCODED

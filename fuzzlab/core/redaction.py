@@ -36,7 +36,7 @@ from __future__ import annotations
 import json
 import math
 import re
-from urllib.parse import unquote_plus, urlsplit, urlunsplit
+from urllib.parse import quote, unquote, unquote_plus
 
 #: Whole tokens that mark a secret on their own.
 SENSITIVE_TOKENS = frozenset({
@@ -229,12 +229,223 @@ def redact_query(query: str) -> str:
 
 
 def redact_url(url: str) -> str:
-    """``url`` (absolute or origin-form) with sensitive query values replaced."""
-    if "?" not in (url or ""):
+    """``url`` (absolute or origin-form) with every sensitively named value replaced by
+    `PLACEHOLDER`, wherever it sits (FR-CORE-537, BUG-0556): a query pair (``&`` or
+    ``;`` separated), a ``;name=value`` path parameter, a query-shaped fragment, and a
+    URL, query string or ``;`` pair nested in any of those values (raw or
+    percent-encoded, walked by `_UrlWalk`). Byte-identical when it holds none; a value
+    past the walk's bounds is replaced whole. Total: a non-string is returned as is."""
+    return _walk_url(url, identifiers=False)
+
+
+# --- URL values, at any depth (BUG-0556, FR-CORE-537) --------------------------------
+
+#: A value is walked at most this many levels deep: a nested URL, a query string, a
+#: ``;`` pair list and a percent-encoding layer are a level each ...
+MAX_VALUE_DEPTH = 12
+#: ... and at most this many characters long. A value past either bound, or one with a
+#: percent-encoding layer still undecoded at the last level, is redacted whole: it
+#: cannot be proven clean (fail closed, PA-0101).
+MAX_VALUE_CHARS = 64 * 1024
+#: The pair separators of a query, a fragment's query and a nested value (``;`` too:
+#: servlet containers and many frameworks split on it, BUG-0556).
+_PAIR_SEP = re.compile(r"([&;])")
+_PCT = re.compile(r"%[0-9A-Fa-f]{2}")
+
+
+class _Whole(Exception):
+    """A value the walk cannot prove clean: its top-level pair redacts it whole."""
+
+
+class _UrlWalk:
+    """One pass over a URL or one of its values (BUG-0556). The rule, at every level:
+
+    - a pair or path parameter whose name `is_sensitive_name` flags: its value is
+      `PLACEHOLDER`;
+    - with ``identifiers``, a value that `looks_like_identifier` (judged percent-decoded
+      once, the callers' contract): ``""`` at the top level (a URL's own query or
+      fragment pair, as before), `PLACEHOLDER` when nested inside another value;
+    - a value with structure of its own is walked: a nested URL (``://``, a leading
+      ``/``, a ``?`` or a ``#``: its path parameters, query and fragment; with
+      ``identifiers``, a token in its host or path redacts the whole outer value) or a
+      query string (``=``, ``&`` or ``;``: its pairs);
+    - a value with neither is percent-decoded one layer and walked again; when that
+      changes it, the result is percent-encoded again (``safe=""``), so the URL stays a
+      URL and the value stays one value;
+    - a value past `MAX_VALUE_DEPTH` levels or `MAX_VALUE_CHARS` characters (a layer
+      left undecoded included), or one the walk fails on, raises `_Whole`: its
+      top-level pair or path parameter is redacted whole, never kept raw.
+
+    Unchanged text is returned byte-identical: only a value that held a secret is
+    re-encoded. Linear in the value's length per level (PA-0095)."""
+
+    def __init__(self, identifiers: bool):
+        self.identifiers = identifiers
+
+    def url(self, url: str) -> str:
+        base, hashmark, frag = url.partition("#")
+        head, qmark, query = base.partition("?")
+        head = self.path(head, 1)
+        if qmark:
+            query = self.pairs(query, 1, top=True)
+        if hashmark:
+            frag = self.fragment(frag, 1, top=True)
+        return head + qmark + query + hashmark + frag
+
+    def path(self, head: str, depth: int) -> str:
+        """``head``'s ``;`` path parameters walked (the authority is left alone)."""
+        if ";" not in head:
+            return head
+        start = 0
+        if "://" in head:
+            start = head.find("/", head.index("://") + 3)
+            if start < 0:
+                return head
+        out = []
+        for seg in head[start:].split("/"):
+            if ";" in seg:
+                first, *params = seg.split(";")
+                seg = ";".join([first] + [self.param(p, depth) for p in params])
+            out.append(seg)
+        return head[:start] + "/".join(out)
+
+    def param(self, part: str, depth: int) -> str:
+        """One path parameter (``name=value`` or bare): its own top level."""
+        name, eq, raw = part.partition("=")
+        if eq and is_sensitive_name(unquote_plus(name)):
+            return f"{name}={PLACEHOLDER}"
+        text = raw if eq else part
+        try:
+            new = self.value(text, depth + 1, top=False)
+        except Exception:                         # _Whole, or a failure: fail closed
+            new = PLACEHOLDER
+        if new == text:
+            return part
+        return f"{name}={new}" if eq else new
+
+    def pairs(self, text: str, depth: int, top: bool) -> str:
+        parts = _PAIR_SEP.split(text)
+        for i in range(0, len(parts), 2):
+            parts[i] = self.pair(parts[i], depth, top)
+        return "".join(parts)
+
+    def pair(self, part: str, depth: int, top: bool) -> str:
+        if not part:
+            return part
+        name, eq, raw = part.partition("=")
+        if eq and is_sensitive_name(unquote_plus(name)):
+            return f"{name}={PLACEHOLDER}"
+        text = raw if eq else part
+        try:
+            new = self.value(text, depth + 1, top)
+        except Exception:
+            if not top:
+                raise                               # the top-level pair redacts it whole
+            new = "" if self.identifiers else PLACEHOLDER
+        if new == text:
+            return part
+        return f"{name}={new}" if eq else new
+
+    def fragment(self, frag: str, depth: int, top: bool) -> str:
+        if "?" in frag:                             # a route's query (``#/x?token=…``)
+            route, q, query = frag.partition("?")
+            return route + q + self.pairs(query, depth, top)
+        if "=" in frag:                             # ``#access_token=…&state=…``
+            return self.pairs(frag, depth, top)
+        if top:
+            return frag                             # ``#top``, ``#/item/7``: no value
+        return self.value(frag, depth + 1, top=False)
+
+    def value(self, text: str, depth: int, top: bool) -> str:
+        if depth > MAX_VALUE_DEPTH or len(text) > MAX_VALUE_CHARS:
+            raise _Whole
+        if self.identifiers and looks_like_identifier(unquote(text)):
+            return "" if top else PLACEHOLDER
+        if "://" in text or text.startswith("/") or "?" in text or "#" in text:
+            return self.nested_url(text, depth)
+        if "=" in text or "&" in text or ";" in text:
+            return self.pairs(text, depth, top=False)
+        if _PCT.search(text):
+            inner = unquote(text, errors="surrogateescape")
+            new = self.value(inner, depth + 1, top=False)
+            if new == inner:
+                return text
+            return quote(new, safe="", errors="surrogateescape")
+        return text
+
+    def nested_url(self, text: str, depth: int) -> str:
+        base, hashmark, frag = text.partition("#")
+        head, qmark, query = base.partition("?")
+        if self.identifiers and looks_like_identifier(
+                unquote("/".join(seg.split(";", 1)[0] for seg in head.split("/")))):
+            raise _Whole                            # a token in its host or path
+        head = self.path(head, depth)
+        if qmark:
+            query = self.pairs(query, depth, top=False)
+        if hashmark:
+            frag = self.fragment(frag, depth, top=False)
+        return head + qmark + query + hashmark + frag
+
+
+def _walk_url(url, identifiers: bool):
+    """`_UrlWalk` over a whole URL; total. A URL with no ``?``, ``;`` or ``#`` holds no
+    value and is returned as it is."""
+    if not isinstance(url, str) or not any(c in url for c in "?;#"):
         return url
-    parts = urlsplit(url)
-    new = redact_query(parts.query)
-    return url if new == parts.query else urlunsplit(parts._replace(query=new))
+    try:
+        return _UrlWalk(identifiers).url(url)
+    except Exception:                               # unreachable by construction; closed
+        return re.split(r"[;?#]", url, maxsplit=1)[0] + "?" + PLACEHOLDER
+
+
+def value_holds_secret(raw_value) -> bool:
+    """True when ``raw_value`` -- one query, fragment or path value, percent-decoded once
+    (the contract `looks_like_identifier` states) -- holds a secret anywhere: it looks
+    like an identifier, or a URL, query string or ``;`` pair nested in it (raw or
+    percent-encoded, at any depth) has a sensitively named or identifier-like value, or
+    it is past the walk's bounds (`_UrlWalk`; BUG-0556). Total: a non-string is False."""
+    if not isinstance(raw_value, str):
+        return False
+    try:
+        return (looks_like_identifier(raw_value)
+                or _UrlWalk(True).value(raw_value, 1, top=True) != raw_value)
+    except Exception:                               # _Whole: it cannot be proven clean
+        return True
+
+
+def stored_value(name, raw_value, value):
+    """A crawled query, fragment or path value as it may be stored -- a link set's entry
+    (`tools.store_adapter.redact_sibling`) or a parameter's example: ``""`` when
+    ``name`` `is_sensitive_name` or ``raw_value`` (percent-decoded once) holds a secret
+    anywhere (`value_holds_secret`), else ``value`` as given. The one rule for every
+    stored sibling value and example (PA-0003, PA-0100; BUG-0556)."""
+    if (isinstance(name, str) and is_sensitive_name(name)) or value_holds_secret(raw_value):
+        return ""
+    return value
+
+
+def strip_secret_path_params(path):
+    """``path`` without each ``;name=value`` (or bare ``;value``) path parameter that
+    holds a secret -- a sensitive name, or a value `value_holds_secret` holds for -- in
+    any segment: how a stored page or endpoint path keeps no session id
+    (``/a;jsessionid=…/b`` -> ``/a/b``; `core.urls.to_path` already drops the last
+    segment's parameters). A parameter that holds none is kept. Total (BUG-0556)."""
+    if not isinstance(path, str) or ";" not in path:
+        return path
+    from urllib.parse import unquote as _unquote
+
+    def secret(part: str) -> bool:
+        name, eq, raw = part.partition("=")
+        if eq and is_sensitive_name(unquote_plus(name)):
+            return True
+        return value_holds_secret(_unquote(raw if eq else part))
+    out = []
+    for seg in path.split("/"):
+        if ";" in seg:
+            first, *params = seg.split(";")
+            seg = ";".join([first] + [p for p in params if not secret(p)])
+        out.append(seg)
+    return "/".join(out)
 
 
 def _redact_json(value):
@@ -375,58 +586,51 @@ CAPTURE_MAX_BYTES = 64 * 1024
 CAPTURE_MAX_DEPTH = 8
 
 
-def _redact_query_identifiers(query: str) -> str:
-    """`redact_query`, then each value that `looks_like_identifier` (judged on its raw,
-    percent-decoded form) blanked to ``name=``."""
-    from urllib.parse import unquote
-    out = []
-    for part in redact_query(query).split("&"):
-        name, eq, raw = part.partition("=")
-        out.append(f"{name}=" if eq and looks_like_identifier(unquote(raw)) else part)
-    return "&".join(out)
-
-
 def redact_spa_fragment(url: str) -> str:
     """``url`` with the query of a SPA-route fragment (``#/reset?token=...``,
-    ``#!/x?id=...``) redacted like a URL query: sensitive names replaced, identifier-like
-    values blanked. A fragment that is not a route (``#top``) is left alone. The crawler
-    keeps such fragments as pages (FR-CRAWL-12), so they pass this boundary."""
+    ``#!/x?id=...``) redacted like a URL query (`_UrlWalk`): sensitive names replaced,
+    identifier-like values blanked, nested URLs and ``;`` pairs walked. A fragment that
+    is not a route (``#top``) is left alone. The crawler keeps such fragments as pages
+    (FR-CRAWL-12), so they pass this boundary."""
     head, sep, frag = (url or "").partition("#")
     from fuzzlab.core.urls import is_spa_route_fragment    # the one definition (PA-0003)
     if not sep or not is_spa_route_fragment(frag) or "?" not in frag:
         return url
     route, _q, query = frag.partition("?")
-    new = _redact_query_identifiers(query)
+    new = _UrlWalk(True).pairs(query, 1, top=True)
     return url if new == query else f"{head}#{route}?{new}"
 
 
 def page_url_is_clean(url: str) -> bool:
     """Whether a page URL may be stored and fetched as it is (FR-FUZZ-67, BUG-0544): the
-    strongest URL redactor (`redact_url_identifiers`) leaves it unchanged, it carries no
-    redaction placeholder (a crawl's ``found_from`` was redacted once already, and a
-    placeholder survives a second pass), and no query value is empty (a value blanked
-    upstream looks exactly like that). Fails closed: any doubt keeps the page out."""
+    strongest URL redactor (`redact_url_identifiers`, which walks nested URLs, query
+    strings and ``;`` pairs and path parameters, BUG-0556) leaves it unchanged, it
+    carries no redaction placeholder at any depth (a crawl's ``found_from`` was redacted
+    once already, and a placeholder survives a second pass; a nested one is redacted as
+    `PLACEHOLDER`, never as a blank), and no query value (``&`` or ``;`` separated) is
+    empty (a value blanked upstream looks exactly like that). Fails closed: any doubt
+    keeps the page out."""
     if not isinstance(url, str) or redact_url_identifiers(url) != url:
         return False
     if PLACEHOLDER in url or "__REDACTED_KEY_" in url or USERINFO_PLACEHOLDER in url:
         return False
     head = url.split("#", 1)[0]
     query = head.split("?", 1)[1] if "?" in head else ""
-    return not any(part.endswith("=") for part in query.split("&"))
+    return not any(part.endswith("=") for part in _PAIR_SEP.split(query)[::2])
 
 
 def redact_url_identifiers(url: str) -> str:
-    """`redact_url`, then each query value that `looks_like_identifier` (given its raw,
-    percent-decoded value) blanked to ``name=``, and a SPA-route fragment's query
-    redacted the same way (`redact_spa_fragment`): how the crawler stores an XHR URL and
-    a captured request's URLs (FR-CRAWL-12/13). Total; a URL with neither is returned
-    unchanged."""
-    url = redact_spa_fragment(redact_url(url))
-    if "?" not in (url or "").split("#", 1)[0]:
-        return url
-    parts = urlsplit(url)
-    new = _redact_query_identifiers(parts.query)
-    return url if new == parts.query else urlunsplit(parts._replace(query=new))
+    """The strongest URL redactor (`_UrlWalk` with identifiers; FR-CORE-537): every
+    sensitively named value replaced (`redact_url`'s rule) and every identifier-like
+    value redacted, wherever it sits -- a query pair (``&`` or ``;``), a path parameter,
+    a query-shaped or SPA-route fragment, and a URL, query string or ``;`` pair nested
+    in any of those, raw or percent-encoded at any depth. A URL's own query or fragment
+    value that is identifier-like (or past the walk's bounds) is blanked to ``name=``; a
+    nested one, and a path parameter's, becomes `PLACEHOLDER`, re-encoded so the URL
+    stays a URL. How the crawler stores an XHR URL and a captured request's URLs
+    (FR-CRAWL-12/13) and what `page_url_is_clean` compares against. Total; a URL holding
+    no secret is returned byte-identical."""
+    return _walk_url(url, identifiers=True)
 
 
 def _blank(value):

@@ -431,6 +431,19 @@ budget where a vulnerability is plausible.
     *(Review round 1:)* the page is stored only when `core.redaction.page_url_is_clean`
     holds (the strongest URL redactor leaves it unchanged; no placeholder; no empty query
     value); otherwise none (PA-0100, PA-0514(1)).
+  - *(Amended by `CC-AUD-0059`, 2026-10-22, BUG-0556:)* **every stored value passes the
+    owner's rule** (`core.redaction.stored_value`, FR-CORE-537): a link set's entries
+    (`redact_sibling`), the `parameter.example` of a link set's names, of a lone query
+    point and of an SPA route's `fragment` parameter, and a crawled form's entries and
+    examples are `""` when the name is sensitive or the value holds a secret anywhere
+    (an identifier, or a token nested in a URL, a query string or a `;` pair, raw or
+    percent-encoded); a form entry blanked so is named in `form.fresh` (never a
+    password). A POST form's action query and a captured request's URL query are stored
+    as `redact_url_identifiers` leaves them; a stored path keeps no path parameter that
+    holds a secret (`store_url`). This closes the reserved BUG-0120 (raw crawled
+    examples). Stated, pinned: a captured body's leaf holding a nested token keeps the
+    flat leaf rule (body redaction paused; BUG-0556 R1), and an endpoint query that
+    redaction changed is sent so by its points (BUG-0556 R2, PA-0544's scope).
   - `audit.engine.evaluate` writes each candidate's request fields through
     `core.reqctx.point_evidence` and stamps `identity_scope` and `context_id` (SP-57,
     FR-FUZZ-66). `InjectionPoint` carries `bindings` and `replay_refusal`.
@@ -453,7 +466,9 @@ budget where a vulnerability is plausible.
   JSON answers without a query too) once to `_import_path_templates`: every
   `core.pathtemplate` template (FR-CORE-503) is a GET endpoint at its template path
   with one `path` parameter, its example the crawled value, blanked when it looks like
-  an identifier (PA-0100). `R-SQLI-PARAM` now includes `path`; `R-ACCESS-CONTROL-PATH`
+  an identifier (PA-0100) *(since `CC-AUD-0059`, BUG-0556: when it holds a secret
+  anywhere, `core.redaction.stored_value`; the template path keeps no path parameter
+  that holds one)*. `R-SQLI-PARAM` now includes `path`; `R-ACCESS-CONTROL-PATH`
   (FR-AUD-25) and the location-agnostic rules apply as to any point.
   - **Stated gaps:** ~~a template on another origin than the run's base is stored as a
     path, so it is probed at the base's origin~~ *(fixed by FR-AUD-27: it keeps its

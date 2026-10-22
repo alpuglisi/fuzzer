@@ -3,6 +3,66 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0059 — The importer stores every URL and value through the redaction owner: examples, form entries, action and captured queries, path parameters (FR-AUD-31, FR-AUD-26, BUG-0556) (2026-10-22)
+- Placement: pre-assigned to lane REDACTURL (item GAP-VALUES), base 7393c90, with
+  CC-CORE-0076 (the owner). This is BUG-0556's PA-0002 sweep by caller: the importer's
+  writers that did not apply the owner's value rule.
+- Change (`fuzzlab/tools/store_adapter.py` only):
+  - `redact_sibling(name, raw_value, value)` is now `core.redaction.stored_value`: `""`
+    also when a URL, query string or `;` pair nested in the value (raw or
+    percent-encoded) holds a sensitive name or an identifier.
+  - `_import_link_set`: a lone query point's `parameter.example` is `redact_sibling`'s
+    value (it was the crawled value: BUG-0120), and a set's rows take the entry as
+    stored.
+  - `_import_route_query`: an SPA route's `fragment` parameters come from `query_pairs`
+    and take `redact_sibling`'s value as their example (they were `parse_qsl`'s, raw).
+  - `_import_path_templates`: the template path passes
+    `core.redaction.strip_secret_path_params`; the example passes `stored_value` (it
+    passed `looks_like_identifier` alone).
+  - `_import_forms`: each crawled entry except a password control passes `stored_value`;
+    one it changes is stored `""` and named in `form.fresh` (bound fresh from the form's
+    page, FR-FUZZ-67), and the field's example is the stored value. A POST form's action
+    query is stored as `core.redaction.redact_url_identifiers` leaves it (the spider
+    stores it through `redact_url`, names only).
+  - `_store_request`: a captured request's URL query on `endpoint.url` passes
+    `redact_url_identifiers` (a disco capture redacts names only; a spider capture has
+    already passed it, and the walk is idempotent on it).
+  - The page and endpoint paths of every writer pass `core.urls.store_url`, which now
+    drops a path parameter that holds a secret (CC-CORE-0076).
+  - Tests: `tests/test_redaction_nested.py` (CC-CORE-0076) covers `import_spider`,
+    `import_disco` and a crawled form; `tests/test_forms_phase2.py`'s two BUG-0120
+    exclusions are removed (`parameter.example` is searched too).
+- Impact (other components / project):
+  - **FUZZ (point builder, oracle):** a crawled form whose hidden value is identifier-
+    like or holds a nested token now has that name in `form.fresh`, so its points are
+    bound fresh from the form's page or inconclusive "no page", where before the stored
+    (stale) value was sent. A point whose example blanked takes its shapes from its
+    name's other rows (FR-AUD-20's existing fallback) and has no redirect seed.
+  - **Store contract:** `parameter.example` holds no secret value from a URL or a
+    crawled form (it held every crawled value); `form.entries` of a crawled form and a
+    POST action's or captured request's endpoint query hold none. No schema change.
+  - **ML:** labels key on SP-57's context, whose seed digests the example for
+    `SEED_CATEGORIES`; a row whose example blanked gets a new seed (a new context for
+    open-redirect, access-control, command and NoSQL injection), which is the intent:
+    the old one digested a secret.
+- Risk (level; mitigation or accepted-risk justification): medium.
+  - Coverage: a form with a token-like hidden value is no longer replayed with the
+    crawled token; it is bound fresh or inconclusive (PA-0544(3): never a stale secret
+    and never a negative).
+  - Pinned residuals (strict xfail in `tests/test_redaction_nested.py`): R1, a captured
+    body's leaf holding a nested token keeps the flat leaf rule (body redaction paused
+    by the owner); R2, a POST action's or captured request's endpoint query that
+    redaction changed is sent so by its points (pre-existing for a spider capture and for
+    a sensitive name in an action URL; replay binding's scope, PA-0544).
+- Deliverables:
+  - [x] the six writers above through the owner — done
+  - [x] FR-AUD-31 and FR-AUD-26 amended in place — done
+  - [x] tests (with CC-CORE-0076) — done
+- Effectiveness (assessed 2026-10-22): `scratchpad/lanes/REDACTURL/exp/repro2.py` found
+  the token in `endpoint.url`, `parameter.example` and `form.entries` (spider forms and
+  disco captures) before, and only R1's two rows after; the harness result is in the
+  lane report.
+
 ### CC-AUD-0057 — The captured-request import refuses and counts a body holding a lone surrogate instead of failing the import (FR-AUD-22, BUG-0554) (2026-10-21)
 - Placement: lane SURROGATE (item AU-REQID78), base 33b423e, with CC-CRAWL-0061 (the
   same change). The lane held no AUD number; CC-AUD-0057 was assigned at merge.

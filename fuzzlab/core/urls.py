@@ -245,8 +245,11 @@ def store_url(url: str, main_origin: str | None, *, route: bool = False,
     unknown; otherwise its canonical origin followed by that path, so a page's API on
     another origin keeps it. ``main_origin`` is a `canonical_origin`. ``keep_query``
     keeps the URL's own query text after the path (a page a fresh form value is fetched
-    from, FR-FUZZ-67, is that exact page)."""
-    path = to_route_path(url) if route else to_path(url)
+    from, FR-FUZZ-67, is that exact page). A ``;`` path parameter that holds a secret
+    (``/a;jsessionid=…/b``) is never stored: `core.redaction.strip_secret_path_params`
+    drops it, as `to_path` drops the last segment's (BUG-0556)."""
+    from fuzzlab.core.redaction import strip_secret_path_params   # the one rule (SP-17)
+    path = strip_secret_path_params(to_route_path(url) if route else to_path(url))
     origin = canonical_origin(url)
     stored = path if main_origin is None or origin is None or origin == main_origin \
         else origin + path

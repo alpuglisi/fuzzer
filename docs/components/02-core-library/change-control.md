@@ -3,6 +3,98 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0076 — A secret in a URL is redacted wherever it sits: one walk over nested URLs, query strings, `;` pairs and path parameters (FR-CORE-537, BUG-0556) (2026-10-22)
+- Placement: pre-assigned to lane REDACTURL (item GAP-VALUES, audit Gap 5), base
+  7393c90, with CC-AUD-0059 (the importer's callers). PA-0541: implemented first, no
+  design draft or review gate.
+- Change (`fuzzlab/core/redaction.py`, `fuzzlab/core/urls.py`):
+  - **One walk for both URL redactors** (`_UrlWalk`, private). `redact_url` (names
+    only) and `redact_url_identifiers` (names and identifiers) are now the walk over a
+    whole URL (`_walk_url`). It judges a query's pairs split on `&` **and `;`**, every
+    `;name=value` or bare `;value` path parameter in any segment (the authority left
+    alone), a query-shaped fragment (`#…?a=b` or `#a=b`; a fragment without one is left
+    alone at the top level), and, inside each value, a nested URL (`://`, a leading `/`,
+    `?` or `#`: its path parameters, query, fragment, and with identifiers a token in its
+    host or path redacts the outer value whole), a nested query string (`=`, `&`, `;`)
+    and a percent-encoding layer (decoded with `surrogateescape`, walked, and re-encoded
+    `quote(safe="")` only when it changed).
+  - **The rule** at every level: a sensitive name (form-decoded) gets `PLACEHOLDER`;
+    with identifiers, an identifier-like value (`looks_like_identifier` on the value
+    percent-decoded once, the existing contract) is `""` at a URL's own query or
+    fragment pair (unchanged from before) and `PLACEHOLDER` when nested or in a path
+    parameter (so a nested redaction is always visible to `page_url_is_clean`'s
+    placeholder test).
+  - **Bounds, fail closed:** `MAX_VALUE_DEPTH = 12` levels and `MAX_VALUE_CHARS = 64
+    KiB` per value; past either (a layer still encoded at the last level included), or
+    on any exception, the top-level pair is redacted whole (`""` with identifiers,
+    `PLACEHOLDER` without; a path parameter `PLACEHOLDER`). `_walk_url` is total; text
+    holding no secret is returned byte-identical (a URL with no `?`, `;` or `#` is not
+    walked).
+  - `redact_spa_fragment` walks a route's query with the same rule;
+    `_redact_query_identifiers` is removed (its only callers were these two).
+  - `page_url_is_clean`: unchanged rule, now over the walk; its empty-value test splits
+    the query on `&` and `;`.
+  - New public functions: `value_holds_secret(raw_value)` (identifier-like, or the walk
+    changes it, or past the bounds), `stored_value(name, raw_value, value)` (`""` when
+    the name is sensitive or the value holds a secret; the one stored-value rule, PA-0003)
+    and `strip_secret_path_params(path)`.
+  - `core/urls.py::store_url` drops a path parameter that holds a secret, in any segment
+    (`strip_secret_path_params`; `to_path` already drops the last segment's).
+  - Unchanged on purpose: `looks_like_identifier` (SP-18), `redact_query` and every body
+    redactor (`redact_body`, the JSON/form/multipart redactors, `redact_captured_body`,
+    `redact_leaf`): body redaction is paused by the owner (audit defect 26, AU-REDACT).
+  - Tests: new `tests/test_redaction_nested.py` (19 test functions, 67 items; 750 generated spellings plus
+    20 path-parameter cases; two strict xfail pins, BUG-0556 R1 and R2);
+    `tests/test_query_placement.py::ALLOWED` drops the three entries for
+    `_redact_query_identifiers` and the two `urlunsplit(_replace(query=))` rebuilds,
+    which no longer exist (the walk reassembles the text it split).
+- Impact (other components / project):
+  - Every producer that calls `redact_url` now redacts nested credential names, `;`
+    pairs, path parameters and query-shaped fragments: **PROXY** (flow history's URL,
+    the request target and `Location`/`Content-Location`/`Refresh` in stored raw
+    messages), the core HTTP recorder, **CRAWL** (the disco capture, runner, explorer's
+    `actions.jsonl`, `ede`; the spider's form page/action URLs and its landing and
+    `found_from`), and `redact_for_record` (UI project records). No caller's code changes.
+  - Every caller of `redact_url_identifiers` / `page_url_is_clean` (the spider's capture,
+    `_queue_xhr`, `_spa_url`; `core.trace.safe_ref` for findings and diagrams; the
+    importer's `_source_page`; the oracle's binder `_FormBoundSender._bind_fresh`) gets
+    the walk. A page whose URL holds a nested or `;` secret is no longer a replay
+    recipe's page (FR-FUZZ-67): its sibling sets' tests are inconclusive "no page" where
+    they were bound before (with the token on the wire).
+  - **Store contract (AUD, via CC-AUD-0059):** `page.url` / `endpoint.url` keep no path
+    parameter that holds a secret; `parameter.example`, `form.entries`, a POST form's
+    action query and a captured URL's query hold no secret value. No schema change.
+  - Evidence that changed shape: a nested redaction is `PLACEHOLDER` inside a
+    re-encoded value (`next=%2Fview%3Fticket%3D__REDACTED__`), where before the value
+    was kept raw.
+- Risk (level; mitigation or accepted-risk justification): medium.
+  - Over-redaction (fail closed, accepted): a benign value whose nested pair has a
+    sensitive name (`q=session%3Dabc`) or that is past the bounds (64 KiB, 12 levels)
+    is redacted; a page holding one is no recipe page. The benign list in the new tests
+    pins ordinary nested values (`next=/account`, percent-encoded and double-encoded
+    paths and URLs, `a=1;b=2`, a clean path parameter, `+` spaces, base64 padding) as
+    byte-identical.
+  - Cost: linear per level, at most 12 levels; a test bounds 8x input to under 32x
+    the time. The proxy's history flush runs it once per URL.
+  - Behaviour change in proxy history for `;`: `?a=1;token=x` now stores
+    `token=__REDACTED__` (it was kept).
+- Deliverables:
+  - [x] `_UrlWalk`, `_walk_url`, `value_holds_secret`, `stored_value`,
+    `strip_secret_path_params`; `redact_url`, `redact_url_identifiers`,
+    `redact_spa_fragment`, `page_url_is_clean` through them — done
+  - [x] `store_url` through `strip_secret_path_params` — done
+  - [x] the importer's callers (CC-AUD-0059) — done
+  - [x] `tests/test_redaction_nested.py`; `test_forms_phase2.py` BUG-0120 assertions
+    tightened; `test_query_placement.py` stale allowances removed — done
+  - [x] FR-CORE-537 (new); FR-CORE-32, FR-CORE-37 and FR-CORE-504 amended in place — done
+  - [x] BUG-0556 report; PA-0556, SP-17 row, CHANGELOG, ERROR_LOG, ARCHITECTURE and
+    failure-record texts handed to the coordinator (`scratchpad/lanes/REDACTURL/
+    doc_texts.md`) — done
+- Effectiveness (assessed 2026-10-22): the six reported spellings stored their token
+  before (measured by `scratchpad/lanes/REDACTURL/exp/repro.py` on 7393c90) and store
+  none after; the new tests fail on the pre-fix product files in one invocation and pass
+  now; `scripts/verify_change.py --base 7393c90` result in the lane report.
+
 ### CC-CORE-0075 — The seam keeps its connections per identity and session generation (FR-CORE-509, BUG-0549) (2026-10-21)
 - Placement: pre-assigned to POOL24 (audit defect 24); CC-CORE-0073 and CC-CORE-0074 are
   other lanes'. Planned merge order: AU-PROXY, then POOL24.
