@@ -965,3 +965,119 @@ test that fails on the round's own pre-fix revision.
 | `core/redaction.py` `redact_for_record` | `_URL_USERINFO`, `_URL_USERINFO_SPACED`, `_BARE_USERINFO`, `redact_url` | `launch.argv`, `launch.target`, `project.targets` | a spaced top-level userinfo **fixed**; the pre-pass deleting a pair name (N7 neighbour 1, across `&` and `%26`) and a spaced userinfo holding `&` **pinned** |
 | `store_adapter.import_audit` / `_audit_endpoint` | `store_url` | `endpoint.url` | the `--append` fallback **pinned** (N3) |
 | `proxy/redact.py` `redact` | `redact_url` | stored raw messages, `flow_fts` | malformed and folded messages, `Link`'s `anchor`, relative custom URL headers **pinned** (N6) |
+
+### r4: the skeptic's regression after r3, fixed in the batch (branch `lane/REDACTURL-r4` from 20cd466)
+
+A skeptic's check of the batch found one more regression the batch itself introduced
+(fixed here under PA-0549(3c)) and one residual (pinned). Proof files are under
+`scratchpad/lanes/REDACTURL/r4/`.
+
+- **What failed.** `http://h/app/p.php?u=bob&next=%5C%5Cx%26password%3D<word>` (the value
+  decodes once to `\\x&password=<word>`) kept the password in `redact_url`,
+  `redact_url_identifiers`, `safe_ref`, `redact_for_record`, the proxy's request line,
+  `Referer` and `Location`; `page_url_is_clean` called the page clean and
+  `value_holds_secret` was False, so `import_spider` stored it. So did
+  `%5C%5Chost%26token%3D<word>`, a `%5C%2F` (`\/`) lead, a triple backslash, the leads
+  `\\/` and `\//`, the double-encoded spelling, a raw or encoded `/x` after the value,
+  the lead left raw (`next=\\x%26password%3D…`) and the same in a route's query
+  (`#/r?next=…`). Measured per consumer (`probe_r4_cases.py`, `probe_r4_cases.log`): on
+  20cd466 every one of the eleven spellings is kept by all eight consumers; on f939778
+  only the proxy's request line and `Referer` (round 2's N6, not this mechanism) keep
+  it; on the revision none. 2955f16 and 111b6fb kept them too (`probe.py`).
+- **What the defect was.** r3's class-(4) fix narrowed `_url_shaped` to an authority's
+  `\\` or `\/` but kept a value so led URL-shaped, and `_authority_start` read an
+  authority only after `scheme://` or a leading `//`. The walk (`_UrlWalk.path`) took
+  such a head for a path whose first segment `\\x&password=<word>` holds no `;` and no
+  escape, so it was returned unchanged; `_AUTHORITY_PAIRS`, which walks a nested
+  authority's raw pairs as a value, sits in the authority branch and was never reached.
+  f939778 had no backslash rule: it split the value into pairs and redacted it.
+- **Five whys.** The password was kept because the pair list was never split. It was
+  never split because the walk read the value as a path segment. It read a path because
+  `_authority_start` and `_url_shaped` disagreed about which leads start an authority:
+  r3 changed one and not the other. That went unseen because r3's differential
+  (`r3/sweep2.py`) had no value led by `\\` or `\/` -- the very leads r3's change kept
+  URL-shaped (its prefixes had `https:\\` and `/\` only). **Root cause:** the
+  differential PA-0556(8) requires was generated from the author's list of shapes, not
+  from the conditions the change itself added, so the branch the change created was the
+  one case it never drove.
+- **Measured.** Node 22's `URL` (`r4/whatwg_bs.js`, `whatwg_bs.log`): relative to a
+  special base, `\\x&…`, `\/x&…`, `\\\x&…`, `\\/x&…`, `\//x&…`, `/\x&…`, `//x&…` and
+  `///x&…` all have host `x&password=…`: the authority starts after the whole run of
+  `/` and `\`; a single `\x&…` is a path (`/x&…` on the base's host).
+- **Fix** (`fuzzlab/core/redaction.py`; CC-CORE-0076's r4 sub-bullet; FR-CORE-537 in
+  place). `_authority_start(head, nested)`: in a nested value a head led by `\\` or `\/`
+  -- the leads `_url_shaped` takes for an authority -- has its authority after the rest
+  of its run of `/` and `\` (`_SLASH_RUN`), so `_UrlWalk.path` reaches the authority
+  branch and walks `x&password=<word>` as a value (pairs split, name redacted). A
+  top-level URL's head is unchanged (its authority is its identity and never walked: a
+  backslash read there would stop its `;` parameters being walked).
+- **Tests** (`tests/test_redaction_nested.py`, "r4"): `_BACKSLASH_AUTHORITY_PAIRS` (the
+  eleven spellings) through
+  `test_a_backslash_led_authoritys_pair_list_is_redacted_by_every_url_consumer` (both
+  redactors, `safe_ref`, `redact_for_record`, the proxy's request line, `Referer` and
+  `Location`, `page_url_is_clean`, `value_holds_secret`, collected by the shared helper
+  `_url_consumers_keeping` before one assertion) and
+  `test_a_backslash_led_authoritys_pair_list_stores_no_secret_through_import_spider`;
+  the guard `test_a_clean_backslash_led_value_is_left_byte_identical` (4 clean
+  spellings, a top-level path parameter's included). The plain runner on a `git archive`
+  of 20cd466's `fuzzlab/` (`r4/plain_20cd466.log`): all 22 new cases fail, each an
+  `AssertionError` on its own assertion (the helper's `== []`, the store's leak check),
+  while the guard's 4 cases and r3's 37 in-batch-regression cases pass there; on the
+  revision the whole file passes (`r4/plain_new.log`: 556 ok, its four strict xfails
+  among them).
+- **The differential, extended** (`r4/sweep3.py`: r3's `sweep2.py` with the leads `\\`,
+  `\/`, `\\\`, `\\/`, `\//`, `\/\`, `\\\\` and `///`, which its encodings spell encoded,
+  and a seventh encoding keeping the lead raw; 152 880 URLs through both redactors,
+  `safe_ref`, `redact_for_record`, `page_url_is_clean` and `value_holds_secret`;
+  `r4/sweep_diff.py`): **the revision leaks in 0 cases f939778 redacted and in 0 cases
+  20cd466 redacted**; it improves 68 083 against f939778 and 10 008 against 20cd466.
+  20cd466 against f939778 on the same sweep: 5 607 regressed cases (this class, unseen by
+  `sweep2.py`). A benign differential with the same leads (`r4/benign2.py`, 25 536 URLs
+  holding no secret) is identical between 20cd466 and the revision.
+- **Residual pinned (not a regression: f939778 kept it too).**
+  `tests/test_redaction_residual_pins.py::test_a_slash_led_authoritys_pair_list_encoded_once_is_redacted_by_redact_url`
+  (strict, `raises=AssertionError`, owner CORE `_authority_start`): `next=%2F%5Cx%26
+  password%3D<word>` decodes once to `/\x&password=<word>`, whose `/\` Node 22 reads as
+  an authority start and the walk as a path, so `redact_url` keeps the password. r4's
+  measurement (`probe_slash.py`) found the other `/`-led runs that are not exactly `//`
+  the same on f939778, 20cd466 and the revision (`///`, `/\\`, `/\/`, `////`), so the
+  pin has five cases, each failing on its stated assertion on the revision
+  (`r4/pins_plain_new.log`) and on 20cd466 (`r4/pins_plain_20cd466.log`). It is the
+  encoded sibling of `::test_a_backslash_led_pair_list_decoded_once_is_held_secret`
+  (whose first assertion, `value_holds_secret`, stops before any redactor is judged, so
+  a sibling, not an extension, covers `redact_url`).
+- **Correction to r3's claim.** r3 listed `_AFTER_FINAL` (21 spellings) as spellings
+  f939778's URL redactors redacted and 111b6fb kept. The skeptic measured three that
+  f939778 kept too, and `r4/probe_after_final.py` confirms it: cases 5 and 6 (0-based;
+  group 1's `/go/` spellings, a spaced userinfo in a nested path segment) and case 12
+  (group 2's `#/r?next=a%3Dhttps…`, a pair-list userinfo in a route's query) are kept on
+  f939778 by both URL redactors, the proxy's `Location`, `page_url_is_clean` and
+  `value_holds_secret`, and cases 5 and 12 by `safe_ref` and `redact_for_record` too
+  (case 6's raw `https://bob:…@` matched those two's own userinfo patterns). They are
+  **not regressions against f939778**: they are fixed by the same r3 change as their
+  group's regression (class 1's authority through whitespace; class 2's `_Whole` for a
+  pair-list userinfo), as N1 (B) is by class 3's. The probe also shows case 14's
+  `value_holds_secret` False on f939778 (its URL redactors redacted it). The test
+  file's comment is corrected; r3's "41 new cases fail on 111b6fb" stands.
+- **The round's run** (one pytest invocation, `FUZZLAB_PYTEST_LOCK_WAIT=7000`, `-n 3
+  --dist loadfile`, of r3's 17 files -- every test file importing
+  `fuzzlab.core.redaction`, the pins file and `tests/test_store_adapter.py`;
+  `scratchpad/lanes/REDACTURL/r4_run.sh`, `r4_run.log`): `1528 passed, 47 xfailed, 3
+  warnings in 496.76s` (exit 0; the 47 xfails are r3's 42 and the 5 new pin cases; no
+  skip, no failure; the warnings are a starlette deprecation and a `fork()` notice in
+  other files' tests; two comment-only edits to the `_AFTER_FINAL` comment of
+  `tests/test_redaction_nested.py` landed about 80 s into the run, after collection, and
+  change no code).
+- **Recurrence review.** The lane's fifth pass at the class, and a recurrence of r3's own
+  defect (a regression the batch introduced, unseen by its tests). **Prior-preventive-
+  action failure analysis: PA-0556(8) (a generated differential against the pre-fix
+  revision before a round is reported) was followed but too narrow.** r3 ran it
+  (90 720 + 12 600 URLs, "regresses none") over prefixes its author chose; it did not
+  require the generator to drive the conditions the change itself adds, and the change's
+  new branch (a `\\` or `\/` lead kept URL-shaped) was the one shape absent. PA-0556
+  gains item 9 (in the lane's doc texts): the differential's inputs are derived from the
+  diff -- for every condition the change adds or alters (each literal a changed
+  predicate tests: a prefix, a character class, a separator) at least one input on each
+  side of it, in every encoding the sweep has, listed in the round's report -- and a
+  claim that a listed spelling was redacted before is measured on the pre-fix revision
+  per spelling, never inferred from its group.

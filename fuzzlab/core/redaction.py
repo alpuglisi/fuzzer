@@ -312,20 +312,42 @@ def _url_shaped(text: str) -> bool:
     its pairs never split). A single leading backslash is not an authority, so
     ``\\host&token=…`` is a pair list as f939778 walked it (BUG-0556 after the final
     round: round 2 took any leading backslash for a URL, whose path segments are never
-    split into pairs)."""
+    split into pairs). The authority after a ``\\\\`` or ``\\/`` lead is read and walked
+    like one after ``//`` (`_authority_start`, BUG-0556 r4)."""
     if _SCHEME.match(text) or text.startswith(("/", "\\\\", "\\/")):
         return True
     m = _RAW_QUERY.search(text)
     return m is not None and m.group(0) in "?#"
 
 
-def _authority_start(head: str) -> int | None:
-    """Where ``head``'s authority starts (after ``scheme://`` or a leading ``//``), or
-    None when it has none (a path)."""
+#: A run of ``/`` and ``\``: the WHATWG parser starts a special URL's authority after the
+#: whole run (measured on Node 22's ``URL``: ``\\x&…``, ``\/x&…``, ``\\\x&…``,
+#: ``\\/x&…`` and ``\//x&…`` all have host ``x&…``; `scratchpad/lanes/REDACTURL/r4/
+#: whatwg_bs.js`).
+_SLASH_RUN = re.compile(r"[/\\]*")
+
+
+def _authority_start(head: str, nested: bool = False) -> int | None:
+    """Where ``head``'s authority starts (after ``scheme://`` or a leading ``//``; in a
+    nested value also after a leading ``\\\\`` or ``\\/`` and the rest of its run of
+    ``/`` and ``\\``, the leads `_url_shaped` takes for an authority), or None when it
+    has none (a path).
+
+    The backslash leads are read only in a nested value (BUG-0556 r4): the after-the-
+    final-round fix kept a value led by ``\\\\`` or ``\\/`` URL-shaped, but this read no
+    authority in it, so ``\\\\x&password=…`` (``next=%5C%5Cx%26password%3D…``) was walked
+    as one path segment whose pairs were never split, and every URL consumer kept the
+    password f939778 had redacted. A top-level URL's own head is unchanged: its
+    authority is its identity and is never walked, so reading one there would stop its
+    ``;`` parameters being walked."""
     m = _SCHEME.match(head)
     if m:
         return m.end()
-    return 2 if head.startswith("//") else None
+    if head.startswith("//"):
+        return 2
+    if nested and head.startswith(("\\\\", "\\/")):
+        return _SLASH_RUN.match(head).end()
+    return None
 
 
 class _UrlWalk:
@@ -338,8 +360,9 @@ class _UrlWalk:
       fragment pair, as before; `PLACEHOLDER` with ``placeholder``), `PLACEHOLDER` when
       nested inside another value;
     - a value with structure of its own is walked: a nested URL (`_url_shaped`: a
-      leading scheme, ``/`` or a backslash, or a ``?`` or ``#`` before any ``=``, ``&`` or
-      ``;``: its path parameters, query and fragment, and its authority and each path
+      leading scheme, ``/``, ``\\\\`` or ``\\/``, or a ``?`` or ``#`` before any ``=``,
+      ``&`` or ``;``: its path parameters, query and fragment, and its authority (after
+      a backslash lead's whole run too, `_authority_start`) and each path
       segment still percent-encoded decoded one layer and walked as a value; with
       ``identifiers``, a token in its host or path redacts the whole outer value) or a
       query string (``=``, ``&`` or ``;``: its pairs, a URL in a pair's value included);
@@ -405,12 +428,13 @@ class _UrlWalk:
         route (``nested``) also its authority -- decoded (`layer`) when it holds an
         escape, walked as a value when it holds a raw ``=``, ``&`` or ``;`` -- and each
         segment still percent-encoded (`layer`). A top-level URL's own authority and
-        segments are its identity, never decoded (BUG-0556 R3)."""
+        segments are its identity, never decoded (BUG-0556 R3). A nested head led by
+        ``\\\\`` or ``\\/`` has its authority after the run (`_authority_start`; r4)."""
         self.tick(head)
         if ";" not in head and not (nested and ("%" in head or "&" in head
                                                 or "=" in head)):
             return head
-        authority = _authority_start(head)
+        authority = _authority_start(head, nested)
         if authority is None:
             start = 0
         else:

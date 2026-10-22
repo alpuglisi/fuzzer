@@ -147,6 +147,36 @@ Newest first.
       R4 and R5; new `tests/test_redaction_residual_pins.py` pins the rest (N1 (A), N2
       items 2-3, the backslash value, N3's `--append`, N6, N7 neighbour 1 across `&` and
       `%26`, a spaced userinfo holding `&`, N8's three oracle blind spots).
+  - *(r4, 2026-10-22, branch `lane/REDACTURL-r4` from 20cd466: a skeptic's check of the
+    batch; BUG-0556 "r4". The owner's rule as above: the batch's own regression fixed,
+    the residual pinned.)*
+    - **The batch's regression, fixed:** `_authority_start(head, nested)` reads, in a
+      nested value, the authority after a leading `\\` or `\/` and the rest of its run of
+      `/` and `\` (`_SLASH_RUN`; measured on Node 22, `r4/whatwg_bs.js`: `\\x&…`,
+      `\/x&…`, `\\\x&…`, `\\/x&…` and `\//x&…` all have host `x&…`), so `_UrlWalk.path`
+      walks such an authority's raw pairs as a value. r3 kept a value so led URL-shaped
+      (`_url_shaped`) while reading no authority in it, so `next=%5C%5Cx%26password%3D…`
+      (decoded once: `\\x&password=…`), `%5C%5Chost%26token%3D…`, a `\/` lead, a triple
+      backslash, double encoding and a `/x` after it were walked as one path segment:
+      2955f16, 111b6fb and 20cd466 kept the secret in both URL redactors, `safe_ref`,
+      `redact_for_record`, the proxy's request line, `Referer` and `Location`,
+      `page_url_is_clean` (True), `value_holds_secret` (False) and `import_spider`;
+      f939778 redacted it. A top-level URL's head is unchanged.
+    - **Correction (r3's sub-bullet above):** of r3's 21 `_AFTER_FINAL` spellings, cases
+      5, 6 and 12 (0-based: the two `/go/` spaced-userinfo spellings and the route
+      query's pair-list userinfo) were kept by f939778 too (the skeptic's measurement;
+      `r4/probe_after_final.py`): they are not regressions against f939778 but are fixed
+      by the same change as their class's regression (classes 1 and 2), as N1 (B) is by
+      class 3's; case 14's `value_holds_secret` was False on f939778 too.
+    - Tests: `tests/test_redaction_nested.py` gains `_BACKSLASH_AUTHORITY_PAIRS` (11
+      spellings) through every URL consumer (the shared helper
+      `_url_consumers_keeping`, which r3's in-batch test now uses too) and through
+      `import_spider`, each failing on 20cd466 on its own assertion, and a benign guard
+      (4 cases); the `_AFTER_FINAL` comment is corrected. The residual
+      `next=%2F%5Cx%26password%3D…` (`/\x&…` decoded once; and `///`, `/\\`, `/\/`,
+      `////` leads, measured the same; on f939778 too) is pinned:
+      `tests/test_redaction_residual_pins.py::test_a_slash_led_authoritys_pair_list_encoded_once_is_redacted_by_redact_url`
+      (strict, `raises=AssertionError`, 5 cases).
 - Impact (other components / project):
   - Every producer that calls `redact_url` now redacts nested credential names, `;`
     pairs, path parameters and query-shaped fragments: **PROXY** (flow history's URL,
@@ -206,6 +236,13 @@ Newest first.
     leak differential (90 720 + 12 600 URLs) regresses none against f939778 or 111b6fb.
     The new branches are one linear pass each; the linearity oracle passes at 500 and
     4000 items.
+  - *(r4:)* over-redaction (fail closed, accepted): a nested value led by `\\` or `\/`
+    whose authority holds a raw `=`, `&` or `;` now has it walked as a pair list (as a
+    `//`-led one already did). The extended leak differential (`r4/sweep3.py`, 152 880
+    URLs: r3's `sweep2.py` with eight backslash and slash leads and the lead left raw)
+    leaks in 0 cases f939778 redacted and in 0 cases 20cd466 redacted; a benign one of
+    25 536 URLs (`r4/benign2.py`) is identical to 20cd466's. `_SLASH_RUN` reads only the
+    lead's run, once per nested head.
 - Deliverables:
   - [x] `_UrlWalk`, `_walk_url`, `value_holds_secret`, `stored_value`,
     `strip_secret_path_params`; `redact_url`, `redact_url_identifiers`,
@@ -234,6 +271,11 @@ Newest first.
     on four revisions; the residual pins file; FR-CORE-537 amended in place (the stated
     gaps name the pins); BUG-0556 "Residuals after the owner's final round"; PA-0556
     item 8, SP-17 and the doc texts amended ("r3 changes") — done
+  - [x] *(r4)* the skeptic's regression in the owner (`_authority_start`), its tests
+    proven on 20cd466, the extended differential against f939778 and 20cd466, the
+    residual pinned, r3's `_AFTER_FINAL` comment and claim corrected; FR-CORE-537
+    amended in place; BUG-0556 "r4"; PA-0556 item 9, SP-17 and the doc texts amended
+    (in "r3 changes") — done
 - Effectiveness (assessed 2026-10-22): the six reported spellings stored their token
   before (measured by `scratchpad/lanes/REDACTURL/exp/repro.py` on 7393c90) and store
   none after; the new tests fail on the pre-fix product files in one invocation and pass
@@ -259,7 +301,13 @@ Newest first.
   its stated assertion on the revision (`r3/pins_plain.log`); the round's run
   (`r3_run.log`, one invocation of 17 files): 1502 passed, 42 xfailed (the 37 pins, R1,
   R2, R4, R5 and BUG-0554's), no failure or skip. The harness result is the
-  orchestrator's at merge.
+  orchestrator's at merge. *(r4:)* the 22 new cases fail on 20cd466's `fuzzlab/` on
+  their own assertions and the whole file passes on the revision (plain runner,
+  `r4/plain_20cd466.log`, `r4/plain_new.log`); each of the 5 new pin cases fails on its
+  stated assertion (`r4/pins_plain_new.log`); the differential's counts are above; the
+  round's run (`r4_run.log`, one invocation of the same 17 files): `1528 passed, 47
+  xfailed, 3 warnings in 496.76s`, exit 0 (no skip, no failure). The harness result is
+  the orchestrator's at merge.
 
 ### CC-CORE-0075 — The seam keeps its connections per identity and session generation (FR-CORE-509, BUG-0549) (2026-10-21)
 - Placement: pre-assigned to POOL24 (audit defect 24); CC-CORE-0073 and CC-CORE-0074 are

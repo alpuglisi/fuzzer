@@ -331,14 +331,24 @@ def test_the_review_round_2_spellings_store_no_secret_through_import_spider(tmp_
 #: ``correct%20horse`` (`scratchpad/lanes/REDACTURL/r3/whatwg_ws.js`; a VT, FF, NBSP or
 #: U+3000 is kept and encoded too, a tab or newline removed).
 _PHRASE = "correct " + _PASS
-#: Spellings f939778's URL redactors redacted and 111b6fb kept in at least one consumer
-#: (``(url, secret)``): the fix check's regression after the final round (N2 item 1 = N7
-#: neighbour 2: `_AUTHORITY_AT`'s authority stopped at whitespace) and the three the r3
-#: differential sweep found beside it (a userinfo that is also a pair list, replaced
-#: before the walk split it; a nested authority holding raw pair structure, never walked
-#: once round 2's `_url_shaped` sent ``a=https://…`` to it; a value led by one backslash
-#: taken for a URL); and N1 (B) (kept on f939778 too), the same mechanism as the third,
-#: fixed with it.
+#: Spellings 111b6fb kept in at least one consumer (``(url, secret)``): the fix check's
+#: regression after the final round (N2 item 1 = N7 neighbour 2: `_AUTHORITY_AT`'s
+#: authority stopped at whitespace) and the three the r3 differential sweep found beside
+#: it (a userinfo that is also a pair list, replaced before the walk split it; a nested
+#: authority holding raw pair structure, never walked once round 2's `_url_shaped` sent
+#: ``a=https://…`` to it; a value led by one backslash taken for a URL). Most are
+#: regressions: f939778's URL redactors redacted them. Not all (corrected in r4, by the
+#: skeptic's measurement and `scratchpad/lanes/REDACTURL/r4/probe_after_final.py`):
+#: cases 5 and 6 of `_AFTER_FINAL` (0-based; group 1's two ``/go/`` spellings, a spaced
+#: userinfo in a nested path segment) and case 12 (group 2's ``#/r?next=a%3Dhttps…``, a
+#: pair-list userinfo in a route's query) were kept by f939778 too, by both URL
+#: redactors, the proxy's ``Location``, `page_url_is_clean` and `value_holds_secret`
+#: (cases 5 and 12 by `safe_ref` and `redact_for_record` as well). They are not
+#: regressions against f939778: they are fixed by the same change as their group's
+#: regression (r3's class 1 or 2), and disclosed as such in BUG-0556 and CC-CORE-0076.
+#: So are N1 (B) (group 3's last four, kept on f939778 too, the same mechanism as the
+#: third class, fixed with it) and case 14's `value_holds_secret` (False on f939778;
+#: its URL redactors redacted it).
 #:
 #: 1. a userinfo holding whitespace: encodeURIComponent's spelling, raw, a tab, an NBSP,
 #: in a nested path segment, a raw space at the top and in a route's query
@@ -403,17 +413,13 @@ def _next_value(url: str) -> str:
     return re.split(r"[?&]next=", url, maxsplit=1)[1]
 
 
-@pytest.mark.parametrize("url,secret", _AFTER_FINAL)
-def test_an_in_batch_regression_spelling_is_redacted_by_every_url_consumer(url, secret):
-    """BUG-0556 after the final round (PA-0549(3c): a regression the batch introduced is
-    fixed in the batch): each spelling is redacted by both URL redactors, the evidence
-    reference, the record redactor, the proxy's request line, ``Referer`` and
-    ``Location``, is never a clean page, and its value is one `value_holds_secret` holds
-    for. Every consumer is checked before the one assertion, so 111b6fb fails there,
-    naming what kept the secret."""
+def _url_consumers_keeping(url: str, secret: str) -> list[str]:
+    """Every URL consumer that keeps ``secret`` of ``url``: both URL redactors, the
+    evidence reference, the record redactor, the proxy's request line and ``Referer``
+    and its ``Location``, `page_url_is_clean` (True) and `value_holds_secret` of the
+    ``next`` value decoded once (False; judged where the code has it)."""
     from fuzzlab.core.trace import safe_ref
     from fuzzlab.proxy.redact import redact
-    assert _leaks(url, secret)                               # not vacuous
     target = url.split("://", 1)[1].partition("/")[2]
     request = f"GET /{target} HTTP/1.1\r\nHost: h\r\nReferer: {url}\r\n\r\n".encode()
     response = f"HTTP/1.1 302 Found\r\nLocation: {url}\r\n\r\n".encode()
@@ -426,10 +432,22 @@ def test_an_in_batch_regression_spelling_is_redacted_by_every_url_consumer(url, 
         ("proxy Location", redact(response).decode("latin-1"))) if _leaks(out, secret)]
     if R.page_url_is_clean(url):
         kept.append("page_url_is_clean")
-    holds = getattr(R, "value_holds_secret", None)       # judged where the code has it
+    holds = getattr(R, "value_holds_secret", None)
     if holds is not None and not holds(unquote(_next_value(url))):
         kept.append("value_holds_secret")
-    assert kept == []
+    return kept
+
+
+@pytest.mark.parametrize("url,secret", _AFTER_FINAL)
+def test_an_in_batch_regression_spelling_is_redacted_by_every_url_consumer(url, secret):
+    """BUG-0556 after the final round (PA-0549(3c): a regression the batch introduced is
+    fixed in the batch): each spelling is redacted by both URL redactors, the evidence
+    reference, the record redactor, the proxy's request line, ``Referer`` and
+    ``Location``, is never a clean page, and its value is one `value_holds_secret` holds
+    for. Every consumer is checked before the one assertion, so 111b6fb fails there,
+    naming what kept the secret."""
+    assert _leaks(url, secret)                               # not vacuous
+    assert _url_consumers_keeping(url, secret) == []
     _api("value_holds_secret")
 
 
@@ -474,6 +492,86 @@ def test_an_in_batch_regression_spelling_stores_no_secret_through_import_spider(
         dump = _dump(store)
     assert any(p.startswith(urlsplit(url).path) for p in pages)    # not vacuous
     assert not _leaks(dump, secret)
+
+
+# --- r4: the skeptic's regression after r3 (BUG-0556; PA-0549(3c)) ------------------------
+_BS = "\\"
+#: A value led by ``\\`` or ``\/`` holding a pair list, below the page's own layer (the
+#: skeptic's ``next=%5C%5Cx%26password%3D<word>``, which decodes once to
+#: ``\\x&password=<word>``): another sensitive name, the ``\/`` lead, a triple
+#: backslash, the leads ``\\/`` and ``\//`` (Node 22 starts the authority after the whole
+#: run, `scratchpad/lanes/REDACTURL/r4/whatwg_bs.js`), double encoding, a raw and an
+#: encoded ``/x`` after it, the lead left raw, and the same in a route's query. r3 kept
+#: such a value URL-shaped (`_url_shaped`) while `_authority_start` read no authority
+#: after a backslash, so the pair list was one path segment, never split: 2955f16,
+#: 111b6fb and 20cd466 kept the secret in every URL consumer; f939778 split the pairs
+#: and redacted it (`r4/probe.py`; `r4/sweep3.py`).
+_BACKSLASH_AUTHORITY_PAIRS = [
+    ("http://h/app/p.php?u=bob&next=" + quote(f"{_BS * 2}x&password={_WORD}", safe=""),
+     _WORD),
+    ("http://h/app/p.php?u=bob&next=" + quote(f"{_BS * 2}host&token={_WORD}", safe=""),
+     _WORD),
+    ("http://h/app/p.php?u=bob&next=" + quote(f"{_BS}/x&password={_WORD}", safe=""),
+     _WORD),
+    ("http://h/app/p.php?u=bob&next=" + quote(f"{_BS * 3}x&password={_WORD}", safe=""),
+     _WORD),
+    ("http://h/app/p.php?u=bob&next=" + quote(f"{_BS * 2}/x&password={_WORD}", safe=""),
+     _WORD),
+    ("http://h/app/p.php?u=bob&next=" + quote(f"{_BS}//x&password={_WORD}", safe=""),
+     _WORD),
+    ("http://h/app/p.php?u=bob&next="
+     + quote(quote(f"{_BS * 2}x&password={_WORD}", safe=""), safe=""), _WORD),
+    ("http://h/app/p.php?u=bob&next="
+     + quote(f"{_BS * 2}x&password={_WORD}", safe="") + "/x", _WORD),
+    ("http://h/app/p.php?u=bob&next=" + quote(f"{_BS * 2}x&password={_WORD}/x", safe=""),
+     _WORD),
+    (f"http://h/app/p.php?u=bob&next={_BS * 2}x" + quote(f"&password={_WORD}", safe=""),
+     _WORD),
+    ("http://h/app/#/r?next=" + quote(f"{_BS * 2}x&password={_WORD}", safe=""), _WORD),
+]
+
+
+@pytest.mark.parametrize("url,secret", _BACKSLASH_AUTHORITY_PAIRS)
+def test_a_backslash_led_authoritys_pair_list_is_redacted_by_every_url_consumer(url,
+                                                                                  secret):
+    """r4 (PA-0549(3c)): a value led by ``\\\\`` or ``\\/`` has its authority read after
+    the run (`_authority_start`), and one holding a pair list is walked as a value, so
+    every URL consumer -- both URL redactors, `safe_ref`, `redact_for_record`, the
+    proxy's request line, ``Referer`` and ``Location``, `page_url_is_clean` and
+    `value_holds_secret` -- redacts what f939778 redacted. Checked before the one
+    assertion, so 20cd466 fails there naming every consumer that kept it."""
+    assert _leaks(url, secret)                               # not vacuous
+    assert _url_consumers_keeping(url, secret) == []
+
+
+@pytest.mark.parametrize("url,secret", _BACKSLASH_AUTHORITY_PAIRS)
+def test_a_backslash_led_authoritys_pair_list_stores_no_secret_through_import_spider(
+        tmp_path, url, secret):
+    """The same spellings through the spider's rows and `import_spider` (20cd466 stored
+    the secret: the page was clean and the value held none)."""
+    from fuzzlab.tools.store_adapter import import_spider
+    _spider_db(tmp_path / "s.db", [url])
+    with Store(tmp_path / "u.db") as store:
+        import_spider(tmp_path / "s.db", store, store.start_run("auto", "h"))
+        pages = [r[0] for r in store.conn.execute("SELECT url FROM page").fetchall()]
+        dump = _dump(store)
+    assert any(p.startswith(urlsplit(url).path) for p in pages)    # not vacuous
+    assert not _leaks(dump, secret)
+
+
+@pytest.mark.parametrize("url", [
+    "http://h/app/p.php?u=bob&next=" + quote(f"{_BS * 2}host/x?y=1", safe=""),
+    "http://h/app/p.php?u=bob&next=" + quote(f"{_BS}/host&lang=en", safe=""),
+    f"http://h/app/p.php?u=bob&next={_BS * 2}host%26lang%3Den",
+    f"http://h/app/p.php;v={_BS * 2}host?u=bob",
+])
+def test_a_clean_backslash_led_value_is_left_byte_identical(url):
+    """The guard beside r4's fix: a clean backslash-led value (a host and a path, a
+    clean pair list, the lead left raw, a top-level path parameter, whose head is never
+    read for an authority) is left byte-identical and the page stays clean."""
+    for fn in (R.redact_url, R.redact_url_identifiers):
+        assert fn(url) == url, fn.__name__
+    assert R.page_url_is_clean(url)
 
 
 @pytest.mark.parametrize("value", [

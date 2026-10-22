@@ -15,6 +15,7 @@ reason names BUG-0556, the finding and the owner.
 from __future__ import annotations
 
 import re
+from urllib.parse import quote
 
 import pytest
 
@@ -132,6 +133,21 @@ def test_a_backslash_led_pair_list_decoded_once_is_held_secret(tmp_path):
     dump = _stored(tmp_path, [f"http://h/app/p.php?u=bob&next=/\\host%26token%3D{_WORD}"
                               "?y=1"])
     assert not _leaks(dump, _WORD)
+
+
+# --- the same value one layer down: the page URL's own walk (found by r4's skeptic) ------
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
+    "BUG-0556 residual after the final round, found by r4's skeptic (owner CORE, "
+    "core.redaction `_authority_start`): `next=%2F%5Cx%26password%3D<word>` decodes once "
+    "to `/\\x&password=<word>`, whose `/\\` Node 22's URL reads as an authority start "
+    "(host `x&password=<word>`) and the walk reads as a path, so `redact_url` keeps the "
+    "password; r4's measurement found the other '/'-led runs that are not exactly '//' "
+    "(`///`, `/\\\\`, `/\\/`, `////`) the same (on f939778 too: not a regression)"))
+@pytest.mark.parametrize("lead", ["/\\", "///", "/\\\\", "/\\/", "////"])
+def test_a_slash_led_authoritys_pair_list_encoded_once_is_redacted_by_redact_url(lead):
+    url = "http://h/app/p.php?u=bob&next=" + quote(f"{lead}x&password={_WORD}", safe="")
+    assert _leaks(url, _WORD)                                # not vacuous
+    assert not _leaks(R.redact_url(url), _WORD)
 
 
 # --- N3: `fuzzlab audit --append --store` ------------------------------------------------

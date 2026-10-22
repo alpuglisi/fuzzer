@@ -853,7 +853,9 @@ plugin registry. It is the layer that makes the store the integration bus.
     bare `;value`) path parameter in any segment; a query-shaped fragment (`#…?a=b`,
     `#a=b`) and a fragment route's path parameters; and, inside any of those values, a
     nested URL (a leading scheme `://`, `/`, or an authority's `\\` or `\/` -- a single
-    leading `\` is not one, *after the final round* -- or a `?` or `#` before any `=`,
+    leading `\` is not one, *after the final round*; the authority after such a lead
+    starts after its whole run of `/` and `\`, as Node 22's `URL` reads it, and is read
+    like one after `//`, *r4* -- or a `?` or `#` before any `=`,
     `&` or `;`: its path parameters, query and fragment), a nested query string (`=`, `&`
     or `;`: its pairs, a URL in a pair's value included), or a percent-encoding layer
     (decoded one layer, then walked again). A layer is decoded wherever it remains
@@ -872,7 +874,9 @@ plugin registry. It is the layer that makes the store the integration bus.
     a special scheme and any run of `/` or `\` (`https:///`, `https:\\`, `http:/`), or
     after two or more of them anywhere (a nested URL's path segment or fragment route,
     a value after a space), as `redact_for_record` and `core.trace.safe_ref` already
-    judged it. A URL's own scheme and `//` (its path walk) count only at its start.
+    judged it. A URL's own scheme and `//` (its path walk) count only at its start (in a
+    nested value also a leading `\\` or `\/`, *r4*; a top-level URL's head reads no
+    backslash authority: its authority is its identity).
     *(After the final round:)* the authority runs to `/`, `\`, `?` or `#` only, so a
     userinfo holding whitespace (a passphrase; Node 22: `correct%20horse`) is a
     credential; a userinfo holding a pair separator, raw or percent-encoded at any depth
@@ -936,7 +940,11 @@ plugin registry. It is the layer that makes the store the integration bus.
     `test_a_userinfo_in_a_top_level_path_segment_is_never_stored` (R3: the top-level
     route, a pair's name and a path segment are the page's identity, N2 item 3);
     `test_a_backslash_led_pair_list_decoded_once_is_held_secret` (`/\host&token=…` read
-    as a path by `_authority_start`);
+    as a path by `_authority_start`) and, *r4*,
+    `test_a_slash_led_authoritys_pair_list_encoded_once_is_redacted_by_redact_url`
+    (`next=%2F%5Cx%26password%3D…` and the `///`, `/\\`, `/\/`, `////` leads: a
+    `/`-led run that is not exactly `//` is read as a path by `_authority_start`, where
+    Node 22 starts an authority after it; on f939778 too);
     `test_a_record_never_deletes_a_pair_name_with_a_userinfo_pattern` and
     `test_a_record_strips_a_top_level_userinfo_holding_a_space_and_a_pair_separator`
     (`redact_for_record`'s userinfo pre-pass runs before the walk, N7 neighbour 1);
@@ -951,7 +959,8 @@ plugin registry. It is the layer that makes the store the integration bus.
     query string, a URL's userinfo -- credential names and identifier shapes, searched in
     the store, proxy history, the HTTP recorder, `safe_ref` and the project records; the
     review rounds' neighbouring spellings through every URL redactor and the store; the
-    in-batch regressions after the final round through every URL consumer and the store;
+    in-batch regressions after the final round, and r4's backslash-led authority's
+    pair list, through every URL consumer and the store;
     the benign list byte-identical; bounds and totality; an operation-count linearity
     oracle proven on quadratic variants); the stated gaps by
     `tests/test_redaction_residual_pins.py` (strict xfails).
