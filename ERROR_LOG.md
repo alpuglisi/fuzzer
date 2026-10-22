@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-22 — store adapter (a BLOB text of a finding page the floor rejects was stored verbatim; BUG-0556)
+- **Symptom:** the independent check of 1ad0fd0: an audit finding whose page `urlsplit` rejects with a `?` and whose `html_context` is a BLOB holding a secret was imported with the BLOB stored as `sink_context`; a str context is withheld. 7393c90's whole import raised on such a page and stored nothing.
+- **Root cause:** `_audit_text` returned any non-string unchanged before it reached the rejected page's withhold.
+- **Remediation:** the page is judged first; every non-NULL text of a page the floor rejects is `AUDIT_TEXT_WITHHELD`, whatever its type (CC-AUD-0059). Ten records the same check found untrue were corrected in the same change (BUG-0556 "After the push").
+- **Status:** Fixed
+
 ## 2026-10-22 — store adapter (gap 5 merge: `import_audit` raised `TypeError` on a BLOB finding page the pushed tree imported; BUG-0556)
 - **Symptom:** a per-finding check of 08eb900: an audit findings row whose `page_url` is a BLOB with no path (`b"http://h"`, `b"x://"`) imported on 7393c90 with the endpoint `/` and failed the whole import on 08eb900 with `TypeError` in `canonical_origin`.
 - **Root cause:** the batch's import rework reads the main origin through `canonical_origin`, and `_readable_origin` caught only `ValueError`; 7393c90 read the page through `to_path` alone.
@@ -31,7 +37,7 @@ Format per entry:
 - **Status:** Fixed (0 import failures where 7393c90 imported, 0 leaks it redacted); family (d) (651 URLs on 7393c90 and the revision alike, 183 of them redacted by the unpushed 144d234) pinned in `tests/test_redaction_residual_pins.py`; a name computed at run time is beyond the static guards, stated.
 
 ## 2026-10-22 — BUG-0556 r6 (144d234 kept what the pushed tree redacted, in five behaviours; layered on the pushed redactor)
-- **Symptom:** on 144d234, `core.trace.safe_ref` kept a userinfo password holding a `;` or `&` before a redacted piece (R1, 775 URLs; 146 stored in `trace_event` / `dg_flow` through `fuzzlab auto`'s trace recorder), `redact_for_record` and `safe_ref` merged pieces 7393c90 split on a tab, CR or LF (R2, 450), the proxy kept a quoted `Refresh` URL's tail and a second `url=` (R3, 384), every URL consumer kept a secret in a URL `urlsplit` rejects, where 7393c90 raised and its callers withheld it (A1, 1 329), and a duplicate `Location` / `Content-Location` kept one 7393c90's collapse dropped (A2): 2 104 of an independent check's 101 005 URLs.
+- **Symptom:** on 144d234, `core.trace.safe_ref` kept a userinfo password holding a `;` or `&` before a redacted piece (R1, 775 URLs; 146 stored in `trace_event` / `dg_flow` through `fuzzlab auto`'s trace recorder), `redact_for_record` and `safe_ref` merged pieces 7393c90 split on a tab, CR or LF (R2, 450), the proxy kept a quoted `Refresh` URL's tail and a second `url=` (R3, 384), every URL consumer kept a secret in a URL `urlsplit` rejects, where 7393c90 raised and its callers withheld it or, in proxy history, stored the URL cut at its first `?` (A1, 1 329), and a duplicate `Location` / `Content-Location` kept one 7393c90's collapse dropped (A2): 2 104 of an independent check's 101 005 URLs.
 - **Root cause:** the batch replaced the pushed redactor and proved each round by a differential enumerating what the replaced code did; each enumeration missed a behaviour (r5's, PA-0556(10), drove the pushed code's parsing, not its order of steps, its callers' splits, a header's grammar, its raises or its container's side effects).
 - **Remediation:** branch `lane/REDACTURL-r6` (CC-CORE-0076, CC-PROXY-0031 and CC-AUD-0059 r6 sub-bullets): `core/redaction_floor.py`, 7393c90's code frozen verbatim, run first by every URL consumer and the walk on its output only (`tests/test_redaction_floor.py` holds it); `import_audit` withholds a target the floor rejects and imports the rest; 29 test cases failing on 144d234 at their own assertions; PA-0556 item 11.
 - **Status:** Fixed (0 leaks the pushed tree redacted, on every corpus); three families the floor's output hides and 7393c90 kept too -- (a) a name joined across a removed tab, CR or LF, (b) the floor's `***@` in `safe_ref`, (c) the floor's 4096-character cut -- pinned in `tests/test_redaction_residual_pins.py` (16 strict xfails), their candidate rules stated.

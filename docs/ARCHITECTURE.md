@@ -1247,8 +1247,9 @@ tracked in the requirements files, not here.
     a URL's `&`/`;` query pairs, its path parameters, a query-shaped fragment and every
     URL, query string or percent-encoding layer nested in a value (FR-CORE-537,
     BUG-0556), a layer left encoded in any piece decoded and a URL's userinfo redacted
-    wherever a URL starts in a value; proxy history passes every value of every
-    URL-bearing header and the request line to `redact_url` (FR-PROXY-11); and
+    where a URL starts in a value (but the spellings pinned as N1(A) and N2); proxy
+    history runs the pushed redactor over the request line and every URL-bearing header
+    and the walk over its output (FR-PROXY-11); and
     `stored_value` is the one rule for a stored sibling value or example. Every URL
     redaction consumer is layered on the pushed redactor: `core/redaction_floor.py`
     holds 7393c90's own redaction code frozen verbatim (never edited;

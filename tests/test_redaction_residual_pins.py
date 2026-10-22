@@ -649,7 +649,9 @@ def test_import_audit_imports_a_finding_page_urlsplit_rejects_without_a_query(tm
     "`import_audit` / `_audit_endpoint` / `_audit_text`): a finding page stored as a BLOB "
     "is read by `to_path` as 7393c90 read it, so one with a path "
     "(`b\"http://h/app/p.php\"`, `b\"/app/p.php\"`) fails the whole import with "
-    "TypeError (`bytes.startswith` given a str), and one with an empty path is imported "
+    "TypeError (`bytes.startswith` given a str), one `urlsplit` rejects "
+    "(`b\"http://[h/x\"`) with ValueError in `to_path` (the merge's check), "
+    "and one with an empty path is imported "
     "but its texts are never judged against it (`_audit_text` judges a str page only), "
     "so a context quoting its query value stores it (`b\"http://h?token=<word>\"`); "
     "unreachable from the auditor "
@@ -660,6 +662,7 @@ def test_import_audit_imports_a_finding_page_urlsplit_rejects_without_a_query(tm
     (b"http://h/app/p.php", None),
     (b"/app/p.php", None),
     (b"http://h?token=" + _WORD.encode(), _WORD),
+    (b"http://[h/x", None),
 ])
 def test_import_audit_imports_a_blob_finding_page_and_judges_its_texts(tmp_path, page,
                                                                       secret):

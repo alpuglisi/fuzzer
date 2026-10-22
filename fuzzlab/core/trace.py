@@ -198,7 +198,8 @@ _WITHHELD = "(unparseable URL withheld)"
 def safe_ref(url: str) -> str:
     """A URL fit for a diagram or an export (BUG-0514):
 
-    - sensitive and identifier-like query values blanked, a SPA route's query too
+    - sensitive query values replaced and identifier-like ones blanked, a SPA route's
+      query too
       (`core.redaction.redact_url_identifiers`);
     - userinfo, sensitive ``;name=value`` path parameters and a query-shaped fragment's
       sensitive values (``#access_token=…``) replaced, by the record boundary

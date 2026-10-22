@@ -1176,12 +1176,13 @@ def _audit_text(text, page_url, *, url: bool = False):
     the rules' cut lengths, review round 2, N3). A ``url`` text (the target identifier,
     which may name another URL: a form action, a link) also passes
     `strip_secret_path_params` and `redact_url_identifiers` itself. The rest of a quoted
-    HTML snippet is body redaction's (audit defect 26). A non-string is returned as it
-    is, a text of a page stored as a BLOB is judged against nothing of that page (as on
-    7393c90, which judged no text), and a text whose URL the owner rejects
-    (``ValueError``: its floor, the pushed tree's redactor, raises on a URL ``urlsplit``
-    rejects that holds a ``?``) is `AUDIT_TEXT_WITHHELD`, never stored (BUG-0556 r6,
-    A1). **Not total** (corrected at the merge; BUG-0556, "At the merge", R4): a page
+    HTML snippet is body redaction's (audit defect 26). A text whose page URL the owner
+    rejects (``ValueError``: its floor, the pushed tree's redactor, raises on a URL
+    ``urlsplit`` rejects that holds a ``?``) is `AUDIT_TEXT_WITHHELD`, never stored,
+    whatever its type -- a BLOB too (BUG-0556 r6, A1; the merge's check, P2) -- and a
+    NULL stays NULL. Otherwise a non-string is returned as it is, and a text of a page
+    stored as a BLOB is judged against nothing of that page (as on 7393c90, which judged
+    no text). **Not total** (corrected at the merge; BUG-0556, "At the merge", R4): a page
     ``urlsplit`` rejects without a ``?`` passes the floor unread, and the
     ``urlparse(page_url)`` below raises ``ValueError``, uncaught, failing the whole
     import as 7393c90's ``to_path`` failed it (pinned; candidate rule, not built: catch
@@ -1190,15 +1191,18 @@ def _audit_text(text, page_url, *, url: bool = False):
 
     from fuzzlab.core.redaction import (PLACEHOLDER, redact_url_identifiers, stored_value,
                                         strip_secret_path_params)
+    clean = None
+    if isinstance(page_url, str):
+        try:
+            clean = redact_url_identifiers(page_url)
+        except ValueError:                  # the owner's floor rejects it (A1): withheld,
+            # whatever the text's type -- a BLOB too (the merge's check, P2); NULL stays NULL
+            return text if text is None else AUDIT_TEXT_WITHHELD
     if not isinstance(text, str):
         return text
     swaps: dict[str, str] = {}
     secrets: list[str] = []
     if isinstance(page_url, str):
-        try:
-            clean = redact_url_identifiers(page_url)
-        except ValueError:                  # the owner's floor rejects it (A1): withheld
-            return AUDIT_TEXT_WITHHELD
         if clean != page_url:
             swaps[page_url] = clean
         parts = urlparse(page_url)

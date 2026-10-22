@@ -305,6 +305,7 @@ Newest first.
   - [x] *(At the merge)* R4's records corrected (not total: a page `urlsplit` rejects
     without a `?` fails as on 7393c90) and pinned; D1(b) fixed with its test, the rest
     pinned; FR-AUD-31 amended in place — done
+- *(After the push: the merge's check, 2026-10-22.)* `store_adapter._audit_text` withholds every non-NULL text of a page the floor rejects, a BLOB included (P2; it was stored verbatim). Test: `tests/test_redaction_nested.py::test_merge_p2_a_blob_text_of_a_page_its_floor_rejects_is_withheld`. The BLOB pin gains `b"http://[h/x"` (fails the import on both trees). FR-AUD-31 states the rejected-page import (P1, P3). BUG-0556, "After the push".
 - Effectiveness (assessed 2026-10-22): `scratchpad/lanes/REDACTURL/exp/repro2.py` found
   the token in `endpoint.url`, `parameter.example` and `form.entries` (spider forms and
   disco captures) before, and only R1's two rows after; the harness result is in the

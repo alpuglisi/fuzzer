@@ -871,8 +871,10 @@ plugin registry. It is the layer that makes the store the integration bus.
     `_prepare_contained` stores every body `OMIT_FAILED` and the flow's own URL cut at
     its first `?`, what precedes it as received -- a `;` path parameter or a fragment
     there is kept, also when only a `Location`, `Refresh` or `Content-Location` value
-    raised (family (d) below); `import_audit` stores a finding's texts
-    `AUDIT_TEXT_WITHHELD` when its page or target holds a `?`, and fails the whole
+    raised (family (d) below); `import_audit` stores both texts of a finding
+    `AUDIT_TEXT_WITHHELD` when the floor rejects its page (one holding a `?`; a BLOB or
+    str text alike, NULL kept, the merge's check P2), only its target when the floor
+    rejects the target alone (its context is then judged as any other), and fails the whole
     import on a page `urlsplit` rejects without one, as 7393c90's did (FR-AUD-31,
     pinned). Held by `tests/test_redaction_floor.py`: the floor's every definition, its
     decorators included, hashes to 7393c90's text; each consumer is bound once in its
@@ -958,8 +960,9 @@ plugin registry. It is the layer that makes the store the integration bus.
     `MAX_VALUE_CHARS` (64 KiB) per value. A value past either bound, one with a layer
     still undecoded at the last level, or one the walk fails on is redacted whole at
     its top level (`""` with identifiers, `PLACEHOLDER` otherwise; a path parameter
-    `PLACEHOLDER`). Total on every URL `urlsplit` accepts (one it rejects raises
-    `ValueError` from the floor, *r6*); linear per level. *(Review rounds 1-2, PA-0135(2):)* the walk
+    `PLACEHOLDER`). Total on every URL `urlsplit` accepts (one it rejects that holds a `?` raises
+    `ValueError` from the floor, *r6*; one without a `?` passes the floor unread and is
+    returned, corrected at the merge's check); linear per level. *(Review rounds 1-2, PA-0135(2):)* the walk
     exposes its operation counts (`WalkCounter`: `steps`, the characters every step was
     given, and `calls`), and its linearity oracle also counts the C-level work of every
     call the module makes (the characters each percent-decode, re-encode, pair split,

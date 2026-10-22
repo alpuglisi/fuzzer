@@ -83,7 +83,12 @@ that shares the store, never a mandatory pipeline (D5).
     `core.redaction.redact_url` finds (`;` pairs and path parameters, a query-shaped
     fragment, nested values, a nested URL's userinfo), with or without a query: the
     target and those headers are always passed to it whole (a `;jsessionid=` path
-    parameter in a URL with no query was kept). *(Review round 2, `CC-PROXY-0031`:)*
+    parameter in a URL with no query was kept). *(Since r6, corrected at the merge's
+    check:)* the message passes the pushed tree's `redact` (the floor) first and the
+    walk (`_walk`, `_walk_names`) on its output, so `redact_url` itself is no longer
+    called on each value: the floor reaches its `redact_url` for the target and the
+    `Location` / `Content-Location` values that hold a `?` and for `Refresh`'s `url=`
+    runs, as 7393c90 did. *(Review round 2, `CC-PROXY-0031`:)*
     **every value of every URL-bearing header**, duplicates included and rewritten in
     place (order and every other line byte-exact): `Location`, `Content-Location`,
     `Referer`, `Origin`, `Destination`, `X-Original-URL`, `X-Rewrite-URL`, `Ping-From`,

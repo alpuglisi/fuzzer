@@ -2182,3 +2182,10 @@ Juice Shop lab is complete.
 - **Cause:** widening a catch to make the failing case pass, before measuring what else the wider catch admits.
 - **Status:** corrected before the report.
 
+### F-279 — I pushed the gap 5 merge with records I had applied or written without measuring them, and its check found ten untrue claims
+- **What:** the merge commit 1ad0fd0 carried lane texts and my own ARCHITECTURE inserts that said the floor raises on every URL `urlsplit` rejects, that proxy history passes every URL value to `redact_url` and withholds what the floor rejects, that a page no path is read from gets its texts withheld, that the guards model every way a name is bound, and that a BLOB rejected page is pinned; none was true of the code. The independent records check ran in parallel with the push's verification, so they were pushed.
+- **Evidence:** the check's result (`subagents/workflows/wf_583842ba-bad/journal.jsonl`, the records lens); BUG-0556 "After the push".
+- **Impact:** false records on the remote for one commit; corrected in the next.
+- **Cause:** I corrected the claims the earlier checks had named and applied the rest of the lane's texts as written, without measuring each against the code, and I let the push go before the records check returned.
+- **Status:** corrected (BUG-0556 "After the push"); the recurrence note there asks that a records-truth check gate the push.
+

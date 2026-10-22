@@ -650,6 +650,16 @@ budget where a vulnerability is plausible.
       (`tests/test_redaction_residual_pins.py::test_import_audit_imports_a_blob_finding_page_and_judges_its_texts`).
       Unreachable from the auditor itself (`fetcher.log_finding` writes the crawler's
       str URL).
+    - *(The merge's check, 2026-10-22.)* A page `urlsplit` rejects that holds a `?`
+      made 7393c90's whole import raise, so it stored nothing; it is imported now, and
+      every non-NULL text of that finding is `AUDIT_TEXT_WITHHELD` whatever its type (a
+      BLOB `html_context` was stored verbatim before this fix:
+      `tests/test_redaction_nested.py::test_merge_p2_a_blob_text_of_a_page_its_floor_rejects_is_withheld`).
+      The other findings of the same DB, and the finding's rule metadata (`category`,
+      `transaction_type`, `reference`), are stored as both trees store them in a run
+      without such a page -- neither redacts them; 7393c90 kept them out only by
+      failing the import. A BLOB page `urlsplit` rejects (`b"http://[h/x"`) fails the
+      import on both trees (pinned, the BLOB pin's fourth case).
   - `audit.engine.evaluate` writes each candidate's request fields through
     `core.reqctx.point_evidence` and stamps `identity_scope` and `context_id` (SP-57,
     FR-FUZZ-66). `InjectionPoint` carries `bindings` and `replay_refusal`.

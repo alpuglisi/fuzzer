@@ -1820,3 +1820,36 @@ docstrings), `tests/test_redaction_nested.py` (the rename, D1(b)'s test, the
 `tests/test_redaction_residual_pins.py` (three pins), FR-CORE-537, FR-AUD-31,
 FR-PROXY-11 (in place), CC-CORE-0076, CC-PROXY-0031, CC-AUD-0059 (appended
 sub-bullets), and this section.
+
+## After the push: the merge's independent check (coordinator, 2026-10-22)
+
+- **Behaviour** (the checker's own corpora, 70 000 + 888 URLs, every consumer and import,
+  plus 973 `import_audit` cases as str and BLOB, against 7393c90): 0 leaks the pushed tree
+  redacted and 0 failures where it succeeded, counting a crashed 7393c90 import as
+  redacted, except one class: a finding page `urlsplit` rejects that holds a `?`. 7393c90
+  raised on it and stored nothing; 1ad0fd0 imports the DB.
+  - **P2, fixed:** `_audit_text` returned any non-string before the rejected page's
+    withhold, so a BLOB `html_context` was stored verbatim. Now every non-NULL text of a
+    page the floor rejects is withheld, whatever its type.
+    Test: `tests/test_redaction_nested.py::test_merge_p2_a_blob_text_of_a_page_its_floor_rejects_is_withheld`
+    (fails on 1ad0fd0 at its own assertion; passes now). CC-AUD-0059.
+  - **P1 and P3, stated, not changed:** the other findings of that DB and a finding's
+    rule metadata are stored as both trees store them in a run without such a page;
+    neither tree redacts them, and 7393c90 kept them out only by failing the whole import.
+    Failing the import again would undo D1. FR-AUD-31.
+- **Records:** ten claims in 1ad0fd0 were not true of the code, each corrected:
+  the r6 and r6-review CHANGELOG lines (the floor raises only on a rejected URL holding a
+  `?`; proxy history stores the URL cut at its first `?`; a page without a `?` still
+  fails the import; the guards see positional parameters only, and two limits were
+  missing); FR-CORE-537's totality and `import_audit` sentences; FR-PROXY-11 and the
+  ARCHITECTURE redaction text (proxy history runs the floor's `redact` and then the walk,
+  not `redact_url` per value); ARCHITECTURE's userinfo claim (the pinned N1(A) and N2
+  spellings); PA-0556(11) ("every way" -> "the lexical ways"); the r6 ERROR_LOG symptom;
+  `core.trace.safe_ref`'s docstring (sensitive values are replaced, not blanked; the
+  frozen floor's copy of 7393c90's docstring is left as it is); and the BLOB pin's
+  missing case (`b"http://[h/x"` fails the import on both trees; it is now the pin's
+  fourth case, failing at its own assertion on the merge tree and on 7393c90).
+- **Recurrence:** the same failure as F-276, in the merge's own texts (F-279): a claim
+  copied from a lane's text or written from the case at hand, not measured over the
+  inputs it covers. PA-0556(11)'s last sentence already requires the measurement; the
+  correction is to run a records-truth check before the push, as this one ran after it.

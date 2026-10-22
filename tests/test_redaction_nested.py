@@ -1074,6 +1074,22 @@ def test_r6_review_r4_import_audit_withholds_the_texts_of_a_page_its_floor_rejec
     assert not _leaks(dump, _PASS)
 
 
+@pytest.mark.parametrize("page", _R4_PAGES)
+def test_merge_p2_a_blob_text_of_a_page_its_floor_rejects_is_withheld(tmp_path, page):
+    """The merge's check (P2): `_audit_text` returned any non-string before it reached the
+    rejected page's withhold, so a BLOB ``html_context`` of such a finding was stored
+    verbatim while a str one was withheld (7393c90's whole import raised on the page and
+    stored nothing). Every non-NULL text of a page the floor rejects is withheld."""
+    blob = f"example value: {_PASS}".encode()
+    audit_db = _audit_findings(tmp_path, [(page, "rule_a", "u", blob)])
+    counts, failed, _endpoints, candidates, _dump_ = _import_audit_or_failure(tmp_path,
+                                                                              audit_db)
+    assert failed is None, f"the import failed: {failed!r}"
+    assert counts == {"candidate": 1}
+    from fuzzlab.tools.store_adapter import AUDIT_TEXT_WITHHELD
+    assert candidates[0][2] == AUDIT_TEXT_WITHHELD
+
+
 # --- at the merge (coordinator's records round, owner-approved): D1(b) --------------------
 #: A finding page stored as a BLOB whose path is empty: 7393c90's `import_audit` read it
 #: with ``to_path`` (``urlparse(b"http://h").path`` is ``b""``, so ``"/"``) and imported

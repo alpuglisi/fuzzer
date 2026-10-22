@@ -459,6 +459,7 @@ Newest first.
     retaken); the guards' limits stated in their docstrings and FR-CORE-537; guard 1
     and the floor tests pass on the merge tree (plain runner, BUG-0556 "At the merge")
     — done
+- *(After the push: the merge's check, 2026-10-22.)* Records corrected: FR-CORE-537 (the floor raises only on a rejected URL that holds a `?`; which `import_audit` texts are withheld), `core.trace.safe_ref`'s docstring (sensitive values replaced, identifier-like ones blanked). No behaviour change in core. BUG-0556, "After the push".
 - Effectiveness (assessed 2026-10-22): the six reported spellings stored their token
   before (measured by `scratchpad/lanes/REDACTURL/exp/repro.py` on 7393c90) and store
   none after; the new tests fail on the pre-fix product files in one invocation and pass
