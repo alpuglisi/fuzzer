@@ -23,9 +23,13 @@ never a silent unauthenticated run.
 from __future__ import annotations
 
 import base64
+import contextlib
 import dataclasses
+import hashlib
+import hmac
 import json
 import logging
+import secrets
 import threading
 import time
 from collections import Counter
@@ -157,6 +161,120 @@ class SessionHealthUnknown(SessionAuthError):
 class IsolatedHealthUnknown(IsolatedLoginFailed):
     """An isolated copy's session state stayed unknown (FR-SESS-23): FR-SESS-17's one
     class a sender catches, so the copy is released and its path goes anonymous."""
+
+
+class LoginFetchFailed(SessionAuthError):
+    """A login whose own pages were not read (FR-SESS-3; BUG-0558, review round 1): a
+    page of the handshake -- a discovery candidate, the credentials POST, the follow-up
+    check -- failed at transport (refused, reset, cut, unanswered, or an incomplete
+    body, `bodyread.BodyIncomplete`), and no other candidate and no browser login
+    (FR-SESS-19, tried first) yielded a login. It is neither "no login form" nor a
+    rejected login: it is not charged to ``max_reauth``. Its own cap of consecutive
+    failures per (host, identity) (``max_login_fetch_failures``, reset by a login that
+    succeeds) ends it loud: past the cap a plain `SessionAuthError`. Every caller that
+    handles `SessionAuthError` handles it; the seam maps it by its cause (SP-34). The
+    transport error is its ``__cause__``; its message names only that error's class,
+    never a URL or the error's text. An isolated copy raises it as is (not
+    `IsolatedLoginFailed`), so its sender maps it by that cause too."""
+
+
+class SessionMaterialChanged(SessionAuthError):
+    """A send bound to the session material its setup request carried
+    (`material_frame(expect=...)`) found other material at its own `prepare`: a
+    re-login, an isolated copy's re-login or a rotated cookie a health check adopted in
+    between (FR-SESS-24, BUG-0557). Raised before anything is applied to the request, so
+    nothing is sent; its sender makes the test unbound, never a negative. It names no
+    value."""
+
+
+# --- the session material a send carries (FR-SESS-24, SP-75, BUG-0557) --------------------
+#: The key of the material digest: random per process and never stored or logged, so a
+#: digest cannot be tested against a guessed cookie value anywhere else.
+_MATERIAL_KEY = secrets.token_bytes(32)
+#: `material_frame`'s "no expectation": record what `prepare` applied, check nothing.
+_RECORD_ONLY = object()
+#: The material frame open on this thread (`material_frame`), read by `prepare`.
+_FRAMES = threading.local()
+
+
+@dataclass(frozen=True)
+class AppliedMaterial:
+    """The session material one `prepare` applied to a request (FR-SESS-24): the state's
+    generation and a keyed digest of every cookie and header the state carries, names
+    and values. A cookie the state adopts in place (a rotation), a re-login or another
+    state changes it; the digest holds no value (`_MATERIAL_KEY`)."""
+
+    generation: int | None
+    digest: str
+
+
+class MaterialFrame:
+    """One send's session material, opened by `material_frame` around exactly one
+    ``client.send``: ``expect`` (the material the send must carry, `_RECORD_ONLY` to
+    record only; None: no session), ``applied`` (what its `prepare` applied: an
+    `AppliedMaterial`, or None when it applied no session) and ``prepared`` (whether a
+    `prepare` settled it; only the first one does)."""
+
+    __slots__ = ("expect", "applied", "prepared")
+
+    def __init__(self, expect):
+        self.expect = expect
+        self.applied: AppliedMaterial | None = None
+        self.prepared = False
+
+
+@contextlib.contextmanager
+def material_frame(*, expect=_RECORD_ONLY):
+    """The one owner of "the session material a send carries" (SP-75, FR-SESS-24,
+    BUG-0557). Around one ``client.send`` on this thread: the first `prepare` inside it
+    (of any `SessionManager`: the run's or an isolated copy's) records the material it
+    applies (``frame.applied``), and, given ``expect``, compares the material it would
+    apply with it **before applying anything**: any change -- another generation, or the
+    same generation's cookies or headers changed in place by an adopted rotation --
+    raises `SessionMaterialChanged`, so nothing is sent. ``expect=None`` is a setup
+    request that carried no session (anonymous, out of origin). The material is a
+    generation and a keyed digest, never a value. Yields the `MaterialFrame`."""
+    frame = MaterialFrame(expect)
+    outer = getattr(_FRAMES, "frame", None)
+    _FRAMES.frame = frame
+    try:
+        yield frame
+    finally:
+        _FRAMES.frame = outer
+
+
+def _open_frame() -> MaterialFrame | None:
+    """This thread's open material frame, unless a `prepare` already settled it (a frame
+    is one send's)."""
+    frame = getattr(_FRAMES, "frame", None)
+    return None if frame is None or frame.prepared else frame
+
+
+def _material(generation: int | None, cookies: dict, headers: dict) -> AppliedMaterial:
+    """The material of a state's ``cookies`` and ``headers`` (one snapshot of each) and
+    its ``generation``: an HMAC-SHA256 under `_MATERIAL_KEY` over every name and value,
+    each length-prefixed. Never a value."""
+    mac = hmac.new(_MATERIAL_KEY, digestmod=hashlib.sha256)
+    for kind, items in ((b"c", cookies), (b"h", headers)):
+        for name, value in sorted((str(k), str(v)) for k, v in (items or {}).items()):
+            for part in (name, value):
+                data = part.encode("utf-8", "surrogatepass")
+                mac.update(kind + len(data).to_bytes(8, "big") + data)
+    return AppliedMaterial(generation, mac.hexdigest())
+
+
+def _settle(frame: MaterialFrame | None, material: AppliedMaterial | None) -> None:
+    """`prepare`'s check of its send's frame, before it applies anything: record
+    ``material`` (None: no session applied) and refuse a send whose expectation differs
+    (`SessionMaterialChanged`)."""
+    if frame is None:
+        return
+    frame.prepared, frame.applied = True, material
+    if frame.expect is not _RECORD_ONLY and frame.expect != material:
+        raise SessionMaterialChanged(
+            "refusing the send: the session material it would carry is not the one its "
+            "setup request carried (a re-login, or a session cookie rotated in between; "
+            "FR-SESS-24)")
 
 
 # --- session health (FR-SESS-23, CC-SESS-0029, BUG-0533) ----------------------------------
@@ -346,15 +464,28 @@ def _plain_fetch_factory() -> Callable[[], Fetcher]:
 def _adopt_rotation(state: SessionState, jar) -> None:
     """A live answer that set a new value for one of the session's own cookies (a
     rotating id) is adopted, so a check never kills its own session. Only a cookie the
-    state already holds, never a new name."""
-    for name, value in (jar or {}).items():
-        if name in (state.cookies or {}) and value and state.cookies[name] != value:
-            state.cookies[name] = value
+    state already holds, never a new name. The state's cookies are replaced in one
+    assignment, so a `prepare` reads the old material or the new, never a mix; the
+    change is a change of the state's material (FR-SESS-24), which a send bound to its
+    setup request's material is refused on (`material_frame`, BUG-0557)."""
+    current = state.cookies or {}
+    rotated = {name: value for name, value in (jar or {}).items()
+               if name in current and value and current[name] != value}
+    if rotated:
+        state.cookies = {**current, **rotated}
 
 
 def _transport_errors() -> tuple:
     import requests
     return (requests.RequestException,)
+
+
+def _fetch_failed(identity: str, host: str, exc: BaseException) -> LoginFetchFailed:
+    """The `LoginFetchFailed` of a login whose page failed with ``exc`` (raise it ``from
+    exc``): names ``exc``'s class only (FR-SESS-3, BUG-0558 review round 1)."""
+    return LoginFetchFailed(
+        f"could not log {identity}@{host} in: a page of the login was not read "
+        f"({type(exc).__name__}); no login answer, so not charged to the re-auth cap")
 
 
 def _stopped_at_login(resp) -> bool:
@@ -415,11 +546,22 @@ class Fetcher:
 
 
 def _requests_fetch_factory() -> Callable[[], Fetcher]:
+    """The login handshake's fetcher (FR-SESS-3, BUG-0558): one ``requests`` session per
+    login, with its own cookie jar and the browser header set, **bounded where it is
+    made** (SP-60, `bodyread.bound`): wire and decoded ceilings, a deadline of four 15 s
+    timeouts held by the watchdog, and pools that keep a connection only after an
+    exactly framed answer (`bodyread.exact_end`), so a stray answer past the login page
+    never reaches the next request of the login. An incomplete body raises
+    `bodyread.BodyIncomplete` (a ``RequestException``): a failed fetch, never a login
+    answer. A send with a body (the credentials POST) goes on a connection of its own,
+    closed after it (PA-0549(3), CL.0): a one-shot bounded session that shares the
+    login's jar and headers, so what its answer sets is the login's."""
     def factory() -> Fetcher:
         import requests
 
+        from fuzzlab.core import bodyread
         from fuzzlab.core.http import DEFAULT_BROWSER_HEADERS
-        sess = requests.Session()
+        sess = bodyread.bound(requests.Session())
         sess.headers.update(DEFAULT_BROWSER_HEADERS)
 
         class _RequestsFetcher:
@@ -430,8 +572,11 @@ def _requests_fetch_factory() -> Callable[[], Fetcher]:
                                      _hops(r))
 
             def post(self, url, data=None, headers=None, allow_redirects=True):
-                r = sess.post(url, data=data, headers=headers, timeout=15,
-                              allow_redirects=allow_redirects)
+                with bodyread.bound(requests.Session()) as own:
+                    own.headers = sess.headers.copy()
+                    own.cookies = sess.cookies           # the login's one jar
+                    r = own.post(url, data=data, headers=headers, timeout=15,
+                                 allow_redirects=allow_redirects)
                 return FetchResponse(r.status_code, dict(r.headers), r.text, r.url,
                                      _hops(r))
 
@@ -453,8 +598,14 @@ class SessionManager:
                  relogin_refill_s: float = 120.0, max_pause_s: float = 300.0,
                  pause_budget_s: float = 600.0, clock: Callable[[], float] | None = None,
                  sleep: Callable[[float], None] | None = None,
-                 health_fetch_factory: Callable[[], Fetcher] | None = None):
-        """FR-SESS-23's keywords (CC-SESS-0029): ``health_ttl_s`` (a live verdict's
+                 health_fetch_factory: Callable[[], Fetcher] | None = None,
+                 max_login_fetch_failures: int = 3):
+        """``max_login_fetch_failures`` (FR-SESS-3, BUG-0558 review round 1): the logins
+        in a row per (host, identity) whose pages were not read (`LoginFetchFailed`)
+        before a login is refused loudly; apart from ``max_reauth``, and reset by a
+        login that succeeds.
+
+        FR-SESS-23's keywords (CC-SESS-0029): ``health_ttl_s`` (a live verdict's
         cache window), ``relogin_burst`` and ``relogin_refill_s`` (the loss-driven
         re-login bucket), ``max_pause_s`` (one pause's bound) and ``pause_budget_s`` (the
         run's: `prepare`'s pauses and bucket waits share one, `verify_live`'s waits
@@ -489,6 +640,9 @@ class SessionManager:
         self._locks: dict[tuple[str, str], threading.Lock] = {}
         self._locks_guard = threading.Lock()
         self._failures: dict[tuple[str, str], int] = {}
+        # FR-SESS-3 (BUG-0558 review round 1): logins in a row whose pages were not read
+        self._max_fetch_failures = int(max_login_fetch_failures)
+        self._fetch_failures: dict[tuple[str, str], int] = {}
         # forms phase 2 (FR-SESS-16): callbacks told when observe() logs a session out
         self._logout_listeners: list[Callable[[str, str], None]] = []
         # guards only the valid->invalid check-and-set in observe(), so concurrent
@@ -632,10 +786,19 @@ class SessionManager:
         then records the generation of the state applied (``session_generation``, set
         from that state, never re-read), and ``session_lost`` when that state is one
         this manager knows to be lost and could not yet recover (the re-login budget of
-        an identity with no stable protected resource is spent)."""
+        an identity with no stable protected resource is spent).
+
+        *(FR-SESS-24, BUG-0557.)* Inside a `material_frame` (one send's), it records the
+        material it applies -- the state's generation and a keyed digest of its cookies
+        and headers, from one snapshot that is also what it applies -- or None when it
+        applies no session; given an expected material, it refuses a send whose material
+        differs (`SessionMaterialChanged`) **before applying anything**, after any
+        login, pause re-check or rotation its own way took."""
+        frame = _open_frame()
         host = urlparse(request.url).hostname or ""
         identity = self._own_identity(identity)
         if identity == ANONYMOUS or host not in self._scope:
+            _settle(frame, None)
             return
         current = self._state_for(request.url, identity)
         if current is not None:
@@ -654,6 +817,7 @@ class SessionManager:
                 # this host's session lives on other origins: never a login here (O3);
                 # an https session's http request is still refused loudly (BUG-0098)
                 _check_transport(existing, request.url)
+                _settle(frame, None)                    # FR-SESS-24: before it counts
                 self._withhold(origin, identity, request)
                 return
             # no session on this host yet: the operator's own base when one is known;
@@ -668,9 +832,15 @@ class SessionManager:
                                 or _directory(request.url))
         _check_transport(state, request.url)          # BUG-0098: before any secret
         if origin is None or origin not in state.origins:
+            _settle(frame, None)                       # FR-SESS-24: before it counts
             self._withhold(origin, identity, request)  # FR-SESS-20: before any secret
             return
-        request.headers = state.apply(request.headers)
+        # FR-SESS-24: one snapshot of the material, checked, then applied (a rotation
+        # adopted meanwhile by another thread is the next send's, never half of this one)
+        cookies, headers = dict(state.cookies or {}), dict(state.headers or {})
+        _settle(frame, _material(state.generation, cookies, headers))
+        request.headers = SessionState(state.host, state.identity, cookies=cookies,
+                                       headers=headers).apply(request.headers)
         # FR-SESS-23 (F4): from the state just applied, never re-read from the manager
         request.session_generation = state.generation
         # D' (FR-FUZZ-65): a session known lost and not yet recovered (D's window)
@@ -850,22 +1020,42 @@ class SessionManager:
     def _log_in_locked(self, host: str, identity: str, base_url: str) -> SessionState:
         """`ensure`'s login, under the (host, identity) login lock: the caps, the login,
         the isolated copy's distinctness, then the install (`_install`), which ends the
-        old generation's pause first (login lock -> health lock)."""
-        if self._failures.get((host, identity), 0) >= self._max_reauth:
+        old generation's pause first (login lock -> health lock).
+
+        *(FR-SESS-3, BUG-0558 review round 1.)* A login whose page was not read raises
+        `LoginFetchFailed` (a transport error anywhere in `_login` -- discovery, the
+        credentials POST, the follow-up check -- included): counted apart from the
+        re-auth cap, and past ``max_login_fetch_failures`` in a row a login is refused
+        with a plain `SessionAuthError`, before anything is fetched."""
+        key = (host, identity)
+        if self._failures.get(key, 0) >= self._max_reauth:
             raise SessionAuthError(
                 f"re-auth cap ({self._max_reauth}) reached for {identity}@{host}"
             )
+        if self._fetch_failures.get(key, 0) >= self._max_fetch_failures:
+            raise SessionAuthError(
+                f"login-page cap ({self._max_fetch_failures}) reached for "
+                f"{identity}@{host}: the login's pages were not read "
+                f"{self._fetch_failures[key]} times in a row (FR-SESS-3)")
         if self._max_logins is not None and \
-                self._attempts.get((host, identity), 0) >= self._max_logins:
+                self._attempts.get(key, 0) >= self._max_logins:
             raise LoginCapReached(
                 f"login cap ({self._max_logins}) reached for the isolated session "
                 f"{self._label or identity}@{host}", reason="isolated login cap reached")
-        self._attempts[(host, identity)] = self._attempts.get((host, identity), 0) + 1
+        self._attempts[key] = self._attempts.get(key, 0) + 1
         from fuzzlab.core.credentials import CredentialError
         try:
-            state = self._login(host, identity, base_url)
+            try:
+                state = self._login(host, identity, base_url)
+            except _transport_errors() as exc:
+                # the credentials POST or the follow-up check not read: a failed fetch,
+                # as a discovery candidate's (never a traceback past every caller)
+                raise _fetch_failed(identity, host, exc) from exc
             if self._isolated_from is not None:
                 self._check_isolated(host, identity, state)   # FR-SESS-17
+        except LoginFetchFailed:
+            self._fetch_failures[key] = self._fetch_failures.get(key, 0) + 1
+            raise                    # never charged to max_reauth, never "rejected"
         except SessionAuthError as exc:
             self._failures[(host, identity)] = self._failures.get((host, identity), 0) + 1
             if self._isolated_from is not None and \
@@ -878,7 +1068,8 @@ class SessionManager:
             self._failures[(host, identity)] = self._failures.get((host, identity), 0) + 1
             raise IsolatedLoginFailed(
                 str(exc), reason="isolated login: no credentials") from exc
-        self._failures[(host, identity)] = 0
+        self._failures[key] = 0
+        self._fetch_failures[key] = 0
         rec = self._health_record(host, identity)
         with rec.lock:                 # login -> health: a new generation ends a pause
             rec.pause = None
@@ -998,7 +1189,8 @@ class SessionManager:
                               relogin_refill_s=self._relogin_refill_s,
                               max_pause_s=self._max_pause_s,
                               pause_budget_s=self._pause_budget_s, clock=self._clock,
-                              sleep=self._sleep, health_fetch_factory=self._health_ff)
+                              sleep=self._sleep, health_fetch_factory=self._health_ff,
+                              max_login_fetch_failures=self._max_fetch_failures)
         # FR-SESS-23: the run's pause budgets and credential-POST count, shared (its
         # health records, generations and re-login bucket are its own)
         copy._run_budget = self._run_budget
@@ -1461,9 +1653,10 @@ class SessionManager:
         cred = self._creds.require(host, identity)   # CredentialError if missing
         fetcher = self._fetch_factory()
         seen: set[str] = set()       # every origin the login handshake fetched (O12)
+        unread: list[BaseException] = []     # candidates whose page was not read
 
         form, login_page_url, challenge, floor_https = \
-            self._discover_login_form(fetcher, base_url, seen=seen)
+            self._discover_login_form(fetcher, base_url, seen=seen, unread=unread)
         if form is None and challenge == "basic":
             # HTTP Basic has no form: the base URL itself challenges (BUG-0081). The
             # header goes only to that same in-scope origin.
@@ -1471,12 +1664,15 @@ class SessionManager:
                                      secure_only=floor_https)
         if form is None:
             if not self._browser_login:
+                if unread:      # FR-SESS-3: a page not read is no "no login form"
+                    raise _fetch_failed(identity, host, unread[0]) from unread[0]
                 raise SessionAuthError(
                     f"could not detect a login for {identity}@{host}: no login form "
                     f"found from {base_url} (multi-step/CAPTCHA logins are not "
                     f"auto-detected, and the browser login fallback, FR-SESS-19, is off "
                     f"for this manager; capture via the proxy post-Phase 6)")
-            return self._browser_login_state(host, identity, base_url, cred)
+            return self._browser_login_state(host, identity, base_url, cred,
+                                             unread=unread)
         if not self._transport_ok(login_page_url, floor_https):
             raise SessionAuthError(
                 f"refusing to log {identity}@{host} in: the login page {login_page_url} "
@@ -1656,18 +1852,23 @@ class SessionManager:
 
     # -- browser login for single-page apps (FR-SESS-19, CC-SESS-0021) -------------
     def _browser_login_state(self, host: str, identity: str, base_url: str,
-                             cred) -> SessionState:
+                             cred, *, unread: Sequence[BaseException] = ()) -> SessionState:
         """No server-rendered form and no Basic challenge: find and perform the login in
         a browser (`session.browserlogin`), detect the credential from the login
         request's own response (`detect.detect_session_credential`), and confirm it by
         a differential on a request the app made after the click (`_spa_probe`). Every
-        failure is a loud `SessionAuthError` (FR-SESS-6)."""
+        failure is a loud `SessionAuthError` (FR-SESS-6). When the browser finds no
+        login either and a discovery candidate's page was not read (``unread``), the
+        failure is that page's: `LoginFetchFailed` (FR-SESS-3, BUG-0558 review round
+        1)."""
         from fuzzlab.session import browserlogin
         try:
             obs = browserlogin.run(self._credential_destination_ok, base_url, cred,
                                    identity=self._label or identity,
                                    auth_origins=sorted(self._auth_origins))
         except browserlogin.BrowserLoginError as exc:
+            if unread:
+                raise _fetch_failed(identity, host, unread[0]) from unread[0]
             raise SessionAuthError(
                 f"could not log {identity}@{host} in: no server-rendered login form or "
                 f"Basic challenge at {base_url}, and the browser login failed: {exc}"
@@ -1825,7 +2026,8 @@ class SessionManager:
         return resp, page, _stopped_at_login(resp), fetcher
 
     def _discover_login_form(self, fetcher: Fetcher, base_url: str, *,
-                             seen: set[str] | None = None):
+                             seen: set[str] | None = None,
+                             unread: list[BaseException]):
         """Look for a login form from the base URL and a few common login paths.
         Returns ``(form, login_page_url, challenge, floor_https)``; ``challenge`` is
         ``"basic"`` when the base URL answered 401 with a Basic ``WWW-Authenticate`` (no
@@ -1834,7 +2036,14 @@ class SessionManager:
 
         Redirects are followed **by hand** (`_navigate`, BUG-0097): every hop is
         authorised against the operator's input before it is fetched, so neither a
-        request nor the page's trust can leave the approved origins."""
+        request nor the page's trust can leave the approved origins.
+
+        A candidate whose page was not read -- a transport failure: refused, reset,
+        cut, unanswered, an incomplete body (`bodyread.BodyIncomplete`) -- is appended
+        to ``unread`` (a required list: such a failure is never dropped) and the next
+        candidate is tried: it is no page without a form (FR-SESS-3, BUG-0558 and its
+        review round 1), and `_login` decides what it means once every candidate and
+        the browser fallback have had their turn."""
         candidates = [base_url] + [urljoin(base_url, p) for p in
                                    ("login", "login.php", "signin", "users/login")]
         challenge = None
@@ -1845,6 +2054,14 @@ class SessionManager:
                                                         seen=seen)
             except SessionAuthError:
                 raise                                   # an unapproved hop: loud
+            except _transport_errors() as exc:
+                # SP-60 (BUG-0558): a page read incomplete (`bodyread.BodyIncomplete`),
+                # cut or unanswered is a failed fetch, never a page without a login form
+                # ("no login detected" would be a conclusion from an answer never read
+                # whole, charged to the re-auth cap); the other candidates still have
+                # their turn (review round 1: a form at /signin is not lost to /login)
+                unread.append(exc)
+                continue
             except Exception:  # noqa: BLE001 - a bad candidate URL is not fatal
                 continue
             if url == base_url and resp.status == 401:

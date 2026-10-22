@@ -1438,6 +1438,14 @@ rewards) derives from it.
     its connection failed with no response (never a cut-off or undecodable body), and
     the re-send is counted in the run's requests and the mechanism's cost.
   - An isolated copy whose login gets no response is a failed copy login.
+  - *(Edited in place, CC-FUZZ-0115 review round 1, BUG-0558 B1.)* A login on the
+    probe's way whose page was not read (`session.manager.LoginFetchFailed`, FR-SESS-3:
+    the probe itself never left) is classified by its transport cause under the same
+    rules: a cut, reset or incomplete login page is "not observed" (an isolated copy's:
+    a failed copy login), an unreachable one or a timeout fails loudly. The session
+    manager raises it only under its own cap of such logins in a row; past the cap a
+    plain `SessionAuthError` ends the run, so a login page that keeps failing never
+    makes every candidate inconclusive.
   - The oracle makes it no verdict from that mechanism: the others still run; the
     candidate is inconclusive (`unobserved`, with its reason in the run's detail)
     unless one confirms; and the run continues.
@@ -1453,7 +1461,8 @@ rewards) derives from it.
     timeout (`Probe.timeout == "read"`); a connect timeout, or a stand-in whose kind its
     sender did not say, is not comparable.
 
-  Enforced by `tests/test_probe_unobserved.py`.
+  Enforced by `tests/test_probe_unobserved.py`, and for a login on the probe's way by
+  `tests/test_login_fetch_failed.py::test_a_seams_cut_login_page_costs_a_bounded_number_of_logins_then_stops_loudly`.
 
 - **FR-FUZZ-400** *(training and benchmark group; `CC-FUZZ-0400`, 2026-10-15).*
   `fuzzlab train <sub>` holds the training/benchmark runs (`docs/CLI_WORKING_VS_TRAINING_DESIGN.md`).
@@ -2050,11 +2059,24 @@ rewards) derives from it.
       fetch and the send: a time expiry, a loss found while a pause was waited out,
       another send's loss). Either way `PrerequisiteUnavailable`, so `UNBOUND`, never a
       negative; a copy's re-login on such a send is still verified (FR-FUZZ-44);
+      *(amended `CC-FUZZ-0115`, 2026-10-22, BUG-0557:)* the token also records the
+      session **material** the fetch's `prepare` applied (FR-SESS-24's
+      `AppliedMaterial`: the generation and a keyed digest of the cookies and headers,
+      never a value; None without a session), and the bound send is dispatched inside
+      `material_frame(expect=...)`: its own `prepare`, after any login, pause re-check
+      or rotation on its way, refuses other material **before anything is applied or
+      sent** -- a re-login, an isolated copy's re-login, or a cookie a LIVE health check
+      adopted in place in the same generation (`verify_live`, another send's
+      `check_health`, a pause's re-check). `PrerequisiteUnavailable` ("session
+      material"), so `UNBOUND`; a copy's re-login is still verified. The after-send
+      generation check stays only for a session addon that keeps no frame;
     - the anonymous `RequestsProbeSender` holds the page's cookies in memory under a
       one-time token and loads them only into the send whose bound entries carry it
       (every other send discards them first, BUG-0112); the authenticated seam carries
       no cookie a probe's or a page's answer set on any route, so a page that sets one is
-      refused (a health check's adopted rotation is the stated gap N-R3-2 below).
+      refused ~~(a health check's adopted rotation is the stated gap N-R3-2 below)~~
+      *(BUG-0557:)* and a health check's adopted rotation changes the session's material,
+      so the bound send is refused before it is sent.
   - **Every send of the candidate's own request** (its URL and method) is bound or
     refused, whatever its shape: a raw or JSON body, entries a strategy built, another
     location (review round 1).
@@ -2066,7 +2088,9 @@ rewards) derives from it.
     the lab (the FR-AUD-20 predicate, failing closed on the value's tail too: an
     allow-list of the tail's grammar since review round 3), a bound send whose route is
     not its page fetch's or whose page's own answer lost the session, a bound send on
-    another session generation than its page fetch's (its answer unread) -- nothing is
+    another session generation than its page fetch's (its answer unread) *(BUG-0557: a
+    bound send whose session material is not its page fetch's -- another generation, or
+    a rotated cookie -- is refused before it is sent)* -- nothing is
     sent and the test is inconclusive (`UNBOUND`) with the reason,
     never a negative. A sibling naming a host outside the lab is never sent and never
     replaced by loopback (FR-AUD-20, which fails closed: `value_shape.names_outside_lab`):
@@ -2080,19 +2104,23 @@ rewards) derives from it.
     endpoint fetched on a session route; a captured JSON body's redacted leaf is never
     rebuilt; a store row from before migration 25 has no recipe. *(Review round 3; the
     round-2 residual "the route check does not compare the session's generation" is
-    closed:)* a session's generation is known only once `prepare` has run inside the
+    closed:)* ~~a session's generation is known only once `prepare` has run inside the
     client's send, so a bound send whose own `prepare` logged in again has gone out --
     on the new session, with the old session's token, to the lab -- before it is
-    refused; its answer is never read. A loss the manager tells its listeners on the
-    page's own answer is refused before that. **Stated gap** (BUG-0544 residual N-R3-2,
-    after the final round; owner FUZZ with SESS): a health check that answers LIVE
-    adopts a rotated session cookie in place, in the same generation
-    (`session.manager._adopt_rotation`; through `verify_live`, which `_verify_main` runs
-    after any copy login or re-login, a policy block's `check_health`, or a pause's LIVE
-    re-check in `prepare` -- the re-check above is covered only when it finds a loss),
-    and the token compares only route, identity, generation and loss. So a bound send
-    after such a check carries the old cookie's token on the new cookie, and its 403 is
-    read as a negative, not unbound; pinned by the strict xfail
+    refused; its answer is never read.~~ *(Closed by BUG-0557, `CC-FUZZ-0115`: the send's
+    own `prepare` refuses the new material before anything is sent.)* A loss the manager
+    tells its listeners on the page's own answer is refused before that. ~~**Stated gap**
+    (BUG-0544 residual N-R3-2, after the final round; owner FUZZ with SESS): a health
+    check that answers LIVE adopts a rotated session cookie in place, in the same
+    generation (`session.manager._adopt_rotation`; through `verify_live`, which
+    `_verify_main` runs after any copy login or re-login, a policy block's
+    `check_health`, or a pause's LIVE re-check in `prepare` -- the re-check above is
+    covered only when it finds a loss), and the token compares only route, identity,
+    generation and loss. So a bound send after such a check carries the old cookie's
+    token on the new cookie, and its 403 is read as a negative, not unbound; pinned by
+    the strict xfail~~ *(Closed by BUG-0557, `CC-FUZZ-0115`, FR-SESS-24: the token
+    records the session material and the bound send's `prepare` refuses any change of
+    it, the rotation included; the pin is a plain passing test)*
     `tests/test_replay_bindings.py::test_a_live_health_check_that_adopts_a_rotated_cookie_after_the_fetch_unbinds_the_send`.
 - **FR-FUZZ-68 (the template stage folds only true duplicates, `CC-FUZZ-0112`,
   `CC-CORE-0074`, 2026-10-21, BUG-0547)** When a caller gives `run_pipeline` the pages'

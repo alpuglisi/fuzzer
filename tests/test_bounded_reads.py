@@ -76,7 +76,9 @@ class _Peer:
       (`HEAD_DRIP`), then a 2-byte body;
     - ``silent``: reads the request and answers nothing until the client hangs up;
     - ``echo``: a 200 whose body is the request's ``Accept-Encoding`` (also kept in
-      ``accept``).
+      ``accept``);
+    - ``cut``: a 200 promising ``Content-Length: 100``, ten bytes of it, then the close
+      (a page cut short: a plain ``requests`` session raises on it too).
     """
 
     def __init__(self, mode: str):
@@ -110,6 +112,10 @@ class _Peer:
                 self.requests += 1
                 if self.mode == "silent":
                     continue                     # until the client closes (recv b"")
+                if self.mode == "cut":
+                    conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
+                                 b"Content-Length: 100\r\n\r\n<html><bo")
+                    break                        # the close (`finally`)
                 if self.mode == "echo":
                     value = next((ln.split(b":", 1)[1].strip() for ln in head.split(b"\r\n")
                                   if ln.lower().startswith(b"accept-encoding:")), b"")
@@ -515,18 +521,100 @@ def test_a_send_with_no_timeout_is_still_cut_at_its_deadline(peer, monkeypatch):
     assert peer.done.wait(10)
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG-0536 sweep: the session manager's login fetcher "
-    "(fuzzlab/session/manager.py::_requests_fetch_factory) reads r.text unbounded; "
-    "fuzzlab/session/* is AU-SESS403's (lane boundary), fixed there with "
-    "bodyread.bound(requests.Session())"))
 @pytest.mark.parametrize("peer", ["bomb"], indirect=True)
-def test_the_session_managers_login_fetch_is_bounded(peer):
+def test_the_session_managers_login_fetch_is_bounded(peer, monkeypatch):
+    """BUG-0536's sweep left the login fetcher (`_requests_fetch_factory`) reading
+    ``r.text`` unbounded, pinned here for its owner (BUG-0558): its GETs and its
+    credentials POST are bounded, an incomplete body a typed marker."""
+    from fuzzlab.core import bodyread
     from fuzzlab.session.manager import _requests_fetch_factory
+    monkeypatch.setattr(bodyread, "MAX_DECODED_BYTES", 1 << 20)
     fetcher = _requests_fetch_factory()()
     with pytest.raises(requests.RequestException) as info:
         fetcher.get(peer.url)
     assert _incomplete(info.value) == "decoded"
+    with pytest.raises(requests.RequestException) as info:
+        fetcher.post(peer.url, data=[("username", "alice"), ("password", "pw")])
+    assert _incomplete(info.value) == "decoded"
+
+
+@pytest.mark.parametrize("peer", ["cut"], indirect=True)
+def test_an_incomplete_login_page_is_a_failed_fetch_never_a_login_answer(peer):
+    """BUG-0558: a login page read incomplete is a failed fetch. Login discovery took
+    any failed candidate for "no form here" and went on, so the login ended as "no login
+    form found" -- a conclusion from pages never read whole, charged to the re-auth cap.
+    The page here is cut short (``cut``), which the old plain session failed on too (the
+    bomb, which it decoded whole, is the bounded-fetch test's; review round 1, B4).
+    Wanted (review round 1, B1): every candidate is tried, then `LoginFetchFailed` -- a
+    `SessionAuthError` naming only the cut's class, chained to it -- never "no login
+    form" and never charged to the re-auth cap; no POST."""
+    from fuzzlab.core.credentials import CredentialStore
+    from fuzzlab.session.manager import SessionAuthError, SessionManager
+    from tests.test_credentials import FakeBackend
+    creds = CredentialStore(backend=FakeBackend())
+    creds.set("127.0.0.1", "alice", "alice", "pw-0558")
+    mgr = SessionManager(creds, scope_hosts=["127.0.0.1"], browser_login=False)
+    base = peer.url.rsplit("/", 1)[0] + "/"
+    try:
+        mgr.ensure("127.0.0.1", "alice", base, operator=True)
+    except Exception as exc:  # noqa: BLE001 - asserted on below
+        raised = exc
+    else:
+        raised = None
+    assert raised is not None
+    assert "no login form" not in str(raised), str(raised)   # 7393c90: the catch-all's
+    assert mgr._failures.get(("127.0.0.1", "alice"), 0) == 0    # not a login failure
+    assert isinstance(raised, SessionAuthError), type(raised).__name__
+    assert type(raised).__name__ == "LoginFetchFailed"
+    assert isinstance(raised.__cause__, requests.exceptions.ChunkedEncodingError)
+    assert "(ChunkedEncodingError)" in str(raised) and base not in str(raised)
+    assert peer.requests == 5                       # every candidate once, no POST
+
+
+def test_a_stray_answer_after_the_login_page_never_reaches_the_credentials_post():
+    """BUG-0558 (SP-60's kept connections, BUG-0549 review round 2): the login fetcher
+    was a plain ``requests.Session()``, whose pool kept the login page's connection
+    although a second answer followed the page in the same segment (urllib3 dropped it
+    with its reader). The credentials POST rode that connection, and a desynchronised
+    upstream's next stray answer (here a 302 setting ``sid=evil``) was read as the login's
+    own. Wanted: the page's connection is closed, the POST gets its own answer on a
+    connection of its own, and the session is the real one."""
+    from fuzzlab.core.credentials import CredentialStore
+    from fuzzlab.session.manager import SessionManager
+    from tests._keepalive_peer import KeepAlivePeer, ok
+    from tests.test_credentials import FakeBackend
+    login_page = (b"<html><body><form method=post action='/login'><input name=username>"
+                  b"<input type=password name=password><input type=submit value=Login>"
+                  b"</form></body></html>")
+    stray = ok(b"stray", "Content-Type: text/html")
+    evil = (b"HTTP/1.1 302 Found\r\nLocation: /\r\nSet-Cookie: sid=evil; Path=/\r\n"
+            b"Content-Length: 0\r\n\r\n")
+    real = (b"HTTP/1.1 302 Found\r\nLocation: /\r\nSet-Cookie: sid=good; Path=/\r\n"
+            b"Content-Length: 0\r\n\r\n")
+    pages: list[int] = []
+
+    def reply(conn, k, req):
+        if req.method == "POST" and req.path == "/login":
+            return evil + real if conn in pages else real
+        if req.path == "/" and "sid=good" in req.headers.get("cookie", ""):
+            return ok(b"<html><h1>Welcome alice</h1></html>", "Content-Type: text/html")
+        pages.append(conn)
+        return ok(login_page, "Content-Type: text/html") + stray
+
+    creds = CredentialStore(backend=FakeBackend())
+    creds.set("127.0.0.1", "alice", "alice", "pw-0558")
+    with KeepAlivePeer(reply) as peer:
+        mgr = SessionManager(creds, scope_hosts=["127.0.0.1"], browser_login=False)
+        state = mgr.ensure("127.0.0.1", "alice", peer.url + "/", operator=True)
+        page_conn = peer.conn_of("/")[0]
+        (post_conn,) = peer.conn_of("/login")
+        assert post_conn != page_conn
+        assert peer.wait(lambda p: page_conn in p.closed)
+        assert peer.wait(lambda p: post_conn in p.closed)   # a body never shares one
+    assert state.cookies == {"sid": "good"} and state.valid
+    assert all("evil" not in s.headers.get("cookie", "") for s in peer.seen)
+    assert [s.body for s in peer.seen if s.method == "POST"] == [
+        b"username=alice&password=pw-0558"]
 
 
 # --- what a caller does with an incomplete body ---------------------------------------------
@@ -620,8 +708,6 @@ UNBOUNDED_ALLOWED: dict[str, tuple[int, str]] = {
     "fuzzlab/tools/fetcher.py": (1, "its one read is navguard.get_checked, which bounds the "
                                     "session it is given (AUD component: this item has no "
                                     "CC-AUD number)"),
-    "fuzzlab/session/manager.py": (1, "AU-SESS403's file: pinned by "
-                                      "test_the_session_managers_login_fetch_is_bounded"),
     "fuzzlab/lab_fixtures/external.py": (2, "lab provisioning of the operator's own pinned "
                                             "containers and the pinned-size bWAPP download, "
                                             "never a crawl or probe (LAB component)"),
