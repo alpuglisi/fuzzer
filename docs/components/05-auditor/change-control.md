@@ -48,6 +48,23 @@ Newest first.
   `tests/test_browser_session_reach.py::test_a_preload_past_the_guard_is_never_read_as_the_identitys_page`
   (the neutraliser taken away; on 72297c9 the fetcher returned
   `(200, 'text/html', '...Sign in...')`). NFR-AUD-safe's clause edited in place.
+- Review round 2 (2026-10-22; BB-3, the auditor's part; branch `lane/BROWSERALIAS-r2`,
+  commits 59866a2 and a2b8ed5; no change to `tools/fetcher.py`): the review measured
+  the fetcher (identity `user`, a page with a closed declarative root whose rule set's
+  type is a character reference, and an `about:blank` popup given one) sending the
+  alias `GET /secret?via=n2` and `/login` with `Cookie: ''` and 127.0.0.1
+  `GET /logout?via=n2` with the live `sid`, `session_host_unreached` `{}`: the page
+  layers of round 1 cannot see those rule sets. The fetcher's browser, launched through
+  `navguard.browser_launch_args` like every other, now sends Chromium's own traffic to
+  the enforcer (CC-CRAWL-0063 round 2), which refuses it: no preload reaches any host;
+  the committed-document check stays as defence in depth
+  (`test_a_preload_past_the_guard_is_never_read_as_the_identitys_page` now takes the
+  enforcer away as well, to keep exercising it). A Latin-1 page now loads in the
+  fetcher's guarded browser (BB-4(2), `navguard._note_received`). Tests: the owner's
+  (`tests/test_browser_session_reach.py::test_no_preload_a_page_hides_from_the_guard_leaves_the_browser`,
+  `::test_a_guarded_page_loads_a_document_in_a_legacy_charset`); the launch path is held
+  by `tests/test_browser_scope.py::test_every_browser_path_in_fuzzlab_is_scoped`.
+  NFR-AUD-safe's clause edited in place.
 
 ### CC-AUD-0057 — The captured-request import refuses and counts a body holding a lone surrogate instead of failing the import (FR-AUD-22, BUG-0554) (2026-10-21)
 - Placement: lane SURROGATE (item AU-REQID78), base 33b423e, with CC-CRAWL-0061 (the

@@ -384,3 +384,219 @@ on both binaries a tool may run; and a reach predicate's inputs are enumerated f
 carrier (every form the browser holds a value in -- an IPv6 literal's brackets --, every
 loopback spelling, and material that is not a credential), each with a test. Enforced by
 the tests named in this section.
+
+
+## Review round 2 (2026-10-22, on c6296bc; BB-1, BB-2, BB-3, BB-4)
+
+The fix check of c6296bc confirmed round 1's repros fixed and found the same defects on
+neighbouring paths (BB-1..BB-3); the lane's own two flags were BB-4. Each finding has a
+test that fails on c6296bc for its stated reason and passes after (commits 59866a2 and
+a2b8ed5 on `lane/BROWSERALIAS-r2`; CC-CRAWL-0063, CC-CRAWL-0064 and CC-AUD-0060
+"Review round 2"). The charset defect (BB-4(2)) is recorded here, with no number of its
+own, as the orchestrator decided.
+
+### What each was
+- **BB-1, a storage state whose session lives in `localStorage` aborted disco's start.**
+  Round 1's `Explorer._storage_session` gave `credential_names = names or None`: when no
+  adopted cookie reaches the start host, None -- "every adopted cookie is the session's".
+  A state holding its token in the start origin's `localStorage` and one ambient `lang`
+  cookie for the alias then had `lang` as its only credential, which refused 127.0.0.1
+  ("1 of 1"): the start navigation was aborted (`net::ERR_ABORTED`) and the run explored
+  nothing, where 7393c90 explored it (measured by the review, real Chromium). Round 1's
+  own docstring said an ambient cookie "never makes the start host unreached"; no test
+  held the empty case.
+- **BB-2, disco's contract runner dropped an IPv6 storage-state cookie.**
+  `disco/runner.py::Runner.auth_headers` (a `storage_state` auth profile) kept a cookie
+  `if host == domain.lstrip(".") or host.endswith("." + ...)` -- round 0's comparison --
+  so a state saved on `[::1]` (Chromium holds the domain `[::1]`) gave `{}` for
+  `http://[::1]:8000/`: every case of the contract went out anonymous, `credentialed=
+  False`, reported nowhere. Identical at 7393c90: it predates the lane, but round 1's
+  sweep said it covered "every comparison of a cookie domain with a host in `fuzzlab/`"
+  and missed it.
+- **BB-3, a preload the page-reading layers cannot see still left the browser.** Three
+  shapes, measured by the review on c6296bc, both binaries, with the guard told nothing:
+  a closed declarative shadow root whose rule set's `type` is written with a character
+  reference (`&#115;peculationrules`: the parser decodes it after the route read the
+  text; `PRELOAD_OFF_JS` cannot see a closed root); a `window.open()` popup still on its
+  initial `about:blank` given a rule set by its opener (no init script runs there); and
+  a handler inside a closed declarative root inserting one (the lane's own `closeddyn`,
+  flagged in round 1). The alias got cookie-less prefetches (and, through the auditor's
+  fetcher, `GET /secret` and `/login` with `Cookie: ''`, uncounted) and 127.0.0.1 got
+  `GET /logout?..` with `sid`, past the destructive rule.
+- **BB-4(1)** is the third BB-3 shape; **BB-4(2)**: `navguard._note_received` read a
+  main-frame HTML document with Playwright's strict UTF-8 `APIResponse.text()`; an
+  ISO-8859-1 page raised `UnicodeDecodeError` out of the route handler, the request was
+  never answered and the load failed (round 1's `r1meas2/latin1.out`: a goto timeout; in
+  the pre-fix proof Playwright re-raised it into `goto`).
+
+### Measured before the design (`scratchpad/lanes/BROWSERALIAS/r2meas`)
+- **Launch switches** (`flags.py`, `switches.out`; Chromium 141.0.7390.37, the full
+  browser and the headless shell, a bare context so only the switch acts): seventeen
+  shapes in turn -- inline, header, same-origin document rules, prerender, created, type
+  set late, fragment, `document.write`, open and closed `attachShadow`, open and closed
+  declarative roots, the character-referenced type, the closed-root handler, an iframe,
+  patched prototypes, the `about:blank` popup. Baseline: every shape but prerender and
+  the iframe prefetched the alias and/or `/logout` (with `sid`).
+  `--disable-blink-features=SpeculationRules,Prerender2,SpeculationRulesPrefetchWithSubresources,SpeculationRulesTargetHint,PrerenderUntilScript`,
+  `--disable-features=Prerender2,PrefetchUseContentRefactor,SpeculationRulesPrefetchFuture,...`
+  (twenty-four names, `NetworkPrediction` kept) and a `PreloadingConfig` holdback for
+  every preloading type and predictor stopped none of them on either binary. The
+  binary's symbols show why the Blink switch cannot: Chromium 141 has no runtime feature
+  gating a rule set (`Prerender2`, `PrerenderUntilScript`, `SpeculationRulesTargetHint`
+  and `SpeculationRulesPrefetchWithSubresources` only); the prefetch is decided in the
+  browser process. **No switch stops it.**
+- **The proxy's prerequisites** (`proxyproto.py`): with `--proxy-server=<a loopback
+  recorder>` and `<-loopback>`, a guarded context still loads its pages through the
+  route -- the Playwright driver never uses the switch -- and every same-origin prefetch
+  reaches the recorder, not the target; Chromium attempts no cross-site prefetch at all
+  with a proxy configured; a WebSocket the guard admits arrives as `CONNECT`; with
+  Playwright's launch `proxy` (disco's capture) and our later switch, Chromium uses ours
+  and the driver the launch option. The full browser also sends Google background
+  traffic there (formerly `~NOTFOUND` by the resolver rules).
+- **A redirect landing** (`redirect.py`): Playwright never routes the browser's
+  re-request of a landing the route answered with a redirect to -- through a
+  refuse-everything enforcer the redirected page never loaded (`title ''`, the full
+  browser `ERR_HTTP_RESPONSE_CODE_FAILURE`). Hence the landing ticket below
+  (`redirect.after.out`: `LANDED`, the landing fetched twice, as before).
+
+### Root cause analysis (Five Whys, across the four)
+1. *Why did these survive round 1?* Each round-1 fix closed the measured shapes at a
+   layer chosen for them: BA-1 for the cookie case (a state with a credential cookie),
+   BA-3 at the page (its text and its DOM, seen from outside), BA-2's sweep over the
+   modules the lane had read.
+2. *Why could the page layers not be complete?* They read the page before or beside the
+   browser's own decision -- the parser decodes character references and builds closed
+   shadow roots after the route read the text, and an `about:blank` window runs no init
+   script -- while the prefetch is decided and sent by the browser process. A defence
+   that sees less than the decision point is incomplete by construction; adding a
+   spelling to the regex would have been the next residual.
+3. *Why was the browser's own egress not enforced?* Round 1 measured that no launch
+   switch stops a prefetch and stopped there; that Chromium's own traffic can be routed
+   through a loopback hop of ours was already how disco's capture works (CC-CRAWL-0031),
+   but it was not seen as a guard.
+4. *Why BB-1?* `names or None` mapped the empty set onto None, whose meaning is the
+   opposite ("every cookie"): the boundary of a derived credential set was not tested,
+   though PA-0559(7) named exactly this failure.
+5. *Why BB-2 and the charset defect?* The sweeps were by reading (modules the lane knew;
+   the exceptions seen so far), not by a search over the package that a guard keeps
+   true.
+
+**Root cause:** round 1 fixed each finding's shapes at the layer that showed them -- the
+page, the cookie case, the modules read -- instead of the class at the point where the
+decision is made: the browser's own network egress, the empty-set boundary of the
+credential set, and every instance of the comparison or decode in `fuzzlab/`, found by a
+search a guard holds.
+
+### Corrective action
+Commits 59866a2 and a2b8ed5 (CC-CRAWL-0063, CC-CRAWL-0064, CC-AUD-0060 "Review round 2";
+FR-CRAWL-43, FR-CRAWL-34, FR-CRAWL-11, FR-CRAWL-14's adoption clause, NFR-CRAWL-safe
+and NFR-AUD-safe edited in place):
+- **BB-3 (and BB-4(1)), the enforcer, in the one owner of launch arguments (SP-04):**
+  `navguard.browser_launch_args` names this process's loopback enforcer as Chromium's
+  proxy (`--proxy-server`, `--proxy-bypass-list=<-loopback>`, its address in the
+  resolver rules); `--no-proxy-server` is gone. The enforcer (a daemon thread on
+  127.0.0.1, one per upstream, started on first use) refuses every request Chromium
+  sends itself (403, `enforcer_refusals()` by kind -- `preload` for a request carrying
+  `Sec-Purpose`, `request`, `connect` -- logged by host) except a WebSocket the guard's
+  socket handler admitted (`admit_socket`, called right before `connect_to_server`;
+  tunnelled once) and the re-request of a redirect landing the route checked
+  (`admit_landing`, called where the route answers a navigation with a redirect to it;
+  forwarded once with `Connection: close`, never as a preload; an `https` landing admits
+  one tunnel). With disco's capture proxy the enforcer is chained to it: the driver
+  keeps the launch option, an admitted tunnel or landing goes through the recorder
+  (recorded as before), and nothing else Chromium sends reaches it.
+  `chromium_launch_kwargs` checks the chain. The page-reading layers (`PRELOAD_OFF_JS`,
+  the header and HTML layers, the popup trampoline) and the consumers'
+  `committed_session_refusal` stay as defence in depth. Measured after
+  (`after.*.out`, all layers; `enforcer_only.*.out`, the page layers taken away): no
+  shape reaches the alias or `/logout`, both binaries; the enforcer refused the
+  same-origin preloads (cross-site ones are not attempted through a proxy).
+- **BB-1:** `_storage_session` gives `credential_names=names` -- an empty set when no
+  adopted cookie reaches the start host: no cookie is the session's, so SP-74 refuses
+  nothing for it. The accepted trade-off stands (the review's note): a state started on
+  `localhost` with `sid@127.0.0.1` and `lang@localhost` takes `lang` as the credential.
+- **BB-2:** `Runner.auth_headers` keeps the state's cookies that `navguard.cookie_reaches`
+  the target's host; `browserlogin.filter_storage_state` keeps a cookie that reaches a
+  scope host in any spelling its origin folds (`navguard.origin_host_spellings`, new) --
+  a host-only cookie of a parent domain, which the browser never sends to the scope's
+  host, is no longer adopted.
+- **BB-4(2):** `navguard.decoded_text(body, content_type)` (a byte-order mark's charset,
+  else the `Content-Type`'s, else a `<meta>`'s, a Latin-1 label read as windows-1252;
+  undeclared: UTF-8, else windows-1252, else byte for byte; never raising; the codec
+  None when the declared charset is not lossless) and `response_text(response)`.
+  `_note_received` decodes with it and never raises; `_fulfil_preload_free` re-encodes
+  an inert rule set's page in the codec it was decoded with (never when lossy);
+  `response_html` uses it.
+
+**PA-0002 sweeps, by primitive and by grep:**
+- *Chromium's own egress* (every caller of SP-04): every launch in `fuzzlab/` takes
+  `browser_launch_args` (held by `tests/test_browser_scope.py::test_every_browser_path_in_fuzzlab_is_scoped`):
+  the spider, the auditor's fetcher, disco's explorer, disco ede, the M6 executor and
+  the browser login all get the enforcer with no change of their own. What Chromium
+  legitimately sends itself in a guarded context, by reading every `route.continue_`,
+  `fallback` and redirect fulfil in `fuzzlab/` and measured: a WebSocket
+  (`connect_to_server`, only in `make_ws_handler`: ticketed) and a redirect landing (the
+  one 3xx fulfil, in `make_route_handler`: ticketed); `continue_` only for
+  `data:`/`blob:`/`about:`; disco ede's `fallback` goes to the guard.
+- *Cookie domain compared with a host* (grep of `get("domain"`, `["domain"]`,
+  `endswith("." +` over `fuzzlab/`): `navguard.cookie_reaches` (the owner);
+  `disco/runner.py::auth_headers` (fixed); `session/browserlogin.py::filter_storage_state`
+  (fixed); `session/manager.py::_jar_cookies` -- **flagged, not changed** (the file is
+  held by another lane, SESSROT): its domain side folds through `canonical_host`, and
+  its host side formats `f"http://{host}/"` from a URL's `hostname`, which for an IPv6
+  target is `::1`, so `canonical_host` gives None and BUG-0132's jar cookies are dropped
+  there (the review's item 5; the same host-side formatting at `manager.py:1359` and
+  `:1390`). An AST guard holds the rule for every other module, exempting `manager.py`
+  by name with this reason.
+- *A response body read as strict UTF-8* (grep of `.text()` in Python under
+  `fuzzlab/`): `navguard._note_received` and `response_html` (fixed); the spider's
+  harvest of a loaded stylesheet's/sitemap's URLs and disco's harvest of a script or
+  stylesheet (fixed: a Latin-1 body was skipped); disco's `_protected_get` (fixed: a
+  Latin-1 page made the health check INCONCLUSIVE). An AST guard holds it.
+
+**Flagged to the orchestrator, not changed:**
+- `manager._jar_cookies` and the host-side formatting at `manager.py:1359`/`:1390`
+  (above; owner SESS, file held by SESSROT).
+- `browserlogin.filter_storage_state` is component SESS; this lane holds no CC-SESS
+  number, so its change is recorded under CC-CRAWL-0063's round 2 -- a CC-SESS entry
+  (and FR-SESS text naming it, if any) is the orchestrator's to assign.
+- For an `https` target the enforcer judges a tunnel by its host and port only: what
+  Chromium sends inside a tunnel it was admitted for (a WebSocket's, a landing's) is not
+  seen. Not measured (no https lab here).
+- Disco's `explore.session_host_unreached` is still not a diagram event (round 0's
+  flag), and the enforcer's refusals are counted per process (`enforcer_refusals`), not
+  per tool run.
+
+### Recurrence review
+- **BUG-0559 round 1 (PA-0559(6), (7)) -- the same bug, recurring on neighbouring paths
+  of the same carrier:** BB-3 is BA-3's class (a browser-process preload past the guard)
+  on shapes the page layers cannot see; BB-1 is BA-1's class (non-credential material
+  refusing the session's own host) at the empty-set boundary; BB-2 is BA-2's class (a
+  cookie's IPv6 held form) in a comparison the sweep missed.
+- **BUG-0123 / PA-0123(3):** the launch-argument layer is again the layer that confines
+  Chromium's own traffic -- now by refusal at its egress, not only by name resolution.
+
+### Prior-preventive-action failure analysis
+- **PA-0559(6): wrong layer.** It required each thing the carrier sends without asking to
+  be confined "by every rule the guard applies, or proven never triggered", and round 1
+  confined preloads where the page is read -- a layer that cannot see what the parser
+  and the browser decide -- with a stated residual (`closeddyn`) instead of moving to the
+  layer where the browser sends.
+- **PA-0559(7): not followed at the boundary.** It named "every adopted value is a
+  credential when one extra value refuses the session's own host" as the failure, and
+  the fix reintroduced it for the empty set; no test held a state with no credential
+  cookie.
+- **PA-0002 (with PA-0559(3)): followed by reading, not by search.** "Every comparison
+  in `fuzzlab/`" was asserted from the modules the lane had read; nothing held it.
+
+### Preventive action
+PA-0559 strengthened (amended text in the lane's doc_texts, items 8-10): (8) a guard
+against something the browser decides and sends itself is placed at the browser's own
+egress (the enforcer every launch names), with the page-reading layers as defence in
+depth only, and a guard's exceptions (tickets) are issued only where the guard already
+checked the request; (9) a sweep's "every X in `fuzzlab/`" is a search over the package,
+and an AST guard over the package holds it (the cookie-domain and strict-decode guards,
+proven on synthetic offenders); (10) a credential set derived from material is tested at
+its boundary (none of the material is a credential) as well as its cases, and the empty
+set never stands for "all". Enforced by the round-2 tests in
+`tests/test_browser_session_reach.py` and `tests/test_browser_scope.py`.

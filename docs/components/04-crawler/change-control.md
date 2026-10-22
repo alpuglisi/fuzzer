@@ -69,6 +69,38 @@ Newest first.
   - Proof: one pytest invocation of the new test file on a scratch copy of 72297c9
     (`scratchpad/lanes/BROWSERALIAS/r1proof/proof.log`: 11 failed, 10 passed, each new
     test on its own assertion).
+- Review round 2 (2026-10-22; the fix check of c6296bc, BB-1 and BB-2's named path, and
+  disco's reads of BB-4(2)'s class; branch `lane/BROWSERALIAS-r2`, commit 59866a2):
+  - Change, **BB-1**: `Explorer._storage_session` gave `credential_names = names or
+    None`, so a state none of whose cookies reaches the start host -- its session in
+    the start origin's `localStorage`, one ambient `lang` cookie for the alias -- counted
+    every adopted cookie as the session's and refused its own start host (`net::
+    ERR_ABORTED`; 7393c90 explored it). It now gives the set as it is: empty, no cookie
+    is the session's, nothing refused for it. `_SessionMaterial.credential_names`'s
+    comment says so; None keeps its meaning for other material.
+  - Change, **BB-2** (the path the check found): `disco/runner.py::Runner.auth_headers`
+    for a `storage_state` profile kept a cookie by its own `host == domain` comparison
+    and dropped a state's `[::1]` cookie for an IPv6 target (every case went out
+    anonymous, `credentialed=False`, unreported; since before the lane); it now keeps
+    the cookies `navguard.cookie_reaches` the target's host (SP-74).
+  - Change, **BB-4(2)'s sweep in disco**: the harvest of a script's or stylesheet's body
+    and `_protected_get`'s health read decode by the body's charset
+    (`navguard.response_text` / `decoded_text`) -- a Latin-1 body was skipped, and a
+    Latin-1 page made the health check INCONCLUSIVE.
+  - Impact: a storage-state run whose session is in browser storage explores its start
+    host again; an IPv6 contract run with a storage-state profile carries the session;
+    Chromium's own traffic in every disco browser goes through the enforcer
+    (CC-CRAWL-0063 round 2), chained to the capture proxy in `disco capture`.
+  - Tests (`tests/test_browser_session_reach.py`):
+    `test_a_storage_state_whose_session_no_cookie_carries_never_refuses_its_start_host`
+    (on c6296bc `None == frozenset()`; it replaces round 1's fail-closed assertion for a
+    state whose only cookie is the alias's),
+    `test_disco_explores_its_start_host_with_a_local_storage_session_and_an_alias_cookie`
+    (real Chromium and the capture proxy; on c6296bc `Page.goto: net::ERR_ABORTED`),
+    `test_a_storage_state_profile_sends_the_cookies_a_browser_would_send` (on c6296bc
+    `{} == {'Cookie': 'sid=v'}` for `http://[::1]:8000/`). Pre-fix proof:
+    `scratchpad/lanes/BROWSERALIAS/r2proof/proof.log`.
+  - FR-CRAWL-43's disco clause edited in place.
 
 ### CC-CRAWL-0063 — The browser guard owns where a session's cookies reach: every request, hop, socket and API request to a host they do not reach is refused, and the spider files such a load failed (FR-CRAWL-43, FR-CRAWL-34, BUG-0559, SP-74) (2026-10-22)
 - Placement: pre-assigned to lane BROWSERALIAS (item GAP-BROWSER), base 7393c90.
@@ -232,6 +264,71 @@ Newest first.
     does not see) and NFR-CRAWL-safe (no preload past the destructive rule) edited in
     place; BUG-0559 "Review round 1"; PA-0559, SP-74, CHANGELOG, ERROR_LOG,
     ARCHITECTURE and failure-record texts amended in the lane's doc_texts.
+- Review round 2 (2026-10-22; the fix check of c6296bc, BB-2 (the sweep's part), BB-3,
+  BB-4; branch `lane/BROWSERALIAS-r2` from c6296bc, commits 59866a2 and a2b8ed5):
+  - Change, **BB-3 and BB-4(1)** (navguard, SP-04's owner): the page-reading layers
+    cannot see a rule set in a closed declarative root whose type is a character
+    reference, one a handler inserts into its closed root, or one an opener gives a
+    popup still on `about:blank` -- each still prefetched the alias without the cookie
+    and `/logout` with it (measured by the review, both binaries). No launch switch stops
+    a prefetch (measured again: the Blink features, twenty-four content features, a
+    `PreloadingConfig` holdback, both binaries; `r2meas/switches.out`). So
+    `browser_launch_args` names this process's loopback **enforcer** as Chromium's
+    proxy (`--proxy-server`, `<-loopback>`, its address in the resolver rules;
+    `--no-proxy-server` gone): it refuses every request Chromium sends itself (403;
+    `enforcer_refusals()`; logged by host) but a WebSocket the guard admitted
+    (`admit_socket`, in `make_ws_handler` before `connect_to_server`; tunnelled once)
+    and the re-request of a redirect landing the route checked (`admit_landing`, at the
+    route's one redirect fulfil; forwarded once with `Connection: close`, never a
+    preload; an https landing admits one tunnel) -- Playwright never routes that
+    re-request, and without the ticket a redirected navigation never loaded
+    (measured, `r2meas/redirect.py`). With a capture proxy (disco) the enforcer is
+    chained to it; `chromium_launch_kwargs` checks the chain. The page layers stay as
+    defence in depth (their docs say so).
+  - Change, **BB-4(2)**: `decoded_text` / `response_text` (new: the body by its charset,
+    never raising); `_note_received` uses it and never raises (an ISO-8859-1 page raised
+    out of the route handler); `_fulfil_preload_free` re-encodes an inert page in the
+    codec it was decoded with, never a lossy one; `response_html` uses it. The spider's
+    harvest of a loaded stylesheet's or sitemap's URLs reads the body the same way.
+  - Change, **BB-2's sweep (component SESS, recorded here: the lane holds no CC-SESS
+    number)**: `session/browserlogin.py::filter_storage_state` keeps a cookie that
+    `navguard.cookie_reaches` a scope host in any spelling its origin folds
+    (`navguard.origin_host_spellings`, new), instead of its own suffix comparison (which
+    adopted a host-only cookie of a parent domain the browser never sends there).
+  - Impact: every browser launch in `fuzzlab/` (spider, auditor, disco, disco ede, the
+    M6 executor, the browser login) sends Chromium's own traffic to the enforcer: no
+    preload, favicon or background request reaches any host; an unrouted page loads
+    nothing (`test_the_launch_args_alone_confine_an_unrouted_page_to_the_origin` now
+    asserts that); a redirected navigation's landing is still fetched twice, the second
+    time forwarded by the enforcer instead of sent by Chromium directly; in disco's
+    capture an admitted WebSocket and a landing re-request still reach the recorder,
+    and nothing else Chromium sends does. A Latin-1 page loads under the guard.
+  - Tests (`tests/test_browser_session_reach.py`):
+    `test_no_preload_a_page_hides_from_the_guard_leaves_the_browser[full|shell]` (real
+    Chromium, both binaries: the character-referenced closed root, the closed-root
+    handler, the `about:blank` popup; the alias and `/logout` receive nothing, the
+    admitted WebSocket opens; on c6296bc the alias got `/a-charref` and `/logout?charref`
+    went with `sid=S`, both binaries),
+    `test_the_enforcer_refuses_what_the_browser_sends_itself_and_tunnels_admitted_sockets`
+    (raw sockets; on c6296bc no `--proxy-server`),
+    `test_a_response_body_is_read_by_its_own_charset_never_raising`,
+    `test_a_guarded_page_loads_a_document_in_a_legacy_charset` (real Chromium; on
+    c6296bc the `UnicodeDecodeError` escaped the route handler into `goto`),
+    `test_no_module_reads_a_response_body_as_strict_utf8` (AST guard; on c6296bc five
+    offenders), `test_a_storage_state_is_adopted_by_where_its_cookies_reach_the_scope`
+    (on c6296bc the parent domain's host-only cookie was adopted) and
+    `test_no_cookie_domain_is_compared_with_a_host_outside_the_owner` (AST guard; on
+    c6296bc `runner.py:347`, `:348`, `browserlogin.py:709`); in
+    `tests/test_browser_scope.py` the four launch-argument tests and the unrouted-page
+    test assert the enforcer (on c6296bc: no `--proxy-server`, no
+    `enforcer_refusals`); `test_a_preload_past_the_guard_is_never_read_as_the_identitys_page`
+    now takes the enforcer away too, so the committed-document check is still exercised.
+    Pre-fix proof: one pytest invocation on c6296bc's product files
+    (`scratchpad/lanes/BROWSERALIAS/r2proof/proof.log`: 16 failed, each as stated).
+  - FR-CRAWL-43, FR-CRAWL-34, FR-CRAWL-11, FR-CRAWL-14's adoption clause and
+    NFR-CRAWL-safe edited in place; BUG-0559 "Review round 2"; PA-0559 (items 8-10),
+    SP-04/SP-74 rows, CHANGELOG, ERROR_LOG, ARCHITECTURE and failure-record texts in the
+    lane's doc_texts.
 
 ### CC-CRAWL-0061 — The capture writer is total: a body holding a lone surrogate is stored losslessly, and a write the store refuses is counted (FR-CRAWL-42, BUG-0554) (2026-10-21)
 - Placement: pre-assigned to lane SURROGATE (item AU-REQID78), base 33b423e (after
