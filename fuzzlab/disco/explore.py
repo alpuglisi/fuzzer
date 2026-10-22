@@ -599,7 +599,8 @@ class _SessionMaterial:
     #: the names of the session's credential cookies: the provider's
     #: ``checked_cookies``; for a storage state, whose credentials disco cannot tell from
     #: its ambient cookies, those that reach the start host (`Explorer._storage_session`,
-    #: BUG-0559 review round 1, BA-1). None: every adopted cookie is the session's
+    #: BUG-0559 review round 1, BA-1; empty when none does: no cookie is the session's,
+    #: round 2, BB-1). None: every adopted cookie is the session's
     credential_names: frozenset | None = None
 
     def session_cookies(self) -> list[dict]:
@@ -972,7 +973,11 @@ class Explorer:
                 found += header_urls(headers, resp.url)
                 media = (headers.get("content-type") or "").split(";", 1)[0].strip()
                 if media in _BODY_MEDIA and resp.url not in shared.bodies_read:
-                    text = resp.text()
+                    # by its charset (BUG-0559 review round 2: a strict UTF-8 read
+                    # skipped a Latin-1 script); None: a body the driver let go
+                    text = navguard.response_text(resp)
+                    if text is None:
+                        continue
                     # read only once it was read: a body the driver let go is read
                     # from its next response (BUG-0539: a failure never consumes work)
                     shared.bodies_read.add(resp.url)
@@ -1024,9 +1029,11 @@ class Explorer:
         URL's host (`navguard.names_reaching`; BUG-0559 review round 1, BA-1). disco
         cannot tell a state's credentials from its ambient cookies, and an ambient
         cookie held for a loopback alias or another scope origin never makes the start
-        host unreached. A state none of whose cookies reaches the start host keeps them
-        all as the session's: the start host is then refused (SP-74), never explored as
-        the session's."""
+        host unreached. A state none of whose cookies reaches the start host carries its
+        session elsewhere -- in its ``localStorage`` -- or not at all: no cookie is the
+        session's (an empty set, never None, which would count every adopted cookie and
+        refuse the start host for one ambient alias cookie; BUG-0559 review round 2,
+        BB-1), so SP-74 refuses nothing for it."""
         from fuzzlab.session.browserlogin import filter_storage_state
         origins = origin_scope(self.start_url)
         kept = filter_storage_state(self.storage_state, self._in_scope, self.scope_urls)
@@ -1034,7 +1041,7 @@ class Explorer:
                                         urlsplit(self.start_url).hostname or "")
         return _SessionMaterial(0, storage_state=kept,
                                 scope=lambda u: in_origin_scope(u, origins),
-                                credential_names=names or None)
+                                credential_names=names)
 
     def _provider_session(self, *, revalidate: bool,
                           lost: int | None = None) -> _SessionMaterial:
@@ -1344,8 +1351,11 @@ class Explorer:
             resp = api.fetch(url, method="GET", max_redirects=0,
                              timeout=self.opts.nav_timeout_ms,
                              headers=None if storage_state is not None else {"cookie": ""})
-            status, headers, body = resp.status, dict(resp.headers or {}), resp.text()
-        except (_pw_error(), UnicodeDecodeError) as exc:
+            status, headers = resp.status, dict(resp.headers or {})
+            # by its charset, never raising (BUG-0559 review round 2): a Latin-1 page
+            # read strictly as UTF-8 made every health check INCONCLUSIVE
+            body = navguard.decoded_text(resp.body(), headers.get("content-type"))[0]
+        except _pw_error() as exc:
             return Health(INCONCLUSIVE, f"no response ({type(exc).__name__})", 0)
         finally:
             try:

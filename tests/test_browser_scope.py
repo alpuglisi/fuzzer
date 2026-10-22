@@ -8,8 +8,9 @@ is now checked where every outbound browser path is made (PA-0123):
 * ``guard_page`` routes the whole *context* (popups included), scope before the
   destructive check, ``in_scope`` required, ``allow`` never lifting scope;
 * WebSockets are routed (``route_web_socket``);
-* every launch takes ``browser_launch_args`` (no proxy; no host resolvable outside
-  scope -- IP literals included);
+* every launch takes ``browser_launch_args`` (no proxy but this process's loopback
+  enforcer, which refuses whatever Chromium sends past the route, BUG-0559 review round
+  2; no host resolvable outside scope -- IP literals included);
 * the API-request clients (``context.request``, ``pw.request.new_context``) are
   scope-checked and never redirect.
 
@@ -31,6 +32,7 @@ from pathlib import Path
 import pytest
 
 from fuzzlab.core.urls import in_origin_scope, origin_scope, url_key
+from fuzzlab.tools import navguard
 from fuzzlab.tools.navguard import (browser_launch_args, checked_api_request,
                                     chromium_launch_kwargs, make_route_handler,
                                     make_ws_handler)
@@ -289,11 +291,22 @@ def _resolver_rules(args):
     return rules
 
 
+def _enforcer(args) -> str:
+    """The ``host:port`` of the enforcer ``args`` name (BUG-0559 review round 2)."""
+    (server,) = [a.split("=", 1)[1] for a in args if a.startswith("--proxy-server=")]
+    return server.removeprefix("http://")
+
+
 def test_launch_args_disable_the_proxy_and_resolve_only_scope_origins():
+    """No proxy but this process's own loopback enforcer (BUG-0559 review round 2: what
+    Chromium sends past the route goes there and is refused), loopback forced through
+    it, and nothing resolvable but the scope origins and the enforcer."""
     args = browser_launch_args(["https://shop.example.org/x", None])
-    assert "--no-proxy-server" in args
+    enforcer = _enforcer(args)
+    assert enforcer.startswith("127.0.0.1:") and "--no-proxy-server" not in args
+    assert "--proxy-bypass-list=<-loopback>" in args
     assert _resolver_rules(args) == ("MAP shop.example.org:443 shop.example.org:443, "
-                                     "MAP * ~NOTFOUND")
+                                     f"MAP {enforcer} {enforcer}, MAP * ~NOTFOUND")
     for flag in ("--disable-background-networking", "--no-pings", "--dns-prefetch-disable",
                  "--disable-features=NetworkPrediction", "--disable-component-update",
                  "--disable-sync", "--disable-domain-reliability"):
@@ -301,17 +314,22 @@ def test_launch_args_disable_the_proxy_and_resolve_only_scope_origins():
 
 
 def test_a_capture_proxy_replaces_no_proxy_and_is_itself_resolvable():
-    """CC-CRAWL-0031: with ``proxy=`` the browser goes through the loopback recorder.
-    Its host:port is added to the resolver rules (else ``MAP * ~NOTFOUND`` refuses the
-    proxy itself: ERR_PROXY_CONNECTION_FAILED, measured), loopback is not bypassed, and
-    the rules still name only the scope origins and the proxy."""
+    """CC-CRAWL-0031: with ``proxy=`` the routed requests go through the loopback
+    recorder (Playwright's launch option, which the driver honours). Chromium's own
+    switch names the enforcer chained to it (BUG-0559 review round 2: an admitted
+    WebSocket is tunnelled through the recorder, nothing else Chromium sends gets
+    there) -- another enforcer than an unchained launch's; it is resolvable (else
+    ``MAP * ~NOTFOUND`` refuses the proxy itself: ERR_PROXY_CONNECTION_FAILED,
+    measured), loopback is not bypassed, and the rules still name only the scope
+    origins and the enforcer."""
     args = browser_launch_args(["http://localhost:3000/"], proxy="127.0.0.1:18102")
+    enforcer = _enforcer(args)
     assert "--no-proxy-server" not in args
-    assert "--proxy-server=http://127.0.0.1:18102" in args
+    assert enforcer != _enforcer(browser_launch_args(["http://localhost:3000/"]))
     assert "--proxy-bypass-list=<-loopback>" in args
     assert _resolver_rules(args) == (
         "MAP 127.0.0.1:3000 127.0.0.1:3000, MAP localhost:3000 localhost:3000, "
-        "MAP [::1]:3000 [::1]:3000, MAP 127.0.0.1:18102 127.0.0.1:18102, MAP * ~NOTFOUND")
+        f"MAP [::1]:3000 [::1]:3000, MAP {enforcer} {enforcer}, MAP * ~NOTFOUND")
     kw = chromium_launch_kwargs(args, proxy="127.0.0.1:18102")
     assert kw["proxy"] == {"server": "http://127.0.0.1:18102", "bypass": "<-loopback>"}
     assert "proxy" not in chromium_launch_kwargs(browser_launch_args(["http://h/"]))
@@ -338,14 +356,18 @@ def test_launch_kwargs_refuse_args_built_for_another_proxy_or_none():
 
 
 def test_a_loopback_origin_admits_its_three_spellings_on_its_port_only():
-    rules = _resolver_rules(browser_launch_args(["http://localhost:3000/"]))
-    assert rules == ("MAP 127.0.0.1:3000 127.0.0.1:3000, MAP localhost:3000 localhost:3000, "
-                     "MAP [::1]:3000 [::1]:3000, MAP * ~NOTFOUND")
+    args = browser_launch_args(["http://localhost:3000/"])
+    enforcer = _enforcer(args)
+    assert _resolver_rules(args) == (
+        "MAP 127.0.0.1:3000 127.0.0.1:3000, MAP localhost:3000 localhost:3000, "
+        f"MAP [::1]:3000 [::1]:3000, MAP {enforcer} {enforcer}, MAP * ~NOTFOUND")
 
 
 def test_any_port_hosts_are_admitted_by_host():
-    rules = _resolver_rules(browser_launch_args([], any_port_hosts=["Shop.example.org"]))
-    assert rules == "EXCLUDE shop.example.org, MAP * ~NOTFOUND"
+    args = browser_launch_args([], any_port_hosts=["Shop.example.org"])
+    enforcer = _enforcer(args)
+    assert _resolver_rules(args) == (f"EXCLUDE shop.example.org, MAP {enforcer} {enforcer}, "
+                                     "MAP * ~NOTFOUND")
 
 
 # --- the spider's API-request client ------------------------------------------------
@@ -699,9 +721,13 @@ def test_a_redirected_post_navigation_is_submitted_once(code, monkeypatch):
 
 
 def test_the_launch_args_alone_confine_an_unrouted_page_to_the_origin(lab):
-    """The network backstop on its own (no route installed): the scope origin loads;
-    another port on the same loopback host, in any spelling, and an off-scope IP
-    literal do not even resolve -- so nothing a route cannot see gets out either."""
+    """The network backstop on its own (no route installed): everything Chromium sends
+    itself goes to the enforcer, which refuses it (BUG-0559 review round 2) -- the scope
+    origin in either spelling, another port on the same loopback host, an off-scope IP
+    literal -- so nothing a route cannot see gets out: the lab and the sink receive
+    nothing at all. (Before round 2 the scope origin loaded and the rest did not
+    resolve; a guarded context never needed the first, every request it makes being
+    answered by its route.)"""
     import os
 
     from playwright.sync_api import sync_playwright
@@ -718,15 +744,20 @@ def test_the_launch_args_alone_confine_an_unrouted_page_to_the_origin(lab):
             skip_or_fail(f"chromium could not launch: {exc}")
         try:
             page = browser.new_page()
-            page.goto(base + "after", timeout=5000)
-            page.goto(base.replace("127.0.0.1", "localhost") + "after", timeout=5000)
-            for url in (f"http://127.0.0.1:{sink.port}/", f"http://localhost:{sink.port}/",
+            before = navguard.enforcer_refusals()["request"]
+            for url in (base + "after", base.replace("127.0.0.1", "localhost") + "after",
+                        f"http://127.0.0.1:{sink.port}/", f"http://localhost:{sink.port}/",
                         "http://203.0.113.9/", "http://127.0.0.2/"):
-                with pytest.raises(Exception, match="ERR_NAME_NOT_RESOLVED"):
-                    page.goto(url, timeout=5000)
+                try:
+                    response = page.goto(url, timeout=5000)
+                except Exception as exc:  # noqa: BLE001 - the full browser fails the 403
+                    assert "ERR_HTTP_RESPONSE_CODE_FAILURE" in str(exc), exc
+                else:
+                    assert response is not None and response.status == 403, url
         finally:
             browser.close()
-    assert seen.count("/after") == 2 and sink.connections == 0
+    assert seen.count("/after") == 0 and sink.connections == 0
+    assert navguard.enforcer_refusals()["request"] >= before + 6
 
 
 # --- static guards (PA-0123): every outbound browser path is scoped where made -------

@@ -700,15 +700,17 @@ def canonical_host(url: str) -> str | None:
 
 def filter_storage_state(state: dict | None, in_scope, scope_urls) -> dict:
     """``state`` (a Playwright ``storage_state()``) kept to in-scope origins only
-    (reviewer A7): a localStorage origin passes ``in_scope``; a cookie is kept when its
-    domain matches the host of a ``scope_urls`` entry that is itself in scope."""
+    (reviewer A7): a localStorage origin passes ``in_scope``; a cookie is kept when the
+    browser sends it to the host of a ``scope_urls`` entry that is itself in scope, in
+    any spelling its origin folds (a loopback host's three), by SP-74's predicate
+    (`navguard.cookie_reaches`; BUG-0559 review round 2, BB-2: one comparison of a
+    cookie's domain with a host in fuzzlab)."""
+    from fuzzlab.tools.navguard import cookie_reaches, origin_host_spellings
     state = state or {}
-    hosts = [h for h in (canonical_host(u) for u in scope_urls if u and in_scope(u)) if h]
+    hosts = {h for u in scope_urls if u and in_scope(u) for h in origin_host_spellings(u)}
 
     def cookie_ok(c: dict) -> bool:
-        domain = canonical_host("http://" + (c.get("domain") or "").lstrip(".") + "/")
-        return domain is not None and any(h == domain or h.endswith("." + domain)
-                                          for h in hosts)
+        return any(cookie_reaches(c, h) for h in hosts)
     origins = [o for o in state.get("origins", []) or []
                if in_scope((o.get("origin") or "").rstrip("/") + "/")]
     return {"cookies": [dict(c) for c in state.get("cookies", []) or [] if cookie_ok(c)],

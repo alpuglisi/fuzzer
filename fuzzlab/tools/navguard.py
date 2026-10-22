@@ -15,17 +15,25 @@ Every one is checked where it is made (PA-0123):
   fetches are made by the Playwright driver, not by Chromium** (verified live), so for
   every routed request this predicate is the only guard; it is checked before every
   fetch, and the callers fix the scope before the browser starts;
-* **Chromium's own traffic** -- what the route never sees (a preconnect, a DNS
-  prefetch, a landing page the browser re-requests, background services, WebSocket
-  connections) is confined by ``browser_launch_args``: no proxy, and nothing resolvable
-  outside the scope ``host:port`` pairs, IP literals included;
-* **Chromium's preloads** -- a speculation-rules prefetch goes from the browser process
-  to an in-scope URL past every rule of the route (scope aside: the resolver rules), and
-  serves a later navigation there past it too (BUG-0559 review round 1, measured):
-  ``guard_page`` never lets one be registered (`PRELOAD_OFF_JS`; the route drops the
-  ``Speculation-Rules`` header and loads a popup's first document through a trampoline),
-  and a consumer checks the document a load committed before it reads it
-  (`committed_session_refusal`).
+* **Chromium's own traffic** -- what the route never sees (a speculation-rules prefetch
+  or prerender, a favicon, a preconnect, background services, a WebSocket the route
+  admitted) goes through the **enforcer** ``browser_launch_args`` names
+  (``--proxy-server``, loopback forced through it; BUG-0559 review round 2, BB-3): a
+  loopback proxy in this process that refuses every request Chromium sends itself and
+  tunnels only a WebSocket the guard's socket handler admitted (`admit_socket`). In a
+  guarded context every request a page makes is answered by the route (fetched by the
+  Playwright driver, never by Chromium), so nothing Chromium sends on its own is ever
+  needed: a preload of a host the session's cookies do not reach, or of a destructive
+  URL, is refused there whatever the page's markup (measured on Chromium 141, both
+  binaries). The resolver rules still name only the scope ``host:port`` pairs;
+* **Chromium's preloads, defence in depth** -- ``guard_page`` keeps a speculation rule
+  set from being registered where a script can see it (`PRELOAD_OFF_JS`; the route drops
+  the ``Speculation-Rules`` header, makes a page's parser-inserted rule sets inert and
+  loads a popup's first document through a trampoline), and a consumer checks the
+  document a load committed before it reads it (`committed_session_refusal`). These
+  layers read the page and cannot see everything it registers (the parser decodes a
+  character reference and builds a closed shadow root after the route looked); the
+  enforcer is the defence.
 
 Callers open their pages with ``service_workers="block"``: a service worker's own
 requests bypass ``page.route``. WebSockets are routed with ``route_web_socket``.
@@ -72,10 +80,14 @@ forwarded only while ``ws_hold()`` is false, else dropped and reported).
 
 from __future__ import annotations
 
+import codecs
 import contextlib
 import json
 import logging
+import os
 import re
+import socket
+import socketserver
 import threading
 import time
 import weakref
@@ -227,11 +239,15 @@ SPECULATION_RULES_HEADER = "speculation-rules"
 #: the full browser and the headless shell: a prefetch of a loopback alias went with no
 #: cookie, a same-origin ``/logout`` named by document rules went with the session past
 #: the destructive rule, and a click then committed the alias's anonymous page). No launch
-#: switch or CDP call stops it there (measured by the review: ``NetworkPrediction``,
-#: ``Prerender2``, ``SpeculationRulesPrefetchFuture``, ``--disable-blink-features=
-#: SpeculationRules``, ``Preload.disable``, ``Network.setCacheDisabled``); the "Preload
+#: switch stops it where the parser or the browser decides (measured again in review
+#: round 2 on both binaries, every shape: ``--disable-blink-features=SpeculationRules,
+#: Prerender2,...`` -- Chromium 141 has no runtime feature gating rule sets --,
+#: ``--disable-features=Prerender2,PrefetchUseContentRefactor,
+#: SpeculationRulesPrefetchFuture,...``, a ``PreloadingConfig`` holdback); the "Preload
 #: pages" preference does in the full browser's own profile only, never the headless
-#: shell. So the guard removes the trigger. This script, installed on every guarded
+#: shell. The enforcer ``browser_launch_args`` names refuses whatever is still sent
+#: (BUG-0559 review round 2, BB-3); this script is defence in depth under it, removing
+#: the trigger where a script can see it. Installed on every guarded
 #: context before any page script runs, takes every ``<script type=speculationrules>``
 #: out of the document as it is inserted -- by the parser (which runs a microtask
 #: checkpoint before it prepares a script), by a script, a fragment or ``document.write``,
@@ -242,9 +258,11 @@ SPECULATION_RULES_HEADER = "speculation-rules"
 #: not turn it off (measured). The route drops the ``Speculation-Rules`` header
 #: (`_fulfil_preload_free`), and a popup's first document, which Chromium loads into the
 #: Window of its initial ``about:blank`` where no init script runs again (measured), is
-#: loaded through a same-URL trampoline (`_TRAMPOLINE_HTML`). Not reached: a rule set in a
-#: *closed* declarative shadow root, which no script can see (measured; the consumers'
-#: `committed_session_refusal` still never reads what it served).
+#: loaded through a same-URL trampoline (`_TRAMPOLINE_HTML`). Not reached by this layer: a
+#: rule set in a *closed* shadow root -- the parser's, with its type written as a
+#: character reference, or one a handler inside that root inserts -- and one a page gives
+#: a ``window.open()`` popup still on its initial ``about:blank`` (measured by the review,
+#: round 2); the enforcer refuses what they send.
 PRELOAD_OFF_JS = r"""(() => {
   const apply = Reflect.apply, desc = Object.getOwnPropertyDescriptor;
   const E = Element.prototype, N = Node.prototype, R = MutationRecord.prototype;
@@ -375,27 +393,38 @@ def _inert_rule_sets(html: str | None) -> str | None:
     ``<script type=speculationrules>`` written with an inert type, or None when it has
     none. The text layer under `PRELOAD_OFF_JS`, for a rule set the parser inserts where
     no script can see it -- a *closed* declarative shadow root (measured on Chromium 141:
-    its prefetch of the alias went out with the script layer alone)."""
+    its prefetch of the alias went out with the script layer alone). Defence in depth
+    only: the parser decodes a character reference in the type (``&#115;peculationrules``)
+    after this text was read (BUG-0559 review round 2, BB-3), so the enforcer
+    (`browser_launch_args`) is what refuses a preload."""
     if not html or "speculationrules" not in html.lower():
         return None
     out, n = _RULES_TYPE.subn(rf"\g<1>\g<2>{INERT_RULES_TYPE}\g<2>", html)
     return out if n else None
 
 
-def _fulfil_preload_free(route, answer, *drop: str, html: str | None = None) -> None:
+def _fulfil_preload_free(route, answer, *drop: str, html: str | None = None,
+                         encoding: str | None = "utf-8") -> None:
     """Fulfil ``route`` with ``answer`` as received, less a ``Speculation-Rules`` header
     (`PRELOAD_OFF_JS`) and the header names in ``drop`` (lower case: ``set-cookie`` for
     an isolated answer, FR-SESS-20 R2); and, given its ``html`` (a main-frame document's,
-    as `_note_received` read it), with its parser-inserted rule sets inert
-    (`_inert_rule_sets`). An answer with none of them is given unchanged. The headers
+    as `_note_received` decoded it with ``encoding``), with its parser-inserted rule sets
+    inert (`_inert_rule_sets`), encoded back the same way -- never when ``encoding`` is
+    None (a body that did not decode losslessly is given as it came; the enforcer stands
+    behind it). An answer with none of them is given unchanged. The headers
     given are never empty: ``route.fulfill`` falls back to the answer's own headers --
     the dropped ones included -- for an empty set, so a ``Content-Length`` (always true
     of the body) then stands in."""
     names = {SPECULATION_RULES_HEADER, *drop}
     headers = dict(answer.headers or {})
-    inert = _inert_rule_sets(html)
+    inert = _inert_rule_sets(html) if encoding else None
+    body = None
     if inert is not None:
-        body = inert.encode("utf-8")          # `answer.text()` decoded it as UTF-8
+        try:
+            body = inert.encode(encoding)     # the charset it was decoded with
+        except (LookupError, UnicodeError):
+            body = None
+    if body is not None:
         given = {k: v for k, v in headers.items()
                  if k.lower() not in names | {"content-length", "content-encoding",
                                               "transfer-encoding"}}
@@ -626,8 +655,8 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
                 # a trampoline's own request: the answer fetched for this popup's first
                 # navigation, already checked and observed; nothing is sent again
                 answer, drop = got
-                html = _note_received(req, url, answer)
-                _fulfil_preload_free(route, answer, *drop, html=html)
+                html, charset = _note_received(req, url, answer)
+                _fulfil_preload_free(route, answer, *drop, html=html, encoding=charset)
                 return
         # BUG-0136 (PA-0136): every abort of a document request -- a navigation,
         # top-level or frame, and each of its redirect hops -- uses "aborted"
@@ -745,11 +774,12 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
                 logging.info(_scrubbed(
                     f"request observer failed on {url.split('?', 1)[0]} "
                     f"({str(exc).splitlines()[0][:80] if str(exc) else exc!r})"))
-        html = None                               # a main-frame document's HTML, as given
+        html, charset = None, None                # a main-frame document's HTML, as given
         if document and doc_kind == "document" and \
                 (stripped or final is first or not req.is_navigation_request()
                  or method not in ("GET", "HEAD")):
-            html = _note_received(req, url, final)   # the body this page is given (Q2)
+            # the body this page is given (Q2), decoded by its charset (never raising)
+            html, charset = _note_received(req, url, final)
         relanding = final is not first and not stripped and \
             req.is_navigation_request() and method in ("GET", "HEAD")
         drop = ("set-cookie",) if stripped else ()
@@ -762,7 +792,7 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
             # an isolated answer never writes the context's jar (FR-SESS-20, R2)
             _fulfil_preload_free(route, final, *drop)
         elif final is first:
-            _fulfil_preload_free(route, first, html=html)
+            _fulfil_preload_free(route, first, html=html, encoding=charset)
         elif req.is_navigation_request() and method in ("GET", "HEAD"):
             # the browser re-requests the (checked) landing URL itself, so page.url and
             # relative links are right; a GET or HEAD only, never a body (reviewers).
@@ -773,7 +803,7 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
         else:
             # a body kept through 307/308 is never sent twice: the landing response is
             # the answer (a navigation's page.url stays the first URL)
-            _fulfil_preload_free(route, final, html=html)
+            _fulfil_preload_free(route, final, html=html, encoding=charset)
     return handler
 
 
@@ -806,23 +836,87 @@ def _abort_code(document: bool) -> str | None:
 _RECEIVED: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
 
 
-def _note_received(req, url: str, answer) -> str | None:
+#: A charset a document names in its first bytes (``<meta charset>``, or ``http-equiv``'s
+#: ``content``), as HTML's prescan reads it.
+_META_CHARSET = re.compile(rb"""<meta[^>]*?charset\s*=\s*["']?\s*([A-Za-z0-9._:-]+)""",
+                           re.IGNORECASE)
+_HEADER_CHARSET = re.compile(r"""charset\s*=\s*["']?\s*([A-Za-z0-9._:-]+)""", re.IGNORECASE)
+#: Python's names of the labels a browser reads as windows-1252.
+_LATIN_CODECS = frozenset({"ascii", "iso8859-1", "latin-1", "cp1252"})
+
+
+def decoded_text(body: bytes | None, content_type: str | None) -> tuple[str, str | None]:
+    """**A response body as text, by its own charset, never raising** (BUG-0559 review
+    round 2, BB-4: a strict UTF-8 read of an ISO-8859-1 page raised out of the route
+    handler, so the request was never answered and the load timed out). The charset is
+    a byte-order mark's, else the ``Content-Type``'s, else one the document names in its
+    first 1024 bytes (a Latin-1 label read as windows-1252, as a browser does); an
+    undeclared body is UTF-8 when it decodes as UTF-8, else windows-1252, else byte for
+    byte. Returns the text and the codec it was decoded with -- None when the declared
+    charset did not decode losslessly (undecodable bytes replaced): such text is read,
+    never re-encoded and given in place of the body. The one decoder of a Playwright
+    response body in fuzzlab (an AST guard holds every module to it)."""
+    data = bytes(body or b"")
+    declared = [name for bom, name in ((codecs.BOM_UTF8, "utf-8-sig"),
+                                       (codecs.BOM_UTF16_LE, "utf-16"),
+                                       (codecs.BOM_UTF16_BE, "utf-16"))
+                if data.startswith(bom)][:1]
+    for match in (_HEADER_CHARSET.search(content_type or ""),
+                  _META_CHARSET.search(data[:1024])):
+        if match:
+            name = match.group(1)
+            declared.append(name.decode("ascii", "replace") if isinstance(name, bytes)
+                            else name)
+    order: list[str] = []
+    for name in declared:
+        try:
+            codec = codecs.lookup(name).name
+        except LookupError:
+            continue
+        # a Latin-1 label is read as windows-1252 (WHATWG), then byte for byte
+        order += ["cp1252", "latin-1"] if codec in _LATIN_CODECS else [codec]
+        break                                 # the first known label decides
+    if not order:
+        order = ["utf-8", "cp1252", "latin-1"]   # undeclared: UTF-8, else HTML's default
+    for codec in order:
+        try:
+            return data.decode(codec), codec
+        except UnicodeDecodeError:
+            continue
+    return data.decode(order[0], "replace"), None
+
+
+def response_text(response) -> str | None:
+    """A Playwright response's body as text (`decoded_text`), or None when its body is
+    gone or cannot be read -- never an exception. What every module reads a response
+    body with, never ``response.text()`` (strict UTF-8)."""
+    try:
+        body = response.body()
+        ctype = (response.headers or {}).get("content-type", "")
+    except Exception:  # noqa: BLE001 - a body the driver let go (or a double): none
+        return None
+    return decoded_text(body, ctype)[0]
+
+
+def _note_received(req, url: str, answer) -> tuple[str | None, str | None]:
     """Keep the HTML of a main-frame document the guard is about to fulfil, for its
     page's `navigate` (never anything else: no subresource, no frame). Returns that HTML
-    (the route reads it once more for `_fulfil_preload_free`), or None."""
+    and the codec it was decoded with (`decoded_text`; the route reads them once more
+    for `_fulfil_preload_free`), or ``(None, None)``. Never raises: the route answers
+    every request (BUG-0559 review round 2, BB-4)."""
     from playwright.sync_api import Error
     try:
         page = getattr(req.frame, "page", None)
         if page is None or "text/html" not in (answer.headers or {}).get(
                 "content-type", ""):
-            return None
-        html = answer.text()
+            return None, None
+        html, charset = decoded_text(answer.body(), answer.headers.get("content-type"))
         _RECEIVED[page] = (document_key(url), html)
-        return html
+        return html, charset
     # no frame (a service worker's request; a request double without one), or a page
     # that cannot be weakly referenced: nothing is kept
-    except (AttributeError, Error, TypeError):
-        return None
+    except (AttributeError, Error, TypeError, ValueError):
+        return None, None
 
 
 def _received_html(page, url: str, response) -> str | None:
@@ -1236,9 +1330,9 @@ def response_html(response) -> str | None:
     try:
         if "text/html" not in (response.headers or {}).get("content-type", ""):
             return None
-        return response.text()
-    except Error:                  # the body is gone (the page moved on)
+    except Error:                  # the response is gone (the page moved on)
         return None
+    return response_text(response)  # by its charset, never raising (BB-4)
 
 
 def make_ws_handler(in_scope: Callable[[str], bool],
@@ -1293,6 +1387,9 @@ def make_ws_handler(in_scope: Callable[[str], bool],
                     on_session_unreached(ws.url, "websocket", ws.url, why)
             return
         if in_scope(ws.url):
+            # Chromium opens it through the enforcer, which tunnels only an admitted
+            # socket (`admit_socket`, BUG-0559 review round 2)
+            admit_socket(ws.url)
             server = ws.connect_to_server()
             if hold is not None:
                 url = ws.url
@@ -1374,8 +1471,9 @@ def guard_page(target, allow: frozenset[str] = frozenset(),
                                             on_session_unreached=on_session_unreached))
     route_ws = getattr(target, "route_web_socket", None)
     if route_ws is None:                            # an old Playwright: say so, loudly
-        logging.warning("this Playwright cannot route WebSockets; the resolver rules "
-                        "of browser_launch_args still confine them (BUG-0123)")
+        logging.warning("this Playwright cannot route WebSockets; the enforcer of "
+                        "browser_launch_args refuses them, none being admitted "
+                        "(BUG-0123, BUG-0559)")
         return
     route_ws("**/*", make_ws_handler(in_scope, on_out_of_scope, hold=ws_hold,
                                      on_drop=on_ws_drop, cookie_scope=cookie_scope,
@@ -1385,6 +1483,21 @@ def guard_page(target, allow: frozenset[str] = frozenset(),
 
 
 _LOOPBACK_SPELLINGS = ("127.0.0.1", "localhost", "[::1]")
+
+
+def origin_host_spellings(url: str) -> tuple[str, ...]:
+    """The host names ``url``'s origin folds (`core.urls.canonical_origin`), as a URL's
+    ``hostname`` spells them: a loopback host's three (``::1`` without brackets), any
+    other host itself; none for a URL with no origin. What a caller asks
+    `cookie_reaches` about when its question is "does this cookie reach the scope's
+    host" (`browserlogin.filter_storage_state`, BUG-0559 review round 2)."""
+    origin = canonical_origin(url) if url else None
+    if origin is None:
+        return ()
+    host = origin.split("://", 1)[1].rsplit(":", 1)[0]
+    if host == "127.0.0.1":
+        return tuple(h.strip("[]") for h in _LOOPBACK_SPELLINGS)
+    return (host.strip("[]"),)
 
 
 def _proxy_endpoint(proxy: str) -> tuple[str, int]:
@@ -1399,26 +1512,219 @@ def _proxy_endpoint(proxy: str) -> tuple[str, int]:
     return host, int(port)
 
 
+# --- the enforcer: what Chromium sends past the route (BUG-0559 review round 2, BB-3) ----
+#: How long a WebSocket the guard admitted (`admit_socket`) may take to reach the enforcer.
+SOCKET_TICKET_TTL_S = 10.0
+#: How long the enforcer waits for a request head, and the most it reads of one.
+_HEAD_TIMEOUT_S = 30.0
+_HEAD_MAX = 65536
+_REFUSAL = (b"HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nContent-Length: 0\r\n"
+            b"Connection: close\r\n\r\n")
+_ENFORCE_LOCK = threading.Lock()
+#: (host, port) -> expiry times of the sockets the guard admitted and not yet tunnelled
+_TICKETS: dict[tuple[str, int], list[float]] = {}
+#: upstream (None: direct) -> (pid, server); endpoint -> its upstream
+_ENFORCERS: dict = {}
+_ENFORCER_UPSTREAM: dict[str, tuple | None] = {}
+_REFUSED = {"request": 0, "preload": 0, "connect": 0}
+
+
+def _socket_key(host, port) -> tuple[str, int]:
+    return str(host or "").lower().strip("[]"), int(port)
+
+
+def admit_socket(url: str) -> None:
+    """One WebSocket to ``url``'s host and port that a guard's socket handler admitted
+    (scope, FR-SESS-20, SP-74 checked) and is about to open (``connect_to_server``):
+    the enforcer tunnels one ``CONNECT`` there within `SOCKET_TICKET_TTL_S`, and no
+    other (BUG-0559 review round 2, BB-3)."""
+    parts = urlsplit(url)
+    try:
+        port = parts.port
+    except ValueError:
+        return
+    if port is None:
+        port = 443 if parts.scheme in ("wss", "https") else 80
+    key, now = _socket_key(parts.hostname, port), time.monotonic()
+    with _ENFORCE_LOCK:
+        live = [t for t in _TICKETS.get(key, ()) if t > now]
+        _TICKETS[key] = (live + [now + SOCKET_TICKET_TTL_S])[-64:]
+
+
+def _take_ticket(host, port) -> bool:
+    key, now = _socket_key(host, port), time.monotonic()
+    with _ENFORCE_LOCK:
+        live = [t for t in _TICKETS.pop(key, ()) if t > now]
+        if not live:
+            return False
+        if live[1:]:
+            _TICKETS[key] = live[1:]
+        return True
+
+
+def enforcer_refusals() -> dict:
+    """What the enforcer refused in this process, by kind: ``preload`` (a request
+    carrying ``Sec-Purpose``: a speculation-rules prefetch or prerender), ``request``
+    (anything else Chromium sent itself), ``connect`` (a tunnel no guard admitted)."""
+    with _ENFORCE_LOCK:
+        return dict(_REFUSED)
+
+
+def _authority(target: str) -> tuple[str | None, int]:
+    """``host`` and ``port`` of a CONNECT target (``[::1]:443`` included)."""
+    host, sep, port = (target or "").rpartition(":")
+    if not sep or not port.isdigit() or not host:
+        return None, 0
+    return host.strip("[]"), int(port)
+
+
+def _header(head: bytes, name: bytes) -> str:
+    for line in head.split(b"\r\n")[1:]:
+        key, sep, value = line.partition(b":")
+        if sep and key.strip().lower() == name:
+            return value.strip().decode("latin-1")
+    return ""
+
+
+def _pump(src, dst) -> None:
+    try:
+        while True:
+            data = src.recv(65536)
+            if not data:
+                break
+            dst.sendall(data)
+    except OSError:
+        pass
+    for s in (src, dst):
+        with contextlib.suppress(OSError):
+            s.shutdown(socket.SHUT_RDWR)
+
+
+class _EnforcerHandler(socketserver.BaseRequestHandler):
+    """One connection from Chromium: a ``CONNECT`` the guard admitted is tunnelled (to
+    its host, or through the capture proxy); every other request is refused (403)."""
+
+    def handle(self) -> None:
+        client = self.request
+        client.settimeout(_HEAD_TIMEOUT_S)
+        head = b""
+        try:
+            while b"\r\n\r\n" not in head and len(head) < _HEAD_MAX:
+                data = client.recv(4096)
+                if not data:
+                    return                       # a preconnect that sent nothing
+                head += data
+        except OSError:
+            return
+        line = head.split(b"\r\n", 1)[0].decode("latin-1", "replace")
+        method, _sep, rest = line.partition(" ")
+        target = rest.split(" ", 1)[0]
+        if method.upper() == "CONNECT":
+            host, port = _authority(target)
+            if host is not None and _take_ticket(host, port):
+                self._tunnel(client, host, port, head)
+                return
+            self._refuse(client, "connect", host or "?", "")
+            return
+        purpose = _header(head, b"sec-purpose")
+        self._refuse(client, "preload" if purpose else "request",
+                     urlsplit(target).hostname or "?", purpose)
+
+    @staticmethod
+    def _refuse(client, kind: str, host: str, purpose: str) -> None:
+        with _ENFORCE_LOCK:
+            _REFUSED[kind] = _REFUSED.get(kind, 0) + 1
+        # the host only, never the URL (a probe marker or a credential may ride in it)
+        logging.info(f"refused a request the browser sent past the guard's route to "
+                     f"{host!r} ({kind}{'; Sec-Purpose: ' + purpose if purpose else ''}; "
+                     f"BUG-0559)")
+        with contextlib.suppress(OSError):
+            client.sendall(_REFUSAL)
+
+    def _tunnel(self, client, host: str, port: int, head: bytes) -> None:
+        upstream = self.server.upstream
+        end = head.index(b"\r\n\r\n") + 4
+        try:
+            if upstream is not None:            # the capture proxy answers the CONNECT
+                remote = socket.create_connection((upstream[0].strip("[]"), upstream[1]),
+                                                  timeout=10)
+                remote.sendall(head)
+            else:
+                remote = socket.create_connection((host, port), timeout=10)
+                client.sendall(b"HTTP/1.1 200 Connection established\r\n\r\n")
+                if head[end:]:
+                    remote.sendall(head[end:])
+        except OSError:
+            with contextlib.suppress(OSError):
+                client.sendall(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n"
+                               b"Connection: close\r\n\r\n")
+            return
+        remote.settimeout(None)
+        client.settimeout(None)
+        back = threading.Thread(target=_pump, args=(remote, client), daemon=True,
+                                name="navguard-enforcer-tunnel")
+        back.start()
+        _pump(client, remote)
+        back.join()
+        remote.close()
+
+
+class _EnforcerServer(socketserver.ThreadingTCPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+    def __init__(self, upstream):
+        self.upstream = upstream
+        super().__init__(("127.0.0.1", 0), _EnforcerHandler)
+
+
+def _enforcer_endpoint(upstream: tuple | None) -> str:
+    """``127.0.0.1:PORT`` of this process's enforcer for ``upstream`` (None: tunnels go
+    to their host; a capture proxy's ``(host, port)``: through it), started on first use
+    and kept for the process's life (a daemon thread on a loopback listener)."""
+    with _ENFORCE_LOCK:
+        got = _ENFORCERS.get(upstream)
+        if got is not None and got[0] == os.getpid():
+            host, port = got[1].server_address[:2]
+            return f"{host}:{port}"
+        server = _EnforcerServer(upstream)
+        host, port = server.server_address[:2]
+        require_loopback(host, "the browser's enforcing proxy")
+        threading.Thread(target=server.serve_forever, daemon=True,
+                         name="navguard-enforcer").start()
+        _ENFORCERS[upstream] = (os.getpid(), server)
+        _ENFORCER_UPSTREAM[f"{host}:{port}"] = upstream
+        return f"{host}:{port}"
+
+
 def browser_launch_args(scope_urls, *, any_port_hosts=(), proxy: str | None = None) -> list[str]:
-    """Chromium arguments for every launch we make (BUG-0123): no proxy, nothing
-    resolvable outside scope, and no background networking.
+    """Chromium arguments for every launch we make (BUG-0123): Chromium's own traffic
+    through the enforcer, nothing resolvable outside scope, and no background
+    networking.
+
+    **The enforcer** (BUG-0559 review round 2, BB-3): ``--proxy-server`` names this
+    process's loopback enforcer, with loopback forced through it (``<-loopback>``; its
+    own ``host:port`` added to the resolver rules, without which ``MAP * ~NOTFOUND``
+    refuses the proxy itself, measured for CC-CRAWL-0031). The Playwright driver fetches
+    every routed request and never uses this switch (measured), so what reaches the
+    enforcer is only what Chromium sends past the route: a speculation-rules prefetch
+    or prerender (no launch switch stops one, measured on both binaries), a favicon,
+    background services, a WebSocket. It refuses all of it (403, counted in
+    `enforcer_refusals`, logged by host) and tunnels only a WebSocket a guard's socket
+    handler admitted (`admit_socket`). An unrouted page therefore loads nothing.
 
     ``proxy`` (CC-CRAWL-0031, the disco capture layer): a loopback ``host:port``
-    recorder every request goes through instead of ``--no-proxy-server``. Its own
-    ``host:port`` is added to the resolver rules (without it Chromium's
-    ``MAP * ~NOTFOUND`` refuses the proxy itself: ``ERR_PROXY_CONNECTION_FAILED``,
-    measured), and loopback is not bypassed (``<-loopback>``), so a loopback lab's
-    traffic is recorded too. Scope stays enforced at both layers: the rules still name
-    only scope origins, and the proxy refuses anything else on its own. Pass the same
-    ``proxy`` to `chromium_launch_kwargs`, which gives it to the Playwright driver: the
-    driver fetches every routed request, and it honours only the launch option.
+    recorder. Pass the same ``proxy`` to `chromium_launch_kwargs`, which gives it to
+    the Playwright driver: every routed request goes through it, recorded. Chromium's
+    switch still names the enforcer, here one that tunnels an admitted WebSocket
+    through the recorder (recorded too); nothing else Chromium sends gets there.
 
     ``--host-resolver-rules`` maps each scope ``host:port`` to itself and every other
     name to ``~NOTFOUND``. Chromium applies the rules to IP literals and matches them on
     ``host:port`` (default ports included), so ``203.0.113.9``, ``127.0.0.2`` or another
-    port on ``127.0.0.1`` fail with ``ERR_NAME_NOT_RESOLVED`` (verified live). This
-    confines what Chromium itself sends and a route cannot see -- a preconnect, a DNS
-    prefetch, a landing page the browser re-requests. It does **not** confine routed
+    port on ``127.0.0.1`` fail with ``ERR_NAME_NOT_RESOLVED`` (verified live). Behind
+    the enforcer they confine what Chromium still resolves itself (the enforcer's own
+    address; anything that would bypass it). They do **not** confine routed
     requests, which the Playwright driver fetches (``guard_page``'s predicate is their
     only guard). A loopback origin admits all three loopback spellings on its
     port. ``any_port_hosts`` are hosts admitted on every port (the crawler's
@@ -1432,11 +1738,9 @@ def browser_launch_args(scope_urls, *, any_port_hosts=(), proxy: str | None = No
         spellings = _LOOPBACK_SPELLINGS if host == "127.0.0.1" else (host,)
         rules += [f"MAP {h}:{port} {h}:{port}" for h in spellings]
     rules += [f"EXCLUDE {h.lower()}" for h in any_port_hosts if h]
-    proxy_args = ["--no-proxy-server"]
-    if proxy is not None:
-        host, port = _proxy_endpoint(proxy)
-        rules.append(f"MAP {host}:{port} {host}:{port}")
-        proxy_args = [f"--proxy-server=http://{host}:{port}", "--proxy-bypass-list=<-loopback>"]
+    enforcer = _enforcer_endpoint(_proxy_endpoint(proxy) if proxy is not None else None)
+    rules.append(f"MAP {enforcer} {enforcer}")
+    proxy_args = [f"--proxy-server=http://{enforcer}", "--proxy-bypass-list=<-loopback>"]
     rules = list(dict.fromkeys(rules)) + ["MAP * ~NOTFOUND"]
     return ["--no-sandbox", "--disable-dev-shm-usage", *proxy_args,
             f"--host-resolver-rules={', '.join(rules)}", "--disable-background-networking",
@@ -1455,15 +1759,20 @@ def chromium_launch_kwargs(args: list[str], *, headless: bool = True,
     ``proxy`` (CC-CRAWL-0031): the loopback recorder `browser_launch_args` was given.
     It becomes Playwright's launch ``proxy`` (loopback not bypassed), which the driver
     honours for the requests the route guard fetches (measured: they reach the proxy
-    with the launch option, carrying the route's headers). ``args`` built for
-    another proxy, or for none, are refused: the two layers never disagree."""
-    import os
+    with the launch option, carrying the route's headers). Playwright also passes it to
+    Chromium as a switch, before ``args``; the later switch -- the enforcer chained to
+    this recorder -- is the one Chromium uses (measured, BUG-0559 review round 2).
+    ``args`` built for another proxy, or for none, are refused: the two layers never
+    disagree."""
+    named = [a.split("=", 1)[1].removeprefix("http://") for a in args
+             if a.startswith("--proxy-server=")]
+    chained = _ENFORCER_UPSTREAM.get(named[-1], ()) if named else None
     if proxy is not None:
         host, port = _proxy_endpoint(proxy)
-        if f"--proxy-server=http://{host}:{port}" not in args:
+        if chained != (host, port):
             raise ValueError("chromium_launch_kwargs: args were not built for this proxy "
                              "(browser_launch_args(..., proxy=...))")
-    elif any(a.startswith("--proxy-server=") for a in args):
+    elif chained is not None:
         raise ValueError("chromium_launch_kwargs: args name a proxy; pass it as proxy=")
     kwargs = {"headless": headless, "args": list(args)}
     if proxy is not None:

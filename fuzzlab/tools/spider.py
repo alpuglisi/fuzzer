@@ -2488,10 +2488,12 @@ class LocalSpider:
             media = ct.split(";", 1)[0].strip().lower()
             if media in ("text/css", "application/javascript", "text/javascript",
                          "text/plain", "application/xml", "text/xml"):
-                try:
-                    more += response_urls(url, ct, response.text(), {})
-                except Exception:       # a body the driver no longer holds
-                    pass
+                # by its charset (BUG-0559 review round 2: a strict UTF-8 read dropped
+                # a Latin-1 stylesheet's or sitemap's URLs); None: a body the driver
+                # no longer holds
+                text = navguard.response_text(response)
+                if text is not None:
+                    more += response_urls(url, ct, text, {})
             links = list(dict.fromkeys(list(links) + more))
         # P4 (review B-N1): the navigation committed (a document, or a same-document
         # hash change), recorded after the navigation returned, never before it -- and
