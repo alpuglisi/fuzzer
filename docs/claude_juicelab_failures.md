@@ -1807,3 +1807,9 @@ Juice Shop lab is complete.
 - **Impact:** a second unpinned instance of the same coverage loss, on the browser engine; the round's status ("the CRAWL selector-form pin") overstated the sweep's reach.
 - **Cause:** the sweep followed the reviewer's named function rather than every engine, fallback and submission path (PA-0545(1)), and took "holds its own copy of the material" for "sends no seam-read value" without measuring it.
 - **Status:** pinned in the fix check (`tests/test_spider_session_material.py`, a real-browser strict xfail with its control, owner CRAWL); BUG-0557's "Fix check of round 1", FR-SESS-24's stated gaps and CC-SESS-0030's round-1 sub-bullet record it.
+
+### F-226 — I measured REDACTURL's "no regression" against the unpushed round 1 instead of the pushed tree, so its final rounds chased intermediate states
+- **What:** after the owner's final-round decision I briefed REDACTURL's follow-ups to show "0 cases where your commit leaks and f939778 redacted" -- f939778 was the lane's own round 1, never pushed. Each follow-up then fixed what round 1 had redacted and round 2 or 3 had lost, and each skeptic found another class an intermediate round had lost (a whitespace userinfo, an encoded double-backslash lead, a pair list in a later path segment, a fragment userinfo). The owner's rule and PA-0549(3c) concern what a batch makes worse than what ships: the pushed tree (7393c90). Leaks the pushed tree also has are pins, not further fixes.
+- **Evidence:** the briefs of `wf_cde5dbfa-ce9` and `wf_bdee35cf-e2d`; their skeptics' results (each "regression against f939778"); the BROWSERALIAS follow-up, where the same brief named the pushed behaviour correctly.
+- **Impact:** two extra fix-and-check cycles on GAP-VALUES; no wrong code pushed.
+- **Status:** corrected: `wf_9a1e5879-609` settles REDACTURL against 7393c90 (fix only leaks 7393c90 redacted; pin the rest; an independent differential confirms).
