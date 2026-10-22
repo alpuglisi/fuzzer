@@ -220,11 +220,9 @@ def test_identifier_like_link_values_are_blanked_and_never_stored(tmp_path):
         assert not [r for r in app.requests if r["query"].get("t") == ""]
         assert any(i["param"] == "u" and "no page" in i["reason"]
                    for i in result.inconclusive)
-        # excluded: parameter.example, BUG-0120 (raw crawl values stored in
-        # parameter.example; reserved, not fixed in this lane). Asserted still needed,
-        # so this exclusion fails loudly once BUG-0120 is fixed.
-        assert HEX32 in _all_rows_text(store)
-        assert HEX32 not in _all_rows_text(store, exclude={("parameter", "example")})
+        # parameter.example included: BUG-0120 (raw crawl values in examples) is closed
+        # by BUG-0556, every stored example passes the owner's rule
+        assert HEX32 not in _all_rows_text(store)
 
 
 def test_a_sensitive_link_sibling_is_blanked_by_its_name(tmp_path):
@@ -242,7 +240,7 @@ def test_the_identifier_predicate_sees_plus_signs(tmp_path):
         u = next(p for p in injection_points_from_store(store, run, "http://h/app/")
                  if p.param == "u")
         assert dict(u.base_entries)["t"] == ""
-        rows = _all_rows_text(store, exclude={("parameter", "example")})   # BUG-0120
+        rows = _all_rows_text(store)               # examples included (BUG-0556)
         assert token.replace("+", " ") not in rows and token not in rows
 
 

@@ -69,6 +69,11 @@ class GreyboxPoint:
     vuln_class: str | None = None
 
 
+class ReplayRefused(ValueError):
+    """A probe whose URL holds a value redaction replaced (`core.redaction.
+    holds_placeholder`): never sent (PA-0544(1)/(3); BUG-0556 review round 2, N4)."""
+
+
 @dataclass(frozen=True)
 class ProbeSpec:
     """One payload to send at a point.
@@ -162,9 +167,17 @@ class RequestsCorrelatingSender:
 
     def send_correlated(self, url: str, param: str, value: str, *,
                         method: str = "GET", location: str = "query", entries=None):
+        from fuzzlab.core.redaction import holds_placeholder
         from fuzzlab.core.urls import bind_query, check_send_url, place_query_param
         # NFR-FUZZ-safe (BUG-0112); a crawl-sourced DELETE too (FR-FUZZ-47)
         check_send_url(url, self._explicit, method=method)
+        if holds_placeholder(url):
+            # a value redaction replaced is evidence, never replay material: refused
+            # before anything is sent, whoever built the point (PA-0544(1)/(3); BUG-0556
+            # review round 2, N4)
+            raise ReplayRefused(
+                f"refusing to send {url.split('?', 1)[0]}: its URL holds a value "
+                "redaction replaced (PA-0544(1))")
         # The operator's cookie is the only session material: none a probe response
         # set rides along, and an auth endpoint is probed anonymously (BUG-0112).
         jar = getattr(self._session, "cookies", None)   # an injected session may have none
@@ -524,13 +537,22 @@ def points_from_store(store, run_id: int, base_url: str,
     """Crawl-discovered points as :class:`GreyboxPoint` (class unknown -> None).
     Destructive URLs are left out and reported in ``skipped`` (BUG-0112). So are JSON
     body points (forms phase 3): `RequestsCorrelatingSender` cannot place them and
-    raises `UnplaceableLocation` (FR-FUZZ-47), so they are reported, not sent."""
+    raises `UnplaceableLocation` (FR-FUZZ-47), so they are reported, not sent. So is a
+    point the builder refused (``replay_refusal``, FR-FUZZ-67): its own URL holds a
+    value redaction replaced, or its request cannot be rebuilt -- greybox keeps the
+    builder's refusal and never sends it (PA-0544(1)/(3); BUG-0556 review round 2, N4:
+    the projection to `GreyboxPoint` dropped the refusal and sent the placeholder)."""
     from urllib.parse import urlsplit
 
     from fuzzlab.core.jsonbody import LOCATION as JSON_LOCATION
     from fuzzlab.harness.auto import injection_points_from_store
     out, seen = [], set()
     for p in injection_points_from_store(store, run_id, base_url, skipped=skipped):
+        if p.replay_refusal:
+            if skipped is not None:
+                skipped.append((urlsplit(p.url).path or "/", p.method, p.param,
+                                p.replay_refusal))
+            continue
         if p.location == JSON_LOCATION:
             if skipped is not None:
                 skipped.append((urlsplit(p.url).path or "/", p.method, p.param,

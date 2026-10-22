@@ -572,6 +572,55 @@ budget where a vulnerability is plausible.
     *(Review round 1:)* the page is stored only when `core.redaction.page_url_is_clean`
     holds (the strongest URL redactor leaves it unchanged; no placeholder; no empty query
     value); otherwise none (PA-0100, PA-0514(1)).
+  - *(Amended by `CC-AUD-0059`, 2026-10-22, BUG-0556:)* **every stored value passes the
+    owner's rule** (`core.redaction.stored_value`, FR-CORE-537): a link set's entries
+    (`redact_sibling`), the `parameter.example` of a link set's names, of a lone query
+    point and of an SPA route's `fragment` parameter, and a crawled form's entries and
+    examples are `""` when the name is sensitive or the value holds a secret anywhere
+    (an identifier, or a token nested in a URL, a query string or a `;` pair, raw or
+    percent-encoded); a form entry blanked so is named in `form.fresh` (never a
+    password). A POST form's action query and a captured request's URL query are stored
+    as `redact_url_identifiers` leaves them; a stored path keeps no path parameter that
+    holds a secret (`store_url`). This closes the reserved BUG-0120 (raw crawled
+    examples). Stated, pinned: a captured body's leaf holding a nested token keeps the
+    flat leaf rule (body redaction paused; BUG-0556 R1), and an endpoint query that
+    redaction changed is sent so by its points (BUG-0556 R2, PA-0544's scope).
+    *(Review round 1, BUG-0556:)* a POST form's action query and a captured request's
+    URL query record a value redaction replaced as `PLACEHOLDER` (by name; never a
+    blank: `redact_url_identifiers(..., placeholder=True)`), and the point builder
+    refuses such a point (FR-FUZZ-67: `UNBOUND`, never sent); R2 remains only for the
+    spider capture writer's blank (owner CRAWL, pinned). `import_audit` stores a
+    finding's endpoint as `store_url` stores the page (another origin kept) and passes its
+    `target_identifier` and `html_context` through the owner (`_audit_text`: the page
+    URL, the page path and every query value `stored_value` would not store).
+    *(Review round 2, `CC-AUD-0059`:)* a query value is judged **whole** and replaced
+    wherever the text repeats it whole or any run of it 8 characters or longer, never by
+    the rules' cut lengths (a rule quotes a substring: `rule_serialized_tokens`); the
+    endpoint is the form this run's spider rows already hold the same page in (the
+    spider's absolute form for a page off its main origin, its path for one on it), else
+    `store_url(page, main)` with `base_url`'s origin or the first finding page's, so an
+    off-origin first finding no longer splits the main origin's pages.
+    *(r6, `CC-AUD-0059`; corrected by the r6 review, D1 and R4:)* the owner's URL
+    redactors run the pushed tree's redactor first, which raises `ValueError` on a URL
+    `urlsplit` rejects (FR-CORE-537). **`import_audit` never fails on a finding's URL
+    and stores nothing the pushed tree's import redacted:**
+    - a target identifier the owner rejects is stored as
+      `store_adapter.AUDIT_TEXT_WITHHELD` (`(unparseable URL withheld)`, as
+      `core.trace.safe_ref` withholds), never raw (7393c90 stored it raw);
+    - a finding **page** no origin can be read from -- `canonical_origin` raises, as it
+      does on a page that is not an absolute URL and holds `[` or `]` in its first
+      segment (`x[y/app/p.php`, `h]/…`, `[h/…`) or after a leading Unicode space
+      (`\u3000http://[h/…`), to which it prefixes `http://` -- is not used for the run's
+      main origin (`_readable_origin`) and is stored by its path, as `store_url` stores a
+      URL whose origin is unknown and as 7393c90's `to_path` stored every finding page (a
+      `;` path parameter holding a secret dropped); its texts pass `_audit_text` as any
+      other's. r6 (3615cfb) failed the whole import there, where 7393c90 imported it;
+    - a finding **page** `urlsplit` rejects as written (`http://[h/…`, `//[h/…`: `to_path`
+      rejects it too, and 7393c90's import raised) gets no endpoint (the candidate's
+      `parameter_id` is NULL), and its target and context are `AUDIT_TEXT_WITHHELD`
+      whole (`_audit_text`: they may quote the page URL the owner cannot read); every
+      other finding is imported. r6's record that such a text was withheld was not true
+      on 3615cfb: `_main_origin` raised before `_audit_text` ran.
   - `audit.engine.evaluate` writes each candidate's request fields through
     `core.reqctx.point_evidence` and stamps `identity_scope` and `context_id` (SP-57,
     FR-FUZZ-66). `InjectionPoint` carries `bindings` and `replay_refusal`.
@@ -617,7 +666,9 @@ budget where a vulnerability is plausible.
   JSON answers without a query too) once to `_import_path_templates`: every
   `core.pathtemplate` template (FR-CORE-503) is a GET endpoint at its template path
   with one `path` parameter, its example the crawled value, blanked when it looks like
-  an identifier (PA-0100). `R-SQLI-PARAM` now includes `path`; `R-ACCESS-CONTROL-PATH`
+  an identifier (PA-0100) *(since `CC-AUD-0059`, BUG-0556: when it holds a secret
+  anywhere, `core.redaction.stored_value`; the template path keeps no path parameter
+  that holds one)*. `R-SQLI-PARAM` now includes `path`; `R-ACCESS-CONTROL-PATH`
   (FR-AUD-25) and the location-agnostic rules apply as to any point.
   - **Stated gaps:** ~~a template on another origin than the run's base is stored as a
     path, so it is probed at the base's origin~~ *(fixed by FR-AUD-27: it keeps its

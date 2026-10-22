@@ -241,8 +241,10 @@ class HistoryWriter:
 
     def _prepare_contained(self, rec: FlowRecord) -> tuple | None:
         """`_prepare`, or — if redaction fails — the flow with every body replaced by
-        `OMIT_FAILED` and its URL query dropped, so it stays visible but never stored
-        unredacted (PA-0086); ``None`` only if even that fails."""
+        `OMIT_FAILED` and its URL query dropped, so it stays visible (PA-0086); ``None``
+        only if even that fails. What precedes the first ``?`` is stored as received, in
+        the flow's URL and its `errors` line: a ``;name=value`` path parameter there is
+        kept (BUG-0556 r6 family (d), pinned; on 7393c90 too)."""
         try:
             return self._prepare(rec)
         except Exception as exc:  # noqa: BLE001 - contained per record, reported

@@ -2032,6 +2032,17 @@ rewards) derives from it.
     only when `core.redaction.page_url_is_clean` holds -- the strongest URL redactor
     leaves it unchanged, it holds no redaction placeholder and no empty query value --
     and only on the point's own origin; otherwise the set has no page.
+    *(BUG-0556, review round 1:)* a crawl point whose **own URL** holds a value
+    redaction replaced (`core.redaction.holds_placeholder`: an endpoint's own query --
+    a POST form's action query, a captured request's URL query -- stored by name, never
+    by value) is built with a `replay_refusal`: no setup step re-obtains an endpoint's
+    own query, so the test is `UNBOUND` with that reason before any strategy runs and
+    nothing is sent, never with the placeholder or a blank (PA-0544(1)/(3);
+    `harness.auto._redacted_url_refusal`). *(Review round 2, `CC-FUZZ-0116`:)* every
+    caller of the point builder keeps its refusal: greybox's `points_from_store` reports
+    a refused point in `skipped` with its reason and never sends it, and
+    `greybox.run.RequestsCorrelatingSender` refuses any URL holding a placeholder before
+    anything is sent (`ReplayRefused`), whoever built the point.
   - **Bound before each send.** The oracle's binder fetches that page through the
     sender's `fetch`, on the probe's own session route, finds the form or link the page
     offers now for the same origin, path, method and entry names

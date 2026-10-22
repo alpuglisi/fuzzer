@@ -88,6 +88,208 @@ Newest first.
   strict xfail, owner navguard SP-04), where it said the browser never preloads
   anything past the guard.
 
+### CC-AUD-0059 — The importer stores every URL and value through the redaction owner: examples, form entries, action and captured queries, path parameters (FR-AUD-31, FR-AUD-26, BUG-0556) (2026-10-22)
+- Placement: pre-assigned to lane REDACTURL (item GAP-VALUES), base 7393c90, with
+  CC-CORE-0076 (the owner). This is BUG-0556's PA-0002 sweep by caller: the importer's
+  writers that did not apply the owner's value rule.
+- Change (`fuzzlab/tools/store_adapter.py` only):
+  - `redact_sibling(name, raw_value, value)` is now `core.redaction.stored_value`: `""`
+    also when a URL, query string or `;` pair nested in the value (raw or
+    percent-encoded) holds a sensitive name or an identifier.
+  - `_import_link_set`: a lone query point's `parameter.example` is `redact_sibling`'s
+    value (it was the crawled value: BUG-0120), and a set's rows take the entry as
+    stored.
+  - `_import_route_query`: an SPA route's `fragment` parameters come from `query_pairs`
+    and take `redact_sibling`'s value as their example (they were `parse_qsl`'s, raw).
+  - `_import_path_templates`: the template path passes
+    `core.redaction.strip_secret_path_params`; the example passes `stored_value` (it
+    passed `looks_like_identifier` alone).
+  - `_import_forms`: each crawled entry except a password control passes `stored_value`;
+    one it changes is stored `""` and named in `form.fresh` (bound fresh from the form's
+    page, FR-FUZZ-67), and the field's example is the stored value. A POST form's action
+    query is stored as `core.redaction.redact_url_identifiers` leaves it (the spider
+    stores it through `redact_url`, names only).
+  - `_store_request`: a captured request's URL query on `endpoint.url` passes
+    `redact_url_identifiers` (a disco capture redacts names only; a spider capture has
+    already passed it, and the walk is idempotent on it).
+  - The page and endpoint paths of every writer pass `core.urls.store_url`, which now
+    drops a path parameter that holds a secret (CC-CORE-0076).
+  - Tests: `tests/test_redaction_nested.py` (CC-CORE-0076) covers `import_spider`,
+    `import_disco` and a crawled form; `tests/test_forms_phase2.py`'s two BUG-0120
+    exclusions are removed (`parameter.example` is searched too).
+  - *(Review round 1, 2026-10-22, branch `lane/REDACTURL-r1`; BUG-0556 "Review round
+    1".)*
+    - **`import_audit` passes the owner (RU-3/RU-8).** It wrote `to_path(page_url)` (a
+      middle segment's `;ref=<uuid>` kept: a second endpoint beside the spider's) and the
+      legacy rules' `target_identifier` and `html_context` raw. Now the endpoint is
+      `store_url(page, main)` (a keyword `base_url`; the run's main origin is its, else
+      the first finding page's, as in the other importers) and both texts pass
+      `_audit_text`: the page URL, the page path and every query value the owner's rule
+      would not store (`stored_value`), whole or cut where a rule cuts it, are replaced;
+      a target identifier also passes `strip_secret_path_params` and
+      `redact_url_identifiers`. `to_path` is no longer imported.
+    - **An endpoint's own redacted query is a placeholder (RU-4).** `_import_forms` (a
+      POST action's query) and `_store_request` (a captured request's URL query) store
+      it through `redact_url_identifiers(..., placeholder=True)`: by name, never by
+      value and never a blank (PA-0544(1)); the point builder refuses such a point
+      (FUZZ). This was a regression of this entry (an identifier there was sent as `id=`),
+      mislabelled pre-existing in the first round.
+  - *(Review round 2, final, 2026-10-22, branch `lane/REDACTURL-r2` from f939778;
+    BUG-0556 "Review round 2", N3.)*
+    - **A quoted substring of a secret value is redacted.** `_audit_text` swapped a
+      value's prefixes at the rules' cut lengths (`_AUDIT_CUTS`, removed), so
+      `rule_serialized_tokens`' `match.group(0)[:60]` -- a JWT behind `Bearer ` or `x.`,
+      a short JWT before a `~tail`, Java-serialized base64 up to a form-decoded `+`, a
+      pickle behind `v1:` -- reached `candidate.sink_context` though `stored_value` held
+      for the value. Now each value the owner would not store is judged **whole** and
+      replaced wherever the text repeats it whole (as crawled, percent-decoded and
+      form-decoded) or any run of it 8 characters or longer (`_secret_spans`: a set of
+      the values' 8-character windows, overlapping matches joined; linear).
+    - **The endpoint is the spider's form of the page (RU-8's split in a new form).**
+      `import_spider` takes the run's main origin from the seed, `import_audit` took it
+      from its first finding's page (`fetcher.py` passes neither a `base_url`), so an
+      off-origin first finding (an XHR on an API origin) stored the main origin's pages
+      absolute beside the spider's paths -- partly round 1's own regression.
+      `_audit_endpoint` now uses the form this run's spider rows hold (`page` or a
+      non-audit `endpoint`): the absolute form names a page off the spider's main
+      origin, the path form one on it; with neither, or a `base_url`, `store_url(page,
+      main)` as before. `tools/fetcher.py` is unchanged (held by lane BROWSERALIAS).
+    - Tests: `test_import_audit_redacts_a_quoted_substring_of_a_secret_value` (a fetcher
+      that echoes nothing, so the parameter haystack's row is stored) and
+      `test_import_audit_stores_a_page_as_the_spider_does_when_the_first_finding_is_off_origin`
+      (no endpoint added by the audit import), each through the real chain.
+    - **PA-0300 (found by the round's targeted run):** round 1 gave `import_audit` a
+      `base_url` keyword without a base-URL registry entry. `import_audit` is now
+      registered in `tests/test_base_url_subpath_registry.py` with
+      `test_import_audit_under_a_subpath_base_stores_the_spiders_paths` (the app under
+      `http://h/app/`), and `_audit_endpoint` takes a `spider_form` flag, not the base.
+  - *(r6, 2026-10-22, branch `lane/REDACTURL-r6` from 144d234; BUG-0556 "r6 (layered on
+    the pushed redactor)", A1.)*
+    - **`import_audit` withholds a target the floor rejects and imports the rest.** The
+      owner's URL redactors now run 7393c90's redactor first (CC-CORE-0076), which
+      raises `ValueError` on a URL `urlsplit` rejects; `import_audit`'s target
+      identifier is the one caller the batch added where 7393c90 did not raise (it
+      stored the target raw, and 144d234 stored the secret its walk keeps), and r6's
+      first draft let the raise fail the whole import. `_audit_text` now returns
+      `AUDIT_TEXT_WITHHELD` (`(unparseable URL withheld)`, its own marker, as
+      `core.trace.safe_ref` withholds such a URL) where the owner raises -- on the
+      target's own redaction or on the page URL's -- so the finding is stored with its
+      target withheld and every other finding is imported. A finding *page* `urlsplit`
+      rejects still fails the import at its endpoint (`_main_origin`, `store_url`), as
+      7393c90's `to_path` did; the other batch-added URL steps of the importer (a POST
+      action's query, a captured request's URL) raise only where their own
+      `store_url` / `urlparse` of the same URL raised on 7393c90.
+    - Test: `tests/test_redaction_nested.py::test_r6_a1_import_audit_withholds_a_target_its_floor_rejects_and_imports_the_rest`
+      (2 cases, through `import_audit`): fails on r6's first draft at "the import
+      failed: ValueError" and on 7393c90 and 144d234 at its leak assertion; passes on
+      the revision.
+  - *(r6 review, 2026-10-22, branch `lane/REDACTURL-r6` after 3615cfb; BUG-0556 "r6
+    review", D1 and R4.)*
+    - **D1 -- `import_audit` failed where the pushed tree imported (a functional
+      regression of the batch against 7393c90).** The batch's import rework read each
+      finding page's origin (`_main_origin` and `_audit_endpoint` -> `canonical_origin`,
+      and `store_url`), which raises `ValueError("Invalid IPv6 URL")` on a page that is
+      not an absolute URL and holds `[` or `]` in its first segment (`x[y/app/p.php?…`,
+      `h]/app/p.php`, `[h/app/p.php`) or after a leading Unicode space
+      (`\u3000http://[h/…`, `\xa0http://h]/…`): `canonical_origin` strips whitespace and
+      prefixes `http://`, and `urlsplit` rejects the netloc. 7393c90 called only
+      `to_path` and imported each. Now such a page names no origin: the main origin is
+      read by `_readable_origin` (`canonical_origin`, `None` where it raises), and
+      `_audit_endpoint` stores the page by its path, as `store_url` stores a URL whose
+      origin is unknown and as 7393c90's `to_path` stored it (a `;` path parameter
+      holding a secret dropped by `strip_secret_path_params`); nothing the pushed
+      import redacted is stored (its `to_path` dropped the query; `_audit_text` redacts
+      the texts).
+    - **R4 -- the r6 sub-bullet above was not true on 3615cfb.** It said a text whose
+      *page* URL the floor rejects is stored `AUDIT_TEXT_WITHHELD` and the import goes
+      on; `_main_origin` raised first, so `_audit_text`'s page-URL branch was unreachable
+      and untested, and the same bullet's next sentence ("a finding *page* `urlsplit`
+      rejects still fails the import") said so. Now that branch is reached through
+      `import_audit`: a page `urlsplit` rejects as written (`http://[h/…`, `//[h/…`,
+      where `to_path` rejects it too and 7393c90's import raised) gets no endpoint
+      (`_audit_endpoint` returns `None`; the candidate's `parameter_id` is NULL), its
+      target and context are `AUDIT_TEXT_WITHHELD` whole, and every other finding is
+      imported. FR-AUD-31 says exactly this, in place.
+    - Tests: `tests/test_redaction_nested.py::test_r6_review_d1_import_audit_imports_a_page_no_origin_reads_as_the_pushed_tree_did`
+      (6 cases) and `::test_r6_review_r4_import_audit_withholds_the_texts_of_a_page_its_floor_rejects`
+      (2), each failing on 3615cfb at its own first assertion ("the import failed:
+      ValueError('Invalid IPv6 URL')"), passing on the revision; on 7393c90, D1's six
+      import (three fail at the leak assertion: 7393c90 stored the page URL's token raw
+      in `sink_context`) and R4's two fail at the import (`to_path` raised there).
+- Impact (other components / project):
+  - **FUZZ (point builder, oracle):** a crawled form whose hidden value is identifier-
+    like or holds a nested token now has that name in `form.fresh`, so its points are
+    bound fresh from the form's page or inconclusive "no page", where before the stored
+    (stale) value was sent. A point whose example blanked takes its shapes from its
+    name's other rows (FR-AUD-20's existing fallback) and has no redirect seed.
+  - **Store contract:** `parameter.example` holds no secret value from a URL or a
+    crawled form (it held every crawled value); `form.entries` of a crawled form and a
+    POST action's or captured request's endpoint query hold none. No schema change.
+  - **ML:** labels key on SP-57's context, whose seed digests the example for
+    `SEED_CATEGORIES`; a row whose example blanked gets a new seed (a new context for
+    open-redirect, access-control, command and NoSQL injection), which is the intent:
+    the old one digested a secret.
+- Risk (level; mitigation or accepted-risk justification): medium.
+  - Coverage: a form with a token-like hidden value is no longer replayed with the
+    crawled token; it is bound fresh or inconclusive (PA-0544(3): never a stale secret
+    and never a negative).
+  - Pinned residuals (strict xfail in `tests/test_redaction_nested.py`): R1, a captured
+    body's leaf holding a nested token keeps the flat leaf rule (body redaction paused
+    by the owner); R2, a POST action's or captured request's endpoint query that
+    redaction changed is sent so by its points (pre-existing for a spider capture and for
+    a sensitive name in an action URL; replay binding's scope, PA-0544).
+  - *(Review round 1:)* R2 is fixed for a form's action query and a disco capture
+    (refused, `UNBOUND`, never sent: a coverage cost, never a negative) and narrowed to
+    the spider capture writer's blank (owner CRAWL, pinned). `import_audit`'s endpoint
+    now equals the spider's for the same page, and a page on another origin keeps its
+    origin (FR-AUD-27) where it was re-rooted at the base.
+  - *(Review round 2:)* over-redaction (fail closed, accepted): any 8-character run of
+    a secret value is replaced in a finding's texts, so text of the page's own URL or
+    path that a secret value happens to repeat (a nested URL of the same app in `next=`)
+    is replaced too; the finding still names its rule and target. The endpoint lookup
+    is one query of the run's `page` and `endpoint` rows per finding. Pinned (BUG-0556
+    R5, strict xfail `test_import_audit_stores_no_userinfo_of_the_finding_page`): a
+    finding page's own userinfo is kept in `called from <url>` (the URL redactors keep a
+    top-level userinfo, R3), outside this round's class.
+- Deliverables:
+  - [x] the six writers above through the owner — done
+  - [x] FR-AUD-31 and FR-AUD-26 amended in place — done
+  - [x] tests (with CC-CORE-0076) — done
+  - [x] *(Review round 1)* `import_audit` and `_audit_text`; the endpoint query's
+    placeholder; FR-AUD-31 amended in place;
+    `test_import_audit_stores_the_spiders_endpoint_and_no_secret`,
+    `test_an_endpoint_query_redaction_changed_is_never_sent` — done
+  - [x] *(Review round 2)* `_audit_text` by the whole value (`_secret_spans`),
+    `_audit_endpoint`; FR-AUD-31 amended in place; the two round-2 importer tests, each
+    failing on f939778 on its own assertion; `import_audit`'s base-URL registry entry
+    and sub-path test; R5's strict xfail — done
+  - [x] *(r6)* `_audit_text` total over the floor's raise (`AUDIT_TEXT_WITHHELD`);
+    FR-AUD-31 amended in place; the A1 import test — done
+  - [x] *(r6 review)* `import_audit` total over a finding page no origin or path is
+    read from (`_readable_origin`, `_audit_endpoint` -> path or `None`); FR-AUD-31
+    corrected in place; the D1 and R4 import tests — done
+- Effectiveness (assessed 2026-10-22): `scratchpad/lanes/REDACTURL/exp/repro2.py` found
+  the token in `endpoint.url`, `parameter.example` and `form.entries` (spider forms and
+  disco captures) before, and only R1's two rows after; the harness result is in the
+  lane report. *(Review round 1:)* the reviewers' audit probe
+  (`scratchpad/gapvalues_b3/probe.py`) found the uuid in a second `endpoint.url` and the
+  hex in `candidate.sink_context` on c3a13f7, and finds no secret and one endpoint per
+  page on the revision; both round-1 importer tests fail on c3a13f7 on their own
+  assertions. *(Review round 2:)* on f939778 the real chain stored quoted substrings of
+  the secret values (from the JWT to the pickle) in `candidate.sink_context` and added
+  two endpoints (`/v1/q.php`, `http://h:80/app/z.php`) for an off-origin first finding;
+  on the revision it stores none and adds none (the two
+  round-2 tests fail on f939778 on their own assertions, `r2_prefix.log`); the targeted
+  run's base-URL registry failure was this entry's (round 1) and is fixed (BUG-0556
+  "Review round 2"). *(r6:)* a finding whose target `urlsplit` rejects failed the whole
+  import on r6's first draft
+  (`scratchpad/lanes/REDACTURL/r6b/a1_import_audit_plain_r6pre.log`), was stored raw
+  with its secret on 7393c90 and 144d234 (`r6_tests_plain_t{7393c90,144d234}.log`), and
+  is stored withheld with the other finding imported on the revision
+  (`a1_import_audit_plain_wt.log`). *(r6 review:)* the eight D1 and R4 cases fail on 3615cfb at "the
+  import failed" and pass on the revision (`scratchpad/lanes/REDACTURL/r6c/
+  r6review_tests_plain_{t3615cfb,wt}.log`); the check's own import runner (`checks-r6b-evidence/run_imports.py`, an `import_audit` per URL under a trace recorder) on the revision, against its 7393c90 outputs (`scratchpad/lanes/REDACTURL/r6c/imp_compare.txt`, `extra_imp_compare.txt`): 0 import failures where 7393c90 imported (3615cfb: 28 of the 888-URL supplement) and 0 URLs leaking what 7393c90 redacted, on the 70 000 and the 888; the findings on a page 7393c90's import raised on (3 463 and 27, a page `urlsplit` rejects as written; 3615cfb raised too) are imported, no secret stored.
+
 ### CC-AUD-0058 — FR-AUD-20's lab predicate is an allow-list from its entry: an explicit set of loopback authorities, no early return on `neutral_value` (SP-73; BUG-0555, BUG-0544 residual N-R3-1) (2026-10-22)
 - Placement: lane LABAUTH (item GAP-VALUES), base 7393c90; numbers pre-assigned
   (BUG-0555, PA-0555, CC-AUD-0058, FR-AUD-20 amended in place).

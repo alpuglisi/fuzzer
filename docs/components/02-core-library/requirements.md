@@ -344,7 +344,14 @@ plugin registry. It is the layer that makes the store the integration bus.
     BUG-0544:)* `core.redaction.page_url_is_clean` is the one test of whether a page URL
     may be stored as `source_page` or fetched: the strongest URL redactor
     (`redact_url_identifiers`) leaves it unchanged, it holds no redaction placeholder and
-    no empty query value.
+    no empty query value. *(Amended by `CC-CORE-0076`, 2026-10-22, BUG-0556:)* the
+    redactor it compares against walks nested URLs, query strings, `;` pairs and path
+    parameters (FR-CORE-537), a nested redaction is a `PLACEHOLDER` (never a blank, so a
+    placeholder at any depth keeps the page out), and the empty-value test splits the
+    query on `&` and `;`. *(Review rounds 1-2:)* a layer left encoded in any piece (behind
+    a raw `/`, in a nested URL's authority, in a fragment's route) and a URL's userinfo
+    wherever a URL starts in a value are redacted too (FR-CORE-537), and its placeholder
+    test is `holds_placeholder`.
   - **Header-point names:** `core.http.header_point_refusal` is the one rule
     (framing, routing, method-override and credential headers, and any name
     `is_sensitive_name` flags; whole names, case-insensitive). `check_send_header`
@@ -411,6 +418,9 @@ plugin registry. It is the layer that makes the store the integration bus.
     a bare `answer` is not one.
   - `redact_url_identifiers(url)`: `redact_url`, then identifier-like query values
     blanked to `name=`, and a SPA-route fragment's query redacted the same way.
+    *(Amended by `CC-CORE-0076`, 2026-10-22, BUG-0556:)* both redactors are one walk
+    that also judges `;` pairs, path parameters, query-shaped fragments and every value
+    nested inside them: FR-CORE-537.
   - `redact_spa_fragment(url)`: only that fragment step (`#/x?token=…`; a fragment that
     is not a route is left alone), for the crawler's stored route URLs.
 
@@ -677,6 +687,10 @@ plugin registry. It is the layer that makes the store the integration bus.
   either origin is unknown, else its canonical origin plus that path.
   *(Amended by `CC-CORE-0073`:)* `keep_query=True` keeps the URL's own query after the
   path (a sibling set's source page, FR-FUZZ-67).
+  *(Amended by `CC-CORE-0076`, 2026-10-22, BUG-0556:)* a `;` path parameter that holds
+  a secret, in any segment, is dropped from the stored path
+  (`redaction.strip_secret_path_params`, FR-CORE-537); `to_path` already drops the last
+  segment's parameters.
   `stored_absolute(stored, base_origin)` reads one back: a stored `http(s)://` URL as it
   is, else the path under `base_origin` (a path always starts with `/`, so one holding
   `://` stays a path). `is_loopback_origin` holds for 127.0.0.0/8, `localhost` and `::1`
@@ -832,6 +846,204 @@ plugin registry. It is the layer that makes the store the integration bus.
     - codings: `test_a_bounded_send_advertises_only_codings_it_can_bound`,
       `test_brotli_is_advertised_when_it_can_be_bounded`;
     - `test_a_response_already_read_is_its_kept_body_never_an_empty_one`.
+- **FR-CORE-537** *(a secret in a URL is redacted wherever it sits; `CC-CORE-0076`,
+  2026-10-22, BUG-0556, audit Gap 5; SP-17).* `core.redaction` judges a URL's values
+  as possibly structured, through one walk (`_UrlWalk`) that both URL redactors run.
+  - **Layered on the pushed redactor** *(r6, the owner's design)*: every URL redaction
+    consumer (`core.redaction.LAYERED`: `redact_url`, `redact_url_identifiers`,
+    `redact_spa_fragment`, `page_url_is_clean`, `redact_for_record`, `stored_value`,
+    `core.trace.safe_ref`, `proxy.redact.redact`) first runs its **floor** -- the pushed
+    tree's own code for it, frozen verbatim at 7393c90 in `core.redaction_floor` and
+    never edited -- on its input as received, and the walk below only on the floor's
+    output, so nothing the pushed tree redacted can be kept and the walk only removes
+    more. `redact_url_identifiers(url, placeholder=True)`'s floor is the pushed
+    `redact_url` (the pushed identifier rule blanks a value, which a sent query must
+    never hold, PA-0544(3)); `page_url_is_clean` holds only when the pushed verdict and
+    the walk's both hold; `stored_value`'s floor is the pushed `redact_sibling`.
+    `strip_secret_path_params` and `value_holds_secret` have no floor (the pushed tree
+    had no counterpart: it stored a path as `to_path` gave it). Where a floor raises
+    `ValueError` (a URL `urlsplit` rejects: `http://[h/…`, a bracketed host it does not
+    accept, a netloc that NFKC-normalises to a delimiter), the consumer raises it, as the
+    pushed tree did, and its caller withholds the value as it did then (the proxy
+    history writer's `_prepare_contained`: every body `OMIT_FAILED` and the URL cut at
+    its first `?`, what precedes it stored as received -- a `;` path parameter or a
+    fragment there is kept, family (d) below; `safe_ref`'s `(unparseable URL withheld)`;
+    `import_audit`'s `AUDIT_TEXT_WITHHELD`, FR-AUD-31). Held by
+    `tests/test_redaction_floor.py`: the floor's every definition, its decorators
+    included, hashes to 7393c90's text; each consumer is bound once in its module, by
+    its undecorated `def`, and never re-bound, calls its floor first on its own
+    parameters, and reads none of its text parameters (every str parameter, `LAYERED`)
+    again except as a predicate's argument (`isinstance`, `is_sensitive_name`,
+    `WALK_PREDICATES`); nothing uses the walk or the floor unregistered -- a call or any
+    other reference, by an imported, aliased, relative or unaliased dotted name, or
+    `getattr` / `setattr` with a literal name. *(r6 review, R1-R2.)* A name computed at
+    run time (`getattr` with a computed name, `globals()`, `sys.modules`, `importlib`,
+    `exec`) is beyond these static guards: review is the only control for it.
+  - **Where a value sits:** a query pair, `&` or `;` separated; a `;name=value` (or
+    bare `;value`) path parameter in any segment; a query-shaped fragment (`#…?a=b`,
+    `#a=b`) and a fragment route's path parameters; and, inside any of those values, a
+    nested URL (a leading scheme `://`, `/`, or an authority's `\\` or `\/` -- a single
+    leading `\` is not one, *after the final round*; the authority after such a lead
+    starts after its whole run of `/` and `\`, as Node 22's `URL` reads it, and is read
+    like one after `//`, *r4* -- or a `?` or `#` before any `=`,
+    `&` or `;`: its path parameters, query and fragment), a nested query string (`=`, `&`
+    or `;`: its pairs, a URL in a pair's value included), or a percent-encoding layer
+    (decoded one layer, then walked again). A layer is decoded wherever it remains
+    inside any piece the walk reads *(review rounds 1-2, BUG-0556)*: a value with a
+    percent-escape and no raw `?`, `#`, `=`, `&` or `;` (`quote(safe="/")`,
+    `quote(safe="/:")`, Django's `redirect_to_login`: `/` and `:` raw at every layer) is
+    decoded first, as a whole; a nested URL's authority and each path segment still
+    encoded are decoded and walked, whatever raw delimiter sits elsewhere in the value
+    (and a nested authority holding a raw `=`, `&` or `;` is walked as a value, *after
+    the final round*: `https://host;jsessionid=…` decoded from a layer);
+    so is each segment of a fragment's route, the top-level fragment's included (its
+    raw segments stay the page's identity); a value is decoded first or split first,
+    never both. A URL's userinfo (`user[:password]@`, its `@` raw or `%40`) is a
+    credential in both redactors, `PLACEHOLDER@`, wherever a URL's authority starts in a
+    nested value, as the WHATWG URL parser reads it (measured on Node 22's `URL`): after
+    a special scheme and any run of `/` or `\` (`https:///`, `https:\\`, `http:/`), or
+    after two or more of them anywhere (a nested URL's path segment or fragment route,
+    a value after a space), as `redact_for_record` and `core.trace.safe_ref` already
+    judged it. A URL's own scheme and `//` (its path walk) count only at its start (in a
+    nested value also a leading `\\` or `\/`, *r4*; a top-level URL's head reads no
+    backslash authority: its authority is its identity).
+    *(After the final round:)* the authority runs to `/`, `\`, `?` or `#` only, so a
+    userinfo holding whitespace (a passphrase; Node 22: `correct%20horse`) is a
+    credential; a userinfo holding a pair separator, raw or percent-encoded at any depth
+    (`&`, `;`, `%26`, `%3B`, `%2526`, ...), is also a pair list and redacts its value
+    whole (`_Whole`), so its replacement never deletes a pair's name.
+  - **The rule at every level:** a sensitively named pair or path parameter
+    (`is_sensitive_name`, name form-decoded) gets `PLACEHOLDER`. *(r5: the pushed tree's
+    readings, fail closed on either.)* A name, and an identifier-like value, are judged
+    as written and with their tabs, CRs and LFs removed, as `urlsplit` and the WHATWG
+    parser read them (`p<TAB>assword=…`, `%7<TAB>0assword=…`, a token split by a tab);
+    an `&` part holding a `;` is also read as one pair, its name to its first `=` and its
+    value to the next `&`, as `redact_query` reads it (`password;x=…`,
+    `password=pw;<word>`), each `;` pair still walked; and a URL holding a tab, CR or LF
+    that either reading redacts is returned with them removed and walked again, as
+    `urlunsplit` returned it. With identifiers
+    (`redact_url_identifiers`), an identifier-like value (`looks_like_identifier`,
+    judged percent-decoded once) is blanked to `name=` at a URL's own query or fragment
+    (as before), and is `PLACEHOLDER` when nested or in a path parameter; a token in a
+    nested URL's host or path redacts the whole outer value. `redact_url` applies the
+    name rule only. *(Review round 1:)* `redact_url_identifiers(url, placeholder=True)`
+    replaces a URL's own identifier-like value by `PLACEHOLDER` instead of blanking it:
+    how an endpoint's own query is stored (by name, never by value or a blank;
+    PA-0544(1)); `holds_placeholder(text)` is the one test of a redaction placeholder at
+    any depth (`page_url_is_clean`; the point builder refuses a point whose own URL holds
+    one, FR-FUZZ-67).
+  - **Re-encoding:** only a value that held a secret changes; a decoded layer that
+    changed is percent-encoded again (`quote(safe="")`), so the URL stays a URL and the
+    value one value. Clean text is byte-identical.
+  - **Bounds, fail closed:** at most `MAX_VALUE_DEPTH` (12) levels and
+    `MAX_VALUE_CHARS` (64 KiB) per value. A value past either bound, one with a layer
+    still undecoded at the last level, or one the walk fails on is redacted whole at
+    its top level (`""` with identifiers, `PLACEHOLDER` otherwise; a path parameter
+    `PLACEHOLDER`). Total on every URL `urlsplit` accepts (one it rejects raises
+    `ValueError` from the floor, *r6*); linear per level. *(Review rounds 1-2, PA-0135(2):)* the walk
+    exposes its operation counts (`WalkCounter`: `steps`, the characters every step was
+    given, and `calls`), and its linearity oracle also counts the C-level work of every
+    call the module makes (the characters each percent-decode, re-encode, pair split,
+    pattern search and predicate call is given), on one URL per part of the walk (path
+    parameters, query pairs, a nested path, a fragment route) in both modes; it is proven
+    on seven quadratic variants, none reporting its extra work through the step counter.
+  - **Stored values:** `value_holds_secret(raw_value)` (percent-decoded once) is true
+    for an identifier-like value or one the walk would change; `stored_value(name,
+    raw_value, value)` is `""` when the name is sensitive or the value holds a secret,
+    else `value`: the one rule for a link set's entries (`store_adapter.redact_sibling`),
+    every `parameter.example` the importer writes from a URL or a crawled form, and a
+    crawled form's entries (FR-AUD-22/31, FR-FUZZ-67's `fresh`).
+    `strip_secret_path_params(path)` drops each path parameter that holds a secret;
+    `store_url` applies it (FR-CORE-504).
+  - **Not changed:** `looks_like_identifier` (FR-CORE-30, SP-18), `redact_query` and
+    the body redactors (`redact_body`, `redact_captured_body`, `redact_leaf`; body
+    redaction is paused by the owner, audit defect 26): a nested token in a captured
+    body's leaf is BUG-0556's pinned residual R1.
+  - **Every caller passes its value whole** *(review rounds 1-2)*: no caller gates its
+    call on a `?` (the proxy's request target and URL headers, RU-7); the proxy passes
+    every value of every URL-bearing header, duplicates included, and reads the request
+    target whitespace-tolerantly (FR-PROXY-11); the project-record redactor walks the
+    whole value before any whitespace split, then each piece (`redact_for_record`, RU-9,
+    N7: a URL holding a raw space); its userinfo pre-pass also strips a userinfo whose
+    span crosses whitespace and holds no pair separator (`_URL_USERINFO_SPACED`, *after
+    the final round*).
+  - **Stated gaps, pinned** *(after the owner's final round; BUG-0556 "Residuals after
+    the owner's final round")*, each a strict xfail in
+    `tests/test_redaction_residual_pins.py` naming its owner:
+    `test_an_encoded_authoritys_userinfo_is_redacted` (a userinfo decoded from a nested
+    authority's or a top-level fragment route's layer, N1 (A));
+    `test_a_userinfo_the_whatwg_parser_reads_after_a_space_or_a_stripped_tab_is_redacted`
+    (`+https:bob:pw@`, `https:/%0A/`, `https:%2F/`, N2 item 2);
+    `test_a_userinfo_in_the_top_level_fragment_route_is_redacted`,
+    `test_a_userinfo_in_a_top_level_pair_name_is_never_stored` and
+    `test_a_userinfo_in_a_top_level_path_segment_is_never_stored` (R3: the top-level
+    route, a pair's name and a path segment are the page's identity, N2 item 3);
+    `test_a_backslash_led_pair_list_decoded_once_is_held_secret` (`/\host&token=…` read
+    as a path by `_authority_start`) and, *r4*,
+    `test_a_slash_led_authoritys_pair_list_encoded_once_is_redacted_by_redact_url`
+    (`next=%2F%5Cx%26password%3D…` and the `///`, `/\\`, `/\/`, `////` leads: a
+    `/`-led run that is not exactly `//` is read as a path by `_authority_start`, where
+    Node 22 starts an authority after it; on f939778 too);
+    `test_a_record_never_deletes_a_pair_name_with_a_userinfo_pattern` and
+    `test_a_record_strips_a_top_level_userinfo_holding_a_space_and_a_pair_separator`
+    (`redact_for_record`'s userinfo pre-pass runs before the walk, N7 neighbour 1);
+    `test_the_linearity_oracle_flags_c_level_work_outside_the_counted_names`,
+    `test_the_linearity_oracle_runs_the_userinfo_loop` and
+    `test_the_linearity_oracle_runs_the_redaction_path` (the oracle's blind spots, N8).
+    The callers' gaps are pinned in the same file: `import_audit` after `--append` (AUD,
+    N3) and malformed or folded proxy messages (PROXY, N6).
+    *(r5: every leak the pushed tree, 7393c90, also had -- the owner's shipping
+    criterion; BUG-0556 "r5")*, each a strict xfail in the same file:
+    `test_a_pair_list_in_a_nested_urls_later_path_segment_is_redacted` (class (a) of r4's
+    skeptic: a pair list in a nested URL's later path segment, `\\x/p&password=…`);
+    `test_a_backslash_led_userinfo_in_the_top_level_fragment_is_redacted` (class (b):
+    `#\\user%3A<pw>%40x%2Fp`); `test_a_path_parameter_value_holding_a_raw_slash_is_redacted`
+    (a top-level path parameter's value cut at its first `/`);
+    `test_a_scheme_less_userinfo_in_a_value_is_redacted` (`next=bob:<pw>@host`);
+    `test_a_top_level_userinfo_holding_a_raw_amp_is_redacted` (`next=//bob:p&w<pw>@host`);
+    `test_a_top_level_fragments_pairs_before_a_question_mark_are_redacted`
+    (`#token=<word>?y=1`, read as a route);
+    `test_a_slash_run_after_a_scheme_before_a_pair_list_is_redacted`
+    (`https:///x&password=…`); `test_the_amp_reading_of_a_nested_value_is_redacted`
+    (`next=/v?password;x=…`: the `&` reading's value is not walked whole);
+    `test_an_identifier_as_a_top_level_path_segment_or_route_is_redacted` and
+    `test_a_top_level_urls_own_userinfo_is_redacted_by_the_url_redactors` (the page's
+    identity, R3); and the proxy's `test_proxy_history_redacts_a_url_holding_a_raw_lf`
+    (PROXY). **Stated, not pinned** (no reading makes them a kept secret of a consumer
+    that judges them): a value `value_holds_secret` keeps where every consumer 7393c90
+    had redacts it (7393c90 had no such function); a word in a `;` pair no reading names
+    sensitive (`?u=bob;password;x=<word>`, a path parameter's `;password;x=<word>`); an
+    identifier-like value under a benign name in the name-only consumers (`redact_url`,
+    the record redactor, the proxy), by this requirement's own rule.
+    *(r6: what the walk cannot see in the floor's output; each leaks at 7393c90 too and
+    is pinned in the same file, owner CORE, its candidate rule stated, not built.)*
+    `test_a_name_joined_by_a_tab_cr_or_lf_in_the_floors_output_is_redacted` (family (a):
+    the floor returns a URL it redacted with its tabs, CRs and LFs removed, so
+    `x<TAB>password` reaches the walk as `xpassword`; both URL redactors, `safe_ref` and
+    the proxy's request line, `Location` and `Content-Location`);
+    `test_the_floors_userinfo_rule_never_lets_the_evidence_reference_keep_a_secret` and
+    `test_import_spider_under_a_trace_recorder_stores_no_identifier_behind_the_floors_userinfo`
+    (family (b): `safe_ref`'s floor turns a userinfo into `***@` before the walk, deleting
+    a pair's name or the userinfo that made the walk redact a nested URL whole);
+    `test_a_nested_userinfo_cut_by_the_records_size_bound_keeps_no_password` (family (c):
+    the floor's record redactor cuts at 4096 characters before the walk, so a nested
+    `%40` userinfo straddling the cut keeps its password's start; `redact_for_record`,
+    `safe_ref`). *(r6 review, R3:)* family (d), what a caller stores where the floor
+    raises: `test_proxy_history_stores_no_path_parameter_of_a_flow_its_floor_rejects`
+    (owner PROXY: the history writer's fallback keeps what precedes the URL's first `?`,
+    a `;name=value` path parameter or a query-shaped fragment there).
+  - Enforced by: `tests/test_redaction_floor.py` (the layering, r6) and
+    `tests/test_redaction_nested.py` (a generated sweep over depth,
+    encoding -- raw, single and double percent, `+`, `quote(safe="/")` single and
+    double, `quote(safe="/:")` -- separator, nested shape -- a path, an absolute URL, a
+    query string, a URL's userinfo -- credential names and identifier shapes, searched in
+    the store, proxy history, the HTTP recorder, `safe_ref` and the project records; the
+    review rounds' neighbouring spellings through every URL redactor and the store; the
+    in-batch regressions after the final round, and r4's backslash-led authority's
+    pair list, through every URL consumer and the store;
+    the benign list byte-identical; bounds and totality; an operation-count linearity
+    oracle proven on quadratic variants); the stated gaps by
+    `tests/test_redaction_residual_pins.py` (strict xfails).
 - **FR-CORE-508** *(one read-only opener; a SQLite file is touched only through
   SQLite; `CC-CORE-0071`, 2026-10-20, BUG-0535).*
   - `core.store.open_read_only(path, *, timeout, fold_on_close=False, any_thread=False)`

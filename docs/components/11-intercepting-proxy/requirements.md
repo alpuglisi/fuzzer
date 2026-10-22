@@ -79,7 +79,39 @@ that shares the store, never a mandatory pipeline (D5).
   written, these are redacted:
   - sensitively named headers;
   - query parameters of the request target and of `Location` / `Content-Location` /
-    `Refresh`;
+    `Refresh`; *(BUG-0556, review round 1:)* every sensitively named URL value
+    `core.redaction.redact_url` finds (`;` pairs and path parameters, a query-shaped
+    fragment, nested values, a nested URL's userinfo), with or without a query: the
+    target and those headers are always passed to it whole (a `;jsessionid=` path
+    parameter in a URL with no query was kept). *(Review round 2, `CC-PROXY-0031`:)*
+    **every value of every URL-bearing header**, duplicates included and rewritten in
+    place (order and every other line byte-exact): `Location`, `Content-Location`,
+    `Referer`, `Origin`, `Destination`, `X-Original-URL`, `X-Rewrite-URL`, `Ping-From`,
+    `Ping-To`, any other header whose value starts as a URL (a scheme's `://` or `/`),
+    each `<URI>` of `Link`, and `Refresh`'s URL as the HTML declarative-refresh steps
+    read it (`url=`, `url = `, quoted, or bare after the delay); the request target is
+    read whitespace-tolerantly (after the method and its run of spaces or tabs, up to
+    the run before a final `HTTP/` version), so a malformed request line is redacted
+    too. *(r6, BUG-0556, the owner's design, `CC-PROXY-0031`:)* **layered on the pushed
+    redactor**: 7393c90's own `redact` (`core.redaction_floor.redact`, frozen verbatim)
+    runs first on the raw message -- the sensitive headers, the request target's query,
+    `Location`'s and `Content-Location`'s query and `Refresh`'s every `url=` run (quotes
+    and the tail after them included), a duplicate of a `Location` or `Content-Location`
+    it rewrites collapsed into the rewritten value (as `RawMessage.with_header` did),
+    and the bodies -- and the walk above runs only on its output, so nothing the pushed
+    tree redacted is kept. Where the floor raises (a URL `urlsplit` rejects in the
+    request line or one of those headers), `redact` raises and the history writer stores
+    the flow with every body `OMIT_FAILED` and its URL cut at its first `?`
+    (`_prepare_contained`), as on 7393c90: what precedes that `?` is stored as received,
+    in `flow.url` and its `errors` line -- a `;name=value` path parameter, a fragment
+    written before it, a path segment (*r6 review*, R3: not "never unredacted"). Pinned
+    (owner PROXY, BUG-0556 r6 family (d), kept on 7393c90 too): such a path parameter or
+    query-shaped fragment
+    (`test_proxy_history_stores_no_path_parameter_of_a_flow_its_floor_rejects`; candidate
+    rule, not built: cut at the first `;`, `?` or `#`). Pinned (owner CORE, BUG-0556 r6 family (a)):
+    a name the floor's `urlsplit` reading joins across a removed tab (`?token=a&x<TAB>
+    password=<w>`, which the floor returns as `xpassword=<w>`) in the request line,
+    `Location` or `Content-Location`, kept on 7393c90 too;
   - form, JSON (any depth) and multipart (non-file) request and response bodies. *(CC-PROXY-0020,
     BUG-0090:)* a sensitive JSON key's **whole value** is replaced, whatever its type
     (scalar, list, object or nested), and plural names are sensitive

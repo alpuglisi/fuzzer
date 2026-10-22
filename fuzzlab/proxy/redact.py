@@ -7,8 +7,18 @@ redacts:
 
 - **headers:** the values of sensitive headers (`SENSITIVE_HEADERS`, plus any header
   whose name `core.redaction.is_sensitive_name` flags);
-- **URL query parameters:** sensitively named ones, in the request target and in
-  ``Location`` / ``Content-Location`` / ``Refresh`` response headers;
+- **URL values:** sensitively named ones wherever `core.redaction.redact_url` finds
+  them (a query, ``;`` pairs and path parameters, a query-shaped fragment, nested
+  values), with or without a query (BUG-0556 review round 1), in the request target
+  (read whitespace-tolerantly: a doubled space or a tab between its parts) and in
+  **every value** of every URL-bearing header, duplicates included (review round 2,
+  N6): ``Location``, ``Content-Location``, ``Referer``, ``Origin``, ``Destination``,
+  ``X-Original-URL``, ``X-Rewrite-URL``, ``Ping-From``, ``Ping-To``, any other header
+  whose value is a URL (a scheme's ``://`` or a ``/`` first), each ``<URI>`` of
+  ``Link``, and ``Refresh``'s URL as the HTML declarative-refresh steps read it
+  (``url=``, ``url = ``, quoted, or bare after the delay). Layered (BUG-0556 r6): the
+  pushed tree's own `redact` runs first (`core.redaction_floor`, frozen at 7393c90),
+  and this walk on its output only;
 - **bodies:** sensitively named fields of form-urlencoded, JSON (any depth) and
   multipart (non-file) bodies, in requests and responses alike. A sensitive JSON key's
   **whole value** is replaced, whatever its type (list, object, scalar; BUG-0090).
@@ -35,10 +45,12 @@ from __future__ import annotations
 import re
 import zlib
 
-from fuzzlab.core.redaction import (MAX_REDACT_BYTES, OMIT_UNSAFE, PLACEHOLDER, body_kind,
-                                    is_sensitive_name, mentions_sensitive_name,
-                                    redact_body, redact_url)
+from fuzzlab.core import redaction_floor as _floor
+from fuzzlab.core.redaction import (MAX_REDACT_BYTES, OMIT_UNSAFE, PLACEHOLDER, _walk_names,
+                                    body_kind, is_sensitive_name, mentions_sensitive_name,
+                                    redact_body)
 from fuzzlab.core.redaction import redact_query  # noqa: F401  (re-exported: one boundary)
+from fuzzlab.core.redaction import redact_url  # noqa: F401  (re-exported: history's URL)
 from fuzzlab.proxy.message import RawMessage
 
 REDACTED = PLACEHOLDER.encode()
@@ -52,7 +64,76 @@ SENSITIVE_HEADERS = (
     "x-api-key",
     "x-auth-token",
 )
-_URL_HEADERS = ("location", "content-location", "refresh")
+#: Headers whose whole value is a URL (an origin, for ``Origin``: a well-formed one holds
+#: no path, so it comes back byte-identical; a malformed one is walked like any URL).
+#: ``Refresh`` and ``Link`` carry a URL inside a larger value (`_redact_refresh`,
+#: `_LINK_URI`); any other header whose value starts as a URL is walked too
+#: (`_URL_VALUE`). BUG-0556 review round 2, N6.
+_URL_HEADERS = frozenset({"location", "content-location", "referer", "origin",
+                          "destination", "x-original-url", "x-rewrite-url",
+                          "ping-from", "ping-to"})
+_URL_VALUE = re.compile(r"[A-Za-z][A-Za-z0-9+.\-]*://|/")
+#: A ``Link`` header's URI references, each between ``<`` and ``>`` (RFC 8288).
+_LINK_URI = re.compile(r"<([^>]*)>")
+#: ``Refresh``'s delay and the optional ``url=`` before its URL, as the HTML "shared
+#: declarative refresh steps" skip them: whitespace, digits and dots, whitespace, an
+#: optional ``;`` or ``,``, whitespace, and ``url`` (any case), whitespace, ``=`` and
+#: whitespace when present. What follows is the URL, quoted or to the end.
+_REFRESH_PREFIX = re.compile(
+    r"[ \t]*[0-9.]*[ \t]*[;,]?[ \t]*(?:[Uu][Rr][Ll][ \t]*=[ \t]*)?")
+
+
+def _redact_refresh(value: str) -> str:
+    """``Refresh``'s URL passed to the walk (`_walk_names`), whichever spelling holds it
+    (review round 2, N6: only ``url=`` with no spaces was read). It reads the quoted URL
+    only; what 7393c90 read (every ``url=`` run to whitespace, a closing quote and the
+    tail after it included) its floor has redacted first (BUG-0556 r6, R3)."""
+    prefix = _REFRESH_PREFIX.match(value).group(0)
+    rest = value[len(prefix):]
+    if rest[:1] in ("'", '"'):
+        end = rest.find(rest[0], 1)
+        end = len(rest) if end < 0 else end
+        return prefix + rest[0] + _walk_names(rest[1:end]) + rest[end:]
+    url = rest.rstrip(" \t")
+    return prefix + _walk_names(url) + rest[len(url):]
+
+
+def _redact_header_value(name: str, value: str) -> str:
+    """One header value with the URL it bears passed to the walk (`_walk_names`;
+    unchanged when the header bears none, or the URL holds no sensitively named
+    value)."""
+    if name == "refresh":
+        return _redact_refresh(value)
+    if name == "link":
+        return _LINK_URI.sub(lambda m: "<" + _walk_names(m.group(1)) + ">", value)
+    if name in _URL_HEADERS or _URL_VALUE.match(value):
+        return _walk_names(value)
+    return value
+
+
+def _target_span(line: bytes) -> tuple[int, int]:
+    """Where a request line's target is: after the method and the whitespace that
+    follows it, up to the whitespace before a final ``HTTP/`` version (or the line's
+    end). Spaces and tabs are both whitespace, and a run of them is one separator, so a
+    malformed line (``GET  /a;jsessionid=… HTTP/1.1``) is read whole (review round 2,
+    N6: ``split(b" ")[1]`` read it as empty). ``(0, 0)`` when there is none. Linear."""
+    i = 0
+    while i < len(line) and line[i] not in b" \t":
+        i += 1
+    j = i
+    while j < len(line) and line[j] in b" \t":
+        j += 1
+    if i == 0 or j == i or j >= len(line):
+        return 0, 0
+    end = len(line)
+    while end > j and line[end - 1] in b" \t":
+        end -= 1
+    last = max(line.rfind(b" ", j, end), line.rfind(b"\t", j, end))
+    if last >= j and line[last + 1:end].startswith(b"HTTP/"):
+        end = last
+        while end > j and line[end - 1] in b" \t":
+            end -= 1
+    return j, end
 
 
 def _dechunk(body: bytes, limit: int) -> bytes | None:
@@ -118,15 +199,6 @@ def _framed_body_unsafe(msg: RawMessage, body: bytes) -> bool:
     return redact_body(payload, ct) != payload
 
 
-def _original_name(msg: RawMessage, name: str) -> bytes:
-    """The header's name as the message spells it (keep the persisted copy faithful)."""
-    for line in msg.header_lines():
-        i = line.find(b":")
-        if i != -1 and line[:i].lower() == name.encode():
-            return line[:i]
-    return name.encode()
-
-
 def _header(msg: RawMessage, name: str) -> str:
     v = msg.get(name)
     return v.decode("latin-1", "replace") if v is not None else ""
@@ -134,7 +206,21 @@ def _header(msg: RawMessage, name: str) -> str:
 
 def redact(raw: bytes, extra_headers: tuple[str, ...] = ()) -> bytes:
     """Return ``raw`` with its secrets replaced by a placeholder (see the module
-    docstring). Benign headers, parameters and fields are left untouched."""
+    docstring). Benign headers, parameters and fields are left untouched.
+
+    Layered (BUG-0556 r6, `core.redaction.LAYERED`): the pushed tree's own `redact`
+    runs first (`core.redaction_floor.redact`, frozen at 7393c90: the sensitive headers,
+    the request target's query, ``Location``, ``Content-Location`` and ``Refresh``'s
+    every ``url=`` run, a duplicate of a rewritten one collapsed into it, the bodies),
+    then the walk (`_walk`) on its output only. Where the floor raises (a URL
+    ``urlsplit`` rejects in the request line or one of those headers), so does this:
+    the history writer withholds the flow (``_prepare_contained``), as on 7393c90."""
+    out = _floor.redact(raw, extra_headers)
+    return _walk(out, extra_headers)
+
+
+def _walk(raw: bytes, extra_headers: tuple[str, ...] = ()) -> bytes:
+    """`redact`'s walk (the 144d234 redactor), on its floor's output."""
     msg = RawMessage.from_bytes(raw)
     names = set(SENSITIVE_HEADERS) | {h.lower() for h in extra_headers}
     for line in msg.header_lines():
@@ -148,22 +234,39 @@ def redact(raw: bytes, extra_headers: tuple[str, ...] = ()) -> bytes:
             msg = msg.without_header(name)
             for _ in range(n):
                 msg = msg.with_appended_header(name, REDACTED)
-    # the request target's query (a response's start line has none)
-    target = msg.target.decode("latin-1", "replace")
-    if not msg.start_line.startswith(b"HTTP/") and "?" in target:
-        new_target = redact_url(target)
+    # the request target (a response's start line has none) and every URL-bearing
+    # header value, each passed whole to the walk (`_walk_names`: `redact_url` past its
+    # floor, which `redact` ran on the whole message first), never gated on a '?': a
+    # ';jsessionid=' path parameter or a query-shaped fragment holds a secret with no
+    # query (Tomcat URL rewriting; BUG-0556 review round 1). The walk returns a URL
+    # holding no value byte-identical, so a clean message is unchanged.
+    line = msg.start_line
+    if not line.startswith(b"HTTP/"):
+        start, end = _target_span(line)
+        target = line[start:end].decode("latin-1")
+        new_target = _walk_names(target)
         if new_target != target:
-            parts = msg.start_line.split(b" ")
-            parts[1] = new_target.encode("latin-1")
-            msg = msg.with_request_line(b" ".join(parts))
-    for name in _URL_HEADERS:
-        value = _header(msg, name)
-        if "?" in value:
-            new = redact_url(value) if name != "refresh" else re.sub(
-                r"(url=)(\S+)", lambda m: m.group(1) + redact_url(m.group(2)), value,
-                flags=re.I)
+            msg = msg.with_request_line(line[:start] + new_target.encode("latin-1")
+                                        + line[end:])
+    # every value of every URL-bearing header, rewritten in place: duplicates
+    # included, order and the other lines kept byte-exact (review round 2, N6: only the
+    # first value was read, and a changed one replaced every duplicate)
+    lines, changed = [], False
+    for hline in msg.header_lines():
+        i = hline.find(b":")
+        name = hline[:i].decode("latin-1").strip().lower() if i != -1 else ""
+        if i != -1 and name not in names:
+            raw_value = hline[i + 1:].decode("latin-1")
+            value = raw_value.strip(" \t")
+            new = _redact_header_value(name, value)
             if new != value:
-                msg = msg.with_header(_original_name(msg, name), new)
+                lead = raw_value[:len(raw_value) - len(raw_value.lstrip(" \t"))]
+                trail = raw_value[len(raw_value.rstrip(" \t")):]
+                hline = hline[:i + 1] + (lead + new + trail).encode("latin-1")
+                changed = True
+        lines.append(hline)
+    if changed:
+        msg = msg._rebuild(msg.start_line, lines, msg.body)
     # bodies. Chunked / compressed: decoded (bounded) and checked; a body that is not
     # provably clean is replaced by the marker with framing made consistent (B-S3),
     # a clean one is kept byte-exact.

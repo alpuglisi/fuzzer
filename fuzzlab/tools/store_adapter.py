@@ -26,7 +26,7 @@ from urllib.parse import parse_qsl, unquote, unquote_plus, urlparse
 
 from fuzzlab.core.forms import LINK_SET_ENCTYPE
 from fuzzlab.core.store import Store
-from fuzzlab.core.urls import canonical_origin, store_url, to_path
+from fuzzlab.core.urls import canonical_origin, store_url
 
 
 def _upsert_endpoint(store: Store, run_id: int, url_path: str, method: str,
@@ -100,12 +100,12 @@ def query_pairs(raw_query: str) -> list[tuple[str, str, str]]:
 
 def redact_sibling(name: str, raw_value: str, value: str) -> str:
     """A crawled link's sibling value as it may be stored and sent: ``""`` when its
-    name is sensitive or its raw value looks like an identifier (a token, an id), else
-    ``value`` (forms phase 2, FR-FUZZ-43; PA-0100)."""
-    from fuzzlab.core.redaction import is_sensitive_name, looks_like_identifier
-    if is_sensitive_name(name) or looks_like_identifier(raw_value):
-        return ""
-    return value
+    name is sensitive or its raw value holds a secret anywhere -- it looks like an
+    identifier (a token, an id), or a URL, query string or ``;`` pair nested in it holds
+    a sensitively named or identifier-like value (BUG-0556) -- else ``value`` (forms
+    phase 2, FR-FUZZ-43; PA-0100). The owner's rule, `core.redaction.stored_value`."""
+    from fuzzlab.core.redaction import stored_value
+    return stored_value(name, raw_value, value)
 
 
 def entries_refusal(entries, *, credential_names: bool = False) -> str | None:
@@ -178,11 +178,12 @@ def import_spider(spider_db: str | Path, store: Store, run_id: int, *,
     return counts
 
 
-def _main_origin(base_url: str | None, urls) -> str | None:
-    """The run's main origin: ``base_url``'s, else the first crawled URL's that has one."""
+def _main_origin(base_url: str | None, urls, *, origin_of=canonical_origin) -> str | None:
+    """The run's main origin: ``base_url``'s, else the first crawled URL's that has one
+    (each read by ``origin_of``; `import_audit` passes `_readable_origin`)."""
     if base_url:
         return canonical_origin(base_url)
-    return next((o for o in map(canonical_origin, urls) if o is not None), None)
+    return next((o for o in map(origin_of, urls) if o is not None), None)
 
 
 def _import_page_url(store: Store, run_id: int, raw: str, status, source: str,
@@ -249,14 +250,15 @@ def _import_path_templates(store: Store, run_id: int, urls, source: str,
     the crawl recorded them (FR-CRAWL-28): a value among them names a route, not data.
     Both importers call it once, after their URLs."""
     from fuzzlab.core.pathtemplate import path_templates
-    from fuzzlab.core.redaction import looks_like_identifier
+    from fuzzlab.core.redaction import stored_value, strip_secret_path_params
     for t in path_templates(urls, code=code):
-        stored = t.path if main is None or t.origin == main else t.origin + t.path
+        path = strip_secret_path_params(t.path)          # as `store_url` (BUG-0556)
+        stored = path if main is None or t.origin == main else t.origin + path
         endpoint_id = _upsert_endpoint(store, run_id, stored, "GET", source)
         if _get_parameter(store, run_id, endpoint_id, t.param, "path", None) is not None:
             continue
         counts["endpoint"] += 1
-        example = "" if looks_like_identifier(t.example) else t.example
+        example = stored_value("", t.example, t.example)     # the owner's rule
         store.conn.execute(
             "INSERT INTO parameter (run_id, endpoint_id, name, location, example) "
             "VALUES (?,?,?,?,?)", (run_id, endpoint_id, t.param, "path", example))
@@ -406,9 +408,10 @@ def _import_link_set(store: Store, run_id: int, endpoint_id: int, pairs, page,
     names = list(dict.fromkeys(name for name, _r, _v in pairs))
     if refused or len(names) < 2:
         counts["link_set_refused"] += 1 if refused else 0
-        for name, _raw, value in pairs:                  # lone points, as crawled
-            _insert_parameter(store, run_id, endpoint_id, name, "query", value, None,
-                              counts)
+        for name, raw, value in pairs:                   # lone points, as crawled
+            # the example is a stored value: through the owner's rule (BUG-0556)
+            _insert_parameter(store, run_id, endpoint_id, name, "query",
+                              redact_sibling(name, raw, value), None, counts)
         if refused:
             return
     entries = [(name, redact_sibling(name, raw, value)) for name, raw, value in pairs]
@@ -423,8 +426,8 @@ def _import_link_set(store: Store, run_id: int, endpoint_id: int, pairs, page,
         counts["link_set"] += 1
     if len(names) < 2:
         return
-    for name, _raw, value in pairs:
-        if _insert_parameter(store, run_id, endpoint_id, name, "query", value, form_id,
+    for name, kept in entries:                       # the example as the entry is stored
+        if _insert_parameter(store, run_id, endpoint_id, name, "query", kept, form_id,
                              counts):
             counts["link_set_bound"] += 1
 
@@ -666,7 +669,8 @@ def _import_forms(src, store: Store, run_id: int, counts: dict,
         verdicts = dict(src.execute("SELECT sig, verdict FROM selector_verdicts").fetchall())
     except sqlite3.Error:
         verdicts = {}                            # a spider DB from before FR-CRAWL-10
-    from fuzzlab.core.redaction import is_sensitive_name
+    from fuzzlab.core.redaction import (is_sensitive_name, redact_url_identifiers,
+                                        stored_value)
     from fuzzlab.tools.formnav import signature_key
     counts.setdefault("form", 0)
     counts.setdefault("form_skipped", 0)
@@ -694,20 +698,30 @@ def _import_forms(src, store: Store, run_id: int, counts: dict,
                 continue
             seen_selectors.add(same)
         kinds = dict(form["controls"])
-        form["entries"] = _filled(form["entries"], kinds)
+        filled = _filled(form["entries"], kinds)
+        # every stored value through the owner's rule (BUG-0556): one that holds a
+        # secret anywhere (an identifier, a token in a nested URL) is blanked and named
+        # in the replay recipe; a password control stays empty by policy (FR-FUZZ-44)
+        stored = [(name, value if kinds.get(name) == "password"
+                   else stored_value(name, value, value)) for name, value in filled]
         path = store_url(form["action_url"], main)
-        query = urlparse(form["action_url"]).query
+        # the action's query, as the strongest URL redactor stores it (BUG-0556); a value
+        # it redacts is recorded as a placeholder, never a blank, so its points are
+        # refused and never send it (PA-0544(1)/(3); review round 1, RU-4)
+        query = urlparse(redact_url_identifiers(form["action_url"],
+                                                placeholder=True)).query
         url = path + ("?" + query if query and form["method"] == "POST" else "")
         endpoint_id = _upsert_endpoint(store, run_id, url, form["method"], "form")
-        fresh = [name for name, _v in form["entries"]
-                 if kinds.get(name) != "password" and is_sensitive_name(name)]
+        fresh = [name for (name, value), (_n, kept) in zip(filled, stored)
+                 if kinds.get(name) != "password"
+                 and (is_sensitive_name(name) or kept != value)]
         form_id = _insert_sibling_set(
-            store, run_id, endpoint_id, form["enctype"], json.dumps(form["entries"]),
+            store, run_id, endpoint_id, form["enctype"], json.dumps(stored),
             source_page=_source_page(row["page_url"], main),
             fresh=fresh, password_fields=json.dumps(password_fields(form)))
         counts["form"] += 1
         location = "body" if form["method"] == "POST" else "query"
-        for name, value in form["entries"]:
+        for name, value in stored:
             kind = kinds.get(name)
             if (kind in ("submit", "password") or is_sensitive_name(name)
                     or (kind == "hidden" and _object_selector(name))):
@@ -731,9 +745,10 @@ def _import_route_query(store: Store, run_id: int, raw: str, source, counts: dic
     endpoint_id = _upsert_endpoint(store, run_id, store_url(raw, main, route=True), "GET",
                                    source)
     counts["endpoint"] += 1
-    for name, value in parse_qsl(route[1], keep_blank_values=True):
-        if _insert_parameter(store, run_id, endpoint_id, name, "fragment", value, None,
-                             counts):
+    for name, raw, value in query_pairs(route[1]):
+        # the example is a stored value: through the owner's rule (BUG-0556)
+        if _insert_parameter(store, run_id, endpoint_id, name, "fragment",
+                             redact_sibling(name, raw, value), None, counts):
             counts["fragment_parameter"] += 1
 
 
@@ -944,7 +959,12 @@ def _store_request(store, run_id, counts, kind, method, url, leaves, *,
                   or (_object_selector(last) and last not in visible))
         if name not in passwords and not pinned and jsonbody.is_point_value(value):
             points.append((name, value))
-    parts = urlparse(url)
+    # the URL's query as the strongest URL redactor stores it (BUG-0556): a disco
+    # capture redacted names only; the spider's capture already passed it. A value it
+    # redacts is recorded as a placeholder, never a blank, so the request's points are
+    # refused and never send it (PA-0544(1)/(3); review round 1, RU-4)
+    from fuzzlab.core.redaction import redact_url_identifiers
+    parts = urlparse(redact_url_identifiers(url, placeholder=True))
     endpoint_url = store_url(url, main) + ("?" + parts.query if parts.query else "")
     endpoint_id = _upsert_endpoint(store, run_id, endpoint_url, method, "request")
     enctype = jsonbody.ENCTYPE if kind == "json" else FORM_URLENCODED
@@ -966,8 +986,26 @@ def _store_request(store, run_id, counts, kind, method, url, leaves, *,
                           counts)
 
 
-def import_audit(audit_db: str | Path, store: Store, run_id: int) -> dict[str, int]:
-    """Import auditor findings -> candidate rows (with rule evidence)."""
+def import_audit(audit_db: str | Path, store: Store, run_id: int, *,
+                 base_url: str | None = None) -> dict[str, int]:
+    """Import auditor findings -> candidate rows (with rule evidence).
+
+    Every stored text passes the redaction owner (BUG-0556 review round 1, PA-0100): a
+    finding's endpoint is `core.urls.store_url` of its page -- a path parameter that
+    holds a secret dropped, and another origin kept -- in the form this run's spider
+    rows already hold it (`_audit_endpoint`: the run's main origin is the spider's, not
+    the first finding page's; review round 2, N3), else by the run's main origin
+    (``base_url``'s, else the first finding page's); its ``target_identifier`` and
+    ``html_context`` (stored as ``sink_context``) pass `_audit_text`.
+
+    Total over a finding page no origin can be read from (BUG-0556 r6 review, D1 and
+    R4): the main origin is the first page's that `_readable_origin` reads; a page whose
+    authority ``urlsplit`` rejects once `canonical_origin` reads it as a URL
+    (``x[y/app/p.php``, ``h]/…``, ``\\u3000http://[h/…``) is stored by its path, as
+    7393c90's ``to_path`` stored every finding page; one ``to_path`` rejects too
+    (``http://[h/…``, where 7393c90's import raised) gets no endpoint (the candidate's
+    ``parameter_id`` is NULL) and its texts are `AUDIT_TEXT_WITHHELD` (`_audit_text`).
+    Such a finding is imported, never failing the import."""
     src = sqlite3.connect(str(audit_db))
     src.row_factory = sqlite3.Row
     counts = {"candidate": 0}
@@ -978,18 +1016,23 @@ def import_audit(audit_db: str | Path, store: Store, run_id: int) -> dict[str, i
         ).fetchall()
     except sqlite3.Error:
         rows = []
+    main = _main_origin(base_url, (r["page_url"] for r in rows),
+                        origin_of=_readable_origin)
     for row in rows:
-        path = to_path(row["page_url"])
-        endpoint_id = _upsert_endpoint(store, run_id, path, "GET", "audit")
+        page = row["page_url"]
+        endpoint = _audit_endpoint(store, run_id, page, main, spider_form=not base_url)
+        endpoint_id = (None if endpoint is None
+                       else _upsert_endpoint(store, run_id, endpoint, "GET", "audit"))
+        target = _audit_text(row["target_identifier"], page, url=True)
         # the legacy auditor names a parameter only: its first row of that name
-        found = store.conn.execute(
+        found = None if endpoint_id is None else store.conn.execute(
             "SELECT id FROM parameter WHERE run_id=? AND endpoint_id=? AND name=? "
-            "ORDER BY id", (run_id, endpoint_id, row["target_identifier"])).fetchone()
+            "ORDER BY id", (run_id, endpoint_id, target)).fetchone()
         param_id = int(found["id"]) if found else None
         evidence = {
             "category": row["category"],
             "transaction_type": row["transaction_type"],
-            "target_identifier": row["target_identifier"],
+            "target_identifier": target,
             "occurrences": row["occurrences"] if "occurrences" in row.keys() else 1,
             "reference": row["reference"] if "reference" in row.keys() else None,
         }
@@ -997,12 +1040,165 @@ def import_audit(audit_db: str | Path, store: Store, run_id: int) -> dict[str, i
             "INSERT INTO candidate (run_id, parameter_id, rule, evidence, sink_context) "
             "VALUES (?,?,?,?,?)",
             (run_id, param_id, row["transaction_type"], json.dumps(evidence),
-             row["html_context"]),
+             _audit_text(row["html_context"], page)),
         )
         counts["candidate"] += 1
     store.conn.commit()
     src.close()
     return counts
+
+
+def _readable_origin(url) -> str | None:
+    """`canonical_origin` of a finding page, or ``None`` where it raises ``ValueError``
+    (an authority ``urlsplit`` rejects once read as a URL: ``x[y/app/p.php``, to which
+    `canonical_origin` prefixes ``http://``; ``http://[h/…``): such a page names no
+    origin (BUG-0556 r6 review, D1)."""
+    try:
+        return canonical_origin(url)
+    except ValueError:
+        return None
+
+
+def _audit_endpoint(store: Store, run_id: int, page: str, main: str | None, *,
+                    spider_form: bool) -> str | None:
+    """A legacy-auditor finding page's endpoint as this run's spider rows hold the same
+    page (review round 2, N3): `import_spider` and `import_audit` each took the run's
+    main origin from their own first row (the seed; the first page with a finding), so
+    an off-origin first finding stored the main origin's pages absolute, beside the
+    spider's paths. ``store_url`` gives a page on another origin absolute only, so the
+    spider's absolute form names a page off the main origin and its path form one on it.
+    With neither stored, or without ``spider_form`` (the caller was given the operator's
+    base URL, whose origin is the main one), the run's ``main`` decides.
+
+    A page no origin can be read from (`_readable_origin` is ``None`` because
+    `canonical_origin` raised: BUG-0556 r6 review, D1) is stored by its path, as
+    ``store_url`` stores a URL whose origin is unknown and as 7393c90's ``to_path``
+    stored every finding page (a ``;`` path parameter holding a secret dropped,
+    `core.redaction.strip_secret_path_params`): r6's import raised there, 7393c90's
+    did not. ``None`` -- no endpoint -- where the page's path cannot be read either
+    (``to_path`` raises: ``http://[h/…``, ``//[h/…``; 7393c90's import raised there)."""
+    from fuzzlab.core.redaction import strip_secret_path_params
+    from fuzzlab.core.urls import to_path
+    try:
+        origin = canonical_origin(page)
+    except ValueError:
+        try:
+            return strip_secret_path_params(to_path(page))
+        except ValueError:
+            return None
+    try:
+        if spider_form and origin is not None:
+            path = store_url(page, origin)
+            for stored in (origin + path, path):
+                if store.conn.execute(
+                        "SELECT 1 FROM page WHERE run_id=? AND url=? UNION ALL "
+                        "SELECT 1 FROM endpoint WHERE run_id=? AND url=? AND source != "
+                        "'audit' LIMIT 1", (run_id, stored, run_id, stored)).fetchone():
+                    return stored
+        return store_url(page, main)
+    except ValueError:                  # its path is unreadable (``//[h/x``: no origin)
+        return None
+
+
+#: A run of a secret value this long or longer that a finding's text holds is the
+#: value's: replaced, wherever and however long the rule cut it (`_secret_spans`).
+_AUDIT_RUN = 8
+
+#: What `_audit_text` stores for a text the redaction owner cannot judge: a URL that
+#: ``urlsplit`` rejects (``http://[h/…``), on which the owner raises ``ValueError`` as
+#: the pushed tree's redactor did (its floor, BUG-0556 r6, A1). Withheld whole, as
+#: `core.trace.safe_ref` withholds such a URL, and the import goes on.
+AUDIT_TEXT_WITHHELD = "(unparseable URL withheld)"
+
+
+def _secret_spans(text: str, secrets: list[str]) -> list[tuple[int, int]]:
+    """The spans of ``text`` that repeat a run of `_AUDIT_RUN` or more characters of any
+    of ``secrets``: every window of that length found in a secret value is marked, and
+    overlapping windows join (review round 2, N3: the legacy rules quote a value's
+    substring -- ``rule_serialized_tokens``'s ``match.group(0)[:60]``, a JWT behind
+    ``Bearer `` -- not only a prefix at a known cut). Linear in the text and the values
+    (a set of fixed-length windows), never a search per cut."""
+    k = _AUDIT_RUN
+    grams = {s[i:i + k] for s in secrets for i in range(len(s) - k + 1)}
+    spans: list[tuple[int, int]] = []
+    if not grams:
+        return spans
+    for i in range(len(text) - k + 1):
+        if text[i:i + k] in grams:
+            if spans and spans[-1][1] >= i:
+                spans[-1] = (spans[-1][0], i + k)
+            else:
+                spans.append((i, i + k))
+    return spans
+
+
+def _audit_text(text, page_url, *, url: bool = False):
+    """A legacy-auditor finding's text as it may be stored (BUG-0556 review rounds 1-2,
+    PA-0100, D12). Its rules quote the finding page's URL (``called from <url>``), its
+    path (``<path>?<name>``, ``linked from <path>``) and its query values: whole, cut to
+    a prefix, or a substring a pattern matched (``rule_serialized_tokens``). Each is
+    replaced where it appears: the page URL by `core.redaction.redact_url_identifiers`'
+    form of it, the path by `core.redaction.strip_secret_path_params`' form, and every
+    query value the owner's rule would not store -- judged **whole**
+    (`core.redaction.stored_value`: a sensitive name, or a value that holds a secret
+    anywhere, nested included) -- by `PLACEHOLDER` wherever the text repeats it whole or
+    any run of it `_AUDIT_RUN` characters or longer (`_secret_spans`; never by matching
+    the rules' cut lengths, review round 2, N3). A ``url`` text (the target identifier,
+    which may name another URL: a form action, a link) also passes
+    `strip_secret_path_params` and `redact_url_identifiers` itself. The rest of a quoted
+    HTML snippet is body redaction's (audit defect 26). Total: a non-string is returned
+    as it is, and a text whose URL the owner rejects (``ValueError``: its floor, the
+    pushed tree's redactor, raises on a URL ``urlsplit`` rejects) is `AUDIT_TEXT_WITHHELD`
+    -- never stored, never failing the import (BUG-0556 r6, A1)."""
+    import re
+
+    from fuzzlab.core.redaction import (PLACEHOLDER, redact_url_identifiers, stored_value,
+                                        strip_secret_path_params)
+    if not isinstance(text, str):
+        return text
+    swaps: dict[str, str] = {}
+    secrets: list[str] = []
+    if isinstance(page_url, str):
+        try:
+            clean = redact_url_identifiers(page_url)
+        except ValueError:                  # the owner's floor rejects it (A1): withheld
+            return AUDIT_TEXT_WITHHELD
+        if clean != page_url:
+            swaps[page_url] = clean
+        parts = urlparse(page_url)
+        path = parts.path.lstrip("/")                     # as the auditor's page sees it
+        if strip_secret_path_params(path) != path:
+            swaps[path] = strip_secret_path_params(path)
+        for part in parts.query.split("&"):
+            name, _eq, rawest = part.partition("=")
+            name, raw, value = unquote_plus(name), unquote(rawest), unquote_plus(rawest)
+            if not value or stored_value(name, raw, value) != "":
+                continue
+            # the whole value, in every spelling a rule may quote it in (as crawled,
+            # percent-decoded, form-decoded as `parse_qsl` gives the rules)
+            for whole in {rawest, raw, value}:
+                if whole:
+                    swaps.setdefault(whole, PLACEHOLDER)
+                    secrets.append(whole)
+    out = text
+    if swaps:
+        # longest first, each a whole run (never inside a longer word)
+        alternation = "|".join(re.escape(k) for k in sorted(swaps, key=len, reverse=True))
+        out = re.sub(f"(?<![A-Za-z0-9])(?:{alternation})(?![A-Za-z0-9])",
+                     lambda m: swaps[m.group(0)], out)
+    if secrets:
+        pieces, last = [], 0
+        for start, end in _secret_spans(out, secrets):
+            pieces += [out[last:start], PLACEHOLDER]
+            last = end
+        out = "".join(pieces + [out[last:]])
+    if url:
+        cut = min([i for i in (out.find("?"), out.find("#")) if i >= 0] or [len(out)])
+        try:
+            out = redact_url_identifiers(strip_secret_path_params(out[:cut]) + out[cut:])
+        except ValueError:                  # the owner's floor rejects it (A1): withheld
+            return AUDIT_TEXT_WITHHELD
+    return out
 
 
 def import_fuzz_csv(csv_path: str | Path, store: Store, run_id: int) -> dict[str, int]:

@@ -290,6 +290,10 @@ REGISTRY = {
     "fuzzlab.tools.store_adapter:_main_origin": Covered(_IMPORT_ORIGIN),
     "fuzzlab.tools.store_adapter:import_spider": Covered(_IMPORT_ORIGIN),
     "fuzzlab.tools.store_adapter:import_disco": Covered(_IMPORT_ORIGIN),
+    # a keyword since BUG-0556 review round 1 (CC-AUD-0059); registered in round 2
+    "fuzzlab.tools.store_adapter:import_audit": Covered(
+        "tests/test_redaction_nested.py::"
+        "test_import_audit_under_a_subpath_base_stores_the_spiders_paths"),
     "fuzzlab.session.manager:SessionManager._json_login": Covered(
         "tests/test_json_login.py::test_a_json_login_under_a_subpath_keeps_the_path"),
     "fuzzlab.tools.authhttp:_build": Covered(_AUTHHTTP),

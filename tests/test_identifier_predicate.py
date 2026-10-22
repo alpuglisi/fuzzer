@@ -110,10 +110,14 @@ def test_boundaries():
 
 
 def test_defined_once():
-    """PA-0003: no second identifier or entropy helper elsewhere in the package."""
+    """PA-0003: no second identifier or entropy helper elsewhere in the package. The one
+    exception is the redaction floor: the pushed tree's redactors frozen at 7393c90
+    (BUG-0556 r6), which only the owner's layered consumers call and which
+    `tests/test_redaction_floor.py` pins verbatim -- not a second rule anyone may use."""
     owner = Path(redaction.__file__).resolve()
+    floor = (ROOT / "fuzzlab" / "core" / "redaction_floor.py").resolve()
     for path in (ROOT / "fuzzlab").rglob("*.py"):
-        if path.resolve() == owner:
+        if path.resolve() in (owner, floor):
             continue
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             if isinstance(node, ast.FunctionDef):

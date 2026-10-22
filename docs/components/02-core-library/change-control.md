@@ -3,6 +3,502 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0076 — A secret in a URL is redacted wherever it sits: one walk over nested URLs, query strings, `;` pairs and path parameters (FR-CORE-537, BUG-0556) (2026-10-22)
+- Placement: pre-assigned to lane REDACTURL (item GAP-VALUES, audit Gap 5), base
+  7393c90, with CC-AUD-0059 (the importer's callers). PA-0541: implemented first, no
+  design draft or review gate.
+- Change (`fuzzlab/core/redaction.py`, `fuzzlab/core/urls.py`):
+  - **One walk for both URL redactors** (`_UrlWalk`, private). `redact_url` (names
+    only) and `redact_url_identifiers` (names and identifiers) are now the walk over a
+    whole URL (`_walk_url`). It judges a query's pairs split on `&` **and `;`**, every
+    `;name=value` or bare `;value` path parameter in any segment (the authority left
+    alone), a query-shaped fragment (`#…?a=b` or `#a=b`; a fragment without one is left
+    alone at the top level), and, inside each value, a nested URL (`://`, a leading `/`,
+    `?` or `#`: its path parameters, query, fragment, and with identifiers a token in its
+    host or path redacts the outer value whole), a nested query string (`=`, `&`, `;`)
+    and a percent-encoding layer (decoded with `surrogateescape`, walked, and re-encoded
+    `quote(safe="")` only when it changed).
+  - **The rule** at every level: a sensitive name (form-decoded) gets `PLACEHOLDER`;
+    with identifiers, an identifier-like value (`looks_like_identifier` on the value
+    percent-decoded once, the existing contract) is `""` at a URL's own query or
+    fragment pair (unchanged from before) and `PLACEHOLDER` when nested or in a path
+    parameter (so a nested redaction is always visible to `page_url_is_clean`'s
+    placeholder test).
+  - **Bounds, fail closed:** `MAX_VALUE_DEPTH = 12` levels and `MAX_VALUE_CHARS = 64
+    KiB` per value; past either (a layer still encoded at the last level included), or
+    on any exception, the top-level pair is redacted whole (`""` with identifiers,
+    `PLACEHOLDER` without; a path parameter `PLACEHOLDER`). `_walk_url` is total; text
+    holding no secret is returned byte-identical (a URL with no `?`, `;` or `#` is not
+    walked).
+  - `redact_spa_fragment` walks a route's query with the same rule;
+    `_redact_query_identifiers` is removed (its only callers were these two).
+  - `page_url_is_clean`: unchanged rule, now over the walk; its empty-value test splits
+    the query on `&` and `;`.
+  - New public functions: `value_holds_secret(raw_value)` (identifier-like, or the walk
+    changes it, or past the bounds), `stored_value(name, raw_value, value)` (`""` when
+    the name is sensitive or the value holds a secret; the one stored-value rule, PA-0003)
+    and `strip_secret_path_params(path)`.
+  - `core/urls.py::store_url` drops a path parameter that holds a secret, in any segment
+    (`strip_secret_path_params`; `to_path` already drops the last segment's).
+  - Unchanged on purpose: `looks_like_identifier` (SP-18), `redact_query` and every body
+    redactor (`redact_body`, the JSON/form/multipart redactors, `redact_captured_body`,
+    `redact_leaf`): body redaction is paused by the owner (audit defect 26, AU-REDACT).
+  - Tests: new `tests/test_redaction_nested.py` (19 test functions, 67 items; 750 generated spellings plus
+    20 path-parameter cases; two strict xfail pins, BUG-0556 R1 and R2);
+    `tests/test_query_placement.py::ALLOWED` drops the three entries for
+    `_redact_query_identifiers` and the two `urlunsplit(_replace(query=))` rebuilds,
+    which no longer exist (the walk reassembles the text it split).
+  - *(Review round 1, 2026-10-22, branch `lane/REDACTURL-r1` from c3a13f7; findings
+    RU-1..RU-10, eight defects; BUG-0556 "Review round 1".)*
+    - **A layer left encoded behind a raw `/` or `://` is decoded (RU-1/RU-6).** A value
+      with a percent-escape and no raw `?`, `#`, `=`, `&` or `;` (Python's `quote()`
+      default `safe="/"`, `quote(safe="/:")`, Django's `redirect_to_login`) is decoded
+      one layer first, as a whole, before anything is split; a nested URL's path segment
+      still encoded is decoded and walked (`_UrlWalk.layer`). A value is decoded first or
+      split first, never both: walking every value again decoded (the review's literal
+      proposal) measured 34 steps per URL character against 8.3, doubling per level.
+    - **A nested URL's userinfo is a credential (RU-2):** `_UrlWalk.userinfo` replaces
+      `user[:password]@` (through the authority's last `@` or `%40`) by `PLACEHOLDER@`
+      in both redactors; a URL's scheme and `//` are recognised only at its start
+      (`_authority_start`), so a `://` inside an encoded nested value is never taken for
+      the outer URL's authority.
+    - **`redact_for_record`'s pieces go through `redact_url` (RU-9):** a route
+      fragment's query was judged flat by `redact_query`; the `ValueError` fallback and
+      the separate fragment branches are gone.
+    - **The walk exposes its operation counts (RU-10, PA-0135(2)):** `WalkCounter`
+      (`steps`: the characters every step was given; `calls`), passed to `_walk_url`.
+    - **For the endpoint query's replay (RU-4):** `redact_url_identifiers(url, *,
+      placeholder=False)` -- with `placeholder`, a URL's own identifier-like query or
+      fragment value becomes `PLACEHOLDER` instead of a blank; `holds_placeholder(text)`
+      is the one test of a redaction placeholder at any depth (`page_url_is_clean` uses
+      it; the point builder refuses a point whose URL holds one).
+    - Callers changed outside CORE: `tools/store_adapter.py` (CC-AUD-0059 round 1),
+      `harness/auto.py` (FUZZ) and `proxy/redact.py` (PROXY, RU-7: the `?` gate on the
+      request target and URL headers removed). No FUZZ or PROXY number was pre-assigned:
+      their entry texts are in the lane's doc texts for the coordinator.
+    - Tests (`tests/test_redaction_nested.py`): the sweep's encodings gain `slash`,
+      `slash2` and `colon` and its shapes `userinfo` (1710 cases); the headline test
+      asserts its leak list before `value_holds_secret` (RU-5); new tests per finding;
+      the linearity test counts the walk's own steps and an offender test proves the
+      oracle on three quadratic variants (PA-0135(3)); the R2 strict xfail becomes a
+      passing test and R2's remainder (the spider's capture blank) is pinned.
+  - *(Review round 2, final, 2026-10-22, branch `lane/REDACTURL-r2` from f939778;
+    findings N1..N8, each the fix check's neighbouring paths; BUG-0556 "Review round
+    2".)*
+    - **A layer left encoded in any piece is decoded (N1).** `_UrlWalk.path` decodes a
+      nested URL's authority when it holds an escape, whatever raw delimiter sits
+      elsewhere in the value (`next=https://host%2Fcb%3Faccess_token%3D…?y=1` was kept:
+      the walk returned the head when no raw `/` followed the authority);
+      `_UrlWalk.route` walks a fragment's route -- the top-level fragment's included --
+      for its `;` path parameters and its segments still encoded (`#/r%3Ftoken%3D…`,
+      `#/r;jsessionid=…?x=1` were kept), its raw segments still the page's identity
+      (R3), a failure there redacting the route whole.
+    - **A pair list holding a URL is split into pairs first (N1):** `_url_shaped` is a
+      nested URL only when it starts with a scheme's `://`, `/` or `\`, or its first raw
+      `?`/`#` comes before any `=`, `&` or `;` (`"://" in text` sent `next=https://bob:
+      <pw>@host/x`, Werkzeug's `url_for` applied twice, and `a=1&token=…&next=https://…`
+      to the URL walk, which never split them).
+    - **A URL's userinfo anywhere in a nested value (N2):** `_UrlWalk.userinfo` scans the
+      value for every place a URL's authority starts (`_AUTHORITY_AT`: a special scheme
+      and any run of `/` or `\`, or two or more of them anywhere -- measured on Node 22's
+      WHATWG `URL`: `https:///`, `https:\\`, `/\`, `http:/` and a leading space all carry
+      userinfo) and replaces each `user[:password]@` (last `@` or `%40`) by
+      `PLACEHOLDER@`, as `redact_for_record`'s `_URL_USERINFO` and `safe_ref` already
+      did; it runs in `value` (every nested value, every layer), so a URL in a nested
+      URL's path segment or fragment route is judged; `_USERINFO_END` is gone.
+    - **`redact_for_record` walks the whole value before any whitespace split (N7):**
+      `redact_url(out)` after the userinfo patterns and before the cut, then each piece
+      as before (`#/r?next=/v?q=a b&token=…` kept its token, `b&token=…` walked alone).
+    - **The walk's C-level work is counted by its oracle (N8):** `WalkCounter`'s
+      docstring no longer claims every C-level call is linear in a step's text; the
+      oracle wraps them (tests below).
+    - Callers changed outside CORE: `tools/store_adapter.py` (CC-AUD-0059 round 2),
+      `greybox/run.py` (CC-FUZZ-0116, N4) and `proxy/redact.py` (CC-PROXY-0031, N6);
+      the round-1 FUZZ (`harness/auto.py`) and PROXY texts carry those numbers too.
+    - Tests (`tests/test_redaction_nested.py`): `_ROUND2` (19 spellings) through
+      every URL redactor, `page_url_is_clean`, `safe_ref` and `redact_for_record`, and
+      through `import_spider`; a test per caller finding; every test's pre-fix path
+      asserts the leak first (`_api`; the depth bound falls back to 12, the size bound
+      is set with `raising=False`; N5); the linearity oracle counts every C-level call
+      on one URL per part of the walk, both modes, proven on seven quadratic variants;
+      the R2 pin covers greybox too.
+  - *(After the owner's final round, 2026-10-22, branch `lane/REDACTURL-r3` from 111b6fb;
+    the round-2 fix check; BUG-0556 "Residuals after the owner's final round". The
+    owner's rule: what is found after the final round is pinned, except a regression the
+    batch introduced, fixed in the batch, PA-0549(3c).)*
+    - **The check's in-batch regression (N2 item 1 = N7 neighbour 2):** `_AUTHORITY_AT`'s
+      authority runs to `/`, `\`, `?` or `#` only, no longer stopping at whitespace
+      (measured on Node 22: `https://bob:correct horse@host/x` has password
+      `correct%20horse`); a passphrase f939778 redacted was kept by every consumer.
+    - **Three more in-batch regressions, found by a differential sweep against f939778
+      and fixed:** `_UrlWalk.userinfo` raises `_Whole` for a userinfo holding a pair
+      separator raw or encoded at any depth (`_USERINFO_PAIR`; its replacement deleted
+      the pair's name, `a=//x&password=…@<word>`); `_UrlWalk.path` walks a nested
+      authority holding a raw `=`, `&` or `;` as a value (`_AUTHORITY_PAIRS`;
+      `a=https://x%26password%3D…`, and the check's N1 (B), the same mechanism, with
+      it); `_url_shaped` takes only an authority's `\\` or `\/`, not a single leading
+      `\`, for a URL (`/\host%26token%3D…` was walked as a path).
+    - **`redact_for_record`:** `_URL_USERINFO_SPACED` strips a top-level userinfo whose
+      span crosses whitespace and holds no pair separator (`http://bob:pw <pw>@…`, kept on
+      f939778 too); `_URL_USERINFO` is unchanged, so no span it matched changes.
+    - Tests: `tests/test_redaction_nested.py` gains the four classes through every URL
+      consumer and `import_spider`, the record's spaced userinfo and its guard, and three
+      benign spellings; N5's fixture and R5 fallback, `raises=AssertionError` on R1, R2,
+      R4 and R5; new `tests/test_redaction_residual_pins.py` pins the rest (N1 (A), N2
+      items 2-3, the backslash value, N3's `--append`, N6, N7 neighbour 1 across `&` and
+      `%26`, a spaced userinfo holding `&`, N8's three oracle blind spots).
+  - *(r4, 2026-10-22, branch `lane/REDACTURL-r4` from 20cd466: a skeptic's check of the
+    batch; BUG-0556 "r4". The owner's rule as above: the batch's own regression fixed,
+    the residual pinned.)*
+    - **The batch's regression, fixed:** `_authority_start(head, nested)` reads, in a
+      nested value, the authority after a leading `\\` or `\/` and the rest of its run of
+      `/` and `\` (`_SLASH_RUN`; measured on Node 22, `r4/whatwg_bs.js`: `\\x&…`,
+      `\/x&…`, `\\\x&…`, `\\/x&…` and `\//x&…` all have host `x&…`), so `_UrlWalk.path`
+      walks such an authority's raw pairs as a value. r3 kept a value so led URL-shaped
+      (`_url_shaped`) while reading no authority in it, so `next=%5C%5Cx%26password%3D…`
+      (decoded once: `\\x&password=…`), `%5C%5Chost%26token%3D…`, a `\/` lead, a triple
+      backslash, double encoding and a `/x` after it were walked as one path segment:
+      2955f16, 111b6fb and 20cd466 kept the secret in both URL redactors, `safe_ref`,
+      `redact_for_record`, the proxy's request line, `Referer` and `Location`,
+      `page_url_is_clean` (True), `value_holds_secret` (False) and `import_spider`;
+      f939778 redacted it. A top-level URL's head is unchanged.
+    - **Correction (r3's sub-bullet above):** of r3's 21 `_AFTER_FINAL` spellings, cases
+      5, 6 and 12 (0-based: the two `/go/` spaced-userinfo spellings and the route
+      query's pair-list userinfo) were kept by f939778 too (the skeptic's measurement;
+      `r4/probe_after_final.py`): they are not regressions against f939778 but are fixed
+      by the same change as their class's regression (classes 1 and 2), as N1 (B) is by
+      class 3's; case 14's `value_holds_secret` was False on f939778 too.
+    - Tests: `tests/test_redaction_nested.py` gains `_BACKSLASH_AUTHORITY_PAIRS` (11
+      spellings) through every URL consumer (the shared helper
+      `_url_consumers_keeping`, which r3's in-batch test now uses too) and through
+      `import_spider`, each failing on 20cd466 on its own assertion, and a benign guard
+      (4 cases); the `_AFTER_FINAL` comment is corrected. The residual
+      `next=%2F%5Cx%26password%3D…` (`/\x&…` decoded once; and `///`, `/\\`, `/\/`,
+      `////` leads, measured the same; on f939778 too) is pinned:
+      `tests/test_redaction_residual_pins.py::test_a_slash_led_authoritys_pair_list_encoded_once_is_redacted_by_redact_url`
+      (strict, `raises=AssertionError`, 5 cases).
+  - *(r5, 2026-10-22, branch `lane/REDACTURL-r4` from 290fcfb; BUG-0556 "r5". The owner's
+    shipping criterion: the redactor leaks nothing the pushed tree, 7393c90, redacted --
+    a regression against the pushed code is fixed in this batch, every leak it also had
+    is pinned. Earlier rounds compared against f939778 or their own pre-fix revision.)*
+    - **The pushed tree's two readings, restored (fail closed on either):** a
+      differential of 214 352 secret-bearing URLs through every URL consumer found 4 366
+      that 290fcfb kept and 7393c90 redacted. (1) `_UrlWalk.pairs` also reads an `&` part
+      holding a `;` as one pair, its name to its first `=` (`amp_secret`), as
+      `redact_query` did: `?u=bob&password;x=<w>`, `a;token;b=<w>` and a sensitive
+      pair's value running past a `;` (`password=pw;<w>`) are redacted again, in a query,
+      a fragment and a route; every `;` pair is still walked first. (2) `_secret_name`
+      and `_identifier_like` judge a name and a value as written and with their tabs, CRs
+      and LFs removed, as `urlsplit` read them (`p<TAB>assword=<w>`, `%7<TAB>0assword=…`,
+      a 16-hex token split by a tab), and `_walk_url` returns a URL holding one of them,
+      when either reading redacts, with them removed and walked again, as `urlunsplit`
+      did, so `core.trace.safe_ref` reads a fragment's pairs, a path parameter and a
+      matrix value as 7393c90's did. A clean URL is unchanged.
+    - Tests: `tests/test_redaction_nested.py` "r5": 23 spellings through every URL
+      consumer and 5 split identifiers through the identifier consumers, each failing on
+      290fcfb on its own assertion; two guards (an `&` reading never replaces the `;` one,
+      the first draft's own regression of 450 URLs against 290fcfb; a clean `;` part or
+      tab is byte-identical). Every family both trees keep is assigned (`r5b/assign.py`)
+      and pinned: 11 new strict xfails (43 cases) in
+      `tests/test_redaction_residual_pins.py`, classes (a) and (b) of r4's skeptic among
+      them; three families are stated with their reason, unpinned (BUG-0556 "r5").
+  - *(r6, 2026-10-22, branch `lane/REDACTURL-r6` from 144d234; BUG-0556 "r6 (layered on
+    the pushed redactor)". An independent check of 144d234 found 2 104 URLs it kept and
+    7393c90 redacted, in five classes r5's differential never drove: R1 `safe_ref`'s
+    order of steps, R2 the record redactor's whitespace split, R3 `Refresh`'s every
+    `url=` run, A1 a URL `urlsplit` rejects (7393c90 raised and its callers withheld),
+    A2 a duplicate `Location` collapsed. The owner's design: layer on the pushed
+    redactor instead of replacing it.)*
+    - **`fuzzlab/core/redaction_floor.py` (new): the floor.** 7393c90's own redaction
+      code, verbatim and never edited (73 definitions: the URL redactors, the name and
+      identifier rules, the body boundary and the record redactor of
+      `core/redaction.py`, `core/urls.py::is_spa_route_fragment`, `core/trace.py::
+      safe_ref` and its blanking, `tools/store_adapter.py::redact_sibling`,
+      `proxy/message.py::RawMessage` and `proxy/redact.py::redact`); the only edits point
+      four function-local imports at the floor. It imports nothing of `fuzzlab` at module
+      level, so `core` still never imports the proxy.
+    - **Every URL redaction consumer runs its floor first, the walk on its output only**
+      (`core.redaction.LAYERED`): `redact_url` (floor `redact_url`, then `_walk_names`),
+      `redact_url_identifiers` (floor `redact_url_identifiers`; with `placeholder=True`
+      the floor `redact_url`, whose output holds no blank), `redact_spa_fragment` (then
+      `_walk_spa_fragment`), `page_url_is_clean` (the floor's verdict must hold first),
+      `redact_for_record` (then `_walk_record`), `stored_value` (floor `redact_sibling`,
+      then the walk's `value_holds_secret`), `core/trace.py::safe_ref` (floor `safe_ref`;
+      a value it withholds stays withheld) and, through CC-PROXY-0031,
+      `proxy/redact.py::redact`. The walk's own steps (`WALK_HELPERS`: `_walk_url`,
+      `_walk_names`, `_walk_record`, `_redact_piece`, `_walk_spa_fragment` and the
+      proxy's `_walk`, `_redact_refresh`, `_redact_header_value`) are called only after a
+      floor; `value_holds_secret` is a `WALK_PREDICATES` entry and
+      `strip_secret_path_params` is `FLOORLESS` (7393c90 had no counterpart). Where a
+      floor raises `ValueError`, the consumer raises it, as 7393c90 did, and each caller
+      withholds as it did then.
+    - Tests and guards: `tests/test_redaction_floor.py` (new: the floor hashes to
+      7393c90's text; each `LAYERED` consumer calls its floor first on its own
+      parameters and never reads its raw text again; no unregistered call of the walk or
+      the floor; each check proven on synthetic offenders);
+      `tests/test_redaction_nested.py` "r6" (29 cases, each failing on 144d234 at its own
+      assertion); `test_the_redactors_are_total` and the every-nested-spelling sweep
+      adjusted for the floor; the defined-once guards
+      (`tests/test_identifier_predicate.py`, `tests/test_shared_primitives.py`) exempt
+      only the frozen floor, naming its guard; `tests/test_query_placement.py` allows the
+      floor's five query builders (7393c90's own entries, moved). Three families the walk
+      cannot see in the floor's output, each kept by 7393c90 too, are pinned by strict
+      xfails in `tests/test_redaction_residual_pins.py` "r6" (16 cases): (a) a name the
+      floor's `urlsplit` reading joins across a removed tab, CR or LF; (b) the floor's
+      record rule `***@` deleting a pair's name or the walk's trigger in `safe_ref`;
+      (c) the floor's 4096-character cut before the walk. Their candidate rules are
+      stated, not built.
+  - *(r6 review, 2026-10-22, branch `lane/REDACTURL-r6` after 3615cfb; BUG-0556 "r6
+    review", R1, R2 and R5. A records-and-code review of 3615cfb found the floor's
+    guards bypassable.)*
+    - **R1 -- the frozen check now hashes a definition's decorators.** It hashed
+      `ast.get_source_segment(node)`, which starts at `def` / `class`, so
+      `@dataclass(frozen=True)` made `@dataclass` on `RawMessage`, or
+      `@lambda f: (lambda url: url)` above the floor's `redact_url` or `safe_ref`,
+      passed while the floor stopped redacting. `_segment` hashes from the first
+      decorator's `@`; `RawMessage`'s recorded digest is retaken from 7393c90's text
+      with its decorator (`0602e778…`); `test_the_frozen_check_flags_an_edited_floor`
+      gains a decorator changed, removed and added (on `redact_url`, `safe_ref`).
+    - **R2 -- the layering guards close the bypasses found.** Guard 2: each `LAYERED`
+      consumer is bound once in its module, by its undecorated `def` (a later
+      `redact_spa_fragment = _walk_spa_fragment`, `redact_url = _walk_names`, a second
+      `def`, an import, a `global` assignment or a decorator replaced the consumer
+      unseen), a name bound to the floor is bound to nothing else, and a consumer reads
+      none of its **text parameters** -- every str parameter, now listed in full in
+      `LAYERED` and checked against the signature (`stored_value`'s entry named only
+      `value`, so `return raw_value if kept else kept` passed) -- after its floor except
+      as a predicate's argument (`isinstance`, `is_sensitive_name`, `WALK_PREDICATES`).
+      `redact_for_record` now passes `""` to its walk instead of `dest` (the floor
+      applied the option-name rule; the walk keeps `PLACEHOLDER` as it is: the same
+      output as 3615cfb's on 24 430 corpus URLs under seven option names and a
+      non-string, `scratchpad/lanes/REDACTURL/r6c/rfr_equiv.py`).
+      Guard 3 (`unregistered_uses`, was `unregistered_calls`): any reference to the walk
+      or the floor is a use, not only a call (`map(_walk_names, …)`,
+      `functools.partial(_walk_url, …)`, `filter(looks_like_identifier, …)`), resolved
+      through unaliased dotted chains (`import fuzzlab.core.redaction` then
+      `fuzzlab.core.redaction._walk_names`), relative imports and `getattr` / `setattr`
+      with a literal name; a decorator's or default's use is module level; an assignment
+      to a `LAYERED`, walk or floor attribute from another module is flagged. **Stated
+      limit:** a name computed at run time (`getattr` with a computed name,
+      `globals()`, `vars()`, `sys.modules`, `importlib`, `exec`) is not visible to a
+      static guard; the guard's docstring and FR-CORE-537 say so instead of claiming it.
+      Each new offender is in the guard tests and passes 3615cfb's guards
+      (`scratchpad/lanes/REDACTURL/r6c/proof_guards_offenders.log`: 27 offenders); each
+      of the reviewer's real edits, applied to a copy of the tree, passes 3615cfb's guard
+      file and fails the revision's (`proof_guards_tree.log`).
+    - **R5 -- the records.** BUG-0556's r6 recurrence review now reconciles r6's pins
+      with PA-0549(3c) (3c concerns regressions against the pushed tree: the owner's
+      rule and F-226) and names F-226 and why its correction did not hold in the r6 brief
+      (F-248); the pins' reasons say the same (`_ON_7393_R6`); the corrective action
+      names CC-CORE-0076, CC-PROXY-0031, CC-AUD-0059, the commits and PA-0556(11), whose
+      header (the lane's doc texts) now states that it narrows PA-0549(3c).
+- Impact (other components / project):
+  - Every producer that calls `redact_url` now redacts nested credential names, `;`
+    pairs, path parameters and query-shaped fragments: **PROXY** (flow history's URL,
+    the request target and `Location`/`Content-Location`/`Refresh` in stored raw
+    messages), the core HTTP recorder, **CRAWL** (the disco capture, runner, explorer's
+    `actions.jsonl`, `ede`; the spider's form page/action URLs and its landing and
+    `found_from`), and `redact_for_record` (UI project records). No caller's code changes.
+  - Every caller of `redact_url_identifiers` / `page_url_is_clean` (the spider's capture,
+    `_queue_xhr`, `_spa_url`; `core.trace.safe_ref` for findings and diagrams; the
+    importer's `_source_page`; the oracle's binder `_FormBoundSender._bind_fresh`) gets
+    the walk. A page whose URL holds a nested or `;` secret is no longer a replay
+    recipe's page (FR-FUZZ-67): its sibling sets' tests are inconclusive "no page" where
+    they were bound before (with the token on the wire).
+  - **Store contract (AUD, via CC-AUD-0059):** `page.url` / `endpoint.url` keep no path
+    parameter that holds a secret; `parameter.example`, `form.entries`, a POST form's
+    action query and a captured URL's query hold no secret value. No schema change.
+  - Evidence that changed shape: a nested redaction is `PLACEHOLDER` inside a
+    re-encoded value (`next=%2Fview%3Fticket%3D__REDACTED__`), where before the value
+    was kept raw.
+  - *(r6:)* every URL consumer raises `ValueError` again where 7393c90 raised (a URL
+    `urlsplit` rejects), so every caller behaves as on 7393c90 (proxy history
+    `OMIT_FAILED`, `safe_ref` withheld, the importers' and the oracle's URL steps
+    raising where their own `store_url` / `urlparse` raised); the one caller the batch
+    added where 7393c90 did not raise, `import_audit`'s target identifier, withholds it
+    (CC-AUD-0059). A new module, `core/redaction_floor.py`, with its guard file; the
+    record redactor's and `safe_ref`'s output is 7393c90's first (its `***@`, its
+    4096-character cut, its `urlsplit`-cleaned URL), then the walk's.
+- Risk (level; mitigation or accepted-risk justification): medium.
+  - Over-redaction (fail closed, accepted): a benign value whose nested pair has a
+    sensitive name (`q=session%3Dabc`) or that is past the bounds (64 KiB, 12 levels)
+    is redacted; a page holding one is no recipe page. The benign list in the new tests
+    pins ordinary nested values (`next=/account`, percent-encoded and double-encoded
+    paths and URLs, `a=1;b=2`, a clean path parameter, `+` spaces, base64 padding) as
+    byte-identical.
+  - Cost: linear per level, at most 12 levels; a test bounds the characters the
+    identifier predicate reads to 4x the URL's length at 500 and 4000 pairs (an
+    operation count, PA-0095(2)/PA-0135; the first version timed it and the harness's
+    wall-clock guard refused it). The proxy's history flush runs it once per URL.
+  - Behaviour change in proxy history for `;`: `?a=1;token=x` now stores
+    `token=__REDACTED__` (it was kept).
+  - *(Review round 1:)* over-redaction: a benign value whose decoded layer has a nested
+    pair with a sensitive name, or a nested URL with any userinfo, is now redacted
+    (fail closed). The benign list adds `next=/search%3Fq%3Dpuppies%26page%3D2`,
+    `return=https://www.example.org/home%3Ftab%3D2`, an `@` in a path and `/a%20b/c%2Fd`,
+    all byte-identical. Proxy history now passes every request target and URL header
+    to `redact_url` (byte-identical when it holds no value). A form or captured request
+    whose own query held a redacted value is now inconclusive (`UNBOUND`) where it sent
+    the blank (FUZZ, below).
+  - *(Review round 2:)* over-redaction (fail closed, accepted): a nested value holding
+    `//` or a special scheme's `http:` (`https:`, `ws:`, `ftp:`, `file:`) followed by an
+    authority with an `@` (`q=a//b@c`) has that
+    userinfo replaced, as `_URL_USERINFO` already did in project records; a top-level
+    fragment route segment still percent-encoded that decodes to an identifier is now
+    redacted (its raw segments are not). The benign list stays byte-identical. A value
+    whose first raw delimiter is `=`, `&` or `;` is now split into pairs before any
+    `://` in it is walked (a value holding no secret comes back byte-identical either
+    way). Cost: the userinfo scan is one linear regex pass per nested value; measured
+    on the new oracle, at most 10.3 steps and 15.4 C-level characters per URL
+    character.
+  - *(After the final round:)* over-redaction (fail closed, accepted): a nested value
+    whose userinfo holds a pair separator (a password with `&`, `;` or `%26`) is now
+    redacted whole, not only its userinfo; a nested userinfo's span now crosses
+    whitespace (`q=see //docs and me@x`), as the WHATWG parser reads it. A benign
+    differential of 20 160 URLs holding no secret is identical to 111b6fb's, and the
+    leak differential (90 720 + 12 600 URLs) regresses none against f939778 or 111b6fb.
+    The new branches are one linear pass each; the linearity oracle passes at 500 and
+    4000 items.
+  - *(r4:)* over-redaction (fail closed, accepted): a nested value led by `\\` or `\/`
+    whose authority holds a raw `=`, `&` or `;` now has it walked as a pair list (as a
+    `//`-led one already did). The extended leak differential (`r4/sweep3.py`, 152 880
+    URLs: r3's `sweep2.py` with eight backslash and slash leads and the lead left raw)
+    leaks in 0 cases f939778 redacted and in 0 cases 20cd466 redacted; a benign one of
+    25 536 URLs (`r4/benign2.py`) is identical to 20cd466's. `_SLASH_RUN` reads only the
+    lead's run, once per nested head.
+  - *(r5:)* over-redaction (fail closed, accepted): an `&` part whose name to its first
+    `=` holds a sensitive token across a `;` (`?token;a=1`) has its whole value
+    redacted, and a URL holding a tab, CR or LF that either reading redacts is stored
+    with them removed (as 7393c90 stored it). The differential (`r5b/`, 234 112 URLs)
+    leaks in 0 cases 7393c90 redacted (and in 0 cases 290fcfb redacted); its 19 760
+    benign URLs' outputs are identical to 290fcfb's. Cost: one more name check per `&`
+    part holding a `;`, and for a URL holding a tab, CR or LF at most three walks; the
+    linearity oracle passes at 500 and 4000 items.
+  - *(r6:)* medium. Mitigation: the floor is frozen code (its guard fails on any edit)
+    and every consumer runs it first (an AST guard), so the walk can only remove more
+    than 7393c90 did: on every corpus (the check's 101 005 URLs, r5b's 234 112, the
+    tab/CR/LF merge set of 2 268, `import_spider` over 99 449, a generated family-(a)
+    set of 480) 0 URLs leak at r6 that 7393c90 redacted. Accepted: the walk sees only
+    the floor's output, so what that output lost (families (a)-(c)) is kept at r6 as at
+    7393c90, pinned; against the unpushed 144d234 (information only) 146 + 3 URLs of
+    family (b), 1 imported, and 100 of family (a)'s generated set regress, and 1 of r5b's
+    19 760 benign outputs is over-redacted. Totality: a URL `urlsplit` rejects raises
+    again (as on 7393c90). Cost: each consumer runs 7393c90's redactor once more before
+    the walk (linear; the walk's linearity oracle unchanged).
+- Deliverables:
+  - [x] `_UrlWalk`, `_walk_url`, `value_holds_secret`, `stored_value`,
+    `strip_secret_path_params`; `redact_url`, `redact_url_identifiers`,
+    `redact_spa_fragment`, `page_url_is_clean` through them — done
+  - [x] `store_url` through `strip_secret_path_params` — done
+  - [x] the importer's callers (CC-AUD-0059) — done
+  - [x] `tests/test_redaction_nested.py`; `test_forms_phase2.py` BUG-0120 assertions
+    tightened; `test_query_placement.py` stale allowances removed — done
+  - [x] FR-CORE-537 (new); FR-CORE-32, FR-CORE-37 and FR-CORE-504 amended in place — done
+  - [x] BUG-0556 report; PA-0556, SP-17 row, CHANGELOG, ERROR_LOG, ARCHITECTURE and
+    failure-record texts handed to the coordinator (`scratchpad/lanes/REDACTURL/
+    doc_texts.md`) — done
+  - [x] *(Review round 1)* RU-1/RU-6, RU-2, RU-9, RU-10 in the owner; RU-3/RU-8 and
+    RU-4 in the importer (CC-AUD-0059); RU-4's point refusal (FUZZ) and RU-7 (PROXY),
+    their entry texts handed over; RU-5's test; each test proven on c3a13f7 (RU-5 on
+    7393c90); FR-CORE-537 and FR-CORE-32 amended in place; BUG-0556 "Review round 1"
+    with the sweep by caller; PA-0556 items 4-6 and the doc texts amended — done
+  - [x] *(Review round 2)* N1, N2, N7 and N8's counter docstring in the owner; N3
+    (CC-AUD-0059), N4 (CC-FUZZ-0116), N6 (CC-PROXY-0031); N5 and N8 in the tests; each
+    test proven on f939778's product files (N5's on 7393c90's, N8's oracle against
+    f939778's oracle); FR-CORE-537, FR-CORE-32, FR-AUD-31, FR-FUZZ-67 and FR-PROXY-11
+    amended in place; BUG-0556 "Review round 2"; PA-0556 item 7 and the doc texts
+    amended — done
+  - [x] *(After the final round)* the four in-batch regressions and N1 (B) in the
+    owner, `_URL_USERINFO_SPACED`; their tests proven on 111b6fb; N5's test fixes swept
+    on four revisions; the residual pins file; FR-CORE-537 amended in place (the stated
+    gaps name the pins); BUG-0556 "Residuals after the owner's final round"; PA-0556
+    item 8, SP-17 and the doc texts amended ("r3 changes") — done
+  - [x] *(r4)* the skeptic's regression in the owner (`_authority_start`), its tests
+    proven on 20cd466, the extended differential against f939778 and 20cd466, the
+    residual pinned, r3's `_AFTER_FINAL` comment and claim corrected; FR-CORE-537
+    amended in place; BUG-0556 "r4"; PA-0556 item 9, SP-17 and the doc texts amended
+    (in "r3 changes") — done
+  - [x] *(r5)* the pushed tree's two readings in the owner (`_UrlWalk.pairs`,
+    `_secret_name`, `_identifier_like`, `_walk_url`), their tests proven on 290fcfb, the
+    differential against 7393c90 and 290fcfb, every family both keep assigned and the
+    unpinned ones pinned (11 strict xfails); FR-CORE-537 amended in place; BUG-0556
+    "r5"; PA-0556 item 10, SP-17 and the doc texts amended (in "r3 changes") — done
+  - [x] *(r6)* `core/redaction_floor.py` and every URL consumer layered on it
+    (`LAYERED`, `WALK_HELPERS`, `WALK_PREDICATES`, `FLOORLESS`), with CC-PROXY-0031 and
+    CC-AUD-0059; `tests/test_redaction_floor.py`; the "r6" tests proven on 144d234; the
+    differentials against 7393c90 (0) and 144d234 (information); families (a)-(c)
+    pinned (16 cases); FR-CORE-537 amended in place; BUG-0556 "r6"; PA-0556 item 11,
+    SP-17 and the doc texts amended ("r6 changes") — done
+  - [x] *(r6 review)* the frozen check over decorators (R1); the layering guards over
+    re-binding, decorators, every text parameter and every use (R2), their limit
+    stated; `redact_for_record`'s walk given `""`; FR-CORE-537 amended in place;
+    BUG-0556 "r6 review"; PA-0556 item 11's header and Enforced-by, SP-17 and the doc
+    texts amended ("r6 review changes") — done
+- Effectiveness (assessed 2026-10-22): the six reported spellings stored their token
+  before (measured by `scratchpad/lanes/REDACTURL/exp/repro.py` on 7393c90) and store
+  none after; the new tests fail on the pre-fix product files in one invocation and pass
+  now; `scripts/verify_change.py --base 7393c90` result in the lane report. *(Review
+  round 1:)* the round's tests fail on c3a13f7's product files on their own assertions
+  in one invocation (`scratchpad/lanes/REDACTURL/r1_prefix.log`: 331 failed, 121
+  passed, 2 xfailed, every failure an `AssertionError`), the headline test on
+  7393c90's on its leak assertion (`r1_ru5_7393c90.log`), and all pass on the revision
+  (the targeted run of 33 affected files: 2327 passed, 35 xfailed, `r1_targeted.log`);
+  the harness result is the orchestrator's at merge. *(Review round 2:)* the round's 28
+  test cases fail on f939778's four product files on their own assertions in one
+  invocation and the rest of the file passes there (`r2_prefix.log`: 28 failed, 452
+  passed, 3 xfailed, every failure an `AssertionError`); every test of the file fails
+  on 7393c90's code on its own claim (`r2_n5_7393c90.log`); f939778's oracle passes the
+  check's three quadratic variants and the new one flags each (`r2_n8_proof.log`). The
+  targeted run of 66 files (`r2_targeted.log`): 3537 passed, 51 xfailed, 2 failed -- the
+  base-URL registry guard (round 1's `import_audit` keyword, fixed after the run:
+  CC-AUD-0059) and a writer-thread counter race in a PROXY test outside this lane
+  (root-caused and flagged, BUG-0556 "Review round 2"). The harness result is the
+  orchestrator's at merge. *(After the final round:)* the round's 41 new test cases fail
+  on 111b6fb's `fuzzlab/` on their own assertions and pass on the revision (plain runner,
+  `scratchpad/lanes/REDACTURL/r3/plain_111b6fb.log`); each of the 37 pin cases fails on
+  its stated assertion on the revision (`r3/pins_plain.log`); the round's run
+  (`r3_run.log`, one invocation of 17 files): 1502 passed, 42 xfailed (the 37 pins, R1,
+  R2, R4, R5 and BUG-0554's), no failure or skip. The harness result is the
+  orchestrator's at merge. *(r4:)* the 22 new cases fail on 20cd466's `fuzzlab/` on
+  their own assertions and the whole file passes on the revision (plain runner,
+  `r4/plain_20cd466.log`, `r4/plain_new.log`); each of the 5 new pin cases fails on its
+  stated assertion (`r4/pins_plain_new.log`); the differential's counts are above; the
+  round's run (`r4_run.log`, one invocation of the same 17 files): `1528 passed, 47
+  xfailed, 3 warnings in 496.76s`, exit 0 (no skip, no failure). The harness result is
+  the orchestrator's at merge. *(r5:)* the 28 new cases fail on 290fcfb's `fuzzlab/` on
+  their own assertions while the 8 guard cases pass there, and all pass on the revision
+  (plain runner, `r5b/r5_tests_plain_290fcfb.log`, `r5_tests_plain_fix.log`; the whole
+  file, `nested_plain_fix.log`: 592 ok); each of the 43 new pin cases fails on its stated
+  assertion on the revision, 290fcfb and 7393c90 (`r5b/pins_plain_*.log`); the
+  differential against 7393c90: 0 leaks it redacted (290fcfb: 4 366); the round's run
+  (`r5_run.sh`, `r5_run.log`, one invocation, `FUZZLAB_PYTEST_LOCK_WAIT=7000`, `-n 3
+  --dist loadfile`, of the same 17 files: the 16 importing `fuzzlab.core.redaction` and
+  `tests/test_store_adapter.py`): `1564 passed, 90 xfailed, 3 warnings in 533.42s`,
+  exit 0 (no skip, no failure; +36 passed and +43 xfailed against r4's run, the round's
+  new cases and pins; the warnings are a starlette deprecation and a `fork()` notice in
+  other files' tests; the docs were edited during the run, no code or test file). The
+  harness result is the orchestrator's at merge. *(r6:)* the 29 "r6" cases fail on
+  144d234's `fuzzlab/` each at its own assertion and pass on the revision (plain runner,
+  `scratchpad/lanes/REDACTURL/r6b/r6_tests_plain_{t144d234,wt}.log`); after the last
+  change the whole of `tests/test_redaction_nested.py` passes (`r6b/nested_wt.log`: 621
+  ok), every pin holds (`pins_wt.log`: 101 strict xfails) and the floor's guards pass
+  (`floor_wt.log`); each of the 16 new pin cases fails on its stated assertion on the
+  revision and on 7393c90 and passes on 144d234 (`pins_r6new_plain_*.log`); the
+  differentials: 0 leaks the pushed tree redacted, on every corpus (BUG-0556 "r6").
+  The round's run is `scripts/verify_change.py --base 144d234` on the committed tree
+  (its TOTAL line in the lane report). *(r6 review:)* the plain runner (pytest imported only as a library;
+  `scratchpad/lanes/REDACTURL/r6c/`): the 27 new guard offenders (R1's 4, R2's 23) each
+  pass 3615cfb's guard functions and fail the revision's (`proof_guards_offenders.log`);
+  the reviewer's 13 real edits (three of the floor, four of `core/redaction.py`, six new
+  modules) each pass 3615cfb's guard file on a copy of 3615cfb and fail the revision's on
+  a copy of the revision (`proof_guards_tree.log`); the revision's guard file fails on
+  3615cfb's tree at `test_every_url_redaction_consumer_runs_its_floor_first`'s assertion
+  (`floor_plain_t3615cfb.log`). After the last change the whole of
+  `tests/test_redaction_nested.py` passes (`nested_wt.log`: 629 ok), every pin holds
+  (`pins_wt.log`: 105 strict xfails, none passing) and the floor's guards pass
+  (`floor_wt.log`: 6 ok). The round's run is `scripts/verify_change.py --base 3615cfb`
+  on the committed tree (its TOTAL line in the lane report).
+
 ### CC-CORE-0075 — The seam keeps its connections per identity and session generation (FR-CORE-509, BUG-0549) (2026-10-21)
 - Placement: pre-assigned to POOL24 (audit defect 24); CC-CORE-0073 and CC-CORE-0074 are
   other lanes'. Planned merge order: AU-PROXY, then POOL24.
