@@ -1136,15 +1136,15 @@ def _raw(endpoint: str, head: bytes, then: bytes = b"") -> bytes:
         got = s.recv(4096)
         if then and got.startswith(b"HTTP/1.1 200"):
             s.sendall(then)
-            s.settimeout(2)
-            try:
-                while not got.endswith(b"ok"):
-                    more = s.recv(4096)
-                    if not more:
-                        break
-                    got += more
-            except OSError:
-                pass
+        s.settimeout(2)
+        try:                        # until it closes, the body arrives, or 2 s pass
+            while not got.endswith(b"ok"):
+                more = s.recv(4096)
+                if not more:
+                    break
+                got += more
+        except OSError:
+            pass
         return got
 
 
@@ -1153,8 +1153,9 @@ def test_the_enforcer_refuses_what_the_browser_sends_itself_and_tunnels_admitted
     arguments name it (loopback forced through it, its address resolvable); a request
     Chromium sends itself -- a prefetch of a destructive URL, any other -- is refused
     (403) and counted, and never reaches the target; a ``CONNECT`` is tunnelled only
-    for a socket a guard admitted (`admit_socket`), once; through a capture proxy the
-    admitted ``CONNECT`` is handed to it as it came."""
+    for a socket a guard admitted (`admit_socket`), once; the re-request of a redirect
+    landing the route checked (`admit_landing`) is forwarded once, never as a preload;
+    through a capture proxy the admitted ``CONNECT`` is handed to it as it came."""
     import threading
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -1200,11 +1201,22 @@ def test_the_enforcer_refuses_what_the_browser_sends_itself_and_tunnels_admitted
         tunnelled = _raw(endpoint, connect.encode(), b"GET /ws HTTP/1.1\r\nHost: x\r\n\r\n")
         assert tunnelled.startswith(b"HTTP/1.1 200") and b"ok" in tunnelled, tunnelled
         assert _raw(endpoint, connect.encode()).startswith(b"HTTP/1.1 403")  # used once
+        # a redirect landing the route checked (Playwright never routes the browser's
+        # re-request of it): forwarded once, never as a preload
+        landing = f"http://127.0.0.1:{port}/land%7Eed?a=%41"     # as the route wrote it
+        navguard.admit_landing(landing)
+        preload = f"GET {landing} HTTP/1.1\r\nSec-Purpose: prefetch\r\n\r\n".encode()
+        assert _raw(endpoint, preload).startswith(b"HTTP/1.1 403")
+        again = f"GET http://127.0.0.1:{port}/land~ed?a=A HTTP/1.1\r\nHost: h\r\n" \
+                f"Proxy-Connection: keep-alive\r\n\r\n".encode()   # as Chromium sends it
+        answer = _raw(endpoint, again)
+        assert b" 200 " in answer.split(b"\r\n", 1)[0] and answer.endswith(b"ok"), answer
+        assert _raw(endpoint, again).startswith(b"HTTP/1.1 403")            # once
         after = navguard.enforcer_refusals()
-        assert after["preload"] == before["preload"] + 1
-        assert after["request"] == before["request"] + 1
+        assert after["preload"] == before["preload"] + 2
+        assert after["request"] == before["request"] + 2
         assert after["connect"] == before["connect"] + 2
-        assert got == ["/ws"], got                       # nothing refused reached it
+        assert got == ["/ws", "/land~ed?a=A"], got       # nothing refused reached it
         # through a capture proxy (disco): the admitted CONNECT goes to it as it came
         chained = navguard.browser_launch_args([f"http://127.0.0.1:{port}/"],
                                                proxy=f"127.0.0.1:{port}")

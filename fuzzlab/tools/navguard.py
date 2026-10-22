@@ -19,11 +19,13 @@ Every one is checked where it is made (PA-0123):
   or prerender, a favicon, a preconnect, background services, a WebSocket the route
   admitted) goes through the **enforcer** ``browser_launch_args`` names
   (``--proxy-server``, loopback forced through it; BUG-0559 review round 2, BB-3): a
-  loopback proxy in this process that refuses every request Chromium sends itself and
-  tunnels only a WebSocket the guard's socket handler admitted (`admit_socket`). In a
-  guarded context every request a page makes is answered by the route (fetched by the
-  Playwright driver, never by Chromium), so nothing Chromium sends on its own is ever
-  needed: a preload of a host the session's cookies do not reach, or of a destructive
+  loopback proxy in this process that refuses every request Chromium sends itself but
+  a WebSocket the guard's socket handler admitted (`admit_socket`) and the browser's
+  re-request of a redirect landing the route checked (`admit_landing`: Playwright never
+  routes it). In a guarded context every other request a page makes is answered by the
+  route (fetched by the Playwright driver, never by Chromium), so nothing else
+  Chromium sends on its own is ever needed: a preload of a host the session's cookies
+  do not reach, or of a destructive
   URL, is refused there whatever the page's markup (measured on Chromium 141, both
   binaries). The resolver rules still name only the scope ``host:port`` pairs;
 * **Chromium's preloads, defence in depth** -- ``guard_page`` keeps a speculation rule
@@ -799,6 +801,9 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
             # In an authenticated context a landing outside the session's origins was
             # aborted above (FR-SESS-20, R1), so this re-request stays on them
             status = 303 if req.method.upper() not in ("GET", "HEAD") else 302
+            # Playwright never routes that re-request: it goes through the enforcer,
+            # which forwards this checked landing once and nothing else (BUG-0559 r2)
+            admit_landing(final_url)
             route.fulfill(status=status, headers={"location": final_url})
         else:
             # a body kept through 307/308 is never sent twice: the landing response is
@@ -1551,8 +1556,49 @@ def admit_socket(url: str) -> None:
         _TICKETS[key] = (live + [now + SOCKET_TICKET_TTL_S])[-64:]
 
 
-def _take_ticket(host, port) -> bool:
-    key, now = _socket_key(host, port), time.monotonic()
+def _landing_key(url: str):
+    """What a checked redirect landing is matched by when the browser re-requests it:
+    scheme, host, port, path and query, percent-decoded (Chromium re-encodes what the
+    route wrote in ``Location``); None for a URL that is not an absolute http one."""
+    from urllib.parse import unquote
+    parts = urlsplit(url or "")
+    scheme = parts.scheme.lower()
+    try:
+        port = parts.port
+    except ValueError:
+        return None
+    if scheme != "http" or not parts.hostname:
+        return None
+    target = unquote(parts.path or "/") + ("?" + unquote(parts.query) if parts.query else "")
+    return ("landing", parts.hostname.lower().strip("[]"), port or 80, target)
+
+
+def admit_landing(url: str) -> None:
+    """The landing of a redirected navigation the route checked and answered with a
+    redirect to it (`make_route_handler`): Playwright never routes the browser's
+    re-request of it, which therefore goes through the enforcer -- forwarded once,
+    within `SOCKET_TICKET_TTL_S` (a ``GET``/``HEAD``, never a preload); an ``https``
+    landing admits one tunnel to its host and port (measured: an unadmitted re-request
+    was refused and the redirected page never loaded, BUG-0559 review round 2)."""
+    if urlsplit(url or "").scheme.lower() == "https":
+        admit_socket(url)
+        return
+    key = _landing_key(url)
+    if key is None:
+        return
+    now = time.monotonic()
+    with _ENFORCE_LOCK:
+        live = [t for t in _TICKETS.get(key, ()) if t > now]
+        _TICKETS[key] = (live + [now + SOCKET_TICKET_TTL_S])[-64:]
+
+
+def _take_ticket(host, port=None) -> bool:
+    """Consume one live ticket: a socket's ``(host, port)``, or a landing's key (``host``
+    given as the key, ``port`` None)."""
+    key = host if port is None else _socket_key(host, port)
+    if key is None:
+        return False
+    now = time.monotonic()
     with _ENFORCE_LOCK:
         live = [t for t in _TICKETS.pop(key, ()) if t > now]
         if not live:
@@ -1601,8 +1647,10 @@ def _pump(src, dst) -> None:
 
 
 class _EnforcerHandler(socketserver.BaseRequestHandler):
-    """One connection from Chromium: a ``CONNECT`` the guard admitted is tunnelled (to
-    its host, or through the capture proxy); every other request is refused (403)."""
+    """One connection from Chromium, one request: a ``CONNECT`` the guard admitted is
+    tunnelled (to its host, or through the capture proxy); the re-request of a redirect
+    landing the route checked (`admit_landing`) is forwarded the same way, with
+    ``Connection: close``; every other request is refused (403)."""
 
     def handle(self) -> None:
         client = self.request
@@ -1627,8 +1675,41 @@ class _EnforcerHandler(socketserver.BaseRequestHandler):
             self._refuse(client, "connect", host or "?", "")
             return
         purpose = _header(head, b"sec-purpose")
+        if not purpose and method.upper() in ("GET", "HEAD") and \
+                _take_ticket(_landing_key(target)):
+            self._forward(client, method.upper(), target, head)
+            return
         self._refuse(client, "preload" if purpose else "request",
                      urlsplit(target).hostname or "?", purpose)
+
+    def _forward(self, client, method: str, target: str, head: bytes) -> None:
+        """One admitted landing re-request, sent on (origin-form to its host, or as it
+        came to the capture proxy) with ``Connection: close``; the answer relayed back
+        and the connection closed, so nothing else rides on it."""
+        upstream = self.server.upstream
+        lines = head[:head.index(b"\r\n\r\n")].split(b"\r\n")
+        kept = [ln for ln in lines[1:] if ln.split(b":", 1)[0].strip().lower() not in
+                (b"connection", b"proxy-connection", b"keep-alive", b"proxy-authorization")]
+        first = lines[0]
+        try:
+            if upstream is not None:
+                remote = socket.create_connection((upstream[0].strip("[]"), upstream[1]),
+                                                  timeout=30)
+            else:
+                parts = urlsplit(target)
+                first = (f"{method} {parts.path or '/'}"
+                         f"{'?' + parts.query if parts.query else ''} HTTP/1.1").encode()
+                remote = socket.create_connection((parts.hostname, parts.port or 80),
+                                                  timeout=30)
+            remote.sendall(b"\r\n".join([first, *kept, b"Connection: close", b"", b""]))
+        except OSError:
+            with contextlib.suppress(OSError):
+                client.sendall(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n"
+                               b"Connection: close\r\n\r\n")
+            return
+        client.settimeout(None)
+        _pump(remote, client)
+        remote.close()
 
     @staticmethod
     def _refuse(client, kind: str, host: str, purpose: str) -> None:
@@ -1709,9 +1790,14 @@ def browser_launch_args(scope_urls, *, any_port_hosts=(), proxy: str | None = No
     every routed request and never uses this switch (measured), so what reaches the
     enforcer is only what Chromium sends past the route: a speculation-rules prefetch
     or prerender (no launch switch stops one, measured on both binaries), a favicon,
-    background services, a WebSocket. It refuses all of it (403, counted in
-    `enforcer_refusals`, logged by host) and tunnels only a WebSocket a guard's socket
-    handler admitted (`admit_socket`). An unrouted page therefore loads nothing.
+    background services, a WebSocket, the re-request of a redirect landing (which
+    Playwright never routes). It refuses all of it (403, counted in
+    `enforcer_refusals`, logged by host) but a WebSocket a guard's socket handler
+    admitted (`admit_socket`, tunnelled once) and a landing the route checked and
+    answered with a redirect to (`admit_landing`, forwarded once, never a preload;
+    measured: without it a redirected navigation never loaded). An unrouted page
+    therefore loads nothing. For an ``https`` target a tunnel is judged by its host and
+    port only: what Chromium sends inside a tunnel it was admitted for is not seen.
 
     ``proxy`` (CC-CRAWL-0031, the disco capture layer): a loopback ``host:port``
     recorder. Pass the same ``proxy`` to `chromium_launch_kwargs`, which gives it to
