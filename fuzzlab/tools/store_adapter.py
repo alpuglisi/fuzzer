@@ -998,14 +998,28 @@ def import_audit(audit_db: str | Path, store: Store, run_id: int, *,
     (``base_url``'s, else the first finding page's); its ``target_identifier`` and
     ``html_context`` (stored as ``sink_context``) pass `_audit_text`.
 
-    Total over a finding page no origin can be read from (BUG-0556 r6 review, D1 and
-    R4): the main origin is the first page's that `_readable_origin` reads; a page whose
-    authority ``urlsplit`` rejects once `canonical_origin` reads it as a URL
-    (``x[y/app/p.php``, ``h]/…``, ``\\u3000http://[h/…``) is stored by its path, as
-    7393c90's ``to_path`` stored every finding page; one ``to_path`` rejects too
-    (``http://[h/…``, where 7393c90's import raised) gets no endpoint (the candidate's
-    ``parameter_id`` is NULL) and its texts are `AUDIT_TEXT_WITHHELD` (`_audit_text`).
-    Such a finding is imported, never failing the import."""
+    A finding page no origin can be read from (BUG-0556 r6 review, D1 and R4): the main
+    origin is the first page's that `_readable_origin` reads; a page whose authority
+    ``urlsplit`` rejects once `canonical_origin` reads it as a URL (``x[y/app/p.php``,
+    ``h]/…``, ``\\u3000http://[h/…``) is stored by its path, as 7393c90's ``to_path``
+    stored every finding page (so it can keep a userinfo or a JWT segment, as on
+    7393c90: ``\\u3000http://u:<pw>@[h/app/p.php`` is stored
+    ``/\\u3000http://u:<pw>@[h/app/p.php``).
+
+    **Not total** (corrected at the merge; BUG-0556, "At the merge", R4). A page
+    ``urlsplit`` rejects as written, where ``to_path`` rejects it too and 7393c90's
+    import raised, is imported only when it holds a ``?``: it gets no endpoint (the
+    candidate's ``parameter_id`` is NULL) and its texts are `AUDIT_TEXT_WITHHELD`
+    (`_audit_text`). One **without** a ``?`` (``http://[h/app/p.php``,
+    ``//[h/app/p.php``, ``http://x＃y/app/p.php``, ``//user:pw@x[y/app/p.php``) still
+    fails the whole import, every other finding with it, with ``ValueError`` at
+    `_audit_text`'s ``urlparse`` (the floor returns a URL without a ``?`` unread, so the
+    withhold branch is never reached), as 7393c90's import fails it (in ``to_path``):
+    pinned in `tests/test_redaction_residual_pins.py`. A page stored as a BLOB is read
+    as 7393c90 read it (`_audit_endpoint`): one with an empty path (``b"http://h"``,
+    ``b"x://"``) is stored ``/``, its texts never judged against it (as on 7393c90); one
+    with a path (``TypeError`` in ``to_path``) or one ``urlsplit`` rejects fails the
+    import, as on 7393c90 (pinned)."""
     src = sqlite3.connect(str(audit_db))
     src.row_factory = sqlite3.Row
     counts = {"candidate": 0}
@@ -1052,10 +1066,13 @@ def _readable_origin(url) -> str | None:
     """`canonical_origin` of a finding page, or ``None`` where it raises ``ValueError``
     (an authority ``urlsplit`` rejects once read as a URL: ``x[y/app/p.php``, to which
     `canonical_origin` prefixes ``http://``; ``http://[h/…``): such a page names no
-    origin (BUG-0556 r6 review, D1)."""
+    origin (BUG-0556 r6 review, D1). Or ``TypeError``: a page stored as a BLOB
+    (``b"http://h"``), which 7393c90's ``to_path`` imported where its path is empty and
+    the batch's import refused (``TypeError`` in `canonical_origin`; BUG-0556, at the
+    merge, D1(b))."""
     try:
         return canonical_origin(url)
-    except ValueError:
+    except (ValueError, TypeError):
         return None
 
 
@@ -1071,16 +1088,27 @@ def _audit_endpoint(store: Store, run_id: int, page: str, main: str | None, *,
     base URL, whose origin is the main one), the run's ``main`` decides.
 
     A page no origin can be read from (`_readable_origin` is ``None`` because
-    `canonical_origin` raised: BUG-0556 r6 review, D1) is stored by its path, as
-    ``store_url`` stores a URL whose origin is unknown and as 7393c90's ``to_path``
-    stored every finding page (a ``;`` path parameter holding a secret dropped,
-    `core.redaction.strip_secret_path_params`): r6's import raised there, 7393c90's
-    did not. ``None`` -- no endpoint -- where the page's path cannot be read either
-    (``to_path`` raises: ``http://[h/…``, ``//[h/…``; 7393c90's import raised there)."""
+    `canonical_origin` raised ``ValueError``: BUG-0556 r6 review, D1) is stored by its
+    path, as ``store_url`` stores a URL whose origin is unknown and as 7393c90's
+    ``to_path`` stored every finding page (a ``;`` path parameter holding a secret
+    dropped, `core.redaction.strip_secret_path_params`; nothing else of the path is
+    judged, so a userinfo or a JWT segment the page holds is kept, as on 7393c90): r6's
+    import raised there, 7393c90's did not. ``None`` -- no endpoint -- where the page's
+    path cannot be read either (``to_path`` raises ``ValueError``: ``http://[h/…``,
+    ``//[h/…``; 7393c90's import raised there).
+
+    A page stored as a BLOB (`canonical_origin` raises ``TypeError``; at the merge,
+    D1(b)) is read by ``to_path`` exactly as 7393c90 read it, nothing it raises caught:
+    one with an empty path (``b"http://h"``) is stored ``/``, and one with a path
+    (``TypeError``) or one ``urlsplit`` rejects (``ValueError``) fails the import, as
+    7393c90's did (pinned). The batch's import raised ``TypeError`` (in
+    `canonical_origin`) on each of them but ``b""``."""
     from fuzzlab.core.redaction import strip_secret_path_params
     from fuzzlab.core.urls import to_path
     try:
         origin = canonical_origin(page)
+    except TypeError:                   # a BLOB page: 7393c90's reading, whatever it raises
+        return strip_secret_path_params(to_path(page))
     except ValueError:
         try:
             return strip_secret_path_params(to_path(page))
@@ -1105,9 +1133,11 @@ def _audit_endpoint(store: Store, run_id: int, page: str, main: str | None, *,
 _AUDIT_RUN = 8
 
 #: What `_audit_text` stores for a text the redaction owner cannot judge: a URL that
-#: ``urlsplit`` rejects (``http://[h/…``), on which the owner raises ``ValueError`` as
-#: the pushed tree's redactor did (its floor, BUG-0556 r6, A1). Withheld whole, as
-#: `core.trace.safe_ref` withholds such a URL, and the import goes on.
+#: ``urlsplit`` rejects and that holds a ``?`` (``http://[h/…?…``), on which the owner
+#: raises ``ValueError`` as the pushed tree's redactor did (its floor, BUG-0556 r6, A1).
+#: Withheld whole, as `core.trace.safe_ref` withholds such a URL, and the import goes
+#: on. A page ``urlsplit`` rejects without a ``?`` is not withheld: it fails the import
+#: (`_audit_text`'s ``urlparse``; on 7393c90 too, pinned; BUG-0556, "At the merge", R4).
 AUDIT_TEXT_WITHHELD = "(unparseable URL withheld)"
 
 
@@ -1146,10 +1176,16 @@ def _audit_text(text, page_url, *, url: bool = False):
     the rules' cut lengths, review round 2, N3). A ``url`` text (the target identifier,
     which may name another URL: a form action, a link) also passes
     `strip_secret_path_params` and `redact_url_identifiers` itself. The rest of a quoted
-    HTML snippet is body redaction's (audit defect 26). Total: a non-string is returned
-    as it is, and a text whose URL the owner rejects (``ValueError``: its floor, the
-    pushed tree's redactor, raises on a URL ``urlsplit`` rejects) is `AUDIT_TEXT_WITHHELD`
-    -- never stored, never failing the import (BUG-0556 r6, A1)."""
+    HTML snippet is body redaction's (audit defect 26). A non-string is returned as it
+    is, a text of a page stored as a BLOB is judged against nothing of that page (as on
+    7393c90, which judged no text), and a text whose URL the owner rejects
+    (``ValueError``: its floor, the pushed tree's redactor, raises on a URL ``urlsplit``
+    rejects that holds a ``?``) is `AUDIT_TEXT_WITHHELD`, never stored (BUG-0556 r6,
+    A1). **Not total** (corrected at the merge; BUG-0556, "At the merge", R4): a page
+    ``urlsplit`` rejects without a ``?`` passes the floor unread, and the
+    ``urlparse(page_url)`` below raises ``ValueError``, uncaught, failing the whole
+    import as 7393c90's ``to_path`` failed it (pinned; candidate rule, not built: catch
+    it and withhold the text)."""
     import re
 
     from fuzzlab.core.redaction import (PLACEHOLDER, redact_url_identifiers, stored_value,

@@ -862,23 +862,42 @@ plugin registry. It is the layer that makes the store the integration bus.
     the walk's both hold; `stored_value`'s floor is the pushed `redact_sibling`.
     `strip_secret_path_params` and `value_holds_secret` have no floor (the pushed tree
     had no counterpart: it stored a path as `to_path` gave it). Where a floor raises
-    `ValueError` (a URL `urlsplit` rejects: `http://[h/…`, a bracketed host it does not
-    accept, a netloc that NFKC-normalises to a delimiter), the consumer raises it, as the
-    pushed tree did, and its caller withholds the value as it did then (the proxy
-    history writer's `_prepare_contained`: every body `OMIT_FAILED` and the URL cut at
-    its first `?`, what precedes it stored as received -- a `;` path parameter or a
-    fragment there is kept, family (d) below; `safe_ref`'s `(unparseable URL withheld)`;
-    `import_audit`'s `AUDIT_TEXT_WITHHELD`, FR-AUD-31). Held by
-    `tests/test_redaction_floor.py`: the floor's every definition, its decorators
-    included, hashes to 7393c90's text; each consumer is bound once in its module, by
-    its undecorated `def`, and never re-bound, calls its floor first on its own
-    parameters, and reads none of its text parameters (every str parameter, `LAYERED`)
-    again except as a predicate's argument (`isinstance`, `is_sensitive_name`,
-    `WALK_PREDICATES`); nothing uses the walk or the floor unregistered -- a call or any
-    other reference, by an imported, aliased, relative or unaliased dotted name, or
-    `getattr` / `setattr` with a literal name. *(r6 review, R1-R2.)* A name computed at
-    run time (`getattr` with a computed name, `globals()`, `sys.modules`, `importlib`,
-    `exec`) is beyond these static guards: review is the only control for it.
+    `ValueError` (a URL `urlsplit` rejects that holds a `?`: `http://[h/…?…`, a
+    bracketed host it does not accept, a netloc that NFKC-normalises to a delimiter; a
+    URL without a `?` the URL floors return unread), the consumer raises it, as the
+    pushed tree did, and its caller does what it did then -- *(corrected at the merge,
+    BUG-0556 "At the merge", R3(a) and R4)* which is not always to withhold the value:
+    `safe_ref` returns `(unparseable URL withheld)`; the proxy history writer's
+    `_prepare_contained` stores every body `OMIT_FAILED` and the flow's own URL cut at
+    its first `?`, what precedes it as received -- a `;` path parameter or a fragment
+    there is kept, also when only a `Location`, `Refresh` or `Content-Location` value
+    raised (family (d) below); `import_audit` stores a finding's texts
+    `AUDIT_TEXT_WITHHELD` when its page or target holds a `?`, and fails the whole
+    import on a page `urlsplit` rejects without one, as 7393c90's did (FR-AUD-31,
+    pinned). Held by `tests/test_redaction_floor.py`: the floor's every definition, its
+    decorators included, hashes to 7393c90's text; each consumer is bound once in its
+    module, by its undecorated `def`, and never re-bound, calls its floor first on its
+    own parameters, and reads none of its positional text parameters (every positional
+    str parameter, `LAYERED`) again except as the argument of a call by a predicate's
+    name (`isinstance`, `is_sensitive_name`, `WALK_PREDICATES`); nothing uses the walk or
+    the floor unregistered -- a call or any other reference, by an imported, aliased,
+    relative or unaliased dotted name, or `getattr` / `setattr` with a literal name.
+    *(r6 review, R1-R2; the limits completed at the merge, R1-R2, no guard rule added:
+    the owner's decision.)* **Stated limits:** the guards are lexical -- they read the
+    source text, not what Python binds at run time -- and do not see: a same-name
+    rebinding in another scope (a function-local import or assignment shadowing an
+    alias: guard 3 keeps one name map per file, so `def other(): import os.path as w`
+    hides a walk alias `w` used in another function); a local or module-level rebinding
+    of a trusted predicate's name (`WALK_PREDICATES`' `value_holds_secret`,
+    `is_sensitive_name`, `isinstance`: guard 2 trusts the call by its name); a star
+    import of the floor or the owner (skipped; neither module defines `__all__`); a
+    keyword-only text parameter (guard 2 reads positional parameters only); literal-name
+    reflection (`R.__dict__['_walk_names']`, `operator.attrgetter`, an assignment
+    through `__dict__`); a shadow package replacing the floor module (guard 1 hashes the
+    file `core/redaction_floor.py`, and a package `core/redaction_floor/` takes
+    precedence on import); and a name computed at run time (`getattr` with a computed
+    name, `globals()`, `vars()`, `sys.modules`, `importlib`, `exec`). Review is the only
+    control for each.
   - **Where a value sits:** a query pair, `&` or `;` separated; a `;name=value` (or
     bare `;value`) path parameter in any segment; a query-shaped fragment (`#…?a=b`,
     `#a=b`) and a fragment route's path parameters; and, inside any of those values, a
@@ -1030,8 +1049,11 @@ plugin registry. It is the layer that makes the store the integration bus.
     `%40` userinfo straddling the cut keeps its password's start; `redact_for_record`,
     `safe_ref`). *(r6 review, R3:)* family (d), what a caller stores where the floor
     raises: `test_proxy_history_stores_no_path_parameter_of_a_flow_its_floor_rejects`
-    (owner PROXY: the history writer's fallback keeps what precedes the URL's first `?`,
-    a `;name=value` path parameter or a query-shaped fragment there).
+    and, *at the merge* (R3(b)), the header-triggered case
+    `test_proxy_history_stores_no_path_parameter_of_a_flow_a_header_value_makes_it_fall_back`
+    (owner PROXY: the history writer's fallback keeps what precedes the flow's own URL's
+    first `?`, a `;name=value` path parameter or a query-shaped fragment there, also when
+    only a `Location`, `Refresh` or `Content-Location` value made the floor raise).
   - Enforced by: `tests/test_redaction_floor.py` (the layering, r6) and
     `tests/test_redaction_nested.py` (a generated sweep over depth,
     encoding -- raw, single and double percent, `+`, `quote(safe="/")` single and

@@ -17,9 +17,11 @@ pushed tree redacted can be kept again. Three guards hold the design:
    R2: a module-level ``redact_url = _walk_names`` or a decorator replaced it unseen);
    a name the module binds to the floor is bound to nothing else; the function's first
    statement (after its docstring and imports) calls its floor on its own parameters as
-   given and calls nothing else; and the function reads none of its text parameters
-   (every one, R2: `stored_value`'s three) again, except as the argument of a predicate
-   (``isinstance``, `is_sensitive_name`, a `WALK_PREDICATES` one), which returns no text;
+   given and calls nothing else; and the function reads none of its positional text
+   parameters (every one, R2: `stored_value`'s three; a keyword-only one is not read,
+   see the limits) again, except as the argument of a call by a predicate's name
+   (``isinstance``, `is_sensitive_name`, a `WALK_PREDICATES` one), which returns no text
+   while that name is bound to the predicate;
 3. **nothing uses the walk or the floor unregistered**: across ``fuzzlab/``, every use
    of the walk (`_UrlWalk`, a `WALK_HELPERS` step, a `WALK_PREDICATES` predicate) is made
    from a registered function, and every use of the floor from a `LAYERED` consumer. A
@@ -30,11 +32,35 @@ pushed tree redacted can be kept again. Three guards hold the design:
    relative import, or ``getattr`` with a literal name; a module-level use, and an
    assignment to a `LAYERED`, walk or floor attribute from another module, are flagged.
 
-**The stated limit.** The guards read source; they cannot see a name computed at run
-time: ``getattr`` / ``setattr`` with a computed name, ``globals()``, ``vars()``,
-``sys.modules``, ``importlib`` / ``__import__`` of a computed or literal module name,
-``exec`` and ``eval``. Such access is not checked here (nor anywhere else); review is the
-only control for it.
+**The stated limits** (completed at the merge: BUG-0556, "At the merge", R1 and R2; no
+guard rule was added for them, the owner's decision). The guards are lexical: they read
+the source text of ``fuzzlab/`` and of the floor's file, not what Python binds when it
+runs, so "every use" and "every binding" above mean every one written in a form they
+read. They do not see:
+
+- a same-name rebinding in another scope: guard 3 keeps one name map per file
+  (`_bound_paths`, the last binding found wins), so a function-local import or
+  assignment of an alias's name (``def other(): import os.path as w``) hides the walk
+  alias ``w`` another function uses -- 3615cfb's guard caught that one, this one does not;
+- a rebinding of a trusted predicate's name: guard 2 exempts a call by the name
+  (``isinstance``, `is_sensitive_name`, a `WALK_PREDICATES` one), not by what the name
+  is bound to, so ``value_holds_secret = lambda v: v`` (local or module level, or a
+  local ``isinstance``) followed by ``return value_holds_secret(raw_value)`` passes;
+- a star import of the floor or the owner (``from fuzzlab.core.redaction_floor import
+  *`` then ``redact_url(u)`` or ``filter(looks_like_identifier, …)``): guard 3 skips
+  ``*``, and neither module defines ``__all__``;
+- a keyword-only text parameter: `_text_params` reads positional parameters only, so
+  ``redact_url(url, *, raw='')`` returning ``raw`` passes guard 2;
+- literal-name reflection: ``R.__dict__['_walk_names']``,
+  ``operator.attrgetter('_walk_names')(R)``, an assignment through ``R.__dict__``;
+- a shadow package: guard 1 hashes the file ``fuzzlab/core/redaction_floor.py``, not the
+  module Python imports, and a package ``fuzzlab/core/redaction_floor/`` takes
+  precedence over that file (one re-exporting an edited copy passes all six tests);
+- a name computed at run time: ``getattr`` / ``setattr`` with a computed name,
+  ``globals()``, ``vars()``, ``sys.modules``, ``importlib`` / ``__import__`` of a
+  computed or literal module name, ``exec`` and ``eval``.
+
+None of these is checked here (nor anywhere else); review is the only control for them.
 
 Each check is proven on synthetic offenders (PA-0034(2)): an edited floor (a decorator
 added, removed or changed among them), a consumer that skips its floor, runs the walk
@@ -204,8 +230,11 @@ FROZEN = [
     ("redact", "fuzzlab/proxy/redact.py",
      "d9ede21400c00479ad1efb2060b918f7cddf6231f16e51b0134d643177a05187"),
 ]
-#: The floor's docstring and imports (every statement before its first definition).
-HEAD_SHA = "ae2642a99a84889cd40b1d7acfe99636f54a27958858f5ab6c128948c223bba9"
+#: The floor's docstring and imports (every statement before its first definition): the
+#: lane's own text, not 7393c90's (the floor module is new). Retaken at the merge, when
+#: the docstring's claim that every caller withholds a value the floor rejects was
+#: corrected (BUG-0556, "At the merge", R3(a)).
+HEAD_SHA = "e73c8f97955e8fa3f4c05c1293a0f91977e37b56806e6f9bb5297aed45c6c4c2"
 #: The only edits: a function-local import of a live module, pointed at the floor
 #: ``(text in the floor, text at 7393c90)``; each must occur exactly once.
 SUBS = {
@@ -238,8 +267,9 @@ FLOOR_CONSUMERS = {"redact_url", "redact_url_identifiers", "redact_spa_fragment"
                    "page_url_is_clean", "redact_for_record", "redact_sibling", "safe_ref",
                    "redact"}
 #: A consumer's positional parameters that hold no text (r6 review, R2): every other one is
-#: a text parameter its `LAYERED` entry must name, so no entry checks fewer than all
-#: (`stored_value`'s named only ``value``, and returning ``raw_value`` passed).
+#: a text parameter its `LAYERED` entry must name, so no entry checks fewer than all its
+#: positional ones (`stored_value`'s named only ``value``, and returning ``raw_value``
+#: passed); a keyword-only parameter is not read (a stated limit).
 NOT_TEXT = {("fuzzlab/proxy/redact.py", "redact"): {"extra_headers"}}   # header names
 
 
@@ -285,7 +315,8 @@ def frozen_problems(text: str) -> list[str]:
     """How a floor module's ``text`` differs from the pinned 7393c90 code: ``[]`` when
     every definition, its decorators included (`_segment`), is 7393c90's (after `SUBS`),
     they are exactly `FROZEN`'s in order, and nothing but the pinned head precedes them
-    or follows."""
+    or follows. **Limit:** it judges the file's text, not the module Python imports: a
+    package ``fuzzlab/core/redaction_floor/`` shadowing the file is not seen."""
     tree = ast.parse(text)
     problems = []
     body = list(tree.body)
@@ -479,7 +510,12 @@ def layering_problems(source: str, func: str, floors, text_params) -> list[str]:
       else;
     - after that statement no parameter in ``text_params`` (a name, or every name in a
       tuple; ``None`` for a verdict) is read, except as a positional argument of a
-      `_predicates` call, so the walk sees only the floor's output."""
+      `_predicates` call, so the walk sees only the floor's output.
+
+    **Limits** (lexical; the module docstring's list): a `_predicates` call is trusted by
+    its name, not by what the name is bound to (a local or module-level rebinding of
+    ``value_holds_secret``, ``is_sensitive_name`` or ``isinstance`` passes), and a
+    keyword-only parameter is never a text parameter here (`_text_params`)."""
     tree = ast.parse(source)
     problems = []
     fn = next((n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == func),
@@ -564,7 +600,7 @@ def test_every_url_redaction_consumer_runs_its_floor_first():
     """Guard 2: each `LAYERED` consumer is bound once, undecorated, runs the pushed
     tree's redactor on its input as received, then the walk on the floor's output only;
     the registry holds every consumer the batch changed, names every floor consumer, and
-    names every text parameter of each (r6 review, R2)."""
+    names every positional text parameter of each (r6 review, R2)."""
     assert set(R.LAYERED) == EXPECTED_LAYERED
     assert {f for floors, _p in R.LAYERED.values() for f in floors} == FLOOR_CONSUMERS
     from fuzzlab.core import redaction_floor as F
@@ -718,8 +754,12 @@ def unregistered_uses(files: dict[str, str]) -> list[str]:
     floor's predicate, a name imported, aliased, defined in the walk's own module, an
     unaliased dotted chain (``fuzzlab.core.redaction_floor.looks_like_identifier``), a
     relative import, and ``getattr`` / ``setattr`` with a literal name on such a module.
-    **Limit:** a name computed at run time (``getattr(R, name)``, ``globals()``,
-    ``vars()``, ``sys.modules``, ``importlib``, ``exec``) is not visible to this scan."""
+    **Limits** (lexical; the module docstring's list): a name computed at run time
+    (``getattr(R, name)``, ``globals()``, ``vars()``, ``sys.modules``, ``importlib``,
+    ``exec``), a same-name rebinding in another scope (one name map per file: a
+    function-local ``import os.path as w`` hides a walk alias ``w`` used elsewhere), a
+    star import (skipped), and literal-name reflection (``R.__dict__[...]``,
+    ``operator.attrgetter``) are not visible to this scan."""
     walk_defs = {f"{_dotted(rel)}.{name}"
                  for rel, name in list(R.WALK_HELPERS) + list(R.WALK_PREDICATES)}
     walk_defs.add("fuzzlab.core.redaction._UrlWalk")

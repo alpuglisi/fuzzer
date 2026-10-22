@@ -240,9 +240,12 @@ def redact_url(url: str) -> str:
     1. **the floor**: the pushed tree's own `redact_url` (`core.redaction_floor`, frozen
        at 7393c90): a sensitively named query value, the query read through
        ``urlsplit`` and split on ``&`` only. It raises ``ValueError`` where 7393c90
-       raised (a URL ``urlsplit`` rejects: ``http://[h/…?…``), and so does this
-       function: every caller withholds the value then, as it did on the pushed tree
-       (proxy history's ``_prepare_contained``; `core.trace.safe_ref`);
+       raised (a URL ``urlsplit`` rejects that holds a ``?``: ``http://[h/…?…``; one
+       without a ``?`` is returned unread), and so does this function; each caller
+       then does what it did on the pushed tree, which is not always to withhold the
+       value: proxy history's ``_prepare_contained`` stores the flow's URL cut at its
+       first ``?``, what precedes it as received (a ``;name=value`` path parameter
+       kept: BUG-0556 family (d), pinned);
     2. **the walk** (`_UrlWalk`) on the floor's output only: a query pair (``&`` or
        ``;`` separated), a ``;name=value`` path parameter, a query-shaped fragment, and
        a URL, query string or ``;`` pair nested in any of those values (raw or
@@ -1047,8 +1050,10 @@ def redact_url_identifiers(url: str, *, placeholder: bool = False) -> str:
     7393c90 redacted is kept; with ``placeholder``, the pushed tree's `redact_url`
     instead (its identifier rule blanks a value, and a blank in a sent query is what
     PA-0544(3) forbids: the walk replaces an identifier-like value by `PLACEHOLDER`).
-    Either floor raises ``ValueError`` where 7393c90 raised (a URL ``urlsplit`` rejects),
-    and so does this function: its caller withholds the value, as on the pushed tree."""
+    Either floor raises ``ValueError`` where 7393c90 raised (a URL ``urlsplit`` rejects
+    that holds a ``?``), and so does this function; its caller then does what it did on
+    the pushed tree, which is not always to withhold the value (`redact_url`'s
+    docstring: proxy history keeps what precedes the ``?``, family (d))."""
     out = _floor.redact_url(url) if placeholder else _floor.redact_url_identifiers(url)
     return _walk_url(out, identifiers=True, placeholder=placeholder)
 

@@ -217,7 +217,8 @@ def safe_ref(url: str) -> str:
     `import_spider` through the trace recorder).
 
     Total: a URL it cannot parse is withheld whole (the floor withholds what 7393c90
-    withheld: a URL ``urlsplit`` rejects)."""
+    withheld: a URL ``urlsplit`` rejects that holds a ``?``; one without a ``?`` is
+    redacted like any other, not withheld, as on 7393c90)."""
     from fuzzlab.core import redaction_floor as _floor
     from fuzzlab.core.redaction import _walk_record, _walk_url
     text = _floor.safe_ref(url)

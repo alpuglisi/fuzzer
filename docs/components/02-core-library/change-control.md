@@ -292,6 +292,27 @@ Newest first.
       (F-248); the pins' reasons say the same (`_ON_7393_R6`); the corrective action
       names CC-CORE-0076, CC-PROXY-0031, CC-AUD-0059, the commits and PA-0556(11), whose
       header (the lane's doc texts) now states that it narrows PA-0549(3c).
+  - *(At the merge, 2026-10-22, the merge 5e80ea2 of `lane/REDACTURL-r6` 08eb900, the
+    coordinator's records round, owner-approved: correct the records, pin what 7393c90
+    also leaks or fails, state the guards' limits, no new guard rule; BUG-0556 "At the
+    merge". No product behaviour of this component changed.)*
+    - **R3(a), the records:** `redact_url`'s and `redact_url_identifiers`' docstrings,
+      `core.trace.safe_ref`'s and the floor's head docstring (`core/redaction_floor.py`:
+      the lane's own text, the module being new) no longer say every caller withholds a
+      value the floor rejects: the floor raises only on a URL holding a `?`, and each
+      caller does what it did on 7393c90 (proxy history keeps what precedes the `?`,
+      family (d)). The floor's pinned head digest `HEAD_SHA` is retaken (`ae2642a9…` ->
+      `e73c8f97…`); `FROZEN` is unchanged.
+    - **R1/R2, the guards' limits stated** (no guard rule added): the guard module's
+      docstring, `frozen_problems`, `layering_problems`, `unregistered_uses` and
+      FR-CORE-537 (in place) now list what the lexical guards do not see -- a same-name
+      rebinding in another scope, a rebinding of a trusted predicate's name, a star
+      import, a keyword-only text parameter, literal-name reflection, a shadow package
+      replacing the floor module, a name computed at run time -- each shown on the merge
+      tree's own guard functions (`scratchpad/merge-r6/logs/guard_limits_wt.log`,
+      `guard_limit_shadow_package.log`); "every text parameter" is every positional one.
+    - FR-CORE-537 also names the header-triggered family (d) pin (CC-PROXY-0031) and
+      `import_audit`'s `?`-less failure (CC-AUD-0059).
 - Impact (other components / project):
   - Every producer that calls `redact_url` now redacts nested credential names, `;`
     pairs, path parameters and query-shaped fragments: **PROXY** (flow history's URL,
@@ -434,6 +455,10 @@ Newest first.
     stated; `redact_for_record`'s walk given `""`; FR-CORE-537 amended in place;
     BUG-0556 "r6 review"; PA-0556 item 11's header and Enforced-by, SP-17 and the doc
     texts amended ("r6 review changes") — done
+  - [x] *(At the merge)* the R3(a) docstrings and the floor's head (its digest
+    retaken); the guards' limits stated in their docstrings and FR-CORE-537; guard 1
+    and the floor tests pass on the merge tree (plain runner, BUG-0556 "At the merge")
+    — done
 - Effectiveness (assessed 2026-10-22): the six reported spellings stored their token
   before (measured by `scratchpad/lanes/REDACTURL/exp/repro.py` on 7393c90) and store
   none after; the new tests fail on the pre-fix product files in one invocation and pass

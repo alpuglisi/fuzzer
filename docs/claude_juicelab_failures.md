@@ -1979,3 +1979,206 @@ Juice Shop lab is complete.
 - **Cause:** a relative script path and output path in a command whose working directory was the main checkout, not the lane's worktree.
 - **Status:** cleaned (files moved out of the checkout, not committed).
 
+### F-250 — BUG-0544's "the strongest redactor leaves it unchanged" inherited a redactor that never looked inside a value; BUG-0514/0521 had fixed the same flat model in the trace only
+- **What:** AU-REQID78 (BUG-0544, review rounds 1-3) made `page_url_is_clean` "the strongest URL redactor leaves it unchanged" and proved the loopback predicate with a generated sweep, but never tested where a secret can sit in the URL that redactor judges. `redact_url_identifiers` judged a query value as one flat token and a query as `&` pairs, so a page with `?next=%2Fview%3Fticket%3D<hex>`, `?a=1;token=<hex>` or `;jsessionid=` in a middle segment was "clean", stored as a replay recipe's page and its token stored in `parameter.example` and `form.entries`. Earlier, BUG-0514 and BUG-0521 had found the same flat model (a token embedded in a value or a segment) and fixed it inside `core.trace.safe_ref` only, not in the owner every other sink calls.
+- **Evidence:** the AU-REQID78 round-1 fix check (audit Gap 5); `scratchpad/lanes/REDACTURL/exp/repro.py` on 7393c90; `tests/test_redaction_nested.py` fails on the pre-fix product files.
+- **Impact:** session ids, one-time and capability tokens in nested positions reached the project store and, by name, proxy history and the disco capture, against D12/PA-0100; a recipe's page could be fetched with its token.
+- **Cause:** PA-0544(7) delegated to "the strongest existing redactor" without testing it; PA-0514/0521's rule was applied to the consumer that reported it (SP-17 rule 1 not followed); redaction tests varied names and shapes, never positions.
+- **Status:** fixed in lane REDACTURL (BUG-0556, PA-0556; CC-CORE-0076, CC-AUD-0059).
+
+### F-251 — A known leak of crawled values into `parameter.example` was asserted in a test as "still needed" instead of fixed or pinned
+- **What:** `tests/test_forms_phase2.py::test_identifier_like_link_values_are_blanked_and_never_stored` asserted `HEX32 in _all_rows_text(store)` ("reserved, not fixed in this lane ... fails loudly once BUG-0120 is fixed"), and two tests excluded `parameter.example` from their secret searches. BUG-0120 had no report, no PA and no strict xfail; `tests/test_replay_bindings.py` excludes `page` and `parameter` "by design, BUG-0120".
+- **Evidence:** the two exclusions at `tests/test_forms_phase2.py` (7393c90, lines 218-222 and 240); BUG-0556's recurrence review.
+- **Impact:** a D12 leak of every crawled identifier-like query value into `parameter.example` survived from forms phase 2 to BUG-0556, protected by a test that would have failed had anyone fixed it.
+- **Cause:** a deferral recorded as a passing assertion (the failure mode PA-0531(4)/PA-0054(3) name: pin a residual with a strict xfail, never defer in prose or assert it).
+- **Status:** fixed in lane REDACTURL (CC-AUD-0059: every example passes `core.redaction.stored_value`; the assertions now search `parameter.example`). `tests/test_replay_bindings.py`'s docstring and exclusion (lane LABAUTH's file) still say "by design, BUG-0120"; their test passes either way, and the merger may tighten them.
+
+### F-252 — REDACTURL's first commit timed its linearity test, which PA-0135 forbids; the harness's guard caught it
+- **What:** `tests/test_redaction_nested.py::test_the_walk_is_linear_in_the_values_length` in commit b6db14a compared two `time.process_time()` measurements (`big < small * 8 * 4 + 0.05`). PA-0095(2) and PA-0135 (BUG-0135) require an operation count, never a ratio or scaled comparison of timings. The lane's targeted run did not include `tests/test_no_wall_clock_ratio.py`, so the first harness run on b6db14a was the first to see it.
+- **Evidence:** `scratchpad/lanes/REDACTURL/vc_run1_parallel.log` (harness on b6db14a: `TOTAL 119 file(s): 4984 passed, 1 failed, 0 errors, 5 skipped, 55 xfailed`, the one failure `tests/test_no_wall_clock_ratio.py::test_no_test_asserts_a_wall_clock_ratio`, offender `big < small * 8 * 4 + 0.05`).
+- **Impact:** one extra harness run; nothing merged. A timing ratio is the shape that failed under load in BUG-0135.
+- **Cause:** PA-0095(2) was read ("a test bounding its operation count") and then implemented as a timing out of habit; PA-0135's guard was not checked before writing a complexity test.
+- **Status:** fixed in the lane's second commit: the test counts the characters `looks_like_identifier` reads (at most 4x the URL's length at 500 and 4000 pairs) through a monkeypatched counter; the guard reports no offender.
+
+### F-253 — REDACTURL's PA-0002 sweep was read from its callers' code, not measured: `import_audit`, the proxy's `?` gate and the record redactor's flat fragment were marked covered
+- **What:** BUG-0556's sweep table said `core.urls.store_url` covered "endpoint.url of every importer" and marked `proxy/redact.py` and `redact_for_record` "fixed by the owner". `import_audit` called no owner (it stored `to_path(page_url)` and the rules' texts raw); the proxy called the owner only behind `"?" in target`; `_redact_piece` passed a route fragment's query to the flat `redact_query`.
+- **Evidence:** review round 1 findings RU-3/RU-8, RU-7, RU-9 (`scratchpad/lanes/REDACTURL/review_round1.md`); the new tests fail on c3a13f7 (`r1_prefix.log`).
+- **Impact:** a session id or token in a middle path segment, a query-less `;jsessionid=`, or a nested route-fragment token reached the audit candidate rows, proxy history's raw messages, and launch and project records, after the lane reported the class closed.
+- **Cause:** the sweep listed each caller with the disposition its call implied, without a test driving a secret through it; PA-0556(3) asked for every writer, and a writer that calls no owner, or calls it conditionally, is invisible to a reading of calls.
+- **Status:** fixed in `lane/REDACTURL-r1`; PA-0556(4) requires each disposition to cite a measuring test.
+
+### F-254 — REDACTURL's generated sweep enumerated the encodings its author thought of, not those real encoders produce
+- **What:** the 750-case sweep used raw, `quote(safe="")`, double and `quote_plus`; none keeps `/` raw, which is Python's `quote()` default and Django's `redirect_to_login`. Such a value (`next=/view%3Fticket%3D<hex>`) took the walk's nested-URL branch and was never decoded; a nested URL's userinfo was not a position at all.
+- **Evidence:** RU-1/RU-6 and RU-2; Django 5.0 `redirect_to_login` measured by the review's skeptic; the 1710-case sweep fails on c3a13f7.
+- **Impact:** the commonest single-encoded redirect spelling kept its token in every redactor and in `form.source_page`, a page the binder would fetch with the token on the wire, under a lane report that claimed "raw or percent-encoded, at any depth".
+- **Cause:** "generated over encodings" was satisfied by the author's own list; no encoder was measured (CLAUDE.md step 8).
+- **Status:** fixed (three encodings and a userinfo shape added); PA-0556(5).
+
+### F-255 — REDACTURL mislabelled a regression it introduced as "pre-existing", and claimed a pre-fix proof its own log contradicted
+- **What:** BUG-0556's residual R2 called "an endpoint query that redaction changed is sent so" pre-existing; for an identifier in a form's action query or a disco capture's URL query it was introduced by the change (sent as `id=`, a new false negative). The bug doc also said every defect test failed pre-fix on its assertion, while `prefix.log` showed the headline test stopping on an `AttributeError`; and the rewritten linearity test was never run against a quadratic variant (PA-0135(3)).
+- **Evidence:** RU-4, RU-5 and RU-10 (`review_round1.md`); `scratchpad/lanes/REDACTURL/prefix.log` lines 20-46.
+- **Impact:** a coverage regression stated as someone else's residual; a proof claim and a complexity oracle that did not hold, in a lane report.
+- **Cause:** the residual was labelled from its class (PA-0544) without measuring each writer before and after; the proof log was not read against the claim; PA-0135(3) and PA-0545(6) were known and not applied.
+- **Status:** fixed in `lane/REDACTURL-r1`: the blank is a placeholder and its point refused; the headline test asserts its leak list first (fails there on 7393c90); an offender test proves the oracle; PA-0556(6). *(Corrected by the round-2 entries below: the RU-5 re-proof covered the named test only, and the oracle's offender reported its own work.)*
+
+### F-256 — REDACTURL's round-1 fixes held for each repro while the same mechanism stayed open beside it, in all eight findings
+- **What:** every round-1 fix was made at the path its repro took and proven on that repro. The fix check found each mechanism still open next to it: an encoded layer in a nested URL's authority (not its path segment), userinfo in a nested URL's path segment, after a space or behind `https:///` (not at a value's start), a pair list holding a URL walked as one URL (Werkzeug's own double `url_for`), the top-level fragment's encoded route, a quoted substring of a secret value (not a prefix at the rules' cut lengths), the proxy's duplicate headers, `Referer`, `Link`, `Refresh` spellings and malformed request lines, and a raw space splitting a record's URL.
+- **Evidence:** `scratchpad/lanes/REDACTURL/review_round2.md` (N1..N8, each confirmed by a skeptic on f939778); the round-2 tests fail on f939778's product files on their own assertions (`r2_prefix.log`).
+- **Impact:** credentials and tokens in those spellings reached `form.source_page` (a page the binder would fetch), `parameter.example`, `candidate.sink_context`, proxy history's raw messages and `launch.argv` after the lane reported round 1 complete; a third review round was needed.
+- **Cause:** no enumeration of a mechanism's neighbouring paths before reporting; the fixes were checked against the reported spelling, not the class.
+- **Status:** fixed in `lane/REDACTURL-r2`; PA-0556(7) requires the enumeration by mechanism, each path with a failing-first test.
+
+### F-257 — REDACTURL round 1 changed what the point builder returns and swept only one of its callers; greybox then sent the placeholder
+- **What:** round 1 gave `injection_points_from_store`'s points a `replay_refusal` and checked the oracle path only. `greybox.run.points_from_store`, the builder's other caller, rebuilt each point without the refusal and its sender had no placeholder gate, so greybox sent `POST /app/edit.php?id=__REDACTED__` (a send the round introduced: it sent `id=` before). PA-0530(5) ("when a producer's output changes, the sweep covers every caller of that producer, grep its name"; written after BUG-0530's review missed greybox) already required that sweep.
+- **Evidence:** review round 2, N4 (a fake session recorded the wire); `tests/test_redaction_nested.py::test_greybox_never_sends_a_point_the_builder_refused_or_a_placeholder` fails on f939778.
+- **Impact:** a redaction placeholder was sent as a request's own query value on every greybox run over such a form, against PA-0544(1).
+- **Cause:** PA-0530(5) was not applied; the sweep listed callers of the redaction owner, not callers of the producer whose output the round changed. The same greybox miss is BUG-0530 review B7's.
+- **Status:** fixed in `lane/REDACTURL-r2` (CC-FUZZ-0116): refused points are reported and never sent, and the sender refuses a placeholder URL.
+
+### F-258 — REDACTURL round 1 re-proved only the test a review named, and proved its oracle with an offender that reported its own work
+- **What:** RU-5's finding was a test failing on the old code for a missing attribute; round 1 fixed and re-proved that one test, though PA-0545(6) requires the proof of every test in the file. `test_a_value_past_the_depth_bound_is_redacted_whole` still stopped on `MAX_VALUE_DEPTH` while the old code leaked, the size test on `MAX_VALUE_CHARS`, and the bug doc still said the totality tests failed only on the missing API (one failed because the old redactor raised). Round 1's linearity offender (A) called `self.tick(text)` per pair, so it was flagged only for the work it reported; three quadratic walks through `unquote`, the pair split and `quote` passed the oracle.
+- **Evidence:** review round 2, N5 and N8; `scratchpad/lanes/REDACTURL/r2_n5_7393c90.log` (every test swept on 7393c90); `r2_n8_proof.log` (f939778's oracle returns `[]` for the three variants).
+- **Impact:** a masked pre-fix proof and an oracle that could not see C-level quadratic work, both reported as done in round 1.
+- **Cause:** PA-0545(6) and PA-0135(3) applied to the named instance only, and an offender built to pass rather than to probe the oracle's blind spot.
+- **Status:** fixed in `lane/REDACTURL-r2`: every test asserts its behaviour before any new API (`_api`), the file was swept on 7393c90 with each failure type recorded, and the oracle counts the C-level work of every call on one URL per part of the walk, proven on seven offenders none of which ticks its own work.
+
+### F-259 — REDACTURL round 1's `import_audit` endpoint fix created a new endpoint split it claimed to remove
+- **What:** round 1 stored a finding's endpoint as `store_url(page, main)` with the main origin taken from the first finding's page, and said it was "as `import_spider` stores the same page". `import_spider` takes the main origin from the seed, and `fetcher.py` passes neither a `base_url`, so with an off-origin first finding (an XHR on an API origin) the main origin's pages became absolute, beside the spider's paths -- a split that `to_path` had not made.
+- **Evidence:** review round 2, N3 neighbour 2 (endpoints measured on f939778 and c3a13f7); `test_import_audit_stores_a_page_as_the_spider_does_when_the_first_finding_is_off_origin` fails on f939778.
+- **Impact:** a candidate and its parameter lookup attached to a second endpoint for a main-origin page; a claim in the bug doc that did not hold under that ordering.
+- **Cause:** the claim was read from the two functions' shared helper, not measured with the orderings `fuzzlab audit --store` produces.
+- **Status:** fixed in `lane/REDACTURL-r2` (`_audit_endpoint`: the form this run's spider rows hold the page in).
+
+### F-260 — REDACTURL round 1 gave `import_audit` a `base_url` keyword without its PA-0300 registry entry; its targeted run left out the whole-package guard
+- **What:** round 1 added `base_url` to `import_audit` (CC-AUD-0059). PA-0300's guard (`tests/test_base_url_subpath_registry.py::test_every_base_url_function_is_registered`) requires every function taking an operator base URL to be registered with a sub-path test. Round 1's targeted run (33 files) did not include that guard, so the lane reported green with it failing; round 2's `_audit_endpoint` repeated the parameter.
+- **Evidence:** `scratchpad/lanes/REDACTURL/r2_targeted.log` (the guard's failure: `fuzzlab.tools.store_adapter:_audit_endpoint` and `:import_audit` unregistered); the registry at f939778 has no `import_audit` entry.
+- **Impact:** a whole-package guard failing on the lane's round-1 branch, which the merge harness would have caught; no sub-path test of `import_audit` existed.
+- **Cause:** the targeted run's file list was taken from the test files importing the changed modules, without the whole-package guards that import nothing they check (the harness adds them; CLAUDE.md step 2).
+- **Status:** fixed in `lane/REDACTURL-r2`: `import_audit` registered with `test_import_audit_under_a_subpath_base_stores_the_spiders_paths`; `_audit_endpoint` takes a flag, not a base.
+
+### F-261 — REDACTURL's final round reintroduced leaks f939778 had closed: a passphrase's space, a userinfo that is also a pair list, a nested authority's pairs, a backslash-led value
+- **What:** round 2 (2955f16, the owner-approved final round) changed the walk in four places that narrowed what it read: `_AUTHORITY_AT`'s authority class stopped at whitespace (round 1 ran it to the next `/`); the userinfo replacement moved before the pair split and the layer's decode, so `a=//x&password=Hunter@<word>` lost the name `password`; `_url_shaped` sent `a=https://x%26password%3D…` to a pair walk whose decoded authority was never read; and any leading backslash made a value a URL whose path is never split. Each kept a secret in every URL consumer or in `import_spider`'s store that f939778 redacted. The lane reported the round fixed by class, citing PA-0556(7) and a test per neighbouring path failing on f939778.
+- **Evidence:** the round-2 fix check's N2 item 1 / N7 neighbour 2 (`scratchpad/lanes/REDACTURL/final_check_findings.md`); r3's differential sweeps (`r3/sweep2.py`: 6 313 of 90 720 cases clean on f939778 and kept on 111b6fb, in four classes); `tests/test_redaction_nested.py`'s after-the-final-round tests, all 41 failing on 111b6fb on their own assertions (`r3/plain_111b6fb.log`).
+- **Impact:** a passphrase or a password's tail nested in a redirect value reached proxy history, project records, finding references and `parameter.example` / `form.source_page` (the page the binder fetches) after the owner's final round, against D12/PA-0100; a fourth fix pass, under PA-0549(3c), after the round meant to be the last.
+- **Cause:** every test the round added asserted that something more was redacted; none compared the changed walk's output with the pre-fix walk's on the same inputs, so a narrowed reading was visible to no test (PA-0556(7) is forward-only); the code comment claimed the whitespace stop was "measured on Node 22's URL" without measuring that case.
+- **Status:** fixed in `lane/REDACTURL-r3` (CC-CORE-0076, after the final round): each class with tests failing on 111b6fb; the differentials regress nothing against f939778 or 111b6fb; PA-0556 item 8 requires the differential before a round is reported.
+
+### F-262 — REDACTURL's final bookkeeping commit masked three tests' pre-fix failures again, the defect its own round had just fixed (N5)
+- **What:** 111b6fb changed the shared fixture `_audit_store` to pass `base_url=base_url` (default `None`) to `import_audit`, after the round's N5 sweep had run; on 7393c90 and c3a13f7 (no such keyword) three tests stopped on a `TypeError` before any assertion, and R5's new strict xfail "held" there on an `ImportError` of `_audit_text`. The bug doc still claimed every test of the file asserts its behaviour before any new API.
+- **Evidence:** the fix check's N5 (`final_check_findings.md`); `r3/plain_7393c90.log` and `r3/plain_c3a13f7.log` after the fix (every failure an `AssertionError` on the test's own assertion but the named IPv6 totality case).
+- **Impact:** a pre-fix proof claim that did not hold for the committed file; a pin that could not tell its residual from a missing function.
+- **Cause:** PA-0545(6)'s sweep was treated as done once run, not re-run after a later change to a shared fixture; the new xfail had no `raises`.
+- **Status:** fixed in `lane/REDACTURL-r3`: the fixture passes `base_url` only when given and only where `import_audit` takes it; R5 falls back to the pre-round-1 writer; R1, R2, R4 and R5 are `raises=AssertionError`; the file swept on four revisions; PA-0556 item 8's last sentence.
+
+### F-263 — REDACTURL r3 fixed a backslash regression by narrowing it, left the narrowed leads unread, and reported "regresses none" from a differential that never drove them
+- **What:** r3's class-(4) fix made only a `\\` or `\/` lead mark a value as a URL, but `_authority_start` still read no authority after such a lead, so `next=%5C%5Cx%26password%3D<word>` was walked as one path segment; every URL consumer and `import_spider` kept the password f939778 redacted. r3's report, commit message, BUG-0556 section and CC-CORE-0076 sub-bullet said the revision "regresses none against either" (f939778 and 111b6fb).
+- **Evidence:** the skeptic's check of r3; `scratchpad/lanes/REDACTURL/r4/probe.py` and `probe_r4_cases.log` (every one of eleven spellings kept by all eight consumers on 20cd466); `r4/sweep3.py`: r3's sweep extended with the backslash leads, 5 607 cases regressed by 20cd466 against f939778; r3's `sweep2.py` prefixes had `https:\\` and `/\` and no `\\` or `\/` lead.
+- **Impact:** a password nested in a redirect value reached proxy history, project records, finding references and `parameter.example` / `form.source_page` after the round meant to close the batch's regressions; a fifth fix pass.
+- **Cause:** the differential PA-0556(8) asked for was generated from the author's list of shapes, not from the conditions the change itself added; the branch the change created was the one case it never drove, and "regresses none" was reported as proven.
+- **Status:** fixed in `lane/REDACTURL-r4` (CC-CORE-0076's r4 sub-bullet): `_authority_start` reads a nested backslash lead's authority; tests failing on 20cd466; the differential extended (0 regressions against f939778 or 20cd466); PA-0556 item 9.
+
+### F-264 — REDACTURL r3 listed three spellings as regressions of the batch that f939778 had kept too
+- **What:** r3's `_AFTER_FINAL` comment, BUG-0556 section and CC-CORE-0076 sub-bullet presented all 21 after-the-final-round spellings as ones f939778's URL redactors redacted and 111b6fb kept. Cases 5 and 6 (the `/go/` spaced-userinfo spellings) and case 12 (`#/r?next=a%3Dhttps…`) were kept by f939778 too, in both URL redactors, the proxy's `Location`, `page_url_is_clean` and `value_holds_secret`.
+- **Evidence:** the skeptic's measurement; `scratchpad/lanes/REDACTURL/r4/probe_after_final.py` on f939778.
+- **Impact:** an overstated account of what the batch had regressed (three improvements counted as regressions fixed); the same per-spelling claim was never measured.
+- **Cause:** each group's label was taken from the spelling that had been measured, not measured per spelling on the pre-fix revision.
+- **Status:** corrected in `lane/REDACTURL-r4`: the comment, BUG-0556 "r4" and CC-CORE-0076's r4 sub-bullet disclose them as fixed by the same change, not regressions; PA-0556 item 9's last sentence.
+
+### F-265 — REDACTURL measured "no regression" against its own revisions for four rounds, never against the pushed tree, and missed what its first commit dropped
+- **What:** every differential of r3 and r4 compared the round with f939778 or the round's own pre-fix revision. The batch's first commit (b6db14a) had replaced 7393c90's `redact_query` (an `&`-only split) and `urlsplit` (tabs, CRs and LFs removed) with the walk, so `?u=bob&password;x=<word>`, `password=pw;<word>` and `p<TAB>assword=<word>` -- redacted by the pushed tree -- were kept by every later revision, on both sides of every comparison. r3's and r4's reports said the revision "regresses none".
+- **Evidence:** `scratchpad/lanes/REDACTURL/r5b/diff_290fcfb_vs_7393c90.txt`: 4 366 URLs of 214 352 kept by 290fcfb and redacted by 7393c90 (19 255 case-consumer pairs; `safe_ref` 4 366, `redact_url_identifiers` 3 616, `redact_for_record` 2 700, `redact_url` 2 289); the probe `r5b/probe_mech.py` on both exports.
+- **Impact:** a password or token named across a `;` or split by a tab reached proxy history, project records, finding references and every URL consumer for the whole batch, behind reports that called it regression-free; a sixth fix pass.
+- **Cause:** PA-0556(8)'s "the pre-fix revision" was read as the round's own; nothing required the pushed tree as a baseline, and the corpus drove the walk's conditions, not the parsing of the code it replaced (the owner had to state the shipping criterion).
+- **Status:** fixed in r5 on `lane/REDACTURL-r4` after 290fcfb (CC-CORE-0076's r5 sub-bullet): both readings restored, 0 leaks the pushed tree redacted; PA-0556 item 10.
+
+### F-266 — REDACTURL r5's first draft regressed 450 URLs against 290fcfb: its `&` reading replaced the `;` reading instead of adding to it
+- **What:** the first r5 draft of `_UrlWalk.pairs`, when an `&` part's name to its first `=` held a sensitive token, redacted the value after `=` and skipped walking the part's own `;` pieces; when the token was there only because a secret sat inside the name (`next=host%253Btoken%253D<word>%2Fx%3Ba%3D1`), the secret was kept.
+- **Evidence:** `scratchpad/lanes/REDACTURL/r5b/` first fix run against 290fcfb: 450 URLs (3 150 pairs) of sweep3 regressed (7393c90 kept them too, so the pushed-tree diff alone showed 0).
+- **Impact:** none shipped -- the differential against the round's own pre-fix revision caught it before commit; it shows a fix judged only against the pushed tree can regress the batch's own gains.
+- **Cause:** "fail closed on either reading" was implemented as a choice between readings, not their union.
+- **Status:** fixed before commit (every `;` pair walked first, then the `&` reading's value replaced); guarded by `tests/test_redaction_nested.py::test_the_amp_reading_never_replaces_the_semicolon_reading`; the differential runs against both the pushed tree and the round's pre-fix revision (PA-0556 item 10 keeps item 8's baseline).
+
+### F-267 — REDACTURL r5 reported "0 leaks the pushed tree redacted" from its own corpus; an independent check found 2 104 in five behaviours it never drove
+- **What:** r5 followed PA-0556(10) (a differential against 7393c90 whose corpus drove the pushed code's parsing) and reported, in its commit, BUG-0556 "r5" and CC-CORE-0076, that 144d234 leaks nothing 7393c90 redacted. An independent check of 144d234 regenerated a corpus over the consumers' behaviours and found 2 104 URLs 144d234 kept that 7393c90 redacted or withheld: `safe_ref`'s order of steps (R1), the record redactor's whitespace split (R2), `Refresh`'s every `url=` run (R3), a URL `urlsplit` rejects, on which 7393c90 raised and its callers withheld (A1), and a duplicate `Location` 7393c90 collapsed (A2). r5's corpus held no URL `urlsplit` rejects, no `Content-Location`, `Refresh` or duplicate header, and no tab between a record's pieces.
+- **Evidence:** the check's journal (`wf_9a1e5879-609`); `scratchpad/lanes/REDACTURL/r6/checkwork/diff.144d234_vs_7393c90.txt` (2 104 URLs: 1 253 pairs redacted and 6 256 withheld by 7393c90); the 29 "r6" cases fail on 144d234 (`r6b/r6_tests_plain_t144d234.log`).
+- **Impact:** had r5 merged, passwords and tokens the pushed tree redacted would have reached finding references and diagram exports, project records, proxy history and the trace rows `fuzzlab auto` stores; a seventh pass at the class.
+- **Cause:** a claim about the redactor was generalised from a corpus; PA-0556(10) enumerated the pushed code's parsing, and the replaced code's other behaviours (its step order, its callers' splits, a header grammar, its exceptions, its container's side effects) were in no corpus. The rule was the wrong layer: an enumeration of a replaced implementation cannot be proven complete.
+- **Status:** fixed in r6 by the owner's design (the pushed redactor frozen and run first; PA-0556 item 11); 0 leaks the pushed tree redacted on every corpus.
+
+### F-268 — The r6 brief added a bar the owner had not set (0 leaks against the unpushed 144d234), and the lane blocked on it
+- **What:** the orchestrator's r6 brief required, besides the owner's criterion (leak nothing the pushed tree 7393c90 redacted), "0 leaks against 144d234", a round of the lane never pushed. Three families the floor-first design cannot see -- (a) a name joined across a removed tab, (b) the floor's `***@` in `safe_ref`, (c) the floor's 4096-character cut -- leak at r6 and at 7393c90 but were redacted by 144d234, so the lane stopped as blocked with 0 leaks against 7393c90 measured on every corpus.
+- **Evidence:** the r6 lane's result (journal `wf_09971c37-a99`, status "blocked"); the owner's correction in the continuation brief ("the bar is the PUSHED tree 7393c90 only ... drop it").
+- **Impact:** one lane round spent blocked; the owner had to restate a criterion they had already given; the families were left unpinned meanwhile.
+- **Cause:** the orchestrator turned its own comparison into an acceptance bar without the owner's word (the owner's success metric is the one measured, `PA-0141`), and against a revision no user has.
+- **Status:** corrected in the continuation brief; the families are pinned by strict xfails and the 144d234 deltas reported as information only (BUG-0556 "r6").
+
+### F-269 — REDACTURL r6's first draft let the floor's raise fail the whole `import_audit`, and did not re-run the whole test file after its last change
+- **What:** layering `import_audit`'s target identifier on the floor made it raise `ValueError` on a URL `urlsplit` rejects; r6's first draft let the raise propagate, so one malformed finding failed `fuzzlab audit --store`'s whole import, where 7393c90 and 144d234 imported it (storing the target raw). The draft's test accepted the raise ("fails closed"). The draft also changed an R1 test after its last whole-file run of `tests/test_redaction_nested.py` and re-ran only the r6 cases (disclosed in its report).
+- **Evidence:** `scratchpad/lanes/REDACTURL/r6b/a1_import_audit_plain_r6pre.log` (the import fails with `ValueError('Invalid IPv6 URL')` on r6's first draft); the r6 lane's report.
+- **Impact:** an availability regression against the pushed tree in the importer (no leak); a file-wide pass claimed from a run older than the file.
+- **Cause:** "fail closed" was applied to the whole import, not to the value (PA-0086: a per-unit failure is contained and reported); the CC number for the auditor's file was missing from the round's list and the fix was reverted instead of flagged; PA-0556(8)'s last sentence (re-run the whole file after a change to it) was not followed.
+- **Status:** fixed in r6's commit: `_audit_text` stores `AUDIT_TEXT_WITHHELD` for such a text and the import goes on (CC-AUD-0059 r6 sub-bullet); the whole file re-run after the last change (`r6b/nested_wt.log`: 621 ok).
+
+### F-270 — REDACTURL's `import_audit` rework failed the import on a page the pushed tree imported, and r6 recorded it as "as 7393c90's `to_path` did"
+- **What:** review round 2 (N3) made `import_audit` read each finding page's origin (`_main_origin`, `_audit_endpoint` -> `canonical_origin`, `store_url`). `canonical_origin` prefixes `http://` to a URL holding no `://`, so a page such as `x[y/app/p.php?u=1&token=…`, `h]/app/p.php`, `[h/app/p.php` or `\u3000http://[h/…` raised `ValueError('Invalid IPv6 URL')` and the whole import failed, where 7393c90 (`to_path` only) imported it. r6 then wrote that a page `urlsplit` rejects "still fails the import, as 7393c90's `to_path` did" (D1 of the r6 review).
+- **Evidence:** `scratchpad/checks-r6b-evidence/repro_audit_bracket.{py,log}` (7393c90 `{'candidate': 1}`, 3615cfb raises, for five spellings); the checker's supplement: 28 of 888 targeted URLs; `tests/test_redaction_nested.py::test_r6_review_d1_import_audit_imports_a_page_no_origin_reads_as_the_pushed_tree_did` fails on 3615cfb at "the import failed".
+- **Impact:** a functional regression of the batch against the pushed tree (a standalone `import_audit` or an `--append` findings DB lost every finding); no leak.
+- **Cause:** the equivalence "`urlsplit` rejects it" = "`to_path` rejects it" was inferred from the absolute spelling (`http://[h/…`) and never measured on the strings `canonical_origin`'s prefix turns into a netloc; no differential ran `import_audit` before the r6 check (PA-0556(4): a caller's sweep measured, not read -- followed for the target, not for the page).
+- **Status:** fixed in the r6 review: a page no origin is read from is stored by its path; one no path is read from gets no endpoint and its texts are withheld (CC-AUD-0059 "r6 review"); measured with the checker's own import runner.
+
+### F-271 — REDACTURL r6's frozen-floor check hashed from `def`, so a decorator could disable the floor unseen
+- **What:** `tests/test_redaction_floor.py`'s guard 1 hashed `ast.get_source_segment(node)`, which starts at `def` / `class`. `@dataclass(frozen=True)` made `@dataclass` on `RawMessage`, or `@lambda f: (lambda url: url)` above the floor's `redact_url` or `safe_ref`, passed while `redaction_floor.redact_url('http://h/?password=hunter2')` returned the URL unredacted. The floor's docstring, PA-0556(11) and CC-CORE-0076 r6 said "an edit here fails it" (R1 of the r6 review).
+- **Evidence:** the review check of 3615cfb (journal `wf_ef48570e-267`); `scratchpad/lanes/REDACTURL/r6c/proof_guards_offenders.log` and `proof_guards_tree.log` (each decorator edit passes 3615cfb's guard file).
+- **Impact:** the design's one structural guarantee (the pushed redactor runs first, unedited) had an unguarded edit; no edit was made.
+- **Cause:** the guard hashed the AST node's span without checking what the span covers, and its synthetic offenders were edit kinds its author listed, not every part of a definition that changes what it does.
+- **Status:** fixed in the r6 review: `_segment` hashes from the first decorator; four decorator offenders added (CC-CORE-0076 "r6 review").
+
+### F-272 — REDACTURL r6's layering guards modelled a consumer as its body and a use as a call, and `stored_value`'s entry named one of its three text parameters
+- **What:** guards 2 and 3 passed a module-level re-binding of a layered consumer (`redact_spa_fragment = _walk_spa_fragment`, `redact_url = _walk_names`), a decorator on one, and a new module using the walk or the floor by `map(_walk_names, …)`, `functools.partial(_walk_url, …)`, `getattr(redaction, '_walk_names')`, an unaliased dotted call or `filter(looks_like_identifier, …)` from the floor; `stored_value`'s registry entry named only `value`, so returning `raw_value` passed. The records said every consumer runs its floor first and nothing runs the walk or the floor unregistered (R2 of the r6 review).
+- **Evidence:** the review check of 3615cfb; `r6c/proof_guards_offenders.log` (23 offenders pass 3615cfb's guard functions), `proof_guards_tree.log` (the real edits pass 3615cfb's guard file; with `redact_spa_fragment` re-bound, the redaction test files still passed 623 cases).
+- **Impact:** a later edit could have bypassed the floor with every guard green, against the claim the design rested on; no such edit was made.
+- **Cause:** the guards' model of Python was the shapes their author thought of: no module namespace (bindings after the `def`, decorators) and no reference but a call by an imported name; the registry recorded "the parameter that holds the text" as one.
+- **Status:** fixed in the r6 review: bindings, decorators, every str parameter and every reference checked; the run-time limit (a computed name) stated in the guard and FR-CORE-537 (CC-CORE-0076 "r6 review").
+
+### F-273 — REDACTURL r6 counted a raise as redacted and recorded the history writer's fallback as "never unredacted"; it keeps what precedes the `?`
+- **What:** where the floor raises, the proxy history writer stores the flow's URL cut at its first `?`, so `http://[h/app;jsessionid=<hex>/p.php?u=1` keeps the session id (on 7393c90 too; 144d234 redacted it). CC-PROXY-0031 r6 said such a flow is stored "never unredacted"; FR-PROXY-11 r6 and BUG-0556 r6's family list (a)-(c) and 144d234-delta accounting left it out (R3 of the r6 review).
+- **Evidence:** the review check's repro; `scratchpad/lanes/REDACTURL/r6c/famd_compare.txt` (651 URLs store a secret so on r6 and 7393c90, 183 of them redacted by 144d234).
+- **Impact:** a family the floor-first design keeps went unpinned and was described as safe in two records.
+- **Cause:** the differential counted any raise as redacted (as the owner's criterion counts 7393c90's) and never measured what the raising consumer's caller stores; the records took the writer's docstring (7393c90's text) for it.
+- **Status:** pinned as family (d) (owner PROXY, strict xfail); the records and the docstring corrected (CC-PROXY-0031 "r6 review"); PA-0556(11) now requires each caller's fallback measured.
+
+### F-274 — REDACTURL r6's records claimed `import_audit` withheld a text whose page URL the floor rejects; that branch was unreachable
+- **What:** FR-AUD-31 r6, CC-AUD-0059 r6 and 3615cfb's commit message said such a text is stored `AUDIT_TEXT_WITHHELD` and the import goes on; `_main_origin` raised first, so `_audit_text`'s page-URL branch never ran from `import_audit`, no test reached it, and the same records' next sentence said the import fails (R4 of the r6 review).
+- **Evidence:** the review check's repro (`http://[h/app/p.php?u=bob&password=…` raises in `_main_origin` on 3615cfb); `tests/test_redaction_nested.py::test_r6_review_r4_import_audit_withholds_the_texts_of_a_page_its_floor_rejects` fails on 3615cfb at "the import failed".
+- **Impact:** a record stated behaviour the code did not have.
+- **Cause:** the claim was written from `_audit_text`'s code, not from a test through its only caller.
+- **Status:** fixed in the r6 review: with D1's fix the branch is reached and tested through `import_audit`, and FR-AUD-31 says exactly what happens (CC-AUD-0059 "r6 review").
+
+### F-275 — REDACTURL r6's recurrence review left out PA-0549(3c) and F-226 and named one of its three change-control entries
+- **What:** BUG-0556 r6's recurrence review did not reconcile its 16 pins of cases the unpushed 144d234 redacted with PA-0549(3c) ("a defect a sweep finds in an unpushed change of the same batch is fixed in that batch, never pinned"), did not name F-226, of whose class the r6 brief's extra bar (F-248 in the stack) was a recurrence, and its corrective action named only CC-AUD-0059 (R5 of the r6 review).
+- **Evidence:** `git show 3615cfb:docs/bugs/BUG-0556-…md | sed -n '1245,$p'` names no PA-0549, F-226, CC-CORE-0076 or CC-PROXY-0031.
+- **Impact:** a reader of the bug could take r6's pins for a breach of 3c, and F-226's correction for one that held.
+- **Cause:** the review was written for the design change and checked against PA-0556 only, not against every rule the round's pins touch.
+- **Status:** fixed in the r6 review: BUG-0556 "r6 review" completes it; the pins' reasons and PA-0556(11)'s header state the reading of 3c (the pushed tree).
+
+### F-276 — REDACTURL's r6 review round wrote records that claimed more than the code does
+- **What:** the round's records said the history writer withholds a flow the floor rejects (proxy `redact` and `redact_url` docstrings, `safe_ref`'s, a test name), that `import_audit` "never fails on a finding's URL" (FR-AUD-31, CC-AUD-0059, three docstrings, a CHANGELOG and an ERROR_LOG text, the SP-17 row) and that the static guards catch "every use" of the walk or the floor (the CHANGELOG and ERROR_LOG texts, SP-17, PA-0556(11)). The writer stores the URL cut at its first `?`; a page `urlsplit` rejects without a `?` still fails the import; the guards are lexical.
+- **Evidence:** the per-finding checks of 08eb900 (`subagents/workflows/wf_d7e029ec-c68/journal.jsonl`: R2, R3, R4); the merge's records round (`scratchpad/merge-r6/logs/`).
+- **Impact:** false records in the lane's texts; corrected at the merge before the push.
+- **Cause:** each claim was written from the case the round fixed, not measured over the inputs the claim covers (the 70 000-URL corpus held no URL without a `?`).
+- **Status:** corrected at the merge (BUG-0556 "At the merge"; PA-0556(8) and (11), SP-17, FR-AUD-31, FR-CORE-537, FR-PROXY-11, the docstrings).
+
+### F-277 — The batch's import rework made `import_audit` fail on a BLOB finding page the pushed tree imported, and no differential drove a non-text page
+- **What:** `_main_origin` read the page through `canonical_origin`, and r6's `_readable_origin` caught only `ValueError`, so a findings row whose `page_url` is a BLOB with no path raised `TypeError` and failed the whole import, where 7393c90's `to_path` stored the endpoint `/`.
+- **Evidence:** the D1 check of 08eb900 (residual (b)); `scratchpad/merge-r6/logs/blob_compare2.txt`; `tests/test_redaction_nested.py::test_merge_d1b_import_audit_imports_a_blob_page_with_no_path_as_the_pushed_tree_did` fails on 08eb900.
+- **Impact:** a regression against the pushed tree for rows the real writer does not produce (`fetcher.log_finding` stores a str URL); fixed before the push.
+- **Cause:** the differentials generated str URLs only; a SQLite column's other storage classes were not inputs.
+- **Status:** fixed at the merge (CC-AUD-0059).
+
+### F-278 — The merge's records agent first fixed the BLOB regression too widely, importing BLOB pages the pushed tree refused, with their texts unchecked
+- **What:** its first draft of the D1(b) fix caught `ValueError` for BLOB pages as well, so 50 BLOB pages 7393c90 fails on were imported with their texts not judged -- a leak under the owner's rule.
+- **Evidence:** its differential before the report (`scratchpad/merge-r6/logs/`); the agent's report.
+- **Impact:** none: replaced before it reported; the final fix matches 7393c90 on 225 of 225 BLOB pages.
+- **Cause:** widening a catch to make the failing case pass, before measuring what else the wider catch admits.
+- **Status:** corrected before the report.
+

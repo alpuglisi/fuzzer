@@ -1637,3 +1637,186 @@ kind; where the floor raises, each caller's fallback is measured for what it sto
 never counted as redacted; and the round's sweep drives every URL a caller the batch
 changed reads (each `import_audit` text and page) through that caller. Enforced by the
 guard tests above and the D1 and R4 tests.
+
+## At the merge (coordinator's records round, owner-approved)
+
+The fix check of 08eb900 (`scratchpad/r6c_checks.txt`, one check per r6-review finding)
+closed D1 and R1 and left R2, R3, R4 and R5 open, none a regression against 7393c90 but
+one (D1(b), below). The owner decided: merge now (5e80ea2, the merge of
+`lane/REDACTURL-r6` 08eb900 into the stack); correct every record that claims too much;
+pin by a strict xfail (`raises=AssertionError`) what the pushed tree 7393c90 also leaks
+or also fails; state the guards' limits; add **no** new guard rule; fix only a
+regression against 7393c90. This round did exactly that, in the merge worktree. Every
+proof below is plain Python (pytest imported only as a library), on the merge tree and
+on git-archive exports of 7393c90 and 08eb900 (the worktree's tests run against each
+export's `fuzzlab`); scripts and logs are in `scratchpad/merge-r6/` (`scripts/`,
+`logs/`), the exports removed afterwards.
+
+- **R3(a) -- records that said a caller withholds what the floor rejects.** Corrected
+  to what is stored: `proxy.redact.redact`'s docstring (the history writer does not
+  withhold the flow: every body `OMIT_FAILED` and the flow's own URL cut at its first
+  `?`, what precedes it as received, also when only a header value raised);
+  `core.redaction.redact_url`'s and `redact_url_identifiers`' docstrings (each caller
+  does what it did on 7393c90, not always to withhold; the floor raises only on a URL
+  holding a `?`); `core.trace.safe_ref`'s ("the floor withholds a URL `urlsplit`
+  rejects" -- only one holding a `?`; one without is redacted, not withheld, as on
+  7393c90: measured on both trees); `tests/test_redaction_nested.py`'s A1 docstring and
+  two comments that said "every caller withholds"; and the test
+  `test_r6_a1_proxy_history_withholds_a_flow_whose_url_its_floor_rejects`, which asserts
+  that the flow is stored, its bodies `OMIT_FAILED` and the query's secret cut, is
+  renamed `test_r6_a1_proxy_history_stores_a_flow_its_floor_rejects_bodies_omitted_query_cut`
+  (CC-PROXY-0031's r6 sub-bullet keeps the old name: it is history). The floor's head
+  docstring (`core/redaction_floor.py`, lines 15-22) made the same claim; it is **the
+  lane's own text, not 7393c90's** (the module is new: `git show
+  7393c90:fuzzlab/core/redaction_floor.py` fails), so it is corrected and its pinned
+  digest `HEAD_SHA` in `tests/test_redaction_floor.py` retaken (`ae2642a9…` ->
+  `e73c8f97…`, the old digest reproduced first from 08eb900's file by guard 1's own
+  head reading, `scripts/head_sha.py`); no frozen definition changed (`FROZEN` as it
+  was), and guard 1 passes.
+- **R3(b) -- the header-triggered family (d) case, pinned.**
+  `tests/test_redaction_residual_pins.py::test_proxy_history_stores_no_path_parameter_of_a_flow_a_header_value_makes_it_fall_back`
+  (owner PROXY, 4 cases: a `Location`, a `Refresh` `url=` and a `Content-Location`
+  value `http://[h/x?y=1` on a flow whose own URL parses -- `;jsessionid=<hex>` in a
+  middle segment, `;sid=<word>` in the last, a fragment `#a=1;password=<word>` before
+  the `?`). *Measured first* (`logs/famd_header.log`): on the merge, on 7393c90 and on
+  08eb900 each such flow makes the writer fall back and stores
+  `http://h/app;jsessionid=<hex>/p.php` in `flow.url` and the `errors` line; the same
+  flow without that header is redacted on the merge and on 08eb900 (7393c90 keeps a
+  path parameter anyway); a quoted `Refresh: 0; URL='http://[h/x?y=1'` and a `?`-less
+  `Location: http://[h/x` make no floor raise; the `observe.exchange` trace event of
+  these flows (one each) held no secret (`logs/famd_header_trace_rows.log`). Each case fails at its own leak assertion on the
+  merge, on 7393c90 and on 08eb900 (`logs/pin_famd_header.log`), and passes, with the
+  four r6-review family (d) cases, on a scratch copy cutting the fallback URL at its
+  first `;`, `?` or `#` (`logs/pins_satisfiable_candidate_rules.log`: 8 strict XPASS).
+  The reason cites the fix check's corpus measurement, not re-run here: 67 371
+  fallbacks, 14 082 storing a secret (on 7393c90 too), 3 517 of them redacted by
+  144d234; the trace event kept a secret in 1 055 (45 redacted by 144d234).
+  FR-PROXY-11 and FR-CORE-537 name the case and the pin, in place.
+- **R4 -- `import_audit` is not total.** The r6 review's records (FR-AUD-31,
+  CC-AUD-0059 "r6 review", the `import_audit` / `_audit_endpoint` / `_audit_text`
+  docstrings, this document's R4 "Fix") said the import never fails on a finding's URL.
+  Measured (`logs/import_audit_probe_before.log`, `import_audit_probe_nq_frames.log`):
+  a page `urlsplit` rejects **with** a `?` is imported with its texts withheld; one
+  **without** a `?` -- `http://[h/app/p.php`, `//[h/app/p.php`, `http://x＃y/app/p.php`,
+  `//user:pw@x[y/app/p.php`, `http://[h]/app/p.php`, `http://h]/app/p.php`, a fragment
+  or a `;` parameter instead of a query -- still fails the whole import, every other
+  finding with it, at `_audit_text`'s `parts = urlparse(page_url)`
+  (`fuzzlab/tools/store_adapter.py:1204` on the merge), because the floor returns a URL
+  without a `?` unread and the withhold branch is never reached; 7393c90 fails all
+  nine at `core/urls.py:18` (`to_path`). The 888-URL supplement through the check's own
+  import runner on the merge tree, against its 7393c90 outputs
+  (`logs/imp888_merge_vs_7393.txt`): 0 regressed and 0 new failures for every
+  consumer; of the 54 pages 7393c90's audit import raised on, the 27 holding a `?` are
+  imported with no canary stored and the 27 without one (every one) fail on both trees.
+  So the r6 review's *Measured* line above ("the findings on a page 7393c90's import
+  raised on (3 463 and 27 …) are imported") counted only the pages that import: 27 of
+  the 888 still fail (the lane's own `r6c/imp_extra/imp_new_0.jsonl` recorded them
+  `F:ValueError`, and its compare filed them under "neither"); the 70 000-URL corpus
+  holds no URL without a `?`. Records corrected in place to say exactly this (FR-AUD-31;
+  the three docstrings and `AUDIT_TEXT_WITHHELD`'s comment; FR-CORE-537's caller
+  sentence) and that a page no origin is read from is stored by its path as 7393c90's
+  `to_path` stored it, so it can keep a userinfo or a JWT segment, as on 7393c90
+  (`\u3000http://u:<pw>@[h/app/p.php` -> `/\u3000http://u:<pw>@[h/app/p.php`, measured
+  on both trees). Pinned (owner AUD; candidate rule, not built: catch that
+  `ValueError` and withhold the texts):
+  `tests/test_redaction_residual_pins.py::test_import_audit_imports_a_finding_page_urlsplit_rejects_without_a_query`
+  (5 cases, the four pages above and `http://[h/app;jsessionid=<hex>/p.php`), each
+  failing at its own first assertion ("the import failed: ValueError(…)") on the merge,
+  on 7393c90 and on 08eb900, and passing with the candidate rule on a scratch copy.
+- **D1(b) -- a regression of the batch, fixed.** A finding page stored as a BLOB with
+  an empty path (`b"http://h"`, `b"x://"`, `b"http://h?u=bob"`): 7393c90's `to_path`
+  read `urlparse(b"…").path == b""` as `/` and imported it; the batch's import (3615cfb,
+  08eb900) raised `TypeError` in `canonical_origin` (`_readable_origin` and
+  `_audit_endpoint` caught `ValueError` only) and stored nothing. A BLOB with a path
+  (`b"http://h/app/p.php"`) or one `urlsplit` rejects fails on 7393c90 too
+  (`TypeError` / `ValueError` in `to_path`). Unreachable from the auditor
+  (`fetcher.log_finding` writes the crawler's str URL), reachable from any other writer
+  of a findings DB. *Fix* (`fuzzlab/tools/store_adapter.py`): `_readable_origin` also
+  catches `TypeError` (`None`: the page names no origin), and `_audit_endpoint` reads a
+  BLOB page by `to_path` exactly as 7393c90 did, nothing it raises caught. A first
+  draft caught `TypeError` beside `ValueError` in the existing branch, which
+  withholds a page `to_path` rejects: the differential below found it importing 50
+  BLOB pages 7393c90 failed on (`b"http://[h…"`) with their texts unjudged -- a leak
+  under the owner's rule, a 7393c90 failure counting as redacted -- and it was replaced
+  before anything was reported. *Proof:* a str/BLOB differential of 225 generated
+  pages (9 heads x 5 paths x 5 tails, a canary in the page and the context;
+  `scripts/blob_diff.py`, `logs/blob_compare2.txt`): every BLOB row identical to
+  7393c90's (outcome, exception type, endpoints, canaries stored: 225 of 225) and every
+  str row identical to 08eb900's (225 of 225). *Test:*
+  `tests/test_redaction_nested.py::test_merge_d1b_import_audit_imports_a_blob_page_with_no_path_as_the_pushed_tree_did`
+  (3 cases) fails on 08eb900 at its own assertion ("the import failed:
+  TypeError(\"a bytes-like object is required, not 'str'\")") and passes on the merge
+  and on 7393c90 (`logs/d1b_and_r6review_tests.log`). What 7393c90 also fails or leaks
+  is pinned (owner AUD; candidate rule: decode a BLOB page before reading it, or
+  withhold its texts):
+  `tests/test_redaction_residual_pins.py::test_import_audit_imports_a_blob_finding_page_and_judges_its_texts`
+  (3 cases: a BLOB with a path, fails the import; `b"http://h?token=<word>"`, imported
+  with a context quoting the token stored, its texts never judged against a BLOB page),
+  failing at its own assertions on the merge and on 7393c90.
+- **R1 and R2 -- the guards' limits, stated** (no guard rule added, the owner's
+  decision). The guards in `tests/test_redaction_floor.py` are lexical: they read the
+  source text, not what Python binds at run time. They do not see a same-name
+  rebinding in another scope (a function-local import or assignment shadowing an
+  alias: guard 3 keeps one name map per file); a local or module-level rebinding of a
+  trusted predicate's name (`WALK_PREDICATES`' `value_holds_secret`,
+  `is_sensitive_name`, `isinstance`: guard 2 trusts the call by its name); a star
+  import of the floor or the owner; a keyword-only text parameter (guard 2 reads
+  positional parameters only); literal-name reflection (`__dict__`,
+  `operator.attrgetter`); a shadow package replacing the floor module (guard 1 hashes
+  the file, and a package of the same name takes precedence on import); and names
+  computed at run time. Each is shown on the merge tree's own guard functions
+  (`logs/guard_limits_wt.log`: each control flagged, each limit not) and the shadow
+  package on a scratch copy (`logs/guard_limit_shadow_package.log`: the six guard
+  tests pass while `fuzzlab.core.redaction_floor` imports from the package and its
+  `redact_url` returns `token=SEKRETzq1` unredacted). The records that claimed more
+  are corrected in place: the guard module's docstring ("every one" of the text
+  parameters is every positional one; the stated limits listed),
+  `frozen_problems`', `layering_problems`' and `unregistered_uses`' docstrings,
+  `NOT_TEXT`'s comment and FR-CORE-537. The r6 review's R2 *Stated limit* above (a name
+  computed at run time only) was incomplete; PA-0556(11)'s "state what they cannot see
+  (a name computed at run time)" is the orchestrator's text (handed over).
+
+**Correction of the r6 review's "Why F-226's correction did not hold"** (that paragraph
+stands as written; this one corrects it). It said that "no rule says the regression bar
+is the pushed tree only (PA-0556(10) requires a differential against the pushed tree but
+does not forbid a second bar against an unpushed revision)". That was inaccurate:
+**PA-0556(8) set the second bar.** Item 8 diffs the changed owner's output "against the
+pre-fix revision's" and calls "a case clean before and kept after … a regression of the
+batch, fixed in it (PA-0549(3c))"; r6's pre-fix revision was the unpushed 144d234, and
+the r6 brief's "N(leak at r6, redacted at 144d234) -- must be 0" (which the r6 review
+quoted as "0 leaks against 144d234") was item 8 applied as written, beside item 10's
+bar against 7393c90; the brief never cited PA-0549. Item 10 added the pushed tree as a
+baseline without retiring item 8's, item 11 kept "the differential of items 8-10"
+running, and the r6 review's own fix -- narrowing PA-0549(3c) in item 11's header --
+left item 8's "fixed in it" in force, so it would not have prevented the next brief from
+setting the bar again (the next pre-fix revision, 08eb900, is unpushed too). F-226's
+correction did not hold because it corrected one brief while the rule the briefs are
+written from, item 8, still named an unpushed revision as a bar. At the merge the
+orchestrator amends PA-0556(8) in place: the regression bar is the pushed tree; a case a
+pre-fix revision of the batch redacted and the change keeps is information, reported
+with its family, never a bar (what the pushed tree also keeps is pinned, item 11).
+
+**Recurrence note.** This round's findings recur the r6 review's own classes one level
+up, in the records: a claim written from the code read or from the change's intent
+("the import is total", "every caller withholds", "every use", "every text parameter")
+instead of from a measurement over the inputs that reach it -- R4's 27 pages were in the
+check's own supplement and in the lane's own output, filed under "neither"; the
+withholding claim was measured for the flow's own URL, not for a header that makes the
+same writer fall back; and a lexical guard was described in the language's terms
+("every binding", "every reference") rather than its own. PA-0556(4) (a sweep is
+measured, not read) and PA-0556(11) (a raise's fallback is measured for what it stores;
+the guards state what they cannot see) applied; each was followed for the case in hand
+and not for its neighbours, and the measurement that would have caught R4 existed and was
+misfiled. No new rule (the owner's decision): the records now say what is measured, the
+guards' limits are stated, and what 7393c90 also leaks or fails is pinned; PA-0556(8)
+is amended (above), by the orchestrator.
+
+**Files changed at the merge by this round:** `fuzzlab/proxy/redact.py`,
+`fuzzlab/core/redaction.py`, `fuzzlab/core/redaction_floor.py` (head docstring only),
+`fuzzlab/core/trace.py` (docstring only), `fuzzlab/tools/store_adapter.py` (D1(b)'s
+two `except` clauses; docstrings), `tests/test_redaction_floor.py` (`HEAD_SHA`;
+docstrings), `tests/test_redaction_nested.py` (the rename, D1(b)'s test, the
+`_import_audit_or_failure` helper also catching `TypeError`; docstrings),
+`tests/test_redaction_residual_pins.py` (three pins), FR-CORE-537, FR-AUD-31,
+FR-PROXY-11 (in place), CC-CORE-0076, CC-PROXY-0031, CC-AUD-0059 (appended
+sub-bullets), and this section.

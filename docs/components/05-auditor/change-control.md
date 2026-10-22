@@ -216,6 +216,40 @@ Newest first.
       ValueError('Invalid IPv6 URL')"), passing on the revision; on 7393c90, D1's six
       import (three fail at the leak assertion: 7393c90 stored the page URL's token raw
       in `sink_context`) and R4's two fail at the import (`to_path` raised there).
+  - *(At the merge, 2026-10-22, the merge 5e80ea2 of `lane/REDACTURL-r6` 08eb900, the
+    coordinator's records round, owner-approved; BUG-0556 "At the merge", R4 and
+    D1(b).)*
+    - **R4 -- correction: `import_audit` is not total.** The r6-review sub-bullet above,
+      its Deliverables line ("total over a finding page no origin or path is read
+      from") and its Effectiveness line (the findings on a page 7393c90's import raised
+      on "are imported") claimed more than the code does: a page `urlsplit` rejects
+      **with** a `?` is imported with its texts withheld, but one **without** a `?`
+      (`http://[h/app/p.php`, `//[h/app/p.php`, `http://x＃y/app/p.php`,
+      `//user:pw@x[y/app/p.php`) still fails the whole import at `_audit_text`'s
+      `urlparse`, as 7393c90's import fails it (in `to_path`); of the 888-URL
+      supplement's 54 pages 7393c90's audit import raised on, the 27 with a `?` import
+      and the 27 without fail on both trees (0 regressed, 0 new failures on the merge
+      tree). A page no origin is read from is stored by its path as 7393c90's `to_path`
+      stored it, so it can keep a userinfo or a JWT segment, as on 7393c90. FR-AUD-31,
+      the `import_audit`, `_audit_endpoint` and `_audit_text` docstrings and
+      `AUDIT_TEXT_WITHHELD`'s comment say exactly this, in place. Pinned (owner AUD;
+      candidate rule, not built: catch that `ValueError` and withhold the texts):
+      `tests/test_redaction_residual_pins.py::test_import_audit_imports_a_finding_page_urlsplit_rejects_without_a_query`
+      (5 cases; fail at "the import failed" on the merge, 7393c90 and 08eb900).
+    - **D1(b) -- a regression of the batch against 7393c90, fixed.** A finding page
+      stored as a BLOB with an empty path (`b"http://h"`, `b"x://"`) imported on 7393c90
+      (endpoint `/`) and raised `TypeError` in `canonical_origin` on 3615cfb and
+      08eb900. `_readable_origin` now also catches `TypeError`, and `_audit_endpoint`
+      reads a BLOB page by `to_path` exactly as 7393c90 did, nothing it raises caught:
+      over 225 generated pages each BLOB row equals 7393c90's (outcome, exception type,
+      endpoints, canaries) and each str row equals 08eb900's
+      (`scratchpad/merge-r6/logs/blob_compare2.txt`). Test:
+      `tests/test_redaction_nested.py::test_merge_d1b_import_audit_imports_a_blob_page_with_no_path_as_the_pushed_tree_did`
+      (3 cases; fails on 08eb900 at its own assertion, passes on the merge and on
+      7393c90). Pinned (owner AUD), as on 7393c90: a BLOB page with a path fails the
+      import, and a BLOB page's texts are never judged against it
+      (`tests/test_redaction_residual_pins.py::test_import_audit_imports_a_blob_finding_page_and_judges_its_texts`,
+      3 cases).
 - Impact (other components / project):
   - **FUZZ (point builder, oracle):** a crawled form whose hidden value is identifier-
     like or holds a nested token now has that name in `form.fresh`, so its points are
@@ -268,6 +302,9 @@ Newest first.
   - [x] *(r6 review)* `import_audit` total over a finding page no origin or path is
     read from (`_readable_origin`, `_audit_endpoint` -> path or `None`); FR-AUD-31
     corrected in place; the D1 and R4 import tests — done
+  - [x] *(At the merge)* R4's records corrected (not total: a page `urlsplit` rejects
+    without a `?` fails as on 7393c90) and pinned; D1(b) fixed with its test, the rest
+    pinned; FR-AUD-31 amended in place — done
 - Effectiveness (assessed 2026-10-22): `scratchpad/lanes/REDACTURL/exp/repro2.py` found
   the token in `endpoint.url`, `parameter.example` and `form.entries` (spider forms and
   disco captures) before, and only R1's two rows after; the harness result is in the

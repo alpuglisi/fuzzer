@@ -764,7 +764,8 @@ def test_a_records_spaced_userinfo_never_reaches_a_later_pair():
 #: its start; R2 the record redactor (and `safe_ref`) returned a URL holding a tab, CR or
 #: LF cleaned, merging the pieces 7393c90 split on that whitespace; R3 the proxy read a
 #: quoted ``Refresh`` URL only inside its quotes, and only the first ``url=``; A1 a URL
-#: ``urlsplit`` rejects made 7393c90 raise, and its callers withheld it; A2 7393c90
+#: ``urlsplit`` rejects made 7393c90 raise, and its callers fell back (not always
+#: withholding it: proxy history keeps what precedes the ``?``, family (d)); A2 7393c90
 #: collapsed a duplicate ``Location`` / ``Content-Location`` into the one it rewrote. r6
 #: runs the pushed tree's own redactor first, frozen (`core.redaction_floor`), and the
 #: walk on its output: each case below fails on 144d234 at its own assertion.
@@ -878,9 +879,13 @@ def _withheld_or(fn, *args):
 
 @pytest.mark.parametrize("url", _A1_REJECTED)
 def test_r6_a1_a_url_urlsplit_rejects_is_withheld_by_every_consumer(url):
-    """A1: 7393c90's URL redactors raised on such a URL and every caller withheld it
-    (`safe_ref`'s ``(unparseable URL withheld)``, the history writer's
-    ``_prepare_contained``); 144d234's walk never raised and kept the secret it keeps
+    """A1: 7393c90's URL redactors raised on such a URL and each caller handled the raise
+    as it does now: `safe_ref` withholds it (``(unparseable URL withheld)``), the history
+    writer's ``_prepare_contained`` stores the flow with every body `OMIT_FAILED` and its
+    URL cut at the first ``?`` -- what precedes the ``?`` as received, which is not
+    withholding it (family (d), pinned in `tests/test_redaction_residual_pins.py`; the
+    query's secret, the one this test plants, is cut); 144d234's walk never raised and
+    kept the secret it keeps
     (1 329 URLs of the check's corpus). The floor raises again: each redactor raises
     ``ValueError`` or keeps nothing, `page_url_is_clean` never answers True, and the
     proxy's request line, ``Location``, ``Content-Location`` and ``Refresh`` too."""
@@ -908,10 +913,16 @@ def test_r6_a1_a_url_urlsplit_rejects_is_withheld_by_every_consumer(url):
     assert kept == []
 
 
-def test_r6_a1_proxy_history_withholds_a_flow_whose_url_its_floor_rejects(tmp_path):
+def test_r6_a1_proxy_history_stores_a_flow_its_floor_rejects_bodies_omitted_query_cut(
+        tmp_path):
     """A1 through the store: the history writer contains a redaction failure per flow
-    (``_prepare_contained``: every body `OMIT_FAILED`, the URL cut at its ``?``), as on
-    7393c90; 144d234 stored the raw request line's secret."""
+    (``_prepare_contained``: every body `OMIT_FAILED`, the URL cut at its first ``?``), as
+    on 7393c90, so the secret planted in the query is not stored; 144d234 stored the raw
+    request line's secret. The flow is stored, not withheld: what precedes the ``?`` is
+    kept as received (a path parameter there: family (d), pinned in
+    `tests/test_redaction_residual_pins.py`). Renamed at the merge from
+    ``test_r6_a1_proxy_history_withholds_a_flow_whose_url_its_floor_rejects``, a name
+    that claimed more than it asserts (BUG-0556, "At the merge", R3(a))."""
     from fuzzlab.core.redaction import OMIT_FAILED
     from fuzzlab.proxy.history import FlowRecord, HistoryWriter
     url = _A1_REJECTED[0]
@@ -977,13 +988,14 @@ def _audit_findings(tmp_path, rows) -> Path:
 
 def _import_audit_or_failure(tmp_path, audit_db):
     """`import_audit` into a fresh store: ``(counts, the failure or None, endpoint urls,
-    candidate rows, the store's dump)``."""
+    candidate rows, the store's dump)``. A ``TypeError`` is a failure too (a BLOB page:
+    at the merge, D1(b))."""
     from fuzzlab.tools.store_adapter import import_audit
     with Store(tmp_path / "u.db") as store:
         failed, counts = None, {}
         try:
             counts = import_audit(audit_db, store, store.start_run("auditor", "h"))
-        except ValueError as exc:
+        except (ValueError, TypeError) as exc:
             failed = exc
         endpoints = [u for (u,) in store.conn.execute("SELECT url FROM endpoint")]
         candidates = [tuple(r) for r in store.conn.execute(
@@ -1060,6 +1072,37 @@ def test_r6_review_r4_import_audit_withholds_the_texts_of_a_page_its_floor_rejec
     assert withheld[2] == AUDIT_TEXT_WITHHELD
     assert json.loads(candidates[1][1])["target_identifier"] == "u"
     assert not _leaks(dump, _PASS)
+
+
+# --- at the merge (coordinator's records round, owner-approved): D1(b) --------------------
+#: A finding page stored as a BLOB whose path is empty: 7393c90's `import_audit` read it
+#: with ``to_path`` (``urlparse(b"http://h").path`` is ``b""``, so ``"/"``) and imported
+#: it; the batch's raised ``TypeError`` in `canonical_origin` (`_readable_origin` and
+#: `_audit_endpoint` caught ``ValueError`` only) and stored nothing. Unreachable from the
+#: auditor itself (`fetcher.log_finding` writes the crawler's str URL), reachable from any
+#: other writer of a findings DB.
+_D1B_PAGES = [b"http://h", b"x://", b"http://h?u=bob"]
+
+
+@pytest.mark.parametrize("page", _D1B_PAGES)
+def test_merge_d1b_import_audit_imports_a_blob_page_with_no_path_as_the_pushed_tree_did(
+        tmp_path, page):
+    """D1(b) (the fix check of 08eb900): a regression of the batch against 7393c90, fixed
+    at the merge. The page names no origin, so it is stored by its path, ``/``, as 7393c90
+    stored it, with no parameter, and every finding is imported. A BLOB page with a path
+    (``b"http://h/app/p.php"``) fails the import on 7393c90 too (``to_path``'s
+    ``TypeError``): pinned in `tests/test_redaction_residual_pins.py`, not here."""
+    good = "http://h/app/q.php?u=1"
+    audit_db = _audit_findings(tmp_path, [
+        (page, "rule_a", "u", f"called from {page!r}"),
+        (good, "rule_b", "u", "value reflected")])
+    counts, failed, endpoints, candidates, _dump_text = _import_audit_or_failure(
+        tmp_path, audit_db)
+    assert failed is None, f"the import failed: {failed!r}"
+    assert counts == {"candidate": 2}
+    assert sorted(endpoints) == ["/", "/app/q.php"]                 # 7393c90's endpoints
+    assert candidates[0][0] is None and json.loads(candidates[0][1])["target_identifier"] \
+        == "u"
 
 
 @pytest.mark.parametrize("headers", [
@@ -1843,9 +1886,10 @@ def test_a_value_past_the_size_bound_is_redacted_whole(monkeypatch):
 def test_the_redactors_are_total(url):
     """Total on every URL ``urlsplit`` accepts. On one it rejects (``http://[::1/x?…``)
     the URL redactors and `page_url_is_clean` raise ``ValueError``, as the pushed tree's
-    did (BUG-0556 r6: the floor raises, and every caller withholds the value,
-    `test_r6_a1_a_url_urlsplit_rejects_is_withheld_by_every_consumer`); nothing else
-    raises."""
+    did (BUG-0556 r6: the floor raises, and each caller falls back as it did on 7393c90,
+    `test_r6_a1_a_url_urlsplit_rejects_is_withheld_by_every_consumer` -- not always
+    withholding the value: proxy history keeps what precedes the ``?``, family (d),
+    pinned); nothing else raises."""
     try:
         urlsplit(url)
         rejected = False

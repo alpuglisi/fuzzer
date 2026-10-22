@@ -21,7 +21,8 @@ import pytest
 
 from fuzzlab.core import redaction as R
 from fuzzlab.core.store import Store
-from tests.test_redaction_nested import (_PASS, _WORD, _SilentFetcher, _dump, _leaks,
+from tests.test_redaction_nested import (_PASS, _WORD, _SilentFetcher, _audit_findings,
+                                         _dump, _import_audit_or_failure, _leaks,
                                          _linearity_violations, _spider_db)
 
 
@@ -547,6 +548,130 @@ def test_proxy_history_stores_no_path_parameter_of_a_flow_its_floor_rejects(tmp_
         assert h.flush() == 1                                # not vacuous: one flow stored
         dump = _dump(store)
     assert not _leaks(dump + "\n".join(h.errors), secret)
+
+
+_BAD_URL_VALUE = "http://[h/x?y=1"                  # urlsplit rejects it, and it has a '?'
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
+    "BUG-0556 residual r6, family (d), header-triggered (owner PROXY, proxy.history "
+    "`HistoryWriter._prepare_contained`; the r6 fix check's R3(b), pinned at the merge): "
+    "a flow whose own URL `urlsplit` accepts, with a `Location`, `Refresh` (`url=`) or "
+    "`Content-Location` value it rejects that holds a '?' (`http://[h/x?y=1`), makes "
+    "the floor's `redact` raise, and the writer falls back as for a rejected request "
+    "line: every body `OMIT_FAILED` and the flow's own URL cut at its first '?', so the "
+    "flow's own `;name=value` path parameter (or a fragment before the '?') is stored "
+    "whole in `flow.url` and the `errors` line (`http://h/app;jsessionid=<hex>/p.php?u=1` "
+    "with `Location: http://[h/x?y=1` keeps the session id; the same flow without that "
+    "header is redacted). The fix check, each r6b corpus URL paired with such a "
+    "`Location`: 67 371 fallbacks, 14 082 store a secret (on 7393c90 too), 3 517 of them "
+    "redacted by 144d234; the fallback flow's `observe.exchange` trace event, built from "
+    "the cut URL, kept a secret in 1 055 (45 redacted by 144d234). "
+    f"{_ON_7393_R6}. Candidate rule, not built: the fallback stores the URL cut at its "
+    "first ';', '?' or '#'"))
+@pytest.mark.parametrize("url,secret,header", [
+    (f"http://h/app;jsessionid={_JSESSION}/p.php?u=1", _JSESSION,
+     f"Location: {_BAD_URL_VALUE}"),
+    (f"http://h/app;jsessionid={_JSESSION}/p.php?u=1", _JSESSION,
+     f"Refresh: 0;url={_BAD_URL_VALUE}"),
+    (f"http://h/app/p.php;sid={_WORD}?u=1", _WORD, f"Content-Location: {_BAD_URL_VALUE}"),
+    (f"http://h/app/p.php#a=1;password={_WORD}?u=bob", _WORD,
+     f"Location: {_BAD_URL_VALUE}"),
+])
+def test_proxy_history_stores_no_path_parameter_of_a_flow_a_header_value_makes_it_fall_back(
+        tmp_path, url, secret, header):
+    from urllib.parse import urlsplit
+
+    from fuzzlab.proxy.history import FlowRecord, HistoryWriter
+    urlsplit(url)                                            # the flow's own URL parses
+    with pytest.raises(ValueError):                          # not vacuous: the header's
+        urlsplit(_BAD_URL_VALUE)                             # value is what raises
+    target = "/" + url.split("://", 1)[1].partition("/")[2]
+    rq = f"GET {target} HTTP/1.1\r\nHost: h\r\n\r\n".encode()
+    rs = f"HTTP/1.1 302 Found\r\n{header}\r\nContent-Length: 0\r\n\r\n".encode()
+    with Store(tmp_path / "s.db") as store:
+        h = HistoryWriter(store, store.start_run("proxy", "x"), batch_size=5)
+        h.record(FlowRecord("GET", url, "h", 302, raw_request=rq, raw_response=rs))
+        assert h.flush() == 1                                # not vacuous: one flow stored
+        dump = _dump(store)
+    assert h.errors                                          # not vacuous: it fell back
+    assert not _leaks(dump + "\n".join(h.errors), secret)
+
+
+# --- at the merge (the coordinator's records round, owner-approved): `import_audit` ------
+# The fix check of 08eb900 found `import_audit` still fails on pages 7393c90's import
+# failed on too, where the records said it never fails (R4), and reads a BLOB page as
+# 7393c90 read it (D1(b): the batch's regression on a BLOB page with an empty path is
+# fixed, `tests/test_redaction_nested.py::test_merge_d1b_*`). Each pin fails at its first
+# assertion ("the import failed") or its leak assertion on the merge and on 7393c90.
+_ON_7393_IMPORT = ("on 7393c90 too: not a regression against the pushed tree, so pinned, "
+                   "not fixed in the batch")
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
+    "BUG-0556 residual at the merge, R4 (owner AUD, tools.store_adapter `_audit_text`): a "
+    "finding page `urlsplit` rejects as written WITHOUT a '?' (`http://[h/app/p.php`, "
+    "`//[h/app/p.php`, `http://x＃y/app/p.php`, `//user:pw@x[y/app/p.php`) passes the "
+    "floor unread (the pushed tree's URL redactors call `urlsplit` only on a URL holding "
+    "a '?'), so `_audit_text`'s withhold branch is never reached and its "
+    "`urlparse(page_url)` raises ValueError, uncaught: the whole import fails, every "
+    "other finding with it (the fix check of 08eb900: all 3 000 '?'-less pages of the "
+    "12 000 rejected ones among 43 680 generated neighbours, and 27 of the 888-URL "
+    "supplement; the 70 000-URL corpus holds no URL without a '?'); 7393c90's `to_path` "
+    f"raised on the same pages ({_ON_7393_IMPORT}). Candidate rule, not built: catch "
+    "that ValueError and withhold the finding's texts (`AUDIT_TEXT_WITHHELD`), as for "
+    "such a page with a '?'"))
+@pytest.mark.parametrize("page,secret", [
+    ("http://[h/app/p.php", None),
+    ("//[h/app/p.php", None),
+    ("http://x＃y/app/p.php", None),
+    ("//user:pw@x[y/app/p.php", None),
+    (f"http://[h/app;jsessionid={_JSESSION}/p.php", _JSESSION),
+])
+def test_import_audit_imports_a_finding_page_urlsplit_rejects_without_a_query(tmp_path,
+                                                                              page, secret):
+    from urllib.parse import urlsplit
+    assert "?" not in page
+    with pytest.raises(ValueError):                          # not vacuous: urlsplit
+        urlsplit(page)                                       # rejects the page as written
+    audit_db = _audit_findings(tmp_path, [
+        (page, "rule_a", "u", f"called from {page}"),
+        ("http://h/app/q.php?u=1", "rule_b", "u", "value reflected")])
+    counts, failed, endpoints, _candidates, dump = _import_audit_or_failure(tmp_path,
+                                                                            audit_db)
+    assert failed is None, f"the import failed: {failed!r}"
+    assert counts == {"candidate": 2} and "/app/q.php" in endpoints
+    assert secret is None or not _leaks(dump, secret)
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
+    "BUG-0556 residual at the merge, D1(b) (owner AUD, tools.store_adapter "
+    "`import_audit` / `_audit_endpoint` / `_audit_text`): a finding page stored as a BLOB "
+    "is read by `to_path` as 7393c90 read it, so one with a path "
+    "(`b\"http://h/app/p.php\"`, `b\"/app/p.php\"`) fails the whole import with "
+    "TypeError (`bytes.startswith` given a str), and one with an empty path is imported "
+    "but its texts are never judged against it (`_audit_text` judges a str page only), "
+    "so a context quoting its query value stores it (`b\"http://h?token=<word>\"`); "
+    "unreachable from the auditor "
+    f"(`fetcher.log_finding` writes the crawler's str URL); {_ON_7393_IMPORT}. Candidate "
+    "rule, not built: decode a BLOB page (UTF-8, the crawler's str) before reading it, "
+    "or withhold its finding's texts"))
+@pytest.mark.parametrize("page,secret", [
+    (b"http://h/app/p.php", None),
+    (b"/app/p.php", None),
+    (b"http://h?token=" + _WORD.encode(), _WORD),
+])
+def test_import_audit_imports_a_blob_finding_page_and_judges_its_texts(tmp_path, page,
+                                                                      secret):
+    context = f"value '{secret}' reflected" if secret else "value reflected"
+    audit_db = _audit_findings(tmp_path, [
+        (page, "rule_a", "token" if secret else "u", context),
+        ("http://h/app/q.php?u=1", "rule_b", "u", "value reflected")])
+    counts, failed, _endpoints, _candidates, dump = _import_audit_or_failure(tmp_path,
+                                                                             audit_db)
+    assert failed is None, f"the import failed: {failed!r}"
+    assert counts == {"candidate": 2}
+    assert secret is None or not _leaks(dump, secret)
 
 
 # --- N3: `fuzzlab audit --append --store` ------------------------------------------------

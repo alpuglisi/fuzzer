@@ -137,6 +137,26 @@ Newest first.
     parameter, 12 fragment); 0 leak at r6 that 7393c90 redacted. Candidate rule, not
     built: the fallback cuts the URL at its first `;`, `?` or `#`. The writer's
     docstring, which made the same claim (7393c90's text), now says what is stored.
+  - *(At the merge, 2026-10-22, the merge 5e80ea2 of `lane/REDACTURL-r6` 08eb900, the
+    coordinator's records round, owner-approved; BUG-0556 "At the merge", R3. No code
+    of this component changed.)*
+    - **R3(a):** `redact`'s docstring said "the history writer withholds the flow"; it
+      now says what `_prepare_contained` stores (every body `OMIT_FAILED`, the flow's own
+      URL cut at its first `?`, what precedes it as received). The test
+      `tests/test_redaction_nested.py::test_r6_a1_proxy_history_withholds_a_flow_whose_url_its_floor_rejects`
+      named above is renamed
+      `::test_r6_a1_proxy_history_stores_a_flow_its_floor_rejects_bodies_omitted_query_cut`,
+      which is what it asserts.
+    - **R3(b), pinned:** the header-triggered family (d) case -- a flow whose own URL
+      parses, with a `Location`, `Refresh` (`url=`) or `Content-Location` value
+      `urlsplit` rejects that holds a `?` (`http://[h/x?y=1`), makes the floor raise and
+      the writer store the flow's own `;jsessionid=<hex>` path parameter (or a fragment
+      before the `?`) raw; measured the same on 7393c90 and 08eb900.
+      `tests/test_redaction_residual_pins.py::test_proxy_history_stores_no_path_parameter_of_a_flow_a_header_value_makes_it_fall_back`
+      (strict, `raises=AssertionError`, owner PROXY, 4 cases, each failing at its leak
+      assertion on the merge, 7393c90 and 08eb900); the fix check's counts in its reason
+      (67 371 fallbacks, 14 082 storing a secret on 7393c90 too, 3 517 redacted by
+      144d234; the trace event 1 055 / 45). FR-PROXY-11 amended in place.
 - Impact (other components / project): proxy history's stored raw request and response
   and their full-text index no longer keep a `;jsessionid=` (or any sensitively named)
   value in a URL with no query (round 1), in a duplicate URL header, `Referer`, `Origin`,
@@ -172,6 +192,8 @@ Newest first.
     done
   - [x] *(r6 review)* family (d) pinned (owner PROXY); FR-PROXY-11 and the writer's
     `_prepare_contained` docstring corrected to what is stored — done
+  - [x] *(At the merge)* `redact`'s docstring corrected; the A1 history test renamed;
+    the header-triggered family (d) case pinned; FR-PROXY-11 amended in place — done
 - Effectiveness (assessed 2026-10-22): the round-1 probe (`rev1probe/proxy_probe.py`)
   found the canary in `body`, `flow_fts` and `flow_fts_content` on c3a13f7; on f939778
   the round-2 test's messages (duplicates, `Referer`, `Origin`, `Link`, a custom header,

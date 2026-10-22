@@ -213,8 +213,12 @@ def redact(raw: bytes, extra_headers: tuple[str, ...] = ()) -> bytes:
     the request target's query, ``Location``, ``Content-Location`` and ``Refresh``'s
     every ``url=`` run, a duplicate of a rewritten one collapsed into it, the bodies),
     then the walk (`_walk`) on its output only. Where the floor raises (a URL
-    ``urlsplit`` rejects in the request line or one of those headers), so does this:
-    the history writer withholds the flow (``_prepare_contained``), as on 7393c90."""
+    ``urlsplit`` rejects, holding a ``?``, in the request line or one of those headers),
+    so does this, as on 7393c90, and the history writer falls back as it did there
+    (``_prepare_contained``): it does not withhold the flow, it stores every body
+    `OMIT_FAILED` and the flow's own URL cut at its first ``?``, what precedes that
+    ``?`` as received -- so a ``;name=value`` path parameter or a fragment before it is
+    kept, also when only a header value raised (BUG-0556 family (d), pinned)."""
     out = _floor.redact(raw, extra_headers)
     return _walk(out, extra_headers)
 

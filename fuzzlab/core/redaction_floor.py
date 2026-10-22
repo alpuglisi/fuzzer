@@ -12,11 +12,14 @@ The owner's design for BUG-0556 (audit gap 5, "layer on the pushed redactor"): e
 redaction consumer first runs its floor here -- the pushed tree's own redaction of what
 that consumer redacts -- and then the batch's walk (`core.redaction._UrlWalk`) on the
 floor's output only. So nothing the pushed tree redacted reaches the walk, and the walk
-can only remove more. Where a floor raises (``urlsplit`` rejecting a URL: ``http://[h/…``,
-a bracketed host it does not accept, a netloc that NFKC-normalises to a delimiter), the
-consumer raises as the pushed tree did and its caller withholds the value as it did then
-(the proxy history writer's ``_prepare_contained``; `core.trace.safe_ref`'s
-``(unparseable URL withheld)``). The consumers and their floors (`core.redaction.LAYERED`):
+can only remove more. Where a floor raises (``urlsplit`` rejecting a URL that holds a
+``?``: ``http://[h/…?…``, a bracketed host it does not accept, a netloc that
+NFKC-normalises to a delimiter; a URL without a ``?`` is returned unread), the consumer
+raises as the pushed tree did and its caller does what it did then, which is not always
+to withhold the value: `core.trace.safe_ref` returns ``(unparseable URL withheld)``, but
+the proxy history writer's ``_prepare_contained`` stores the flow's URL cut at its first
+``?``, what precedes it as received (a ``;name=value`` path parameter kept: BUG-0556
+family (d), pinned). The consumers and their floors (`core.redaction.LAYERED`):
 
 - `core.redaction.redact_url` -> `redact_url`; `redact_url_identifiers` ->
   `redact_url_identifiers` (with ``placeholder``: `redact_url`, which never blanks a

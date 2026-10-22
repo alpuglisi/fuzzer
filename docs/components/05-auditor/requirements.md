@@ -600,10 +600,13 @@ budget where a vulnerability is plausible.
     spider's absolute form for a page off its main origin, its path for one on it), else
     `store_url(page, main)` with `base_url`'s origin or the first finding page's, so an
     off-origin first finding no longer splits the main origin's pages.
-    *(r6, `CC-AUD-0059`; corrected by the r6 review, D1 and R4:)* the owner's URL
-    redactors run the pushed tree's redactor first, which raises `ValueError` on a URL
-    `urlsplit` rejects (FR-CORE-537). **`import_audit` never fails on a finding's URL
-    and stores nothing the pushed tree's import redacted:**
+    *(r6, `CC-AUD-0059`; corrected by the r6 review, D1 and R4, and at the merge,
+    BUG-0556 "At the merge", R4 and D1(b):)* the owner's URL redactors run the pushed
+    tree's redactor first, which raises `ValueError` on a URL `urlsplit` rejects that
+    holds a `?` and returns one without a `?` unread (FR-CORE-537). **`import_audit`
+    stores nothing the pushed tree's import redacted and fails on no finding page the
+    pushed tree's import read; it is not total** -- it still fails on the pages below
+    that 7393c90's import failed on too:
     - a target identifier the owner rejects is stored as
       `store_adapter.AUDIT_TEXT_WITHHELD` (`(unparseable URL withheld)`, as
       `core.trace.safe_ref` withholds), never raw (7393c90 stored it raw);
@@ -613,14 +616,40 @@ budget where a vulnerability is plausible.
       (`\u3000http://[h/…`), to which it prefixes `http://` -- is not used for the run's
       main origin (`_readable_origin`) and is stored by its path, as `store_url` stores a
       URL whose origin is unknown and as 7393c90's `to_path` stored every finding page (a
-      `;` path parameter holding a secret dropped); its texts pass `_audit_text` as any
-      other's. r6 (3615cfb) failed the whole import there, where 7393c90 imported it;
-    - a finding **page** `urlsplit` rejects as written (`http://[h/…`, `//[h/…`: `to_path`
-      rejects it too, and 7393c90's import raised) gets no endpoint (the candidate's
-      `parameter_id` is NULL), and its target and context are `AUDIT_TEXT_WITHHELD`
-      whole (`_audit_text`: they may quote the page URL the owner cannot read); every
-      other finding is imported. r6's record that such a text was withheld was not true
-      on 3615cfb: `_main_origin` raised before `_audit_text` ran.
+      `;` path parameter holding a secret dropped; nothing else of the path is judged, so
+      the endpoint can keep a userinfo or a JWT segment, as on 7393c90:
+      `\u3000http://u:<pw>@[h/app/p.php` is stored `/\u3000http://u:<pw>@[h/app/p.php`);
+      its texts pass `_audit_text` as any other's. r6 (3615cfb) failed the whole import
+      there, where 7393c90 imported it;
+    - a finding **page** `urlsplit` rejects as written **and that holds a `?`**
+      (`http://[h/…?…`, `//[h/…?…`: `to_path` rejects it too, and 7393c90's import
+      raised) gets no endpoint (the candidate's `parameter_id` is NULL), and its target
+      and context are `AUDIT_TEXT_WITHHELD` whole (`_audit_text`: they may quote the
+      page URL the owner cannot read); every other finding is imported. r6's record that
+      such a text was withheld was not true on 3615cfb: `_main_origin` raised before
+      `_audit_text` ran;
+    - *(at the merge, R4: the r6 review's record that the import is total, and that it
+      never fails on a finding's URL, was not true on 08eb900)* a finding **page**
+      `urlsplit` rejects as written **without a `?`** (`http://[h/app/p.php`,
+      `//[h/app/p.php`, `http://x＃y/app/p.php`, `//user:pw@x[y/app/p.php`) **still fails
+      the whole import**, every other finding with it: the floor returns such a URL
+      unread, so `_audit_text`'s withhold branch is never reached and its
+      `urlparse(page_url)` raises `ValueError`, as 7393c90's import fails the same pages
+      (in `to_path`). Pinned, owner AUD, candidate rule (not built): catch that
+      `ValueError` and withhold the texts
+      (`tests/test_redaction_residual_pins.py::test_import_audit_imports_a_finding_page_urlsplit_rejects_without_a_query`);
+    - *(at the merge, D1(b))* a finding page stored as a BLOB is read by `to_path` as
+      7393c90 read it: one with an empty path (`b"http://h"`, `b"x://"`) is stored `/`,
+      its texts judged against nothing of the page (as on 7393c90, which judged no
+      text); one with a path (`TypeError`) or one `urlsplit` rejects (`ValueError`)
+      fails the import, as on 7393c90. The batch's import (3615cfb, 08eb900) raised
+      `TypeError` in `canonical_origin` on every BLOB page but `b""` -- a regression
+      against 7393c90 for the empty-path ones, fixed at the merge
+      (`tests/test_redaction_nested.py::test_merge_d1b_import_audit_imports_a_blob_page_with_no_path_as_the_pushed_tree_did`);
+      the rest is pinned, owner AUD
+      (`tests/test_redaction_residual_pins.py::test_import_audit_imports_a_blob_finding_page_and_judges_its_texts`).
+      Unreachable from the auditor itself (`fetcher.log_finding` writes the crawler's
+      str URL).
   - `audit.engine.evaluate` writes each candidate's request fields through
     `core.reqctx.point_evidence` and stamps `identity_scope` and `context_id` (SP-57,
     FR-FUZZ-66). `InjectionPoint` carries `bindings` and `replay_refusal`.
