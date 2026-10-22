@@ -1972,3 +1972,10 @@ Juice Shop lab is complete.
 - **Cause:** F-226 corrected the bar to the pushed tree; I added the unpushed round back as a hard bar to protect the batch's own gains, without checking it against the owner's rule.
 - **Status:** corrected in the continuation brief (`wf_ef48570e-267`: the bar is 7393c90 only; 144d234 deltas are information; the three families are pinned).
 
+### F-249 — A REDACTURL r6 sub-agent wrote two error logs into the main checkout
+- **What:** during the r6 review-fix round (`wf_d7e029ec-c68`), a command of the form `sh plain.sh > floor_wt.log` (and `pins_wt.log`) ran with `/home/user/fuzzer` as its directory, so the shell could not find the script and wrote its 42-byte error into two untracked files in the main checkout, which every lane brief says is never written.
+- **Evidence:** `floor_wt.log` and `pins_wt.log` (16:41, each `sh: 0: cannot open plain.sh: No such file`), moved to `scratchpad/lanes/REDACTURL/stray_main_tree/`; the stop hook's untracked-files notice.
+- **Impact:** none beyond two stray files; nothing in the repository's tracked tree changed.
+- **Cause:** a relative script path and output path in a command whose working directory was the main checkout, not the lane's worktree.
+- **Status:** cleaned (files moved out of the checkout, not committed).
+
