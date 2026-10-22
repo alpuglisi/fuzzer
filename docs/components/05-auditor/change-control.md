@@ -143,8 +143,10 @@ Newest first.
     `::test_the_bare_token_rule_reads_ianas_root_zone_and_nothing_else`,
     `::test_no_expected_vulnerable_answer_key_point_is_unbound_by_the_lab_predicate`;
     amended: both generated sweeps (bare IPv6, reserved names), the measured tables, the
-    recogniser guard and its offender, `tests/test_forms_phase2.py::test_link_query_siblings_are_bound`
-    and `::test_neutral_value_errs_toward_loopback`.
+    recogniser guard and its offender, `tests/test_forms_phase2.py::test_link_query_siblings_are_bound`,
+    `::test_neutral_value_errs_toward_loopback` and
+    `tests/test_nosqli.py::test_auto_turns_a_json_body_point_into_a_json_leaf_candidate`
+    (below).
   - Pre-fix proof: one pytest invocation (`scratchpad/lanes/LABAUTH/r1/prefix_r1.txt`)
     of `tests/test_replay_bindings.py` and `tests/test_forms_phase2.py` whole, with
     1338d7a's `value_shape.py` in place of the fix (the bundled TLD data left: the old
@@ -161,6 +163,23 @@ Newest first.
     call of the test functions with 7393c90's module in place (no pytest session,
     `r1/prefix_7393c90_plain.txt`): it fails at its first assertion, naming the twelve
     recognisers reached.
+  - Targeted run (one pytest invocation of the 20 affected files on e0f4210: the
+    importers of `value_shape`, the tests asserting on point entries or refusals through
+    `harness.auto`, packaging, lint, traceability; `r1/targeted_r1.txt`): 1 failed, 1387
+    passed, 1 skipped, 13 xfailed. The failure,
+    `tests/test_nosqli.py::test_auto_turns_a_json_body_point_into_a_json_leaf_candidate`,
+    also fails on 1338d7a at the same assertion (unseen there: `verify_change.py`
+    selects the importers of a changed module, and this test reaches the predicate only
+    through `harness.auto`; 1338d7a's 85-file selection did not hold it). Root cause: its
+    fixture `email=a@b.co` is an e-mail under the delegated `.co`, outside since BUG-0555
+    (the e-mail residual superseded), so loopback holds the point's own slot while the
+    test, written when e-mails were sent as given, asserted the value. Amended: the
+    point is built with `user@lab.test` (sent as given) and with `a@b.co` (loopback in
+    its own slot); checked by a plain-Python call on the fix, 1338d7a and 7393c90 (it
+    fails on 1338d7a at the lab e-mail, on 7393c90 at the stand-in), not a second pytest
+    invocation. A scan of every string and number literal in the 50 test files that use
+    `harness.auto` (`r1/literal_scan.py`) finds no other sibling value r1 newly puts
+    outside. The merge's verification should hold the callers' tests (or `--full`).
   - Deliverables: [x] the fixes above; [x] tests; [x] FR-AUD-20 amended in place and
     FR-AUD-32 added; [x] BUG-0555's review section; [ ] PA-0555 (strengthened), SP-73,
     CHANGELOG, ERROR_LOG and failure-record texts handed over for the merge

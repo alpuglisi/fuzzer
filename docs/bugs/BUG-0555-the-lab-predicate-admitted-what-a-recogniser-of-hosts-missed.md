@@ -531,6 +531,20 @@ assertion with "names_outside_lab reaches recognisers of hosts: ['FILE_EXTENSION
 passes are the controls (the loopback set, the remaining lab-table rows, the JSON
 controls) and the earlier tests.
 
+**A test 1338d7a broke, unseen.** The targeted run of this round (one pytest invocation,
+20 files, `r1/targeted_r1.txt`: 1 failed, 1387 passed, 1 skipped, 13 xfailed) failed
+`tests/test_nosqli.py::test_auto_turns_a_json_body_point_into_a_json_leaf_candidate`,
+which fails on 1338d7a at the same assertion. Its fixture's e-mail `a@b.co` is under the
+delegated `.co`, so since BUG-0555 its domain is a host outside the lab and loopback
+holds the point's own slot (the payload's: the NoSQL strategy replaces it), while the
+test asserted the stored value. 1338d7a's `verify_change.py` run did not select it: the
+harness selects the importers of a changed module, and this test reaches the predicate
+only through `harness.auto`. Amended: the point is built with `user@lab.test` (sent as
+given) and with `a@b.co` (loopback in its own slot); a plain-Python call shows it passing
+on the fix and failing on 1338d7a (the lab e-mail) and on 7393c90 (the stand-in). A scan
+of every literal in the 50 test files that use `harness.auto` (`r1/literal_scan.py`)
+finds no other sibling value this round newly puts outside.
+
 ### Recurrence review (added in review round 1)
 Checked `docs/bugs/` and `docs/PREVENTIVE_ACTIONS.md` again: the findings recur
 BUG-0544's and this bug's root cause (FR-AUD-20's predicate admitted what its model of a
