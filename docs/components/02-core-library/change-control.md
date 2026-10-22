@@ -74,8 +74,10 @@ Newest first.
     pins ordinary nested values (`next=/account`, percent-encoded and double-encoded
     paths and URLs, `a=1;b=2`, a clean path parameter, `+` spaces, base64 padding) as
     byte-identical.
-  - Cost: linear per level, at most 12 levels; a test bounds 8x input to under 32x
-    the time. The proxy's history flush runs it once per URL.
+  - Cost: linear per level, at most 12 levels; a test bounds the characters the
+    identifier predicate reads to 4x the URL's length at 500 and 4000 pairs (an
+    operation count, PA-0095(2)/PA-0135; the first version timed it and the harness's
+    wall-clock guard refused it). The proxy's history flush runs it once per URL.
   - Behaviour change in proxy history for `;`: `?a=1;token=x` now stores
     `token=__REDACTED__` (it was kept).
 - Deliverables:

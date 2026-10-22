@@ -388,17 +388,21 @@ def test_the_redactors_are_total(url):
     assert R.value_holds_secret(None) is False
 
 
-def test_the_walk_is_linear_in_the_values_length():
-    """PA-0095(2): a long ``;``/``&`` list, each value nested once, is walked once per
-    level -- the work grows with the length, never with its square."""
-    import time
-    def cost(n):
+def test_the_walk_is_linear_in_the_values_length(monkeypatch):
+    """PA-0095(2), PA-0135: an operation count, never a timing. A long ``;``/``&`` list,
+    each value nested once, is judged once per level: the characters the identifier
+    predicate reads stay under a constant times the URL's length, at 500 pairs and at
+    4000 (a walk that re-read the whole query per pair would read ~n times it)."""
+    judged = []
+    real = R.looks_like_identifier
+    monkeypatch.setattr(R, "looks_like_identifier",
+                        lambda v: judged.append(len(v)) or real(v))
+    for n in (500, 4000):
+        judged.clear()
         url = "http://h/p?" + "&".join(f"k{i}=%2Fv%3Fa%3D{i};b{i}=c" for i in range(n))
-        t0 = time.process_time()
-        R.redact_url_identifiers(url)
-        return time.process_time() - t0
-    small, big = cost(500), cost(4000)
-    assert big < small * 8 * 4 + 0.05                     # 8x the input, never 64x
+        assert R.redact_url_identifiers(url) == url       # clean: nothing changed
+        assert 0 < sum(judged) <= 4 * len(url)
+        assert len(judged) <= 6 * 2 * n                   # a bounded number per pair
 
 
 # --- residuals pinned (PA-0054(3)): body redaction is paused by the owner -----------------
