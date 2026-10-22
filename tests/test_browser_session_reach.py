@@ -55,6 +55,14 @@ def test_a_cookie_reaches_its_own_host_or_a_name_under_its_dotted_domain_never_a
     assert not reach({"name": "sid", "domain": "example.test"}, "app.example.test")
     assert not reach({"name": "sid", "domain": ".0.0.1"}, "127.0.0.1")    # never an IP
     assert not reach({"name": "sid"}, "127.0.0.1") and not reach(bare, "")
+    # BA-2 (BUG-0559 review round 1): Chromium holds an IPv6 cookie by domain with its
+    # brackets, '[::1]' (measured: `test_an_ipv6_cookie_as_chromium_holds_it_...`); a
+    # URL's hostname has none. Both spellings meet without them
+    v6 = {"name": "sid", "domain": "[::1]"}
+    assert reach(v6, "::1") and reach(v6, "[::1]")
+    assert reach({"name": "sid", "url": "http://[::1]:8000/"}, "::1")
+    assert not reach(v6, "127.0.0.1") and not reach(v6, "localhost")
+    assert not reach({"name": "sid", "domain": "[::2]"}, "::1")
 
 
 def test_the_session_is_unreached_where_any_of_its_cookies_has_no_copy_there():
@@ -77,6 +85,170 @@ def test_the_session_is_unreached_where_any_of_its_cookies_has_no_copy_there():
                                      session_cookies=held)
     navguard.checked_api_request(lambda u: True, "http://127.0.0.1:8000/a",
                                  session_cookies=held)
+
+
+def _explorer(start, state):
+    """disco's explorer, never run: its session material is what a context adopts."""
+    from fuzzlab.disco.explore import Explorer
+    return Explorer(start, scope_urls=[start], storage_state=state, proxy="127.0.0.1:9")
+
+
+def test_a_storage_states_ambient_cookie_on_another_host_never_refuses_its_start_host():
+    """BA-1 (BUG-0559 review round 1): an operator's storage state (`disco capture
+    --storage-state`) holding the session cookie for 127.0.0.1 and an ambient cookie for
+    the alias. The scope filter keeps both (it folds the aliases), and disco cannot tell
+    the credential from the ambient cookie: the session's cookies are those that reach
+    the start host. Its start host is never refused for the ambient cookie; the alias
+    still is, for the session cookie. Before (72297c9): every adopted cookie was the
+    session's, so ``lang`` (no copy on 127.0.0.1) refused the start host -- the run's
+    start navigation was aborted (measured: ``net::ERR_ABORTED``)."""
+    base = "http://127.0.0.1:8000/"
+    state = {"cookies": [{"name": "sid", "value": "v", "domain": "127.0.0.1", "path": "/"},
+                         {"name": "lang", "value": "en", "domain": "localhost",
+                          "path": "/"}], "origins": []}
+    material = _explorer(base, state)._current_session()
+    held = material.session_cookies()
+    assert {c["name"] for c in held} == {"sid"}, held
+    assert navguard.session_host_refusal(held, base) is None
+    assert navguard.session_host_refusal(held, base + "deeper?x=1") is None
+    why = navguard.session_host_refusal(held, "http://localhost:8000/")
+    assert why is not None and "'localhost'" in why                # sid never goes there
+    # a state none of whose cookies reaches the start host keeps them all: the start
+    # host is refused (fail closed), never explored as the session's
+    elsewhere = {"cookies": [{"name": "sid", "value": "v", "domain": "localhost",
+                              "path": "/"}], "origins": []}
+    held = _explorer(base, elsewhere)._current_session().session_cookies()
+    assert navguard.session_host_refusal(held, base) is not None
+
+
+def test_an_ipv6_cookie_as_chromium_holds_it_reaches_its_own_host_and_no_other(monkeypatch):
+    """BA-2 (BUG-0559 review round 1), measured in the real browser: a cookie set for
+    ``http://[::1]:8000/`` is held by Chromium with the domain ``[::1]`` -- brackets
+    included -- and the browser sends it there (``context.cookies(url)``). SP-74's
+    predicate agrees: the session reaches ``[::1]`` and not 127.0.0.1; disco's material
+    from that storage state never refuses its own ``[::1]`` start. Before (72297c9):
+    ``'[::1]' != '::1'``, so every request to the session's own IPv6 host was refused,
+    the start page included. (No IPv6 socket is needed: nothing is sent.)"""
+    from tests._spa_fixture import chromium_or_skip
+    chromium_or_skip(monkeypatch)
+    from playwright.sync_api import sync_playwright
+    try:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(**navguard.chromium_launch_kwargs(
+                navguard.browser_launch_args(["http://[::1]:8000/"])))
+            try:
+                ctx = browser.new_context()
+                ctx.add_cookies([{"name": "sid", "value": "1", "url": "http://[::1]:8000/"}])
+                state = ctx.storage_state()
+                sent = [c["name"] for c in ctx.cookies("http://[::1]:8000/")]
+            finally:
+                browser.close()
+    except Exception as exc:  # noqa: BLE001 - a launch failure is a skip
+        from tests._browser import skip_or_fail
+        skip_or_fail(f"chromium could not launch: {exc}")
+    assert [(c["name"], c["domain"]) for c in state["cookies"]] == [("sid", "[::1]")]
+    assert sent == ["sid"]                                   # the browser sends it there
+    held = navguard.held_session_cookies(None, state, None)
+    assert navguard.session_host_refusal(held, "http://[::1]:8000/x") is None
+    assert navguard.session_host_refusal(held, "http://127.0.0.1:8000/x") is not None
+    start = "http://[::1]:8000/"
+    material = _explorer(start, state)._current_session().session_cookies()
+    assert [c["name"] for c in material] == ["sid"]
+    assert navguard.session_host_refusal(material, start) is None
+
+
+# --- preloads (BA-3, BUG-0559 review round 1) ---------------------------------------------
+class _Page:
+    def __init__(self, url):
+        self._url = url
+
+    @property
+    def url(self):
+        if isinstance(self._url, Exception):
+            raise self._url
+        return self._url
+
+
+def test_a_document_committed_on_an_unreached_host_is_never_the_sessions():
+    """`committed_session_refusal`: the consumers' defence in depth behind the route --
+    the main frame's committed document on a host the session's cookies do not reach
+    (one a preload served) is refused with SP-74's cause; its own host, a page with no
+    session cookie, ``about:blank``, the error page and a closed page are not."""
+    cookies = [{"name": "sid", "value": "s", "url": "http://127.0.0.1:3000/"}]
+    refusal = navguard.committed_session_refusal
+    why = refusal(_Page("http://localhost:3000/secret"), cookies)
+    assert why is not None and "'localhost'" in why
+    assert refusal(_Page("http://127.0.0.1:3000/secret"), cookies) is None
+    assert refusal(_Page("http://localhost:3000/secret"), []) is None
+    for url in ("about:blank", "chrome-error://chromewebdata/", RuntimeError("closed")):
+        assert refusal(_Page(url), cookies) is None
+    # another origin than the session's is FR-SESS-20's, never this rule's
+    assert refusal(_Page("http://localhost:3000/"), cookies,
+                   cookie_scope=lambda u: False) is None
+
+
+def test_the_route_gives_no_speculation_rule_set():
+    """The route's answers (doubles): a ``Speculation-Rules`` header is dropped from every
+    answer it fulfils, an isolated answer's ``Set-Cookie`` with it; a main-frame
+    document's parser-inserted ``<script type=speculationrules>`` is given with an inert
+    type, whatever its spelling, and nothing else of the page changes."""
+    given = []
+
+    class Route:
+        def fulfill(self, response=None, status=None, headers=None, body=None):
+            given.append((response, status, headers, body))
+
+    class Answer:
+        status = 200
+
+        def __init__(self, headers):
+            self.headers = headers
+
+        def body(self):
+            return b"x"
+    plain = Answer({"content-type": "text/html"})
+    navguard._fulfil_preload_free(Route(), plain)
+    assert given.pop() == (plain, None, None, None)           # unchanged: no header
+    rules = Answer({"content-type": "text/html", "Speculation-Rules": '"/r.json"'})
+    navguard._fulfil_preload_free(Route(), rules)
+    assert given.pop() == (rules, None, {"content-type": "text/html"}, None)
+    iso = Answer({"set-cookie": "b=1", "speculation-rules": '"/r.json"'})
+    navguard._fulfil_preload_free(Route(), iso, "set-cookie")
+    assert given.pop() == (iso, None, {"content-length": "1"}, None)   # never empty
+    html = ("<p>a</p><SCRIPT TYPE=SpeculationRules>{}</SCRIPT>"
+            "<script type=\" speculationrules \">{}</script><script>var t ="
+            " 'speculationrules';</script><template shadowrootmode=closed>"
+            "<script type='speculationrules'>{}</script></template>")
+    navguard._fulfil_preload_free(Route(), Answer({"content-type": "text/html",
+                                                   "content-length": "9",
+                                                   "content-encoding": "gzip"}),
+                                  html=html)
+    _resp, status, headers, body = given.pop()
+    text = body.decode()
+    assert status == 200 and "speculationrules\">" not in text.lower()
+    assert text.lower().count(navguard.INERT_RULES_TYPE) == 3
+    assert "var t = 'speculationrules';" in text and "<p>a</p>" in text
+    assert headers == {"content-type": "text/html", "content-length": str(len(body))}
+    assert navguard._inert_rule_sets("<p>speculation rules</p>") is None
+
+
+def test_every_guarded_context_neutralises_preloads_before_its_pages_run():
+    """`guard_page` installs `PRELOAD_OFF_JS` on the context it guards (popups
+    included), before the route: no guarded page registers a speculation rule set."""
+    calls = []
+
+    class Ctx:
+        def add_init_script(self, script=None, path=None):
+            calls.append(("init", script))
+
+        def route(self, pattern, handler):
+            calls.append(("route", pattern))
+
+        def route_web_socket(self, pattern, handler):
+            calls.append(("ws", pattern))
+    navguard.guard_page(Ctx(), in_scope=lambda u: True)
+    assert calls[0] == ("init", navguard.PRELOAD_OFF_JS) and calls[1] == ("route", "**/*")
+    assert "speculationrules" in navguard.PRELOAD_OFF_JS
 
 
 def test_the_route_refuses_every_request_and_hop_to_an_unreached_host_before_it_is_sent():
@@ -136,7 +308,9 @@ API_STORAGE_EXEMPT = {
     "fuzzlab/disco/explore.py:_protected_get": (
         "its URL is a page the guarded context committed (`_find_protected_resource`), "
         "and the route refuses a navigation to a host the cookies do not reach (SP-74), "
-        "so it is a host they reach; or it carries no session (storage None)"),
+        "no preload serves one past it (`PRELOAD_OFF_JS`), and the probe skips a page "
+        "committed on such a host (`committed_session_refusal`, BUG-0559 review round "
+        "1), so it is a host they reach; or it carries no session (storage None)"),
 }
 
 
@@ -369,14 +543,22 @@ def test_the_auditors_browser_fetcher_never_audits_an_unreached_host_as_the_iden
     assert fetcher.session_host_unreached.get("localhost", 0) >= 3
 
 
-def test_disco_never_explores_an_unreached_host_as_the_storage_states_session(tmp_path):
-    """disco's explorer with an operator's storage state (`disco capture
-    --storage-state`): its context holds ``sid`` host-only for ``127.0.0.1``; the start
-    page links the alias, fetches from it and its harvest finds it. Nothing reaches the
-    alias -- every request there is refused by the guard (SP-74) and counted in the
-    report (``session_host_unreached``, explore.json) -- so no anonymous state of it is
-    explored or captured as the session's. Before: the alias was loaded and captured
-    with no cookie."""
+def _sid(site) -> str:
+    body = f"user={USER}&pw={PASSWORD}".encode()
+    with urllib.request.urlopen(urllib.request.Request(site.base + "login", data=body),
+                                timeout=10) as resp:
+        return resp.headers["Set-Cookie"].split(";", 1)[0].split("=", 1)[1]
+
+
+def _state_cookie(name, value, domain) -> dict:
+    return {"name": name, "value": value, "domain": domain, "path": "/", "expires": -1,
+            "httpOnly": False, "secure": False, "sameSite": "Lax"}
+
+
+def _disco_capture(tmp_path, site, cookies):
+    """``disco capture --storage-state`` of ``site`` (real Chromium, the capture proxy),
+    with a storage state holding ``cookies``; the report. Only a browser or proxy that
+    cannot start is a skip (a failure when required): an aborted start is the test's."""
     from tests._browser import skip_or_fail
     for mod in ("playwright.sync_api", "mitmproxy"):
         try:
@@ -392,35 +574,329 @@ def test_disco_never_explores_an_unreached_host_as_the_storage_states_session(tm
 
     from fuzzlab.disco.explore import Explorer, ExploreOptions
     from fuzzlab.disco.proxyproc import CaptureProxy
-    site = _IdSite(protected=("/secret",))
-    alias = _alias(site)
-    site.home_extra = (f"<a href='{alias}/secret?via=link'>alias</a>"
-                       f"<script>fetch('{alias}/data').catch(() => 0)</script>")
-    body = f"user={USER}&pw={PASSWORD}".encode()
-    with urllib.request.urlopen(urllib.request.Request(site.base + "login", data=body),
-                                timeout=10) as resp:
-        sid = resp.headers["Set-Cookie"].split(";", 1)[0].split("=", 1)[1]
-    state = {"cookies": [{"name": "sid", "value": sid, "domain": "127.0.0.1", "path": "/",
-                          "expires": -1, "httpOnly": False, "secure": False,
-                          "sameSite": "Lax"}], "origins": []}
     options = ExploreOptions(max_actions=6, deadline_s=60, max_states=4, idle_ms=200,
                              max_quiet_ms=3000)
     try:
         with CaptureProxy([site.base], out=tmp_path / "capture.jsonl",
                           profile="user") as proxy:
             ex = Explorer(site.base, scope_urls=[site.base], proxy=proxy.endpoint,
-                          options=options, storage_state=state,
+                          options=options,
+                          storage_state={"cookies": cookies, "origins": []},
                           actions_log=tmp_path / "actions.jsonl")
             try:
-                report = ex.run()
+                return ex.run()
             except PlaywrightError as exc:
-                skip_or_fail(f"chromium unavailable: {str(exc).splitlines()[0]}")
+                if "BrowserType.launch" in str(exc):
+                    skip_or_fail(f"chromium unavailable: {str(exc).splitlines()[0]}")
+                raise
     finally:
         site.close()
+
+
+def _own_gets(site) -> list[tuple[str, str]]:
+    """``(path, Cookie)`` of every GET the site got on its own host."""
+    with site._lock:
+        return [(p, c) for h, (m, p, c, _ua) in zip(site.hosts, site.requests)
+                if h.split(":")[0] == "127.0.0.1" and m == "GET"]
+
+
+def test_disco_never_explores_an_unreached_host_as_the_storage_states_session(tmp_path):
+    """disco's explorer with an operator's storage state (`disco capture
+    --storage-state`): its context holds ``sid`` host-only for ``127.0.0.1``; the start
+    page links the alias, fetches from it and its harvest finds it. Nothing reaches the
+    alias -- every request there is refused by the guard (SP-74) and counted in the
+    report (``session_host_unreached``, explore.json) -- so no anonymous state of it is
+    explored or captured as the session's. Before: the alias was loaded and captured
+    with no cookie."""
+    site = _IdSite(protected=("/secret",))
+    alias = _alias(site)
+    site.home_extra = (f"<a href='{alias}/secret?via=link'>alias</a>"
+                       f"<script>fetch('{alias}/data').catch(() => 0)</script>")
+    sid = _sid(site)
+    report = _disco_capture(tmp_path, site, [_state_cookie("sid", sid, "127.0.0.1")])
     assert _to_alias(site) == []
     assert report.session_host_unreached.get("localhost", 0) >= 1, report
     assert json.loads(json.dumps(report.__dict__))["session_host_unreached"]
-    with site._lock:
-        own = [c for h, (m, _p, c, _ua) in zip(site.hosts, site.requests)
-               if h.split(":")[0] == "127.0.0.1" and m == "GET"]
+    own = [c for _p, c in _own_gets(site)]
     assert any(f"sid={sid}" in c for c in own), own     # its own host: with the session
+
+
+def test_disco_explores_its_start_host_with_a_storage_state_that_holds_an_alias_cookie(
+        tmp_path):
+    """BA-1 (BUG-0559 review round 1), real Chromium: the operator's storage state holds
+    the session cookie for 127.0.0.1 and an ambient ``lang`` cookie for the alias. The
+    start host is explored with the session -- its start page and the page it links
+    carry ``sid`` -- and the alias, which ``sid`` never reaches, receives nothing
+    (refused and counted). Before (72297c9): the ambient cookie made the start host
+    unreached and the start navigation was aborted (``net::ERR_ABORTED``): the run
+    explored nothing."""
+    site = _IdSite(protected=("/secret",))
+    alias = _alias(site)
+    site.home_extra = f"<a href='{alias}/secret?via=link'>alias</a>"
+    sid = _sid(site)
+    report = _disco_capture(tmp_path, site, [_state_cookie("sid", sid, "127.0.0.1"),
+                                             _state_cookie("lang", "en", "localhost")])
+    assert _to_alias(site) == []
+    got = _own_gets(site)
+    for path in ("/", "/secret"):
+        assert any(p == path and f"sid={sid}" in c for p, c in got), got
+    assert report.states >= 1 and report.session_host_unreached.get("localhost", 0) >= 1
+
+
+class _PreloadSite:
+    """A loopback app whose pages ask the browser to preload its loopback alias -- and,
+    on its own host, a ``/logout`` -- in every way Chromium 141 acts on (measured,
+    `scratchpad/lanes/BROWSERALIAS/r1meas2`): an inline rule set, one named by a
+    ``Speculation-Rules`` header, one a script inserts, one in a closed declarative
+    shadow root, same-origin document rules over a ``/logout`` link, and a popup
+    (``window.open``, with an opener) carrying an inline and a script-inserted one.
+    Every request is recorded as ``(method, host, path, Cookie, Sec-Purpose)``."""
+
+    def __init__(self):
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        from fuzzlab.core.net import require_loopback
+        require_loopback("127.0.0.1")
+        self.seen: list[tuple[str, str, str, str, str]] = []
+        self._lock = threading.Lock()
+        site = self
+
+        def rules(*urls):
+            return '{"prefetch":[{"source":"list","urls":[%s]}]}' % ",".join(
+                f'"{u}"' for u in urls)
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):  # noqa: N802 - http.server API
+                with site._lock:
+                    site.seen.append((self.command, (self.headers.get("Host") or "")
+                                      .split(":")[0], self.path,
+                                      self.headers.get("Cookie") or "",
+                                      self.headers.get("Sec-Purpose") or ""))
+                alias = site.alias
+                kind, body, extra = "text/html", "<title>ANON</title>anonymous", {}
+                if self.path == "/p":
+                    extra = {"Speculation-Rules": '"/rules.json"'}
+                    body = (
+                        f"<title>OWN</title><script type=speculationrules>"
+                        f"{rules(alias + '/a-inline')}</script>"
+                        '<script type="speculationrules">{"prefetch":[{"where":'
+                        '{"href_matches":"/*"},"eagerness":"immediate"}]}</script>'
+                        f"<div><template shadowrootmode=closed><script "
+                        f"type=speculationrules>{rules(alias + '/a-closed')}</script>"
+                        f"</template></div>"
+                        f"<a href='/logout'>out</a><a id=go href='{alias}/a-inline'>go</a>"
+                        f"<script>var s = document.createElement('script');"
+                        f"s.type = 'speculationrules';"
+                        f"s.textContent = '{rules(alias + '/a-created')}';"
+                        f"document.head.appendChild(s);</script>")
+                elif self.path == "/rules.json":
+                    kind, body = "application/speculationrules+json", rules(
+                        alias + "/a-header")
+                elif self.path == "/opener":
+                    body = "<title>OWN</title><script>window.open('/pop')</script>"
+                elif self.path == "/pop":
+                    body = (f"<title>POP</title><script type=speculationrules>"
+                            f"{rules(alias + '/pop-inline')}</script>"
+                            f"<script>var d = document.createElement('script');"
+                            f"d.type = 'speculationrules';"
+                            f"d.textContent = '{rules(alias + '/pop-created')}';"
+                            f"document.head.appendChild(d);</script>")
+                data = body.encode()
+                self.send_response(200)
+                self.send_header("Content-Type", kind)
+                for k, v in extra.items():
+                    self.send_header(k, v)
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        port = self.server.server_address[1]
+        self.base = f"http://127.0.0.1:{port}/"
+        self.alias = f"http://localhost:{port}"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+
+def test_no_speculation_rules_preload_leaves_a_guarded_context(monkeypatch):
+    """BA-3 (BUG-0559 review round 1), real Chromium: a guarded context carrying a
+    session cookie host-only for 127.0.0.1 loads pages that ask the browser to preload
+    the alias and a same-origin ``/logout``, in every way measured (`_PreloadSite`),
+    then a link to the alias is clicked, and a popup with an opener loads its own rule
+    sets. Nothing is preloaded: the alias receives no request at all, ``/logout`` and
+    the external rule set are never requested, the click is refused by the route and
+    told (no prefetch served it), the page keeps its own document, and the popup gets
+    its own page, sent once. Before (72297c9): Chromium sent every prefetch from the
+    browser process, past the route -- the alias got them with no cookie, ``/logout``
+    went with the session past the destructive rule -- and the click committed the
+    alias's anonymous page from the prefetch."""
+    from tests._spa_fixture import chromium_or_skip
+    chromium_or_skip(monkeypatch)
+    from playwright.sync_api import sync_playwright
+
+    from fuzzlab.core.urls import in_origin_scope, origin_scope
+    site = _PreloadSite()
+    told = []
+    try:
+        with sync_playwright() as pw:
+            try:
+                browser = pw.chromium.launch(**navguard.chromium_launch_kwargs(
+                    navguard.browser_launch_args([site.base])))
+            except Exception as exc:  # noqa: BLE001 - a launch failure is a skip
+                from tests._browser import skip_or_fail
+                skip_or_fail(f"chromium could not launch: {exc}")
+            try:
+                ctx = browser.new_context(service_workers="block")
+                cookies = [{"name": "sid", "value": "S", "url": site.base}]
+                origins = origin_scope(site.base)
+                navguard.guard_page(ctx, in_scope=lambda u: in_origin_scope(u, origins),
+                                    session_cookies=cookies,
+                                    on_session_unreached=lambda u, k, s, w: told.append(
+                                        (k, u)))
+                ctx.add_cookies(cookies)
+                page = ctx.new_page()
+                navguard.navigate(page, site.base + "p", timeout_ms=8000)
+                page.wait_for_timeout(1500)
+                try:
+                    page.click("#go", timeout=3000)
+                except Exception:  # noqa: BLE001 - a refused click may time out
+                    pass
+                page.wait_for_timeout(800)
+                own_url, own_title = page.url, page.title()
+                with ctx.expect_page(timeout=8000) as popup_info:
+                    navguard.navigate(page, site.base + "opener", timeout_ms=8000)
+                popup = popup_info.value
+                popup.wait_for_load_state()
+                page.wait_for_timeout(1500)
+                popup_url, popup_title = popup.url, popup.title()
+            finally:
+                browser.close()
+    finally:
+        site.close()
+    with site._lock:
+        seen = list(site.seen)
+    assert [s for s in seen if s[1] == "localhost"] == [], seen
+    assert not [s for s in seen if s[2] in ("/logout", "/rules.json")], seen
+    assert not [s for s in seen if s[4]], seen                  # no Sec-Purpose at all
+    assert ("document", f"{site.alias}/a-inline") in told, told
+    assert (own_url, own_title) == (site.base + "p", "OWN")
+    assert (popup_url, popup_title) == (site.base + "pop", "POP")
+    assert [s[:3] for s in seen if s[2] == "/pop"] == [("GET", "127.0.0.1", "/pop")]
+
+
+def _spec_page(alias_target: str, *, inline: bool) -> str:
+    """A home page asking the browser to prefetch ``alias_target`` -- an inline rule
+    set, or one its script inserts -- and jumping there 300 ms later."""
+    rules = '{"prefetch":[{"source":"list","urls":["%s"]}]}' % alias_target
+    insert = (f"<script type=speculationrules>{rules}</script>" if inline else
+              f"<script>var s = document.createElement('script');"
+              f"s.type = 'speculationrules'; s.textContent = '{rules}';"
+              f"document.head.appendChild(s);</script>")
+    return insert + (f"<script>setTimeout(function () {{ location.href = "
+                     f"'{alias_target}'; }}, 300)</script>")
+
+
+def _fetch_once(monkeypatch, site, url):
+    """One rendered fetch of ``url`` as 'user' (the CLI's manager scope); the result,
+    the fetcher and the kinds of every SP-74 refusal it was told."""
+    from fuzzlab.tools.fetcher import ContentFetcher
+    from tests._spa_fixture import chromium_or_skip
+    chromium_or_skip(monkeypatch)
+    mgr = SessionManager(_creds("127.0.0.1"), scope_hosts=["localhost", "127.0.0.1"],
+                         browser_login=False)
+    kinds = []
+    try:
+        with ContentFetcher(engine="playwright", timeout_ms=8000, identity="user",
+                            session_manager=mgr, auth_base_url=site.base) as fetcher:
+            note = fetcher._note_session_unreached
+
+            def told(u, kind, source, reason):
+                kinds.append(kind)
+                note(u, kind, source, reason)
+            fetcher._note_session_unreached = told
+            try:
+                got = fetcher.fetch(url)
+            except Exception as exc:  # noqa: BLE001 - a launch failure is a skip
+                from tests._browser import skip_or_fail
+                skip_or_fail(f"chromium could not launch: {exc}")
+    finally:
+        site.close()
+    return got, fetcher, kinds
+
+
+def test_the_auditors_fetcher_and_the_spider_never_preload_the_alias(monkeypatch,
+                                                                     tmp_path):
+    """BA-3, the consumers (real Chromium): the identity's page asks the browser to
+    prefetch the alias's protected page and jumps there 300 ms later. The auditor's
+    fetcher audits the page's own (the identity's) content -- the jump refused by the
+    route, told -- and the alias receives nothing; an identity browser crawl of the same
+    page stores no anonymous landing and the alias receives nothing. Before (72297c9):
+    the alias got the prefetch and the anonymous ``/login`` with no cookie, and the
+    fetcher returned the alias's login page as the identity's page (measured by the
+    review: 200 and the ``Sign in`` form)."""
+    site = _IdSite(protected=("/secret",))
+    site.home_extra = _spec_page(_alias(site) + "/secret?via=spec", inline=True)
+    got, fetcher, kinds = _fetch_once(monkeypatch, site, site.base + "?spec=1")
+    assert _to_alias(site) == []
+    assert "welcome alice" in got[2] and "Sign in" not in got[2], got
+    assert "document" in kinds and fetcher.session_host_unreached.get("localhost", 0) >= 1
+    crawled = _IdSite(protected=("/secret",))
+    crawled.home_extra = _spec_page(_alias(crawled) + "/secret?via=spec", inline=False)
+    _spider, pages, _stats = _browser_crawl(monkeypatch, tmp_path, crawled, max_depth=1)
+    assert _to_alias(crawled) == []
+    _no_anonymous_landing(pages)
+    assert "welcome alice" in pages[crawled.base][1], pages[crawled.base]
+
+
+def test_a_preload_past_the_guard_is_never_read_as_the_identitys_page(monkeypatch,
+                                                                      tmp_path):
+    """BA-3's defence in depth (`navguard.committed_session_refusal`): with the guard's
+    preload neutraliser taken away -- as if a rule set slipped past it -- the browser
+    prefetches the alias and serves the page's jump from that prefetch, past the route.
+    The auditor's fetcher then returns no page (status 0: the committed document is on
+    a host the session's cookies do not reach, told as ``committed``), and the spider
+    stores the load failed with that cause -- never the alias's anonymous page. Before
+    (72297c9): the fetcher returned the alias's login page as the identity's (measured
+    by the review: 200 and the ``Sign in`` form)."""
+    monkeypatch.setattr(navguard, "PRELOAD_OFF_JS", "", raising=False)
+    site = _IdSite(protected=("/secret",))
+    site.home_extra = _spec_page(_alias(site) + "/secret?via=spec", inline=False)
+    got, _fetcher, kinds = _fetch_once(monkeypatch, site, site.base + "?spec=1")
+    assert got[:3] == (0, "", ""), got
+    assert "committed" in kinds, kinds
+    crawled = _IdSite(protected=("/secret",))
+    crawled.home_extra = _spec_page(_alias(crawled) + "/secret?via=spec", inline=False)
+    _spider, pages, stats = _browser_crawl(monkeypatch, tmp_path, crawled, max_depth=1)
+    _no_anonymous_landing(pages)
+    home = pages[crawled.base]
+    assert home[2] == "failed" and "do not reach host 'localhost'" in home[3], home
+    assert stats["session_host_unserved"] >= 1
+
+
+def test_disco_never_reads_a_state_or_a_protected_resource_on_an_unreached_host():
+    """BA-3's defence in depth in disco (the cross-site prefetch itself is not sent
+    through disco's capture proxy -- measured -- so the wiring is shown on doubles): a
+    state read (`settled_fingerprint`) of a document the main frame committed on a host
+    the session's cookies do not reach is None and counted, never read; the start
+    page's protected-resource probe never GETs such a page with the context's cookies.
+    Before (72297c9): both read it."""
+    base = "http://127.0.0.1:8000/"
+    ex = _explorer(base, {"cookies": [{"name": "sid", "value": "v", "domain": "127.0.0.1",
+                                       "path": "/"}], "origins": []})
+    ex._ctx_session_cookies = ex._current_session().session_cookies()
+    ex._ctx_cookie_scope = None
+    ex.fingerprint = lambda page, ctx: "READ"
+    checks = []
+    ex._context_check = lambda url=None: checks.append(url)
+    assert ex.settled_fingerprint(_Page("http://localhost:8000/secret"), None) is None
+    assert ex.report.session_host_unreached == {"localhost": 1}
+    assert ex.settled_fingerprint(_Page(base + "secret"), None) == "READ"
+    ex._find_protected_resource(_Page("http://localhost:8000/secret"))
+    assert checks == []

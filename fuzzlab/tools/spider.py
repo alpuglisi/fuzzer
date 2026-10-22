@@ -2417,6 +2417,17 @@ class LocalSpider:
                 self._settle(self._page)
             if self._win is not None and self._win.get("query"):
                 self._win["own_nav"] = frozenset()   # the load's own navigation only (Q4)
+            # SP-74 (BUG-0559 review round 1, BA-3), before anything is extracted: a
+            # document the main frame committed on a host the session's cookies do not
+            # reach is the anonymous page of a navigation the route never saw (a
+            # preload served it); unresolved with the cause, never filed as this URL's
+            # page (`_fetch_rendered` re-raises it: no static fallback)
+            unreached = navguard.committed_session_refusal(
+                self._page, self._session_cookies(), cookie_scope=self._cookie_scope)
+            if unreached is not None:
+                self._bump_shared("session_host_unserved")
+                self._unreached_targets.setdefault(_target_key(url), unreached)
+                raise HostNotServed(f"{unreached}; {self.UNREACHED_ADVICE}")
             # BUG-0138 review (Q2): a load that did not complete either stopped (a
             # refused script navigation superseded it), merely outlasted the wait, or
             # was replaced by another document a script navigation committed

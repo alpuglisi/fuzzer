@@ -596,9 +596,10 @@ class _SessionMaterial:
     scope: Callable[[str], bool] | None = field(default=None, repr=False)
     login_url: str | None = None
     login_fields: tuple | None = None
-    #: the names of the session's credential cookies (the provider's
-    #: ``checked_cookies``); None: every adopted cookie is the session's (a storage
-    #: state, whose credentials disco cannot tell from its ambient cookies)
+    #: the names of the session's credential cookies: the provider's
+    #: ``checked_cookies``; for a storage state, whose credentials disco cannot tell from
+    #: its ambient cookies, those that reach the start host (`Explorer._storage_session`,
+    #: BUG-0559 review round 1, BA-1). None: every adopted cookie is the session's
     credential_names: frozenset | None = None
 
     def session_cookies(self) -> list[dict]:
@@ -844,6 +845,11 @@ class Explorer:
         self._answers: list = []
         self._window_tags: set = set()
         self._ctx_generation: int | None = None
+        #: SP-74 (BUG-0559 review round 1, BA-3): the session's cookies as this worker's
+        #: context holds them, and the origin rule it was guarded with -- what a state
+        #: read (`settled_fingerprint`) checks the committed document against
+        self._ctx_session_cookies: list = []
+        self._ctx_cookie_scope = None
         self._browser = None
         self._pw = None
 
@@ -875,13 +881,15 @@ class Explorer:
         # SP-74 (BUG-0559): the session's cookies as this context holds them; nothing
         # it sends goes to a host they do not reach (a loopback alias of a host-only
         # cookie's host is in the scope's origin, and would be explored anonymously)
+        self._ctx_session_cookies = auth.session_cookies() if auth is not None else []
+        self._ctx_cookie_scope = auth.scope if isolate else None
         navguard.guard_page(
             ctx, in_scope=self._in_scope, headers=self._tag_headers,
             on_out_of_scope=self._count_out_of_scope,
             on_abort=lambda url, why: self._count_abort(),
-            cookie_scope=auth.scope if isolate else None,
+            cookie_scope=self._ctx_cookie_scope,
             isolated_request=(lambda: pw.request.new_context()) if isolate else None,
-            session_cookies=auth.session_cookies() if auth is not None else None,
+            session_cookies=self._ctx_session_cookies or None,
             on_session_unreached=self._count_session_unreached)
         if auth is not None and auth.cookies:
             from fuzzlab.tools import browserauth
@@ -1006,13 +1014,27 @@ class Explorer:
                 if self.session is not None:
                     shared.auth = self._provider_session(revalidate=False)
                 else:
-                    from fuzzlab.session.browserlogin import filter_storage_state
-                    origins = origin_scope(self.start_url)
-                    shared.auth = _SessionMaterial(
-                        0, storage_state=filter_storage_state(
-                            self.storage_state, self._in_scope, self.scope_urls),
-                        scope=lambda u: in_origin_scope(u, origins))
+                    shared.auth = self._storage_session()
             return shared.auth
+
+    def _storage_session(self) -> "_SessionMaterial":
+        """The operator's storage state (``--storage-state``) as session material: its
+        cookies kept to the scope (`filter_storage_state`, which folds the loopback
+        aliases), and its credential cookies taken to be those that reach the start
+        URL's host (`navguard.names_reaching`; BUG-0559 review round 1, BA-1). disco
+        cannot tell a state's credentials from its ambient cookies, and an ambient
+        cookie held for a loopback alias or another scope origin never makes the start
+        host unreached. A state none of whose cookies reaches the start host keeps them
+        all as the session's: the start host is then refused (SP-74), never explored as
+        the session's."""
+        from fuzzlab.session.browserlogin import filter_storage_state
+        origins = origin_scope(self.start_url)
+        kept = filter_storage_state(self.storage_state, self._in_scope, self.scope_urls)
+        names = navguard.names_reaching((kept or {}).get("cookies"),
+                                        urlsplit(self.start_url).hostname or "")
+        return _SessionMaterial(0, storage_state=kept,
+                                scope=lambda u: in_origin_scope(u, origins),
+                                credential_names=names or None)
 
     def _provider_session(self, *, revalidate: bool,
                           lost: int | None = None) -> _SessionMaterial:
@@ -1350,10 +1372,15 @@ class Explorer:
         cookies as live and one with no credential as refused (a login redirect, a 401,
         a login form). Its suspicions are then decided by a GET of it with the suspected
         context's cookies (`_context_check`); without one a loss shape stays an
-        unconfirmed loss (PA-0533(1))."""
+        unconfirmed loss (PA-0533(1)). Never a page the main frame committed on a host the
+        session's cookies do not reach (SP-74; BUG-0559 review round 1, BA-3): a GET of it
+        with the context's cookies would go without them."""
         from fuzzlab.session.manager import LIVE, LOST
         url = urldefrag(page.url)[0]
         if not self._in_scope(url) or destructive_reason(url) or looks_like_login_url(url):
+            return
+        if navguard.committed_session_refusal(page, self._ctx_session_cookies,
+                                              cookie_scope=self._ctx_cookie_scope):
             return
         if self._context_check(url).state != LIVE:
             return
@@ -1642,8 +1669,19 @@ class Explorer:
 
     def settled_fingerprint(self, page, ctx) -> Reading | None:
         """`fingerprint` of a page that may still be navigating: a destroyed execution
-        context (the page moved on mid-read) is waited out once; None if it persists."""
+        context (the page moved on mid-read) is waited out once; None if it persists.
+
+        None as well, counted, for a document the main frame committed on a host the
+        session's cookies do not reach (SP-74; BUG-0559 review round 1, BA-3): the
+        anonymous page of a navigation the route never saw (a preload served it), never
+        read as a state of the session. Every state is read here (the start, an action's
+        effect, a harvest load, a restore)."""
         for _ in range(2):
+            why = navguard.committed_session_refusal(page, self._ctx_session_cookies,
+                                                     cookie_scope=self._ctx_cookie_scope)
+            if why is not None:
+                self._count_session_unreached(page.url, "committed", page.url, why)
+                return None
             try:
                 return self.fingerprint(page, ctx)
             except _pw_error():

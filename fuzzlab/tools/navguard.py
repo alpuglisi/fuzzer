@@ -18,7 +18,14 @@ Every one is checked where it is made (PA-0123):
 * **Chromium's own traffic** -- what the route never sees (a preconnect, a DNS
   prefetch, a landing page the browser re-requests, background services, WebSocket
   connections) is confined by ``browser_launch_args``: no proxy, and nothing resolvable
-  outside the scope ``host:port`` pairs, IP literals included.
+  outside the scope ``host:port`` pairs, IP literals included;
+* **Chromium's preloads** -- a speculation-rules prefetch goes from the browser process
+  to an in-scope URL past every rule of the route (scope aside: the resolver rules), and
+  serves a later navigation there past it too (BUG-0559 review round 1, measured):
+  ``guard_page`` never lets one be registered (`PRELOAD_OFF_JS`; the route drops the
+  ``Speculation-Rules`` header and loads a popup's first document through a trampoline),
+  and a consumer checks the document a load committed before it reads it
+  (`committed_session_refusal`).
 
 Callers open their pages with ``service_workers="block"``: a service worker's own
 requests bypass ``page.route``. WebSockets are routed with ``route_web_socket``.
@@ -66,6 +73,7 @@ forwarded only while ``ws_hold()`` is false, else dropped and reported).
 from __future__ import annotations
 
 import contextlib
+import json
 import logging
 import re
 import threading
@@ -99,18 +107,24 @@ def cookie_reaches(cookie, host) -> bool:
     to ``127.0.0.1`` and not to ``localhost`` on the same port; Playwright's API request
     context with that storage state likewise). A dotted domain also reaches the hosts
     under it, never an IP address (RFC 6265 §5.1.3). A deny-only check: where the session
-    goes is still decided by origin (``cookie_scope``, FR-SESS-20)."""
+    goes is still decided by origin (``cookie_scope``, FR-SESS-20).
+
+    An IPv6 literal compares without its brackets on both sides (BUG-0559 review round 1,
+    BA-2): Chromium holds a cookie set for ``http://[::1]:P/`` with the domain ``[::1]``,
+    brackets included, and sends it there (measured on Chromium 141: ``storage_state()``
+    gives ``('sid', '[::1]')`` and ``context.cookies('http://[::1]:P/')`` returns it),
+    while a URL's ``hostname`` -- the ``host`` every caller passes -- is ``::1``."""
     import ipaddress
     url = cookie.get("url")
     # one name per assignment, so PA-0134(3)'s host-compare guard sees the compare below
     if url:
-        domain = (urlsplit(url).hostname or "").lower()
+        domain = (urlsplit(url).hostname or "").lower().strip("[]")
         host_only = True
     else:
         raw = str(cookie.get("domain") or "").lower()
-        domain = raw.lstrip(".")
+        domain = raw.lstrip(".").strip("[]")
         host_only = not raw.startswith(".")
-    host = str(host or "").lower()
+    host = str(host or "").lower().strip("[]")
     if not domain or not host:
         return False
     if host == domain:
@@ -132,6 +146,17 @@ def held_session_cookies(cookies, storage_state=None, names=None) -> list[dict]:
     held = [*(cookies or ()), *((storage_state or {}).get("cookies") or ())]
     keep = None if names is None else set(names)
     return [dict(c) for c in held if c.get("name") and (keep is None or c["name"] in keep)]
+
+
+def names_reaching(cookies, host) -> frozenset[str]:
+    """The names of ``cookies`` (as a context holds them) of which a copy reaches
+    ``host`` (`cookie_reaches`). A caller that cannot tell a session's credential cookies
+    from its ambient ones (an operator's storage state) takes the session's to be those
+    that reach the session's own start host (BUG-0559 review round 1, BA-1): an ambient
+    cookie held for another host -- a loopback alias, another scope origin -- is never
+    one, so it never makes the start host unreached."""
+    return frozenset(str(c["name"]) for c in cookies or ()
+                     if c.get("name") and cookie_reaches(c, host))
 
 
 def unreached_session_cookies(session_cookies, host) -> list[str]:
@@ -172,6 +197,218 @@ class SessionHostUnreached(PermissionError):
     """An API request of a context carrying a session, to a host its cookies do not
     reach (`checked_api_request`, SP-74): refused before it is sent. The message is
     `session_host_refusal`'s (the host and the cause, never a URL)."""
+
+
+def committed_session_refusal(page, session_cookies, *, cookie_scope=None) -> str | None:
+    """**Why the document ``page``'s main frame has committed is not the session's** -- a
+    host the session's cookies do not reach (`session_host_refusal`) -- or None (SP-74,
+    BUG-0559 review round 1, BA-3). Defence in depth behind the route and
+    `PRELOAD_OFF_JS`: a navigation the route never saw (one a browser-process preload
+    served) would commit an anonymous document under the session's context. Every
+    consumer asks before it reads a load's content or a state: the auditor's fetcher,
+    the spider's extraction, disco's state reads. A non-http(s) document
+    (``about:blank``, the browser's error page) is None."""
+    try:
+        url = page.url or ""
+    except Exception:  # noqa: BLE001 - a closed page has committed nothing
+        return None
+    if not str(url).lower().startswith(("http://", "https://")):
+        return None
+    return session_host_refusal(session_cookies, url, cookie_scope=cookie_scope)
+
+
+# --- browser-process preloads (BUG-0559 review round 1, BA-3) ------------------------------
+#: The response header that names an external speculation rule set (Chromium 141).
+SPECULATION_RULES_HEADER = "speculation-rules"
+
+#: **No speculation rule set is ever registered in a guarded page** (BUG-0559 review
+#: round 1, BA-3). Chromium sends a speculation-rules prefetch from the browser process:
+#: the route never sees it, nor the navigation it then serves (measured on Chromium 141,
+#: the full browser and the headless shell: a prefetch of a loopback alias went with no
+#: cookie, a same-origin ``/logout`` named by document rules went with the session past
+#: the destructive rule, and a click then committed the alias's anonymous page). No launch
+#: switch or CDP call stops it there (measured by the review: ``NetworkPrediction``,
+#: ``Prerender2``, ``SpeculationRulesPrefetchFuture``, ``--disable-blink-features=
+#: SpeculationRules``, ``Preload.disable``, ``Network.setCacheDisabled``); the "Preload
+#: pages" preference does in the full browser's own profile only, never the headless
+#: shell. So the guard removes the trigger. This script, installed on every guarded
+#: context before any page script runs, takes every ``<script type=speculationrules>``
+#: out of the document as it is inserted -- by the parser (which runs a microtask
+#: checkpoint before it prepares a script), by a script, a fragment or ``document.write``,
+#: into an open shadow root (``attachShadow``, or a parser's declarative one) -- before
+#: its rules are registered, and again whenever it is re-inserted; removing a registered
+#: one drops its rules. What it calls is captured before the page's scripts run, so a
+#: page that replaces ``Element.prototype.remove`` or ``MutationRecord``'s getters does
+#: not turn it off (measured). The route drops the ``Speculation-Rules`` header
+#: (`_fulfil_preload_free`), and a popup's first document, which Chromium loads into the
+#: Window of its initial ``about:blank`` where no init script runs again (measured), is
+#: loaded through a same-URL trampoline (`_TRAMPOLINE_HTML`). Not reached: a rule set in a
+#: *closed* declarative shadow root, which no script can see (measured; the consumers'
+#: `committed_session_refusal` still never reads what it served).
+PRELOAD_OFF_JS = r"""(() => {
+  const apply = Reflect.apply, desc = Object.getOwnPropertyDescriptor;
+  const E = Element.prototype, N = Node.prototype, R = MutationRecord.prototype;
+  const nodeType = desc(N, 'nodeType').get, localName = desc(E, 'localName').get;
+  const shadowRoot = desc(E, 'shadowRoot').get, getAttribute = E.getAttribute;
+  const remove = E.remove, attach = E.attachShadow, qsaElement = E.querySelectorAll;
+  const qsaDocument = Document.prototype.querySelectorAll;
+  const qsaFragment = DocumentFragment.prototype.querySelectorAll;
+  const recType = desc(R, 'type').get, recTarget = desc(R, 'target').get;
+  const recAdded = desc(R, 'addedNodes').get;
+  const listLength = desc(NodeList.prototype, 'length').get, item = NodeList.prototype.item;
+  const trim = String.prototype.trim, lower = String.prototype.toLowerCase, Str = String;
+  const taken = new WeakSet(), has = WeakSet.prototype.has, add = WeakSet.prototype.add;
+  const observe = MutationObserver.prototype.observe;
+  const OPTIONS = {subtree: true, childList: true, attributes: true,
+                   attributeFilter: ['type']};
+  const isRules = (t) => t !== null &&
+    apply(lower, apply(trim, Str(t), []), []) === 'speculationrules';
+  const off = (el) => {
+    if (apply(nodeType, el, []) !== 1 || apply(localName, el, []) !== 'script') return;
+    if (apply(has, taken, [el]) || isRules(apply(getAttribute, el, ['type']))) {
+      apply(add, taken, [el]);
+      apply(remove, el, []);
+    }
+  };
+  const scan = (root) => {
+    const t = apply(nodeType, root, []);
+    const q = t === 1 ? qsaElement : t === 9 ? qsaDocument : t === 11 ? qsaFragment : null;
+    if (q === null) return;
+    const found = apply(q, root, ['script']), n = apply(listLength, found, []);
+    for (let i = 0; i < n; i++) off(apply(item, found, [i]));
+  };
+  let mo = null;
+  const watch = (root) => { apply(observe, mo, [root, OPTIONS]); scan(root); };
+  const visit = (node) => {
+    off(node);
+    scan(node);
+    if (apply(nodeType, node, []) === 1) {
+      const sr = apply(shadowRoot, node, []);
+      if (sr) watch(sr);
+    }
+  };
+  mo = new MutationObserver((records) => {
+    for (let i = 0; i < records.length; i++) {
+      const r = records[i];
+      if (apply(recType, r, []) === 'attributes') { off(apply(recTarget, r, [])); continue; }
+      const added = apply(recAdded, r, []), n = apply(listLength, added, []);
+      for (let j = 0; j < n; j++) visit(apply(item, added, [j]));
+    }
+  });
+  E.attachShadow = function attachShadow() {
+    const root = apply(attach, this, arguments);
+    watch(root);
+    return root;
+  };
+  watch(document);
+})();"""
+
+#: The document a popup's first navigation is answered with (`PRELOAD_OFF_JS`): it
+#: replaces itself with the same URL, now from a document that is not the initial
+#: ``about:blank``, so Chromium gives the real one a new Window -- where the context's
+#: init scripts run -- and the route serves it the answer it already fetched.
+_TRAMPOLINE_HTML = ("<!doctype html><meta charset=utf-8><title></title>"
+                    "<script>location.replace({url})</script>")
+
+#: How long a popup's fetched answer waits for its trampoline's request, and how many
+#: wait at once, per guard.
+_KEPT_TTL_S = 30.0
+_KEPT_MAX = 32
+
+
+def _initial_window(req) -> bool:
+    """Is ``req`` a navigation of a new page's main frame from the initial ``about:blank``
+    that Chromium would reuse the Window of (`PRELOAD_OFF_JS`)? Playwright cannot name
+    the frame of a popup's first navigation ("the request was issued before the frame is
+    created", measured for ``window.open``, ``<a target=_blank rel=opener>``, a named
+    target); a frame it can name counts when it is the main frame of a page with an
+    opener, still on ``about:blank`` (``window.open()`` then ``w.location = url``). A
+    request double without a frame is never one."""
+    from playwright.sync_api import Error
+    try:
+        if not req.is_navigation_request():
+            return False
+    except Exception:  # noqa: BLE001 - a request that cannot say is not one
+        return False
+    try:
+        frame = req.frame
+    except Error as exc:
+        return "not available" in str(exc)
+    except Exception:  # noqa: BLE001 - a double: no frame to ask
+        return False
+    try:
+        return frame is not None and frame.parent_frame is None and \
+            frame.url == "about:blank" and frame.page.opener() is not None
+    except Exception:  # noqa: BLE001 - a frame that cannot say is not one
+        return False
+
+
+def _trampoline_target(req, url: str) -> bool:
+    """Is ``req`` the request a popup's trampoline (`_TRAMPOLINE_HTML`) made for ``url``:
+    a GET navigation of a main frame whose document is at ``url``, or whose frame
+    Playwright cannot name yet?"""
+    from playwright.sync_api import Error
+    try:
+        if not req.is_navigation_request() or req.method.upper() != "GET":
+            return False
+        frame = req.frame
+    except Error as exc:
+        return "not available" in str(exc)
+    except Exception:  # noqa: BLE001 - a double: never one
+        return False
+    try:
+        return frame is not None and frame.parent_frame is None and \
+            frame.url.split("#", 1)[0] == url
+    except Exception:  # noqa: BLE001
+        return False
+
+
+#: A parser-inserted rule set's ``type`` in a page's HTML (`_inert_rule_sets`).
+_RULES_TYPE = re.compile(r"""(<script\b[^>]*?\btype\s*=\s*)(["']?)\s*speculationrules\s*\2""",
+                         re.IGNORECASE)
+#: What `_inert_rule_sets` writes in its place: no script type the browser runs.
+INERT_RULES_TYPE = "x-fuzzlab-inert"
+
+
+def _inert_rule_sets(html: str | None) -> str | None:
+    """``html`` (a main-frame document the route is about to give) with every
+    ``<script type=speculationrules>`` written with an inert type, or None when it has
+    none. The text layer under `PRELOAD_OFF_JS`, for a rule set the parser inserts where
+    no script can see it -- a *closed* declarative shadow root (measured on Chromium 141:
+    its prefetch of the alias went out with the script layer alone)."""
+    if not html or "speculationrules" not in html.lower():
+        return None
+    out, n = _RULES_TYPE.subn(rf"\g<1>\g<2>{INERT_RULES_TYPE}\g<2>", html)
+    return out if n else None
+
+
+def _fulfil_preload_free(route, answer, *drop: str, html: str | None = None) -> None:
+    """Fulfil ``route`` with ``answer`` as received, less a ``Speculation-Rules`` header
+    (`PRELOAD_OFF_JS`) and the header names in ``drop`` (lower case: ``set-cookie`` for
+    an isolated answer, FR-SESS-20 R2); and, given its ``html`` (a main-frame document's,
+    as `_note_received` read it), with its parser-inserted rule sets inert
+    (`_inert_rule_sets`). An answer with none of them is given unchanged. The headers
+    given are never empty: ``route.fulfill`` falls back to the answer's own headers --
+    the dropped ones included -- for an empty set, so a ``Content-Length`` (always true
+    of the body) then stands in."""
+    names = {SPECULATION_RULES_HEADER, *drop}
+    headers = dict(answer.headers or {})
+    inert = _inert_rule_sets(html)
+    if inert is not None:
+        body = inert.encode("utf-8")          # `answer.text()` decoded it as UTF-8
+        given = {k: v for k, v in headers.items()
+                 if k.lower() not in names | {"content-length", "content-encoding",
+                                              "transfer-encoding"}}
+        given["content-length"] = str(len(body))
+        route.fulfill(status=answer.status, headers=given, body=body)
+        return
+    if not any(k.lower() in names for k in headers):
+        route.fulfill(response=answer)
+        return
+    kept = {k: v for k, v in headers.items() if k.lower() not in names}
+    if not kept:
+        kept = {"content-length": str(len(answer.body()))}
+    route.fulfill(response=answer, headers=kept)
 
 
 def make_route_handler(allow: frozenset[str] = frozenset(),
@@ -341,18 +578,66 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
                      f"in the reveal window ({why})")              # the host only
         return True
 
+    # BA-3 (BUG-0559 review round 1): a popup's first document, fetched and checked like
+    # any other, waits here for the request its trampoline makes (`_TRAMPOLINE_HTML`):
+    # url -> (answer, header names to drop, when kept, trampolines so far). A plain dict:
+    # route handlers interleave on one thread, and a lock held across a switch would
+    # deadlock it.
+    kept: dict = {}
+
+    def take_kept(req, url: str):
+        now = time.monotonic()
+        for key in [k for k, v in kept.items() if now - v[2] > _KEPT_TTL_S]:
+            kept.pop(key, None)
+        if url not in kept or not _trampoline_target(req, url):
+            return None
+        got = kept.pop(url, None)
+        return None if got is None else got[:2]
+
+    def trampoline(route, url: str, answer, drop: tuple) -> bool:
+        """Answer a popup's first navigation with the trampoline and keep its fetched
+        answer for the trampoline's own request; False once ``url`` was trampolined
+        three times without that request coming (a frame Playwright never names): the
+        answer is then given as it is, and logged."""
+        hops = kept[url][3] + 1 if url in kept else 1
+        if hops > 3:
+            kept.pop(url, None)
+            logging.info(f"a popup's first document on {urlsplit(url).hostname or '?'!r} "
+                         f"is given without its trampoline (BUG-0559 review round 1)")
+            return False
+        while len(kept) >= _KEPT_MAX:
+            kept.pop(next(iter(kept)), None)
+        kept[url] = (answer, drop, time.monotonic(), hops)
+        target = json.dumps(url).replace("<", "\\u003c")
+        route.fulfill(status=200, body=_TRAMPOLINE_HTML.replace("{url}", target),
+                      headers={"content-type": "text/html; charset=utf-8",
+                               "cache-control": "no-store"})
+        return True
+
     def handler(route, request=None) -> None:
         req = request if request is not None else route.request
         url = req.url
         if url.lower().startswith(_LOCAL_SCHEMES):
             route.continue_()
             return
+        if kept and str(req.method).upper() == "GET":
+            got = take_kept(req, url)
+            if got is not None:
+                # a trampoline's own request: the answer fetched for this popup's first
+                # navigation, already checked and observed; nothing is sent again
+                answer, drop = got
+                html = _note_received(req, url, answer)
+                _fulfil_preload_free(route, answer, *drop, html=html)
+                return
         # BUG-0136 (PA-0136): every abort of a document request -- a navigation,
         # top-level or frame, and each of its redirect hops -- uses "aborted"
         # (ERR_ABORTED), whatever the reason: the current document survives (the
         # default code commits Chromium's error page in its place) and `goto` of that
         # target still raises. A subresource keeps the default code.
         document = _is_document(req)
+        # BA-3: a popup's first navigation, from the initial about:blank whose Window
+        # Chromium reuses -- where no init script runs again (measured)
+        fresh = document and _initial_window(req)
 
         def abort() -> None:
             route.abort(_abort_code(document)) if document else route.abort()
@@ -460,15 +745,24 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
                 logging.info(_scrubbed(
                     f"request observer failed on {url.split('?', 1)[0]} "
                     f"({str(exc).splitlines()[0][:80] if str(exc) else exc!r})"))
+        html = None                               # a main-frame document's HTML, as given
         if document and doc_kind == "document" and \
                 (stripped or final is first or not req.is_navigation_request()
                  or method not in ("GET", "HEAD")):
-            _note_received(req, url, final)       # the body this page is given (Q2)
+            html = _note_received(req, url, final)   # the body this page is given (Q2)
+        relanding = final is not first and not stripped and \
+            req.is_navigation_request() and method in ("GET", "HEAD")
+        drop = ("set-cookie",) if stripped else ()
+        if fresh and doc_kind == "document" and not relanding and \
+                trampoline(route, url, final, drop):
+            return                                   # BA-3: given to the trampoline
+        # every answer is given without a `Speculation-Rules` header, and a page's
+        # parser-inserted rule sets inert (BA-3)
         if stripped:
             # an isolated answer never writes the context's jar (FR-SESS-20, R2)
-            route.fulfill(response=final, headers=_without_set_cookie(final.headers))
+            _fulfil_preload_free(route, final, *drop)
         elif final is first:
-            route.fulfill(response=first)
+            _fulfil_preload_free(route, first, html=html)
         elif req.is_navigation_request() and method in ("GET", "HEAD"):
             # the browser re-requests the (checked) landing URL itself, so page.url and
             # relative links are right; a GET or HEAD only, never a body (reviewers).
@@ -479,7 +773,7 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
         else:
             # a body kept through 307/308 is never sent twice: the landing response is
             # the answer (a navigation's page.url stays the first URL)
-            route.fulfill(response=final)
+            _fulfil_preload_free(route, final, html=html)
     return handler
 
 
@@ -512,20 +806,23 @@ def _abort_code(document: bool) -> str | None:
 _RECEIVED: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
 
 
-def _note_received(req, url: str, answer) -> None:
+def _note_received(req, url: str, answer) -> str | None:
     """Keep the HTML of a main-frame document the guard is about to fulfil, for its
-    page's `navigate` (never anything else: no subresource, no frame)."""
+    page's `navigate` (never anything else: no subresource, no frame). Returns that HTML
+    (the route reads it once more for `_fulfil_preload_free`), or None."""
     from playwright.sync_api import Error
     try:
         page = getattr(req.frame, "page", None)
         if page is None or "text/html" not in (answer.headers or {}).get(
                 "content-type", ""):
-            return
-        _RECEIVED[page] = (document_key(url), answer.text())
+            return None
+        html = answer.text()
+        _RECEIVED[page] = (document_key(url), html)
+        return html
     # no frame (a service worker's request; a request double without one), or a page
     # that cannot be weakly referenced: nothing is kept
     except (AttributeError, Error, TypeError):
-        return
+        return None
 
 
 def _received_html(page, url: str, response) -> str | None:
@@ -566,11 +863,6 @@ def _is_subframe(req) -> bool:
         return frame is not None and frame.parent_frame is not None
     except Exception:  # noqa: BLE001 - no frame (a service worker's): not a subframe
         return False
-
-
-def _without_set_cookie(headers) -> dict[str, str]:
-    """``headers`` without ``Set-Cookie`` (FR-SESS-20, R2)."""
-    return {k: v for k, v in (headers or {}).items() if k.lower() != "set-cookie"}
 
 
 def _merged(request_headers, extra: dict[str, str]) -> dict[str, str]:
@@ -1057,7 +1349,17 @@ def guard_page(target, allow: frozenset[str] = frozenset(),
     ``on_ws_drop`` / ``on_ws_send``: see `make_ws_handler`. Session headers are applied by the route only
     (FR-CRAWL-14). ``session_cookies`` / ``on_session_unreached`` (SP-74, BUG-0559): every
     context that adopts a session's cookies passes them, as it holds them
-    (`held_session_cookies`); nothing it sends goes to a host they do not reach."""
+    (`held_session_cookies`); nothing it sends goes to a host they do not reach.
+
+    Every guarded context gets `PRELOAD_OFF_JS` before any of its pages runs a script
+    (BUG-0559 review round 1, BA-3): a speculation-rules preload is sent by the browser
+    process, past every rule of the route, so no rule set is ever registered."""
+    init = getattr(target, "add_init_script", None)
+    if init is None:                        # a double, or an old Playwright: loudly
+        logging.warning("this target cannot take an init script; speculation-rules "
+                        "preloads are not neutralised (BUG-0559)")
+    else:
+        init(PRELOAD_OFF_JS)                # the script itself (positional: ``script``)
     api = getattr(target, "request", None)
     target.route("**/*", make_route_handler(allow, on_abort, in_scope=in_scope,
                                             on_out_of_scope=on_out_of_scope, api=api,

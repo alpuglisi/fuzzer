@@ -1146,13 +1146,17 @@ fuzzer.
     transport for a redirect hop and a selector form's submission (logged; the page
     holding the form is kept). **Inside a browser load** *(BUG-0559, CC-CRAWL-0063,
     closing residual R8)* the same predicate refuses every request the load makes, at
-    the guard's route (FR-CRAWL-43): a redirect hop to such a host is never fetched and
+    the guard's route (FR-CRAWL-43), and the browser makes none the route does not see
+    -- no speculation-rules preload is ever registered *(review round 1, BA-3)*: a
+    redirect hop to such a host is never fetched and
     the load is stored `failed` with the cause (never the landing's page, no static
     fallback); a selector form's submission there (`_isolated_submit`'s browser branch)
     is refused before it is sent (`navguard.checked_api_request`, counted, the page
     holding the form kept); a navigation the page makes itself (a script's `location`, a
     meta refresh) is refused, the page keeps its own document, and the target is queued
-    and refused at the gate. Adding the host to `scope_hosts` makes the manager serve it
+    and refused at the gate; a load whose main frame is found committed on such a host
+    before extraction (a navigation the route never saw) is stored `failed` with the
+    cause too. Adding the host to `scope_hosts` makes the manager serve it
     (measured for a loopback alias); `--auth-origin` does not; a browser crawl of such a
     host starts there.
   - **Losses:** an answer on a session the manager knows lost, or sent while the manager
@@ -1594,7 +1598,9 @@ fuzzer.
   into one origin. A request there goes without the session to what the tool takes for
   the session's own origin, and its anonymous answer would be the identity's.
   - **One owner, every request.** `tools/navguard.py` decides it: `cookie_reaches` (the
-    domain match), `session_host_refusal` (a host where one of the session's cookies has
+    domain match; an IPv6 literal compared without its brackets on both sides, since
+    Chromium holds a cookie for `[::1]` with the domain `[::1]` -- measured, review round
+    1, BA-2), `session_host_refusal` (a host where one of the session's cookies has
     no held copy that reaches it; `None` for a context with no session cookie and for an
     origin FR-SESS-20's `cookie_scope` puts outside the session's, which keeps its own
     disposition: documents aborted, the rest fetched cookie-less) and
@@ -1609,28 +1615,70 @@ fuzzer.
     `checked_api_request(..., session_cookies=)` refuses an API request the same way
     (`SessionHostUnreached`). No alias list: the host is compared with where the cookies
     go.
+  - **No request the route does not see** *(review round 1, BA-3; measured on Chromium
+    141, the full browser and the headless shell)*. A speculation-rules prefetch is sent
+    by the browser process, past the route -- a prefetch of the alias went with no
+    cookie, a same-origin `/logout` named by document rules went with the session past
+    the destructive rule -- and a navigation it served committed the alias's anonymous
+    page past the route too. No launch switch or CDP call stops it. So every guarded
+    context, with or without a session, never registers a rule set: `guard_page`
+    installs `navguard.PRELOAD_OFF_JS` before any page script runs (every
+    `<script type=speculationrules>` taken out as it is inserted -- by the parser, a
+    script, a fragment, `document.write`, into an open shadow root, re-inserted --
+    with what it calls captured before the page runs); the route drops the
+    `Speculation-Rules` header from every answer and gives a main-frame document's
+    parser-inserted rule sets an inert type (a closed declarative shadow root, which no
+    script sees); and a popup's first document -- which Chromium loads into the Window of
+    its initial `about:blank`, where no init script runs again -- is answered with a
+    same-URL trampoline and then given the answer the route already fetched (sent once).
+    A `<link rel=prefetch>` is the page's own request and passes the route as any other.
+  - **The document a load committed** is checked before anything of it is read
+    (`navguard.committed_session_refusal`, defence in depth behind the route): a main
+    frame on a host the session's cookies do not reach is never read as the session's.
   - **The legacy spider** (`--engine playwright`, an identity crawl): every refusal is
-    counted (`session_host_unserved`). A load whose own redirect hop was refused is
-    stored `failed` with the cause (`HostNotServed`, unresolved, resumed; no static
+    counted (`session_host_unserved`). A load whose own redirect hop was refused, or
+    whose main frame is found committed on such a host before extraction, is stored
+    `failed` with the cause (`HostNotServed`, unresolved, resumed; no static
     fallback); a navigation the page made itself leaves the page with its own content,
     and its target is queued and refused at the load gate (FR-CRAWL-34: stored
     `failed`); a selector form's submission there is never sent. No anonymous landing
     is ever stored.
   - **Disco** (`disco capture`, a storage state or a session provider): the explorer's
-    context passes the session material's cookies (a provider's credential cookies; a
-    storage state's every cookie, since disco cannot tell its credentials from its
-    ambient cookies) and counts each refusal by host in `explore.json`
-    (`explore.session_host_unreached`), printed in the capture summary.
+    context passes the session material's cookies -- a provider's credential cookies; a
+    storage state's cookies that reach the start URL's host (`navguard.names_reaching`,
+    review round 1, BA-1: disco cannot tell a state's credentials from its ambient
+    cookies, and an ambient cookie held for an alias or another scope origin never
+    makes the start host unreached; a state none of whose cookies reaches the start
+    host keeps them all, so the start host is refused, never explored as the session's)
+    -- and counts each refusal by host in `explore.json`
+    (`explore.session_host_unreached`), printed in the capture summary. A state read
+    (`settled_fingerprint`) of a document committed on such a host is none (counted),
+    and the protected-resource probe never takes such a page.
   - **The auditor's browser fetcher** (FR-AUD, CC-AUD-0060) does the same for its pages.
-  - Enforced by: `tests/test_browser_session_reach.py` -- the predicate and the route on
-    doubles; real Chromium on loopback for a redirect hop, a selector form, a script's
-    `location` and a meta refresh (each with an image and a `fetch` to the alias), the
-    auditor's fetcher and disco's explorer, each asserting the alias received no request
-    and no anonymous landing is stored; and an AST guard that every module adopting a
-    session into a browser context passes `session_cookies=` to every `guard_page` and
-    to `checked_api_request` beside an API request context with a storage state, proven
-    on synthetic offenders. Each real-browser test fails on 7393c90 on its own
-    assertion (the alias received the requests with no cookie).
+  - Enforced by: `tests/test_browser_session_reach.py` -- the predicate (the IPv6 held
+    form included) and the route on doubles; real Chromium on loopback for a redirect
+    hop, a selector form, a script's `location` and a meta refresh (each with an image
+    and a `fetch` to the alias), the auditor's fetcher and disco's explorer, each
+    asserting the alias received no request and no anonymous landing is stored; and an
+    AST guard that every module adopting a session into a browser context passes
+    `session_cookies=` to every `guard_page` and to `checked_api_request` beside an API
+    request context with a storage state, proven on synthetic offenders. Each
+    real-browser test fails on 7393c90 on its own assertion (the alias received the
+    requests with no cookie). *(Review round 1:)* Chromium's held form of an IPv6 cookie
+    (`test_an_ipv6_cookie_as_chromium_holds_it_reaches_its_own_host_and_no_other`); a
+    storage state with an ambient alias cookie, explored with the session in disco
+    (`test_disco_explores_its_start_host_with_a_storage_state_that_holds_an_alias_cookie`,
+    `test_a_storage_states_ambient_cookie_on_another_host_never_refuses_its_start_host`);
+    no preload of any measured shape leaves a guarded context
+    (`test_no_speculation_rules_preload_leaves_a_guarded_context`,
+    `test_the_auditors_fetcher_and_the_spider_never_preload_the_alias`,
+    `test_the_route_gives_no_speculation_rule_set`,
+    `test_every_guarded_context_neutralises_preloads_before_its_pages_run`); a preload
+    past the guard is never read as the identity's page
+    (`test_a_preload_past_the_guard_is_never_read_as_the_identitys_page`,
+    `test_disco_never_reads_a_state_or_a_protected_resource_on_an_unreached_host`,
+    `test_a_document_committed_on_an_unreached_host_is_never_the_sessions`). Each fails
+    on 72297c9 on its own assertion (`scratchpad/lanes/BROWSERALIAS/r1proof/proof.log`).
 
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default
@@ -1649,7 +1697,12 @@ fuzzer.
   nothing outside scope); and the API-request client (scope-checked, no redirects).
   *(BUG-0545 review, B1:)* and every load, where it is made (`_visit`): scope and the
   destructive rule are asked again whatever queued it, a resumed crawl's stored rows
-  included (FR-CRAWL-35).
+  included (FR-CRAWL-35). *(BUG-0559 review round 1, BA-3:)* and no browser preload
+  makes a request the route never sees: Chromium's speculation-rules prefetch of a
+  same-origin `/logout` a page's document rules named went with the session past the
+  destructive rule (measured on Chromium 141), so no guarded context ever registers a
+  rule set (`navguard.PRELOAD_OFF_JS`, FR-CRAWL-43) --
+  `tests/test_browser_session_reach.py::test_no_speculation_rules_preload_leaves_a_guarded_context`.
   *(CC-CRAWL-0028, BUG-0136:)* **how** a request is refused is one rule: every abort
   of a document request (a navigation, top-level or frame, and each of its redirect
   hops), whatever the reason -- scope, destructive, refused method or body, the reveal

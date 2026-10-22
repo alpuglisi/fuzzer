@@ -352,7 +352,10 @@ class ContentFetcher:
         """The guard refused a request of the authenticated context to a host the
         session's cookies do not reach (SP-74, BUG-0559): nothing was sent; counted by
         host. A page load whose own target or redirect landing it was (``source``) is
-        refused whole (`fetch`): never the anonymous answer, never a static fallback."""
+        refused whole (`fetch`): never the anonymous answer, never a static fallback.
+        ``kind`` ``"committed"`` (BUG-0559 review round 1, BA-3): `fetch` found the main
+        frame committed on such a host after the load (a navigation the route never
+        saw) and refuses the load itself."""
         host = urlparse(url).hostname or "?"
         self.session_host_unreached[host] = self.session_host_unreached.get(host, 0) + 1
         if kind in ("document", "landing"):
@@ -488,6 +491,19 @@ class ContentFetcher:
                 if nav.reached:
                     # Let JavaScript-driven DOM updates settle (best effort).
                     navguard.wait_for_state(self._page, "networkidle", self.timeout_ms)
+                # SP-74 (BUG-0559 review round 1, BA-3), before anything of the page is
+                # read: a document the main frame committed on a host the session's
+                # cookies do not reach is the anonymous page of a navigation the route
+                # never saw (a preload served it) -- never audited as the identity's,
+                # nor is this load's own HTML, which that document replaced
+                unreached = navguard.committed_session_refusal(self._page,
+                                                               self._session_cookies)
+                if unreached is not None:
+                    self._note_session_unreached(self._page.url, "committed", url,
+                                                 unreached)
+                    navguard.end_failed_load(self._page, None, timeout_ms=self.timeout_ms)
+                    return self._refuse_unreached(url, unreached)
+                if nav.reached:
                     html = self._page.content()
                 else:
                     # BUG-0138 (review Q2): the load did not complete. Its parsing
