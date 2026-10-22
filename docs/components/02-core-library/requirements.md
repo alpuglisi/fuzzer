@@ -874,9 +874,10 @@ plugin registry. It is the layer that makes the store the integration bus.
     raised (family (d) below); `import_audit` stores both texts of a finding
     `AUDIT_TEXT_WITHHELD` when the floor rejects its page (one holding a `?`; a BLOB or
     str text alike, NULL kept, the merge's check P2), only its target when the floor
-    rejects the target alone (its context is then judged as any other), and fails the whole
-    import on a page `urlsplit` rejects without one, as 7393c90's did (FR-AUD-31,
-    pinned). Held by `tests/test_redaction_floor.py`: the floor's every definition, its
+    rejects the target alone (its context is then judged as any other), and, since the
+    merge's follow-up, every non-NULL text of a page `urlsplit` rejects without a `?`
+    too (it judges the page by `urlparse` as well; that page failed the whole import
+    before, as on 7393c90; FR-AUD-31). Held by `tests/test_redaction_floor.py`: the floor's every definition, its
     decorators included, hashes to 7393c90's text; each consumer is bound once in its
     module, by its undecorated `def`, and never re-bound, calls its floor first on its
     own parameters, and reads none of its positional text parameters (every positional

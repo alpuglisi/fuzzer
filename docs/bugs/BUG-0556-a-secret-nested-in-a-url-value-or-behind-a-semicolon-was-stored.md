@@ -1836,7 +1836,7 @@ sub-bullets), and this section.
   - **P1 and P3, stated, not changed:** the other findings of that DB and a finding's
     rule metadata are stored as both trees store them in a run without such a page;
     neither tree redacts them, and 7393c90 kept them out only by failing the whole import.
-    Failing the import again would undo D1. FR-AUD-31.
+    Failing the import again would undo the import of such pages (R4's, at the r6 review). FR-AUD-31.
 - **Records:** ten claims in 1ad0fd0 were not true of the code, each corrected:
   the r6 and r6-review CHANGELOG lines (the floor raises only on a rejected URL holding a
   `?`; proxy history stores the URL cut at its first `?`; a page without a `?` still
@@ -1853,3 +1853,17 @@ sub-bullets), and this section.
   copied from a lane's text or written from the case at hand, not measured over the
   inputs it covers. PA-0556(11)'s last sentence already requires the measurement; the
   correction is to run a records-truth check before the push, as this one ran after it.
+- **The follow-up's own records check (before its push):** three claims of the first
+  draft of this change were not true. (1) `_audit_text` judged a page rejected only where
+  its floor raised, which needs a `?`: on a page `urlsplit` rejects without one, a
+  non-text (a BLOB context with a NULL or numeric target, in a findings table other than
+  the auditor's, whose target is `TEXT NOT NULL`) was stored as it was, where 7393c90's
+  import raised, and a str text failed the whole import. Fixed: the page is judged by
+  `urlparse` as well, so every non-NULL text of a page `urlsplit` rejects is withheld and
+  the import goes on; the R4 pin becomes an ordinary test, and
+  `tests/test_redaction_nested.py::test_merge_followup_every_text_of_a_page_urlsplit_rejects_is_withheld`
+  (12 of its 20 cases fail on the first draft, all pass now) holds the rule for every
+  text type. (2) "no other leak or failure" held only for the checkers' corpora; the
+  line now says so. (3) "every lexically visible use" overstated the guards: a literal
+  `__dict__` or `attrgetter` reference is lexically visible and missed; the records now
+  name the uses the guards see. F-280.

@@ -605,8 +605,8 @@ budget where a vulnerability is plausible.
     tree's redactor first, which raises `ValueError` on a URL `urlsplit` rejects that
     holds a `?` and returns one without a `?` unread (FR-CORE-537). **`import_audit`
     stores nothing the pushed tree's import redacted and fails on no finding page the
-    pushed tree's import read; it is not total** -- it still fails on the pages below
-    that 7393c90's import failed on too:
+    pushed tree's import read**; on the pages below, where 7393c90's import failed or
+    stored the text raw:
     - a target identifier the owner rejects is stored as
       `store_adapter.AUDIT_TEXT_WITHHELD` (`(unparseable URL withheld)`, as
       `core.trace.safe_ref` withholds), never raw (7393c90 stored it raw);
@@ -628,16 +628,16 @@ budget where a vulnerability is plausible.
       page URL the owner cannot read); every other finding is imported. r6's record that
       such a text was withheld was not true on 3615cfb: `_main_origin` raised before
       `_audit_text` ran;
-    - *(at the merge, R4: the r6 review's record that the import is total, and that it
-      never fails on a finding's URL, was not true on 08eb900)* a finding **page**
+    - *(at the merge, R4, pinned; fixed in the merge's follow-up)* a finding **page**
       `urlsplit` rejects as written **without a `?`** (`http://[h/app/p.php`,
-      `//[h/app/p.php`, `http://x＃y/app/p.php`, `//user:pw@x[y/app/p.php`) **still fails
-      the whole import**, every other finding with it: the floor returns such a URL
-      unread, so `_audit_text`'s withhold branch is never reached and its
-      `urlparse(page_url)` raises `ValueError`, as 7393c90's import fails the same pages
-      (in `to_path`). Pinned, owner AUD, candidate rule (not built): catch that
-      `ValueError` and withhold the texts
-      (`tests/test_redaction_residual_pins.py::test_import_audit_imports_a_finding_page_urlsplit_rejects_without_a_query`);
+      `//[h/app/p.php`, `http://x＃y/app/p.php`, `//user:pw@x[y/app/p.php`) is handled
+      as one with a `?`: no endpoint, every non-NULL text withheld, the import goes on.
+      The floor returns such a URL unread, so `_audit_text` judges the page by
+      `urlparse` as well; until the follow-up its `urlparse` raised and the whole
+      import failed, as 7393c90's fails the same pages (in `to_path`)
+      (`tests/test_redaction_residual_pins.py::test_import_audit_imports_a_finding_page_urlsplit_rejects_without_a_query`,
+      an ordinary test now;
+      `tests/test_redaction_nested.py::test_merge_followup_every_text_of_a_page_urlsplit_rejects_is_withheld`);
     - *(at the merge, D1(b))* a finding page stored as a BLOB is read by `to_path` as
       7393c90 read it: one with an empty path (`b"http://h"`, `b"x://"`) is stored `/`,
       its texts judged against nothing of the page (as on 7393c90, which judged no
@@ -650,8 +650,8 @@ budget where a vulnerability is plausible.
       (`tests/test_redaction_residual_pins.py::test_import_audit_imports_a_blob_finding_page_and_judges_its_texts`).
       Unreachable from the auditor itself (`fetcher.log_finding` writes the crawler's
       str URL).
-    - *(The merge's check, 2026-10-22.)* A page `urlsplit` rejects that holds a `?`
-      made 7393c90's whole import raise, so it stored nothing; it is imported now, and
+    - *(The merge's check, 2026-10-22; the follow-up's.)* A page `urlsplit` rejects (with
+      or without a `?`) made 7393c90's whole import raise, so it stored nothing; it is imported now, and
       every non-NULL text of that finding is `AUDIT_TEXT_WITHHELD` whatever its type (a
       BLOB `html_context` was stored verbatim before this fix:
       `tests/test_redaction_nested.py::test_merge_p2_a_blob_text_of_a_page_its_floor_rejects_is_withheld`).

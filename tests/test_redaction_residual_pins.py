@@ -608,19 +608,6 @@ _ON_7393_IMPORT = ("on 7393c90 too: not a regression against the pushed tree, so
                    "not fixed in the batch")
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
-    "BUG-0556 residual at the merge, R4 (owner AUD, tools.store_adapter `_audit_text`): a "
-    "finding page `urlsplit` rejects as written WITHOUT a '?' (`http://[h/app/p.php`, "
-    "`//[h/app/p.php`, `http://x＃y/app/p.php`, `//user:pw@x[y/app/p.php`) passes the "
-    "floor unread (the pushed tree's URL redactors call `urlsplit` only on a URL holding "
-    "a '?'), so `_audit_text`'s withhold branch is never reached and its "
-    "`urlparse(page_url)` raises ValueError, uncaught: the whole import fails, every "
-    "other finding with it (the fix check of 08eb900: all 3 000 '?'-less pages of the "
-    "12 000 rejected ones among 43 680 generated neighbours, and 27 of the 888-URL "
-    "supplement; the 70 000-URL corpus holds no URL without a '?'); 7393c90's `to_path` "
-    f"raised on the same pages ({_ON_7393_IMPORT}). Candidate rule, not built: catch "
-    "that ValueError and withhold the finding's texts (`AUDIT_TEXT_WITHHELD`), as for "
-    "such a page with a '?'"))
 @pytest.mark.parametrize("page,secret", [
     ("http://[h/app/p.php", None),
     ("//[h/app/p.php", None),
@@ -630,6 +617,12 @@ _ON_7393_IMPORT = ("on 7393c90 too: not a regression against the pushed tree, so
 ])
 def test_import_audit_imports_a_finding_page_urlsplit_rejects_without_a_query(tmp_path,
                                                                               page, secret):
+    """BUG-0556, pinned at the merge (R4) and fixed in its follow-up: a page `urlsplit`
+    rejects WITHOUT a '?' passes the floor unread, and `_audit_text`'s `urlparse` raised,
+    failing the whole import (as 7393c90's `to_path` did). `_audit_text` now withholds
+    every text of a page `urlsplit` rejects, with or without a '?', and the import goes
+    on; no secret of the page is stored. No longer a residual: kept in this file beside
+    its neighbours."""
     from urllib.parse import urlsplit
     assert "?" not in page
     with pytest.raises(ValueError):                          # not vacuous: urlsplit

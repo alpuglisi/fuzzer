@@ -194,7 +194,7 @@ Newest first.
     `_prepare_contained` docstring corrected to what is stored — done
   - [x] *(At the merge)* `redact`'s docstring corrected; the A1 history test renamed;
     the header-triggered family (d) case pinned; FR-PROXY-11 amended in place — done
-- *(After the push: the merge's check, 2026-10-22.)* FR-PROXY-11 corrected: since r6 a message passes the pushed tree's `redact` (the floor) and then the walk, so `redact_url` is no longer called on every value; the floor reaches its own `redact_url` for the target and the `Location` / `Content-Location` values holding a `?` and for `Refresh`'s `url=` runs. No behaviour change. BUG-0556, "After the push".
+- *(After the push: the merge's check, 2026-10-22.)* FR-PROXY-11 corrected: since r6 a message passes the pushed tree's `redact` (the floor) and then the walk, so `redact_url` is no longer called on every value; the floor reaches its own `redact_url` for the target and the `Location` / `Content-Location` values holding a `?` and for `Refresh`'s `url=` runs in such a value. No behaviour change. BUG-0556, "After the push".
 - Effectiveness (assessed 2026-10-22): the round-1 probe (`rev1probe/proxy_probe.py`)
   found the canary in `body`, `flow_fts` and `flow_fts_content` on c3a13f7; on f939778
   the round-2 test's messages (duplicates, `Referer`, `Origin`, `Link`, a custom header,

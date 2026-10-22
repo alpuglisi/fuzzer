@@ -88,7 +88,7 @@ that shares the store, never a mandatory pipeline (D5).
     walk (`_walk`, `_walk_names`) on its output, so `redact_url` itself is no longer
     called on each value: the floor reaches its `redact_url` for the target and the
     `Location` / `Content-Location` values that hold a `?` and for `Refresh`'s `url=`
-    runs, as 7393c90 did. *(Review round 2, `CC-PROXY-0031`:)*
+    runs in a value that holds a `?`, as 7393c90 did; the walk then reaches every value. *(Review round 2, `CC-PROXY-0031`:)*
     **every value of every URL-bearing header**, duplicates included and rewritten in
     place (order and every other line byte-exact): `Location`, `Content-Location`,
     `Referer`, `Origin`, `Destination`, `X-Original-URL`, `X-Rewrite-URL`, `Ping-From`,

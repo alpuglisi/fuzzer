@@ -1090,6 +1090,26 @@ def test_merge_p2_a_blob_text_of_a_page_its_floor_rejects_is_withheld(tmp_path, 
     assert candidates[0][2] == AUDIT_TEXT_WITHHELD
 
 
+@pytest.mark.parametrize("page", [*_R4_PAGES, "http://[h/app/p.php", "//[h/app/p.php",
+                                  "http://[h/app/p.php#token=" + _PASS])
+@pytest.mark.parametrize("text", [f"value {_PASS}", f"value {_PASS}".encode(), 7, 1.5])
+def test_merge_followup_every_text_of_a_page_urlsplit_rejects_is_withheld(page, text):
+    """The follow-up's records check: `_audit_text` judged a page rejected only where its
+    floor raised (a page holding a '?'), so on a '?'-less page `urlsplit` rejects a
+    non-string text was returned as it is (a BLOB context of a finding with a NULL or
+    numeric target, in a findings table other than the auditor's, was stored verbatim)
+    and a string one failed the import. Every non-NULL text of a page `urlsplit` rejects,
+    with or without a '?', is withheld; NULL stays NULL."""
+    from urllib.parse import urlsplit
+
+    from fuzzlab.tools.store_adapter import AUDIT_TEXT_WITHHELD, _audit_text
+    with pytest.raises(ValueError):                          # not vacuous
+        urlsplit(page)
+    assert _audit_text(text, page) == AUDIT_TEXT_WITHHELD
+    assert _audit_text(text, page, url=True) == AUDIT_TEXT_WITHHELD
+    assert _audit_text(None, page) is None
+
+
 # --- at the merge (coordinator's records round, owner-approved): D1(b) --------------------
 #: A finding page stored as a BLOB whose path is empty: 7393c90's `import_audit` read it
 #: with ``to_path`` (``urlparse(b"http://h").path`` is ``b""``, so ``"/"``) and imported
