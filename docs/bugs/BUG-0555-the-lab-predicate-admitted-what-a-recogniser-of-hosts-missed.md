@@ -1,0 +1,305 @@
+# BUG-0555 — FR-AUD-20's lab predicate admitted every value a recogniser of hosts missed: a loopback authority it did not recognise kept an outside tail, and a bare outside host with an unlisted TLD was sent
+
+- Date: 2026-10-22
+- Status: fixed (CC-AUD-0058, FR-AUD-20 amended in place; SP-73's owner), with one
+  neighbouring residual pinned for FUZZ (below)
+- Severity: high. A value naming a host outside the lab was sent to the lab app as a
+  sibling, and bound fresh from a page, verbatim (D11's lab-only rule; FR-AUD-20). The
+  same predicate gates all three senders of app-supplied values:
+  `harness.auto._send_value`, `harness.auto._outside_lab` and
+  `oracle._FormBoundSender._bind_fresh`.
+
+## Description
+`audit/value_shape.py::names_outside_lab` (SP-73) decides whether an app-supplied value
+may be sent (FR-AUD-20, amended by FR-FUZZ-67). BUG-0544's three review rounds made its
+proof an allow-list: a loopback authority with a numeric port, and a path, query and
+fragment in the safe tail grammar (`_tail_in_grammar`). But the proof ran only behind a
+gate:
+
+```python
+if not isinstance(value, str) or neutral_value(value) == value:
+    return False
+return not _names_only_lab(value)
+```
+
+`neutral_value` is the stand-in chooser, and it decides with a recogniser: it replaces a
+value only when it contains `://`, starts with `//`, or `value_shape` reads the value,
+or its prefix up to the first `/` or `:` (`_host_prefix`), as an `ip` or a `hostname`.
+`value_shape`'s `hostname` needs a two-letter TLD or one of the closed `GENERIC_TLDS`;
+its `ip` is Python's `ipaddress`, which refuses every short, integer, hex, octal or
+trailing-dot spelling. Whatever that recogniser missed returned False (the lab) before
+the allow-list ran. So the allow-list of BUG-0544 round 3 decided only the values the
+recogniser had already flagged.
+
+## Where encountered
+The check of BUG-0544's final round (8fee220), recorded as residual N-R3-1
+(`docs/bugs/BUG-0544-stored-evidence-was-replayed-as-the-request.md`, "Residuals after
+the final round"; `scratchpad/reqid78/residuals_r3.md`), pinned by two strict xfails over
+twelve spellings. The same values are sent verbatim at dcc7091 (older than the
+amendment). Reproduced on 7393c90 by those two tests with the pin removed (12 + 12
+failures), and by this lane's sweep (below).
+
+## What it caused to fail
+Each of these was the lab to `names_outside_lab` at 7393c90, so `_send_value` sent it
+unchanged, `_outside_lab` let its request be rebuilt, and `_bind_fresh` bound it. WHATWG
+reads each one as naming an outside host (node 22, `new URL("http://" + v)`):
+- a loopback authority with no `/` before `?` or `#`: `127.0.0.1?next=evil.top`,
+  `localhost?next=evil.example`, `127.0.0.1#evil.example:8080`, `localhost?u=134744072`,
+  `127.0.0.1?next=https:evil.example`, `127.0.0.1?next=//evil.top/x`,
+  `LOCALHOST?next=8.8.8.8:53` (host 127.0.0.1 or localhost, the tail naming evil.top,
+  evil.example or 8.8.8.8);
+- a loopback authority spelled so the recogniser misses it: `127.0.0.1./?next=evil.top`,
+  `localhost./?next=evil.example`, `127.1/?next=evil.top`, `2130706433/?next=evil.top`,
+  `0x7f000001/?next=evil.example:8080` (WHATWG: 127.0.0.1, or `localhost.`);
+- the broader gap with the same cause, a top-level outside value: `evil.top`,
+  `evil.top/x`, `evil.shop:8080`, `134744072`, `8.8.2056/x`, `8.8.8.8./x`,
+  `0x8080808:53` (evil.top, evil.shop, 8.8.8.8), and `ｅｖｉｌ．ｔｏｐ`, `evil%2Etop`,
+  `evil​.top`, `evil。top` (each evil.top), `/evil.top` and `\\evil.top/x`
+  (evil.top), `user@evil.example` (evil.example).
+
+An app that reads such a value as a URL or a host (an SSRF or redirect sink, a
+`next=` parameter) is sent a host outside the lab by the fuzzer.
+
+## What the bug was identified to be
+The admission decision of a safety predicate was made by a recogniser of the forbidden
+thing (`neutral_value` → `value_shape` → `GENERIC_TLDS`, `ipaddress`, `_host_prefix`),
+in front of the allow-list that BUG-0544 round 3 required. The allow-list itself
+(`_names_only_lab`, `_tail_in_grammar`) was correct for the values it saw.
+
+## Root cause analysis (Five Whys)
+1. Why were `127.1/?next=evil.top` and `evil.top` sent? `names_outside_lab` returned
+   False without running its proof.
+2. Why? It returned early when `neutral_value(value) == value`, which it is for every
+   value `neutral_value`'s recogniser does not flag.
+3. Why was the gate a recogniser? `names_outside_lab` was introduced (BUG-0544) as a
+   refinement of `neutral_value`: "a value `neutral_value` would replace whose host is not
+   loopback". The three review rounds each tightened what happens after the gate (the
+   authority split, then the tail grammar) and never questioned which values reach it.
+4. Why did round 3's guard and sweep not catch it? The guard
+   (`test_the_tail_rule_is_an_allow_list_never_a_recogniser_of_hosts`) read
+   `_tail_in_grammar` only, not the predicate's entry or anything else it reaches. The
+   sweep (`_r3_sweep`) varied the tail token only; every position put a recognised
+   authority (`http://127.0.0.1/`, `127.0.0.1/`, `localhost:3000/`, `http://[::1]:8080/`)
+   before it, so the gate always passed.
+5. Why was the scope of the guard and the sweep the tail? PA-0544(7) round 3 said "every
+   part" and "a guard that the predicate reads no recogniser", but its enforcement named
+   one helper, and "every part" was read as authority and tail of a value already known
+   to have them: the decision of *which values have a host at all* was not seen as a part.
+
+**Root cause:** the predicate's admission was split into "is this a URL-like value" and
+"is this URL-like value loopback", and only the second was made an allow-list; the
+first stayed a recogniser of hosts, and the guard and sweep that PA-0544(7) required were
+scoped to the second.
+
+## Corrective action
+CC-AUD-0058 (FR-AUD-20 amended in place; SP-73's row text updated at the merge):
+- `names_outside_lab` no longer reads `neutral_value` or `value_shape`. It decides on
+  every text a reader parses from the value (`_reader_texts`: WHATWG's tab/newline
+  removal and C0/space trim, an application's Unicode trim, and a C reader's cut at the
+  first NUL). A value of a **URL or authority shape** (`_authority_shaped`: a scheme and
+  `:`, any scheme; a leading `//`, `\` or `/\`; or a leading token, or the host a reader
+  that puts `http://` before the value takes -- leading slashes skipped, userinfo cut at
+  its last `@` -- that is a `_host_token`) is the lab only when `_names_only_lab` proves
+  it: its authority, up to the first `/`, `?` or `#`, is one of an **explicit set of
+  loopback spellings** (`_lab_authority`: `localhost` in any case, `[::1]`, and
+  `127.a.b.c` in canonical dotted decimal, with at most a port of one to five digits),
+  `urlsplit` agrees, the tail is in `_tail_in_grammar`, and no `@`, `\`, `%`, control,
+  space or non-ASCII character is anywhere. Anything else names no host to any reader
+  but a single-label one, and is the lab.
+- `_host_token` (what a reader takes for a host): WHATWG can read it (no space or
+  control after percent-decoding, NFKC case folding and dropping ignorable characters)
+  and it holds a dot or an IDNA full stop, is a bracketed literal, is `localhost`, or is a
+  dotless number that WHATWG reads as 0.0.0.0 or as an address of at least 2**24 (and
+  below 2**32). A bare dotless number below 2**24 (0 included) is no shape.
+- `neutral_value` stands loopback in for every value `names_outside_lab` puts outside
+  (SAFE_URL with a scheme, path, query or fragment, else SAFE_HOST), so `_send_value`
+  never returns an outside value unchanged.
+- Bounded: a token longer than `MAX_LEN` with no space is read as a dotted host (fail
+  closed); `int()` never sees more than ten decimal digits; the shape checks are C-level
+  string operations (a 10 MB value: 0.2 s, measured).
+
+**Design measured, then narrowed.** The first version also held two shapes with no host
+of their own to the tail grammar: a reference to the page's own origin (a leading `/`,
+`?` or `#`: resolved against the lab it is a lab URL) and a single-label authority before
+a tail (`intranet/?next=evil.top`). Measured on random tokens before shipping
+(`token_cost.py`, 20,000 each): the reference rule put 99.9% of ASP.NET-shaped view
+states (`/wE...`) outside, and the single-label rule 20.5% of 32-byte standard base64
+tokens (21.5% with both), so their forms' fresh-bound tokens would be unbound. Both
+rules were dropped for the stated residual below; with the shipped design, standard base64
+tokens are 0.1% outside (those starting `0/`, which WHATWG reads as 0.0.0.0, or `//`),
+view states, URL-safe base64, hex and UUID tokens 0%.
+
+**Measurements** (CLAUDE.md step 8; scripts in
+`scratchpad/lanes/LABAUTH/`):
+- **WHATWG readings, node 22.22.0** (`probe.js`, `measure.py`): the 69 readings
+  embedded in the tests (`_MEASURED_OUTSIDE`, `_MEASURED_LAB`) were checked against node
+  (`check_tables.py`: 0 mismatches). Notable: `127.1`, `2130706433`, `0x7f000001`,
+  `0177.0.0.1`, `127.0.0.1.` are 127.0.0.1; `localhost.` stays `localhost.`;
+  `[0:0:0:0:0:0:0:1]` is `[::1]`; `/evil.top`, `\\evil.top/x` and `/\evil.top/x` are
+  evil.top and `/8.8.8.8:53/x` is 8.8.8.8:53 with `http://` before them;
+  `evil.top\x00` is evil.top (trailing C0 trimmed); `user@evil.example` is
+  evil.example; `42` is 0.0.0.42, `0:3000` is 0.0.0.0:3000; `4294967296`,
+  `hello world`, `a b.top` and `/?next=evil.top` are no host.
+- **Soundness against node** (`soundness.py`): 2,730,000 generated values (18 prefixes,
+  7 userinfos, 91 host spellings, 7 ports, 13 tails); 16,159 admitted. For every
+  admitted value node reads, as an absolute URL and with `http://` before it, either no
+  host, or a loopback host (or 0.0.0.0) whose path, query and fragment are in the
+  grammar, or (with `http://` before it) a single-label name or a non-zero 0.0.0.0/8
+  address: **0 unsound admissions**; 2,710 of the admitted values are the stated
+  residual (a single-label host before a tail outside the grammar).
+- **0.0.0.0/8 on the test host** (Linux 6.18; a UDP `connect`, a route lookup that sends
+  nothing): 0.0.0.0 is routed to 127.0.0.1; 0.0.0.1, 0.0.0.42, 0.1.2.3 and
+  0.255.255.255 go to the default route (Linux treats 0/8 as unicast since 5.3).
+  Hence 0 is a host token (it is this host: its port and tail must be proven), and the
+  other small numbers are a stated residual, not "no host".
+- **Flip cost** (`collect_store_values.py`, `flips.py`): over the 532 fuzzlab stores on
+  this host holding sibling values (the test suite's and the lanes' recorded runs; form
+  entries, parameter examples, stored URLs' query values), 3,509 distinct non-filler
+  values (14,755 occurrences): 15 distinct values (188 occurrences) move from the lab to
+  outside, none the other way: `robots.txt` (72), `lang_en.php` (32), `portal.php`,
+  `message.txt` (8 each), `getting-started.html`, `2.5` (4 each),
+  `keyboard-shortcuts.html` (2), two `.md` file names (1 each), two long values over
+  `MAX_LEN` (5 and 1), `disco.user@example.com` (27), `a@lab.test`, `a@b.example` (8
+  each), a free text holding `...@fuzzlab.lab)` (7). Over the values written in the
+  repo's test fixtures and lab sources (`collect_fixture_values.py`: HTML `value=`
+  attributes and URL query values, 217 distinct non-filler), 32 flip: the tests' own
+  outside spellings, file names (`login.php`, `xss_login.php`, `lang_fr.php`,
+  `clip123.mp4`), `1.2.3`, `1.`, `...`, `/manager.php` and path-traversal payloads. The
+  literal reading of "a leading token WHATWG parses as a host" (a pure word before a
+  delimiter, `text/html`, outside too) would flip one more stored value
+  (`1;token=<hex>`); this design keeps the word a single-label name, as bare.
+
+**Accepted false positives** (outside: a sibling or fresh value is unbound, a stand-in
+context gets loopback): a dotted token (`robots.txt`, `lang_en.php`, `2.5`, `1.2.3`,
+`0.00`, `v1.2`, `Hello.`, a JWT), also as a path's first segment (`/index.php`) or a
+leading `..`; an e-mail address (`user@mail.example.com`: it names its domain to a reader
+that puts `http://` before it; this supersedes FR-AUD-20's stated e-mail residual); a
+dotless number from 2**24 to 2**32 - 1 (an 8- to 10-digit id or Unix timestamp: an IPv4
+address to WHATWG and inet_aton) and one reading 0.0.0.0 before a port or path (`00:30`,
+`0/x`); text starting with a word and `:` (a scheme to WHATWG: `Note: x`, `sort:asc`,
+`intranet:8080/x`, `javascript:`, `mailto:`); a loopback spelling outside the explicit set
+(`127.1`, `2130706433`, `localhost.`, `[0:0:0:0:0:0:0:1]`, `[::ffff:127.0.0.1]`,
+`127.0.0.1.`, `/127.0.0.1/`).
+
+**Stated residuals** (the lab): a pure dotless word and a dotless number of 2**32 or more
+(single-label names: a host only to a resolver that completes them from a search list or
+a hosts file), whatever follows them (`intranet/?next=evil.top`); a non-zero dotless
+number below 2**24 (0.0.0.0/8: RFC 6890 not forwardable; this kernel routes it to the
+default route); free text with a space (no reader reads a host from it); a value naming
+no host of its own whose path, query or fragment does (`/?next=evil.top`, `/go/evil.top`,
+`?next=evil.top`, `#evil.zip`): resolved against the lab it is a lab URL with such a tail,
+but holding it to the grammar costs the tokens measured above.
+
+**Tests** (`tests/test_replay_bindings.py`; each reproduction run once on 7393c90's
+`value_shape.py` in a scratch copy, see CC-AUD-0058):
+- the two N-R3-1 pins, now plain tests (24 cases);
+- `test_every_authority_spelling_outside_the_lab_set_is_outside_the_lab` (the generated
+  sweep: IPv4 one- to four-part, integer, hex, octal, trailing-dot and upper-case
+  spellings of 8.8.8.8, 127.0.0.1, 10.0.0.1 and 1.2.3.4; host names in other cases,
+  trailing dots, percent-encoded, with IDNA, fullwidth and halfwidth full stops,
+  fullwidth letters and ignorable characters; IPv6 literals with `::ffff:127.0.0.1` and
+  `::ffff:8.8.8.8`; in 23 positions: bare, port, path, query, fragment, `;`, absolute,
+  upper-case scheme, scheme-relative, backslashed, special scheme without `//`,
+  userinfo both ways) and `test_the_binder_never_binds_an_authority_spelling_outside_the_lab_set`;
+- `test_a_lab_set_authority_with_a_grammar_tail_is_the_lab` (70 loopback controls, sent
+  and bound as given);
+- `test_a_value_a_reader_takes_for_a_host_beyond_the_lab_set_is_outside` and
+  `test_a_pure_word_a_small_number_and_free_text_are_the_lab` (the measured tables);
+- `test_a_reference_is_outside_only_when_a_reader_takes_a_host_from_it` (the
+  `http://`-reader host after leading slashes, the scheme reading of `word:`, and the
+  residual, with a view state and a standard base64 token kept);
+- `test_the_lab_predicate_reaches_no_recogniser_of_hosts` and
+  `test_the_recogniser_guard_catches_a_synthetic_offender` (an AST walk of everything
+  `names_outside_lab` reaches, proven on N-R3-1's own early return and on a recogniser
+  three calls down).
+- Amended with before/after: `tests/test_forms_phase2.py::test_neutral_value_errs_toward_loopback`
+  (`lang_en.php` and the e-mail row now get loopback) and
+  `::test_link_query_siblings_are_bound` (`u=robots.txt` is outside: loopback holds its
+  slot, and the points that need it as a sibling carry a `replay_refusal`).
+
+**Residual pinned (FUZZ):**
+`tests/test_replay_bindings.py::test_an_access_control_replay_never_reads_a_stand_in_for_its_own_value`
+(strict xfail, `raises=AssertionError`). The point builder puts loopback in a point's
+own slot when its value is outside the lab (FR-AUD-20: the payload's slot), but
+`CrossAccountReplayStrategy` (a SEED category, PA-0530) replays that slot as the object
+key: the owner's request for `127.0.0.1` answers 404, and the point is read as a
+negative, not inconclusive. Measured in plain Python (`pin_check.py`): `10.0.0.5`
+(outside at 7393c90 too) and `100000001` (outside since this change) give no verdict and
+no inconclusive, `42` confirms. Pre-existing for an ip- or host-name-valued id; wider now
+for 8- to 10-digit ids. R-ACCESS-CONTROL fires only on id-named parameters
+(`*_id`, `id`, `uuid`, `guid`), and no recorded store holds such an id.
+
+## Recurrence review
+Checked `docs/bugs/` and `docs/PREVENTIVE_ACTIONS.md` for a safety predicate whose
+admission a recogniser decided, and for FR-AUD-20's predicate:
+- **BUG-0544 / PA-0544(7)**: the same predicate, the same root cause, four times. Round 1
+  (B3): the authority was read with `urlsplit` only (`127.0.0.1:80@evil.example/`
+  passed). Round 2 (R2-1): the tail was read with `value_shape` (`?next=evil.example:8080`
+  passed). Round 3 (R3-1): the tail rule was still a recogniser (`?next=evil.top`
+  passed); fixed by `_tail_in_grammar`. Final check (N-R3-1): the gate in front of the
+  allow-list was a recogniser (`127.1/?next=evil.top`, `evil.top` passed); pinned. This
+  is that pinned residual, and a recurrence of the same root cause.
+- BUG-0124 (FR-AUD-21's redirect seed): an explicit, operator-approved exception, not
+  a predicate; not this cause.
+- PA-0123, PA-0132 (scope predicates for the browser and redirects): about where fuzzlab
+  sends, not what an app-supplied value names.
+
+## Prior-preventive-action failure analysis
+**PA-0544(7)** (BUG-0544, rounds 1 to 3) required that the predicate admit only what it
+proves for every part of the value, as an allow-list, "enforced by a guard that the
+predicate reads no recogniser, and by a generated sweep of each bypass class". It did not
+prevent this recurrence because:
+- **Enforced on the wrong layer, too narrow.** Its guard
+  (`test_the_tail_rule_is_an_allow_list_never_a_recogniser_of_hosts`) parses
+  `_tail_in_grammar` alone. "The predicate" was implemented as the tail helper;
+  `names_outside_lab`, the predicate's entry, read `neutral_value` and the guard never
+  looked there. A guard of one helper cannot see a recogniser in its caller.
+- **The sweep varied one part.** `_r3_sweep` generated every tail token in every position,
+  but every position began with an authority the recogniser recognises, so the gate never
+  failed open in the sweep. "Each bypass class" was read as "each tail token class".
+- **"Every part" omitted the shape decision.** Which values have an authority at all was
+  decided before the proof, and was not treated as a part to prove.
+- It was followed in name (the allow-list exists) and the residual was pinned per
+  PA-0530(4), as required, by a strict xfail: the pin worked, which is why this fix is
+  scoped exactly.
+
+## Preventive action
+**PA-0555** (strengthens PA-0544(7); PA-0002 sweep below):
+1. **A safety predicate's guard reads everything the predicate reaches**, from its
+   public entry through each function of its module it calls (a transitive walk, not one
+   helper), and fails on any recogniser, classifier, closed list or parser of the
+   forbidden thing; it is proven on a synthetic offender at the entry (an early return)
+   and one several calls down.
+2. **The shape decision is a part.** Deciding which values are subject to the proof is
+   itself fail closed: made syntactically on every text a reader parses (WHATWG's
+   preprocessing, an application's trim, a C reader's NUL), and a value of uncertain shape
+   is subject to the proof. A carve-out that admits without proof (a pure word, a small
+   number) is a stated residual with its measurement and its measured flip cost.
+3. **An admitted host is an explicit set of spellings every reader reads alike**, never
+   "a reader reads it as loopback": other spellings of the same address are outside
+   (stated false positives).
+4. **A generated sweep varies every part of the value**: the authority's spelling in
+   every form, the delimiter after it, the prefix before it, and the tail, and is checked
+   against the real reader (node) at design time, with the measured readings embedded in
+   the test. A sweep whose fixed parts pass a gate cannot test the gate.
+
+- Enforced by: tests/test_replay_bindings.py::test_the_lab_predicate_reaches_no_recogniser_of_hosts, tests/test_replay_bindings.py::test_the_recogniser_guard_catches_a_synthetic_offender, tests/test_replay_bindings.py::test_every_authority_spelling_outside_the_lab_set_is_outside_the_lab, tests/test_replay_bindings.py::test_the_binder_never_binds_an_authority_spelling_outside_the_lab_set, tests/test_replay_bindings.py::test_a_value_a_reader_takes_for_a_host_beyond_the_lab_set_is_outside, tests/test_replay_bindings.py::test_a_loopback_authority_the_recogniser_misses_is_still_outside_the_lab
+
+**PA-0002 sweep** (by primitive, SP-73: every caller of the owner and every consumer of
+what changed):
+- `harness.auto._send_value` (sibling and own entries of form, link-set, path and JSON
+  points; header points' representative query): reads the owner; `neutral_value` now
+  stands loopback in for every outside value, so it never returns one unchanged.
+- `harness.auto._outside_lab` (a point's `replay_refusal`; `first_link_set`'s accept for
+  header points): reads the owner.
+- `oracle._FormBoundSender._bind_fresh`: reads the owner.
+- Consumers of the own slot's stand-in: the strategies' payloads replace it, except the
+  SEED categories (PA-0530): command-injection starts from `base_value` (SAFE_HOST or
+  none), open-redirect from its `redirect_seed` (FR-AUD-21's exception), nosql-injection
+  reads only the leaf's type, and access-control replays it -- the pinned residual above.
+- Other uses of `value_shape` (`harness.auto._shapes`, the rule predicates, the
+  command-injection `base_value`, `redirect_seed`) choose categories and starting values;
+  none admits a value to be sent.
+- Other admit predicates for app-supplied values: none (grep of `names_outside_lab`,
+  `neutral_value`, `is_loopback_origin` callers on values; `core.urls` scope predicates
+  judge fuzzlab's own request URLs, PA-0123).

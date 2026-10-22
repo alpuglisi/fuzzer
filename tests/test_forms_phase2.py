@@ -119,8 +119,15 @@ FRAME = "http://h/app/frame.php?u=robots.txt&w=250&h=250"
 def test_link_query_siblings_are_bound(tmp_path):
     pts, _s, counts = _points(tmp_path, pages=[FRAME])
     by = {p.param: p for p in pts}
-    want = (("u", "robots.txt"), ("w", "250"), ("h", "250"))
+    # BUG-0555 (before: ("u", "robots.txt") sent as given): a dotted token is a host to
+    # a reader that puts http:// before it (node 22: `new URL("http://robots.txt").host`),
+    # so FR-AUD-20 puts it outside the lab -- loopback holds its slot, and a point that
+    # needs it as a sibling cannot be rebuilt (an accepted false positive)
+    want = (("u", vs.SAFE_HOST), ("w", "250"), ("h", "250"))
     assert {by[n].base_entries for n in "uwh"} == {want}
+    assert by["u"].replay_refusal is None
+    assert all("sibling u names a host outside the lab" in by[n].replay_refusal
+               for n in "wh")
     assert counts["link_set"] == 1 and counts["link_set_bound"] == 3
 
 
@@ -871,10 +878,13 @@ def test_value_shape_table(value, shape):
     ("www.example.com:8080/x", vs.SAFE_URL), ("http://a/" + "x" * 3000, vs.SAFE_URL),
     ("http://itsecgames.blogspot.com", vs.SAFE_URL),
     # unchanged: not a network location
-    ("lang_en.php", "lang_en.php"), ("docs/x.pdf", "docs/x.pdf"), ("text/html", "text/html"),
-    ("12:00", "12:00"), ("2020-01-01T00:00", "2020-01-01T00:00"), ("fuzzlab", "fuzzlab"),
-    # stated residual (reviewer B): an e-mail default is sent as is
-    ("user@mail.example.com", "user@mail.example.com"),
+    ("docs/x.pdf", "docs/x.pdf"), ("text/html", "text/html"), ("12:00", "12:00"),
+    ("2020-01-01T00:00", "2020-01-01T00:00"), ("fuzzlab", "fuzzlab"),
+    # BUG-0555: whatever FR-AUD-20's lab predicate puts outside the lab (a dotted token
+    # a reader takes for a host, `new URL("http://lang_en.php").host` in node 22; an
+    # e-mail's domain, which supersedes reviewer B's stated e-mail residual) has
+    # loopback in its place
+    ("lang_en.php", vs.SAFE_HOST), ("user@mail.example.com", vs.SAFE_HOST),
 ])
 def test_neutral_value_errs_toward_loopback(value, sent):
     assert vs.neutral_value(value) == sent

@@ -3,6 +3,97 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0058 — FR-AUD-20's lab predicate is an allow-list from its entry: an explicit set of loopback authorities, no early return on `neutral_value` (SP-73; BUG-0555, BUG-0544 residual N-R3-1) (2026-10-22)
+- Placement: lane LABAUTH (item GAP-VALUES), base 7393c90; numbers pre-assigned
+  (BUG-0555, PA-0555, CC-AUD-0058, FR-AUD-20 amended in place).
+- Change: `audit/value_shape.py`:
+  - `names_outside_lab` (SP-73's owner) no longer returns False when
+    `neutral_value(value) == value`, and reads neither `neutral_value` nor `value_shape`.
+    It decides on every text a reader parses (`_reader_texts`: WHATWG's tab/newline
+    removal and C0/space trim, an application's Unicode trim, a C reader's NUL cut): a
+    URL or authority shape (`_authority_shaped`: a scheme and `:`, a leading `//`, `\`
+    or `/\`, or a leading token or `http://`-reader host -- leading slashes skipped --
+    that is a `_host_token`) is the lab only when `_names_only_lab` proves it. Anything
+    else names no host but a single-label one and is the lab (stated residual: a
+    reference whose own tail names a host, `/?next=evil.top`).
+  - `_names_only_lab`'s authority is now an explicit set of spellings
+    (`_lab_authority`, `_LAB_NAMES`, `_lab_ipv4`): `localhost` in any case, `[::1]`,
+    `127.a.b.c` in canonical dotted decimal, at most a 1- to 5-digit port up to 65535;
+    `urlsplit` must read the same host and port. `_loopback_authority` and its
+    `core.urls.is_loopback_origin` / `ipaddress` reading are gone.
+  - New helpers: `_reader_texts`, `_reader_text`, `_scheme_shaped`, `_leading_token`,
+    `_reader_host`, `_host_text` (percent-decode, NFKC case fold, ignorables dropped,
+    IDNA full stop; bounded by `MAX_LEN`), `_has_space_or_control`, `_ipv4_number`
+    (WHATWG's; bounded), `_small_number`, `_host_token`, `_plain_ascii`; constants
+    `_LEAD_DELIMITERS`, `_AUTHORITY_ENDS`, `_IDNA_DOTS`, `_C0_OR_SPACE`,
+    `_SMALL_NUMBER_LIMIT`.
+  - `neutral_value` stands loopback in for every value `names_outside_lab` puts outside
+    that its own recogniser does not replace (SAFE_URL with a scheme, path, query or
+    fragment, else SAFE_HOST), so `harness.auto._send_value` never returns an outside
+    value unchanged. Its other behaviour is unchanged.
+- Impact (other components / project):
+  - FUZZ (no FUZZ code changed): the three callers of SP-73 --
+    `harness.auto._send_value`, `harness.auto._outside_lab`,
+    `oracle._FormBoundSender._bind_fresh` -- now refuse every value of the class
+    (N-R3-1's twelve spellings, a bare outside host whatever its TLD, an IPv4 address in
+    any radix or short form, a percent-encoded, fullwidth or IDNA-dotted host, an
+    e-mail's domain, a network-path or backslashed reference, `/evil.top`). More points
+    carry a `replay_refusal` (inconclusive, FR-FUZZ-67) and more fresh bindings are
+    unbound. Measured: 15 of 3,509 distinct recorded sibling values (188 of 14,755
+    occurrences) move to outside, none the other way (BUG-0555). Random tokens: 0.1% of
+    32-byte standard base64 tokens, 0% of URL-safe base64, hex, UUID and ASP.NET-shaped
+    view states (a first version that also held references and single-label
+    authorities to the tail grammar put 21.5% and 99.9% outside; narrowed, BUG-0555).
+    Expected on bWAPP (by its `iframei.php` redirect, not run): BWAPP-0054 and
+    BWAPP-0055 need the sibling `ParamUrl=robots.txt` and become inconclusive.
+  - FR-AUD-20's stated e-mail residual is superseded: an e-mail default is outside.
+  - No store, wire or CLI contract changes; no new dependency.
+  - Pinned neighbour (FUZZ): `CrossAccountReplayStrategy` replays a point's own
+    stand-in as its object key (pre-existing for an ip- or host-name id; wider for an
+    8- to 10-digit id), a strict xfail below.
+- Risk (medium; accepted with mitigation): a fail-closed predicate trades coverage
+  for D11. Mitigation: the flip cost was measured before the change on every recorded
+  store and on the repo's fixtures; each accepted false-positive class is stated in
+  FR-AUD-20 with its measurement; the allow-list's soundness was checked against node 22
+  on 2,730,000 generated values (0 unsound admissions); the residuals (single-label
+  names, small numbers, free text) are stated with their measurement.
+- Deliverables:
+  - [x] `value_shape.py` predicate, helpers and `neutral_value` stand-in — done
+  - [x] the N-R3-1 strict xfails turned into plain tests
+    (`tests/test_replay_bindings.py::test_a_loopback_authority_the_recogniser_misses_is_still_outside_the_lab`,
+    `::test_the_binder_never_binds_a_loopback_authority_the_recogniser_misses`; 24 cases,
+    all failing on 7393c90's `value_shape.py`) — done
+  - [x] generated authority sweep and binder sweep
+    (`::test_every_authority_spelling_outside_the_lab_set_is_outside_the_lab`,
+    `::test_the_binder_never_binds_an_authority_spelling_outside_the_lab_set`), loopback
+    controls (`::test_a_lab_set_authority_with_a_grammar_tail_is_the_lab`), node-measured
+    tables (`::test_a_value_a_reader_takes_for_a_host_beyond_the_lab_set_is_outside`,
+    `::test_a_pure_word_a_small_number_and_free_text_are_the_lab`), references
+    (`::test_a_reference_is_outside_only_when_a_reader_takes_a_host_from_it`), the
+    recogniser guard and its synthetic offenders
+    (`::test_the_lab_predicate_reaches_no_recogniser_of_hosts`,
+    `::test_the_recogniser_guard_catches_a_synthetic_offender`) — done
+  - [x] pin of the FUZZ neighbour
+    (`::test_an_access_control_replay_never_reads_a_stand_in_for_its_own_value`, strict
+    xfail, `raises=AssertionError`, owner FUZZ) — done
+  - [x] proof on the pre-fix code (one invocation, 7393c90's `value_shape.py` swapped into
+    the worktree, then restored; `scratchpad/lanes/LABAUTH/prefix_run2.txt`): 79 failed,
+    129 passed, 1 xfailed. Every reproduction fails: the N-R3-1 tests (12 + 12), both
+    sweeps, 39 of the 41 measured outside readings (the other two were outside before),
+    8 of the 20 reference cases (the outside ones), both guard tests, and the two
+    before/after rows of `test_forms_phase2`. The passes are the controls (70 loopback
+    spellings, 28 measured lab values, the 12 lab reference cases). The pin's
+    `100000001` case XPASSes there (the id was sent as given), `10.0.0.5` xfails. —
+    done
+  - [x] before/after: `tests/test_forms_phase2.py::test_neutral_value_errs_toward_loopback`
+    (`lang_en.php`, the e-mail row), `::test_link_query_siblings_are_bound`
+    (`u=robots.txt` is now outside) — done
+  - [x] FR-AUD-20 amended in place; BUG-0555 with the RCA, recurrence review and
+    prior-PA failure analysis — done
+  - [ ] SP-73's row, PA-0555, CHANGELOG, ERROR_LOG and ARCHITECTURE texts — handed over
+    for the merge (`scratchpad/lanes/LABAUTH/doc_texts.md`)
+- Effectiveness (assessed <date> or pending): pending.
+
 ### CC-AUD-0057 — The captured-request import refuses and counts a body holding a lone surrogate instead of failing the import (FR-AUD-22, BUG-0554) (2026-10-21)
 - Placement: lane SURROGATE (item AU-REQID78), base 33b423e, with CC-CRAWL-0061 (the
   same change). The lane held no AUD number; CC-AUD-0057 was assigned at merge.

@@ -224,40 +224,79 @@ budget where a vulnerability is plausible.
     (`value_shape.names_outside_lab`, the one predicate). A point's own value and the
     command-injection base value are the payload's slot and keep loopback. *(Review
     rounds 1 to 3, BUG-0544: the predicate fails closed, on the authority and on the
-    tail; the tail rule is an allow-list, the owner's decision of 2026-10-21.)* A value
-    is the lab only when it holds no `@`, `\`, `%`, control or non-ASCII character,
-    names no scheme but http(s), its whole authority is a loopback host with a numeric
-    port under both a manual split and `urlsplit`, and its path, query and fragment are
-    wholly in the **safe tail grammar** (`value_shape._tail_in_grammar`): the separators
-    `/`, `?`, `#`, `&`, `=` (never `/` twice in a row) between words of ASCII letters,
-    digits, `_`, `-`, `~` whose first character is not a digit. So no tail token holds
-    a `.` or a `:` (or any other character), and none is a number in any radix or of
-    any length. The rule never asks whether a token reads as a host: no shape
-    classifier, TLD list or address parser reads the tail. Anything else
-    `neutral_value` would change is outside the lab (`127.0.0.1:80@evil.example/`,
-    `localhost:1@evil.example`, `http://evil.example\@127.0.0.1/`,
-    `http://127.0.0.1/r?next=http://evil.example/`, `http://127.0.0.1/?next=evil.example:8080`,
-    `?next=8.8.8.8:53`, `?next=https:evil.example`, `#evil.example:8080`, `?next=evil.top`,
-    `#evil.zip`, `?next=134744072`, `?next=8.8.2056`, `?next=0x8080808` are outside).
-    The same predicate gates a fresh value the binder reads from a page (FR-FUZZ-67).
-    Accepted false positives (the owner's decision): a loopback value whose tail holds a
-    number, a dotted or colon-separated token or any other character outside the
-    grammar (`?page=2`, `/app.js?v=1.2.3`, `?at=10:30`, `?q=a+b`, `/2fa`) is outside --
-    wherever a stand-in is sent, plain loopback stands in for it, as at dcc7091, and a
-    request needing it as a sibling or a fresh value is unbound (FR-FUZZ-67). Stated
-    residual: a dotless word (`?next=intranet`) is in the grammar; only a resolver that
-    completes it from a search list reads it as a host. **Stated gap** (BUG-0544
-    residual N-R3-1, after the final round; owner AUD; SP-73): the proof above runs only
-    when `neutral_value` would change the value, and `neutral_value` recognises a
-    loopback authority with a recogniser (`_host_prefix` cuts only at `/` or `:`), so a
-    loopback value with no `/` before `?` or `#` (`127.0.0.1?next=evil.top`,
-    `localhost?u=134744072`) or a loopback authority it misses (`127.0.0.1./`,
-    `localhost./`, `127.1/`, `2130706433/`, `0x7f000001/` before `?next=evil.top`) is sent
-    and bound verbatim; pinned by the strict xfails
-    `tests/test_replay_bindings.py::test_a_loopback_authority_the_recogniser_misses_is_still_outside_the_lab`
-    and `::test_the_binder_never_binds_a_loopback_authority_the_recogniser_misses`.
-    Stated residual: an e-mail default
-    (`user@mail.example.com`) is sent as is and may trigger mail. **Stated exception (FR-AUD-21, BUG-0124,
+    tail; the tail rule is an allow-list, the owner's decision of 2026-10-21. Amended by
+    `CC-AUD-0058`, BUG-0555, 2026-10-22: the predicate is an allow-list from its entry;
+    no recogniser decides which values it proves.)* `names_outside_lab` reads every text
+    a URL reader parses from the value (WHATWG's tab and newline removal and C0-or-space
+    trim, an application's Unicode trim, a C reader's cut at the first NUL) and never
+    asks whether `neutral_value` or `value_shape` would change it. A value of a **URL or
+    authority shape** -- a scheme and `:` (any scheme: `https:evil.example`, `mailto:`,
+    `sort:asc`), a leading `//`, `\` or `/\`, or a leading token (up to the first
+    `/ ? # : @ ; \`), or the host a reader that puts `http://` before the value takes
+    (leading slashes skipped, userinfo cut at its last `@`: `/evil.top` → evil.top,
+    `user@evil.example` → evil.example), that is a host to a reader (WHATWG reads it --
+    no space or control after percent-decoding and its mapping -- and it holds a dot or
+    an IDNA full stop, is a bracketed literal, is `localhost`, or is a dotless number
+    WHATWG reads as 0.0.0.0 or as an address of at least 2^24) -- is the lab only when
+    its authority, up to the first `/`, `?` or `#` after `http://`, `https://`, `//` or
+    nothing, is one of the **explicit loopback spellings**: `localhost` in any case,
+    `[::1]`, or `127.a.b.c` in canonical dotted decimal (four decimal parts, no leading
+    zero: every reader reads that spelling alike, 127.0.0.0/8 never leaves the host, and
+    the lab's multi-origin setups bind 127.0.0.2 and 127.0.0.3), with at most a port of
+    one to five digits; `urlsplit` reads the same host and port; no `@`, `\`, `%`,
+    control, space or non-ASCII character is anywhere; and its path, query and fragment
+    are wholly in the **safe tail grammar** (`value_shape._tail_in_grammar`): the
+    separators `/`, `?`, `#`, `&`, `=` (never `/` twice in a row) between words of ASCII
+    letters, digits, `_`, `-`, `~` whose first character is not a digit. So no tail
+    token holds a `.` or a `:` (or any other character), and none is a number in any
+    radix or of any length; the tail rule never asks whether a token reads as a host.
+    Not admitted, so outside: `localhost.` (WHATWG keeps it as another host, and a
+    resolver may send a rooted name to DNS) and every other spelling of a loopback
+    address (`127.1`, `2130706433`, `0x7f000001`, `0177.0.0.1`, `127.0.0.1.`,
+    `[0:0:0:0:0:0:0:1]`, `[::ffff:127.0.0.1]`: readers disagree on them). A value of no
+    such shape names no host to any reader but a single-label one (a pure word, a small
+    number, free text with a space, a reference to the page's own path) and is the lab.
+
+    Outside, for example: `127.0.0.1:80@evil.example/`, `localhost:1@evil.example`,
+    `http://evil.example\@127.0.0.1/`, `http://127.0.0.1/r?next=http://evil.example/`,
+    `?next=evil.example:8080`, `?next=8.8.8.8:53`, `?next=https:evil.example`,
+    `#evil.example:8080`, `?next=evil.top`, `#evil.zip`, `?next=134744072` after a
+    loopback authority; BUG-0544's residual N-R3-1, fixed: `127.0.0.1?next=evil.top`,
+    `localhost?u=134744072`, `LOCALHOST?next=8.8.8.8:53`, and `127.0.0.1./`,
+    `localhost./`, `127.1/`, `2130706433/`, `0x7f000001/` before `?next=evil.top`; and a
+    bare `evil.top`, `evil.shop:8080`, `134744072`, `0x8080808`, `8.8.2056`, a
+    fullwidth or percent-encoded `evil.top`, `/evil.top`, `/8.8.8.8:53/x`. The same
+    predicate gates a fresh value the binder reads from a page (FR-FUZZ-67), and
+    `neutral_value` stands loopback in for every value it puts outside. Accepted false
+    positives (the owner's decision for the tail; BUG-0555 for the rest, whose measured
+    cost is 15 of 3,509 distinct recorded sibling values): a loopback value whose tail
+    holds a number, a dotted or colon-separated token or any other character outside
+    the grammar (`?page=2`, `/app.js?v=1.2.3`, `?at=10:30`, `?q=a+b`, `/2fa`); a dotted
+    token (`robots.txt`, `lang_en.php`, `2.5`, `1.2.3`, `0.00`, `Hello.`, a JWT), also
+    as a path's first segment (`/index.php`) or before `/` (`../x`); an e-mail address
+    (`user@mail.example.com`: this supersedes the earlier stated e-mail residual); a
+    dotless number from 2^24 to 2^32 - 1 (an 8- to 10-digit id or timestamp) and one
+    read as 0.0.0.0 before a port or path (`00:30`, `0/x`); text starting with a word
+    and `:` (a scheme to WHATWG: `Note: x`, `intranet:8080/x`); and every loopback
+    spelling outside the explicit set. Wherever a stand-in is sent, plain loopback stands
+    in for such a value, and a request needing it as a sibling or a fresh value is
+    unbound (FR-FUZZ-67). Expected cost on bWAPP (from its own redirect,
+    `iframei.php:24`; not run): the link carries `ParamUrl=robots.txt`, so BWAPP-0054
+    and BWAPP-0055 (`ParamWidth`, `ParamHeight`) are inconclusive. Stated residuals: a
+    pure dotless word and a dotless number of 2^32 or more (`intranet`, `?next=intranet`)
+    are single-label names, a host only to a resolver that completes them from a search
+    list or a hosts file, whatever follows them (`intranet/?next=evil.top`); a non-zero
+    dotless number below 2^24 (`42` is 0.0.0.42 to WHATWG) is in 0.0.0.0/8 (RFC 6890:
+    not forwardable; on the test host Linux routes it to the default route and 0.0.0.0
+    to loopback, measured); free text with a space names no host to any reader; a value
+    naming no host of its own whose path, query or fragment does (`/?next=evil.top`,
+    `/go/evil.top`, `?next=evil.top`, `#evil.zip`) is the lab: holding every such value
+    to the tail grammar would put 99.9% of ASP.NET view states (`/wE...`) and 21.5% of
+    standard base64 tokens outside (measured, BUG-0555). Pinned neighbour (owner FUZZ):
+    the access-control replay reads a point's own stand-in as the object key and records
+    a negative
+    (`tests/test_replay_bindings.py::test_an_access_control_replay_never_reads_a_stand_in_for_its_own_value`).
+    **Stated exception (FR-AUD-21, BUG-0124,
     operator-approved 2026-10-14):** the open-redirect retry probe.
 - **FR-AUD-21** *(open redirect and SSRF by value; `CC-AUD-0034`, 2026-10-14,
   BUG-0124).*
