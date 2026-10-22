@@ -488,7 +488,9 @@ credential set, and every instance of the comparison or decode in `fuzzlab/`, fo
 search a guard holds.
 
 ### Corrective action
-Commits 59866a2 and a2b8ed5 (CC-CRAWL-0063, CC-CRAWL-0064, CC-AUD-0060 "Review round 2";
+Commits 59866a2, a2b8ed5 and d5c867f (the targeted run's four failures, each this change's:
+two package guards and one test asserting `--no-proxy-server`; CC-CRAWL-0063 round 2)
+(CC-CRAWL-0063, CC-CRAWL-0064, CC-AUD-0060 "Review round 2";
 FR-CRAWL-43, FR-CRAWL-34, FR-CRAWL-11, FR-CRAWL-14's adoption clause, NFR-CRAWL-safe
 and NFR-AUD-safe edited in place):
 - **BB-3 (and BB-4(1)), the enforcer, in the one owner of launch arguments (SP-04):**

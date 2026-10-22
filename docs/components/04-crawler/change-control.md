@@ -329,6 +329,20 @@ Newest first.
     NFR-CRAWL-safe edited in place; BUG-0559 "Review round 2"; PA-0559 (items 8-10),
     SP-04/SP-74 rows, CHANGELOG, ERROR_LOG, ARCHITECTURE and failure-record texts in the
     lane's doc_texts.
+  - Targeted run on 1caa7d6 (one pytest invocation, the harness's selection for this
+    change computed by its own `select_tests`: 116 files, `-n 3 --dist loadfile`, the
+    three `FUZZLAB_REQUIRE_*` flags; `scratchpad/lanes/BROWSERALIAS/r2proof/targeted.log`):
+    4 failed, 4376 passed, 5 skipped, 59 xfailed in 20 min 37 s. Each failure was this
+    change's, root-caused and fixed in d5c867f: the query-placement guard (PA-0531) flagged
+    two strings the enforcer built with a query (the landing key now keeps path and query
+    apart; the forward sends the target's own bytes); the host-compare guard (PA-0134(3))
+    found the two `browserlogin` allowances stale (removed: that filter now asks
+    `cookie_reaches`); `test_the_m6_browser_is_launched_scoped_and_plants_without_redirects`
+    and its confirm-trace replay asserted `--no-proxy-server` (now the enforcer). The
+    spider's harvest keeps its old catch-all around the extraction. The three guards were
+    re-evaluated on d5c867f outside pytest (`r2meas/guards_check.py`: no extra, no stale,
+    no offender); the brief allowed one pytest invocation, so the run of record on
+    d5c867f is the orchestrator's harness.
 
 ### CC-CRAWL-0061 — The capture writer is total: a body holding a lone surrogate is stored losslessly, and a write the store refuses is counted (FR-CRAWL-42, BUG-0554) (2026-10-21)
 - Placement: pre-assigned to lane SURROGATE (item AU-REQID78), base 33b423e (after
