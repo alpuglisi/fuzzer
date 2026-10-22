@@ -620,7 +620,7 @@ def test_import_audit_imports_a_finding_page_urlsplit_rejects_without_a_query(tm
     """BUG-0556, pinned at the merge (R4) and fixed in its follow-up: a page `urlsplit`
     rejects WITHOUT a '?' passes the floor unread, and `_audit_text`'s `urlparse` raised,
     failing the whole import (as 7393c90's `to_path` did). `_audit_text` now withholds
-    every text of a page `urlsplit` rejects, with or without a '?', and the import goes
+    every text of a str page `urlsplit` rejects, with or without a '?', and the import goes
     on; no secret of the page is stored. No longer a residual: kept in this file beside
     its neighbours."""
     from urllib.parse import urlsplit

@@ -1098,8 +1098,9 @@ def test_merge_followup_every_text_of_a_page_urlsplit_rejects_is_withheld(page, 
     floor raised (a page holding a '?'), so on a '?'-less page `urlsplit` rejects a
     non-string text was returned as it is (a BLOB context of a finding with a NULL or
     numeric target, in a findings table other than the auditor's, was stored verbatim)
-    and a string one failed the import. Every non-NULL text of a page `urlsplit` rejects,
-    with or without a '?', is withheld; NULL stays NULL."""
+    and a string one failed the import. Every non-NULL text of a str page `urlsplit`
+    rejects, with or without a '?', is withheld; NULL stays NULL (a BLOB page it rejects
+    fails the import, as on 7393c90: the BLOB pin)."""
     from urllib.parse import urlsplit
 
     from fuzzlab.tools.store_adapter import AUDIT_TEXT_WITHHELD, _audit_text

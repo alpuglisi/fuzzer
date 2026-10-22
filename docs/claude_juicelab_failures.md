@@ -2190,9 +2190,9 @@ Juice Shop lab is complete.
 - **Status:** corrected (BUG-0556 "After the push"); the recurrence note there asks that a records-truth check gate the push.
 
 ### F-280 — My fix of F-279 again wrote claims beyond what was measured, and fixed P2 for the floor's rejection only
-- **What:** the first draft of the gap 5 follow-up (d7a9f2c, not pushed) withheld a non-text only where the floor raised (a rejected page holding a `?`), though the check had reported the class as "a page `urlsplit` rejects"; its CHANGELOG line said "no other leak or failure against the pushed tree", and three records still said "every lexically visible use" of the walk or the floor.
-- **Evidence:** the records check of d7a9f2c (`subagents/workflows/wf_fdedbe2f-df8/journal.jsonl`): 18 of 18 rejected `?`-less pages with a NULL or numeric target stored a BLOB context; 72 of 216 text-type combinations imported where the records said the import fails; a literal `__dict__` reference missed by the guard.
+- **What:** the first draft of the gap 5 follow-up (d7a9f2c, not pushed) withheld a non-text only where the floor raised (a rejected page holding a `?`), the class the merge's check had reported (a page `urlsplit` rejects that holds a `?`); the `?`-less pages were first reported by d7a9f2c's own check; its CHANGELOG line said "no other leak or failure against the pushed tree", and three records still said "every lexically visible use" of the walk or the floor.
+- **Evidence:** the records check of d7a9f2c (`subagents/workflows/wf_fdedbe2f-df8/journal.jsonl`): 18 of 18 cases (3 rejected `?`-less pages, NULL or numeric targets) stored a BLOB context; 72 of 216 text-type combinations imported where the records said the import fails; a literal `__dict__` reference missed by the guard.
 - **Impact:** none pushed: this time the records check gated the push (the harness of d7a9f2c was green: 107 files, 5156 passed, 0 failed).
-- **Cause:** I fixed the reported repro's mechanism (the floor's raise) rather than the class the report named (any page `urlsplit` rejects), and kept summary words ("no other", "every") the measurement did not cover.
+- **Cause:** I fixed the class as reported (pages holding a `?`, where the floor raises) without asking what else makes `urlsplit` reject a page, and kept summary words ("no other", "every") the measurement did not cover.
 - **Status:** fixed in the follow-up's final commit (`_audit_text` judges the page by `urlparse` too; the claims scoped to what was measured).
 

@@ -21,7 +21,7 @@ Format per entry:
 ## 2026-10-22 — store adapter (a BLOB text of a finding page the floor rejects was stored verbatim; BUG-0556)
 - **Symptom:** the independent check of 1ad0fd0: an audit finding whose page `urlsplit` rejects with a `?` and whose `html_context` is a BLOB holding a secret was imported with the BLOB stored as `sink_context`; a str context is withheld. 7393c90's whole import raised on such a page and stored nothing.
 - **Root cause:** `_audit_text` returned any non-string unchanged before it reached the rejected page's withhold.
-- **Remediation:** the page is judged first, by the floor and by `urlparse`; every non-NULL text of a page `urlsplit` rejects, with or without a `?`, is `AUDIT_TEXT_WITHHELD`, whatever its type, and the import goes on (CC-AUD-0059; a `?`-less page failed the whole import and a non-text on it was stored as it was, found by this change's own records check). Ten records the same check found untrue were corrected in the same change (BUG-0556 "After the push").
+- **Remediation:** the page is judged first, by the floor and by `urlparse`; every non-NULL text of a str page `urlsplit` rejects, with or without a `?`, is `AUDIT_TEXT_WITHHELD`, whatever its type, and the import goes on (CC-AUD-0059; a `?`-less page failed the whole import and a non-text on it was stored as it was, found by this change's own records check). Ten records the same check found untrue were corrected in the same change (BUG-0556 "After the push").
 - **Status:** Fixed
 
 ## 2026-10-22 — store adapter (gap 5 merge: `import_audit` raised `TypeError` on a BLOB finding page the pushed tree imported; BUG-0556)

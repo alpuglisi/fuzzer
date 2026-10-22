@@ -1128,7 +1128,7 @@ def _audit_endpoint(store: Store, run_id: int, page: str, main: str | None, *,
 _AUDIT_RUN = 8
 
 #: What `_audit_text` stores for a text the redaction owner cannot judge: a text of a
-#: page ``urlsplit`` rejects (the floor raises on one that holds a ``?``, as the pushed
+#: str page ``urlsplit`` rejects (the floor raises on one that holds a ``?``, as the pushed
 #: tree's redactor did, BUG-0556 r6, A1; ``urlparse`` on one without, the merge's
 #: follow-up), or a target URL the floor rejects. Withheld whole, as `core.trace.safe_ref`
 #: withholds such a URL, and the import goes on.

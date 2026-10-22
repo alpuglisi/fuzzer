@@ -1859,7 +1859,7 @@ sub-bullets), and this section.
   non-text (a BLOB context with a NULL or numeric target, in a findings table other than
   the auditor's, whose target is `TEXT NOT NULL`) was stored as it was, where 7393c90's
   import raised, and a str text failed the whole import. Fixed: the page is judged by
-  `urlparse` as well, so every non-NULL text of a page `urlsplit` rejects is withheld and
+  `urlparse` as well, so every non-NULL text of a str page `urlsplit` rejects is withheld and
   the import goes on; the R4 pin becomes an ordinary test, and
   `tests/test_redaction_nested.py::test_merge_followup_every_text_of_a_page_urlsplit_rejects_is_withheld`
   (12 of its 20 cases fail on the first draft, all pass now) holds the rule for every
