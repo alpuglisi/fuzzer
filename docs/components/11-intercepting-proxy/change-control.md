@@ -3,6 +3,65 @@
 Component code: **PROXY**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PROXY-0032 — The age-batch test waits for the history writer's counter, not its rows; a guard over every history test (BUG-0560, PA-0560) (2026-10-22)
+- Change (tests only; no product code):
+  - **`tests/test_proxy_history_writer_thread.py::test_a_batch_is_cut_by_age`:**
+    - The test now polls `h.stats["written"] == 2` as a presence claim (PA-0511).
+      This is the last of the writer thread's publications for a batch.
+    - Before the fix, it waited until the rows were visible and read the counter at
+      once. The writer moves the counter only after the rows' commit and the trace
+      events' commit, so that read could fall between them.
+    - After the poll, the test asserts the rows (now the exact URLs in order, not a
+      count) and the batch sizes. Both are in place before the counter moves.
+  - **The guard (new), in the same module:**
+    - `_PUBLISHED` lists the writer's publications in order: rows, trace events,
+      `stats`, `run_metrics`.
+    - `_read_after_visible_offenders` flags a read of a later publication after a poll
+      on an earlier one, up to a `close`, `aclose`, `flush`, `drain` or `join`.
+      Submit-side counters are exempt. A poll is a call named `*until*` or a loop that
+      sleeps. The module's own helpers are followed by name.
+    - `test_no_history_test_reads_a_later_publication_than_it_waited_for` runs the
+      guard over every test module that drives `HistoryWriter` or `ProxyController`
+      (21 modules). It checks it is not vacuous by requiring polls on publications in
+      this module and in `test_proxy_trace.py`.
+    - `test_the_read_after_visible_guard_on_synthetic_code` proves the guard: it flags
+      BUG-0560's own lines and four other offenders, and passes five safe shapes (the
+      fix among them).
+- Impact (other components / project):
+  - None on behaviour. `fuzzlab/proxy/history.py` is unchanged.
+  - The UI component's history tests (`test_web_*` that drive `ProxyController`) are
+    now scanned by the guard. They pass it unchanged.
+- Risk (level; mitigation or accepted-risk justification):
+  - Low. The change is to tests only. The fixed test still proves that a batch is cut
+    by age: nobody flushes, and the counter reaches 2 well before the 30 s poll
+    bound, with `flush_seconds` at 0.2 s.
+  - The guard's limits are stated in BUG-0560. It knows only this writer's
+    publications, and it is lenient on any `close`/`flush`/`drain`.
+- Deliverables:
+  - [x] the test fixed; proven by delay injection — done. Plain Python, a 0.3 s delay
+    in `HistoryWriter._trace` (after the rows' commit, before the counter):
+    - the pre-fix test failed 5 of 5 (and 1 of 5 with no delay, on the first run in a
+      process);
+    - the fixed test passed 5 of 5 with the delay and 5 of 5 without.
+
+    Log: `/tmp/claude-0/-home-user-fuzzer/2f299c5d-40a8-582c-a2d4-d0cdcbec2db1/scratchpad/age-race/age_race_proof.log`.
+  - [x] the natural window measured — done. `_trace` on a writer's first batch takes
+    6.9-9.3 ms for the first writer in a process (a lazy import and a new recorder)
+    and 1.2-5.6 ms after that, against a 10 ms poll (`.../age-race/trace_window.log`).
+  - [x] PA-0002 sweep of the 21 history-test modules: one instance, this test (BUG-0560
+    "Sweep") — done.
+  - [x] guard and its synthetic proof. On the pre-fix file it reports exactly the
+    BUG-0560 line (`:237`) — done.
+  - [x] BUG-0560 — done. The ERROR_LOG line, PA-0560, the CHANGELOG line and the
+    failure-record entry are handed to the orchestrator for the shared docs — done.
+  - [ ] `scripts/verify_change.py` on the merged tree — todo. It is the orchestrator's
+    step; this lane ran the one targeted pytest invocation it was given.
+- Effectiveness (assessed 2026-10-22): verified offline.
+  - The delay injection that failed the pre-fix test every time passes the fixed test
+    every time.
+  - The guard finds 0 offenders in the 21 modules after the fix and exactly one before
+    it.
+
 ### CC-PROXY-0030 — The flow history is written off the proxy's event loop (BUG-0550, FR-PROXY-404) (2026-10-21)
 - Change:
   - **`proxy/history.py`:** `HistoryWriter.submit(rec)` (new) does bounded work on the

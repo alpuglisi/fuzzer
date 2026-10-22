@@ -16,6 +16,7 @@ import ast
 import asyncio
 import json
 import os
+import re
 import socket
 import sqlite3
 import subprocess
@@ -225,7 +226,13 @@ def test_a_batch_is_cut_by_bytes(tmp_path, monkeypatch):
 
 def test_a_batch_is_cut_by_age(tmp_path, monkeypatch):
     """Neither the count nor the byte bound is reached and nobody flushes: the flows are
-    still written, once the oldest has waited `flush_seconds`."""
+    still written, once the oldest has waited `flush_seconds`.
+
+    BUG-0560 (PA-0560): the writer thread publishes a batch's rows (commit), then their
+    trace events, then its counter. This test waited for the rows and read the counter
+    at once, so a delay after the commit failed it. It polls the counter, the value
+    published last, as a presence claim (PA-0511); the rows and the batch sizes, both
+    in place before it, are read after it."""
     sizes = _spy_batches(monkeypatch)
     with Store(tmp_path / "s.db") as store:
         run_id = store.start_run("proxy", "x")
@@ -233,8 +240,9 @@ def test_a_batch_is_cut_by_age(tmp_path, monkeypatch):
                           flush_seconds=0.2)
         h.submit(_flow(0))
         h.submit(_flow(1))
-        assert _until(lambda: len(_urls(store, run_id)) == 2)
-        assert sum(sizes) == 2 and h.stats["written"] == 2
+        assert _until(lambda: h.stats["written"] == 2)
+        assert _urls(store, run_id) == [f"http://127.0.0.1:9/p{i}" for i in range(2)]
+        assert sum(sizes) == 2
         h.close()
 
 
@@ -752,3 +760,211 @@ def test_the_web_repeater_check_sees_its_shape():
 def test_no_web_handler_runs_a_repeater_send_or_write_on_the_event_loop():
     src = (REPO / "fuzzlab" / "web" / "app.py").read_text()
     assert _web_loop_offenders(src) == []
+
+
+# --- the guard: a read after a wait reads only what that wait saw published (BUG-0560) ---
+
+#: What the writer thread publishes for a batch, in the order it publishes it: the flow
+#: rows (their commit), their trace events (`_trace`, a second commit), the counters
+#: (`stats`), the live ``run_metrics`` (``history_*``, a third commit). A wait that saw
+#: one of them has seen only it and what came before it (PA-0560).
+_PUBLISHED = ("rows", "trace", "stats", "metrics")
+#: Counters the submitting thread sets itself, in `submit`: never the writer's publication.
+_SUBMIT_SIDE = {"accepted", "dropped", "dropped_bytes", "pending_bytes_peak"}
+#: Calls after which everything submitted before them is published (or counted). Any
+#: receiver counts: the guard is lenient there, never strict.
+_PUBLISHED_ALL = {"close", "aclose", "flush", "drain", "join"}
+
+
+def _call_name(node) -> str:
+    return _terminal_name(node.func) if isinstance(node, ast.Call) else ""
+
+
+def _sql_rank(text: str) -> int:
+    if "run_metrics" in text:
+        return 3
+    if "trace_event" in text:
+        return 1
+    return 0 if re.search(r"\bFROM flow\b", text) else -1
+
+
+def _stats_item(node) -> bool:
+    return isinstance(node, ast.Subscript) and isinstance(node.value, ast.Attribute) and \
+        node.value.attr == "stats"
+
+
+def _stats_read(node) -> bool:
+    """`<writer>.stats` whole, a counter of it the writer thread moves, or `.snapshot()`."""
+    if _stats_item(node):
+        key = node.slice
+        return not (isinstance(key, ast.Constant) and key.value in _SUBMIT_SIDE)
+    return (isinstance(node, ast.Attribute) and node.attr == "stats") or \
+        _call_name(node) == "snapshot"
+
+
+def _rank(node, helpers: dict, seen: frozenset = frozenset()) -> int:
+    """The latest publication `node` reads (an index in `_PUBLISHED`), or -1. A call to
+    a function of the same module counts as what that function reads."""
+    rank, skip = -1, set()
+    for sub in ast.walk(node):                 # breadth first: a parent before its child
+        if id(sub) in skip:
+            continue
+        if _stats_item(sub):
+            skip.add(id(sub.value))
+            rank = max(rank, 2 if _stats_read(sub) else -1)
+        elif _stats_read(sub):
+            rank = max(rank, 2)
+        elif isinstance(sub, ast.Constant) and isinstance(sub.value, str):
+            rank = max(rank, _sql_rank(sub.value))
+        elif isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name) and \
+                sub.func.id in helpers and sub.func.id not in seen:
+            rank = max([rank] + [_rank(h, helpers, seen | {sub.func.id})
+                                 for h in helpers[sub.func.id]])
+    return rank
+
+
+def _is_poll(node) -> bool:
+    """A wait on a concurrent actor: a call named ``*until*``, or a loop that sleeps."""
+    if isinstance(node, ast.Call):
+        return "until" in _call_name(node).lower()
+    if isinstance(node, (ast.For, ast.AsyncFor, ast.While)):
+        return any(_call_name(n) == "sleep" for n in ast.walk(node))
+    return False
+
+
+def _events(fn, helpers: dict) -> list[tuple[str, int, int]]:
+    """``(kind, rank, line)`` in `fn`'s own body, in source order: each poll (with the
+    latest publication its predicate reads), each call that waits for everything, each
+    read of a publication. A nested function is a scope of its own, and a lambda outside
+    a poll runs wherever it is handed."""
+    out: list[tuple[str, int, int]] = []
+
+    def visit(node) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                continue
+            if _is_poll(child):
+                out.append(("poll", _rank(child, helpers), child.lineno))
+                continue
+            if _stats_item(child):
+                if _stats_read(child):
+                    out.append(("read", 2, child.lineno))
+                continue                       # a submit-side counter: no publication
+            if _stats_read(child) or (isinstance(child, ast.Constant) and
+                                      isinstance(child.value, str)) or \
+                    (isinstance(child, ast.Call) and isinstance(child.func, ast.Name)
+                     and child.func.id in helpers):
+                r = _rank(child, helpers)
+                if r >= 0:
+                    out.append(("read", r, child.lineno))
+                    continue
+            visit(child)
+            if _call_name(child) in _PUBLISHED_ALL:
+                out.append(("sync", -1, child.lineno))
+
+    visit(ast.Module(body=fn.body, type_ignores=[]))   # not its decorators
+    return out
+
+
+def _functions(src: str) -> tuple[list, dict]:
+    fns = [n for n in ast.walk(ast.parse(src))
+           if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    helpers: dict[str, list] = {}
+    for fn in fns:
+        helpers.setdefault(fn.name, []).append(fn)
+    return fns, helpers
+
+
+def _read_after_visible_offenders(src: str, name: str = "<src>") -> list[str]:
+    """A read of a later publication than the one the last poll waited for, before a
+    call that waits for everything: it can run between the two publications."""
+    fns, helpers = _functions(src)
+    found = []
+    for fn in fns:
+        upto = None                            # the publication the last poll waited for
+        for kind, rank, line in _events(fn, helpers):
+            if kind == "poll" and rank >= 0:
+                upto = rank
+            elif kind == "sync":
+                upto = None
+            elif kind == "read" and upto is not None and rank > upto:
+                found.append(f"{name}:{line}:{fn.name}: reads {_PUBLISHED[rank]} after "
+                             f"waiting for {_PUBLISHED[upto]}")
+    return found
+
+
+def _polls_on_publications(src: str) -> list[int]:
+    fns, helpers = _functions(src)
+    return [rank for fn in fns for kind, rank, _ in _events(fn, helpers)
+            if kind == "poll" and rank >= 0]
+
+
+#: BUG-0560's own lines (the test before the fix).
+_BUG_0560 = '''
+def test_a_batch_is_cut_by_age(tmp_path, monkeypatch):
+    sizes = _spy_batches(monkeypatch)
+    with Store(tmp_path / "s.db") as store:
+        run_id = store.start_run("proxy", "x")
+        h = HistoryWriter(store, run_id, batch_size=10_000, flush_bytes=1 << 30,
+                          flush_seconds=0.2)
+        h.submit(_flow(0))
+        h.submit(_flow(1))
+        assert _until(lambda: len(_urls(store, run_id)) == 2)
+        assert sum(sizes) == 2 and h.stats["written"] == 2
+        h.close()
+'''
+_SYNTHETIC_HELPERS = '''
+def _urls(store, run_id):
+    return [r[0] for r in store.conn.execute("SELECT url FROM flow WHERE run_id=?",
+                                             (run_id,))]
+def _metrics(store, run_id):
+    return dict(store.conn.execute("SELECT key, value FROM run_metrics WHERE run_id=?",
+                                   (run_id,)))
+'''
+
+
+def _history_test_sources() -> dict[str, str]:
+    """Every test module that drives the proxy's history writer."""
+    out = {}
+    for path in sorted((REPO / "tests").glob("test_*.py")):
+        text = path.read_text(encoding="utf-8")
+        if re.search(r"\b(HistoryWriter|ProxyController)\b", text):
+            out[path.name] = text
+    return out
+
+
+def test_no_history_test_reads_a_later_publication_than_it_waited_for():
+    """PA-0560 over every test that drives the history writer: after a wait, a test
+    reads only the publication it waited for and those before it, until a close, a
+    flush or a drain."""
+    sources = _history_test_sources()
+    for name in ("test_proxy_history_writer_thread.py", "test_proxy_trace.py"):
+        assert _polls_on_publications(sources[name]), name     # not vacuous
+    found = [o for n, s in sources.items() for o in _read_after_visible_offenders(s, n)]
+    assert found == []
+
+
+@pytest.mark.parametrize("src, flagged", [
+    (_BUG_0560, True),                                                  # the pre-fix test
+    (("def t(s, r, h):\n    assert _until(lambda: len(_urls(s, r)) == 1)\n"
+      "    assert s.conn.execute('SELECT key FROM trace_event').fetchall()\n"), True),
+    (("def t(s, r, h):\n    assert _until(lambda: s.conn.execute("
+      "'SELECT 1 FROM trace_event').fetchone())\n"
+      "    assert _metrics(s, r)['history_written'] == 1.0\n"), True),
+    (("async def t(s, r, h):\n    await until(lambda: _urls(s, r))\n"
+      "    assert h.stats['failed'] == 0\n"), True),
+    (("def t(s, r, h):\n    while not _urls(s, r):\n        time.sleep(0.01)\n"
+      "    snap = h.snapshot()\n"), True),                              # a hand-made poll
+    (("def t(s, r, h, sizes):\n    assert _until(lambda: h.stats['written'] == 2)\n"
+      "    assert _urls(s, r) and sum(sizes) == 2\n"), False),          # the fix
+    (("def t(s, r, h):\n    assert _until(lambda: _urls(s, r))\n    h.close()\n"
+      "    assert h.stats['written'] == 1\n"), False),                  # after a close
+    (("def t(s, r, h):\n    assert _until(lambda: _urls(s, r))\n    h.flush()\n"
+      "    assert _metrics(s, r)\n"), False),                           # after a drain
+    (("def t(s, r, h):\n    assert _until(lambda: _urls(s, r))\n"
+      "    assert h.stats['accepted'] == 1\n"), False),                 # the submitter's own
+    (("def t(s, r, h):\n    assert _until(lambda: _metrics(s, r).get('history_failed'))\n"
+      "    assert _urls(s, r) == [] and h.stats['failed'] == 1\n"), False),  # earlier ones
+])
+def test_the_read_after_visible_guard_on_synthetic_code(src, flagged):
+    assert bool(_read_after_visible_offenders(_SYNTHETIC_HELPERS + src)) is flagged
