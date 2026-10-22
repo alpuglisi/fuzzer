@@ -451,6 +451,83 @@ Newest first.
     1 skipped** (`test_packaging.py:179`, bdist_wheel unavailable here), **55 xfailed**
     in 18 min 29 s. `scripts/verify_change.py` was not run: the orchestrator verifies
     at the merge.
+- After the owner's final round (2026-10-22; the round-3 fix check's two open results on
+  72497c9; branch `lane/BROWSERALIAS-r4` from 72497c9; the owner's rule: a regression
+  the batch introduced is fixed in it, anything else found is pinned by a strict xfail):
+  - Change, **the decoder regression** (navguard, SP-76's owner): round 3's
+    `decoded_text` still decoded a target's body by every text codec Python registers,
+    and CPython's `punycode` decoder is super-linear -- a 300 KB page labelled with it
+    timed the route out (measured by the check; 72497c9 here: 384 KB 9.8 s, 512 KB
+    82.5 s; c6296bc loaded it in 0.18 s) and a request body labelled with it held
+    disco's request handler (`carries_value`). Now a label decodes only by an encoding
+    the WHATWG Encoding Standard defines: `_BROWSER_CODECS` maps Python's name for a
+    label (`codecs.lookup(label).name`) to the codec that decodes it as Chromium 141
+    does, each mapping measured (`r4meas/labels.full.json`: every WHATWG label and every
+    label Python registers, header and `<meta>`; `multibyte.full.out`): windows-1252 for
+    a Latin-1 or ASCII label, `cp1254` for `iso8859-9`, `cp874` for `iso8859-11` and
+    `tis-620`, `gb18030` for `gbk` and `gb2312`, `big5hkscs` for `big5`, `cp932` for
+    `shift_jis`, `cp949` for `euc_kr`, `iso2022_jp_ext` for `iso2022_jp`, UTF-16LE for
+    `utf-16`; a `<meta>` naming UTF-16 is UTF-8 (`_text_codec(label, meta=)`). Any
+    other label is unknown and the next label, else the undeclared order, decides.
+    Every allowed codec decodes 1 MB in at most 42 ms and never raises with
+    replacement (`decoder_cost.out`).
+  - Change, **docs only, the neighbour** (navguard, SP-04): the module doc and
+    `browser_launch_args` no longer claim every preload is refused; they state the
+    pinned gap below.
+  - Pinned, not changed (strict xfails, `raises=AssertionError`, each shown failing at
+    its stated assertion): **a ticket its own connection never uses is taken by a
+    prefetch** -- `test_a_ticket_its_own_connection_never_uses_admits_no_prefetch`
+    (real Chromium, both binaries, the socket shape and the landing shape, TLS
+    verification on: `/logout?socket` / `/logout?landing` reach the server with `sid=S`
+    and `Sec-Purpose: prefetch`; 10 of 10 runs, and with no ticket issued the prefetch
+    is refused, `pin_ticket.repeat.out`, `pin_ticket.control.out`; owner navguard
+    SP-04); **the decoder's measured deltas from Chromium** --
+    `test_a_document_reads_as_chromium_decodes_it_under_every_whatwg_label` (139 of
+    the 228 WHATWG labels: the 74 Python does not resolve, a windows code page's
+    undefined bytes, KOI8-U's two bytes, the CJK decoders' recovery from invalid
+    sequences, the replacement encoding; owner SP-76); **the legacy spider's static
+    engine** -- `test_the_static_engine_reads_a_page_whatever_charset_it_names`
+    (offline: `LocalSpider._fetch_static` reads requests' `Response.text` under the
+    header's charset: `idna` and `undefined` raise, `punycode` and EBCDIC labels read an
+    ASCII page as other characters, `punycode` 18.6 s per read on 384 KB; predates the
+    batch; found by this round's PA-0002 sweep and, in part, by the check).
+  - Flagged to the orchestrator, not pinned (PA-0559(4)): the same requests property
+    in other components' senders -- `session/manager.py` (excluded from this lane),
+    `tools/probesender.py` (excluded), `tools/fetcher.py:563`, `greybox/run.py:217`,
+    `tools/blind_sqli_fuzzer.py:103`, `labgen/identifier_sqli_oracle.py:296`,
+    `lab_fixtures/external.py:1090` (BUG-0559 "After the owner's final round").
+  - Impact: a page or request body labelled with a codec no browser decodes by is read
+    by the undeclared order, as Chromium reads it; pages in a legacy CJK charset are read
+    by the superset decoder Chromium uses (fewer lossy reads); a page whose rule sets
+    are made inert is re-encoded in that codec (it round-trips). Every guarded browser
+    in every tool takes it through `navguard`.
+  - Tests (`tests/test_browser_session_reach.py`):
+    `test_a_charset_label_decodes_only_by_an_encoding_a_browser_defines` (new),
+    `test_a_guarded_page_loads_a_document_whatever_charset_it_names` (extended: a costly
+    codec's label on a 384 KB page), `test_a_request_body_is_read_whatever_charset_it_names_within_its_budget`
+    (new, real Chromium), the round-2 unit test's Shift_JIS expectation (`cp932`); the
+    three pins above (`_TlsSite` takes extra pages and per-path delays). Pre-fix proof
+    by plain calls on a `git archive` export of 72497c9 with the new test file (no
+    pytest session; `scratchpad/lanes/BROWSERALIAS/r4meas/proof.72497c9.out`): the
+    three fail at their assertions (codecs outside the browser's; `Page.goto: Timeout
+    5000ms exceeded` for `label/punycode`; `punycode` 10.3 s over the 2 s budget and
+    EBCDIC labels unseen in `carries_value`).
+  - FR-CRAWL-43, FR-CRAWL-34 and NFR-CRAWL-safe edited in place (the decoder, the
+    pinned gaps); NFR-AUD-safe's clause too (CC-AUD-0060); BUG-0559 "After the owner's
+    final round"; the CHANGELOG clause, the SP-76 row, PA-0559 item 13 and a failure
+    record text in the lane's doc_texts. Not touched: `fuzzlab/session/*`,
+    `probesender.py`, `value_shape.py`, `core/redaction.py`; TLS verification
+    untouched (the tests trust their own leaf key only).
+  - Run: one pytest invocation on the final tree, `FUZZLAB_REQUIRE_BROWSER=1
+    FUZZLAB_PYTEST_LOCK_WAIT=7000`, `-n 3 --dist loadfile`, of
+    `tests/test_browser_session_reach.py`, `tests/test_browser_scope.py` and every
+    test file a grep finds naming `fuzzlab.tools.navguard` in an import (14 files,
+    `test_disco_isolation.py` included for its import-guard string):
+    **864 passed, 0 failed, 0 skipped, 8 xfailed in 587.23 s** (the six strict-xfail
+    pins above and `test_bounded_reads.py`'s two;
+    `scratchpad/lanes/BROWSERALIAS/r4proof/targeted.log`). Development used plain
+    calls of the test functions (no other pytest session). `scripts/verify_change.py`
+    was not run: the orchestrator verifies at the merge.
 
 ### CC-CRAWL-0061 — The capture writer is total: a body holding a lone surrogate is stored losslessly, and a write the store refuses is counted (FR-CRAWL-42, BUG-0554) (2026-10-21)
 - Placement: pre-assigned to lane SURROGATE (item AU-REQID78), base 33b423e (after

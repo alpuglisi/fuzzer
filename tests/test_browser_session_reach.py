@@ -21,8 +21,10 @@ Every site here is a loopback server this test starts, recording each request wi
 from __future__ import annotations
 
 import ast
+import codecs
 import json
 import sqlite3
+import time
 import urllib.request
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -1245,7 +1247,9 @@ def test_a_response_body_is_read_by_its_own_charset_never_raising():
     assert dec(cafe.encode("utf-8"), "text/html") == (cafe, "utf-8")
     assert dec(cafe.encode("latin-1"), "text/html") == (cafe, "cp1252")   # undeclared
     sjis = '<meta charset="shift_jis"><p>あ</p>'
-    assert dec(sjis.encode("shift_jis"), "text/html") == (sjis, "shift_jis")
+    # a Shift_JIS label is read as windows-31j, as Chromium does (BUG-0559, after the
+    # owner's final round: measured, `navguard._BROWSER_CODECS`)
+    assert dec(sjis.encode("shift_jis"), "text/html") == (sjis, "cp932")
     assert dec(b"<p>\x81</p>", "text/html; charset=latin1") == ("<p>\x81</p>", "latin-1")
     assert dec(b"<p>\xff</p>", "text/html; charset=utf-8") == ("<p>�</p>", None)
     assert dec(b"x", "text/html; charset=no-such") == ("x", "utf-8")
@@ -1508,6 +1512,24 @@ def test_no_charset_label_a_target_writes_makes_the_decoder_raise():
         assert isinstance(navguard.response_text(Resp(ctype, b"\xe9a.b\xff" * 20)), str)
 
 
+#: The codecs Python registers whose decoder a target's body can make costly (CPython's
+#: ``punycode`` decoder is super-linear) or that refuse a document (BUG-0559, after the
+#: owner's final round): a page or request body labelled with one is large.
+_COSTLY = frozenset({"punycode", "idna", "unicode-escape", "raw-unicode-escape", "utf-7"})
+#: A body this large, ASCII with a long run of letters after its last ``-``, held
+#: 72497c9's decoder about 10 s under ``charset=punycode`` (``r4meas/
+#: route_body_timing.72497c9.out``: 256 KB took 4-18 s with the host's load, 512 KB 82 s);
+#: every browser's decoder reads it in about a millisecond.
+_COSTLY_SIZE = 384 * 1024
+
+
+def _costly(name: str) -> bool:
+    try:
+        return codecs.lookup(name).name in _COSTLY
+    except Exception:  # noqa: BLE001 - a name the registry refuses: not one of them
+        return False
+
+
 def test_a_guarded_page_loads_a_document_whatever_charset_it_names(monkeypatch):
     """BB-4 (BUG-0559 review round 3), real Chromium, generated: a guarded page loads an
     ASCII document labelled with each codec name Python registers -- in its
@@ -1516,7 +1538,15 @@ def test_a_guarded_page_loads_a_document_whatever_charset_it_names(monkeypatch):
     charset=base64>`` alone, ``charset=idna`` on a body it refuses (that one raised out of
     `navigate` itself, through `response_text`). Before (1b05e3f): the route's decoder
     raised ``LookupError`` past `_note_received`, the request was never answered and
-    ``goto`` timed out (measured by the review: pages that loaded at c6296bc)."""
+    ``goto`` timed out (measured by the review: pages that loaded at c6296bc).
+
+    After the owner's final round (BUG-0559): a label of a codec whose decoder a body can
+    make costly (`_COSTLY`: ``punycode``, ``idna``, ``unicode_escape``,
+    ``raw_unicode_escape``, ``utf-7``, every alias) labels a 384 KB page, and it loads
+    within the navigation's timeout like the rest. Before (72497c9): round 2's decoder
+    ran CPython's super-linear ``punycode`` decoder on it in the route handler, ~10 s, and
+    ``goto`` timed out (``Page.goto: Timeout 5000ms exceeded``; the page loaded at
+    c6296bc, measured by the final round's check)."""
     import threading
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
     from urllib.parse import quote, unquote
@@ -1536,6 +1566,8 @@ def test_a_guarded_page_loads_a_document_whatever_charset_it_names(monkeypatch):
             name = unquote(name)
             ctype, body = f"text/html; charset={name}", \
                 f'<meta charset="{name}"><title>labelled</title>ok'.encode()
+            if how == "label" and _costly(name):
+                body += b"-" + b"a" * _COSTLY_SIZE
             if how == "hex":
                 ctype, body = "text/html; charset=hex", b"<title>hexpage</title>ok"
             elif how == "b64":
@@ -1661,6 +1693,324 @@ def test_a_legacy_charset_forms_submission_is_seen_carrying_its_value(monkeypatc
     assert got == (True, True, True, True, False), got
 
 
+# --- after the owner's final round (BUG-0559): only an encoding a browser defines --------
+def test_a_charset_label_decodes_only_by_an_encoding_a_browser_defines():
+    """BUG-0559, after the owner's final round (round 2's decoder regression), generated
+    over every codec name Python registers, in the ``Content-Type`` and in a ``<meta>``:
+    `navguard.decoded_text` decodes only by an encoding the WHATWG Encoding Standard
+    defines -- the codec it names is one a browser encoding decodes by (measured; held
+    in `navguard._BROWSER_CODECS`), a byte-order mark's, or the undeclared order (UTF-8,
+    windows-1252, byte for byte) -- so a codec no browser decodes by (``punycode``, ``utf-7``,
+    ``unicode_escape``, ``idna``, EBCDIC, ``utf-32``) never runs on a body a target
+    wrote, and a 384 KB body labelled with a costly one is read by the undeclared order
+    within a 2 s budget (well under a millisecond, measured). The label-to-codec mappings
+    measured on Chromium 141 hold. Before (72497c9): every text codec Python registers
+    decoded (``punycode``'s super-linear decoder took ~10 s on that body;
+    ``r4meas/route_body_timing.72497c9.out``)."""
+    dec = navguard.decoded_text
+    # the Python codecs the browser encodings decode by (measured), a byte-order mark's,
+    # the undeclared order's, and None (a declared charset read lossily)
+    browser = {"utf-8", "cp866", "koi8-r", "koi8-u", "mac-roman", "mac-cyrillic", "cp874",
+               *(f"iso8859-{n}" for n in (2, 3, 4, 5, 6, 7, 8, 10, 13, 14, 15, 16)),
+               *(f"cp{n}" for n in range(1250, 1259)), "gb18030", "big5hkscs", "euc_jp",
+               "iso2022_jp_ext", "cp932", "cp949", "utf-16-be", "utf-16-le",
+               "utf-8-sig", "utf-16", "latin-1", None}
+    names = _codec_names()
+    outside = []
+    for name in names:
+        for ctype, body in ((f"text/html; charset={name}", b"<title>t</title>ok"),
+                            ("text/html", f'<meta charset="{name}"><title>t</title>'
+                                          .encode())):
+            codec = dec(body, ctype)[1]
+            if codec not in browser:
+                outside.append((name, ctype.split(";")[0], codec))
+    assert outside == [], outside[:20]
+    slow = []
+    for name in (n for n in names if _costly(n)):
+        body = b"q=zzfiller1&pad-" + b"a" * _COSTLY_SIZE
+        started = time.monotonic()
+        text, codec = dec(body, f"text/plain; charset={name}")
+        took = time.monotonic() - started
+        if codec != "utf-8" or "zzfiller1" not in text or took > 2.0:
+            slow.append((name, codec, round(took, 3)))
+    assert slow == [], slow
+    # each mapping as measured on Chromium 141 (``r4meas/labels.full.json``,
+    # ``multibyte.full.out``): the label, the codec that decodes it as Chromium does
+    for label, codec in (("iso-8859-1", "cp1252"), ("us-ascii", "cp1252"),
+                         ("iso-8859-9", "cp1254"), ("tis-620", "cp874"),
+                         ("iso-8859-11", "cp874"), ("ibm866", "cp866"),
+                         ("iso-8859-2", "iso8859-2"), ("iso-8859-16", "iso8859-16"),
+                         ("koi8-u", "koi8-u"), ("macintosh", "mac-roman"),
+                         ("windows-1250", "cp1250"), ("windows-1258", "cp1258"),
+                         ("gb2312", "gb18030"), ("gbk", "gb18030"), ("gb18030", "gb18030"),
+                         ("big5", "big5hkscs"), ("big5-hkscs", "big5hkscs"),
+                         ("euc-jp", "euc_jp"), ("iso-2022-jp", "iso2022_jp_ext"),
+                         ("shift_jis", "cp932"), ("ms932", "cp932"), ("euc-kr", "cp949"),
+                         ("utf-8", "utf-8"), ("utf-16", "utf-16-le"),
+                         ("utf-16le", "utf-16-le"), ("utf-16be", "utf-16-be")):
+        assert navguard._text_codec(label) == codec, (label, navguard._text_codec(label))
+    assert navguard._text_codec("utf-16be", meta=True) == "utf-8"   # HTML's prescan
+    for label in ("punycode", "utf-7", "unicode_escape", "raw_unicode_escape", "idna",
+                  "cp037", "utf-32", "hex", "undefined", "hz", "iso2022_kr"):
+        assert navguard._text_codec(label) is None, label
+    assert dec("堃".encode("gbk"), "text/html; charset=gb2312") == ("堃", "gb18030")
+    assert dec("똠".encode("cp949"), "text/html; charset=euc-kr") == ("똠", "cp949")
+    assert dec(b"\x80", "text/html; charset=iso-8859-9") == ("€", "cp1254")
+    assert dec(b'<meta charset="utf-16"><p>x', None)[1] == "utf-8"
+
+
+def test_a_request_body_is_read_whatever_charset_it_names_within_its_budget(monkeypatch):
+    """BUG-0559, after the owner's final round, real Chromium, generated: a guarded page
+    POSTs ``q=zzfiller1`` -- with a 384 KB tail for a costly codec's label (`_COSTLY`) --
+    once with each codec name Python registers as its ``Content-Type`` charset, and disco's
+    `carries_value` reads each real request (``post_data_buffer``, `decoded_text`) within
+    a 2 s budget and sees ``zzfiller1``. A UTF-16 label reads those ASCII bytes as other
+    characters, as a browser reads such a document: there it only answers in time.
+    Before (72497c9): any text codec Python registers decoded the body, in disco's
+    request handler -- ``punycode`` ~10 s on the 384 KB body (the check measured 4.6 s on
+    300 KB), and an EBCDIC or ``utf-32`` label read the ASCII body as other characters,
+    so a submission that carried the value counted as not sent."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    from tests._spa_fixture import chromium_or_skip
+    chromium_or_skip(monkeypatch)
+    from playwright.sync_api import sync_playwright
+
+    from fuzzlab.core.urls import in_origin_scope, origin_scope
+    from fuzzlab.disco.explore import carries_value
+
+    class Site(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def _answer(self, data: bytes, ctype: str) -> None:
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def do_GET(self):  # noqa: N802 - http.server API
+            self._answer(b"<title>poster</title>", "text/html")
+
+        def do_POST(self):  # noqa: N802 - http.server API
+            got = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            self._answer(str(len(got)).encode(), "text/plain")
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Site)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.server_address[1]}/"
+    names = _codec_names()
+    posts, failed = [], []
+    try:
+        with sync_playwright() as pw:
+            try:
+                browser = pw.chromium.launch(**navguard.chromium_launch_kwargs(
+                    navguard.browser_launch_args([base])))
+            except Exception as exc:  # noqa: BLE001 - a launch failure is a skip
+                from tests._browser import skip_or_fail
+                skip_or_fail(f"chromium could not launch: {exc}")
+            try:
+                ctx = browser.new_context(service_workers="block")
+                origins = origin_scope(base)
+                navguard.guard_page(ctx, in_scope=lambda u: in_origin_scope(u, origins))
+                page = ctx.new_page()
+                page.on("request", lambda r: posts.append(r) if r.method == "POST"
+                        else None)
+                navguard.navigate(page, base, timeout_ms=5000)
+                sent = page.evaluate("""async (labels) => {
+                    const out = [];
+                    for (const [label, size] of labels) {
+                        const r = await fetch('/post', {method: 'POST',
+                            headers: {'Content-Type': 'text/plain; charset=' + label},
+                            body: 'q=zzfiller1' + (size ? '&pad-' + 'a'.repeat(size) : '')});
+                        out.push(await r.text());
+                    }
+                    return out;
+                }""", [[n, _COSTLY_SIZE if _costly(n) else 0] for n in names])
+                for req in posts:
+                    label = (req.headers.get("content-type") or "").split("charset=")[-1]
+                    started = time.monotonic()
+                    seen = carries_value(req, ["zzfiller1"])
+                    took = time.monotonic() - started
+                    try:
+                        utf16 = codecs.lookup(label).name.startswith("utf-16")
+                    except Exception:  # noqa: BLE001 - a name the registry refuses
+                        utf16 = False
+                    if took > 2.0 or seen is not (not utf16):
+                        failed.append((label, seen, round(took, 3)))
+            finally:
+                browser.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert len(posts) == len(names) and len(sent) == len(names), (len(posts), len(names))
+    assert failed == [], sorted(failed, key=lambda f: -f[2])[:20]     # the slowest first
+
+
+#: The WHATWG Encoding Standard's labels (its ``encodings.json``), every one: measured on
+#: Chromium 141 to decode by the encoding the standard names (``r4meas/labels.full.json``).
+_WHATWG_LABELS = """
+unicode-1-1-utf-8 unicode11utf8 unicode20utf8 utf-8 utf8 x-unicode20utf8 866 cp866 csibm866
+ibm866 csisolatin2 iso-8859-2 iso-ir-101 iso8859-2 iso88592 iso_8859-2 iso_8859-2:1987 l2
+latin2 csisolatin3 iso-8859-3 iso-ir-109 iso8859-3 iso88593 iso_8859-3 iso_8859-3:1988 l3
+latin3 csisolatin4 iso-8859-4 iso-ir-110 iso8859-4 iso88594 iso_8859-4 iso_8859-4:1988 l4
+latin4 csisolatincyrillic cyrillic iso-8859-5 iso-ir-144 iso8859-5 iso88595 iso_8859-5
+iso_8859-5:1988 arabic asmo-708 csiso88596e csiso88596i csisolatinarabic ecma-114 iso-8859-6
+iso-8859-6-e iso-8859-6-i iso-ir-127 iso8859-6 iso88596 iso_8859-6 iso_8859-6:1987
+csisolatingreek ecma-118 elot_928 greek greek8 iso-8859-7 iso-ir-126 iso8859-7 iso88597
+iso_8859-7 iso_8859-7:1987 sun_eu_greek csiso88598e csisolatinhebrew hebrew iso-8859-8
+iso-8859-8-e iso-ir-138 iso8859-8 iso88598 iso_8859-8 iso_8859-8:1988 visual csiso88598i
+iso-8859-8-i logical csisolatin6 iso-8859-10 iso-ir-157 iso8859-10 iso885910 l6 latin6
+iso-8859-13 iso8859-13 iso885913 iso-8859-14 iso8859-14 iso885914 csisolatin9 iso-8859-15
+iso8859-15 iso885915 iso_8859-15 l9 iso-8859-16 cskoi8r koi koi8 koi8-r koi8_r koi8-ru koi8-u
+csmacintosh mac macintosh x-mac-roman dos-874 iso-8859-11 iso8859-11 iso885911 tis-620
+windows-874 cp1250 windows-1250 x-cp1250 cp1251 windows-1251 x-cp1251 ansi_x3.4-1968 ascii
+cp1252 cp819 csisolatin1 ibm819 iso-8859-1 iso-ir-100 iso8859-1 iso88591 iso_8859-1
+iso_8859-1:1987 l1 latin1 us-ascii windows-1252 x-cp1252 cp1253 windows-1253 x-cp1253 cp1254
+csisolatin5 iso-8859-9 iso-ir-148 iso8859-9 iso88599 iso_8859-9 iso_8859-9:1989 l5 latin5
+windows-1254 x-cp1254 cp1255 windows-1255 x-cp1255 cp1256 windows-1256 x-cp1256 cp1257
+windows-1257 x-cp1257 cp1258 windows-1258 x-cp1258 x-mac-cyrillic x-mac-ukrainian chinese
+csgb2312 csiso58gb231280 gb2312 gb_2312 gb_2312-80 gbk iso-ir-58 x-gbk gb18030 big5
+big5-hkscs cn-big5 csbig5 x-x-big5 cseucpkdfmtjapanese euc-jp x-euc-jp csiso2022jp
+iso-2022-jp csshiftjis ms932 ms_kanji shift-jis shift_jis sjis windows-31j x-sjis cseuckr
+csksc56011987 euc-kr iso-ir-149 korean ks_c_5601-1987 ks_c_5601-1989 ksc5601 ksc_5601
+windows-949 csiso2022kr hz-gb-2312 iso-2022-cn iso-2022-cn-ext iso-2022-kr replacement
+unicodefffe utf-16be csunicode iso-10646-ucs-2 ucs-2 unicode unicodefeff utf-16 utf-16le
+x-user-defined
+""".split()
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
+    "BUG-0559 (after the owner's final round), pinned for the owner of the decoder, "
+    "navguard.decoded_text (SP-76): Python's codecs.lookup resolves 74 of the 228 WHATWG "
+    "labels Chromium knows to nothing (windows-874, x-cp1252, iso88591, koi8, x-sjis, "
+    "x-mac-cyrillic, windows-949, ...: read by the undeclared order); a windows code "
+    "page's undefined byte is U+FFFD where Chromium gives its C1 control, and windows-1252 "
+    "then falls back to byte for byte for the whole document; KOI8-U differs at 0xAE/0xBE; "
+    "the CJK decoders recover from an invalid sequence otherwise than Chromium's (Shift_JIS, "
+    "EUC-JP, EUC-KR, Big5) and GBK's 0x80 is not the euro sign; the replacement encoding's "
+    "labels are read as text -- measured on Chromium 141 (r4meas/labels.full.json, "
+    "pin_deltas.out): the text a tool reads differs from what the browser shows, never a "
+    "hang or a raise"))
+def test_a_document_reads_as_chromium_decodes_it_under_every_whatwg_label(monkeypatch):
+    """BUG-0559, after the owner's final round, real Chromium, generated over every WHATWG
+    label (`_WHATWG_LABELS`, in the ``Content-Type``): `navguard.decoded_text` reads a
+    document's bytes 0x80..0xFF as the text Chromium decodes them to. A strict xfail: the
+    deltas its docstring's reason lists are measured and open, owned by SP-76."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from urllib.parse import quote, unquote
+
+    from tests._spa_fixture import chromium_or_skip
+    chromium_or_skip(monkeypatch)
+    from playwright.sync_api import sync_playwright
+
+    from fuzzlab.core.urls import in_origin_scope, origin_scope
+    body = b"<pre id=p>" + bytes(range(0x80, 0x100))
+
+    class Site(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):  # noqa: N802 - http.server API
+            label = unquote(self.path.lstrip("/"))
+            self.send_response(200)
+            self.send_header("Content-Type", f"text/html; charset={label}")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Site)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.server_address[1]}/"
+    deltas = {}
+    try:
+        with sync_playwright() as pw:
+            try:
+                browser = pw.chromium.launch(**navguard.chromium_launch_kwargs(
+                    navguard.browser_launch_args([base])))
+            except Exception as exc:  # noqa: BLE001 - a launch failure is a skip
+                from tests._browser import skip_or_fail
+                skip_or_fail(f"chromium could not launch: {exc}")
+            try:
+                ctx = browser.new_context(service_workers="block")
+                origins = origin_scope(base)
+                navguard.guard_page(ctx, in_scope=lambda u: in_origin_scope(u, origins))
+                page = ctx.new_page()
+                for label in _WHATWG_LABELS:
+                    navguard.navigate(page, base + quote(label, safe=""), timeout_ms=5000)
+                    shown = page.evaluate("(document.getElementById('p') || "
+                                          "document.documentElement).textContent")
+                    mine = navguard.decoded_text(body, f"text/html; charset={label}")[0]
+                    mine = mine.removeprefix("<pre id=p>")
+                    if mine != shown:
+                        deltas[label] = sum(a != b for a, b in zip(mine, shown)) + abs(
+                            len(mine) - len(shown))
+            finally:
+                browser.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert deltas == {}, (len(deltas), sorted(deltas.items())[:30])
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
+    "BUG-0559 (after the owner's final round; found by its PA-0002 sweep of every reader "
+    "of a charset label, and in part by the final round's check), pinned for the owner of "
+    "the legacy spider's static engine, LocalSpider._fetch_static (tools/spider.py, "
+    "CRAWL): it reads requests' Response.text under the header's charset, never through "
+    "navguard.decoded_text (SP-76), so charset=idna and charset=undefined raise "
+    "UnicodeError out of the read (the crawl loop files the page as an error), punycode "
+    "and EBCDIC labels read an ASCII page as other characters, and CPython's super-linear "
+    "punycode decoder runs on a target's page (384 KB: 18.6 s per Response.text, read "
+    "three times; r4meas/spider_static_text.out). Predates the batch (7393c90)"))
+def test_the_static_engine_reads_a_page_whatever_charset_it_names(tmp_path):
+    """BUG-0559, after the owner's final round, offline: the legacy spider's static
+    engine (`LocalSpider._fetch_static`, its real requests session against a loopback
+    server) reads a small ASCII page labelled with a codec no browser decodes by as a
+    browser shows it, never raising. A strict xfail: it reads them by Python's codec
+    (``r4meas/spider_static_fetch.out``)."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from urllib.parse import unquote
+
+    page = "<title>static</title>ok-abc"
+
+    class Site(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):  # noqa: N802 - http.server API
+            data = page.encode()
+            self.send_response(200)
+            self.send_header("Content-Type",
+                             f"text/html; charset={unquote(self.path.lstrip('/'))}")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Site)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.server_address[1]}/"
+    spider = sp.LocalSpider(base, max_depth=0, db_name=str(tmp_path / "s.db"),
+                            engine="requests", timeout_ms=5000)
+    wrong = []
+    try:
+        for label in ("idna", "undefined", "punycode", "cp037", "utf-7"):
+            try:
+                spider._fetch_static(base + label)
+                if spider._last_html != page:
+                    wrong.append((label, spider._last_html[:40]))
+            except Exception as exc:  # noqa: BLE001 - the defect: collected, named
+                wrong.append((label, f"{type(exc).__name__}: {exc}"))
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert wrong == [], wrong
+
+
 class _TlsSite:
     """A loopback HTTPS app with HTTP/1.1 keep-alive (the review's round-3 repro), its
     certificate a leaf of the test's own CA (`proxy.ca.LocalCA` under ``tmp_path``, one
@@ -1669,9 +2019,10 @@ class _TlsSite:
     character-referenced type prefetching ``/logout?tls`` and the alias; ``/wsp`` opens a
     ``wss`` WebSocket to it. Every request is recorded as ``(client port, path, Cookie,
     Sec-Purpose, ALPN)``. ``alpn``: the protocols it offers (``h2`` first: Chromium picks
-    it when offered, measured); ``tls12``: TLS 1.2 at most."""
+    it when offered, measured); ``tls12``: TLS 1.2 at most. ``pages``: more HTML pages by
+    path (``{port}`` is this site's port); ``delays``: seconds a path's answer waits."""
 
-    def __init__(self, tmp_path, *, alpn=None, tls12=False):
+    def __init__(self, tmp_path, *, alpn=None, tls12=False, pages=None, delays=None):
         import base64
         import hashlib
         import ssl
@@ -1724,6 +2075,8 @@ class _TlsSite:
                     except OSError:
                         pass
                     return
+                if (delays or {}).get(self.path):
+                    time.sleep(delays[self.path])
                 if self.path.startswith("/start"):
                     self.send_response(302)
                     self.send_header("Location", "/land" + self.path[len("/start"):])
@@ -1741,6 +2094,8 @@ class _TlsSite:
                     body = (f"<title>WSP</title><script>var ws = new WebSocket("
                             f"'wss://127.0.0.1:{site.port}/ws'); ws.onopen = function () "
                             f"{{ document.title = 'WS-OPEN'; }};</script>")
+                elif self.path in (pages or {}):
+                    body = pages[self.path].replace("{port}", str(site.port))
                 data = body.encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html")
@@ -2010,3 +2365,96 @@ def test_the_enforcer_holds_an_https_tunnel_to_its_ticket(monkeypatch, tmp_path,
     assert after["reuse"] == before.get("reuse", 0) + 1, (before, after)
     assert after["connect"] == before["connect"] + 3, (before, after)
     assert "--disable-http2" in args          # Chromium's own traffic: one request a time
+
+
+# --- after the owner's final round (BUG-0559): a ticket its own connection never uses --
+#: A closed declarative root's handler leaks a function that inserts a speculation-rules
+#: prefetch of a URL into that root, where no page layer sees it (`PRELOAD_OFF_JS` watches
+#: the document and open roots): the test fires it once the guard's ticket is live.
+_CLOSED_ROOT_PREFETCH = (
+    "<div><template shadowrootmode=closed><img src=\"data:,\" onerror=\"const root = "
+    "this.getRootNode(); window.fire = (url) => { const s = document.createElement("
+    "'script'); s.type = 'speculationrules'; s.textContent = JSON.stringify({prefetch: "
+    "[{source: 'list', urls: [url]}]}); root.appendChild(s); }; document.title += "
+    "'+armed';\"></template></div>")
+#: The check's two shapes of a ticket whose own connection never comes: a WebSocket whose
+#: native constructor throws after the guard admitted it (Playwright's page-side mock
+#: does not validate the subprotocol; the native one refuses ``not a token``), and an
+#: iframe's redirect landing the route admits after the page removed the frame (the
+#: server holds the route's own fetch of the landing 1.5 s).
+_UNUSED_TICKET_PAGES = {
+    "socket": ("/sockpin", "<title>PIN</title>" + _CLOSED_ROOT_PREFETCH + "<script>try { "
+               "new WebSocket('wss://127.0.0.1:{port}/ws', 'not a token'); } catch (e) "
+               "{ document.title += '+threw'; }</script>"),
+    "landing": ("/ifr", "<title>PIN</title>" + _CLOSED_ROOT_PREFETCH + "<iframe "
+                "src=/start2></iframe><script>setTimeout(() => document.querySelector("
+                "'iframe').remove(), 700);</script>"),
+}
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
+    "BUG-0559 (after the owner's final round), pinned for the owner of the enforcer's "
+    "tickets, navguard (SP-04: admit_socket, admit_landing, _TunnelTicket): a tunnel "
+    "ticket is keyed by host:port only and stays live SOCKET_TICKET_TTL_S (10 s) when the "
+    "connection it was issued for never comes -- a WebSocket whose native constructor "
+    "throws after the guard admitted it, a redirect landing whose frame was removed "
+    "before the route answered -- and the next CONNECT Chromium makes to that host:port "
+    "takes it: a same-origin speculation-rules prefetch of /logout, inserted where no page "
+    "layer sees it, reaches the target with the session past the destructive rule "
+    "(measured by the final round's check on 72497c9 and 1b05e3f, both binaries; not a "
+    "regression of this batch). The fix withdraws a ticket whose connection does not "
+    "follow, or stops Chromium's speculation-rules prefetch at launch, measured first"))
+@pytest.mark.parametrize("which", ["full", "shell"])
+@pytest.mark.parametrize("kind", ["socket", "landing"])
+def test_a_ticket_its_own_connection_never_uses_admits_no_prefetch(monkeypatch, tmp_path,
+                                                                  kind, which):
+    """BUG-0559, after the owner's final round, real Chromium, both binaries, TLS
+    verification on (the test trusts its own key only): the guard admits a tunnel ticket
+    for a connection that never comes (`_UNUSED_TICKET_PAGES`), then a prefetch of
+    ``/logout`` is inserted into a closed root; the enforcer must refuse the prefetch's
+    ``CONNECT`` (no ticket of its own), so ``/logout`` never reaches the target. A strict
+    xfail: on 72497c9 the prefetch takes the ticket and ``GET /logout`` arrives with
+    ``sid=S`` and ``Sec-Purpose: prefetch`` (measured by the check, and here)."""
+    _binary(monkeypatch, which)
+    from playwright.sync_api import sync_playwright
+    path, page_html = _UNUSED_TICKET_PAGES[kind]
+    site = _TlsSite(tmp_path, pages={path: page_html}, delays={"/land2": 1.5})
+    monkeypatch.setenv("NODE_EXTRA_CA_CERTS", str(site.ca.ca_cert_path))
+    want = "admit_socket" if kind == "socket" else "admit_landing"
+    admitted = []
+    for name in ("admit_socket", "admit_landing"):
+        real = getattr(navguard, name)
+        monkeypatch.setattr(navguard, name, lambda url, _real=real, _name=name: (
+            admitted.append((_name, url)), _real(url))[1])
+    ready = (False, "", [])
+    try:
+        with sync_playwright() as pw:
+            browser, ctx = _guarded_https(pw, site, extra_args=[site.spki_switch()])
+            try:
+                page = ctx.new_page()
+                nav = navguard.navigate(page, site.base + path.lstrip("/"),
+                                        timeout_ms=8000)
+                for _ in range(150):                  # armed: the ticket is live
+                    if any(n == want for n, _u in admitted) and "armed" in page.title():
+                        break
+                    page.wait_for_timeout(100)
+                ready = (nav.reached, page.title(), list(admitted))
+                if any(n == want for n, _u in admitted) and "armed" in ready[1]:
+                    page.evaluate("(url) => window.fire(url)", f"{site.base}logout?{kind}")
+                    for _ in range(80):               # well inside the ticket's 10 s
+                        if any(p.startswith("/logout") for p in site.paths()):
+                            break
+                        page.wait_for_timeout(100)
+            finally:
+                browser.close()
+    finally:
+        site.close()
+        with navguard._ENFORCE_LOCK:              # no ticket of this site outlives it
+            navguard._TUNNEL_TICKETS.pop(("127.0.0.1", site.port), None)
+    if not (ready[0] and "armed" in ready[1] and any(n == want for n, _u in ready[2])):
+        pytest.fail(f"the repro did not arm: {ready}")      # never the pinned assertion
+    if "/ws" in site.paths():
+        pytest.fail(f"the socket connected, so its ticket was used: {site.paths()}")
+    with site._lock:
+        logouts = [s for s in site.seen if s[1].startswith("/logout")]
+    assert logouts == [], logouts

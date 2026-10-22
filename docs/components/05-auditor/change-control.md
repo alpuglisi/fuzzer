@@ -77,6 +77,16 @@ Newest first.
   `::test_an_https_landing_and_socket_load_from_a_self_signed_target`,
   `::test_a_guarded_page_loads_a_document_whatever_charset_it_names`). NFR-AUD-safe's
   clause edited in place.
+- After the owner's final round (2026-10-22; branch `lane/BROWSERALIAS-r4` from 72497c9;
+  no change to `tools/fetcher.py`): the fetcher's guarded browser takes the owner's
+  decoder fix (CC-CRAWL-0063, after the owner's final round) through `navguard`: a page
+  labelled with a codec no browser decodes by (`punycode`: a 384 KB page held the route
+  past its navigation timeout) is read by the undeclared order, as Chromium treats an
+  unknown label. NFR-AUD-safe's clause now states the gap the final round's check found
+  and this round pins (a ticket whose own connection never comes is taken by a
+  prefetch; `tests/test_browser_session_reach.py::test_a_ticket_its_own_connection_never_uses_admits_no_prefetch`,
+  strict xfail, owner navguard SP-04), where it said the browser never preloads
+  anything past the guard.
 
 ### CC-AUD-0057 — The captured-request import refuses and counts a body holding a lone surrogate instead of failing the import (FR-AUD-22, BUG-0554) (2026-10-21)
 - Placement: lane SURROGATE (item AU-REQID78), base 33b423e, with CC-CRAWL-0061 (the

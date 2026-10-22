@@ -30,8 +30,13 @@ Every one is checked where it is made (PA-0123):
   Chromium sends on its own is ever needed: a preload of a host the session's cookies
   do not reach, or of a destructive
   URL, is refused there whatever the page's markup (measured on Chromium 141, both
-  binaries, http and https). The resolver rules still name only the scope ``host:port``
-  pairs;
+  binaries, http and https) -- **but** through a ticket whose own connection never
+  comes (a WebSocket whose native constructor throws after the guard admitted it, a
+  redirect landing whose frame is gone): it stays live its TTL and the next ``CONNECT``
+  Chromium makes to that host and port, a prefetch's, takes it (measured; BUG-0559,
+  after the owner's final round: a known gap, pinned by
+  ``test_a_ticket_its_own_connection_never_uses_admits_no_prefetch``). The resolver
+  rules still name only the scope ``host:port`` pairs;
 * **Chromium's preloads, defence in depth** -- ``guard_page`` keeps a speculation rule
   set from being registered where a script can see it (`PRELOAD_OFF_JS`; the route drops
   the ``Speculation-Rules`` header, makes a page's parser-inserted rule sets inert and
@@ -850,8 +855,51 @@ _RECEIVED: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
 _META_CHARSET = re.compile(rb"""<meta[^>]*?charset\s*=\s*["']?\s*([A-Za-z0-9._:-]+)""",
                            re.IGNORECASE)
 _HEADER_CHARSET = re.compile(r"""charset\s*=\s*["']?\s*([A-Za-z0-9._:-]+)""", re.IGNORECASE)
-#: Python's names of the labels a browser reads as windows-1252.
-_LATIN_CODECS = frozenset({"ascii", "iso8859-1", "latin-1", "cp1252"})
+#: **The encodings a browser decodes a document by** (BUG-0559, after the owner's final
+#: round): the WHATWG Encoding Standard's, keyed by Python's name for a label
+#: (``codecs.lookup(label).name``: each browser encoding's own name -- else its Python
+#: codec, ``cp874`` for windows-874, ``mac-cyrillic`` for x-mac-cyrillic -- and every
+#: Python name its WHATWG labels resolve to), each to the Python codec that decodes as
+#: Chromium does. Measured on Chromium 141 over every WHATWG label and every label Python
+#: registers, header and ``<meta>`` (``r4meas/browser_labels.py``,
+#: ``browser_multibyte.py``): a Latin-1 or ASCII label is windows-1252, ``iso-8859-9``
+#: windows-1254, ``iso-8859-11``/``tis-620`` windows-874; GBK's decoder is gb18030's (5/6
+#: of the sampled sequences against 4/6 for gbk and 2/6 for gb2312), Big5 is
+#: Big5-HKSCS's (6/8 against 2/8), Shift_JIS is windows-31j's (12/13 against 5/13), EUC-KR
+#: is windows-949's (4/4 against 3/4), ISO-2022-JP reads half-width katakana (3/4 against
+#: 2/4); ``utf-16`` is UTF-16LE. Single-byte decoders matched Chromium on 0x80..0xFF but
+#: for the bytes a windows code page leaves undefined (Chromium: the C1 control, here
+#: U+FFFD; windows-1252 then reads the whole document byte for byte) and two KOI8-U
+#: bytes; the CJK decoders recover from an invalid sequence otherwise than Chromium's.
+#: Those deltas and the 74 WHATWG labels Python does not resolve are measured and pinned
+#: (``test_a_document_reads_as_chromium_decodes_it_under_every_whatwg_label``). Any
+#: other label is unknown, as Chromium treats it: no codec a browser never decodes by runs
+#: on a body a target wrote (CPython's ``punycode`` decoder is super-linear: a 384 KB page
+#: labelled with it held the route about 10 s, 512 KB 82 s, measured on 72497c9; ``utf-7``,
+#: ``unicode_escape``, ``idna``, EBCDIC, ``utf-32`` ... are no browser's either). Every
+#: codec here decodes 1 MB of random bytes in under 50 ms, never raising with replacement
+#: (``r4meas/decoder_cost.out``).
+_BROWSER_CODECS = {
+    "utf-8": "utf-8",
+    "cp866": "cp866",                                                   # IBM866
+    **{f"iso8859-{n}": f"iso8859-{n}" for n in (2, 3, 4, 5, 6, 7, 8, 10, 13, 14, 15, 16)},
+    "koi8-r": "koi8-r", "koi8-u": "koi8-u",
+    "mac-roman": "mac-roman", "mac-cyrillic": "mac-cyrillic",       # macintosh, x-mac-cyrillic
+    "cp874": "cp874", "iso8859-11": "cp874", "tis-620": "cp874",        # windows-874
+    **{f"cp{n}": f"cp{n}" for n in range(1250, 1259)},                  # windows-1250..1258
+    "iso8859-1": "cp1252", "ascii": "cp1252",                           # windows-1252
+    "iso8859-9": "cp1254",                                              # windows-1254
+    "gbk": "gb18030", "gb2312": "gb18030", "gb18030": "gb18030",        # GBK, gb18030
+    "big5": "big5hkscs", "big5hkscs": "big5hkscs",                      # Big5
+    "euc_jp": "euc_jp",                                                 # EUC-JP
+    "iso2022_jp": "iso2022_jp_ext",                                     # ISO-2022-JP
+    "shift_jis": "cp932", "cp932": "cp932",                             # Shift_JIS
+    "euc_kr": "cp949",                                                  # EUC-KR
+    "utf-16-be": "utf-16-be", "utf-16-le": "utf-16-le", "utf-16": "utf-16-le",
+}
+#: The byte-order marks a body may start with, and the codec each one names.
+_BOMS = ((codecs.BOM_UTF8, "utf-8-sig"), (codecs.BOM_UTF16_LE, "utf-16"),
+         (codecs.BOM_UTF16_BE, "utf-16"))
 
 
 def decoded_text(body: bytes | None, content_type: str | None) -> tuple[str, str | None]:
@@ -872,23 +920,27 @@ def decoded_text(body: bytes | None, content_type: str | None) -> tuple[str, str
     ``LookupError``) and text codecs that refuse a document (``idna``, ``undefined``:
     ``UnicodeError``, with ``replace`` too). Such a label is unknown, as a browser
     treats a label it does not know: the next one decides (the document's own), else the
-    undeclared order. Nothing a codec raises leaves this function."""
+    undeclared order. Nothing a codec raises leaves this function.
+
+    **Only an encoding a browser decodes by runs** (BUG-0559, after the owner's final
+    round): a label is known only when Python's name for it is one of the WHATWG
+    Encoding Standard's encodings (`_BROWSER_CODECS`, measured on Chromium 141), decoded
+    by the codec that reads it as Chromium does; a ``<meta>`` naming UTF-16 is UTF-8, as
+    HTML's prescan makes it. Round 3 admitted any text codec Python registers, and
+    CPython's ``punycode`` decoder is super-linear: a large page labelled with it held
+    the route past the navigation timeout (a regression against c6296bc) and a request
+    body held disco's request handler. Every allowed codec is linear and never raises
+    with replacement."""
     data = bytes(body or b"")
-    declared = [name for bom, name in ((codecs.BOM_UTF8, "utf-8-sig"),
-                                       (codecs.BOM_UTF16_LE, "utf-16"),
-                                       (codecs.BOM_UTF16_BE, "utf-16"))
-                if data.startswith(bom)][:1]
-    for match in (_HEADER_CHARSET.search(content_type or ""),
-                  _META_CHARSET.search(data[:1024])):
+    declared = [codec for bom, codec in _BOMS if data.startswith(bom)][:1]
+    for match, meta in ((_HEADER_CHARSET.search(content_type or ""), False),
+                        (_META_CHARSET.search(data[:1024]), True)):
         if match:
-            name = match.group(1)
-            declared.append(name.decode("ascii", "replace") if isinstance(name, bytes)
-                            else name)
-    for name in declared:                     # the first label known decides
-        codec = _text_codec(name)
-        if codec is None:
-            continue                          # unknown, or no text encoding: not a label
-        if codec in _LATIN_CODECS:
+            codec = _text_codec(match.group(1), meta=meta)
+            if codec is not None:             # unknown, or no browser's: not a label
+                declared.append(codec)
+    for codec in declared:                    # the first label known decides
+        if codec == "cp1252":
             # a Latin-1 label is read as windows-1252 (WHATWG), then byte for byte
             try:
                 return data.decode("cp1252"), "cp1252"
@@ -899,10 +951,10 @@ def decoded_text(body: bytes | None, content_type: str | None) -> tuple[str, str
         except UnicodeDecodeError:            # the declared charset, lossy: read only
             try:
                 return data.decode(codec, "replace"), None
-            except Exception:  # noqa: BLE001 - it cannot replace (idna): not a label
+            except Exception:  # noqa: BLE001 - defensive: no allowed codec raises here
                 continue
-        except Exception:  # noqa: BLE001 - a codec that refuses a document (undefined,
-            continue       # idna): not a label either
+        except Exception:  # noqa: BLE001 - defensive: nothing a codec raises leaves
+            continue
     for codec in ("utf-8", "cp1252"):         # undeclared: UTF-8, else HTML's default
         try:
             return data.decode(codec), codec
@@ -911,17 +963,21 @@ def decoded_text(body: bytes | None, content_type: str | None) -> tuple[str, str
     return data.decode("latin-1"), "latin-1"
 
 
-def _text_codec(label: str) -> str | None:
-    """Python's name of the text encoding a charset ``label`` names, or None: an unknown
-    label, or a codec that is not a text encoding (``hex``, ``base64``, ``rot13``, ...;
-    `decoded_text`)."""
+def _text_codec(label: str | bytes, *, meta: bool = False) -> str | None:
+    """The Python codec that decodes a document labelled ``label`` as a browser does, or
+    None: a label Python does not know, or one whose codec no browser decodes by
+    (``punycode``, ``utf-7``, ``hex``, ...; `_BROWSER_CODECS`, `decoded_text`). From a
+    ``<meta>`` (``meta``), a UTF-16 label is UTF-8 (HTML's prescan; measured on Chromium
+    141: ``document.characterSet`` is UTF-8 for every UTF-16 label in a ``<meta>``)."""
+    if isinstance(label, bytes):
+        label = label.decode("ascii", "replace")
     try:
-        info = codecs.lookup(label)
+        codec = _BROWSER_CODECS.get(codecs.lookup(label).name)
     except Exception:  # noqa: BLE001 - LookupError, or a label the registry chokes on
         return None
-    if not getattr(info, "_is_text_encoding", True):
-        return None
-    return info.name
+    if meta and codec is not None and codec.startswith("utf-16"):
+        return "utf-8"
+    return codec
 
 
 def response_text(response) -> str | None:
@@ -2079,7 +2135,10 @@ def browser_launch_args(scope_urls, *, any_port_hosts=(), proxy: str | None = No
     therefore loads nothing. A tunnel is admitted by host and port, and read at the TLS
     record layer only, never decrypted (`_HeldTunnel`, BUG-0559 review round 3): an
     ``https`` landing's carries its one exchange and is closed at the browser's next
-    request on it; a ticket admits a certificate error's retry. ``--disable-http2`` keeps
+    request on it; a ticket admits a certificate error's retry. A ticket whose own
+    connection never comes is taken by the next ``CONNECT`` to its host and port, a
+    prefetch's included (a known gap, pinned: BUG-0559 after the owner's final round,
+    ``test_a_ticket_its_own_connection_never_uses_admits_no_prefetch``). ``--disable-http2`` keeps
     Chromium's own traffic on HTTP/1.1 (one request at a time on a connection; routed
     requests are the driver's and never see it); what a WebSocket's tunnel carries is
     not seen.

@@ -1159,7 +1159,9 @@ fuzzer.
     enforcer every launch names *(review round 2, BB-3; round 1's page layers, which
     keep a rule set from being registered where a script can see it, are defence in
     depth; review round 3: over `https` too, an admitted landing's tunnel carrying its
-    one exchange)*: a
+    one exchange; after the owner's final round, a gap pinned in FR-CRAWL-43: a ticket
+    whose own connection never comes is taken by the next `CONNECT` to its host and
+    port, a prefetch's included)*: a
     redirect hop to such a host is never fetched and
     the load is stored `failed` with the cause (never the landing's page, no static
     fallback); a selector form's submission there (`_isolated_submit`'s browser branch)
@@ -1656,13 +1658,31 @@ fuzzer.
     chose `h2` inside the tunnel when offered). So no preload, whatever the page's
     markup (a rule set in a closed shadow root with a character-referenced type, one a
     handler inserts into its closed root, one an opener gives an `about:blank` popup),
-    reaches any host, over `http` or `https`. *Residual (round 3, stated):* a ticket
+    reaches any host, over `http` or `https` -- but through the pinned gap below.
+    *Residual (round 3, stated):* a ticket
     cannot tell whose `CONNECT` it admits -- another request of the browser to the same
     host and port in the milliseconds before the browser's own connection (or its
     retry) could take it; a WebSocket's and an `https` landing's tickets admitted at the
     same moment for one host and port may be matched in the other order; what a
     WebSocket's tunnel carries after its upgrade is not seen; measured on a local TLS
-    server (TLS 1.2 and 1.3), no https lab. **Defence in depth** *(round 1)*: every guarded
+    server (TLS 1.2 and 1.3), no https lab. **Gap, pinned** *(after the owner's final
+    round; BUG-0559, not a regression of the batch)*: a ticket is keyed by host and port
+    and stays live for `SOCKET_TICKET_TTL_S` (10 s) when the connection it was issued
+    for never comes -- a WebSocket whose native constructor throws after the guard
+    admitted it (Playwright's page-side mock does not validate the subprotocol), a
+    redirect landing whose frame the page removed before the route answered -- and the
+    next `CONNECT` Chromium makes to that host and port takes it: a same-origin
+    speculation-rules prefetch of `/logout`, inserted into a closed root, reaches the
+    target with the session past the destructive rule (a socket ticket's tunnel then
+    stays in Chromium's pool for later prefetches). Measured by the final round's check
+    on 72497c9 and 1b05e3f, both binaries, and here (`r4meas/pin_ticket.repeat.out`:
+    10 of 10 runs; with no ticket issued the prefetch is refused,
+    `pin_ticket.control.out`). Owner: navguard (SP-04: `admit_socket`, `admit_landing`,
+    `_TunnelTicket`); pinned by
+    `test_a_ticket_its_own_connection_never_uses_admits_no_prefetch` (strict xfail, both
+    shapes, both binaries); the remedy withdraws a ticket whose connection does not
+    follow, or stops Chromium's speculation-rules prefetch at launch, measured first.
+    **Defence in depth** *(round 1)*: every guarded
     context, with or without a session, never registers a rule set a script can see: `guard_page`
     installs `navguard.PRELOAD_OFF_JS` before any page script runs (every
     `<script type=speculationrules>` taken out as it is inserted -- by the parser, a
@@ -1685,7 +1705,33 @@ fuzzer.
     label, as a browser treats one -- the next label decides, else the undeclared order
     (round 2's decoder raised `LookupError` past the handler and a page that loaded at
     c6296bc hung). A request body is read the same way (disco's `carries_value`, never
-    Playwright's strict `post_data`).
+    Playwright's strict `post_data`). *(After the owner's final round, BUG-0559:)* only
+    an encoding a browser defines decodes -- a label is known only when Python's name for
+    it (`codecs.lookup(label).name`) is one of the WHATWG Encoding Standard's encodings
+    (`navguard._BROWSER_CODECS`), each decoded by the codec that reads it as Chromium
+    141 does (measured over every WHATWG label and every label Python registers: a
+    Latin-1 or ASCII label is windows-1252, `iso-8859-9` windows-1254, `iso-8859-11` and
+    `tis-620` windows-874, GBK's decoder is gb18030's, Big5 Big5-HKSCS's, Shift_JIS
+    windows-31j's, EUC-KR windows-949's; a `<meta>` naming UTF-16 is UTF-8); any other
+    label is unknown. Round 2's decoder ran any text codec Python registers, and
+    CPython's `punycode` decoder is super-linear: a 384 KB page labelled with it held the
+    route about 10 s, past the navigation timeout (a regression against c6296bc), and a
+    request body labelled with it held disco's request handler as long. *Gap, pinned:*
+    the text read differs from what Chromium shows for the 74 WHATWG labels Python does
+    not resolve (read by the undeclared order), a windows code page's undefined bytes
+    (U+FFFD for Chromium's C1 control; windows-1252 then byte for byte), two KOI8-U
+    bytes, the CJK decoders' recovery from an invalid sequence and the replacement
+    encoding's labels -- never a hang or a raise
+    (`test_a_document_reads_as_chromium_decodes_it_under_every_whatwg_label`, strict
+    xfail; owner navguard, SP-76). *Gap, pinned (found by the same round's PA-0002
+    sweep; predates the batch):* the legacy spider's static engine
+    (`LocalSpider._fetch_static`) reads requests' `Response.text` under the header's
+    charset, never `decoded_text`: `charset=idna` and `undefined` raise out of the read
+    (the crawl loop files the page as an error), `punycode` and EBCDIC labels read an
+    ASCII page as other characters, and `punycode`'s super-linear decoder runs there
+    (384 KB: 18.6 s per read, three reads a page)
+    (`test_the_static_engine_reads_a_page_whatever_charset_it_names`, strict xfail;
+    owner the spider's static engine).
   - **The document a load committed** is checked before anything of it is read
     (`navguard.committed_session_refusal`, defence in depth behind the route): a main
     frame on a host the session's cookies do not reach is never read as the session's.
@@ -1768,7 +1814,22 @@ fuzzer.
     (`test_no_request_rides_an_https_landings_tunnel_after_its_exchange`); the tickets
     and the one-exchange rule on raw TLS sockets, TLS 1.2 and 1.3
     (`test_the_enforcer_holds_an_https_tunnel_to_its_ticket`). Each fails on 1b05e3f as
-    stated (`scratchpad/lanes/BROWSERALIAS/r3proof/proof.log`).
+    stated (`scratchpad/lanes/BROWSERALIAS/r3proof/proof.log`). *(After the owner's final
+    round:)* a label decodes only by an encoding a browser defines, every codec name
+    Python registers, header and `<meta>`
+    (`test_a_charset_label_decodes_only_by_an_encoding_a_browser_defines`); a costly
+    codec's label (`punycode`, `idna`, `unicode_escape`, `raw_unicode_escape`, `utf-7`,
+    every alias) on a 384 KB page loads through the route within its timeout
+    (`test_a_guarded_page_loads_a_document_whatever_charset_it_names`, extended) and on a
+    384 KB request body is read by `carries_value` within 2 s
+    (`test_a_request_body_is_read_whatever_charset_it_names_within_its_budget`, real
+    Chromium, generated). Each fails on 72497c9 as stated
+    (`scratchpad/lanes/BROWSERALIAS/r4meas/proof.72497c9.out`: codecs outside the
+    browser's, `Page.goto: Timeout 5000ms exceeded` for `label/punycode`, `punycode`
+    10.3 s and EBCDIC labels unseen in `carries_value`). Pinned gaps (strict xfails):
+    `test_a_ticket_its_own_connection_never_uses_admits_no_prefetch`,
+    `test_a_document_reads_as_chromium_decodes_it_under_every_whatwg_label`,
+    `test_the_static_engine_reads_a_page_whatever_charset_it_names`.
 
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default
@@ -1802,6 +1863,11 @@ fuzzer.
   tunnel admitted for a redirect landing, so that tunnel carries its one exchange and is
   closed at the next request (FR-CRAWL-43) --
   `tests/test_browser_session_reach.py::test_no_request_rides_an_https_landings_tunnel_after_its_exchange`.
+  *(After the owner's final round, BUG-0559, a known gap:)* a ticket whose own
+  connection never comes is taken by the next `CONNECT` to its host and port, and a
+  prefetch of `/logout` inserted into a closed root then reaches the target with the
+  session -- pinned (strict xfail, owner navguard SP-04) by
+  `tests/test_browser_session_reach.py::test_a_ticket_its_own_connection_never_uses_admits_no_prefetch`.
   *(CC-CRAWL-0028, BUG-0136:)* **how** a request is refused is one rule: every abort
   of a document request (a navigation, top-level or frame, and each of its redirect
   hops), whatever the reason -- scope, destructive, refused method or body, the reveal

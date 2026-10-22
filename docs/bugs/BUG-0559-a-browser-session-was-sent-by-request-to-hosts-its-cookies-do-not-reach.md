@@ -789,3 +789,232 @@ the whole domain the library accepts, generated (every codec name the registry k
 through the real path; a guard against a hazardous call bans the class (every strict
 decode of a Playwright body), each proven on a synthetic offender. Enforced by the
 round-3 tests in `tests/test_browser_session_reach.py`.
+
+## After the owner's final round (2026-10-22, on 72497c9; the round-3 fix check's two open results)
+
+The owner approved round 3 (72497c9) as the final round, with one rule: anything found
+after it is pinned by a strict xfail, except a regression the batch itself introduced,
+which is fixed in the batch (PA-0549(3c)). Round 3's fix check confirmed every named
+repro fixed (BB-4's `hex`/`base64`/`idna`/`undefined` pages and the Latin-1 form; the
+https landing, the certificate retry and the tunnel reuse, both binaries, through the
+capture proxy) and returned two open results. This section records what was done with
+each, on `lane/BROWSERALIAS-r4` from 72497c9 (CC-CRAWL-0063 and CC-AUD-0060 "After the
+owner's final round").
+
+### What each was
+- **A regression, fixed: a large page labelled `charset=punycode` timed the route out.**
+  Round 3's `decoded_text` rejected only a label naming no text encoding or a codec that
+  raised, so every other text codec Python registers still decoded a target's body.
+  `punycode` is one, and CPython's punycode decoder is super-linear (each decoded code
+  point is an insertion into the string built so far). The check measured, at 72497c9,
+  a 300 KB ASCII page labelled with it: `Page.goto: Timeout 5000ms exceeded` on the
+  headless shell (4.66 s on the full browser), 500 KB `Timeout 15000ms exceeded` at
+  disco's default navigation timeout; the route handler runs on the Playwright
+  dispatcher, so everything else on it stalled too. c6296bc loaded the 300 KB page in
+  0.18 s (it read a main-frame page as strict UTF-8 and failed only on non-UTF-8 bytes);
+  1b05e3f also timed out -- round 2's decoder introduced it and round 3 did not cover
+  it. The same decoder runs in disco's `carries_value`, inside its request handler, on
+  a request body whose label the page chooses (300 KB: 4.57 s). Chromium itself does
+  not know the label and loads the page at once.
+- **A neighbour, pinned: a tunnel ticket its own connection never uses is taken by a
+  prefetch.** Not a regression of the batch (the pushed code let that prefetch out
+  anyway): a ticket is keyed by host and port and stays live `SOCKET_TICKET_TTL_S`
+  (10 s). The check made two tickets whose connection never comes -- a WebSocket whose
+  native constructor throws after the guard admitted it (Playwright's page-side mock
+  does not validate the subprotocol `'not a token'`, so `make_ws_handler` calls
+  `admit_socket` and `connect_to_server`, and the native constructor then throws), and
+  an iframe's redirect landing that the route admits after the page removed the frame
+  (the server holding the route's fetch of the landing 1.5 s) -- and a speculation-rules
+  prefetch of `/logout` that a handler inside a closed declarative root inserts into
+  that root: the prefetch's `CONNECT` took the ticket and `GET /logout` reached the
+  server with `sid=S` and `Sec-Purpose: prefetch`, counted nowhere (both binaries, the
+  review's certificate configuration and the spki trust, through the capture proxy; a
+  socket ticket's tunnel then stays in Chromium's pool and carries later prefetches).
+  So the claim in the module doc and `browser_launch_args` that a destructive preload
+  is refused "whatever the page's markup" was false for https.
+
+### Measured before the design (`scratchpad/lanes/BROWSERALIAS/r4meas`)
+- `browser_labels.py` -> `labels.full.json` (Chromium 141.0.7390.37, full browser, no
+  guard): `document.characterSet` and the decoded bytes 0x80..0xFF for all 618 labels
+  (the 455 Python registers and the 228 WHATWG labels), in the header and in a
+  `<meta>`. Every WHATWG label decoded by the encoding the standard names; every other
+  label is unknown (Chromium then detects: an unlabelled page of those bytes read as
+  IBM866); a `<meta>` naming any UTF-16 label is UTF-8 and `x-user-defined` windows-1252.
+- `py_labels.py`: `codecs.lookup` resolves 154 of the 228 WHATWG labels; 74 (for
+  example `windows-874`, `x-cp1252`, `iso88591`, `koi8`, `mac`, `x-sjis`, `x-euc-jp`,
+  `cseuckr`, `windows-949`, `x-mac-cyrillic`, `unicode-1-1-utf-8`) resolve to nothing.
+  Python names some WHATWG labels' encodings by a subset codec (`gb2312`, `shift_jis`,
+  `euc_kr`, `big5`) or by the ISO code page a browser reads as a windows one
+  (`iso8859-1`, `iso8859-9`, `iso8859-11`).
+- `browser_multibyte.py` -> `multibyte.full.out`: Chromium against each candidate
+  Python codec on characteristic sequences under a WHATWG label: Shift_JIS is
+  `cp932`'s 12/13 (`shift_jis` 5/13), EUC-KR `cp949`'s 4/4 (`euc_kr` 3/4), GBK
+  `gb18030`'s 5/6 (`gbk` 4/6, `gb2312` 2/6), Big5 `big5hkscs`'s 6/8 (`big5` 2/8),
+  ISO-2022-JP `iso2022_jp_ext`'s 3/4 (`iso2022_jp` 2/4), EUC-JP `euc_jp` 4/7 (the 2004
+  variants decode IBM extension rows as other characters), windows-874 `cp874`,
+  `iso-8859-9` `cp1254`, `ibm866` `cp866`, `utf-16` UTF-16LE.
+- `decoder_cost.out`: each codec the allow-list can choose decodes 1 MB of random bytes,
+  of `a`, and of escape sequences in at most 42 ms, strict or with replacement, and
+  raises nothing but `UnicodeDecodeError`.
+- `costly.72497c9.out`, `route_body_timing.72497c9.out`: 72497c9's `decoded_text` on an
+  ASCII body with a long run of letters after its last `-`, labelled `punycode`: 128 KB
+  about 1 s, 256 KB 4-18 s with the host's load, 384 KB 9.8 s, 512 KB 82.5 s; `idna`,
+  `unicode_escape`, `raw_unicode_escape` and `utf-7` stay linear on Python 3.13 (idna
+  refuses a label over 1024 bytes). The tests use 384 KB.
+- `post_body.py`: Playwright's `post_data_buffer` carries a guarded page's 512 KB fetch
+  body whole, so `carries_value` can be tested on real requests.
+- Pin measurements: `pin_ticket.repeat.out` (the pin's repro, 10 of 10 runs, both
+  shapes, both binaries: `/logout?socket` / `/logout?landing` with `sid=S` and
+  `Sec-Purpose: prefetch`); `pin_ticket.control.out` (the same with the admits made
+  no-ops: no ticket, the prefetch's `CONNECT` refused, no `/logout`, 4 of 4);
+  `pin_deltas.out` (the decoder's remaining deltas from Chromium by WHATWG encoding);
+  `spider_static_text.out`, `spider_static_fetch.out` (the legacy spider's static
+  engine, below).
+
+### Root cause analysis (Five Whys, the regression)
+1. *Why did a punycode-labelled page time the route out?* The route's decoder ran
+   CPython's punycode codec on a 300 KB body, which took longer than the navigation's
+   timeout.
+2. *Why did that codec run at all?* Round 3 decided a label by subtracting from what
+   Python's registry accepts -- codecs that are not text encodings, codecs that raise --
+   so every text codec Python ships stayed allowed, `punycode`, `utf-7`,
+   `unicode_escape`, EBCDIC and `utf-32` among them, though no browser decodes a
+   document by any of them.
+3. *Why was the cost not seen?* Round 3's generated tests covered every label but on
+   small bodies: they proved "never raises", not "answers within its time". The hazard
+   of a target-chosen codec is in the label and the body together.
+4. *Why a deny-list?* The fix was shaped by the failures in hand (`LookupError`,
+   `UnicodeError`); the reference that defines which labels mean anything -- the WHATWG
+   Encoding Standard, which Chromium implements -- was not the starting point.
+
+**Root cause:** the decoder's input domain was taken to be "labels Python knows",
+filtered by what had failed, instead of "labels a browser knows", allowed by what the
+browser does; and its tests bounded what can raise, not what can take time.
+
+### Corrective action
+Commit on `lane/BROWSERALIAS-r4` (CC-CRAWL-0063 and CC-AUD-0060 "After the owner's
+final round"; FR-CRAWL-43, FR-CRAWL-34, NFR-CRAWL-safe and NFR-AUD-safe's clause edited
+in place).
+- **The decoder (`navguard`, SP-76's owner):** `decoded_text` decodes only by an encoding
+  the WHATWG Encoding Standard defines. `_BROWSER_CODECS` is the allow-list: keyed by
+  Python's name for a label (`codecs.lookup(label).name`) -- each browser encoding's own
+  name, else its Python codec (`cp874`, `mac-cyrillic`), and every Python name its
+  WHATWG labels resolve to -- each mapped to the Python codec that decodes as Chromium
+  does, as measured: `iso8859-1`/`ascii`/`cp1252` windows-1252, `iso8859-9` `cp1254`,
+  `iso8859-11`/`tis-620` `cp874`, `gbk`/`gb2312` `gb18030`, `big5` `big5hkscs`,
+  `shift_jis` `cp932`, `euc_kr` `cp949`, `iso2022_jp` `iso2022_jp_ext`, `utf-16`
+  UTF-16LE, the rest themselves. `_text_codec(label, meta=)` looks a label up there; a
+  `<meta>` naming UTF-16 gives UTF-8 (HTML's prescan, measured). Any other label is
+  unknown and the next label, else the undeclared order (UTF-8, windows-1252, byte for
+  byte), decides. Every allowed codec is linear and never raises with replacement, and
+  the broad catches stay as defence. `carries_value` and every other caller inherit it.
+- **The neighbour:** not changed (the owner's rule). The module doc and
+  `browser_launch_args` now state the gap and name its pin; FR-CRAWL-43,
+  FR-CRAWL-34, NFR-CRAWL-safe and NFR-AUD-safe say the same.
+- **Tests** (`tests/test_browser_session_reach.py`):
+  `test_a_charset_label_decodes_only_by_an_encoding_a_browser_defines` (every codec name
+  Python registers, header and `<meta>`: the codec used is one a browser encoding decodes
+  by, a byte-order mark's or the undeclared order's; a costly codec's label on a 384 KB
+  body is read by the undeclared order within 2 s; the measured mappings);
+  `test_a_guarded_page_loads_a_document_whatever_charset_it_names` extended (a costly
+  codec's label -- `punycode`, `idna`, `unicode_escape`, `raw_unicode_escape`, `utf-7`,
+  every alias -- labels a 384 KB page, which loads through the route within the 5 s
+  navigation timeout); `test_a_request_body_is_read_whatever_charset_it_names_within_its_budget`
+  (real Chromium: a guarded page POSTs `q=zzfiller1`, 384 KB for a costly label, once
+  per codec name Python registers; `carries_value` reads each real request within 2 s
+  and sees the value, a UTF-16 label excepted). The round-2 unit test's Shift_JIS
+  expectation is now `cp932`. **Pre-fix proof** (plain calls, no pytest session, the new
+  test file over a `git archive` export of 72497c9;
+  `scratchpad/lanes/BROWSERALIAS/r4meas/proof.72497c9.out`): all three fail at their
+  assertions -- codecs outside the browser's (`cp037`, `cp1026`, `cp437`, ...);
+  `[('label/punycode', 'Page.goto: Timeout 5000ms exceeded.')]`;
+  `('punycode', True, 10.307)` (over the 2 s budget) and EBCDIC labels unseen.
+- **Pins** (strict xfails, `raises=AssertionError`, real code, each shown failing at its
+  stated assertion by a plain call):
+  `test_a_ticket_its_own_connection_never_uses_admits_no_prefetch[socket|landing]-[full|shell]`
+  (real Chromium, TLS verification on, the test trusting its own key only: the guard's
+  real `admit_socket`/`admit_landing` recorded, the prefetch fired once the ticket is
+  live; a precondition that does not hold is `pytest.fail`, never the pinned
+  assertion; `assert logouts == []` fails with `/logout?socket` / `/logout?landing`,
+  `sid=S`, `prefetch`; owner navguard SP-04);
+  `test_a_document_reads_as_chromium_decodes_it_under_every_whatwg_label` (real
+  Chromium, every WHATWG label: 139 of 228 labels read otherwise than Chromium shows --
+  the 74 unresolved labels, the windows code pages' undefined bytes, KOI8-U's two bytes,
+  the CJK decoders' recovery from invalid sequences, the replacement encoding; owner
+  navguard SP-76); `test_the_static_engine_reads_a_page_whatever_charset_it_names`
+  (offline, below).
+- **The run:** one pytest invocation on the final tree (`FUZZLAB_REQUIRE_BROWSER=1`,
+  `-n 3 --dist loadfile`; this file's tests, `tests/test_browser_scope.py` and every test
+  file importing `fuzzlab.tools.navguard`, 14 files): 864 passed, 0 failed, 0 skipped,
+  8 xfailed -- the six pins and two older ones -- in 587 s
+  (`scratchpad/lanes/BROWSERALIAS/r4proof/targeted.log`; CC-CRAWL-0063).
+
+**PA-0002 sweep, by primitive (every reader of a charset label a target writes):**
+- `navguard.decoded_text` is the one decoder of a Playwright body (the AST guard
+  `test_no_module_reads_a_response_body_as_strict_utf8`); its callers -- `_note_received`
+  (the route), `response_text` (`response_html`, the spider's and disco's harvests),
+  disco's `_protected_get` and `carries_value` -- all take the allow-list.
+- **Found, not this batch's code, pinned:** the legacy spider's static engine
+  (`LocalSpider._fetch_static`, with `_as_requests_response` for the seam's answers)
+  reads requests' `Response.text` under the header's charset, three times a page, never
+  through `decoded_text`. Measured (`spider_static_text.out`, `spider_static_fetch.out`):
+  `charset=idna` and `charset=undefined` raise `UnicodeError` out of the read (the
+  crawl loop files the page as an error -- the check's finding), `punycode` and EBCDIC
+  labels read an ASCII page as other characters, and `punycode` runs super-linearly
+  (384 KB: 18.6 s per read). It predates the batch (7393c90: `get_encoding_from_headers`
+  and `resp.text` were there), so by the owner's rule it is pinned, not fixed:
+  `test_the_static_engine_reads_a_page_whatever_charset_it_names` (offline strict
+  xfail, owner the spider's static engine; the remedy reads the body through SP-76).
+- **Found, not this batch's code, flagged to the orchestrator (not pinned in this
+  round; PA-0559(4): the item stops there and the orchestrator decides):** the same
+  mechanism -- requests' `Response.text`, which decodes a target's body by the
+  header's charset with whatever Python codec it names (`str(content, charset,
+  "replace")`; it catches only `LookupError` and `TypeError`, so `idna` and `undefined`
+  raise, and `punycode` runs super-linearly: measured on requests' own property,
+  `spider_static_text.out`) -- is read by other components' senders. A grep of `.text`
+  on `requests` responses over `fuzzlab/` found, besides the spider's static engine:
+  `session/manager.py:334`, `:429`, `:435` (the session manager's fetches; a file this
+  lane may not touch), `tools/probesender.py:1286` (excluded too),
+  `tools/fetcher.py:563` (the auditor's unauthenticated static fetch),
+  `greybox/run.py:217`, `tools/blind_sqli_fuzzer.py:103`,
+  `labgen/identifier_sqli_oracle.py:296` and `lab_fixtures/external.py:1090`; a grep
+  by variable name may miss a reader. Each path was read, not driven: the property's
+  cost and errors were measured, not each caller's handling of them. They predate the
+  batch and sit with other owners (SESS, FUZZ, AUD, greybox, labgen); one fix point
+  would be SP-60's bounded session (`core/bodyread.bound`), whose response hook could
+  set `Response.encoding` from the same allow-list so every `.text` read inherits it --
+  an owner's design decision, not taken here.
+
+### Recurrence review
+- **BUG-0559 round 3 (PA-0559(12)) -- the same defect recurring on the same function:**
+  a label the target writes made the route handler miss the navigation's timeout,
+  through a codec round 3's fix still allowed.
+- **BUG-0559 round 2 (PA-0559(7), (9)) and BUG-0548 (PA-0548, a decode on the proxy's
+  loop held it 104 ms per MiB) -- the same root cause:** a decode of a target's bytes on
+  a path that must answer in bounded time, bounded by what had failed rather than by
+  what the input can cost.
+
+### Prior-preventive-action failure analysis
+- **PA-0559(12): too narrow.** It required the decoder to be tested over the whole
+  domain the library accepts for the label, generated, through the real path -- which
+  round 3 did, for every label, on small bodies. It named the label as the input and
+  "can raise" as the hazard; the cost lives in the label and the body together, and the
+  domain to allow is the browser's, not the library's minus its failures.
+- **PA-0536(1) and PA-0548(4) (a bound on untrusted input enforced inside the loop that
+  does the work; a target's body decoded under a ceiling): not applied here.** They were
+  written for body bytes read from the network and for the proxy's decode, and swept by
+  library (`requests`, mitmproxy), not by "a codec the target chooses runs on its bytes".
+
+### Preventive action
+PA-0559 strengthened (text in the lane's doc_texts, item 13): **when a value the target
+writes selects an implementation (a codec, a parser, a format), the selection is an
+allow-list of what the browser (or the protocol's reference) does, measured, never what
+the library accepts minus what failed; and the tests generate the hazard's whole input --
+the selector and the data it runs on, at a size that shows a super-linear cost -- with a
+time budget, through the real path.** Enforced by
+`tests/test_browser_session_reach.py::test_a_charset_label_decodes_only_by_an_encoding_a_browser_defines`,
+`::test_a_guarded_page_loads_a_document_whatever_charset_it_names` and
+`::test_a_request_body_is_read_whatever_charset_it_names_within_its_budget`. The
+neighbour and the spider's static engine are pinned by strict xfails (PA-0531(4),
+PA-0550(7)); the other components' `requests` readers the sweep found are flagged to the
+orchestrator with their files (PA-0559(4)), never stated as residuals.
