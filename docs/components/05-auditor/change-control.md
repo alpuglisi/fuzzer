@@ -33,6 +33,21 @@ Newest first.
     was audited as the login page) — done
   - [x] NFR-AUD-safe's clause and §5 edited in place — done
 - Effectiveness (assessed <date> or pending): pending.
+- Review round 1 (2026-10-22; BA-3, the auditor's part; branch `lane/BROWSERALIAS-r1`
+  from 72297c9): a page whose speculation rules prefetched the alias and then jumped
+  there was returned as the identity's page -- the alias's anonymous `Sign in` form
+  with status 200 (measured by the review on 72297c9) -- because the prefetch and the
+  navigation it served went past the route. The guard no longer lets a rule set be
+  registered (CC-CRAWL-0063 round 1), and `fetch` now checks the document the main
+  frame committed before it reads anything (`navguard.committed_session_refusal`): on
+  a host the session's cookies do not reach it ends that document
+  (`end_failed_load`), counts it (`kind` `committed`) and returns no page
+  (`(0, "", "", [])`), never that document's content nor the load's own HTML. Tests:
+  `tests/test_browser_session_reach.py::test_the_auditors_fetcher_and_the_spider_never_preload_the_alias`
+  (on 72297c9 the alias got the prefetch and `/login`) and
+  `tests/test_browser_session_reach.py::test_a_preload_past_the_guard_is_never_read_as_the_identitys_page`
+  (the neutraliser taken away; on 72297c9 the fetcher returned
+  `(200, 'text/html', '...Sign in...')`). NFR-AUD-safe's clause edited in place.
 
 ### CC-AUD-0057 — The captured-request import refuses and counts a body holding a lone surrogate instead of failing the import (FR-AUD-22, BUG-0554) (2026-10-21)
 - Placement: lane SURROGATE (item AU-REQID78), base 33b423e, with CC-CRAWL-0061 (the

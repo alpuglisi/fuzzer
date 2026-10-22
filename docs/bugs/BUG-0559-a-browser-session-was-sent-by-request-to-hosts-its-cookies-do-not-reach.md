@@ -229,3 +229,158 @@ orchestrator; each such path has a real-browser test asserting the unreached hos
 received nothing and no anonymous landing was stored. Enforced by the wiring guard and
 its synthetic offenders, the route test on doubles, and the six real-browser tests of
 `tests/test_browser_session_reach.py`.
+
+
+## Review round 1 (2026-10-22, on 72297c9; BA-1 = BA-4, BA-2 = BA-5, BA-3)
+
+Five confirmed findings (one reviewer, a skeptic for each), three defects. Each is
+reproduced by a test that fails on 72297c9 on its own assertion and passes after
+(commit 1d7b5e6 on `lane/BROWSERALIAS-r1`; CC-CRAWL-0063, CC-CRAWL-0064 and CC-AUD-0060
+"Review round 1"). A revision agent's uncommitted partial edits, lost to a container
+restart, were read as a starting point; every line was re-verified and the design was
+re-measured, not taken as it stood.
+
+### What each was
+- **BA-1, a storage state's ambient cookie aborted disco's start.** `disco capture
+  --storage-state` built its session material with `credential_names=None`, so every
+  cookie the state adopted counted as the session's, and `filter_storage_state` keeps
+  every loopback spelling's cookies (it folds the aliases). With `sid` held for
+  127.0.0.1 and an ambient `lang` for `localhost`, `session_host_refusal` refused the
+  start host itself ("1 of 2"): the start navigation was aborted (`net::ERR_ABORTED`)
+  and the run explored nothing. On 7393c90 the same state explored 127.0.0.1 with `sid`
+  on every GET: a regression this lane made.
+- **BA-2, an IPv6 cookie never reached its own host.** Chromium holds a cookie set for
+  `http://[::1]:P/` with the domain `[::1]`, brackets included, and sends it there
+  (measured on Chromium 141); `cookie_reaches` compared that with a URL's `hostname`,
+  `::1`. A storage state saved on `[::1]` had every request to its own host refused,
+  the start page included. The lane's measurement (`measure/reach.out`) never held an
+  IPv6 cookie.
+- **BA-3, a speculation-rules preload went past the route.** Chromium sends a
+  speculation-rules prefetch from the browser process: neither the route nor a CDP
+  interceptor sees it, and a later navigation to that URL is served from the prefetch,
+  past the route too. Measured on 72297c9 (`scratchpad/lanes/BROWSERALIAS/r1meas2`,
+  both the full browser and the headless shell): a session-carrying page's rule set --
+  inline, named by a `Speculation-Rules` header, inserted by a script in any of five
+  ways, in a shadow root, or inserted after the page replaced `Element.prototype.remove`
+  -- sent the alias a cookie-less prefetch; same-origin document rules sent `/logout`
+  with the session, past the destructive rule; a click then committed the alias's
+  anonymous page; a popup with an opener prefetched for its own rule sets. The auditor's
+  fetcher returned the alias's `Sign in` page as the identity's (200), and the spider
+  sent the alias the same uncounted requests. The lane's docs said the guard "refuses
+  every request the load makes".
+
+### Root cause analysis (Five Whys, across the three)
+1. *Why did these reach review?* Each lies outside what the lane measured: the reach
+   measurement held IPv4 cookies by URL and bare domain only (no IPv6, no ambient
+   cookie of another spelling); the route's coverage was measured for requests the
+   page makes (navigations, hops, subresources, sockets, API calls), never for traffic
+   the browser makes on its own.
+2. *Why was the browser's own traffic not measured?* The lane took PA-0123(3)'s split
+   as settled: "the launch arguments confine only what Chromium itself sends". That
+   layer confines by *scope* (resolver rules per `host:port`), and a loopback scope
+   admits all three spellings on its port, so the alias -- and any same-origin URL --
+   passes it. Nothing confined Chromium's own traffic by session reach or by the
+   destructive rule, and nobody listed which of Chromium's own requests a page can
+   trigger.
+3. *Why were the held forms and the ambient cookies not measured?* The predicate was
+   designed from the RFC's text and checked on the shapes the bug showed (127.0.0.1 vs
+   `localhost`); the inputs it is given -- every form a context holds a cookie in, and a
+   storage state's cookies that are not credentials -- were not enumerated from the
+   carrier.
+4. *Why did disco treat every adopted cookie as a credential?* "Fail closed" was read
+   as "when in doubt, more cookies are the session's"; with a per-name refusal rule,
+   more names means more refusals of the session's *own* host, which fails open for
+   coverage (the run explores nothing) and was never run with a second cookie.
+5. *Why did the docs claim every request?* The claim was derived from the route's code
+   (every routed request passes it), not from the browser's behaviour (which requests
+   reach the route at all).
+
+**Root cause:** the guard's completeness was established by reading the route, not by
+measuring what the browser sends; and the reach predicate's inputs were taken from the
+bug's own shapes, not enumerated from what the carrier produces (held forms, ambient
+material).
+
+### Corrective action
+Commit 1d7b5e6 (CC-CRAWL-0063, CC-CRAWL-0064, CC-AUD-0060 "Review round 1"; FR-CRAWL-43,
+FR-CRAWL-34, NFR-CRAWL-safe and NFR-AUD-safe edited in place):
+- **BA-2:** `cookie_reaches` compares an IPv6 literal without brackets on both sides.
+- **BA-1:** `Explorer._storage_session`: a storage state's session cookies are those that
+  reach the start URL's host (`navguard.names_reaching`); a state none of whose cookies
+  reaches it keeps them all (the start host is refused, never explored as the
+  session's).
+- **BA-3, in the owner:** every guarded context gets `navguard.PRELOAD_OFF_JS` before its
+  pages run (each `<script type=speculationrules>` removed as it is inserted, open
+  shadow roots included, with the functions it calls captured before the page runs);
+  the route drops the `Speculation-Rules` header from every answer, gives a main-frame
+  document's parser-inserted rule sets an inert type (closed declarative shadow roots),
+  and answers a popup's first navigation -- which Chromium commits in the Window of its
+  initial `about:blank`, where no init script runs again (measured for five popup
+  shapes) -- with a same-URL trampoline, serving the answer it already fetched to the
+  trampoline's request (sent once). **In the consumers** (defence in depth):
+  `committed_session_refusal` before anything of a load is read -- the fetcher returns
+  no page, the spider stores the load `failed`, disco reads no state and takes no
+  protected resource there.
+- Measured after, both binaries: nothing reaches the alias or `/logout` in any shape
+  above, the click is refused and told, popups load their own page once and the opener
+  can still script them (`after.*.out`, `edge.after.*.out`, `docopen.out`).
+
+**PA-0002 sweep, by primitive:** every caller of `guard_page` now gets the preload
+neutraliser in the owner (the spider, the auditor's fetcher, disco's explorer, disco
+ede, the M6 executor, the browser login); no caller passes it or can omit it. Every
+consumer that reads a guarded load's committed document as the session's: the fetcher's
+`fetch`, the spider's `_goto_and_parse`, disco's `settled_fingerprint` (every state
+read) and `_find_protected_resource` (the one place disco sends an API request for a
+page URL it took from the browser) -- each checks it. Every comparison of a cookie
+domain with a host in `fuzzlab/`: `navguard.cookie_reaches` (fixed);
+`session/manager.py` and `session/browserlogin.py` fold the domain through
+`canonical_host("http://" + domain + "/")`, which parses `[::1]` correctly (no change).
+
+**Measured, not closed -- flagged to the orchestrator (PA-0559(4)):** a rule set that a
+handler *inside a closed declarative shadow root* inserts into that root (an
+`<img onerror>` there, `this.getRootNode()`, `appendChild`) is still prefetched with the
+guard on, both binaries (`r1meas2/closeddyn.py`, `closeddyn.out`): no script outside
+that root can see it, and the HTML layer sees only the parser's rule sets. Closing it
+needs pre-insertion hooks on every DOM insertion and attribute API (about twenty), a
+wider change than this round's; the consumers' committed-document check still keeps
+any page such a prefetch serves from being read as the session's.
+
+**Seen while measuring, another defect, not this bug's (flagged, not changed):** a
+guarded page never loads a main-frame HTML document whose bytes are not UTF-8: the
+route's `_note_received` reads it with Playwright's strict `APIResponse.text()`, the
+`UnicodeDecodeError` escapes the route handler, the request is never fulfilled and the
+navigation times out (`r1meas2/latin1.py`, `latin1.out`: an ISO-8859-1 page). Present
+since BUG-0138's `_note_received`; for the orchestrator (no number held here).
+
+### Recurrence review
+- **BUG-0559 round 0 / PA-0559(2)** ("a cookie reaches a host by RFC 6265's domain
+  match ... measured in the real browser"): followed for the shapes the bug showed,
+  not for every held form -- BA-2 is its recurrence on an input it did not enumerate.
+- **BUG-0123 / PA-0123(3)** (a browser is confined at two layers, each for what it
+  actually sees): the launch-argument layer confines Chromium's own traffic by scope
+  only; BA-3 is a send of that layer's class that scope admits (an alias of the
+  session's host, a destructive same-origin URL). **Match: same root (a layer's
+  coverage taken from its rule, not from what passes it).**
+- **BUG-0545 / PA-0545(1)** (each disposition measured -- what the target received --
+  never read from the path's rule): not followed for the guard's completeness claim.
+- **BUG-0134 / PA-0134** (one predicate at every send path): not a recurrence.
+
+### Prior-preventive-action failure analysis
+- **PA-0123(3): too narrow.** It names what the launch arguments confine (Chromium's own
+  traffic) by one rule, scope, and its tests reach for another port and an off-host
+  address only. Session reach and the destructive rule were never asked of that layer,
+  and the page-triggered part of Chromium's own traffic (preloads) was never listed.
+- **PA-0559(2) (round 0): wrong unit.** It required the predicate to be measured, and the
+  lane measured it on the bug's shapes; it did not require the inputs to be enumerated
+  from the carrier (every held form, ambient cookies, every loopback spelling).
+- **PA-0545(1): not followed** for a claim about a guard ("refuses every request"),
+  which was read from the route's code.
+
+### Preventive action
+PA-0559 strengthened (amended text in the lane's doc_texts, items 6 and 7): a guard
+that claims every request of a carrier passes it lists, by measurement, what the carrier
+sends without asking the guard -- for a browser, what the page can make Chromium send on
+its own (preloads, prefetches) -- and either confines each or proves it never triggered,
+on both binaries a tool may run; and a reach predicate's inputs are enumerated from the
+carrier (every form the browser holds a value in -- an IPv6 literal's brackets --, every
+loopback spelling, and material that is not a credential), each with a test. Enforced by
+the tests named in this section.

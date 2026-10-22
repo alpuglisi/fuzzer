@@ -42,6 +42,33 @@ Newest first.
     with no cookie and the run ended its authenticated exploration) — done
   - [x] FR-CRAWL-43 (disco's clause) — done
 - Effectiveness (assessed <date> or pending): pending.
+- Review round 1 (2026-10-22; one reviewer and a skeptic per finding on 72297c9; BA-1
+  = BA-4 and disco's part of BA-3; branch `lane/BROWSERALIAS-r1` from 72297c9):
+  - Change: **BA-1** -- a storage state's material named every adopted cookie the
+    session's (`credential_names=None`), and `filter_storage_state` keeps every loopback
+    spelling's cookies, so one ambient cookie held for the alias made the start host
+    unreached and the run's start navigation was aborted (`net::ERR_ABORTED`; the run
+    explored nothing). `Explorer._storage_session` (new; `_current_session` calls it)
+    takes the session's cookies to be the state's cookies that reach the start URL's
+    host (`navguard.names_reaching`); a state none of whose cookies reaches it keeps
+    them all (the start host is refused, fail closed). **BA-3 (disco's part)** -- each
+    worker keeps the cookies and origin rule its context was guarded with
+    (`_ctx_session_cookies`, `_ctx_cookie_scope`); `settled_fingerprint` returns None
+    (counted under `session_host_unreached`) for a document the main frame committed
+    on a host they do not reach, and `_find_protected_resource` never takes such a
+    page. A cross-site speculation prefetch is not sent through disco's capture proxy
+    (measured: none reached the alias with the neutraliser off), so this is defence in
+    depth; the neutraliser itself is the guard's (CC-CRAWL-0063 round 1).
+  - Tests (`tests/test_browser_session_reach.py`):
+    `test_a_storage_states_ambient_cookie_on_another_host_never_refuses_its_start_host`
+    and `test_disco_explores_its_start_host_with_a_storage_state_that_holds_an_alias_cookie`
+    (real Chromium and the capture proxy; on 72297c9 ``{'lang', 'sid'} == {'sid'}`` and
+    ``Page.goto: net::ERR_ABORTED``), `test_disco_never_reads_a_state_or_a_protected_resource_on_an_unreached_host`
+    (on 72297c9 the alias page was read: ``'READ' is None``). The existing disco test
+    now runs through `_disco_capture`, which skips only a launch failure.
+  - Proof: one pytest invocation of the new test file on a scratch copy of 72297c9
+    (`scratchpad/lanes/BROWSERALIAS/r1proof/proof.log`: 11 failed, 10 passed, each new
+    test on its own assertion).
 
 ### CC-CRAWL-0063 — The browser guard owns where a session's cookies reach: every request, hop, socket and API request to a host they do not reach is refused, and the spider files such a load failed (FR-CRAWL-43, FR-CRAWL-34, BUG-0559, SP-74) (2026-10-22)
 - Placement: pre-assigned to lane BROWSERALIAS (item GAP-BROWSER), base 7393c90.
@@ -119,6 +146,92 @@ Newest first.
     ERROR_LOG, PA-0559, SP-74, ARCHITECTURE and failure-record texts in the lane's
     doc_texts — done
 - Effectiveness (assessed <date> or pending): pending.
+- Review round 1 (2026-10-22; one reviewer and a skeptic per finding on 72297c9; BA-2 =
+  BA-5 and BA-3; branch `lane/BROWSERALIAS-r1` from 72297c9; a revision agent's
+  uncommitted partial edits, lost to a container restart, were read and each line
+  re-verified, not taken as they stood):
+  - Change, **BA-2** (`navguard.cookie_reaches`): Chromium holds a cookie set for
+    `http://[::1]:P/` with the domain `[::1]`, brackets included, and sends it there
+    (measured on Chromium 141: `storage_state()`, `context.cookies(url)`); the predicate
+    compared it with a URL's `hostname`, `::1`, so a cookie held by domain never reached
+    its own IPv6 host and every request there was refused. Both sides now compare
+    without brackets.
+  - Change, **BA-3** (navguard, the owner; the spider): a speculation-rules prefetch is
+    sent by the browser process, past the route, and a navigation it served commits
+    past the route too. Measured on Chromium 141 (full browser and headless shell,
+    `scratchpad/lanes/BROWSERALIAS/r1meas2`): with the 72297c9 guard (`before.*.out`) an
+    inline list rule set, one named by a `Speculation-Rules` header, one a script
+    inserted (by `appendChild`, a type set late, a fragment, `document.write`), one in
+    an open shadow root and one a page inserted after replacing
+    `Element.prototype.remove` and `MutationRecord`'s getters each sent the alias a
+    cookie-less prefetch; same-origin document rules sent `/logout` with the session
+    past the destructive rule; a click then committed the alias's anonymous page; in
+    the bare browser, which that guard leaves as it is (`edge.bare.*.out`), so did a
+    rule set in a closed shadow root (declarative or `attachShadow`), one re-inserted
+    after removal, one moved in from an iframe, and every popup's own rule sets. `<link rel=prefetch>` and a preconnect
+    did not bypass (the first passes the route; the second opened no connection).
+    `guard_page` now installs `PRELOAD_OFF_JS` on every guarded context: a
+    MutationObserver, set up before any page script with every function it calls
+    captured, removes each `<script type=speculationrules>` as it is inserted
+    (document, open shadow roots through a wrapped `attachShadow` and an added host's
+    `shadowRoot`), and again on re-insertion. The route drops the `Speculation-Rules`
+    header from every answer it fulfils (`_fulfil_preload_free`, which also replaces
+    `_without_set_cookie` and never gives an empty header set), gives a main-frame
+    document's parser-inserted rule sets the type `x-fuzzlab-inert`
+    (`_inert_rule_sets`, from the HTML `_note_received` already read: a closed
+    declarative shadow root, which no script sees), and answers a popup's first
+    navigation -- which Chromium commits in the Window of its initial `about:blank`,
+    where no init script runs again (measured: `window.open`, `<a target=_blank
+    rel=opener>`, `window.open()` then `w.location=`, a named window, a `rel=opener`
+    POST form) -- with a same-URL trampoline (`location.replace`) and serves the answer
+    it already fetched and checked to the trampoline's request (`kept`; sent once, POST
+    included; three trampolines at most, then given as is). `committed_session_refusal`
+    (new) is the consumers' defence in depth; the spider's `_goto_and_parse` checks the
+    committed document before extraction and files a hit `failed` (`HostNotServed`,
+    counted). Measured after (`after.*.out`, `edge.after.*.out`, `docopen.py`): the
+    alias and `/logout` receive nothing in any shape, both binaries; the click is
+    refused and told; popups load their own page once, the opener can still script
+    them.
+  - Impact: every guarded context, authenticated or not, in every tool (spider,
+    auditor, disco, disco ede, the M6 executor, the browser login): no page registers a
+    speculation rule set; `Element.prototype.attachShadow` is wrapped (same result); a
+    page whose HTML holds a rule set gets that script with an inert type in its DOM
+    (`_RECEIVED` and every tool's received HTML keep the original); a popup's first
+    document is requested from the target once, as before, but the browser shows two
+    request events for it and the follow-up's Referer is the popup's own URL.
+  - **Measured, not closed -- flagged to the orchestrator (PA-0559(4)):** a rule set
+    that a handler *inside a closed declarative shadow root* inserts into that root
+    (an `<img onerror>` there: `this.getRootNode()`, `appendChild`) is still prefetched
+    -- the alias got `/closed-dyn` and `/closed-late` with the guard on, both binaries
+    (`r1meas2/closeddyn.py`, `closeddyn.out`): no script outside that root can see it,
+    and the HTML layer sees only the parser's rule sets. Closing it needs pre-insertion
+    hooks on every DOM insertion and attribute API (about twenty), a wider change than
+    this finding's; the committed-document check still keeps any page such a prefetch
+    serves from being read as the session's.
+  - Tests (`tests/test_browser_session_reach.py`): the predicate test extended with the
+    held IPv6 form and `test_an_ipv6_cookie_as_chromium_holds_it_reaches_its_own_host_and_no_other`
+    (real Chromium); `test_no_speculation_rules_preload_leaves_a_guarded_context` (real
+    Chromium: every measured shape, the click, a popup with an opener);
+    `test_the_auditors_fetcher_and_the_spider_never_preload_the_alias`;
+    `test_a_preload_past_the_guard_is_never_read_as_the_identitys_page` (the
+    neutraliser taken away: the fetcher returns no page, the spider stores the load
+    failed); `test_the_route_gives_no_speculation_rule_set`,
+    `test_every_guarded_context_neutralises_preloads_before_its_pages_run`,
+    `test_a_document_committed_on_an_unreached_host_is_never_the_sessions` (doubles).
+    Each fails on 72297c9 on its own assertion -- the alias received the prefetches,
+    `/logout` went with the session, the fetcher returned the `Sign in` page,
+    `cookie_reaches(..'[::1]'.., '::1')` was False -- or, for the three unit tests of the
+    new API, on its absence (`scratchpad/lanes/BROWSERALIAS/r1proof/proof.log`: 11
+    failed, 10 passed). Targeted run on 1d7b5e6, one pytest invocation of round 0's
+    harness selection (119 files: every test file importing a changed module, the
+    whole-package guards), real Chromium required: 4408 passed, 0 failed, 5 skipped
+    (the same two live-boot skips and the packaging skip as round 0), 59 xfailed, in
+    19 min 40 s (`scratchpad/lanes/BROWSERALIAS/r1proof/targeted.log`).
+  - FR-CRAWL-43 (preloads, the committed document, disco's credential cookies, the
+    IPv6 held form), FR-CRAWL-34 (a browser load's requests include none the route
+    does not see) and NFR-CRAWL-safe (no preload past the destructive rule) edited in
+    place; BUG-0559 "Review round 1"; PA-0559, SP-74, CHANGELOG, ERROR_LOG,
+    ARCHITECTURE and failure-record texts amended in the lane's doc_texts.
 
 ### CC-CRAWL-0061 — The capture writer is total: a body holding a lone surrogate is stored losslessly, and a write the store refuses is counted (FR-CRAWL-42, BUG-0554) (2026-10-21)
 - Placement: pre-assigned to lane SURROGATE (item AU-REQID78), base 33b423e (after
