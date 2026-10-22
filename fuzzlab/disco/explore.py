@@ -542,6 +542,10 @@ class ExploreReport:
     auth_ended: str | None = None
     aborted: int = 0
     out_of_scope: dict[str, int] = field(default_factory=dict)
+    #: SP-74 (BUG-0559): requests of an authenticated context never sent because the
+    #: session's cookies do not reach their host (a loopback alias of a host-only
+    #: cookie's host), by host
+    session_host_unreached: dict[str, int] = field(default_factory=dict)
     budget_hit: str | None = None
     #: FR-CRAWL-39 (BUG-0551), per route, a page read again adds nothing
     #: (`compose.Coverage`): open shadow roots and same-origin frames read; what was
@@ -592,6 +596,19 @@ class _SessionMaterial:
     scope: Callable[[str], bool] | None = field(default=None, repr=False)
     login_url: str | None = None
     login_fields: tuple | None = None
+    #: the names of the session's credential cookies: the provider's
+    #: ``checked_cookies``; for a storage state, whose credentials disco cannot tell from
+    #: its ambient cookies, those that reach the start host (`Explorer._storage_session`,
+    #: BUG-0559 review round 1, BA-1; empty when none does: no cookie is the session's,
+    #: round 2, BB-1). None: every adopted cookie is the session's
+    credential_names: frozenset | None = None
+
+    def session_cookies(self) -> list[dict]:
+        """The session's cookies as a context adopting this material holds them (SP-74,
+        `navguard.held_session_cookies`): the guard refuses any request to a host they
+        do not reach."""
+        return navguard.held_session_cookies(self.cookies, self.storage_state,
+                                             self.credential_names)
 
 
 class SessionUnavailable(RuntimeError):
@@ -738,12 +755,20 @@ def is_distinctive(value: str) -> bool:
 
 
 def carries_value(req, values: list[str]) -> bool:
-    """Whether a browser request carries one of ``values`` in its URL or body."""
+    """Whether a browser request carries one of ``values`` in its URL or body. The body
+    is read as bytes and decoded by `navguard.decoded_text`, never Playwright's
+    ``post_data`` -- a strict UTF-8 read that raised on a legacy-charset form's body, so
+    a submission that carried the value counted as not sent (BUG-0559 review round 3,
+    BB-4(4), measured on Chromium 141 with an ISO-8859-1 multipart form)."""
     from urllib.parse import unquote_plus
+    text = unquote_plus(req.url)
     try:
-        text = unquote_plus(req.url) + "\n" + (req.post_data or "")
-    except (UnicodeDecodeError, ValueError):     # a binary body: the URL alone
-        text = unquote_plus(req.url)
+        body = req.post_data_buffer
+    except Exception:  # noqa: BLE001 - a body the driver cannot give: the URL alone
+        body = None
+    if body:
+        ctype = (getattr(req, "headers", None) or {}).get("content-type")
+        text += "\n" + navguard.decoded_text(body, ctype)[0]
     return any(v in text for v in values)
 
 
@@ -829,6 +854,11 @@ class Explorer:
         self._answers: list = []
         self._window_tags: set = set()
         self._ctx_generation: int | None = None
+        #: SP-74 (BUG-0559 review round 1, BA-3): the session's cookies as this worker's
+        #: context holds them, and the origin rule it was guarded with -- what a state
+        #: read (`settled_fingerprint`) checks the committed document against
+        self._ctx_session_cookies: list = []
+        self._ctx_cookie_scope = None
         self._browser = None
         self._pw = None
 
@@ -857,12 +887,19 @@ class Explorer:
         ctx = browser.new_context(service_workers="block", ignore_https_errors=True,
                                   storage_state=auth.storage_state if auth else None)
         isolate = auth is not None and len(self.origins) > 1
+        # SP-74 (BUG-0559): the session's cookies as this context holds them; nothing
+        # it sends goes to a host they do not reach (a loopback alias of a host-only
+        # cookie's host is in the scope's origin, and would be explored anonymously)
+        self._ctx_session_cookies = auth.session_cookies() if auth is not None else []
+        self._ctx_cookie_scope = auth.scope if isolate else None
         navguard.guard_page(
             ctx, in_scope=self._in_scope, headers=self._tag_headers,
             on_out_of_scope=self._count_out_of_scope,
             on_abort=lambda url, why: self._count_abort(),
-            cookie_scope=auth.scope if isolate else None,
-            isolated_request=(lambda: pw.request.new_context()) if isolate else None)
+            cookie_scope=self._ctx_cookie_scope,
+            isolated_request=(lambda: pw.request.new_context()) if isolate else None,
+            session_cookies=self._ctx_session_cookies or None,
+            on_session_unreached=self._count_session_unreached)
         if auth is not None and auth.cookies:
             from fuzzlab.tools import browserauth
             browserauth.apply_to_context(ctx, auth.cookies)
@@ -884,6 +921,16 @@ class Explorer:
 
     def _count_abort(self) -> None:
         self._bump("aborted")
+
+    def _count_session_unreached(self, url: str, kind: str, source: str,
+                                 reason: str) -> None:
+        """SP-74 (BUG-0559): the guard refused a request of the authenticated context to
+        a host the session's cookies do not reach; nothing was sent. Counted by host."""
+        from urllib.parse import urlsplit
+        host = urlsplit(url).hostname or "?"
+        with self._shared.lock:
+            got = self.report.session_host_unreached
+            got[host] = got.get(host, 0) + 1
 
     def _refuse(self, why: str) -> None:
         with self._shared.lock:
@@ -934,7 +981,11 @@ class Explorer:
                 found += header_urls(headers, resp.url)
                 media = (headers.get("content-type") or "").split(";", 1)[0].strip()
                 if media in _BODY_MEDIA and resp.url not in shared.bodies_read:
-                    text = resp.text()
+                    # by its charset (BUG-0559 review round 2: a strict UTF-8 read
+                    # skipped a Latin-1 script); None: a body the driver let go
+                    text = navguard.response_text(resp)
+                    if text is None:
+                        continue
                     # read only once it was read: a body the driver let go is read
                     # from its next response (BUG-0539: a failure never consumes work)
                     shared.bodies_read.add(resp.url)
@@ -976,13 +1027,29 @@ class Explorer:
                 if self.session is not None:
                     shared.auth = self._provider_session(revalidate=False)
                 else:
-                    from fuzzlab.session.browserlogin import filter_storage_state
-                    origins = origin_scope(self.start_url)
-                    shared.auth = _SessionMaterial(
-                        0, storage_state=filter_storage_state(
-                            self.storage_state, self._in_scope, self.scope_urls),
-                        scope=lambda u: in_origin_scope(u, origins))
+                    shared.auth = self._storage_session()
             return shared.auth
+
+    def _storage_session(self) -> "_SessionMaterial":
+        """The operator's storage state (``--storage-state``) as session material: its
+        cookies kept to the scope (`filter_storage_state`, which folds the loopback
+        aliases), and its credential cookies taken to be those that reach the start
+        URL's host (`navguard.names_reaching`; BUG-0559 review round 1, BA-1). disco
+        cannot tell a state's credentials from its ambient cookies, and an ambient
+        cookie held for a loopback alias or another scope origin never makes the start
+        host unreached. A state none of whose cookies reaches the start host carries its
+        session elsewhere -- in its ``localStorage`` -- or not at all: no cookie is the
+        session's (an empty set, never None, which would count every adopted cookie and
+        refuse the start host for one ambient alias cookie; BUG-0559 review round 2,
+        BB-1), so SP-74 refuses nothing for it."""
+        from fuzzlab.session.browserlogin import filter_storage_state
+        origins = origin_scope(self.start_url)
+        kept = filter_storage_state(self.storage_state, self._in_scope, self.scope_urls)
+        names = navguard.names_reaching((kept or {}).get("cookies"),
+                                        urlsplit(self.start_url).hostname or "")
+        return _SessionMaterial(0, storage_state=kept,
+                                scope=lambda u: in_origin_scope(u, origins),
+                                credential_names=names)
 
     def _provider_session(self, *, revalidate: bool,
                           lost: int | None = None) -> _SessionMaterial:
@@ -1010,7 +1077,9 @@ class Explorer:
         material = _SessionMaterial(state.generation, storage_state=shaped.storage_state,
                                     cookies=list(shaped.cookies), scope=shaped.cookie_scope,
                                     login_url=state.login_url,
-                                    login_fields=state.login_fields)
+                                    login_fields=state.login_fields,
+                                    credential_names=frozenset(
+                                        n for n, _v in shaped.checked_cookies))
         if revalidate:
             health, _moved = sess.manager.check_health(
                 host, sess.identity, sess.base_url, generation=state.generation,
@@ -1290,8 +1359,11 @@ class Explorer:
             resp = api.fetch(url, method="GET", max_redirects=0,
                              timeout=self.opts.nav_timeout_ms,
                              headers=None if storage_state is not None else {"cookie": ""})
-            status, headers, body = resp.status, dict(resp.headers or {}), resp.text()
-        except (_pw_error(), UnicodeDecodeError) as exc:
+            status, headers = resp.status, dict(resp.headers or {})
+            # by its charset, never raising (BUG-0559 review round 2): a Latin-1 page
+            # read strictly as UTF-8 made every health check INCONCLUSIVE
+            body = navguard.decoded_text(resp.body(), headers.get("content-type"))[0]
+        except _pw_error() as exc:
             return Health(INCONCLUSIVE, f"no response ({type(exc).__name__})", 0)
         finally:
             try:
@@ -1318,10 +1390,15 @@ class Explorer:
         cookies as live and one with no credential as refused (a login redirect, a 401,
         a login form). Its suspicions are then decided by a GET of it with the suspected
         context's cookies (`_context_check`); without one a loss shape stays an
-        unconfirmed loss (PA-0533(1))."""
+        unconfirmed loss (PA-0533(1)). Never a page the main frame committed on a host the
+        session's cookies do not reach (SP-74; BUG-0559 review round 1, BA-3): a GET of it
+        with the context's cookies would go without them."""
         from fuzzlab.session.manager import LIVE, LOST
         url = urldefrag(page.url)[0]
         if not self._in_scope(url) or destructive_reason(url) or looks_like_login_url(url):
+            return
+        if navguard.committed_session_refusal(page, self._ctx_session_cookies,
+                                              cookie_scope=self._ctx_cookie_scope):
             return
         if self._context_check(url).state != LIVE:
             return
@@ -1610,8 +1687,19 @@ class Explorer:
 
     def settled_fingerprint(self, page, ctx) -> Reading | None:
         """`fingerprint` of a page that may still be navigating: a destroyed execution
-        context (the page moved on mid-read) is waited out once; None if it persists."""
+        context (the page moved on mid-read) is waited out once; None if it persists.
+
+        None as well, counted, for a document the main frame committed on a host the
+        session's cookies do not reach (SP-74; BUG-0559 review round 1, BA-3): the
+        anonymous page of a navigation the route never saw (a preload served it), never
+        read as a state of the session. Every state is read here (the start, an action's
+        effect, a harvest load, a restore)."""
         for _ in range(2):
+            why = navguard.committed_session_refusal(page, self._ctx_session_cookies,
+                                                     cookie_scope=self._ctx_cookie_scope)
+            if why is not None:
+                self._count_session_unreached(page.url, "committed", page.url, why)
+                return None
             try:
                 return self.fingerprint(page, ctx)
             except _pw_error():

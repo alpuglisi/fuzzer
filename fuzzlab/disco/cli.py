@@ -233,6 +233,11 @@ def _capture(ns) -> int:
         blocked[host] = blocked.get(host, 0) + n
     if blocked:
         print(f"  refused out of scope: {dict(sorted(blocked.items()))}")
+    if report.session_host_unreached:
+        # SP-74 (BUG-0559): never sent, so never explored as the identity's
+        print(f"  refused, the session's cookies do not reach the host (start on that "
+              f"host if it is this app's): "
+              f"{dict(sorted(report.session_host_unreached.items()))}")
     if report.harvest_found:
         print(f"  harvest: {report.harvest_found} linked URL(s) never requested found, "
               f"{report.harvest_loads} loaded, {report.harvest_states} state(s) from them")

@@ -341,11 +341,14 @@ class Runner:
         if kind == "none":
             return {}
         if kind == "storage_state":
+            # the cookies a browser holding this state sends to the target's host: SP-74's
+            # predicate (an IPv6 literal held as ``[::1]`` reaches ``::1``; a host-only
+            # cookie its own host only; BUG-0559 review round 2, BB-2)
+            from fuzzlab.tools.navguard import cookie_reaches
             doc = json.loads(Path(ref).read_text(encoding="utf-8"))
             host = urlsplit(self.c.base_url).hostname or ""
             jar = [f"{c['name']}={c['value']}" for c in doc.get("cookies") or []
-                   if host == str(c.get("domain", "")).lstrip(".")
-                   or host.endswith("." + str(c.get("domain", "")).lstrip("."))]
+                   if cookie_reaches(c, host)]
             return {"Cookie": "; ".join(jar)} if jar else {}
         secret = self._secret(ref)
         text = secret.password if hasattr(secret, "password") else str(secret)

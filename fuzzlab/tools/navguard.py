@@ -15,10 +15,36 @@ Every one is checked where it is made (PA-0123):
   fetches are made by the Playwright driver, not by Chromium** (verified live), so for
   every routed request this predicate is the only guard; it is checked before every
   fetch, and the callers fix the scope before the browser starts;
-* **Chromium's own traffic** -- what the route never sees (a preconnect, a DNS
-  prefetch, a landing page the browser re-requests, background services, WebSocket
-  connections) is confined by ``browser_launch_args``: no proxy, and nothing resolvable
-  outside the scope ``host:port`` pairs, IP literals included.
+* **Chromium's own traffic** -- what the route never sees (a speculation-rules prefetch
+  or prerender, a favicon, a preconnect, background services, a WebSocket the route
+  admitted) goes through the **enforcer** ``browser_launch_args`` names
+  (``--proxy-server``, loopback forced through it; BUG-0559 review round 2, BB-3): a
+  loopback proxy in this process that refuses every request Chromium sends itself but
+  a WebSocket the guard's socket handler admitted (`admit_socket`) and the browser's
+  re-request of a redirect landing the route checked (`admit_landing`: Playwright never
+  routes it). An ``https`` landing's tunnel carries that one exchange and is closed at
+  the browser's next request on it (`_HeldTunnel`, review round 3: Chromium kept it in
+  its pool and a later prefetch rode it); a certificate error's retry is admitted on the
+  same ticket. In a guarded context every other request a page makes is answered by the
+  route (fetched by the Playwright driver, never by Chromium), so nothing else
+  Chromium sends on its own is ever needed: a preload of a host the session's cookies
+  do not reach, or of a destructive
+  URL, is refused there whatever the page's markup (measured on Chromium 141, both
+  binaries, http and https) -- **but** through a ticket whose own connection never
+  comes (a WebSocket whose native constructor throws after the guard admitted it, a
+  redirect landing whose frame is gone): it stays live its TTL and the next ``CONNECT``
+  Chromium makes to that host and port, a prefetch's, takes it (measured; BUG-0559,
+  after the owner's final round: a known gap, pinned by
+  ``test_a_ticket_its_own_connection_never_uses_admits_no_prefetch``). The resolver
+  rules still name only the scope ``host:port`` pairs;
+* **Chromium's preloads, defence in depth** -- ``guard_page`` keeps a speculation rule
+  set from being registered where a script can see it (`PRELOAD_OFF_JS`; the route drops
+  the ``Speculation-Rules`` header, makes a page's parser-inserted rule sets inert and
+  loads a popup's first document through a trampoline), and a consumer checks the
+  document a load committed before it reads it (`committed_session_refusal`). These
+  layers read the page and cannot see everything it registers (the parser decodes a
+  character reference and builds a closed shadow root after the route looked); the
+  enforcer is the defence.
 
 Callers open their pages with ``service_workers="block"``: a service worker's own
 requests bypass ``page.route``. WebSockets are routed with ``route_web_socket``.
@@ -44,6 +70,18 @@ port-agnostic, so the context's jar and its pages' ``document.cookie`` /
 A ``request_refusal`` hook sees a request's body before it is sent (FR-SESS-19's login
 window).
 
+**Where the session's cookies reach** (SP-74, BUG-0559): a context that carries a session
+in its cookie jar (the caller's ``session_cookies``: the session's cookies as the context
+holds them) never sends a request -- a navigation, top-level or frame, a redirect hop, a
+subresource, a WebSocket -- to a host those cookies do not reach (`cookie_reaches`, RFC
+6265's domain match: a host-only cookie reaches its own host only, a dotted domain also
+the names under it, never an IP). Such a request would go out without the session to
+what the crawl takes for the session's own origin (``in_origin_scope`` folds the loopback
+aliases ``localhost`` / ``127.0.0.1`` / ``[::1]``, a host-only cookie reaches one of
+them): it is aborted before it is sent, at every hop, and ``on_session_unreached`` is
+told. A request to another origin than the session's keeps FR-SESS-20's disposition
+(above); `checked_api_request` applies the same rule to an API request.
+
 The crawler's **reveal window** (FR-CRAWL-15/16, W1-W3) uses two hooks: ``window`` on
 the route (asked for every request after the scope and destructive checks, and for
 each redirect hop, with whether it is a navigation) and ``ws_hold`` on WebSockets (an
@@ -53,9 +91,14 @@ forwarded only while ``ws_hold()`` is false, else dropped and reported).
 
 from __future__ import annotations
 
+import codecs
 import contextlib
+import json
 import logging
+import os
 import re
+import socket
+import socketserver
 import threading
 import time
 import weakref
@@ -78,6 +121,336 @@ _LOCAL_SCHEMES = ("data:", "blob:", "about:")
 _REDIRECTS = (301, 302, 303, 307, 308)
 
 
+# --- where a session's cookies reach (SP-74, BUG-0559) -----------------------------------
+def cookie_reaches(cookie, host) -> bool:
+    """Does the browser send ``cookie`` (as a context holds it: a Playwright cookie with a
+    ``url``, or with a ``domain``) to a request for ``host``? **The** predicate (SP-74). A
+    cookie added by URL, or with a domain without a leading dot, is host-only: that exact
+    host (measured on Chromium 141: a ``127.0.0.1`` cookie, by URL or by bare domain, goes
+    to ``127.0.0.1`` and not to ``localhost`` on the same port; Playwright's API request
+    context with that storage state likewise). A dotted domain also reaches the hosts
+    under it, never an IP address (RFC 6265 §5.1.3). A deny-only check: where the session
+    goes is still decided by origin (``cookie_scope``, FR-SESS-20).
+
+    An IPv6 literal compares without its brackets on both sides (BUG-0559 review round 1,
+    BA-2): Chromium holds a cookie set for ``http://[::1]:P/`` with the domain ``[::1]``,
+    brackets included, and sends it there (measured on Chromium 141: ``storage_state()``
+    gives ``('sid', '[::1]')`` and ``context.cookies('http://[::1]:P/')`` returns it),
+    while a URL's ``hostname`` -- the ``host`` every caller passes -- is ``::1``."""
+    import ipaddress
+    url = cookie.get("url")
+    # one name per assignment, so PA-0134(3)'s host-compare guard sees the compare below
+    if url:
+        domain = (urlsplit(url).hostname or "").lower().strip("[]")
+        host_only = True
+    else:
+        raw = str(cookie.get("domain") or "").lower()
+        domain = raw.lstrip(".").strip("[]")
+        host_only = not raw.startswith(".")
+    host = str(host or "").lower().strip("[]")
+    if not domain or not host:
+        return False
+    if host == domain:
+        return True
+    if host_only or not host.endswith("." + domain):
+        return False
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return True
+    return False
+
+
+def held_session_cookies(cookies, storage_state=None, names=None) -> list[dict]:
+    """The session's cookies as a context that adopted them holds them (SP-74's input):
+    those added by URL (``context.add_cookies``) and those of an adopted
+    ``storage_state`` (by domain), kept to ``names`` -- the session's credential cookies
+    -- when given (``None``: every one is the session's)."""
+    held = [*(cookies or ()), *((storage_state or {}).get("cookies") or ())]
+    keep = None if names is None else set(names)
+    return [dict(c) for c in held if c.get("name") and (keep is None or c["name"] in keep)]
+
+
+def names_reaching(cookies, host) -> frozenset[str]:
+    """The names of ``cookies`` (as a context holds them) of which a copy reaches
+    ``host`` (`cookie_reaches`). A caller that cannot tell a session's credential cookies
+    from its ambient ones (an operator's storage state) takes the session's to be those
+    that reach the session's own start host (BUG-0559 review round 1, BA-1): an ambient
+    cookie held for another host -- a loopback alias, another scope origin -- is never
+    one, so it never makes the start host unreached."""
+    return frozenset(str(c["name"]) for c in cookies or ()
+                     if c.get("name") and cookie_reaches(c, host))
+
+
+def unreached_session_cookies(session_cookies, host) -> list[str]:
+    """The names of the session's cookies none of whose held copies reaches ``host``
+    (`cookie_reaches`), sorted: a request there would go without (part of) the session."""
+    copies: dict[str, list[dict]] = {}
+    for c in session_cookies or ():
+        copies.setdefault(str(c.get("name")), []).append(c)
+    return sorted(n for n, held in copies.items()
+                  if not any(cookie_reaches(c, host) for c in held))
+
+
+def session_host_refusal(session_cookies, url, *, cookie_scope=None) -> str | None:
+    """**Why a request for ``url`` by a context carrying ``session_cookies`` would go
+    without the session** -- a host none of a session cookie's held copies reaches
+    (`unreached_session_cookies`) -- or None (SP-74, BUG-0559). None as well for a
+    context that carries no session in cookies, and for a URL ``cookie_scope`` puts on
+    another origin than the session's (FR-SESS-20 decides that one: its documents are
+    aborted and the rest goes cookie-less). The one decision of the guard's route, its
+    WebSocket handler, `checked_api_request` and a crawler's load gate. The message names
+    the host and the cause, never a URL."""
+    if not session_cookies:
+        return None
+    if cookie_scope is not None and not cookie_scope(url):
+        return None
+    unreached = unreached_session_cookies(session_cookies, urlsplit(url).hostname or "")
+    if not unreached:
+        return None
+    total = len({str(c.get("name")) for c in session_cookies})
+    return (f"the session's cookies do not reach host {urlsplit(url).hostname or ''!r} "
+            f"in the browser "
+            f"({len(unreached)} of {total} scoped to another host; a host-only cookie "
+            f"reaches its own host only): not sent, since it would go without the "
+            f"session (SP-74)")
+
+
+class SessionHostUnreached(PermissionError):
+    """An API request of a context carrying a session, to a host its cookies do not
+    reach (`checked_api_request`, SP-74): refused before it is sent. The message is
+    `session_host_refusal`'s (the host and the cause, never a URL)."""
+
+
+def committed_session_refusal(page, session_cookies, *, cookie_scope=None) -> str | None:
+    """**Why the document ``page``'s main frame has committed is not the session's** -- a
+    host the session's cookies do not reach (`session_host_refusal`) -- or None (SP-74,
+    BUG-0559 review round 1, BA-3). Defence in depth behind the route and
+    `PRELOAD_OFF_JS`: a navigation the route never saw (one a browser-process preload
+    served) would commit an anonymous document under the session's context. Every
+    consumer asks before it reads a load's content or a state: the auditor's fetcher,
+    the spider's extraction, disco's state reads. A non-http(s) document
+    (``about:blank``, the browser's error page) is None."""
+    try:
+        url = page.url or ""
+    except Exception:  # noqa: BLE001 - a closed page has committed nothing
+        return None
+    if not str(url).lower().startswith(("http://", "https://")):
+        return None
+    return session_host_refusal(session_cookies, url, cookie_scope=cookie_scope)
+
+
+# --- browser-process preloads (BUG-0559 review round 1, BA-3) ------------------------------
+#: The response header that names an external speculation rule set (Chromium 141).
+SPECULATION_RULES_HEADER = "speculation-rules"
+
+#: **No speculation rule set is ever registered in a guarded page** (BUG-0559 review
+#: round 1, BA-3). Chromium sends a speculation-rules prefetch from the browser process:
+#: the route never sees it, nor the navigation it then serves (measured on Chromium 141,
+#: the full browser and the headless shell: a prefetch of a loopback alias went with no
+#: cookie, a same-origin ``/logout`` named by document rules went with the session past
+#: the destructive rule, and a click then committed the alias's anonymous page). No launch
+#: switch stops it where the parser or the browser decides (measured again in review
+#: round 2 on both binaries, every shape: ``--disable-blink-features=SpeculationRules,
+#: Prerender2,...`` -- Chromium 141 has no runtime feature gating rule sets --,
+#: ``--disable-features=Prerender2,PrefetchUseContentRefactor,
+#: SpeculationRulesPrefetchFuture,...``, a ``PreloadingConfig`` holdback); the "Preload
+#: pages" preference does in the full browser's own profile only, never the headless
+#: shell. The enforcer ``browser_launch_args`` names refuses whatever is still sent
+#: (BUG-0559 review round 2, BB-3); this script is defence in depth under it, removing
+#: the trigger where a script can see it. Installed on every guarded
+#: context before any page script runs, takes every ``<script type=speculationrules>``
+#: out of the document as it is inserted -- by the parser (which runs a microtask
+#: checkpoint before it prepares a script), by a script, a fragment or ``document.write``,
+#: into an open shadow root (``attachShadow``, or a parser's declarative one) -- before
+#: its rules are registered, and again whenever it is re-inserted; removing a registered
+#: one drops its rules. What it calls is captured before the page's scripts run, so a
+#: page that replaces ``Element.prototype.remove`` or ``MutationRecord``'s getters does
+#: not turn it off (measured). The route drops the ``Speculation-Rules`` header
+#: (`_fulfil_preload_free`), and a popup's first document, which Chromium loads into the
+#: Window of its initial ``about:blank`` where no init script runs again (measured), is
+#: loaded through a same-URL trampoline (`_TRAMPOLINE_HTML`). Not reached by this layer: a
+#: rule set in a *closed* shadow root -- the parser's, with its type written as a
+#: character reference, or one a handler inside that root inserts -- and one a page gives
+#: a ``window.open()`` popup still on its initial ``about:blank`` (measured by the review,
+#: round 2); the enforcer refuses what they send.
+PRELOAD_OFF_JS = r"""(() => {
+  const apply = Reflect.apply, desc = Object.getOwnPropertyDescriptor;
+  const E = Element.prototype, N = Node.prototype, R = MutationRecord.prototype;
+  const nodeType = desc(N, 'nodeType').get, localName = desc(E, 'localName').get;
+  const shadowRoot = desc(E, 'shadowRoot').get, getAttribute = E.getAttribute;
+  const remove = E.remove, attach = E.attachShadow, qsaElement = E.querySelectorAll;
+  const qsaDocument = Document.prototype.querySelectorAll;
+  const qsaFragment = DocumentFragment.prototype.querySelectorAll;
+  const recType = desc(R, 'type').get, recTarget = desc(R, 'target').get;
+  const recAdded = desc(R, 'addedNodes').get;
+  const listLength = desc(NodeList.prototype, 'length').get, item = NodeList.prototype.item;
+  const trim = String.prototype.trim, lower = String.prototype.toLowerCase, Str = String;
+  const taken = new WeakSet(), has = WeakSet.prototype.has, add = WeakSet.prototype.add;
+  const observe = MutationObserver.prototype.observe;
+  const OPTIONS = {subtree: true, childList: true, attributes: true,
+                   attributeFilter: ['type']};
+  const isRules = (t) => t !== null &&
+    apply(lower, apply(trim, Str(t), []), []) === 'speculationrules';
+  const off = (el) => {
+    if (apply(nodeType, el, []) !== 1 || apply(localName, el, []) !== 'script') return;
+    if (apply(has, taken, [el]) || isRules(apply(getAttribute, el, ['type']))) {
+      apply(add, taken, [el]);
+      apply(remove, el, []);
+    }
+  };
+  const scan = (root) => {
+    const t = apply(nodeType, root, []);
+    const q = t === 1 ? qsaElement : t === 9 ? qsaDocument : t === 11 ? qsaFragment : null;
+    if (q === null) return;
+    const found = apply(q, root, ['script']), n = apply(listLength, found, []);
+    for (let i = 0; i < n; i++) off(apply(item, found, [i]));
+  };
+  let mo = null;
+  const watch = (root) => { apply(observe, mo, [root, OPTIONS]); scan(root); };
+  const visit = (node) => {
+    off(node);
+    scan(node);
+    if (apply(nodeType, node, []) === 1) {
+      const sr = apply(shadowRoot, node, []);
+      if (sr) watch(sr);
+    }
+  };
+  mo = new MutationObserver((records) => {
+    for (let i = 0; i < records.length; i++) {
+      const r = records[i];
+      if (apply(recType, r, []) === 'attributes') { off(apply(recTarget, r, [])); continue; }
+      const added = apply(recAdded, r, []), n = apply(listLength, added, []);
+      for (let j = 0; j < n; j++) visit(apply(item, added, [j]));
+    }
+  });
+  E.attachShadow = function attachShadow() {
+    const root = apply(attach, this, arguments);
+    watch(root);
+    return root;
+  };
+  watch(document);
+})();"""
+
+#: The document a popup's first navigation is answered with (`PRELOAD_OFF_JS`): it
+#: replaces itself with the same URL, now from a document that is not the initial
+#: ``about:blank``, so Chromium gives the real one a new Window -- where the context's
+#: init scripts run -- and the route serves it the answer it already fetched.
+_TRAMPOLINE_HTML = ("<!doctype html><meta charset=utf-8><title></title>"
+                    "<script>location.replace({url})</script>")
+
+#: How long a popup's fetched answer waits for its trampoline's request, and how many
+#: wait at once, per guard.
+_KEPT_TTL_S = 30.0
+_KEPT_MAX = 32
+
+
+def _initial_window(req) -> bool:
+    """Is ``req`` a navigation of a new page's main frame from the initial ``about:blank``
+    that Chromium would reuse the Window of (`PRELOAD_OFF_JS`)? Playwright cannot name
+    the frame of a popup's first navigation ("the request was issued before the frame is
+    created", measured for ``window.open``, ``<a target=_blank rel=opener>``, a named
+    target); a frame it can name counts when it is the main frame of a page with an
+    opener, still on ``about:blank`` (``window.open()`` then ``w.location = url``). A
+    request double without a frame is never one."""
+    from playwright.sync_api import Error
+    try:
+        if not req.is_navigation_request():
+            return False
+    except Exception:  # noqa: BLE001 - a request that cannot say is not one
+        return False
+    try:
+        frame = req.frame
+    except Error as exc:
+        return "not available" in str(exc)
+    except Exception:  # noqa: BLE001 - a double: no frame to ask
+        return False
+    try:
+        return frame is not None and frame.parent_frame is None and \
+            frame.url == "about:blank" and frame.page.opener() is not None
+    except Exception:  # noqa: BLE001 - a frame that cannot say is not one
+        return False
+
+
+def _trampoline_target(req, url: str) -> bool:
+    """Is ``req`` the request a popup's trampoline (`_TRAMPOLINE_HTML`) made for ``url``:
+    a GET navigation of a main frame whose document is at ``url``, or whose frame
+    Playwright cannot name yet?"""
+    from playwright.sync_api import Error
+    try:
+        if not req.is_navigation_request() or req.method.upper() != "GET":
+            return False
+        frame = req.frame
+    except Error as exc:
+        return "not available" in str(exc)
+    except Exception:  # noqa: BLE001 - a double: never one
+        return False
+    try:
+        return frame is not None and frame.parent_frame is None and \
+            frame.url.split("#", 1)[0] == url
+    except Exception:  # noqa: BLE001
+        return False
+
+
+#: A parser-inserted rule set's ``type`` in a page's HTML (`_inert_rule_sets`).
+_RULES_TYPE = re.compile(r"""(<script\b[^>]*?\btype\s*=\s*)(["']?)\s*speculationrules\s*\2""",
+                         re.IGNORECASE)
+#: What `_inert_rule_sets` writes in its place: no script type the browser runs.
+INERT_RULES_TYPE = "x-fuzzlab-inert"
+
+
+def _inert_rule_sets(html: str | None) -> str | None:
+    """``html`` (a main-frame document the route is about to give) with every
+    ``<script type=speculationrules>`` written with an inert type, or None when it has
+    none. The text layer under `PRELOAD_OFF_JS`, for a rule set the parser inserts where
+    no script can see it -- a *closed* declarative shadow root (measured on Chromium 141:
+    its prefetch of the alias went out with the script layer alone). Defence in depth
+    only: the parser decodes a character reference in the type (``&#115;peculationrules``)
+    after this text was read (BUG-0559 review round 2, BB-3), so the enforcer
+    (`browser_launch_args`) is what refuses a preload."""
+    if not html or "speculationrules" not in html.lower():
+        return None
+    out, n = _RULES_TYPE.subn(rf"\g<1>\g<2>{INERT_RULES_TYPE}\g<2>", html)
+    return out if n else None
+
+
+def _fulfil_preload_free(route, answer, *drop: str, html: str | None = None,
+                         encoding: str | None = "utf-8") -> None:
+    """Fulfil ``route`` with ``answer`` as received, less a ``Speculation-Rules`` header
+    (`PRELOAD_OFF_JS`) and the header names in ``drop`` (lower case: ``set-cookie`` for
+    an isolated answer, FR-SESS-20 R2); and, given its ``html`` (a main-frame document's,
+    as `_note_received` decoded it with ``encoding``), with its parser-inserted rule sets
+    inert (`_inert_rule_sets`), encoded back the same way -- never when ``encoding`` is
+    None (a body that did not decode losslessly is given as it came; the enforcer stands
+    behind it). An answer with none of them is given unchanged. The headers
+    given are never empty: ``route.fulfill`` falls back to the answer's own headers --
+    the dropped ones included -- for an empty set, so a ``Content-Length`` (always true
+    of the body) then stands in."""
+    names = {SPECULATION_RULES_HEADER, *drop}
+    headers = dict(answer.headers or {})
+    inert = _inert_rule_sets(html) if encoding else None
+    body = None
+    if inert is not None:
+        try:
+            body = inert.encode(encoding)     # the charset it was decoded with
+        except (LookupError, UnicodeError):
+            body = None
+    if body is not None:
+        given = {k: v for k, v in headers.items()
+                 if k.lower() not in names | {"content-length", "content-encoding",
+                                              "transfer-encoding"}}
+        given["content-length"] = str(len(body))
+        route.fulfill(status=answer.status, headers=given, body=body)
+        return
+    if not any(k.lower() in names for k in headers):
+        route.fulfill(response=answer)
+        return
+    kept = {k: v for k, v in headers.items() if k.lower() not in names}
+    if not kept:
+        kept = {"content-length": str(len(answer.body()))}
+    route.fulfill(response=answer, headers=kept)
+
+
 def make_route_handler(allow: frozenset[str] = frozenset(),
                        on_abort: Callable[[str, str], None] | None = None, *,
                        in_scope: Callable[[str], bool],
@@ -92,7 +465,10 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
                        window: Callable[[str, str, bool], str | None] | None = None,
                        cookie_scope: Callable[[str], bool] | None = None,
                        on_session_withheld: Callable[[str, str, str], None] | None = None,
-                       isolated_request: Callable[[], object] | None = None):
+                       isolated_request: Callable[[], object] | None = None,
+                       session_cookies=None,
+                       on_session_unreached: Callable[[str, str, str, str], None]
+                       | None = None):
     """The route handler ``guard_page`` installs (split out so it is testable).
 
     Scope first (BUG-0123): a URL ``in_scope`` refuses is aborted, whatever ``allow``
@@ -141,7 +517,19 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
     asked after the scope and destructive checks, before anything is fetched, for the
     request and again for every redirect hop (a navigation's hop is a navigation too);
     a reason aborts it. The caller keeps its own state (whether the window is open, what it
-    blocked, which navigation targets to enqueue)."""
+    blocked, which navigation targets to enqueue).
+
+    ``session_cookies`` (a context carrying a session in its cookie jar, SP-74,
+    BUG-0559): the session's cookies as the context holds them (`held_session_cookies`).
+    A request to a host they do not reach (`session_host_refusal`; another origin than
+    the session's stays ``cookie_scope``'s) is aborted before anything is sent -- the
+    request itself and every redirect hop, a navigation or not -- right after the scope
+    and destructive checks, and ``on_session_unreached(url, kind, source, reason)`` is
+    told: ``kind`` as ``on_session_withheld``'s (``"document"``, ``"landing"``,
+    ``"frame"``, ``"request"``), ``source`` the URL the chain started at. None or empty:
+    nothing is refused by it (a context with no session cookie)."""
+    session_cookies = [dict(c) for c in (session_cookies or ())]
+
     def refused(url: str) -> bool:
         if not in_scope(url):
             logging.info(f"blocked out-of-scope browser request to "
@@ -175,6 +563,23 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
                      f"({kind}: another origin than the session's, FR-SESS-20)")
         if on_session_withheld is not None:
             on_session_withheld(url, kind, source)
+
+    def unreached(url: str, kind: str, source: str) -> bool:
+        """SP-74: a request of this session-carrying context to a host its cookies do
+        not reach -- refused, told; another origin than the session's is FR-SESS-20's."""
+        if not session_cookies or not in_scope(url):
+            return False
+        why = session_host_refusal(session_cookies, url, cookie_scope=cookie_scope)
+        if why is None:
+            return False
+        logging.info(f"sent nothing to {urlsplit(url).hostname or '?'!r} ({kind}): the "
+                     f"session's cookies do not reach that host (SP-74)")
+        if on_session_unreached is not None:
+            try:
+                on_session_unreached(url, kind, source, why)
+            except Exception as exc:  # noqa: BLE001 - a hook never lets a request out
+                logging.info(f"session-unreached hook failed ({type(exc).__name__})")
+        return True
 
     # the guard's one cookie-less request context (R2, V1), made once, here, when the
     # guard is built: route handlers run concurrently, so a lazy "make it if missing"
@@ -213,24 +618,76 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
                      f"in the reveal window ({why})")              # the host only
         return True
 
+    # BA-3 (BUG-0559 review round 1): a popup's first document, fetched and checked like
+    # any other, waits here for the request its trampoline makes (`_TRAMPOLINE_HTML`):
+    # url -> (answer, header names to drop, when kept, trampolines so far). A plain dict:
+    # route handlers interleave on one thread, and a lock held across a switch would
+    # deadlock it.
+    kept: dict = {}
+
+    def take_kept(req, url: str):
+        now = time.monotonic()
+        for key in [k for k, v in kept.items() if now - v[2] > _KEPT_TTL_S]:
+            kept.pop(key, None)
+        if url not in kept or not _trampoline_target(req, url):
+            return None
+        got = kept.pop(url, None)
+        return None if got is None else got[:2]
+
+    def trampoline(route, url: str, answer, drop: tuple) -> bool:
+        """Answer a popup's first navigation with the trampoline and keep its fetched
+        answer for the trampoline's own request; False once ``url`` was trampolined
+        three times without that request coming (a frame Playwright never names): the
+        answer is then given as it is, and logged."""
+        hops = kept[url][3] + 1 if url in kept else 1
+        if hops > 3:
+            kept.pop(url, None)
+            logging.info(f"a popup's first document on {urlsplit(url).hostname or '?'!r} "
+                         f"is given without its trampoline (BUG-0559 review round 1)")
+            return False
+        while len(kept) >= _KEPT_MAX:
+            kept.pop(next(iter(kept)), None)
+        kept[url] = (answer, drop, time.monotonic(), hops)
+        target = json.dumps(url).replace("<", "\\u003c")
+        route.fulfill(status=200, body=_TRAMPOLINE_HTML.replace("{url}", target),
+                      headers={"content-type": "text/html; charset=utf-8",
+                               "cache-control": "no-store"})
+        return True
+
     def handler(route, request=None) -> None:
         req = request if request is not None else route.request
         url = req.url
         if url.lower().startswith(_LOCAL_SCHEMES):
             route.continue_()
             return
+        if kept and str(req.method).upper() == "GET":
+            got = take_kept(req, url)
+            if got is not None:
+                # a trampoline's own request: the answer fetched for this popup's first
+                # navigation, already checked and observed; nothing is sent again
+                answer, drop = got
+                html, charset = _note_received(req, url, answer)
+                _fulfil_preload_free(route, answer, *drop, html=html, encoding=charset)
+                return
         # BUG-0136 (PA-0136): every abort of a document request -- a navigation,
         # top-level or frame, and each of its redirect hops -- uses "aborted"
         # (ERR_ABORTED), whatever the reason: the current document survives (the
         # default code commits Chromium's error page in its place) and `goto` of that
         # target still raises. A subresource keeps the default code.
         document = _is_document(req)
+        # BA-3: a popup's first navigation, from the initial about:blank whose Window
+        # Chromium reuses -- where no init script runs again (measured)
+        fresh = document and _initial_window(req)
 
         def abort() -> None:
             route.abort(_abort_code(document)) if document else route.abort()
 
         if refused(url):
             abort()
+            return
+        doc_kind = "frame" if document and _is_subframe(req) else "document"
+        if unreached(url, doc_kind if document else "request", url):
+            abort()                              # SP-74: never sent without the session
             return
         navigation = document if window is not None else False
         if window is not None:
@@ -249,7 +706,6 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
         if body_refused(req.method.upper(), url, req.headers or {}, req.post_data_buffer):
             abort()
             return
-        doc_kind = "frame" if document and _is_subframe(req) else "document"
         if withheld(url) and (document or isolated_request is None):
             tell_withheld(url, doc_kind if document else "request", url)
             abort()                              # FR-SESS-20 (R1): never loaded (T1)
@@ -274,6 +730,11 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
                 nxt = urljoin(final_url, location)
                 if api is None or refused(nxt):
                     abort()
+                    return
+                hop_kind = ("frame" if doc_kind == "frame" else "landing") \
+                    if document else "request"
+                if unreached(nxt, hop_kind, url):
+                    abort()                      # SP-74: the hop is never fetched
                     return
                 if final.status in (301, 302, 303) and method not in ("GET", "HEAD"):
                     method = "GET"                          # as a browser does
@@ -324,26 +785,39 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
                 logging.info(_scrubbed(
                     f"request observer failed on {url.split('?', 1)[0]} "
                     f"({str(exc).splitlines()[0][:80] if str(exc) else exc!r})"))
+        html, charset = None, None                # a main-frame document's HTML, as given
         if document and doc_kind == "document" and \
                 (stripped or final is first or not req.is_navigation_request()
                  or method not in ("GET", "HEAD")):
-            _note_received(req, url, final)       # the body this page is given (Q2)
+            # the body this page is given (Q2), decoded by its charset (never raising)
+            html, charset = _note_received(req, url, final)
+        relanding = final is not first and not stripped and \
+            req.is_navigation_request() and method in ("GET", "HEAD")
+        drop = ("set-cookie",) if stripped else ()
+        if fresh and doc_kind == "document" and not relanding and \
+                trampoline(route, url, final, drop):
+            return                                   # BA-3: given to the trampoline
+        # every answer is given without a `Speculation-Rules` header, and a page's
+        # parser-inserted rule sets inert (BA-3)
         if stripped:
             # an isolated answer never writes the context's jar (FR-SESS-20, R2)
-            route.fulfill(response=final, headers=_without_set_cookie(final.headers))
+            _fulfil_preload_free(route, final, *drop)
         elif final is first:
-            route.fulfill(response=first)
+            _fulfil_preload_free(route, first, html=html, encoding=charset)
         elif req.is_navigation_request() and method in ("GET", "HEAD"):
             # the browser re-requests the (checked) landing URL itself, so page.url and
             # relative links are right; a GET or HEAD only, never a body (reviewers).
             # In an authenticated context a landing outside the session's origins was
             # aborted above (FR-SESS-20, R1), so this re-request stays on them
             status = 303 if req.method.upper() not in ("GET", "HEAD") else 302
+            # Playwright never routes that re-request: it goes through the enforcer,
+            # which forwards this checked landing once and nothing else (BUG-0559 r2)
+            admit_landing(final_url)
             route.fulfill(status=status, headers={"location": final_url})
         else:
             # a body kept through 307/308 is never sent twice: the landing response is
             # the answer (a navigation's page.url stays the first URL)
-            route.fulfill(response=final)
+            _fulfil_preload_free(route, final, html=html, encoding=charset)
     return handler
 
 
@@ -376,20 +850,171 @@ def _abort_code(document: bool) -> str | None:
 _RECEIVED: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
 
 
-def _note_received(req, url: str, answer) -> None:
+#: A charset a document names in its first bytes (``<meta charset>``, or ``http-equiv``'s
+#: ``content``), as HTML's prescan reads it.
+#: One character class between ``=`` and the label (never ``\s*["']?\s*``: two
+#: quantifiers over one whitespace run the target writes split it every way, quadratic
+#: in its length -- BUG-0559, after the owner's final round).
+_META_CHARSET = re.compile(rb"""<meta[^>]*?charset\s*=[\s"']*([A-Za-z0-9._:-]+)""",
+                           re.IGNORECASE)
+_HEADER_CHARSET = re.compile(r"""charset\s*=[\s"']*([A-Za-z0-9._:-]+)""", re.IGNORECASE)
+#: **The encodings a browser decodes a document by** (BUG-0559, after the owner's final
+#: round): the WHATWG Encoding Standard's, keyed by Python's name for a label
+#: (``codecs.lookup(label).name``: each browser encoding's own name -- else its Python
+#: codec, ``cp874`` for windows-874, ``mac-cyrillic`` for x-mac-cyrillic -- and every
+#: Python name its WHATWG labels resolve to), each to the Python codec that decodes as
+#: Chromium does. Measured on Chromium 141 over every WHATWG label and every label Python
+#: registers, header and ``<meta>`` (``r4meas/browser_labels.py``,
+#: ``browser_multibyte.py``): a Latin-1 or ASCII label is windows-1252, ``iso-8859-9``
+#: windows-1254, ``iso-8859-11``/``tis-620`` windows-874; GBK's decoder is gb18030's (5/6
+#: of the sampled sequences against 4/6 for gbk and 2/6 for gb2312), Big5 is
+#: Big5-HKSCS's (6/8 against 2/8), Shift_JIS is windows-31j's (12/13 against 5/13), EUC-KR
+#: is windows-949's (4/4 against 3/4), ISO-2022-JP reads half-width katakana (3/4 against
+#: 2/4); ``utf-16`` is UTF-16LE. Single-byte decoders matched Chromium on 0x80..0xFF but
+#: for the bytes a windows code page leaves undefined (Chromium: the C1 control, here
+#: U+FFFD; windows-1252 then reads the whole document byte for byte) and two KOI8-U
+#: bytes; the CJK decoders recover from an invalid sequence otherwise than Chromium's.
+#: Those deltas and the 74 WHATWG labels Python does not resolve are measured and pinned
+#: (``test_a_document_reads_as_chromium_decodes_it_under_every_whatwg_label``). Any
+#: other label is unknown, as Chromium treats it: no codec a browser never decodes by runs
+#: on a body a target wrote (CPython's ``punycode`` decoder is super-linear: a 384 KB page
+#: labelled with it held the route about 10 s, 512 KB 82 s, measured on 72497c9; ``utf-7``,
+#: ``unicode_escape``, ``idna``, EBCDIC, ``utf-32`` ... are no browser's either). Every
+#: codec here decodes 1 MB of random bytes in under 50 ms, never raising with replacement
+#: (``r4meas/decoder_cost.out``).
+_BROWSER_CODECS = {
+    "utf-8": "utf-8",
+    "cp866": "cp866",                                                   # IBM866
+    **{f"iso8859-{n}": f"iso8859-{n}" for n in (2, 3, 4, 5, 6, 7, 8, 10, 13, 14, 15, 16)},
+    "koi8-r": "koi8-r", "koi8-u": "koi8-u",
+    "mac-roman": "mac-roman", "mac-cyrillic": "mac-cyrillic",       # macintosh, x-mac-cyrillic
+    "cp874": "cp874", "iso8859-11": "cp874", "tis-620": "cp874",        # windows-874
+    **{f"cp{n}": f"cp{n}" for n in range(1250, 1259)},                  # windows-1250..1258
+    "iso8859-1": "cp1252", "ascii": "cp1252",                           # windows-1252
+    "iso8859-9": "cp1254",                                              # windows-1254
+    "gbk": "gb18030", "gb2312": "gb18030", "gb18030": "gb18030",        # GBK, gb18030
+    "big5": "big5hkscs", "big5hkscs": "big5hkscs",                      # Big5
+    "euc_jp": "euc_jp",                                                 # EUC-JP
+    "iso2022_jp": "iso2022_jp_ext",                                     # ISO-2022-JP
+    "shift_jis": "cp932", "cp932": "cp932",                             # Shift_JIS
+    "euc_kr": "cp949",                                                  # EUC-KR
+    "utf-16-be": "utf-16-be", "utf-16-le": "utf-16-le", "utf-16": "utf-16-le",
+}
+#: The byte-order marks a body may start with, and the codec each one names.
+_BOMS = ((codecs.BOM_UTF8, "utf-8-sig"), (codecs.BOM_UTF16_LE, "utf-16"),
+         (codecs.BOM_UTF16_BE, "utf-16"))
+
+
+def decoded_text(body: bytes | None, content_type: str | None) -> tuple[str, str | None]:
+    """**A response body as text, by its own charset, never raising** (BUG-0559 review
+    round 2, BB-4: a strict UTF-8 read of an ISO-8859-1 page raised out of the route
+    handler, so the request was never answered and the load timed out). The charset is
+    a byte-order mark's, else the ``Content-Type``'s, else one the document names in its
+    first 1024 bytes (a Latin-1 label read as windows-1252, as a browser does); an
+    undeclared body is UTF-8 when it decodes as UTF-8, else windows-1252, else byte for
+    byte. Returns the text and the codec it was decoded with -- None when the declared
+    charset did not decode losslessly (undecodable bytes replaced): such text is read,
+    never re-encoded and given in place of the body. The one decoder of a Playwright
+    response body in fuzzlab (an AST guard holds every module to it).
+
+    **Any label a target writes is safe** (BUG-0559 review round 3, BB-4): Python's
+    registry also names codecs that are not text encodings (``hex``, ``base64``,
+    ``rot13``, ``zlib``, ``bz2``, ``uu``, ``quopri``: ``bytes.decode`` raises
+    ``LookupError``) and text codecs that refuse a document (``idna``, ``undefined``:
+    ``UnicodeError``, with ``replace`` too). Such a label is unknown, as a browser
+    treats a label it does not know: the next one decides (the document's own), else the
+    undeclared order. Nothing a codec raises leaves this function.
+
+    **Only an encoding a browser decodes by runs** (BUG-0559, after the owner's final
+    round): a label is known only when Python's name for it is one of the WHATWG
+    Encoding Standard's encodings (`_BROWSER_CODECS`, measured on Chromium 141), decoded
+    by the codec that reads it as Chromium does; a ``<meta>`` naming UTF-16 is UTF-8, as
+    HTML's prescan makes it. Round 3 admitted any text codec Python registers, and
+    CPython's ``punycode`` decoder is super-linear: a large page labelled with it held
+    the route past the navigation timeout (a regression against c6296bc) and a request
+    body held disco's request handler. Every allowed codec is linear and never raises
+    with replacement."""
+    data = bytes(body or b"")
+    declared = [codec for bom, codec in _BOMS if data.startswith(bom)][:1]
+    for match, meta in ((_HEADER_CHARSET.search(content_type or ""), False),
+                        (_META_CHARSET.search(data[:1024]), True)):
+        if match:
+            codec = _text_codec(match.group(1), meta=meta)
+            if codec is not None:             # unknown, or no browser's: not a label
+                declared.append(codec)
+    for codec in declared:                    # the first label known decides
+        if codec == "cp1252":
+            # a Latin-1 label is read as windows-1252 (WHATWG), then byte for byte
+            try:
+                return data.decode("cp1252"), "cp1252"
+            except UnicodeDecodeError:
+                return data.decode("latin-1"), "latin-1"
+        try:
+            return data.decode(codec), codec
+        except UnicodeDecodeError:            # the declared charset, lossy: read only
+            try:
+                return data.decode(codec, "replace"), None
+            except Exception:  # noqa: BLE001 - defensive: no allowed codec raises here
+                continue
+        except Exception:  # noqa: BLE001 - defensive: nothing a codec raises leaves
+            continue
+    for codec in ("utf-8", "cp1252"):         # undeclared: UTF-8, else HTML's default
+        try:
+            return data.decode(codec), codec
+        except UnicodeDecodeError:
+            continue
+    return data.decode("latin-1"), "latin-1"
+
+
+def _text_codec(label: str | bytes, *, meta: bool = False) -> str | None:
+    """The Python codec that decodes a document labelled ``label`` as a browser does, or
+    None: a label Python does not know, or one whose codec no browser decodes by
+    (``punycode``, ``utf-7``, ``hex``, ...; `_BROWSER_CODECS`, `decoded_text`). From a
+    ``<meta>`` (``meta``), a UTF-16 label is UTF-8 (HTML's prescan; measured on Chromium
+    141: ``document.characterSet`` is UTF-8 for every UTF-16 label in a ``<meta>``)."""
+    if isinstance(label, bytes):
+        label = label.decode("ascii", "replace")
+    try:
+        codec = _BROWSER_CODECS.get(codecs.lookup(label).name)
+    except Exception:  # noqa: BLE001 - LookupError, or a label the registry chokes on
+        return None
+    if meta and codec is not None and codec.startswith("utf-16"):
+        return "utf-8"
+    return codec
+
+
+def response_text(response) -> str | None:
+    """A Playwright response's body as text (`decoded_text`), or None when its body is
+    gone or cannot be read -- never an exception. What every module reads a response
+    body with, never ``response.text()`` (strict UTF-8)."""
+    try:
+        body = response.body()
+        ctype = (response.headers or {}).get("content-type", "")
+        return decoded_text(body, ctype)[0]       # never raises itself (BB-4, round 3)
+    except Exception:  # noqa: BLE001 - a body the driver let go (or a double): none
+        return None
+
+
+def _note_received(req, url: str, answer) -> tuple[str | None, str | None]:
     """Keep the HTML of a main-frame document the guard is about to fulfil, for its
-    page's `navigate` (never anything else: no subresource, no frame)."""
+    page's `navigate` (never anything else: no subresource, no frame). Returns that HTML
+    and the codec it was decoded with (`decoded_text`; the route reads them once more
+    for `_fulfil_preload_free`), or ``(None, None)``. Never raises: the route answers
+    every request (BUG-0559 review round 2, BB-4)."""
     from playwright.sync_api import Error
     try:
         page = getattr(req.frame, "page", None)
         if page is None or "text/html" not in (answer.headers or {}).get(
                 "content-type", ""):
-            return
-        _RECEIVED[page] = (document_key(url), answer.text())
+            return None, None
+        html, charset = decoded_text(answer.body(), answer.headers.get("content-type"))
+        _RECEIVED[page] = (document_key(url), html)
+        return html, charset
     # no frame (a service worker's request; a request double without one), or a page
-    # that cannot be weakly referenced: nothing is kept
-    except (AttributeError, Error, TypeError):
-        return
+    # that cannot be weakly referenced: nothing is kept (`decoded_text` itself never
+    # raises; a LookupError escaped it before, BB-4 review round 3)
+    except (AttributeError, Error, LookupError, TypeError, ValueError):
+        return None, None
 
 
 def _received_html(page, url: str, response) -> str | None:
@@ -430,11 +1055,6 @@ def _is_subframe(req) -> bool:
         return frame is not None and frame.parent_frame is not None
     except Exception:  # noqa: BLE001 - no frame (a service worker's): not a subframe
         return False
-
-
-def _without_set_cookie(headers) -> dict[str, str]:
-    """``headers`` without ``Set-Cookie`` (FR-SESS-20, R2)."""
-    return {k: v for k, v in (headers or {}).items() if k.lower() != "set-cookie"}
 
 
 def _merged(request_headers, extra: dict[str, str]) -> dict[str, str]:
@@ -808,9 +1428,9 @@ def response_html(response) -> str | None:
     try:
         if "text/html" not in (response.headers or {}).get("content-type", ""):
             return None
-        return response.text()
-    except Error:                  # the body is gone (the page moved on)
+    except Error:                  # the response is gone (the page moved on)
         return None
+    return response_text(response)  # by its charset, never raising (BB-4)
 
 
 def make_ws_handler(in_scope: Callable[[str], bool],
@@ -819,7 +1439,10 @@ def make_ws_handler(in_scope: Callable[[str], bool],
                     on_drop: Callable[[str, object], None] | None = None,
                     cookie_scope: Callable[[str], bool] | None = None,
                     on_session_withheld: Callable[[str, str, str], None] | None = None,
-                    on_send: Callable[[str], None] | None = None):
+                    on_send: Callable[[str], None] | None = None,
+                    session_cookies=None,
+                    on_session_unreached: Callable[[str, str, str, str], None]
+                    | None = None):
     """WebSockets are routed separately from HTTP: an in-scope socket is connected
     through; an out-of-scope one is **never connected** -- Playwright then serves it as
     a mock with no server connection at all (BUG-0123). Not ``ws.close()``: called in
@@ -837,7 +1460,14 @@ def make_ws_handler(in_scope: Callable[[str], bool],
     ``cookie_scope`` (an authenticated context, FR-SESS-20, R1): an in-scope socket on
     another origin than the session's is never connected either (the browser would open
     it with the context's port-agnostic jar); ``on_session_withheld(url,
-    "websocket", url)`` is told."""
+    "websocket", url)`` is told.
+
+    ``session_cookies`` (SP-74, BUG-0559): an in-scope socket on a host the session's
+    cookies do not reach (`session_host_refusal`) is never connected either; it would
+    open without the session. ``on_session_unreached(url, "websocket", url, reason)`` is
+    told."""
+    session_cookies = [dict(c) for c in (session_cookies or ())]
+
     def handler(ws) -> None:
         if in_scope(ws.url) and cookie_scope is not None and not cookie_scope(ws.url):
             logging.info(f"blocked a WebSocket to {urlsplit(ws.url).hostname or '?'!r}: "
@@ -845,7 +1475,19 @@ def make_ws_handler(in_scope: Callable[[str], bool],
             if on_session_withheld is not None:
                 on_session_withheld(ws.url, "websocket", ws.url)
             return
+        why = session_host_refusal(session_cookies, ws.url, cookie_scope=cookie_scope) \
+            if session_cookies and in_scope(ws.url) else None
+        if why is not None:
+            logging.info(f"blocked a WebSocket to {urlsplit(ws.url).hostname or '?'!r}: "
+                         f"the session's cookies do not reach that host (SP-74)")
+            if on_session_unreached is not None:
+                with contextlib.suppress(Exception):
+                    on_session_unreached(ws.url, "websocket", ws.url, why)
+            return
         if in_scope(ws.url):
+            # Chromium opens it through the enforcer, which tunnels only an admitted
+            # socket (`admit_socket`, BUG-0559 review round 2)
+            admit_socket(ws.url)
             server = ws.connect_to_server()
             if hold is not None:
                 url = ws.url
@@ -888,7 +1530,10 @@ def guard_page(target, allow: frozenset[str] = frozenset(),
                on_ws_send: Callable[[str], None] | None = None,
                cookie_scope: Callable[[str], bool] | None = None,
                on_session_withheld: Callable[[str, str, str], None] | None = None,
-               isolated_request: Callable[[], object] | None = None) -> None:
+               isolated_request: Callable[[], object] | None = None,
+               session_cookies=None,
+               on_session_unreached: Callable[[str, str, str, str], None]
+               | None = None) -> None:
     """Confine a Playwright ``BrowserContext`` (pass the context, so popups are covered
     too), WebSockets included. ``in_scope`` is required: there is no unscoped guard
     (BUG-0123). ``method_refusal``, ``observe``, ``request_refusal``, ``window``, the
@@ -897,7 +1542,19 @@ def guard_page(target, allow: frozenset[str] = frozenset(),
     `make_route_handler` (a WebSocket off the session's origins is never connected,
     `make_ws_handler`); ``ws_hold`` /
     ``on_ws_drop`` / ``on_ws_send``: see `make_ws_handler`. Session headers are applied by the route only
-    (FR-CRAWL-14)."""
+    (FR-CRAWL-14). ``session_cookies`` / ``on_session_unreached`` (SP-74, BUG-0559): every
+    context that adopts a session's cookies passes them, as it holds them
+    (`held_session_cookies`); nothing it sends goes to a host they do not reach.
+
+    Every guarded context gets `PRELOAD_OFF_JS` before any of its pages runs a script
+    (BUG-0559 review round 1, BA-3): a speculation-rules preload is sent by the browser
+    process, past every rule of the route, so no rule set is ever registered."""
+    init = getattr(target, "add_init_script", None)
+    if init is None:                        # a double, or an old Playwright: loudly
+        logging.warning("this target cannot take an init script; speculation-rules "
+                        "preloads are not neutralised (BUG-0559)")
+    else:
+        init(PRELOAD_OFF_JS)                # the script itself (positional: ``script``)
     api = getattr(target, "request", None)
     target.route("**/*", make_route_handler(allow, on_abort, in_scope=in_scope,
                                             on_out_of_scope=on_out_of_scope, api=api,
@@ -907,19 +1564,38 @@ def guard_page(target, allow: frozenset[str] = frozenset(),
                                             headers=headers, header_scope=header_scope,
                                             window=window, cookie_scope=cookie_scope,
                                             on_session_withheld=on_session_withheld,
-                                            isolated_request=isolated_request))
+                                            isolated_request=isolated_request,
+                                            session_cookies=session_cookies,
+                                            on_session_unreached=on_session_unreached))
     route_ws = getattr(target, "route_web_socket", None)
     if route_ws is None:                            # an old Playwright: say so, loudly
-        logging.warning("this Playwright cannot route WebSockets; the resolver rules "
-                        "of browser_launch_args still confine them (BUG-0123)")
+        logging.warning("this Playwright cannot route WebSockets; the enforcer of "
+                        "browser_launch_args refuses them, none being admitted "
+                        "(BUG-0123, BUG-0559)")
         return
     route_ws("**/*", make_ws_handler(in_scope, on_out_of_scope, hold=ws_hold,
                                      on_drop=on_ws_drop, cookie_scope=cookie_scope,
                                      on_session_withheld=on_session_withheld,
-                                     on_send=on_ws_send))
+                                     on_send=on_ws_send, session_cookies=session_cookies,
+                                     on_session_unreached=on_session_unreached))
 
 
 _LOOPBACK_SPELLINGS = ("127.0.0.1", "localhost", "[::1]")
+
+
+def origin_host_spellings(url: str) -> tuple[str, ...]:
+    """The host names ``url``'s origin folds (`core.urls.canonical_origin`), as a URL's
+    ``hostname`` spells them: a loopback host's three (``::1`` without brackets), any
+    other host itself; none for a URL with no origin. What a caller asks
+    `cookie_reaches` about when its question is "does this cookie reach the scope's
+    host" (`browserlogin.filter_storage_state`, BUG-0559 review round 2)."""
+    origin = canonical_origin(url) if url else None
+    if origin is None:
+        return ()
+    host = origin.split("://", 1)[1].rsplit(":", 1)[0]
+    if host == "127.0.0.1":
+        return tuple(h.strip("[]") for h in _LOOPBACK_SPELLINGS)
+    return (host.strip("[]"),)
 
 
 def _proxy_endpoint(proxy: str) -> tuple[str, int]:
@@ -934,26 +1610,554 @@ def _proxy_endpoint(proxy: str) -> tuple[str, int]:
     return host, int(port)
 
 
+# --- the enforcer: what Chromium sends past the route (BUG-0559 review round 2, BB-3) ----
+#: How long a WebSocket the guard admitted (`admit_socket`) may take to reach the enforcer.
+SOCKET_TICKET_TTL_S = 10.0
+#: How long the enforcer waits for a request head, and the most it reads of one.
+_HEAD_TIMEOUT_S = 30.0
+_HEAD_MAX = 65536
+_REFUSAL = (b"HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nContent-Length: 0\r\n"
+            b"Connection: close\r\n\r\n")
+_ENFORCE_LOCK = threading.Lock()
+#: http landing key (`_landing_key`) -> expiry times of the landings the route checked
+_TICKETS: dict[tuple, list[float]] = {}
+#: (host, port) -> the tunnels admitted there and not yet carried (`_TunnelTicket`),
+#: oldest first: a WebSocket's (`admit_socket`) and an https landing's (`admit_landing`)
+_TUNNEL_TICKETS: dict[tuple[str, int], list] = {}
+#: How many tunnels one ticket may open before one of them carries its traffic, and how
+#: long after its first the others may come: the browser's retry after a certificate
+#: error is a second ``CONNECT``, 4-12 ms after the first (BUG-0559 review round 3,
+#: measured on Chromium 141 with ``ignore_https_errors``, both binaries)
+_TICKET_TUNNELS_MAX = 4
+_TICKET_RETRY_WINDOW_S = 3.0
+#: upstream (None: direct) -> (pid, server); endpoint -> its upstream
+_ENFORCERS: dict = {}
+_ENFORCER_UPSTREAM: dict[str, tuple | None] = {}
+_REFUSED = {"request": 0, "preload": 0, "connect": 0, "reuse": 0}
+
+
+def _socket_key(host, port) -> tuple[str, int]:
+    return str(host or "").lower().strip("[]"), int(port)
+
+
+class _TunnelTicket:
+    """One tunnel a guard admitted to a host and port (`admit_socket`, `admit_landing`),
+    within `SOCKET_TICKET_TTL_S`. Tunnels open on it until one carries the browser's
+    traffic -- a TLS handshake the browser abandoned on a certificate error carries none,
+    and its retry is a second ``CONNECT`` (measured, BUG-0559 review round 3) --, at
+    most `_TICKET_TUNNELS_MAX`, the later ones within `_TICKET_RETRY_WINDOW_S` of the
+    first. The tunnel that carries it ``claims`` it, and no other tunnel opens on it. A
+    ``landing`` ticket's tunnel carries one exchange (`_HeldTunnel`); a WebSocket's, the
+    socket's life."""
+
+    __slots__ = ("claimed", "expires", "first", "landing", "tunnels")
+
+    def __init__(self, landing: bool, expires: float):
+        self.landing, self.expires, self.tunnels, self.claimed = landing, expires, 0, False
+        self.first = 0.0                  # when its first tunnel opened
+
+
+def _admit_tunnel(url: str, *, landing: bool) -> None:
+    parts = urlsplit(url or "")
+    try:
+        port = parts.port
+    except ValueError:
+        return
+    if not parts.hostname:
+        return
+    if port is None:
+        port = 443 if parts.scheme.lower() in ("wss", "https") else 80
+    key, now = _socket_key(parts.hostname, port), time.monotonic()
+    with _ENFORCE_LOCK:
+        live = [t for t in _TUNNEL_TICKETS.get(key, ()) if t.expires > now and
+                not t.claimed]
+        _TUNNEL_TICKETS[key] = (live + [_TunnelTicket(landing,
+                                                      now + SOCKET_TICKET_TTL_S)])[-64:]
+
+
+def admit_socket(url: str) -> None:
+    """One WebSocket to ``url``'s host and port that a guard's socket handler admitted
+    (scope, FR-SESS-20, SP-74 checked) and is about to open (``connect_to_server``):
+    the enforcer tunnels a ``CONNECT`` there within `SOCKET_TICKET_TTL_S` until one
+    tunnel carries it (`_TunnelTicket`: a certificate error's retry included), and no
+    other (BUG-0559 review rounds 2 and 3, BB-3)."""
+    _admit_tunnel(url, landing=False)
+
+
+def _landing_key(url: str):
+    """What a checked redirect landing is matched by when the browser re-requests it:
+    scheme, host, port, path and query, percent-decoded (Chromium re-encodes what the
+    route wrote in ``Location``); None for a URL that is not an absolute http one."""
+    from urllib.parse import unquote
+    parts = urlsplit(url or "")
+    scheme = parts.scheme.lower()
+    try:
+        port = parts.port
+    except ValueError:
+        return None
+    if scheme != "http" or not parts.hostname:
+        return None
+    return ("landing", parts.hostname.lower().strip("[]"), port or 80,
+            unquote(parts.path or "/"), unquote(parts.query))
+
+
+def admit_landing(url: str) -> None:
+    """The landing of a redirected navigation the route checked and answered with a
+    redirect to it (`make_route_handler`): Playwright never routes the browser's
+    re-request of it, which therefore goes through the enforcer -- forwarded once,
+    within `SOCKET_TICKET_TTL_S` (a ``GET``/``HEAD``, never a preload); an ``https``
+    landing admits tunnels to its host and port until one carries the browser's request
+    (a certificate error's retry included), and that tunnel carries that one exchange
+    only (`_TunnelTicket`, `_HeldTunnel`). Measured: an unadmitted re-request was
+    refused and the redirected page never loaded (BUG-0559 review round 2); a tunnel
+    kept in the browser's pool carried a later prefetch, and a certificate error's retry
+    needed a second tunnel (review round 3)."""
+    if urlsplit(url or "").scheme.lower() == "https":
+        _admit_tunnel(url, landing=True)
+        return
+    key = _landing_key(url)
+    if key is None:
+        return
+    now = time.monotonic()
+    with _ENFORCE_LOCK:
+        live = [t for t in _TICKETS.get(key, ()) if t > now]
+        _TICKETS[key] = (live + [now + SOCKET_TICKET_TTL_S])[-64:]
+
+
+def _take_ticket(key) -> bool:
+    """Consume one live ticket of an http landing (`_landing_key`)."""
+    if key is None:
+        return False
+    now = time.monotonic()
+    with _ENFORCE_LOCK:
+        live = [t for t in _TICKETS.pop(key, ()) if t > now]
+        if not live:
+            return False
+        if live[1:]:
+            _TICKETS[key] = live[1:]
+        return True
+
+
+def _take_tunnel(host, port):
+    """The `_TunnelTicket` that admits a ``CONNECT`` to ``host:port`` (its tunnel
+    counted), or None: the oldest live one not yet carried -- each is admitted just
+    before the browser opens its connection."""
+    key, now = _socket_key(host, port), time.monotonic()
+    with _ENFORCE_LOCK:
+        live = [t for t in _TUNNEL_TICKETS.pop(key, ()) if t.expires > now and
+                not t.claimed]
+        if live:
+            _TUNNEL_TICKETS[key] = live
+        for ticket in live:
+            if ticket.tunnels == 0:
+                ticket.first = now
+            elif ticket.tunnels >= _TICKET_TUNNELS_MAX or \
+                    now - ticket.first > _TICKET_RETRY_WINDOW_S:
+                continue
+            ticket.tunnels += 1
+            return ticket
+        return None
+
+
+def _claim(ticket: _TunnelTicket) -> bool:
+    """``ticket``'s traffic goes through the tunnel asking: False once another of its
+    tunnels has carried it."""
+    with _ENFORCE_LOCK:
+        if ticket.claimed:
+            return False
+        ticket.claimed = True
+        return True
+
+
+def enforcer_refusals() -> dict:
+    """What the enforcer refused in this process, by kind: ``preload`` (a request
+    carrying ``Sec-Purpose``: a speculation-rules prefetch or prerender), ``request``
+    (anything else Chromium sent itself), ``connect`` (a tunnel no guard admitted),
+    ``reuse`` (traffic on an admitted tunnel past what its ticket admits -- a further
+    request on an https landing's, a second tunnel carrying one ticket --: the tunnel is
+    closed instead, BUG-0559 review round 3)."""
+    with _ENFORCE_LOCK:
+        return dict(_REFUSED)
+
+
+def _authority(target: str) -> tuple[str | None, int]:
+    """``host`` and ``port`` of a CONNECT target (``[::1]:443`` included)."""
+    host, sep, port = (target or "").rpartition(":")
+    if not sep or not port.isdigit() or not host:
+        return None, 0
+    return host.strip("[]"), int(port)
+
+
+def _header(head: bytes, name: bytes) -> str:
+    for line in head.split(b"\r\n")[1:]:
+        key, sep, value = line.partition(b":")
+        if sep and key.strip().lower() == name:
+            return value.strip().decode("latin-1")
+    return ""
+
+
+def _pump(src, dst) -> None:
+    try:
+        while True:
+            data = src.recv(65536)
+            if not data:
+                break
+            dst.sendall(data)
+    except OSError:
+        pass
+    for s in (src, dst):
+        with contextlib.suppress(OSError):
+            s.shutdown(socket.SHUT_RDWR)
+
+
+#: TLS record content types (RFC 8446 §5.1)
+_TLS_HANDSHAKE, _TLS_APPLICATION_DATA = 22, 23
+#: The largest encrypted record that cannot hold an HTTP request: an alert or a key
+#: update (TLS 1.3 sends both as application data). The shortest request line with its
+#: blank line is 18 bytes, and every cipher adds at least 16 to it.
+_TLS_CONTROL_MAX = 33
+
+
+def _tls13(record: bytes) -> bool | None:
+    """Did the server choose TLS 1.3 in this ``ServerHello`` record (its
+    ``supported_versions`` extension, RFC 8446 §4.2.1)? None when the record is not one
+    that can be read."""
+    try:
+        if record[0] != _TLS_HANDSHAKE or record[5] != 2:     # handshake, server_hello
+            return None
+        body = record[9:9 + int.from_bytes(record[6:9], "big")]
+        at = 2 + 32                                         # legacy_version, random
+        at += 1 + body[at]                                  # legacy_session_id
+        at += 2 + 1                                         # cipher_suite, compression
+        end = at + 2 + int.from_bytes(body[at:at + 2], "big")
+        at += 2
+        while at + 4 <= end:
+            kind = int.from_bytes(body[at:at + 2], "big")
+            size = int.from_bytes(body[at + 2:at + 4], "big")
+            if kind == 0x002B:                              # supported_versions
+                return body[at + 4:at + 4 + size] == b"\x03\x04"
+            at += 4 + size
+        return False
+    except IndexError:
+        return None
+
+
+class _HeldTunnel:
+    """A tunnel a `_TunnelTicket` admitted, read at the TLS record layer only -- nothing is
+    decrypted or re-signed (BUG-0559 review round 3). It ``claims`` its ticket when it
+    carries the browser's traffic (a WebSocket's first application-data record past an
+    alert's size, or its first plain byte; a landing's request): until then a handshake
+    the browser abandons on a certificate error -- with an alert, which TLS 1.3 sends as
+    application data (measured) -- leaves the ticket to the browser's retry, a second
+    ``CONNECT`` (measured on Chromium 141 with ``ignore_https_errors``, both binaries:
+    without it the redirected page, or the ``wss`` socket, never opened). Traffic past
+    what the ticket admits -- a second tunnel carrying it, a landing's further request --
+    closes the tunnel, counted (``reuse``).
+
+    An https **landing**'s tunnel carries **one exchange**: Chromium keeps an idle tunnel
+    in its pool, and a later same-origin speculation-rules prefetch carrying the session
+    rode the landing's, past the route and the enforcer, which judges a ``CONNECT`` only
+    (measured, both binaries). The browser's records go on until its request has been
+    sent and the server has answered; its next request on the tunnel (an
+    application-data record that can hold one, `_TLS_CONTROL_MAX`) is never forwarded --
+    the tunnel is closed and counted (``reuse``), and the browser's retry on a new tunnel
+    finds no ticket. HTTP/1.1 sends nothing between a request and the end of its answer
+    (`browser_launch_args` disables HTTP/2 for Chromium's own traffic: a multiplexed
+    connection would carry the prefetch beside the landing). The first application-data
+    record of a TLS 1.3 client is its ``Finished`` (the ``ServerHello`` says which
+    version; unreadable, it is taken as 1.2, so the tunnel errs towards closing). A
+    landing's tunnel that does not speak TLS is closed."""
+
+    def __init__(self, ticket: _TunnelTicket, *, via_proxy: bool):
+        self.ticket, self.via_proxy = ticket, via_proxy
+        self.tls13: bool | None = None
+        self.client_data = 0              # the browser's application-data records so far
+        self.claimed = False              # this tunnel carries the ticket's traffic
+        self.sent = False                 # a landing's request has gone
+        self.answered = False             # the server has sent something since
+
+    def from_client(self, client, remote, buffered: bytes) -> None:
+        """Forward the browser's records, whole; a socket's raw once it is claimed; a
+        landing's until its next request."""
+        buf = buffered
+        try:
+            while True:
+                while buf:
+                    if self.claimed and not self.ticket.landing:
+                        remote.sendall(buf)        # a WebSocket's own traffic: as it comes
+                        buf = b""
+                        break
+                    if buf[0] not in (20, 21, _TLS_HANDSHAKE, _TLS_APPLICATION_DATA):
+                        if self.ticket.landing or not self._claim():
+                            self._close(client, remote, "not TLS" if self.ticket.landing
+                                        else "a tunnel carried already")
+                            return
+                        continue                   # a plain ws:// socket
+                    if len(buf) < 5:
+                        break
+                    size = 5 + int.from_bytes(buf[3:5], "big")
+                    if len(buf) < size:
+                        break
+                    record, buf = buf[:size], buf[size:]
+                    if not self._admits(record):
+                        self._close(client, remote, "a further request"
+                                    if self.ticket.landing else "a tunnel carried already")
+                        return
+                    remote.sendall(record)
+                data = client.recv(65536)
+                if not data:
+                    break
+                buf += data
+        except OSError:
+            pass
+        self._close(client, remote, None)
+
+    def _claim(self) -> bool:
+        if not self.claimed:
+            self.claimed = _claim(self.ticket)
+        return self.claimed
+
+    def _admits(self, record: bytes) -> bool:
+        if record[0] != _TLS_APPLICATION_DATA:
+            return True
+        self.client_data += 1
+        if len(record) - 5 <= _TLS_CONTROL_MAX:
+            # an alert or a key update -- a TLS 1.3 client gives up a handshake on a
+            # certificate error with one (measured) --: it carries nothing, no request fits
+            return True
+        if not self.ticket.landing:
+            return self._claim()          # a WebSocket: its handshake went, it is carried
+        if self.tls13 and self.client_data == 1:
+            return True                   # a TLS 1.3 client's Finished
+        if self.answered:
+            return False                  # the exchange is done: a further request
+        if not self.sent:
+            if not self._claim():
+                return False              # another tunnel carried this landing
+            self.sent = True
+        return True
+
+    def from_server(self, remote, client) -> None:
+        """Relay the server's bytes; read its ``ServerHello`` (after a capture proxy's
+        answer to the ``CONNECT``) and note any answer once the request has gone."""
+        head = b""
+        try:
+            while True:
+                data = remote.recv(65536)
+                if not data:
+                    break
+                if self.sent:
+                    self.answered = True
+                if self.tls13 is None:
+                    head += data
+                    self._read_hello(head)
+                client.sendall(data)
+        except OSError:
+            pass
+        for s in (remote, client):
+            with contextlib.suppress(OSError):
+                s.shutdown(socket.SHUT_RDWR)
+
+    def _read_hello(self, head: bytes) -> None:
+        if self.via_proxy:
+            if b"\r\n\r\n" not in head:
+                return
+            head = head.split(b"\r\n\r\n", 1)[1]
+        if len(head) < 5:
+            return
+        size = 5 + int.from_bytes(head[3:5], "big")
+        if len(head) >= size or len(head) > 4096:
+            self.tls13 = bool(_tls13(head[:size]))     # unreadable: 1.2, towards closing
+
+    def _close(self, client, remote, why: str | None) -> None:
+        if why is not None:
+            with _ENFORCE_LOCK:
+                _REFUSED["reuse"] += 1
+            logging.info(f"closed a tunnel the enforcer admitted ({why}; BUG-0559)")
+        for s in (client, remote):
+            with contextlib.suppress(OSError):
+                s.shutdown(socket.SHUT_RDWR)
+
+
+class _EnforcerHandler(socketserver.BaseRequestHandler):
+    """One connection from Chromium, one request: a ``CONNECT`` the guard admitted is
+    tunnelled (to its host, or through the capture proxy); the re-request of a redirect
+    landing the route checked (`admit_landing`) is forwarded the same way, with
+    ``Connection: close``; every other request is refused (403)."""
+
+    def handle(self) -> None:
+        client = self.request
+        client.settimeout(_HEAD_TIMEOUT_S)
+        head = b""
+        try:
+            while b"\r\n\r\n" not in head and len(head) < _HEAD_MAX:
+                data = client.recv(4096)
+                if not data:
+                    return                       # a preconnect that sent nothing
+                head += data
+        except OSError:
+            return
+        line = head.split(b"\r\n", 1)[0].decode("latin-1", "replace")
+        method, _sep, rest = line.partition(" ")
+        target = rest.split(" ", 1)[0]
+        if method.upper() == "CONNECT":
+            host, port = _authority(target)
+            ticket = _take_tunnel(host, port) if host is not None else None
+            if ticket is not None:
+                self._tunnel(client, host, port, head, ticket)
+                return
+            self._refuse(client, "connect", host or "?", "")
+            return
+        purpose = _header(head, b"sec-purpose")
+        if not purpose and method.upper() in ("GET", "HEAD") and \
+                _take_ticket(_landing_key(target)):
+            self._forward(client, method.upper(), target, head)
+            return
+        self._refuse(client, "preload" if purpose else "request",
+                     urlsplit(target).hostname or "?", purpose)
+
+    def _forward(self, client, method: str, target: str, head: bytes) -> None:
+        """One admitted landing re-request, sent on (origin-form to its host, or as it
+        came to the capture proxy) with ``Connection: close``; the answer relayed back
+        and the connection closed, so nothing else rides on it."""
+        upstream = self.server.upstream
+        lines = head[:head.index(b"\r\n\r\n")].split(b"\r\n")
+        kept = [ln for ln in lines[1:] if ln.split(b":", 1)[0].strip().lower() not in
+                (b"connection", b"proxy-connection", b"keep-alive", b"proxy-authorization")]
+        first = lines[0]
+        try:
+            if upstream is not None:
+                remote = socket.create_connection((upstream[0].strip("[]"), upstream[1]),
+                                                  timeout=30)
+            else:
+                # the target as Chromium sent it, in origin form: its own bytes after
+                # the authority, never rebuilt
+                parts = urlsplit(target)
+                after = target.split("://", 1)[-1]
+                origin_form = after[after.index("/"):] if "/" in after else "/"
+                first = f"{method} {origin_form} HTTP/1.1".encode()
+                remote = socket.create_connection((parts.hostname, parts.port or 80),
+                                                  timeout=30)
+            remote.sendall(b"\r\n".join([first, *kept, b"Connection: close", b"", b""]))
+        except OSError:
+            with contextlib.suppress(OSError):
+                client.sendall(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n"
+                               b"Connection: close\r\n\r\n")
+            return
+        client.settimeout(None)
+        _pump(remote, client)
+        remote.close()
+
+    @staticmethod
+    def _refuse(client, kind: str, host: str, purpose: str) -> None:
+        with _ENFORCE_LOCK:
+            _REFUSED[kind] = _REFUSED.get(kind, 0) + 1
+        # the host only, never the URL (a probe marker or a credential may ride in it)
+        logging.info(f"refused a request the browser sent past the guard's route to "
+                     f"{host!r} ({kind}{'; Sec-Purpose: ' + purpose if purpose else ''}; "
+                     f"BUG-0559)")
+        with contextlib.suppress(OSError):
+            client.sendall(_REFUSAL)
+
+    def _tunnel(self, client, host: str, port: int, head: bytes,
+                ticket: _TunnelTicket) -> None:
+        """Tunnel a ``CONNECT`` ``ticket`` admitted (`_HeldTunnel`): a WebSocket's for its
+        life, an https landing's for its one exchange."""
+        upstream = self.server.upstream
+        end = head.index(b"\r\n\r\n") + 4
+        try:
+            if upstream is not None:            # the capture proxy answers the CONNECT
+                remote = socket.create_connection((upstream[0].strip("[]"), upstream[1]),
+                                                  timeout=10)
+                remote.sendall(head[:end])
+            else:
+                remote = socket.create_connection((host, port), timeout=10)
+                client.sendall(b"HTTP/1.1 200 Connection established\r\n\r\n")
+        except OSError:
+            with contextlib.suppress(OSError):
+                client.sendall(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n"
+                               b"Connection: close\r\n\r\n")
+            return
+        remote.settimeout(None)
+        client.settimeout(None)
+        held = _HeldTunnel(ticket, via_proxy=upstream is not None)
+        back = threading.Thread(target=held.from_server, args=(remote, client),
+                                daemon=True, name="navguard-enforcer-tunnel")
+        back.start()
+        held.from_client(client, remote, head[end:])
+        back.join()
+        remote.close()
+
+
+class _EnforcerServer(socketserver.ThreadingTCPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+    def __init__(self, upstream):
+        self.upstream = upstream
+        super().__init__(("127.0.0.1", 0), _EnforcerHandler)
+
+
+def _enforcer_endpoint(upstream: tuple | None) -> str:
+    """``127.0.0.1:PORT`` of this process's enforcer for ``upstream`` (None: tunnels go
+    to their host; a capture proxy's ``(host, port)``: through it), started on first use
+    and kept for the process's life (a daemon thread on a loopback listener)."""
+    with _ENFORCE_LOCK:
+        got = _ENFORCERS.get(upstream)
+        if got is not None and got[0] == os.getpid():
+            host, port = got[1].server_address[:2]
+            return f"{host}:{port}"
+        server = _EnforcerServer(upstream)
+        host, port = server.server_address[:2]
+        require_loopback(host, "the browser's enforcing proxy")
+        threading.Thread(target=server.serve_forever, daemon=True,
+                         name="navguard-enforcer").start()
+        _ENFORCERS[upstream] = (os.getpid(), server)
+        _ENFORCER_UPSTREAM[f"{host}:{port}"] = upstream
+        return f"{host}:{port}"
+
+
 def browser_launch_args(scope_urls, *, any_port_hosts=(), proxy: str | None = None) -> list[str]:
-    """Chromium arguments for every launch we make (BUG-0123): no proxy, nothing
-    resolvable outside scope, and no background networking.
+    """Chromium arguments for every launch we make (BUG-0123): Chromium's own traffic
+    through the enforcer, nothing resolvable outside scope, and no background
+    networking.
+
+    **The enforcer** (BUG-0559 review round 2, BB-3): ``--proxy-server`` names this
+    process's loopback enforcer, with loopback forced through it (``<-loopback>``; its
+    own ``host:port`` added to the resolver rules, without which ``MAP * ~NOTFOUND``
+    refuses the proxy itself, measured for CC-CRAWL-0031). The Playwright driver fetches
+    every routed request and never uses this switch (measured), so what reaches the
+    enforcer is only what Chromium sends past the route: a speculation-rules prefetch
+    or prerender (no launch switch stops one, measured on both binaries), a favicon,
+    background services, a WebSocket, the re-request of a redirect landing (which
+    Playwright never routes). It refuses all of it (403, counted in
+    `enforcer_refusals`, logged by host) but a WebSocket a guard's socket handler
+    admitted (`admit_socket`, one tunnel carries it) and a landing the route checked and
+    answered with a redirect to (`admit_landing`, forwarded once, never a preload;
+    measured: without it a redirected navigation never loaded). An unrouted page
+    therefore loads nothing. A tunnel is admitted by host and port, and read at the TLS
+    record layer only, never decrypted (`_HeldTunnel`, BUG-0559 review round 3): an
+    ``https`` landing's carries its one exchange and is closed at the browser's next
+    request on it; a ticket admits a certificate error's retry. A ticket whose own
+    connection never comes is taken by the next ``CONNECT`` to its host and port, a
+    prefetch's included (a known gap, pinned: BUG-0559 after the owner's final round,
+    ``test_a_ticket_its_own_connection_never_uses_admits_no_prefetch``). ``--disable-http2`` keeps
+    Chromium's own traffic on HTTP/1.1 (one request at a time on a connection; routed
+    requests are the driver's and never see it); what a WebSocket's tunnel carries is
+    not seen.
 
     ``proxy`` (CC-CRAWL-0031, the disco capture layer): a loopback ``host:port``
-    recorder every request goes through instead of ``--no-proxy-server``. Its own
-    ``host:port`` is added to the resolver rules (without it Chromium's
-    ``MAP * ~NOTFOUND`` refuses the proxy itself: ``ERR_PROXY_CONNECTION_FAILED``,
-    measured), and loopback is not bypassed (``<-loopback>``), so a loopback lab's
-    traffic is recorded too. Scope stays enforced at both layers: the rules still name
-    only scope origins, and the proxy refuses anything else on its own. Pass the same
-    ``proxy`` to `chromium_launch_kwargs`, which gives it to the Playwright driver: the
-    driver fetches every routed request, and it honours only the launch option.
+    recorder. Pass the same ``proxy`` to `chromium_launch_kwargs`, which gives it to
+    the Playwright driver: every routed request goes through it, recorded. Chromium's
+    switch still names the enforcer, here one that tunnels an admitted WebSocket
+    through the recorder (recorded too); nothing else Chromium sends gets there.
 
     ``--host-resolver-rules`` maps each scope ``host:port`` to itself and every other
     name to ``~NOTFOUND``. Chromium applies the rules to IP literals and matches them on
     ``host:port`` (default ports included), so ``203.0.113.9``, ``127.0.0.2`` or another
-    port on ``127.0.0.1`` fail with ``ERR_NAME_NOT_RESOLVED`` (verified live). This
-    confines what Chromium itself sends and a route cannot see -- a preconnect, a DNS
-    prefetch, a landing page the browser re-requests. It does **not** confine routed
+    port on ``127.0.0.1`` fail with ``ERR_NAME_NOT_RESOLVED`` (verified live). Behind
+    the enforcer they confine what Chromium still resolves itself (the enforcer's own
+    address; anything that would bypass it). They do **not** confine routed
     requests, which the Playwright driver fetches (``guard_page``'s predicate is their
     only guard). A loopback origin admits all three loopback spellings on its
     port. ``any_port_hosts`` are hosts admitted on every port (the crawler's
@@ -967,12 +2171,15 @@ def browser_launch_args(scope_urls, *, any_port_hosts=(), proxy: str | None = No
         spellings = _LOOPBACK_SPELLINGS if host == "127.0.0.1" else (host,)
         rules += [f"MAP {h}:{port} {h}:{port}" for h in spellings]
     rules += [f"EXCLUDE {h.lower()}" for h in any_port_hosts if h]
-    proxy_args = ["--no-proxy-server"]
-    if proxy is not None:
-        host, port = _proxy_endpoint(proxy)
-        rules.append(f"MAP {host}:{port} {host}:{port}")
-        proxy_args = [f"--proxy-server=http://{host}:{port}", "--proxy-bypass-list=<-loopback>"]
+    enforcer = _enforcer_endpoint(_proxy_endpoint(proxy) if proxy is not None else None)
+    rules.append(f"MAP {enforcer} {enforcer}")
+    proxy_args = [f"--proxy-server=http://{enforcer}", "--proxy-bypass-list=<-loopback>"]
     rules = list(dict.fromkeys(rules)) + ["MAP * ~NOTFOUND"]
+    # HTTP/1.1 for what Chromium sends itself: an https landing's tunnel is held to one
+    # exchange (`_HeldTunnel`), which a multiplexed HTTP/2 connection would not be
+    # (measured: Chromium chose h2 inside the tunnel when the server offered it). Routed
+    # requests are fetched by the Playwright driver and do not see this switch
+    proxy_args.append("--disable-http2")
     return ["--no-sandbox", "--disable-dev-shm-usage", *proxy_args,
             f"--host-resolver-rules={', '.join(rules)}", "--disable-background-networking",
             "--disable-component-update", "--disable-sync", "--disable-domain-reliability",
@@ -990,15 +2197,20 @@ def chromium_launch_kwargs(args: list[str], *, headless: bool = True,
     ``proxy`` (CC-CRAWL-0031): the loopback recorder `browser_launch_args` was given.
     It becomes Playwright's launch ``proxy`` (loopback not bypassed), which the driver
     honours for the requests the route guard fetches (measured: they reach the proxy
-    with the launch option, carrying the route's headers). ``args`` built for
-    another proxy, or for none, are refused: the two layers never disagree."""
-    import os
+    with the launch option, carrying the route's headers). Playwright also passes it to
+    Chromium as a switch, before ``args``; the later switch -- the enforcer chained to
+    this recorder -- is the one Chromium uses (measured, BUG-0559 review round 2).
+    ``args`` built for another proxy, or for none, are refused: the two layers never
+    disagree."""
+    named = [a.split("=", 1)[1].removeprefix("http://") for a in args
+             if a.startswith("--proxy-server=")]
+    chained = _ENFORCER_UPSTREAM.get(named[-1], ()) if named else None
     if proxy is not None:
         host, port = _proxy_endpoint(proxy)
-        if f"--proxy-server=http://{host}:{port}" not in args:
+        if chained != (host, port):
             raise ValueError("chromium_launch_kwargs: args were not built for this proxy "
                              "(browser_launch_args(..., proxy=...))")
-    elif any(a.startswith("--proxy-server=") for a in args):
+    elif chained is not None:
         raise ValueError("chromium_launch_kwargs: args name a proxy; pass it as proxy=")
     kwargs = {"headless": headless, "args": list(args)}
     if proxy is not None:
@@ -1009,13 +2221,21 @@ def chromium_launch_kwargs(args: list[str], *, headless: bool = True,
     return kwargs
 
 
-def checked_api_request(in_scope: Callable[[str], bool], url: str) -> None:
+def checked_api_request(in_scope: Callable[[str], bool], url: str, *,
+                        session_cookies=None,
+                        cookie_scope: Callable[[str], bool] | None = None) -> None:
     """Before a Playwright API-request call (``context.request.*``,
     ``pw.request.new_context().fetch``), which `route` never sees: refuse an
-    out-of-scope URL. Callers pass ``max_redirects=0`` too."""
+    out-of-scope URL. Callers pass ``max_redirects=0`` too. ``session_cookies`` (a request
+    made with a session's cookies, SP-74): a host they do not reach -- on the session's
+    origin by ``cookie_scope`` -- raises `SessionHostUnreached` before anything is
+    sent, as the route refuses it."""
     if not in_scope(url):
         raise PermissionError(f"refusing an out-of-scope request to "
                               f"{urlsplit(url).hostname!r} (BUG-0123)")
+    why = session_host_refusal(session_cookies, url, cookie_scope=cookie_scope)
+    if why is not None:
+        raise SessionHostUnreached(why)
 
 
 #: Redirects a static fetch follows by hand (each hop checked first).

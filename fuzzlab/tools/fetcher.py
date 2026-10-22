@@ -334,6 +334,12 @@ class ContentFetcher:
         # outside it is refused, browser and static engine alike.
         self._scope_origins = origin_scope(auth_base_url) or None
         self.skipped_out_of_scope: dict[str, int] = {}
+        #: SP-74 (BUG-0559): the browser session's cookies as the context holds them,
+        #: and the requests and loads never sent because they do not reach the host,
+        #: by host
+        self._session_cookies: list = []
+        self.session_host_unreached: dict[str, int] = {}
+        self._unreached_loads: dict = {}
 
     def _in_scope(self, url):
         return in_origin_scope(url, self._scope_origins or frozenset())
@@ -341,6 +347,36 @@ class ContentFetcher:
     def _note_out_of_scope(self, url):
         host = urlparse(url).hostname or "?"
         self.skipped_out_of_scope[host] = self.skipped_out_of_scope.get(host, 0) + 1
+
+    def _note_session_unreached(self, url, kind, source, reason):
+        """The guard refused a request of the authenticated context to a host the
+        session's cookies do not reach (SP-74, BUG-0559): nothing was sent; counted by
+        host. A page load whose own target or redirect landing it was (``source``) is
+        refused whole (`fetch`): never the anonymous answer, never a static fallback.
+        ``kind`` ``"committed"`` (BUG-0559 review round 1, BA-3): `fetch` found the main
+        frame committed on such a host after the load (a navigation the route never
+        saw) and refuses the load itself."""
+        host = urlparse(url).hostname or "?"
+        self.session_host_unreached[host] = self.session_host_unreached.get(host, 0) + 1
+        if kind in ("document", "landing"):
+            self._unreached_loads.setdefault(source or url, reason)
+
+    def _unreached_load(self, url):
+        """The cause, when the guard refused this load's own target or redirect landing
+        for a host the session's cookies do not reach (SP-74), else None. The route names
+        the load as the browser does: matched by ``url_key`` and the host itself
+        (``url_key`` folds the loopback aliases)."""
+        from fuzzlab.core.urls import url_key
+
+        def key(u):
+            return url_key(u), (urlparse(u).hostname or "").lower()
+        want = key(url)
+        return next((why for source, why in self._unreached_loads.items()
+                     if key(source) == want), None)
+
+    def _refuse_unreached(self, url, reason):
+        logging.info(f"    not fetching {url}: {reason}")
+        return 0, "", "", []
 
     def __enter__(self):
         # The browser starts on the first fetch: its resolver rules name the hosts it
@@ -374,10 +410,20 @@ class ContentFetcher:
                                             **browserauth.context_options(session))
         # NFR-AUD-safe (BUG-0111, BUG-0123): the whole context, popups included, is
         # confined to the fixed scope
+        # SP-74 (BUG-0559): the session's cookies as this context holds them; no request
+        # of it goes to a host they do not reach (a loopback alias of a host-only
+        # cookie's host: the scope folds it into the session's origin)
+        if session is not None:
+            from fuzzlab.tools.navguard import held_session_cookies
+            self._session_cookies = held_session_cookies(
+                session.cookies, session.storage_state,
+                {name for name, _value in session.checked_cookies})
         guard_page(context, in_scope=self._in_scope,
                    on_out_of_scope=self._note_out_of_scope,
                    headers=session.headers if session else None,
-                   header_scope=session.header_scope if session else None)
+                   header_scope=session.header_scope if session else None,
+                   session_cookies=self._session_cookies or None,
+                   on_session_unreached=self._note_session_unreached)
         self._context = context
         self._page = context.new_page()
         self._page.on("request", self._on_request)
@@ -426,8 +472,15 @@ class ContentFetcher:
             self._xhr_urls = []
             if self._pw is None:
                 self._start_browser(url)        # a launch failure is an error, as before
+            from fuzzlab.tools import navguard
+            # SP-74 (BUG-0559): a page on a host the session's cookies do not reach is
+            # never loaded (it would be the anonymous page, audited as the identity's)
+            unreached = navguard.session_host_refusal(self._session_cookies, url)
+            if unreached is not None:
+                self._note_session_unreached(url, "document", url, unreached)
+                return self._refuse_unreached(url, unreached)
+            self._unreached_loads = {}
             try:
-                from fuzzlab.tools import navguard
                 # BUG-0138 (CC-AUD-0043): the commit, then a bounded load: a refused own
                 # target still raises; a load a refused script navigation superseded is
                 # not waited out
@@ -438,6 +491,19 @@ class ContentFetcher:
                 if nav.reached:
                     # Let JavaScript-driven DOM updates settle (best effort).
                     navguard.wait_for_state(self._page, "networkidle", self.timeout_ms)
+                # SP-74 (BUG-0559 review round 1, BA-3), before anything of the page is
+                # read: a document the main frame committed on a host the session's
+                # cookies do not reach is the anonymous page of a navigation the route
+                # never saw (a preload served it) -- never audited as the identity's,
+                # nor is this load's own HTML, which that document replaced
+                unreached = navguard.committed_session_refusal(self._page,
+                                                               self._session_cookies)
+                if unreached is not None:
+                    self._note_session_unreached(self._page.url, "committed", url,
+                                                 unreached)
+                    navguard.end_failed_load(self._page, None, timeout_ms=self.timeout_ms)
+                    return self._refuse_unreached(url, unreached)
+                if nav.reached:
                     html = self._page.content()
                 else:
                     # BUG-0138 (review Q2): the load did not complete. Its parsing
@@ -465,8 +531,13 @@ class ContentFetcher:
                 # otherwise be listed under the URLs fetched next. The one way (SP-01,
                 # BUG-0522): the browser's own error page when the failure settled on
                 # one, else about:blank
-                from fuzzlab.tools import navguard
                 navguard.end_failed_load(self._page, e, timeout_ms=self.timeout_ms)
+                unreached = self._unreached_load(url)
+                if unreached is not None:
+                    # SP-74: its redirect hop went to a host the session's cookies do
+                    # not reach and was never sent; no static fallback (it would fetch
+                    # what the browser refused, without the browser's session)
+                    return self._refuse_unreached(url, unreached)
                 # Chromium refuses to render some responses (downloads,
                 # application/octet-stream). Those URLs are still audit targets,
                 # so fall back to a plain request rather than losing the page.

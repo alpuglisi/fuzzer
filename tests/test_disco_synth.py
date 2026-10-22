@@ -127,13 +127,15 @@ def test_a_submission_is_sent_only_when_a_distinctive_filled_value_reaches_a_req
     from fuzzlab.disco.explore import carries_value, is_distinctive
 
     class Req:
+        """A request double: its body as Playwright's ``post_data_buffer`` gives it
+        (bytes), read by `carries_value` (BUG-0559 review round 3, BB-4(4))."""
+
         def __init__(self, url, body=None):
-            self.url, self._body = url, body
+            self.url = url
+            self._body = body.encode() if isinstance(body, str) else body
 
         @property
-        def post_data(self):
-            if self._body == b"bin":
-                raise UnicodeDecodeError("utf-8", b"", 0, 1, "x")
+        def post_data_buffer(self):
             return self._body
 
     assert is_distinctive("Hello from disco") and not is_distinctive("test")

@@ -3,6 +3,91 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0060 — The auditor's browser fetcher never audits a host the session's cookies do not reach as the identity's page (NFR-AUD-safe, BUG-0559, SP-74) (2026-10-22)
+- Placement: pre-assigned to lane BROWSERALIAS (item GAP-BROWSER), base 7393c90; merged
+  after CC-CRAWL-0063 (navguard, the owner). `tools/fetcher.py` only.
+- Change:
+  - `ContentFetcher._start_browser` keeps the browser session's credential cookies as
+    the context holds them (`navguard.held_session_cookies` over the session's URL
+    cookies, its storage state and its `checked_cookies` names) and passes them with
+    `on_session_unreached=self._note_session_unreached` to `guard_page`: no request,
+    redirect hop or socket of the authenticated context goes to a host they do not reach
+    (a loopback alias of a host-only cookie's host: the audit's origin scope folds it).
+  - `fetch` refuses a page on such a host before navigating
+    (`navguard.session_host_refusal`), and a load whose own target or redirect landing
+    the route refused (`_unreached_load`, matched by `url_key` and the host), with
+    `(0, "", "", [])` -- the out-of-scope shape -- and **no static fallback** (it would
+    fetch what the browser refused, without the browser's session). A page's own jump
+    there is refused and the page is audited with its own content.
+  - `session_host_unreached` (`{host: count}`) counts every refusal.
+- Impact (other components / project): the auditor finds nothing on such a page
+  (`audit_page` runs its rules on an empty page), where it audited the app's anonymous
+  answer (a login page) under the identity. No store or wire change; the static engine
+  (the seam, the session manager's `prepare`) is unchanged -- its alias behaviour is the
+  manager's scope decision, a residual stated in BUG-0559.
+- Risk (low): deny-only, only with a session cookie, only on the session's origin.
+- Deliverables:
+  - [x] the guard wiring, the load refusal, the counter — done
+  - [x] test: `tests/test_browser_session_reach.py::test_the_auditors_browser_fetcher_never_audits_an_unreached_host_as_the_identity`
+    (real Chromium; fails on 7393c90: the alias got 9 requests with no cookie and `/go`
+    was audited as the login page) — done
+  - [x] NFR-AUD-safe's clause and §5 edited in place — done
+- Effectiveness (assessed <date> or pending): pending.
+- Review round 1 (2026-10-22; BA-3, the auditor's part; branch `lane/BROWSERALIAS-r1`
+  from 72297c9): a page whose speculation rules prefetched the alias and then jumped
+  there was returned as the identity's page -- the alias's anonymous `Sign in` form
+  with status 200 (measured by the review on 72297c9) -- because the prefetch and the
+  navigation it served went past the route. The guard no longer lets a rule set be
+  registered (CC-CRAWL-0063 round 1), and `fetch` now checks the document the main
+  frame committed before it reads anything (`navguard.committed_session_refusal`): on
+  a host the session's cookies do not reach it ends that document
+  (`end_failed_load`), counts it (`kind` `committed`) and returns no page
+  (`(0, "", "", [])`), never that document's content nor the load's own HTML. Tests:
+  `tests/test_browser_session_reach.py::test_the_auditors_fetcher_and_the_spider_never_preload_the_alias`
+  (on 72297c9 the alias got the prefetch and `/login`) and
+  `tests/test_browser_session_reach.py::test_a_preload_past_the_guard_is_never_read_as_the_identitys_page`
+  (the neutraliser taken away; on 72297c9 the fetcher returned
+  `(200, 'text/html', '...Sign in...')`). NFR-AUD-safe's clause edited in place.
+- Review round 2 (2026-10-22; BB-3, the auditor's part; branch `lane/BROWSERALIAS-r2`,
+  commits 59866a2 and a2b8ed5; no change to `tools/fetcher.py`): the review measured
+  the fetcher (identity `user`, a page with a closed declarative root whose rule set's
+  type is a character reference, and an `about:blank` popup given one) sending the
+  alias `GET /secret?via=n2` and `/login` with `Cookie: ''` and 127.0.0.1
+  `GET /logout?via=n2` with the live `sid`, `session_host_unreached` `{}`: the page
+  layers of round 1 cannot see those rule sets. The fetcher's browser, launched through
+  `navguard.browser_launch_args` like every other, now sends Chromium's own traffic to
+  the enforcer (CC-CRAWL-0063 round 2), which refuses it: no preload reaches any host;
+  the committed-document check stays as defence in depth
+  (`test_a_preload_past_the_guard_is_never_read_as_the_identitys_page` now takes the
+  enforcer away as well, to keep exercising it). A Latin-1 page now loads in the
+  fetcher's guarded browser (BB-4(2), `navguard._note_received`). Tests: the owner's
+  (`tests/test_browser_session_reach.py::test_no_preload_a_page_hides_from_the_guard_leaves_the_browser`,
+  `::test_a_guarded_page_loads_a_document_in_a_legacy_charset`); the launch path is held
+  by `tests/test_browser_scope.py::test_every_browser_path_in_fuzzlab_is_scoped`.
+  NFR-AUD-safe's clause edited in place.
+- Review round 3, final (2026-10-22; branch `lane/BROWSERALIAS-r3`, commit 1c337dd; no
+  change to `tools/fetcher.py`): the fetcher's guarded browser takes the owner's round-3
+  changes (CC-CRAWL-0063 round 3) through `navguard`: on an `https` target a tunnel the
+  enforcer admitted for a redirect landing carries that one exchange (a later
+  same-origin prefetch with the session rode it, measured on the guard), a self-signed
+  target's redirected page loads under `ignore_https_errors` again (the certificate
+  retry is admitted), and a page labelled with any codec name is answered by the route
+  (a `charset=hex` page had hung its load). Tests: the owner's
+  (`tests/test_browser_session_reach.py::test_no_request_rides_an_https_landings_tunnel_after_its_exchange`,
+  `::test_an_https_landing_and_socket_load_from_a_self_signed_target`,
+  `::test_a_guarded_page_loads_a_document_whatever_charset_it_names`). NFR-AUD-safe's
+  clause edited in place.
+- After the owner's final round (2026-10-22; branch `lane/BROWSERALIAS-r4` from 72497c9;
+  no change to `tools/fetcher.py`): the fetcher's guarded browser takes the owner's
+  decoder fix (CC-CRAWL-0063, after the owner's final round) through `navguard`: a page
+  labelled with a codec no browser decodes by (`punycode`: a 384 KB page held the route
+  past its navigation timeout) is read by the undeclared order, as Chromium treats an
+  unknown label. NFR-AUD-safe's clause now states the gap the final round's check found
+  and this round pins (a ticket whose own connection never comes is taken by a
+  prefetch; `tests/test_browser_session_reach.py::test_a_ticket_its_own_connection_never_uses_admits_no_prefetch`,
+  strict xfail, owner navguard SP-04), where it said the browser never preloads
+  anything past the guard.
+
 ### CC-AUD-0058 — FR-AUD-20's lab predicate is an allow-list from its entry: an explicit set of loopback authorities, no early return on `neutral_value` (SP-73; BUG-0555, BUG-0544 residual N-R3-1) (2026-10-22)
 - Placement: lane LABAUTH (item GAP-VALUES), base 7393c90; numbers pre-assigned
   (BUG-0555, PA-0555, CC-AUD-0058, FR-AUD-20 amended in place).
