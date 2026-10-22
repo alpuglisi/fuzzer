@@ -3,6 +3,123 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0064 — disco's explorer hands its session's cookies to the guard: nothing an authenticated context sends goes to a host they do not reach (FR-CRAWL-43, BUG-0559, SP-74) (2026-10-22)
+- Placement: pre-assigned to lane BROWSERALIAS (item GAP-BROWSER), base 7393c90; merged
+  after CC-CRAWL-0063 (the owner). Touches `disco/explore.py` (the session context's
+  guard wiring, its material and one report counter) and `disco/cli.py` (one summary
+  line) only.
+- Change:
+  - `_SessionMaterial.credential_names` (a provider's `checked_cookies` names; `None`
+    for a storage state: disco cannot tell its credentials from its ambient cookies, so
+    every adopted cookie is the session's) and `session_cookies()`
+    (`navguard.held_session_cookies` over its URL cookies and its storage state).
+    `_provider_session` fills the names.
+  - `Explorer._new_context` passes `session_cookies=auth.session_cookies()` and
+    `on_session_unreached=self._count_session_unreached` to `guard_page`: the route of
+    every context that carries the run's session refuses a navigation, redirect hop,
+    subresource or socket to a host the session's cookies do not reach (a loopback alias
+    of a host-only cookie's host, which the run's scope folds into its origin) before it
+    is sent.
+  - `ExploreReport.session_host_unreached` (`{host: count}`, written to `explore.json`
+    with the rest of the report) and a `disco capture` summary line.
+- Impact (other components / project):
+  - `explore.json` gains the key `explore.session_host_unreached` (additive; readers
+    that look up their own keys are unchanged: `tools/observe.py` reads `out_of_scope`
+    only). Not yet traced as a diagram event (FR-AUD-29's guard-refusal events cover
+    `out_of_scope`): a residual for AUD, stated in BUG-0559.
+  - A run whose storage state holds cookies of two loopback spellings with different
+    names fails closed: a host where one name has no copy is refused (counted, printed).
+  - No change for an anonymous run, or for an origin `cookie_scope` puts outside the
+    session's (FR-SESS-20 keeps its disposition).
+- Risk (low): a deny-only refusal in the guard of authenticated contexts; it removes
+  requests that went anonymous and, measured on 7393c90, ended the authenticated
+  exploration (the alias's login redirect read as a lost session).
+- Deliverables:
+  - [x] the material's cookies and the guard wiring — done
+  - [x] the report counter and the summary line — done
+  - [x] test: `tests/test_browser_session_reach.py::test_disco_never_explores_an_unreached_host_as_the_storage_states_session`
+    (real Chromium and the capture proxy; fails on 7393c90: the alias got 7 requests
+    with no cookie and the run ended its authenticated exploration) — done
+  - [x] FR-CRAWL-43 (disco's clause) — done
+- Effectiveness (assessed <date> or pending): pending.
+
+### CC-CRAWL-0063 — The browser guard owns where a session's cookies reach: every request, hop, socket and API request to a host they do not reach is refused, and the spider files such a load failed (FR-CRAWL-43, FR-CRAWL-34, BUG-0559, SP-74) (2026-10-22)
+- Placement: pre-assigned to lane BROWSERALIAS (item GAP-BROWSER), base 7393c90.
+  `tools/navguard.py` (the owner, SP-01/02/38's module) first, then `tools/spider.py`;
+  CC-CRAWL-0064 (disco) and CC-AUD-0060 (the auditor's fetcher) follow. Closes BUG-0545's
+  residual R8 (CC-CRAWL-0056) and the round-2 check's third path (client-side
+  navigation).
+- Change:
+  - **`tools/navguard.py` (the owner, SP-74):** `cookie_reaches(cookie, host)` (moved
+    from `spider._cookie_reaches`; RFC 6265: by URL or a bare domain, that exact host; a
+    dotted domain, the names under it, never an IP), `held_session_cookies(cookies,
+    storage_state, names)`, `unreached_session_cookies(cookies, host)`,
+    `session_host_refusal(cookies, url, *, cookie_scope)` (why a request would go
+    without the session -- a cookie name with no held copy reaching the host -- or None;
+    None for no session cookie and for another origin than the session's, FR-SESS-20's)
+    and `SessionHostUnreached(PermissionError)`. `make_route_handler` and `guard_page`
+    take `session_cookies` and `on_session_unreached(url, kind, source, reason)`: a
+    request to such a host is aborted right after the scope and destructive checks,
+    before the window, method, body and FR-SESS-20 checks and before anything is fetched
+    -- the request itself (kind `document`, `frame` or `request`) and every redirect hop
+    (`landing`, `frame` or `request`, never asked of the context's client) -- with
+    SP-02's code. `make_ws_handler` never connects such a socket (`websocket`).
+    `checked_api_request(in_scope, url, *, session_cookies, cookie_scope)` raises
+    `SessionHostUnreached`. A failing hook never lets the request out. `cookie_reaches`
+    assigns one name per statement so PA-0134(3)'s host-compare guard sees its compare
+    (its allowance moved from `spider.py:_cookie_reaches` to
+    `navguard.py:cookie_reaches`).
+  - **`tools/spider.py`:** `_session_host_refusal`'s browser branch asks the owner over
+    `_session_cookies()` (the browser session's `checked_cookies` as the context holds
+    them) and adds `UNREACHED_ADVICE`; `_guard` passes the cookies and
+    `_note_session_unreached` for the authenticated context. The hook counts
+    `session_host_unserved`, keeps a probe's URL as its blocked evidence, records a
+    refused own target or redirect landing in `_unreached_targets` (keyed by
+    `_target_key`: `url_key` and the host, since `url_key` folds the aliases) and queues
+    a page's own refused jump (`_query_navs`, so `_visit`'s gate files it `failed`).
+    `_fetch_rendered` raises `HostNotServed` for a load in `_unreached_targets` (after a
+    failed `goto`, before the static fallback; or after a commit). `_isolated_submit`
+    passes the cookies and `cookie_scope` to `checked_api_request` and turns a refusal
+    into `HostNotServed` (counted; `_after_fetch` stops that form's enumeration). The
+    private `_cookie_reaches` is removed. `_clone` resets `_unreached_targets`.
+- Impact (other components / project):
+  - Every guarded context that adopts a session: the spider (here), disco
+    (CC-CRAWL-0064), the auditor's fetcher (CC-AUD-0060). Contexts with no session
+    cookie (the spider's unauthenticated contexts, `disco/ede.py`, the M6 executor,
+    the browser login's own context) pass nothing and are unchanged.
+  - A crawl whose app sends its pages to another loopback spelling than the one its
+    session cookie holds (a canonical-host redirect) now gets those loads `failed` with
+    the cause, where it got the anonymous pages filed as the identity's: loud partial
+    coverage instead of wrong coverage. The cause names the remedy (start on that host).
+  - Spider DB: no schema change; rows that were `visited` with an anonymous landing are
+    now `failed` with the cause (FR-CRAWL-36's unresolved state).
+  - SHARED_PRIMITIVES gains SP-74 (text in the lane's doc_texts); PA-0134(3)'s
+    allowance list moves one entry.
+- Risk (low-medium): a deny-only check in a shared primitive's owner on every request
+  of an authenticated context. Mitigated: it applies only when the caller passes
+  session cookies and only to in-scope requests on the session's origins (FR-SESS-20's
+  other-origin disposition is unchanged); measured on Chromium 141 before the design
+  (`scratchpad/lanes/BROWSERALIAS/measure/reach.out`); the existing browser, scope and
+  disco tests stay green (targeted run: 838 passed and one stale allowance found and
+  fixed, then the harness).
+- Deliverables:
+  - [x] the owner: predicate, refusal, route, WebSocket handler, API check — done
+  - [x] the spider: gate through the owner, guard wiring, hook, load refusal, form
+    submission — done
+  - [x] tests (`tests/test_browser_session_reach.py`, new): the predicate, the refusal,
+    the route on doubles; real Chromium on loopback for a redirect hop, a selector form,
+    a script's `location` and a meta refresh (each with an image and a `fetch` to the
+    alias); the AST wiring guard and its synthetic offenders. Each real-browser test
+    fails on 7393c90 on `_to_alias(site) == []` (the alias received the requests with no
+    cookie); the guard on its own assertion (4 offenders); the unit tests on the
+    missing API (`scratchpad/lanes/BROWSERALIAS/proof.log`: 10 failed, 1 passed) — done
+  - [x] `tests/test_session_origin_scope.py`: the host-compare allowance moved — done
+  - [x] FR-CRAWL-43 added; FR-CRAWL-34 and FR-CRAWL-36 edited in place (R8 closed) — done
+  - [x] BUG-0559 (RCA, sweep, recurrence review, prior-PA analysis); CHANGELOG,
+    ERROR_LOG, PA-0559, SP-74, ARCHITECTURE and failure-record texts in the lane's
+    doc_texts — done
+- Effectiveness (assessed <date> or pending): pending.
+
 ### CC-CRAWL-0061 — The capture writer is total: a body holding a lone surrogate is stored losslessly, and a write the store refuses is counted (FR-CRAWL-42, BUG-0554) (2026-10-21)
 - Placement: pre-assigned to lane SURROGATE (item AU-REQID78), base 33b423e (after
   SPIDER9). Inside `StorageManager.record_request` and its new helper only; lane SPIDER

@@ -1134,20 +1134,27 @@ fuzzer.
     decision recorded: outside the manager's own scope, such as a loopback alias of the
     start the config does not list -- is refused; the **browser** refuses a host that
     one of the session's credential cookies, as its context holds them (by URL, or a
-    browser login's cookies by domain), does not reach (`_cookie_reaches`: a host-only
-    cookie reaches its own host only, so a loopback alias of the start is refused even
-    when the manager serves it; a dotted domain also reaches its subdomains, never an IP
-    address). A session without cookies goes by its headers, by origin (FR-SESS-20).
-    Never a list of aliases. A refused load raises `HostNotServed` with the cause:
-    nothing is sent; the page is stored `failed` (unresolved, resumed) with that cause,
-    counted `session_host_unserved` in `crawl_stats` and reported, never `withheld`.
-    Inside a static load the seam keeps the same refusal before the transport for a
-    redirect hop and a selector form's submission (logged; the page holding the form is
-    kept). Adding the host to `scope_hosts` makes the manager serve it (measured for a
-    loopback alias); `--auth-origin` does not; a browser crawl of such a host starts
-    there. *Not yet enforced (residual R8, CC-CRAWL-0056):* inside a browser load, a
-    redirect hop (the route's walk) and a selector form's submission to a host the
-    cookies do not reach are still sent without the cookie (measured).
+    browser login's cookies by domain), does not reach (`navguard.session_host_refusal`,
+    SP-74, whose `cookie_reaches` moved there from the spider in CC-CRAWL-0063: a
+    host-only cookie reaches its own host only, so a loopback alias of the start is
+    refused even when the manager serves it; a dotted domain also reaches its
+    subdomains, never an IP address). A session without cookies goes by its headers, by
+    origin (FR-SESS-20). Never a list of aliases. A refused load raises `HostNotServed`
+    with the cause: nothing is sent; the page is stored `failed` (unresolved, resumed)
+    with that cause, counted `session_host_unserved` in `crawl_stats` and reported,
+    never `withheld`. Inside a static load the seam keeps the same refusal before the
+    transport for a redirect hop and a selector form's submission (logged; the page
+    holding the form is kept). **Inside a browser load** *(BUG-0559, CC-CRAWL-0063,
+    closing residual R8)* the same predicate refuses every request the load makes, at
+    the guard's route (FR-CRAWL-43): a redirect hop to such a host is never fetched and
+    the load is stored `failed` with the cause (never the landing's page, no static
+    fallback); a selector form's submission there (`_isolated_submit`'s browser branch)
+    is refused before it is sent (`navguard.checked_api_request`, counted, the page
+    holding the form kept); a navigation the page makes itself (a script's `location`, a
+    meta refresh) is refused, the page keeps its own document, and the target is queued
+    and refused at the gate. Adding the host to `scope_hosts` makes the manager serve it
+    (measured for a loopback alias); `--auth-origin` does not; a browser crawl of such a
+    host starts there.
   - **Losses:** an answer on a session the manager knows lost, or sent while the manager
     saw a loss on any send (its logout listener), is no evidence: the page is retried
     (FR-CRAWL-36) after the manager's re-login. A `SessionAuthError` on a send (a re-auth
@@ -1165,7 +1172,8 @@ fuzzer.
     `GET /deeper?via=alias` and two `GET /login`. The unserved-host test also fails on
     9071440 (the alias was sent with no cookie), and
     `test_a_browser_load_the_session_cookie_does_not_reach_is_refused_never_sent` on
-    8c2fa86 (the same three requests to the alias).
+    8c2fa86 (the same three requests to the alias). The browser load's own requests
+    (BUG-0559): FR-CRAWL-43's tests in `tests/test_browser_session_reach.py`.
 - **FR-CRAWL-35 (the legacy spider's frontier: one admission per key, budgets,
   CC-CRAWL-0056, BUG-0545)** Every URL the crawl would load enters through one frontier
   (`_Frontier`), shared by every worker:
@@ -1220,7 +1228,8 @@ fuzzer.
     another start URL's crawl left is never requested and stays unresolved for a crawl
     whose scope it is in. `pages_retried` counts retries. A host the session does not
     reach (FR-CRAWL-34: the manager does not serve it, or the browser's session cookies
-    do not reach it) is unresolved too, with that cause, never `withheld`.
+    do not reach it -- where the load starts or at a redirect hop inside it,
+    FR-CRAWL-43) is unresolved too, with that cause, never `withheld`.
   - **The writer.** Recording a page never touches the store: rows are queued in memory
     and one writer thread commits them in order when they hold 64 rows or 1 MiB, or the
     oldest waited 1 s, and at close; reads of page rows flush first. A crawl thread waits
@@ -1577,6 +1586,51 @@ fuzzer.
     with a sensitive field and a lone surrogate is refused as "redaction failed"
     (counted, not stored), because the storage boundary (`core.redaction.
     redact_json_body`, CORE) re-encodes a rewritten body strictly.
+- **FR-CRAWL-43 (a browser context carrying a session sends nothing to a host its
+  cookies do not reach; CC-CRAWL-0063, CC-CRAWL-0064, BUG-0559, SP-74)** A browser
+  carries a cookie session by host (RFC 6265: a host-only cookie goes to its own host
+  only; a dotted domain to the names under it, never an IP), while the crawl scope and
+  the session's origins fold the loopback aliases (`localhost`, `127.0.0.1`, `[::1]`)
+  into one origin. A request there goes without the session to what the tool takes for
+  the session's own origin, and its anonymous answer would be the identity's.
+  - **One owner, every request.** `tools/navguard.py` decides it: `cookie_reaches` (the
+    domain match), `session_host_refusal` (a host where one of the session's cookies has
+    no held copy that reaches it; `None` for a context with no session cookie and for an
+    origin FR-SESS-20's `cookie_scope` puts outside the session's, which keeps its own
+    disposition: documents aborted, the rest fetched cookie-less) and
+    `held_session_cookies` (the session's cookies as a context that adopted them holds
+    them: by URL, and an adopted `storage_state`'s by domain, kept to the credential
+    names when known). Every guarded context that adopts a session passes them to
+    `guard_page(session_cookies=, on_session_unreached=)`; its route refuses a
+    navigation (top-level or frame), each redirect hop, a subresource (an image, a
+    script, a `fetch`/XHR) and its WebSocket handler a socket, to such a host, right
+    after the scope and destructive checks and before anything is sent (a document with
+    `ERR_ABORTED`, SP-02), and tells `on_session_unreached(url, kind, source, reason)`.
+    `checked_api_request(..., session_cookies=)` refuses an API request the same way
+    (`SessionHostUnreached`). No alias list: the host is compared with where the cookies
+    go.
+  - **The legacy spider** (`--engine playwright`, an identity crawl): every refusal is
+    counted (`session_host_unserved`). A load whose own redirect hop was refused is
+    stored `failed` with the cause (`HostNotServed`, unresolved, resumed; no static
+    fallback); a navigation the page made itself leaves the page with its own content,
+    and its target is queued and refused at the load gate (FR-CRAWL-34: stored
+    `failed`); a selector form's submission there is never sent. No anonymous landing
+    is ever stored.
+  - **Disco** (`disco capture`, a storage state or a session provider): the explorer's
+    context passes the session material's cookies (a provider's credential cookies; a
+    storage state's every cookie, since disco cannot tell its credentials from its
+    ambient cookies) and counts each refusal by host in `explore.json`
+    (`explore.session_host_unreached`), printed in the capture summary.
+  - **The auditor's browser fetcher** (FR-AUD, CC-AUD-0060) does the same for its pages.
+  - Enforced by: `tests/test_browser_session_reach.py` -- the predicate and the route on
+    doubles; real Chromium on loopback for a redirect hop, a selector form, a script's
+    `location` and a meta refresh (each with an image and a `fetch` to the alias), the
+    auditor's fetcher and disco's explorer, each asserting the alias received no request
+    and no anonymous landing is stored; and an AST guard that every module adopting a
+    session into a browser context passes `session_cookies=` to every `guard_page` and
+    to `checked_api_request` beside an API request context with a storage state, proven
+    on synthetic offenders. Each real-browser test fails on 7393c90 on its own
+    assertion (the alias received the requests with no cookie).
 
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default

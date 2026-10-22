@@ -3,6 +3,37 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0060 — The auditor's browser fetcher never audits a host the session's cookies do not reach as the identity's page (NFR-AUD-safe, BUG-0559, SP-74) (2026-10-22)
+- Placement: pre-assigned to lane BROWSERALIAS (item GAP-BROWSER), base 7393c90; merged
+  after CC-CRAWL-0063 (navguard, the owner). `tools/fetcher.py` only.
+- Change:
+  - `ContentFetcher._start_browser` keeps the browser session's credential cookies as
+    the context holds them (`navguard.held_session_cookies` over the session's URL
+    cookies, its storage state and its `checked_cookies` names) and passes them with
+    `on_session_unreached=self._note_session_unreached` to `guard_page`: no request,
+    redirect hop or socket of the authenticated context goes to a host they do not reach
+    (a loopback alias of a host-only cookie's host: the audit's origin scope folds it).
+  - `fetch` refuses a page on such a host before navigating
+    (`navguard.session_host_refusal`), and a load whose own target or redirect landing
+    the route refused (`_unreached_load`, matched by `url_key` and the host), with
+    `(0, "", "", [])` -- the out-of-scope shape -- and **no static fallback** (it would
+    fetch what the browser refused, without the browser's session). A page's own jump
+    there is refused and the page is audited with its own content.
+  - `session_host_unreached` (`{host: count}`) counts every refusal.
+- Impact (other components / project): the auditor finds nothing on such a page
+  (`audit_page` runs its rules on an empty page), where it audited the app's anonymous
+  answer (a login page) under the identity. No store or wire change; the static engine
+  (the seam, the session manager's `prepare`) is unchanged -- its alias behaviour is the
+  manager's scope decision, a residual stated in BUG-0559.
+- Risk (low): deny-only, only with a session cookie, only on the session's origin.
+- Deliverables:
+  - [x] the guard wiring, the load refusal, the counter — done
+  - [x] test: `tests/test_browser_session_reach.py::test_the_auditors_browser_fetcher_never_audits_an_unreached_host_as_the_identity`
+    (real Chromium; fails on 7393c90: the alias got 9 requests with no cookie and `/go`
+    was audited as the login page) — done
+  - [x] NFR-AUD-safe's clause and §5 edited in place — done
+- Effectiveness (assessed <date> or pending): pending.
+
 ### CC-AUD-0057 — The captured-request import refuses and counts a body holding a lone surrogate instead of failing the import (FR-AUD-22, BUG-0554) (2026-10-21)
 - Placement: lane SURROGATE (item AU-REQID78), base 33b423e, with CC-CRAWL-0061 (the
   same change). The lane held no AUD number; CC-AUD-0057 was assigned at merge.

@@ -517,6 +517,8 @@ budget where a vulnerability is plausible.
   - Enforced by: the auditor sends only GETs of crawled URLs, now deny-listed and redirect-checked — `tests/test_destructive_urls.py::test_the_auditor_never_refetches_a_destructive_url_from_an_old_spider_db`, `tests/test_destructive_urls.py::test_the_auditors_static_fetch_does_not_follow_a_redirect_to_one`
   - Enforced by (session headers; CC-AUD-0038, FR-CRAWL-14's mechanism): the rendered fetcher ensures the session before its context opens and hands its headers to the guarded route only (in scope, the session's host, its transport), never `set_extra_http_headers` — `tests/test_browser_scope.py::test_no_browser_context_gets_session_headers_outside_the_route`, `tests/test_browser_scope.py::test_session_headers_are_added_by_the_route_only_in_scope`, `tests/test_browserauth.py::test_an_https_sessions_headers_never_go_over_http`
   - Enforced by (a browser login's state adopted in scope only, through the one helper; CC-AUD-0040): `ContentFetcher._start_browser` → `browserauth.context_options` — `tests/test_session_browser_login.py::test_the_auditors_browser_adopts_a_browser_logins_local_storage`, `tests/test_session_browser_login.py::test_the_auditors_browser_renders_the_app_logged_in`, `tests/test_session_browser_login.py::test_storage_state_adoption_keeps_in_scope_origins_only`
+  - Clause (where the session's cookies reach; CC-AUD-0060, BUG-0559, SP-74, FR-CRAWL-43): the rendered fetcher's context passes the session's credential cookies, as it holds them, to its guard, which refuses every request, redirect hop and socket to a host they do not reach (a loopback alias of a host-only cookie's host is in the audit's origin scope). A page on such a host, or whose own redirect hop went there, is never fetched and gives no page (`(0, "", "", [])`, as an out-of-scope URL; no static fallback); a jump the page makes itself is refused and the page is audited with its own content. Each refusal is counted by host (`ContentFetcher.session_host_unreached`). The static path is the seam's (the session manager's `prepare`), unchanged here.
+  - Enforced by (the session's cookies reach): `ContentFetcher.fetch` / `_start_browser`, `navguard.session_host_refusal` — `tests/test_browser_session_reach.py::test_the_auditors_browser_fetcher_never_audits_an_unreached_host_as_the_identity`, `tests/test_browser_session_reach.py::test_every_context_that_adopts_a_session_hands_its_cookies_to_the_guard`
   - Not yet enforced: there is no destructive-check gate in `fuzzlab/audit` (it has no destructive checks today), and the FR-AUD-3 reflection canary is not wired into production code. (BUG-0111 sweep.)
 - **NFR-AUD-no-leak** Candidate identifiers carry no vulnerability class name (D9).
 - **NFR-AUD-dry-run** `fuzzlab audit` accepts `--dry-run`: plans and prints the
@@ -537,7 +539,8 @@ the session manager: the static path through the `core/` seam; the rendered path
 browser context adopts the session the crawl's way (`browserauth.browser_session`,
 then `browserauth.context_options`: a browser login's `storage_state`, cookies and
 localStorage, filtered to in-scope origins; its cookies; its headers through the guarded
-route only; CC-AUD-0038, CC-AUD-0040). Runs standalone or in the discovery pipeline.
+route only; CC-AUD-0038, CC-AUD-0040), and nothing it sends goes to a host the session's
+cookies do not reach (SP-74, CC-AUD-0060). Runs standalone or in the discovery pipeline.
 
 ## 6. Dependencies (components)
 `core/`, session manager, crawler, indicator DB & catalogs.
