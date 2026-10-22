@@ -149,3 +149,24 @@ def test_an_ipv6_sessions_jar_cookies_and_host_matches_are_kept():
     assert _jar_cookies(v6, "::1", secure_ok=False) == {"sid": "1"}
     assert _jar_cookies(v6, "[::1]", secure_ok=False) == {"sid": "1"}
     assert _jar_cookies(v6, "10.0.0.1", secure_ok=False) == {}            # another host
+
+
+def test_a_host_with_a_port_keeps_its_jar_cookies_as_on_the_pushed_tree():
+    """The gaps merge's review: the first IPv6 fix bracketed any host holding a ':', so an
+    operator's ``--host '[::1]:8080'`` (``fuzzlab session print``) became
+    ``http://[::1]:8080]/`` and lost its browser-jar cookies, and ``127.0.0.1:8080`` raised
+    -- both matched on 7393c90, which spelled ``f"http://{host}/"``. Only an IPv6 literal is
+    bracketed now; ``parse_auth_origins`` keeps its own spelling (a ``host:port`` scope
+    entry stays a usage error)."""
+    import pytest
+    from fuzzlab.session.manager import _jar_cookies, parse_auth_origins
+    v6 = {"cookies": [{"name": "token", "value": "T", "domain": "[::1]", "path": "/",
+                       "expires": -1, "secure": False}]}
+    v4 = {"cookies": [{"name": "sid", "value": "v", "domain": "127.0.0.1", "path": "/",
+                       "expires": -1, "secure": False}]}
+    assert _jar_cookies(v6, "[::1]:8080", secure_ok=False) == {"token": "T"}
+    assert _jar_cookies(v4, "127.0.0.1:8080", secure_ok=False) == {"sid": "v"}
+    assert _jar_cookies(v6, "fe80::1%25eth0", secure_ok=False) == {}      # another host
+    with pytest.raises(ValueError):
+        parse_auth_origins(["http://localhost:3000"], ["localhost:3000"])
+    assert parse_auth_origins(["http://[::1]:9"], ["::1"]) == ["http://127.0.0.1:9"]

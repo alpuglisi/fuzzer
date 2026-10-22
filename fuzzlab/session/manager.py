@@ -77,15 +77,6 @@ AUTH_ORIGIN_HELP = ("an origin, scheme://host[:port] with no path, that belongs 
                     "port of a host is another app unless named here")
 
 
-def _host_url(name) -> str:
-    """A URL for a bare host (an IPv6 literal bracketed, as a URL spells it): the one
-    spelling `parse_auth_origins`, the auth-endpoint and session-host matches and the
-    browser jar's cookie match use (BUG-0559: ``f"http://{host}/"`` is no URL for
-    ``::1``)."""
-    name = str(name)
-    return f"http://[{name.strip('[]')}]/" if ":" in name else f"http://{name}/"
-
-
 def parse_auth_origins(values, scope_hosts) -> list[str]:
     """The canonical origins of ``--auth-origin`` values (FR-SESS-20, R5), or
     `ValueError`: each must be a bare http(s) origin (no user, path, query or fragment)
@@ -94,7 +85,10 @@ def parse_auth_origins(values, scope_hosts) -> list[str]:
     ``127.0.0.1`` are one host). A usage error, checked before any side effect
     (PA-0079)."""
     from urllib.parse import urlsplit
-    scope = origin_scope(*(_host_url(h) for h in scope_hosts or ()))
+    def as_url(name) -> str:
+        name = str(name)
+        return f"http://[{name.strip('[]')}]/" if ":" in name else f"http://{name}/"
+    scope = origin_scope(*(as_url(h) for h in scope_hosts or ()))
     out: list[str] = []
     for value in values or ():
         text = str(value).strip()
@@ -114,7 +108,7 @@ def parse_auth_origins(values, scope_hosts) -> list[str]:
             raise ValueError(f"--auth-origin {text!r}: not an origin")
         # its host, canonically, against the scope's hosts (an origin compare: the
         # scope's origins on this origin's scheme and port)
-        same_host = canonical_origin(_host_url(parts.hostname))
+        same_host = canonical_origin(as_url(parts.hostname))
         if same_host not in scope:
             raise ValueError(f"--auth-origin {text!r}: its host is not in scope "
                              f"({', '.join(sorted(scope_hosts or ())) or 'none'}); add "
@@ -2495,6 +2489,21 @@ def credential_cookie(name: str, value: str, state: SessionState) -> bool:
         return True
     return value in _header_tokens(state) or _identifier_like(name, value)
 
+
+def _host_url(name) -> str:
+    """A URL for a host as a session holds it, for `canonical_host`: an IPv6 literal
+    (bare, as `urlparse` gives it, or bracketed) is bracketed, as a URL spells it
+    (BUG-0559: ``f"http://{host}/"`` is no URL for ``::1``); anything else -- a name, an
+    IPv4 address, a host with a port, ``[::1]:8080`` -- is spelled as before. Not
+    `parse_auth_origins`' ``as_url``, where a ``host:port`` scope entry is a usage
+    error."""
+    import ipaddress
+    name = str(name)
+    try:
+        v6 = ipaddress.ip_address(name.strip("[]")).version == 6
+    except ValueError:
+        v6 = False
+    return f"http://[{name.strip('[]')}]/" if v6 else f"http://{name}/"
 
 
 def _jar_cookies(storage: dict | None, host: str, *, secure_ok: bool,

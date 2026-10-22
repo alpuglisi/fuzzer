@@ -1080,3 +1080,33 @@ orchestrator with their files (PA-0559(4)), never stated as residuals.
   at a merge was checked by its own test only, as was LABAUTH's review round 1 (BUG-0555,
   same section); each cost a full verification cycle. PA-0559(15) moves the whole-package
   guards to the commit.
+
+### The merge fix's review (coordinator, 2026-10-22)
+
+- **Found by** an independent review of 8f9d48a (two lenses, workflow `wf_e557b350-655`):
+  hoisting `parse_auth_origins`' `as_url` as the manager's `_host_url` kept b827781's rule
+  (bracket any host holding a ':'), a regression against 7393c90 for a host with a port.
+  `fuzzlab session print --host '[::1]:8080'` reaches `_jar_cookies` with that spelling
+  (`parse_auth_origins` accepts it when no `--auth-origin` is given): it became
+  `http://[::1]:8080]/`, `canonical_host` gave `None`, and the browser jar's cookies
+  (BUG-0132) were dropped without an error; `127.0.0.1:8080` raised `ValueError`. 7393c90
+  (`f"http://{host}/"`) matched both.
+- **Fix:** `_host_url` brackets only an IPv6 literal (`ipaddress.ip_address` of the
+  unbracketed spelling, zone ids included) and spells anything else as 7393c90 did;
+  `parse_auth_origins` keeps its own `as_url`, byte for byte 7393c90's (a `host:port`
+  scope entry stays a usage error). Test:
+  `tests/test_session_material.py::test_a_host_with_a_port_keeps_its_jar_cookies_as_on_the_pushed_tree`
+  (fails on 8f9d48a at its first assertion; its assertions hold on 7393c90; passes on the
+  fix). The host-compare guard reports no offender. CC-SESS-0030; F-246.
+- **Recurrence review (corrects the section above, which named only PA-0040):** the same
+  failure class -- a commit checked by its own or its importers' tests that then failed a
+  whole-package guard at the next harness run -- is F-157, F-164 and F-198 before F-244
+  and F-245, and the rule that covers it is PA-0403(1) (BUG-0403: every path-scanning
+  guard, not only the importers).
+- **Prior-preventive-action failure analysis (PA-0403):** PA-0403(1) is at the right layer
+  (the verification set) and is enforced -- `verify_change.py` always selects the guards
+  (`tests/test_verify_change.py`) -- but only where the harness runs. It was not followed
+  at the commit: lane rounds ran one hand-picked targeted pytest (my briefs asked for "one
+  pytest invocation of every test file importing X"), and my merge fix ran its own test.
+  Each miss cost a harness cycle. PA-0559(15) supersedes the commit-level gap: a commit's
+  check, and any targeted run a brief asks for, is the harness's selection.

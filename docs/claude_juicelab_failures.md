@@ -1951,3 +1951,17 @@ Juice Shop lab is complete.
 - **Cause:** a lane's targeted run selects importers of the changed module, never the whole-package guards, and neither the lane nor I ran them before the merge commit.
 - **Status:** fixed (a reviewed `ALLOWED` entry; PA-0559(15)).
 
+### F-246 — My fix of F-244 reused the pushed `as_url` where its contract does not fit, keeping a regression against 7393c90 for a host with a port
+- **What:** 8f9d48a hoisted `parse_auth_origins`' `as_url` as the session manager's one `_host_url`. Its rule (bracket any host holding a ':') suits a scope entry, where `host:port` is a usage error, not a host to match: `--host '[::1]:8080'` lost its browser-jar cookies and `127.0.0.1:8080` raised, where 7393c90 matched both. b827781 had the same rule; I kept it without enumerating the sites' inputs.
+- **Evidence:** the review journal `subagents/workflows/wf_e557b350-655/journal.jsonl` (951 inputs per revision, diffed); `tests/test_session_material.py::test_a_host_with_a_port_keeps_its_jar_cookies_as_on_the_pushed_tree` fails on 8f9d48a at its first assertion.
+- **Impact:** an operator-typed bracketed host with a port silently lost the JS-set jar cookies in `session print`; 8f9d48a was in a verify-then-push run when the review reported, and that run pushes it if green (I could not hold it back: a local pre-push hook and stopping the wrapper were both refused). The fix follows in the next verified push.
+- **Cause:** I treated "one implementation" as "reuse the nearest helper" without checking that its inputs and contract matched the new callers'.
+- **Status:** fixed (`_host_url` brackets only an IPv6 literal; PA-0559(15)).
+
+### F-247 — My recurrence review for F-244 and F-245 named PA-0040 and missed PA-0403(1) and three earlier repeats
+- **What:** the BUG-0559 and BUG-0555 sections "At the gaps merge's verification" named only BUG-0038 / PA-0040; F-244's cause cited PA-0040 and PA-0559(9). The rule that covers the class is PA-0403(1) (every path-scanning guard, not only importers), repeated in F-157, F-164 and F-198; no prior-PA failure analysis was written, and PA-0559(15) said the push gate enforced it, which it cannot.
+- **Evidence:** the review journal `subagents/workflows/wf_e557b350-655/journal.jsonl` (lens 2); `grep -c 'PA-0403' docs/bugs/BUG-0559-*.md` was 0 on 8f9d48a.
+- **Impact:** a preventive action that restated a prior rule without fixing why it failed; corrected before the push of the fix.
+- **Cause:** I searched the PA list for "whole-package guard" and stopped at the first hit instead of searching by the root cause (the verification set) and the failure record.
+- **Status:** corrected (BUG-0559 "The merge fix's review" with the PA-0403 failure analysis; PA-0559(15) restated).
+

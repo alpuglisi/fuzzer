@@ -829,3 +829,7 @@ by strict xfails, not fixed in another round (PA-0531(4)):
   caught it. What failed is the commit-level check, the same gap as the coordinator's own
   `_host_url` fix (BUG-0559, "At the gaps merge's verification"); PA-0559(15) closes it for
   both.
+- **References:** the allowance is recorded in CC-AUD-0058 (a coordinator deliverable) and
+  the failure in F-245. The prior rule this repeats is PA-0403(1) (BUG-0403; earlier
+  repeats F-157, F-164, F-198); its failure analysis is in BUG-0559, "The merge fix's
+  review", and PA-0559(15) is this section's preventive action as well.

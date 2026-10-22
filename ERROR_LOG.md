@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-22 — session manager (the merge fix's host-to-URL helper dropped a `[::1]:8080` session's browser-jar cookies; BUG-0559)
+- **Symptom:** an independent review of 8f9d48a: `_jar_cookies(storage, '[::1]:8080')` returned `{}` (7393c90: the `[::1]` cookie), and `127.0.0.1:8080` raised `ValueError`; reachable through `fuzzlab session print --host '[::1]:8080'`.
+- **Root cause:** the merge fix hoisted `parse_auth_origins`' `as_url` (bracket any host holding a ':') for sites whose input is a host to match, not a scope entry to validate; b827781 had the same rule.
+- **Remediation:** `_host_url` brackets only an IPv6 literal; `parse_auth_origins` keeps its own `as_url`; a test pins 7393c90's matches (CC-SESS-0030; PA-0559(15)).
+- **Status:** Fixed
+
 ## 2026-10-22 — gaps merge verification (two whole-package guards failed on the merged stack: a duplicated host-to-URL helper in the session manager, and an unreviewed package-data read in the web process's closure; BUG-0559, BUG-0555)
 - **Symptom:** `scripts/verify_change.py --base 7393c90` on c222c92: 155 files, 5153 passed, 2 failed -- `test_session_origin_scope.py::test_no_session_send_decision_compares_hosts` (seven host compares in `session/manager.py`) and `test_web_store_locks.py::test_no_web_process_module_opens_a_store_file_except_through_sqlite` (`value_shape._delegated_tlds`'s `.read_text()`). Not pushed.
 - **Root cause:** the coordinator's IPv6 fix (b827781) added `_host_url`, assigning a name from a host, which the host-compare guard taints module-wide, and duplicated the pushed `as_url`; LABAUTH's review round 1 (e0f4210) added a package-data read in the web closure without its reviewed allowance. Both commits were checked by their own tests only.
