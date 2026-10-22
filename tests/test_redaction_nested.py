@@ -565,6 +565,18 @@ def test_proxy_history_redacts_every_url_bearing_header_and_any_request_line(tmp
     assert redact(clean) == clean
 
 
+@pytest.mark.xfail(strict=True, reason="BUG-0556 residual R4 (stated in review round 2, "
+                   "owner PROXY): a URL inside another structured header's grammar (a "
+                   "CSP `report-uri`, `Reporting-Endpoints`, `Report-To`'s JSON) is not "
+                   "parsed, so a sensitively named value there is kept in proxy history; "
+                   "the URL-bearing headers whose value is a URL are covered (N6)")
+def test_proxy_history_redacts_a_url_inside_a_structured_header():
+    from fuzzlab.proxy.redact import redact
+    raw = (f"HTTP/1.1 200 OK\r\nContent-Security-Policy: default-src 'self'; report-uri "
+           f"/csp?token={_WORD}\r\n\r\n").encode()
+    assert _WORD.encode() not in redact(raw)
+
+
 @pytest.mark.parametrize("value", [
     f"http://127.0.0.1:3000/app/#/r?next=/v?q=a b&token={_WORD}",
     f"http://127.0.0.1:3000/app/#/r?next=/v?q=a b%26token%3D{_WORD}",
@@ -710,11 +722,11 @@ _SUBSTRING_QUOTED = [
 ]
 
 
-def _audit_store(tmp_path, rows, fetcher):
+def _audit_store(tmp_path, rows, fetcher, base_url=None):
     """The real chain: the spider's rows, `load_urls`, `audit_page` with every rule,
-    `import_spider`, then `import_audit` (no ``base_url``, as `fuzzlab audit --store`
-    calls them). ``(candidates' sink contexts, the endpoint urls after the spider's
-    import, the endpoint urls after the audit's, dump)``."""
+    `import_spider`, then `import_audit` (no ``base_url`` by default, as `fuzzlab audit
+    --store` calls them). ``(candidates' sink contexts, the endpoint urls after the
+    spider's import, the endpoint urls after the audit's, dump)``."""
     from fuzzlab.tools import fetcher as F
     from fuzzlab.tools.spider import StorageManager
     from fuzzlab.tools.store_adapter import import_audit, import_spider
@@ -731,9 +743,9 @@ def _audit_store(tmp_path, rows, fetcher):
     db.close()
     with Store(tmp_path / "u.db") as store:
         run = store.start_run("auditor", "h")
-        import_spider(tmp_path / "s.db", store, run)
+        import_spider(tmp_path / "s.db", store, run, base_url=base_url)
         spider = {r[0] for r in store.conn.execute("SELECT url FROM endpoint").fetchall()}
-        import_audit(tmp_path / "a.db", store, run)
+        import_audit(tmp_path / "a.db", store, run, base_url=base_url)
         after = {r[0] for r in store.conn.execute("SELECT url FROM endpoint").fetchall()}
         contexts = [r[0] for r in store.conn.execute(
             "SELECT sink_context FROM candidate").fetchall()]
@@ -767,6 +779,33 @@ def test_import_audit_stores_a_page_as_the_spider_does_when_the_first_finding_is
     assert {"/app/z.php", "http://api.h:8081/v1/q.php"} <= spider     # not vacuous
     assert any(c and c.startswith("example value: ") for c in contexts)
     assert after == spider, sorted(after - spider)
+
+
+def test_import_audit_under_a_subpath_base_stores_the_spiders_paths(tmp_path):
+    """PA-0300 (`tests/test_base_url_subpath_registry.py`): `import_audit`'s ``base_url``
+    (a keyword since review round 1) with the app under a sub-path. Its origin is the
+    run's main one, so a page is stored by its whole path, as `import_spider` stores it
+    with the same base -- never re-rooted at the sub-path nor doubled -- and another
+    origin's page keeps its origin; the audit import adds no endpoint."""
+    base = "http://h/app/"
+    rows = [(base, 0, "link"), ("http://api.h:8081/v1/q.php?u=bob", 1, "xhr"),
+            ("http://h/app/z.php?id=7", 1, "link")]
+    contexts, spider, after, _dump_text = _audit_store(tmp_path, rows, _SilentFetcher(),
+                                                       base_url=base)
+    assert {"/app/z.php", "http://api.h:8081/v1/q.php"} <= spider     # not vacuous
+    assert any(c and c.startswith("example value: ") for c in contexts)
+    assert after == spider, sorted(after - spider)
+
+
+@pytest.mark.xfail(strict=True, reason="BUG-0556 residual R5 (stated in review round 2; "
+                   "owners CORE and AUD): a page URL's own userinfo is kept by both URL "
+                   "redactors (R3), so `import_audit`'s `called from <url>` text keeps it "
+                   "in `candidate.sink_context`; R3's reason (the store keeps no top-level "
+                   "userinfo) does not hold for this writer")
+def test_import_audit_stores_no_userinfo_of_the_finding_page():
+    from fuzzlab.tools.store_adapter import _audit_text
+    url = f"http://bob:{_PASS}@h/app/x.php?u=bob"
+    assert _PASS not in _audit_text(f"called from {url}", url)
 
 
 # --- the endpoint's own query is never sent redacted (review round 1, RU-4; PA-0544) -----

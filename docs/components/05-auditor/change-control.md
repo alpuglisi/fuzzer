@@ -49,6 +49,35 @@ Newest first.
       value and never a blank (PA-0544(1)); the point builder refuses such a point
       (FUZZ). This was a regression of this entry (an identifier there was sent as `id=`),
       mislabelled pre-existing in the first round.
+  - *(Review round 2, final, 2026-10-22, branch `lane/REDACTURL-r2` from f939778;
+    BUG-0556 "Review round 2", N3.)*
+    - **A quoted substring of a secret value is redacted.** `_audit_text` swapped a
+      value's prefixes at the rules' cut lengths (`_AUDIT_CUTS`, removed), so
+      `rule_serialized_tokens`' `match.group(0)[:60]` -- a JWT behind `Bearer ` or `x.`,
+      a short JWT before a `~tail`, Java-serialized base64 up to a form-decoded `+`, a
+      pickle behind `v1:` -- reached `candidate.sink_context` though `stored_value` held
+      for the value. Now each value the owner would not store is judged **whole** and
+      replaced wherever the text repeats it whole (as crawled, percent-decoded and
+      form-decoded) or any run of it 8 characters or longer (`_secret_spans`: a set of
+      the values' 8-character windows, overlapping matches joined; linear).
+    - **The endpoint is the spider's form of the page (RU-8's split in a new form).**
+      `import_spider` takes the run's main origin from the seed, `import_audit` took it
+      from its first finding's page (`fetcher.py` passes neither a `base_url`), so an
+      off-origin first finding (an XHR on an API origin) stored the main origin's pages
+      absolute beside the spider's paths -- partly round 1's own regression.
+      `_audit_endpoint` now uses the form this run's spider rows hold (`page` or a
+      non-audit `endpoint`): the absolute form names a page off the spider's main
+      origin, the path form one on it; with neither, or a `base_url`, `store_url(page,
+      main)` as before. `tools/fetcher.py` is unchanged (held by lane BROWSERALIAS).
+    - Tests: `test_import_audit_redacts_a_quoted_substring_of_a_secret_value` (a fetcher
+      that echoes nothing, so the parameter haystack's row is stored) and
+      `test_import_audit_stores_a_page_as_the_spider_does_when_the_first_finding_is_off_origin`
+      (no endpoint added by the audit import), each through the real chain.
+    - **PA-0300 (found by the round's targeted run):** round 1 gave `import_audit` a
+      `base_url` keyword without a base-URL registry entry. `import_audit` is now
+      registered in `tests/test_base_url_subpath_registry.py` with
+      `test_import_audit_under_a_subpath_base_stores_the_spiders_paths` (the app under
+      `http://h/app/`), and `_audit_endpoint` takes a `spider_form` flag, not the base.
 - Impact (other components / project):
   - **FUZZ (point builder, oracle):** a crawled form whose hidden value is identifier-
     like or holds a nested token now has that name in `form.fresh`, so its points are
@@ -76,6 +105,14 @@ Newest first.
     the spider capture writer's blank (owner CRAWL, pinned). `import_audit`'s endpoint
     now equals the spider's for the same page, and a page on another origin keeps its
     origin (FR-AUD-27) where it was re-rooted at the base.
+  - *(Review round 2:)* over-redaction (fail closed, accepted): any 8-character run of
+    a secret value is replaced in a finding's texts, so text of the page's own URL or
+    path that a secret value happens to repeat (a nested URL of the same app in `next=`)
+    is replaced too; the finding still names its rule and target. The endpoint lookup
+    is one query of the run's `page` and `endpoint` rows per finding. Pinned (BUG-0556
+    R5, strict xfail `test_import_audit_stores_no_userinfo_of_the_finding_page`): a
+    finding page's own userinfo is kept in `called from <url>` (the URL redactors keep a
+    top-level userinfo, R3), outside this round's class.
 - Deliverables:
   - [x] the six writers above through the owner — done
   - [x] FR-AUD-31 and FR-AUD-26 amended in place — done
@@ -84,6 +121,10 @@ Newest first.
     placeholder; FR-AUD-31 amended in place;
     `test_import_audit_stores_the_spiders_endpoint_and_no_secret`,
     `test_an_endpoint_query_redaction_changed_is_never_sent` — done
+  - [x] *(Review round 2)* `_audit_text` by the whole value (`_secret_spans`),
+    `_audit_endpoint`; FR-AUD-31 amended in place; the two round-2 importer tests, each
+    failing on f939778 on its own assertion; `import_audit`'s base-URL registry entry
+    and sub-path test; R5's strict xfail — done
 - Effectiveness (assessed 2026-10-22): `scratchpad/lanes/REDACTURL/exp/repro2.py` found
   the token in `endpoint.url`, `parameter.example` and `form.entries` (spider forms and
   disco captures) before, and only R1's two rows after; the harness result is in the
@@ -91,7 +132,13 @@ Newest first.
   (`scratchpad/gapvalues_b3/probe.py`) found the uuid in a second `endpoint.url` and the
   hex in `candidate.sink_context` on c3a13f7, and finds no secret and one endpoint per
   page on the revision; both round-1 importer tests fail on c3a13f7 on their own
-  assertions.
+  assertions. *(Review round 2:)* on f939778 the real chain stored quoted substrings of
+  the secret values (from the JWT to the pickle) in `candidate.sink_context` and added
+  two endpoints (`/v1/q.php`, `http://h:80/app/z.php`) for an off-origin first finding;
+  on the revision it stores none and adds none (the two
+  round-2 tests fail on f939778 on their own assertions, `r2_prefix.log`); the targeted
+  run's base-URL registry failure was this entry's (round 1) and is fixed (BUG-0556
+  "Review round 2").
 
 ### CC-AUD-0057 — The captured-request import refuses and counts a body holding a lone surrogate instead of failing the import (FR-AUD-22, BUG-0554) (2026-10-21)
 - Placement: lane SURROGATE (item AU-REQID78), base 33b423e, with CC-CRAWL-0061 (the

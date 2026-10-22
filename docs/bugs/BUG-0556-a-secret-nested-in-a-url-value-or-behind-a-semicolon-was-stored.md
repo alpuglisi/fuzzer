@@ -132,6 +132,14 @@ CC-CORE-0076 (owner) and CC-AUD-0059 (importer); FR-CORE-537 (new), FR-CORE-32 a
   `test_every_nested_spelling_of_a_secret_is_redacted_and_the_url_stays_a_url`, which
   stopped on `AttributeError: … value_holds_secret` (`prefix.log` lines 20-46). It now
   asserts its leak list first and fails there on 7393c90; see "Review round 1".)*
+  *(Corrected in review round 2, N5: also false for
+  `test_a_value_past_the_depth_bound_is_redacted_whole`, which stopped on `AttributeError:
+  … MAX_VALUE_DEPTH` though the old code kept the hex (a defect test, not a bound
+  test), for the size-bound test (`MAX_VALUE_CHARS`), and for
+  `test_the_redactors_are_total[http://[::1/x?token=a;b=%2F%3F]`, where the old
+  redactor raised `ValueError: Invalid IPv6 URL` (not total: `prefix.log` lines
+  1192-1266). Every test of the file now asserts its behaviour before any new API; the
+  sweep on 7393c90 is in "Review round 2".)*
 
 ### The PA-0002 sweep, by primitive (every caller of the owner and every writer of a URL or sibling value)
 
@@ -502,3 +510,265 @@ amended to match:
   - A top-level URL's userinfo is kept by `redact_url`. The project store keeps none of
     it (`to_path` and `canonical_origin` drop it), and a browser never sends userinfo in
     a request line.
+
+## Review round 2 (f939778, final): the fix check's neighbouring paths
+
+The owner approved one final round (2026-10-22): each round-1 finding's fix check
+(`scratchpad/lanes/REDACTURL/review_round2.md`, items N1..N8, each with a repro, a
+proposed fix and a skeptic's confirmation) found the round-1 repro fixed and the same
+mechanism still open on neighbouring paths. Each neighbouring path is fixed by class on
+branch `lane/REDACTURL-r2` from f939778; anything a later check finds is pinned by a
+strict xfail, never a further fix. The owner's and the importer's parts are in the
+review-round-2 sub-bullets of CC-CORE-0076 and CC-AUD-0059; the callers' are CC-FUZZ-0116
+(greybox) and CC-PROXY-0031 (proxy), which also carry the round-1 FUZZ and PROXY texts.
+
+1. **N1 (RU-1/RU-6's neighbours): a layer left encoded in any piece; a pair list holding
+   a URL.**
+   - **What failed.** `next=https://host%2Fcb%3Faccess_token%3D<word>?y=1`: the raw `?`
+     sent the value to `nested_url`, whose head's authority holds the encoded layer, and
+     `path(nested=True)` returned the head when no raw `/` followed the authority, so
+     both redactors, `page_url_is_clean`, `safe_ref`, the proxy and `form.source_page`
+     kept the token. Werkzeug's `url_for` applied twice (measured by the check on
+     werkzeug 3.1.9: `/login?next=/login?next%3Dhttps://bob:<pw>@host/x`) decoded to
+     `next=https://bob:<pw>@host/x`, which `"://" in text` sent to `nested_url` as one
+     URL, so no pair was split and no userinfo found; `?state=next=https://bob:<pw>@…`
+     raw, and `a=1&token=<word>&next=https://h/x` encoded, the same. The top-level
+     fragment's route was never walked: `#/r%3Ftoken%3D<word>` (Python's `quote()` of a
+     route), `#!/…`, `#%2Fr%3F…`, `#token%3D…` and `#/r;jsessionid=<word>?x=1` were kept
+     (N7's second neighbour; the same class).
+   - **Fix.** `_UrlWalk.path` decodes a nested authority holding an escape (a host's own
+     escapes decode to host characters and come back unchanged); `_UrlWalk.route` walks a
+     fragment's route for its `;` path parameters and its encoded segments, the top
+     level's included (its raw segments stay the page's identity, R3); `_url_shaped`
+     takes a value for a URL only when it starts with a scheme's `://`, `/` or `\`, or
+     its first raw `?`/`#` comes before any `=`, `&` or `;`, else it is split into pairs.
+   - **Tests.** `test_a_review_round_2_spelling_is_redacted_by_every_url_redactor`
+     (`_ROUND2`, 19 spellings: both redactors, `page_url_is_clean`, `safe_ref`,
+     `redact_for_record`) and
+     `test_the_review_round_2_spellings_store_no_secret_through_import_spider`.
+2. **N2 (RU-2's neighbours): a URL's userinfo wherever a URL starts.**
+   - **What failed.** `_UrlWalk.userinfo` judged an authority only at the very start of a
+     nested head, so `next=/go/https%3A%2F%2Fbob%3A<pw>%40host%2Fx` (decoded whole, then
+     a path whose segments held no escape), raw `/go/https://bob:<pw>@host/x`,
+     `https://proxy.example/go/https://bob:<pw>@…`, a leading space (`+https://…`,
+     `%20https://…`), a nested fragment route (`/a%23https://bob:<pw>@…?y=1`),
+     `https:///bob:<pw>@…` and the backslash spellings were stored by `import_spider`,
+     called clean, and kept by proxy history, though `redact_for_record`'s
+     `_URL_USERINFO` and `safe_ref` treated them as credentials.
+   - **Fix, measured.** The WHATWG URL parser (Node 22's `URL`,
+     `scratchpad/lanes/REDACTURL/r2/whatwg.js`) gives userinfo for `https:///bob:pw@`,
+     `https:\\bob:pw@`, `/\bob:pw@` and `\\bob:pw@` against a base, a leading space or tab,
+     and `http:/bob:pw@` and `http:bob:pw@` parsed absolute; not for `/go/https://…` (a
+     path), which `_URL_USERINFO` and `safe_ref` still call a credential, so the walk
+     agrees with them there. `_AUTHORITY_AT` finds every authority start in a value (a
+     special scheme and any run of `/` or `\`, or two or more of them anywhere) and
+     `_UrlWalk.userinfo` replaces each `user[:password]@` (last `@` or `%40`) by
+     `PLACEHOLDER@`; it runs in `value`, at every nested level and layer.
+   - **Tests.** The N2 spellings in `_ROUND2` and the proxy test's target and `Location`.
+3. **N3 (RU-3/RU-8's neighbours): `import_audit`'s quoted substrings and its main
+   origin.**
+   - **What failed.** `_audit_text` replaced a secret value's prefixes at the rules' cut
+     lengths (80/60/40/20); `rule_serialized_tokens` quotes `match.group(0)[:60]`, a
+     substring (a JWT behind `Bearer `, `x.`, a short JWT before `~tail`, base64 up to a
+     form-decoded `+`, a pickle behind `v1:`), stored in `candidate.sink_context` though
+     `stored_value` held for each value. The round-1 test's fetcher echoed the query, so
+     the body's row won the auditor's dedupe and hid it. And `import_audit` took the
+     run's main origin from its first finding's page while `import_spider` took the
+     seed's (`fetcher.py` passes neither a `base_url`): with an off-origin first finding,
+     the main origin's pages were stored absolute beside the spider's paths -- partly
+     round 1's own regression (before it, `to_path` kept the main origin's pages shared).
+   - **Fix.** Each value the owner would not store is judged whole and replaced wherever
+     the text repeats it whole or any run of 8 or more of its characters
+     (`_secret_spans`), never by cut lengths; the endpoint is the form this run's spider
+     rows hold the page in (`_audit_endpoint`), else `store_url(page, main)` as before.
+     `tools/fetcher.py` (held by lane BROWSERALIAS) is unchanged.
+   - **Tests.** `test_import_audit_redacts_a_quoted_substring_of_a_secret_value` (a
+     fetcher echoing nothing) and
+     `test_import_audit_stores_a_page_as_the_spider_does_when_the_first_finding_is_off_origin`,
+     each through the real chain (spider rows, `load_urls`, `audit_page` with every rule,
+     `import_spider`, `import_audit`).
+4. **N4 (RU-4's neighbours): every caller of the point builder keeps its refusal.**
+   - **What failed.** Round 1 made `injection_points_from_store` carry a
+     `replay_refusal` but swept only the oracle path. `greybox.run.points_from_store`, its
+     other caller (PA-0530(5): grep the producer's name), rebuilt `GreyboxPoint`s without
+     it, and `RequestsCorrelatingSender` had no placeholder gate, so greybox sent `POST
+     /app/edit.php?id=__REDACTED__` (it sent `id=` before round 1).
+   - **Fix.** `points_from_store` reports a refused point in `skipped` and never returns
+     it; `send_correlated` raises `ReplayRefused` for a URL holding a placeholder before
+     anything is sent (CC-FUZZ-0116).
+   - **The spider's own capture blank (R2).** `tools/spider.py` is still held by lane
+     BROWSERALIAS; the blank `id=` is sent by both callers. R2's strict xfail now asserts
+     both (`harness.auto` and greybox), so it fails until the writer records a
+     placeholder.
+   - **Test.** `test_greybox_never_sends_a_point_the_builder_refused_or_a_placeholder`.
+5. **N5 (RU-5's neighbours): every test's pre-fix path reaches its behaviour.**
+   - **What failed.** Round 1 re-proved only the test the review named.
+     `test_a_value_past_the_depth_bound_is_redacted_whole` stopped on 7393c90 at
+     `R.MAX_VALUE_DEPTH` though the old code kept the hex; the size-bound test stopped on
+     `monkeypatch.setattr(R, "MAX_VALUE_CHARS", 64)`; the benign, layer, userinfo and
+     totality tests called the new API directly.
+   - **Fix.** `_api(name)` looks a new function up and asserts it present, called only
+     after a test's behaviour assertions; the depth bound falls back to 12 and the leak
+     is asserted first (in up to depth + 3 decodings); the size bound is set with
+     `raising=False`.
+   - **Proof, every test of the file.** A plain-Python runner (no pytest session:
+     parametrize expanded, `tmp_path` and `monkeypatch` supplied;
+     `scratchpad/lanes/REDACTURL/r2/run_plain.py`) ran all 35 test functions then in the
+     file (R4's strict xfail was added after) on a `git archive` of 7393c90's `fuzzlab/`
+     (`r2_n5_7393c90.log`): 425 cases failed, 57 passed (the 57: the two axis checks, an
+     ordinary-link store test and the 54 depth-1 record cases, caught by `_MATRIX_PARAM`
+     or `redact_query`). Every failure is an `AssertionError` on the test's own claim, except
+     `test_the_redactors_are_total[http://[::1/x?token=a;b=%2F%3F]`, where the old
+     redactor raised `ValueError: Invalid IPv6 URL` -- the totality failure that test
+     names. The benign test's 18 cases and the other 16 totality cases fail on `_api`'s
+     assertion after their behaviour held (the old code was byte-identical and total
+     there). The depth test fails on its leak assertion (`redact_url_identifiers` keeps
+     the hex), the size test on the over-long value kept. The proof sentence under
+     "Corrective action" is corrected there.
+6. **N6 (RU-7's neighbours): every URL-bearing header value and any request line.**
+   - **What failed** (all older than BUG-0556): `redact()` read each URL header's first
+     value only and `with_header` replaced every duplicate by a changed one; `Referer`,
+     `Origin`, `Link` and custom URL headers were never read; `Refresh` only as `url=`;
+     the target as `split(b" ")[1]` (empty for a doubled space or a tab).
+   - **Fix.** Every header line is read and a changed value rewritten in place; the
+     URL-bearing set, `Link`'s `<URI>`s, `Refresh` per the HTML declarative-refresh steps
+     and a whitespace-tolerant target (CC-PROXY-0031). A URL inside another structured
+     header's grammar is residual R4 (pinned).
+   - **Test.** `test_proxy_history_redacts_every_url_bearing_header_and_any_request_line`.
+7. **N7 (RU-9's neighbours): a URL holding a raw space in a project record.**
+   - **What failed.** `redact_for_record` split the value on whitespace before the walk,
+     so `#/r?next=/v?q=a b&token=<word>` kept its token (`b&token=…` walked alone), in
+     `launch.argv` too.
+   - **Fix.** `redact_url` runs on the whole value first, then each piece as before.
+   - **Test.** `test_a_project_record_walks_a_url_holding_a_raw_space_whole` (the
+     function, `insert_launch` and `add_target`).
+8. **N8 (RU-10's neighbours): the linearity oracle counts the C-level work.**
+   - **What failed.** The oracle counted the walk's own steps and the identifier
+     predicate's reads; a pair step that unquotes, splits or quotes the whole list once
+     per pair (with the real single `tick`) passed it at n=100 and n=500 (about 24 times
+     the CPU time for 5 times the input), and round 1's variant A was flagged only
+     because it ticked its own extra work. Its URL had no path parameter, nested path
+     or fragment, and it ran with identifiers only.
+   - **Fix.** `_counted_walk` wraps `unquote`, `unquote_plus`, `quote`,
+     `looks_like_identifier`, `is_sensitive_name` and every compiled pattern of the
+     module (`_PAIR_SEP`'s split, the escape, raw-structure and authority searches) and
+     counts the characters each call is given; `_oracle_urls` has one URL per part of the
+     walk (path parameters, query pairs, a nested path, a fragment route); both modes;
+     per-character bounds measured with about 50% headroom (worst part: 10.3 steps, 0.79
+     step calls, 15.4 C-level characters, 1.9 C-level calls per URL character, at 100,
+     500 and 4000 items).
+   - **Proof.** `test_the_linearity_oracle_flags_a_quadratic_walk` flags seven
+     variants, none ticking its own work: the check's three (whole-list unquote, split,
+     quote per pair: 615 C-level characters per character), the every-layer re-walk
+     (52), a per-pair whole-query judgement (1815), a path step decoding its whole head
+     per segment (105) and a fragment step re-encoding the whole fragment per pair (113).
+     On f939778's product code f939778's own oracle returns `[]` for the check's three
+     variants and the new oracle flags each in six places
+     (`scratchpad/lanes/REDACTURL/r2/n8_proof.py`, `r2_n8_proof.log`).
+
+**Pre-fix proof (PA-0545(6)).** One pytest invocation ran the whole of
+`tests/test_redaction_nested.py` with f939778's four product files swapped in
+(`fuzzlab/core/redaction.py`, `fuzzlab/tools/store_adapter.py`,
+`fuzzlab/proxy/redact.py`, `fuzzlab/greybox/run.py`), then restored them
+(`scratchpad/lanes/REDACTURL/r2_prefix_proof.sh`, `r2_prefix.log`): 28 failed, 452
+passed, 3 xfailed. The 28 failures are exactly the round-2 tests (19 `_ROUND2` cases,
+the `import_spider` store test, the proxy test, 4 record cases, the two `import_audit`
+tests and the greybox test), each an `AssertionError` on its own assertion (the secret
+found, the placeholder sent, the endpoint added); none is an import, attribute or type
+error. The rounds-0/1 tests pass there, as does the N5- and N8-edited tests' behaviour
+on f939778's product (their proofs are on 7393c90 and against f939778's oracle, above).
+The 3 xfails are R1, R2 (both callers) and R4.
+
+**The round's targeted run** (one pytest invocation of the 66 test files that import a
+changed module, or `core.project`, `core.trace`, `proxy.history` or `greybox`, plus the
+lint, wall-clock, traceability, PA and SP guards; `scratchpad/lanes/REDACTURL/r2_targeted.sh`,
+`r2_targeted.log`): 3537 passed, 51 xfailed, 2 failed. Both were root-caused:
+- `tests/test_base_url_subpath_registry.py::test_every_base_url_function_is_registered`:
+  `import_audit`'s `base_url` keyword, added by round 1 (CC-AUD-0059), had no PA-0300
+  registry entry, and round 2's `_audit_endpoint` took the same parameter; round 1's
+  targeted run did not include the whole-package guard. Fixed: `_audit_endpoint` takes
+  `spider_form` (a flag, not a base), and `import_audit` is registered with
+  `test_import_audit_under_a_subpath_base_stores_the_spiders_paths` (the app under
+  `http://h/app/`: pages stored by their whole path as `import_spider` stores them, no
+  endpoint added). Verified after the run without a pytest session (the guard's
+  functions called directly: no unregistered, stale or bad pointer; the new test and
+  the three other `import_audit` tests pass).
+- `tests/test_proxy_history_writer_thread.py::test_a_batch_is_cut_by_age`: a race in the
+  test, outside this lane. The writer thread commits a batch (`HistoryWriter._write`),
+  runs `_trace`, and only then adds to `stats["written"]` (`proxy/history.py`); the test
+  polls for the committed rows and reads the counter at once. A 0.3 s delay inserted in
+  `_trace` makes it fail 5 times in 5, none without it
+  (`scratchpad/lanes/REDACTURL/r2/age_race.py`, `r2_age_race.log`); no redaction code
+  runs in that window (`redact` runs before the batch is written). Flagged to the
+  coordinator with its fix (poll the counter: `_until(lambda: h.stats["written"] ==
+  2)`); not changed here (owner PROXY's history lane, no bug number assigned to this
+  lane for it).
+
+R5's strict xfail was added after the targeted run and confirmed failing on the
+revision by the plain runner.
+
+**Why round 1 missed them.** Each round-1 fix was made at the path its repro took and
+proven on that repro: the authority beside the path segment, the userinfo after a path
+segment or a space beside the one at a value's start, the substring beside the prefixes
+the rules' code showed, the greybox caller beside the oracle's, the other tests beside
+the named one, the duplicate and the other URL headers beside the three named, the
+whitespace split beside the walk it fed, and the oracle's own self-reporting variant.
+None enumerated the mechanism's other paths before reporting. Two of the rules that
+would have caught them already existed: PA-0530(5) (sweep every caller of a producer by
+grep) and PA-0545(6) (the pre-fix proof of every test in the file).
+
+**Recurrence review (round 2).** The same lane's third pass at the same class.
+Prior-preventive-action failure analysis:
+- **PA-0556(4) (a sweep measured per caller): too narrow.** It measured each caller of
+  the owner, not each caller of a producer whose output round 1 changed (the point
+  builder's `replay_refusal`), and not each *path inside* a caller (a header loop, a
+  whitespace split).
+- **PA-0530(5) and PA-0545(6): not followed.** Both name the exact step that was skipped.
+- **PA-0135(3): followed in name only.** The offender reported its own work, so the
+  oracle's blindness to C-level work was never tested.
+
+PA-0556 gains item 7 (in the lane's doc texts): a fix is made to the mechanism, not
+the spelling -- before a round is reported its neighbouring paths are enumerated by
+mechanism (every piece the walk reads, every place a URL can start, every caller of a
+producer whose output changed, every value of a repeated field, every split before the
+owner sees a value) and each gets a test that fails on the pre-fix code.
+
+### The PA-0002 sweep after review round 2 (rows that changed; the round-1 table stands otherwise)
+
+| Caller (file:function) | Calls | What it stores or sends | Disposition |
+|---|---|---|---|
+| `proxy/redact.py` `redact` | `redact_url` | stored raw messages, `flow_fts` | **fixed in round 2** (N6): every value of every URL-bearing header, `Link`, `Refresh`, any request line; a URL inside another structured header is R4 (pinned); `test_proxy_history_redacts_every_url_bearing_header_and_any_request_line` |
+| `core/redaction.py` `redact_for_record` | `redact_url` (whole value, then pieces) | `project.targets`, `launch.argv`, `launch.target` | **fixed in round 2** (N7); `test_a_project_record_walks_a_url_holding_a_raw_space_whole` |
+| `store_adapter.import_audit` / `_audit_text` / `_audit_endpoint` | `store_url`, `redact_url_identifiers`, `strip_secret_path_params`, `stored_value` | `endpoint.url`, `candidate.evidence.target_identifier`, `candidate.sink_context` | **fixed in round 2** (N3); the two round-2 importer tests |
+| `harness/auto.py` `run_auto` (a caller of `injection_points_from_store`) | the oracle (`replay_refusal` -> `UNBOUND`), `_fingerprint_point` (skips a refused point) | what an auto run sends | clean since round 1; `test_an_endpoint_query_redaction_changed_is_never_sent` |
+| `greybox/run.py` `points_from_store` (the other caller) and `RequestsCorrelatingSender.send_correlated` | `replay_refusal`; `holds_placeholder` | what a greybox run sends | **fixed in round 2** (N4); `test_greybox_never_sends_a_point_the_builder_refused_or_a_placeholder`; the spider capture's blank (R2) pinned for both callers |
+| every URL redactor's walk (`_UrlWalk`) | itself | every caller above | **fixed in round 2** (N1, N2); `_ROUND2` through every redactor and `import_spider` |
+
+## Review round 2: residuals (final)
+
+- **R1 (pinned, unchanged).**
+- **R2 (pinned, both callers).** The spider capture writer's blank (`record_request`) is
+  sent `id=` by `harness.auto` and greybox alike; the strict xfail asserts both. The fix
+  is the writer recording a placeholder in `tools/spider.py` (lane BROWSERALIAS).
+- **R3 (by design, narrowed).** Unchanged: an identifier-shaped top-level path segment;
+  a token glued on with no separator (SP-18); a pair's name judged by the name rule
+  only; a top-level URL's own userinfo kept by `redact_url`; the URL's own top-level
+  path segments, raw or encoded (`/app/redirect/https%3A%2F%2Fbob%3Apw%40host%2Fx` is
+  stored in `page` and `endpoint`), and a top-level path parameter's value cut by a raw
+  `/` (`p.php;next=/cb%3Faccess_token%3D…`). Narrowed: the top-level fragment's route
+  is now walked for its path parameters and its encoded segments (N1); its raw segments
+  remain the page's identity.
+- **R4 (new, pinned; owner PROXY).** A URL inside another structured header's grammar (a
+  CSP `report-uri`, `Reporting-Endpoints`, `Report-To`'s JSON) is not parsed, so a
+  sensitively named value there is kept in proxy history. Pinned by
+  `tests/test_redaction_nested.py::test_proxy_history_redacts_a_url_inside_a_structured_header`
+  (strict xfail).
+- **R5 (new, pinned; owners CORE and AUD).** The check's N3 note: a finding page's own
+  userinfo is kept by both URL redactors (R3), so `import_audit`'s `called from <url>`
+  text keeps it in `candidate.sink_context`. R3's reason -- the store keeps no top-level
+  userinfo -- holds for `page` and `endpoint` (`to_path`, `canonical_origin`) but not for
+  this writer. It is outside N3's class (a query value judged by `stored_value`) and was
+  found after the round's proof, so it is pinned, not fixed:
+  `tests/test_redaction_nested.py::test_import_audit_stores_no_userinfo_of_the_finding_page`
+  (strict xfail; confirmed failing on the revision by the plain runner, added after the
+  targeted run).

@@ -1010,7 +1010,8 @@ def import_audit(audit_db: str | Path, store: Store, run_id: int, *,
     for row in rows:
         page = row["page_url"]
         endpoint_id = _upsert_endpoint(
-            store, run_id, _audit_endpoint(store, run_id, page, main, base_url), "GET",
+            store, run_id,
+            _audit_endpoint(store, run_id, page, main, spider_form=not base_url), "GET",
             "audit")
         target = _audit_text(row["target_identifier"], page, url=True)
         # the legacy auditor names a parameter only: its first row of that name
@@ -1037,17 +1038,17 @@ def import_audit(audit_db: str | Path, store: Store, run_id: int, *,
     return counts
 
 
-def _audit_endpoint(store: Store, run_id: int, page: str, main: str | None,
-                    base_url: str | None) -> str:
+def _audit_endpoint(store: Store, run_id: int, page: str, main: str | None, *,
+                    spider_form: bool) -> str:
     """A legacy-auditor finding page's endpoint as this run's spider rows hold the same
     page (review round 2, N3): `import_spider` and `import_audit` each took the run's
     main origin from their own first row (the seed; the first page with a finding), so
     an off-origin first finding stored the main origin's pages absolute, beside the
     spider's paths. ``store_url`` gives a page on another origin absolute only, so the
-    spider's absolute form names a page off the main origin and its path form one on it;
-    with neither stored (no spider import, or ``base_url`` given) the run's ``main``
-    decides."""
-    if not base_url:
+    spider's absolute form names a page off the main origin and its path form one on it.
+    With neither stored, or without ``spider_form`` (the caller was given the operator's
+    base URL, whose origin is the main one), the run's ``main`` decides."""
+    if spider_form:
         origin = canonical_origin(page)
         if origin is not None:
             path = store_url(page, origin)

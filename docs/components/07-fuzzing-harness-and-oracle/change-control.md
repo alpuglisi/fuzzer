@@ -3,6 +3,59 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0116 — A point whose own URL holds a value redaction replaced is refused, never sent, by every caller of the point builder (FR-FUZZ-67, BUG-0556 review rounds 1-2) (2026-10-22)
+- Placement: lane REDACTURL (item GAP-VALUES), with CC-CORE-0076 and CC-AUD-0059 (their
+  review-round sub-bullets). Review round 1 on branch `lane/REDACTURL-r1` from c3a13f7
+  (`harness/auto.py`); review round 2 on `lane/REDACTURL-r2` from f939778
+  (`greybox/run.py`). The number is the coordinator's (assigned at round 2; the round-1
+  text was handed over unnumbered).
+- Change:
+  - *(Review round 1, `fuzzlab/harness/auto.py`.)* `injection_points_from_store` gives a
+    crawl point a `replay_refusal` when its own URL holds a value redaction replaced
+    (`_redacted_url_refusal`, through `core.redaction.holds_placeholder`): an
+    endpoint's own query -- a POST form's action query, a captured request's URL query
+    -- that the importer now stores by name as `PLACEHOLDER` (CC-AUD-0059 round 1). The
+    oracle returns `UNBOUND` with that reason before any strategy runs; nothing is sent.
+  - *(Review round 2, `fuzzlab/greybox/run.py`, N4.)* The point builder's other caller
+    (PA-0530(5): every caller by grep -- `harness.auto.run_auto` and
+    `greybox.run.points_from_store`) dropped the refusal: `points_from_store` rebuilt
+    each point as a `GreyboxPoint(url, param, method, location)`, and
+    `RequestsCorrelatingSender.send_correlated` had no placeholder gate, so the form
+    `action='/app/edit.php?id=<uuid>'` was sent as `POST /app/edit.php?id=__REDACTED__`.
+    Now `points_from_store` reports a refused point in `skipped` with its reason and
+    never returns it, and `send_correlated` raises `ReplayRefused` (a `ValueError`) for
+    any URL holding a placeholder, before anything is sent, whoever built the point.
+- Impact (other components / project): such a form's or captured request's tests are
+  inconclusive (auto) or skipped and reported (greybox) where they sent the request with
+  `id=` (BUG-0556's first round), `token=__REDACTED__` (before BUG-0556, for a sensitive
+  name in a crawled action URL) or `id=__REDACTED__` (greybox after round 1). The
+  fingerprint baseline already skips a refused point. Greybox also skips a point refused
+  for a sibling naming a host outside the lab (`_outside_lab`), though it sends no
+  siblings: the builder's refusal is kept as given, never re-judged by a caller. No store
+  change.
+- Risk (level; mitigation or accepted-risk justification): low. Coverage: those tests
+  are inconclusive or skipped, never negatives (PA-0544(3)); no setup step re-obtains an
+  endpoint's own query (the binder binds sibling entries from the page's form), so
+  binding was not an option without a new binder capability. `ReplayRefused` propagates
+  out of a greybox run like `DestructiveUrlRefused` does (fail closed); `points_from_store`
+  keeps it from being reached. Residual R2 (the spider capture writer's blank, owner
+  CRAWL) is sent `id=` by both callers and pinned for both.
+- Deliverables:
+  - [x] `_redacted_url_refusal` (round 1) — done
+  - [x] greybox `points_from_store` keeps the refusal; `send_correlated`'s placeholder
+    gate (round 2) — done
+  - [x] FR-FUZZ-67 amended in place (both rounds) — done
+  - [x] `tests/test_redaction_nested.py::test_an_endpoint_query_redaction_changed_is_never_sent`
+    (fails on c3a13f7 on its own assertion) and
+    `::test_greybox_never_sends_a_point_the_builder_refused_or_a_placeholder` (fails on
+    f939778 on its own assertion); the R2 pin covers greybox — done
+- Effectiveness (assessed 2026-10-22): on c3a13f7 the form `action='/app/edit.php?id=<uuid>'`
+  gave a point sending `id=`; on round 1 its auto point is refused and the oracle, with a
+  sender that refuses any send, returns `UNBOUND` and sends nothing. On f939778 greybox
+  sent `POST http://127.0.0.1:3000/app/edit.php?id=__REDACTED__` to a recording session;
+  on round 2 it sends nothing, reports the refusal, and the sender raises for the
+  placeholder URL.
+
 ### CC-FUZZ-0114 — `SeamProbeSender._dispatch` docstring: the transport never re-sends (BUG-0549 review round 1) (2026-10-21)
 - Change: docstring only, `fuzzlab/tools/probesender.py::SeamProbeSender._dispatch`: "it never re-sends: each request has a fresh connection" becomes "it never re-sends, BUG-0147, and neither does its transport, FR-CORE-509".
 - Impact (other components / project): none; FR-FUZZ-61 ("never re-sends, so at most one try per dispatch") holds again since CC-CORE-0075's round 1 removed the transport's resend.

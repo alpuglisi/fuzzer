@@ -348,9 +348,10 @@ plugin registry. It is the layer that makes the store the integration bus.
     redactor it compares against walks nested URLs, query strings, `;` pairs and path
     parameters (FR-CORE-537), a nested redaction is a `PLACEHOLDER` (never a blank, so a
     placeholder at any depth keeps the page out), and the empty-value test splits the
-    query on `&` and `;`. *(Review round 1:)* a layer left encoded behind a raw `/` and a
-    nested URL's userinfo are redacted too (FR-CORE-537), and its placeholder test is
-    `holds_placeholder`.
+    query on `&` and `;`. *(Review rounds 1-2:)* a layer left encoded in any piece (behind
+    a raw `/`, in a nested URL's authority, in a fragment's route) and a URL's userinfo
+    wherever a URL starts in a value are redacted too (FR-CORE-537), and its placeholder
+    test is `holds_placeholder`.
   - **Header-point names:** `core.http.header_point_refusal` is the one rule
     (framing, routing, method-override and credential headers, and any name
     `is_sensitive_name` flags; whole names, case-insensitive). `check_send_header`
@@ -850,16 +851,25 @@ plugin registry. It is the layer that makes the store the integration bus.
   as possibly structured, through one walk (`_UrlWalk`) that both URL redactors are.
   - **Where a value sits:** a query pair, `&` or `;` separated; a `;name=value` (or
     bare `;value`) path parameter in any segment; a query-shaped fragment (`#…?a=b`,
-    `#a=b`); and, inside any of those values, a nested URL (`://`, a leading `/`, a `?`
-    or a `#`: its path parameters, query and fragment), a nested query string (`=`, `&`
-    or `;`: its pairs), or a percent-encoding layer (decoded one layer, then walked
-    again). *(Review round 1, BUG-0556:)* a layer is decoded wherever it remains: a value
-    with a percent-escape and no raw `?`, `#`, `=`, `&` or `;` (`quote(safe="/")`,
+    `#a=b`) and a fragment route's path parameters; and, inside any of those values, a
+    nested URL (a leading scheme `://`, `/` or `\`, or a `?` or `#` before any `=`, `&`
+    or `;`: its path parameters, query and fragment), a nested query string (`=`, `&`
+    or `;`: its pairs, a URL in a pair's value included), or a percent-encoding layer
+    (decoded one layer, then walked again). A layer is decoded wherever it remains
+    inside any piece the walk reads *(review rounds 1-2, BUG-0556)*: a value with a
+    percent-escape and no raw `?`, `#`, `=`, `&` or `;` (`quote(safe="/")`,
     `quote(safe="/:")`, Django's `redirect_to_login`: `/` and `:` raw at every layer) is
-    decoded first, as a whole; a nested URL's path segment still encoded is decoded and
-    walked; a value is decoded first or split first, never both. A nested URL's
-    userinfo (`//user[:password]@`, its `@` raw or `%40`) is a credential in both
-    redactors: `PLACEHOLDER@`. A URL's scheme and `//` count only at its start.
+    decoded first, as a whole; a nested URL's authority and each path segment still
+    encoded are decoded and walked, whatever raw delimiter sits elsewhere in the value;
+    so is each segment of a fragment's route, the top-level fragment's included (its
+    raw segments stay the page's identity); a value is decoded first or split first,
+    never both. A URL's userinfo (`user[:password]@`, its `@` raw or `%40`) is a
+    credential in both redactors, `PLACEHOLDER@`, wherever a URL's authority starts in a
+    nested value, as the WHATWG URL parser reads it (measured on Node 22's `URL`): after
+    a special scheme and any run of `/` or `\` (`https:///`, `https:\\`, `http:/`), or
+    after two or more of them anywhere (a nested URL's path segment or fragment route,
+    a value after a space), as `redact_for_record` and `core.trace.safe_ref` already
+    judged it. A URL's own scheme and `//` (its path walk) count only at its start.
   - **The rule at every level:** a sensitively named pair or path parameter
     (`is_sensitive_name`, name form-decoded) gets `PLACEHOLDER`. With identifiers
     (`redact_url_identifiers`), an identifier-like value (`looks_like_identifier`,
@@ -879,10 +889,13 @@ plugin registry. It is the layer that makes the store the integration bus.
     `MAX_VALUE_CHARS` (64 KiB) per value. A value past either bound, one with a layer
     still undecoded at the last level, or one the walk fails on is redacted whole at
     its top level (`""` with identifiers, `PLACEHOLDER` otherwise; a path parameter
-    `PLACEHOLDER`). Total; linear per level. *(Review round 1, PA-0135(2):)* the walk
+    `PLACEHOLDER`). Total; linear per level. *(Review rounds 1-2, PA-0135(2):)* the walk
     exposes its operation counts (`WalkCounter`: `steps`, the characters every step was
-    given, and `calls`); its linearity test asserts on them, proven on three quadratic
-    variants.
+    given, and `calls`), and its linearity oracle also counts the C-level work of every
+    call the module makes (the characters each percent-decode, re-encode, pair split,
+    pattern search and predicate call is given), on one URL per part of the walk (path
+    parameters, query pairs, a nested path, a fragment route) in both modes; it is proven
+    on seven quadratic variants, none reporting its extra work through the step counter.
   - **Stored values:** `value_holds_secret(raw_value)` (percent-decoded once) is true
     for an identifier-like value or one the walk would change; `stored_value(name,
     raw_value, value)` is `""` when the name is sensitive or the value holds a secret,
@@ -895,14 +908,18 @@ plugin registry. It is the layer that makes the store the integration bus.
     the body redactors (`redact_body`, `redact_captured_body`, `redact_leaf`; body
     redaction is paused by the owner, audit defect 26): a nested token in a captured
     body's leaf is BUG-0556's pinned residual R1.
-  - **Every caller passes its value whole** *(review round 1)*: no caller gates its call
-    on a `?` (the proxy's request target and URL headers, RU-7), and the project-record
-    redactor's pieces go through `redact_url` (`redact_for_record`, RU-9).
+  - **Every caller passes its value whole** *(review rounds 1-2)*: no caller gates its
+    call on a `?` (the proxy's request target and URL headers, RU-7); the proxy passes
+    every value of every URL-bearing header, duplicates included, and reads the request
+    target whitespace-tolerantly (FR-PROXY-11); the project-record redactor walks the
+    whole value before any whitespace split, then each piece (`redact_for_record`, RU-9,
+    N7: a URL holding a raw space).
   - Enforced by: `tests/test_redaction_nested.py` (a generated sweep over depth,
     encoding -- raw, single and double percent, `+`, `quote(safe="/")` single and
     double, `quote(safe="/:")` -- separator, nested shape -- a path, an absolute URL, a
     query string, a URL's userinfo -- credential names and identifier shapes, searched in
     the store, proxy history, the HTTP recorder, `safe_ref` and the project records; the
+    review rounds' neighbouring spellings through every URL redactor and the store; the
     benign list byte-identical; bounds and totality; an operation-count linearity
     oracle proven on quadratic variants).
 - **FR-CORE-508** *(one read-only opener; a SQLite file is touched only through

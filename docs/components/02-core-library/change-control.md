@@ -82,6 +82,46 @@ Newest first.
       the linearity test counts the walk's own steps and an offender test proves the
       oracle on three quadratic variants (PA-0135(3)); the R2 strict xfail becomes a
       passing test and R2's remainder (the spider's capture blank) is pinned.
+  - *(Review round 2, final, 2026-10-22, branch `lane/REDACTURL-r2` from f939778;
+    findings N1..N8, each the fix check's neighbouring paths; BUG-0556 "Review round
+    2".)*
+    - **A layer left encoded in any piece is decoded (N1).** `_UrlWalk.path` decodes a
+      nested URL's authority when it holds an escape, whatever raw delimiter sits
+      elsewhere in the value (`next=https://host%2Fcb%3Faccess_token%3D…?y=1` was kept:
+      the walk returned the head when no raw `/` followed the authority);
+      `_UrlWalk.route` walks a fragment's route -- the top-level fragment's included --
+      for its `;` path parameters and its segments still encoded (`#/r%3Ftoken%3D…`,
+      `#/r;jsessionid=…?x=1` were kept), its raw segments still the page's identity
+      (R3), a failure there redacting the route whole.
+    - **A pair list holding a URL is split into pairs first (N1):** `_url_shaped` is a
+      nested URL only when it starts with a scheme's `://`, `/` or `\`, or its first raw
+      `?`/`#` comes before any `=`, `&` or `;` (`"://" in text` sent `next=https://bob:
+      <pw>@host/x`, Werkzeug's `url_for` applied twice, and `a=1&token=…&next=https://…`
+      to the URL walk, which never split them).
+    - **A URL's userinfo anywhere in a nested value (N2):** `_UrlWalk.userinfo` scans the
+      value for every place a URL's authority starts (`_AUTHORITY_AT`: a special scheme
+      and any run of `/` or `\`, or two or more of them anywhere -- measured on Node 22's
+      WHATWG `URL`: `https:///`, `https:\\`, `/\`, `http:/` and a leading space all carry
+      userinfo) and replaces each `user[:password]@` (last `@` or `%40`) by
+      `PLACEHOLDER@`, as `redact_for_record`'s `_URL_USERINFO` and `safe_ref` already
+      did; it runs in `value` (every nested value, every layer), so a URL in a nested
+      URL's path segment or fragment route is judged; `_USERINFO_END` is gone.
+    - **`redact_for_record` walks the whole value before any whitespace split (N7):**
+      `redact_url(out)` after the userinfo patterns and before the cut, then each piece
+      as before (`#/r?next=/v?q=a b&token=…` kept its token, `b&token=…` walked alone).
+    - **The walk's C-level work is counted by its oracle (N8):** `WalkCounter`'s
+      docstring no longer claims every C-level call is linear in a step's text; the
+      oracle wraps them (tests below).
+    - Callers changed outside CORE: `tools/store_adapter.py` (CC-AUD-0059 round 2),
+      `greybox/run.py` (CC-FUZZ-0116, N4) and `proxy/redact.py` (CC-PROXY-0031, N6);
+      the round-1 FUZZ (`harness/auto.py`) and PROXY texts carry those numbers too.
+    - Tests (`tests/test_redaction_nested.py`): `_ROUND2` (19 spellings) through
+      every URL redactor, `page_url_is_clean`, `safe_ref` and `redact_for_record`, and
+      through `import_spider`; a test per caller finding; every test's pre-fix path
+      asserts the leak first (`_api`; the depth bound falls back to 12, the size bound
+      is set with `raising=False`; N5); the linearity oracle counts every C-level call
+      on one URL per part of the walk, both modes, proven on seven quadratic variants;
+      the R2 pin covers greybox too.
 - Impact (other components / project):
   - Every producer that calls `redact_url` now redacts nested credential names, `;`
     pairs, path parameters and query-shaped fragments: **PROXY** (flow history's URL,
@@ -122,6 +162,17 @@ Newest first.
     to `redact_url` (byte-identical when it holds no value). A form or captured request
     whose own query held a redacted value is now inconclusive (`UNBOUND`) where it sent
     the blank (FUZZ, below).
+  - *(Review round 2:)* over-redaction (fail closed, accepted): a nested value holding
+    `//` or a special scheme's `http:` (`https:`, `ws:`, `ftp:`, `file:`) followed by an
+    authority with an `@` (`q=a//b@c`) has that
+    userinfo replaced, as `_URL_USERINFO` already did in project records; a top-level
+    fragment route segment still percent-encoded that decodes to an identifier is now
+    redacted (its raw segments are not). The benign list stays byte-identical. A value
+    whose first raw delimiter is `=`, `&` or `;` is now split into pairs before any
+    `://` in it is walked (a value holding no secret comes back byte-identical either
+    way). Cost: the userinfo scan is one linear regex pass per nested value; measured
+    on the new oracle, at most 10.3 steps and 15.4 C-level characters per URL
+    character.
 - Deliverables:
   - [x] `_UrlWalk`, `_walk_url`, `value_holds_secret`, `stored_value`,
     `strip_secret_path_params`; `redact_url`, `redact_url_identifiers`,
@@ -139,6 +190,12 @@ Newest first.
     their entry texts handed over; RU-5's test; each test proven on c3a13f7 (RU-5 on
     7393c90); FR-CORE-537 and FR-CORE-32 amended in place; BUG-0556 "Review round 1"
     with the sweep by caller; PA-0556 items 4-6 and the doc texts amended — done
+  - [x] *(Review round 2)* N1, N2, N7 and N8's counter docstring in the owner; N3
+    (CC-AUD-0059), N4 (CC-FUZZ-0116), N6 (CC-PROXY-0031); N5 and N8 in the tests; each
+    test proven on f939778's product files (N5's on 7393c90's, N8's oracle against
+    f939778's oracle); FR-CORE-537, FR-CORE-32, FR-AUD-31, FR-FUZZ-67 and FR-PROXY-11
+    amended in place; BUG-0556 "Review round 2"; PA-0556 item 7 and the doc texts
+    amended — done
 - Effectiveness (assessed 2026-10-22): the six reported spellings stored their token
   before (measured by `scratchpad/lanes/REDACTURL/exp/repro.py` on 7393c90) and store
   none after; the new tests fail on the pre-fix product files in one invocation and pass
@@ -148,7 +205,17 @@ Newest first.
   passed, 2 xfailed, every failure an `AssertionError`), the headline test on
   7393c90's on its leak assertion (`r1_ru5_7393c90.log`), and all pass on the revision
   (the targeted run of 33 affected files: 2327 passed, 35 xfailed, `r1_targeted.log`);
-  the harness result is the orchestrator's at merge.
+  the harness result is the orchestrator's at merge. *(Review round 2:)* the round's 28
+  test cases fail on f939778's four product files on their own assertions in one
+  invocation and the rest of the file passes there (`r2_prefix.log`: 28 failed, 452
+  passed, 3 xfailed, every failure an `AssertionError`); every test of the file fails
+  on 7393c90's code on its own claim (`r2_n5_7393c90.log`); f939778's oracle passes the
+  check's three quadratic variants and the new one flags each (`r2_n8_proof.log`). The
+  targeted run of 66 files (`r2_targeted.log`): 3537 passed, 51 xfailed, 2 failed -- the
+  base-URL registry guard (round 1's `import_audit` keyword, fixed after the run:
+  CC-AUD-0059) and a writer-thread counter race in a PROXY test outside this lane
+  (root-caused and flagged, BUG-0556 "Review round 2"). The harness result is the
+  orchestrator's at merge.
 
 ### CC-CORE-0075 — The seam keeps its connections per identity and session generation (FR-CORE-509, BUG-0549) (2026-10-21)
 - Placement: pre-assigned to POOL24 (audit defect 24); CC-CORE-0073 and CC-CORE-0074 are

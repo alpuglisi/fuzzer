@@ -449,10 +449,16 @@ budget where a vulnerability is plausible.
     blank: `redact_url_identifiers(..., placeholder=True)`), and the point builder
     refuses such a point (FR-FUZZ-67: `UNBOUND`, never sent); R2 remains only for the
     spider capture writer's blank (owner CRAWL, pinned). `import_audit` stores a
-    finding's endpoint as `store_url(page, main)` (the spider's form of the page; another
-    origin kept) and passes its `target_identifier` and `html_context` through the owner
-    (`_audit_text`: the page URL, the page path and every query value `stored_value`
-    would not store, whole or cut as the legacy rules cut it).
+    finding's endpoint as `store_url` stores the page (another origin kept) and passes its
+    `target_identifier` and `html_context` through the owner (`_audit_text`: the page
+    URL, the page path and every query value `stored_value` would not store).
+    *(Review round 2, `CC-AUD-0059`:)* a query value is judged **whole** and replaced
+    wherever the text repeats it whole or any run of it 8 characters or longer, never by
+    the rules' cut lengths (a rule quotes a substring: `rule_serialized_tokens`); the
+    endpoint is the form this run's spider rows already hold the same page in (the
+    spider's absolute form for a page off its main origin, its path for one on it), else
+    `store_url(page, main)` with `base_url`'s origin or the first finding page's, so an
+    off-origin first finding no longer splits the main origin's pages.
   - `audit.engine.evaluate` writes each candidate's request fields through
     `core.reqctx.point_evidence` and stamps `identity_scope` and `context_id` (SP-57,
     FR-FUZZ-66). `InjectionPoint` carries `bindings` and `replay_refusal`.

@@ -83,7 +83,16 @@ that shares the store, never a mandatory pipeline (D5).
     `core.redaction.redact_url` finds (`;` pairs and path parameters, a query-shaped
     fragment, nested values, a nested URL's userinfo), with or without a query: the
     target and those headers are always passed to it whole (a `;jsessionid=` path
-    parameter in a URL with no query was kept);
+    parameter in a URL with no query was kept). *(Review round 2, `CC-PROXY-0031`:)*
+    **every value of every URL-bearing header**, duplicates included and rewritten in
+    place (order and every other line byte-exact): `Location`, `Content-Location`,
+    `Referer`, `Origin`, `Destination`, `X-Original-URL`, `X-Rewrite-URL`, `Ping-From`,
+    `Ping-To`, any other header whose value starts as a URL (a scheme's `://` or `/`),
+    each `<URI>` of `Link`, and `Refresh`'s URL as the HTML declarative-refresh steps
+    read it (`url=`, `url = `, quoted, or bare after the delay); the request target is
+    read whitespace-tolerantly (after the method and its run of spaces or tabs, up to
+    the run before a final `HTTP/` version), so a malformed request line is redacted
+    too;
   - form, JSON (any depth) and multipart (non-file) request and response bodies. *(CC-PROXY-0020,
     BUG-0090:)* a sensitive JSON key's **whole value** is replaced, whatever its type
     (scalar, list, object or nested), and plural names are sensitive

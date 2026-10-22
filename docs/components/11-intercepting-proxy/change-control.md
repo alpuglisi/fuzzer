@@ -3,6 +3,69 @@
 Component code: **PROXY**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PROXY-0031 — The request target and every URL-bearing header value pass the URL redactor, with or without a query (FR-PROXY-11, BUG-0556 review rounds 1-2) (2026-10-22)
+- Placement: lane REDACTURL (item GAP-VALUES); a caller of CC-CORE-0076's owner. Review
+  round 1 on branch `lane/REDACTURL-r1` from c3a13f7, review round 2 on
+  `lane/REDACTURL-r2` from f939778. The number is the coordinator's (assigned at round
+  2; the round-1 text was handed over unnumbered).
+- Change (`fuzzlab/proxy/redact.py` only):
+  - *(Review round 1.)* `redact` passed the request target, `Location`,
+    `Content-Location` and `Refresh`'s `url=` to `core.redaction.redact_url` only when
+    they held a `?`; now every one is passed whole. `redact_url` returns a URL holding
+    no value byte-identical, so a clean message is unchanged.
+  - *(Review round 2, N6.)* Four neighbouring paths in the same function, all older
+    than BUG-0556:
+    - **Duplicates:** the loop read each URL header's first value only
+      (`RawMessage.get`), and a changed one went through `with_header`, which replaced
+      every duplicate by it. Now every header line is read and a changed value is
+      rewritten in place (`_redact_header_value`), keeping the order and every other
+      line byte-exact; `_original_name` is gone.
+    - **Which headers:** `Referer` (a browser sends the full same-origin URL, so a
+      URL-rewritten app's session id came back in the next request's raw head), `Origin`
+      (a well-formed one holds no path: byte-identical), `Destination`, `X-Original-URL`,
+      `X-Rewrite-URL`, `Ping-From`, `Ping-To`, any other header whose value starts as a
+      URL (`_URL_VALUE`: a scheme's `://` or `/`), and each `<URI>` of `Link` join
+      `Location` and `Content-Location`.
+    - **`Refresh`:** read as the HTML shared declarative-refresh steps read it
+      (`_redact_refresh`: the delay, an optional `;` or `,`, an optional `url` `=` with
+      any spacing and case, then the URL, quoted or to the end); only `url=` without
+      spaces was read.
+    - **The request target:** `_target_span` reads it after the method and its run of
+      spaces or tabs, up to the run before a final `HTTP/` version (or the line's end);
+      `msg.target` (`split(b" ")[1]`) gave an empty target for a doubled space or a tab,
+      and cut a raw space's target short.
+  - Module docstring updated.
+- Impact (other components / project): proxy history's stored raw request and response
+  and their full-text index no longer keep a `;jsessionid=` (or any sensitively named)
+  value in a URL with no query (round 1), in a duplicate URL header, `Referer`, `Origin`,
+  `Link`, a custom URL header or a spaced `Refresh`, or in a malformed request line
+  (round 2), which `flow.url` already redacted. No schema change; the forwarded bytes
+  are untouched (only the persisted copy).
+- Risk (level; mitigation or accepted-risk justification): low. Cost: one `redact_url`
+  call per URL-bearing header value and per request target, which returns at once for
+  a URL with no `?`, `;` or `#`. A header whose value merely starts with `/` and is not a
+  URL is walked too; only a sensitively named value in it changes. Not covered: a URL
+  inside another structured header's grammar (a CSP `report-uri`, `Reporting-Endpoints`,
+  `Report-To`'s JSON) -- BUG-0556 residual R4, pinned by the strict xfail
+  `tests/test_redaction_nested.py::test_proxy_history_redacts_a_url_inside_a_structured_header`
+  -- and an obs-folded header continuation line (obsolete in HTTP/1.1, RFC 9112 §5.2).
+- Deliverables:
+  - [x] the `?` gates removed (round 1) — done
+  - [x] every value of every URL-bearing header, `Refresh` and `Link` parsing, the
+    whitespace-tolerant target (round 2) — done
+  - [x] FR-PROXY-11 amended in place (both rounds) — done
+  - [x] `tests/test_redaction_nested.py::test_proxy_history_redacts_a_path_parameter_in_a_message_with_no_query`
+    (fails on c3a13f7 on its own assertion) and
+    `::test_proxy_history_redacts_every_url_bearing_header_and_any_request_line` (fails
+    on f939778 on its own assertion); R4's strict xfail — done
+- Effectiveness (assessed 2026-10-22): the round-1 probe (`rev1probe/proxy_probe.py`)
+  found the canary in `body`, `flow_fts` and `flow_fts_content` on c3a13f7; on f939778
+  the round-2 test's messages (duplicates, `Referer`, `Origin`, `Link`, a custom header,
+  three `Refresh` spellings, a doubled space, a tab and a raw space in the request line,
+  a nested URL's userinfo in the target and `Location`) kept it in `redact()`'s output;
+  on the revision none does, in the output or in a `HistoryWriter` store, and a clean
+  message is byte-identical.
+
 ### CC-PROXY-0030 — The flow history is written off the proxy's event loop (BUG-0550, FR-PROXY-404) (2026-10-21)
 - Change:
   - **`proxy/history.py`:** `HistoryWriter.submit(rec)` (new) does bounded work on the
