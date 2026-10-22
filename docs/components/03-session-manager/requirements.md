@@ -390,7 +390,16 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     fetch and its submission sends the page's session-bound field on the rotated
     cookie (refused, the form's targets lost). Pinned by the strict xfail
     `tests/test_spider_session_material.py::test_a_selector_form_submitted_after_a_rotation_is_refused_or_carries_its_pages_material`
-    (BUG-0557, PA-0557(1)), with its control.
+    (BUG-0557, PA-0557(1)), with its control. *(Fix check of round 1.)* On the spider's
+    browser engine, a page the static fallback fetches (a download Chromium will not
+    render) is read on the manager's material, and its selector form is submitted
+    through `tools/spider.py::_isolated_submit`'s browser branch with the browser
+    context's cookies (owner CRAWL): after a rotation the manager adopted, the page's
+    session-bound field goes out on the start's id (refused, the page behind it lost).
+    Pinned by the strict xfail
+    `tests/test_spider_session_material.py::test_a_fallback_pages_selector_form_is_submitted_on_the_material_its_page_was_fetched_on`
+    (real browser; BUG-0557, PA-0557(1)), with its control
+    `tests/test_spider_session_material.py::test_the_browser_engines_fallback_page_form_is_accepted_when_the_check_rotates_nothing`.
   - Enforced by: `tests/test_session_material.py` (5 tests),
     `tests/test_replay_bindings.py::test_a_live_health_check_that_adopts_a_rotated_cookie_after_the_fetch_unbinds_the_send`,
     `::test_another_sends_policy_block_whose_check_adopts_a_rotation_unbinds_the_bound_send`,

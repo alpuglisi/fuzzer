@@ -134,6 +134,31 @@ Newest first.
     `_LINT`, `_NETNS` set; `r1_targeted.log`): 1371 passed, 33 xfailed (the B2 pin among
     them), 0 failed, 0 skipped. The harness (`scripts/verify_change.py`) is the
     orchestrator's, at merge; live lab run pending.
+  - Fix check of B2 (the browser engine's instance; branch `lane/SESSROT-r1` on
+    e5d33e4; no new number): the check found a neighbouring CRAWL instance of
+    PA-0557(1) round 1 had not pinned -- on the browser engine, a page the static
+    fallback fetches on the manager's material has its selector form submitted through
+    `tools/spider.py::_isolated_submit`'s Playwright branch with the browser context's
+    cookies, so after an adopted rotation (FR-SESS-24's stated gap) its `form_key` goes
+    out on the start's id (403; the page behind it lost). Change: test-only,
+    `tests/test_spider_session_material.py` (`_FormKeySite(form_at="/p")` serves the
+    form page as an attachment; `pick_keys` records each submitted `form_key`): the
+    strict xfail
+    `test_a_fallback_pages_selector_form_is_submitted_on_the_material_its_page_was_fetched_on`
+    (real Chromium, `FUZZLAB_REQUIRE_BROWSER`; `raises=AssertionError`; reason naming
+    BUG-0557, PA-0557(1), owner CRAWL and `_isolated_submit`'s browser branch; premises
+    by `pytest.fail`) and its plain control
+    `test_the_browser_engines_fallback_page_form_is_accepted_when_the_check_rotates_nothing`.
+    `tools/spider.py` unchanged (lane BROWSERALIAS's file). Recorded in BUG-0557's
+    "Fix check of round 1" (it corrects the sweep's "none of them binds a page value
+    through the seam") and FR-SESS-24's stated gaps. Deliverable:
+    `_isolated_submit`'s browser branch bound to its page's material (owner CRAWL) --
+    todo, pinned. Effectiveness: plain Python, no pytest runner
+    (`scratchpad/lanes/SESSROT/r1_b2b_proof.log`): the control passed; the pin failed at
+    its own assertion (`('sid-1-...', False)` carrying the `form_key` of `sid-r1-...`).
+    One pytest invocation of the file (`FUZZLAB_REQUIRE_BROWSER=1`;
+    `r1_b2b_pytest.log`): "2 passed, 2 xfailed in 8.78s" (both controls passed, both
+    pins xfailed; 0 failed, 0 skipped).
 
 ### CC-SESS-0029 — A forbidden answer is never, by itself, a lost session (FR-SESS-23, BUG-0533) (2026-10-20)
 - Placement: AU-SESS403 (audit defect 6); design record

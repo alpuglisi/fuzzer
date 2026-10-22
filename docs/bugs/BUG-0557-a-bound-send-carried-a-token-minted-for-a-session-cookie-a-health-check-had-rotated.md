@@ -282,3 +282,54 @@ record holds an entry for each (doc_texts.md).
   at `frame.applied == fetched` (generation 2 != 1). The same invocation ran the B2 pin
   with `--runxfail`: it fails at its own assertion ("a submission carried the page's
   form_key on ['sid-r1-...']"), and its control passed.
+
+### Fix check of round 1 (SESSROT-B2): the browser engine's instance
+- **What it was.** The fix check of B2 found a neighbouring CRAWL instance of
+  PA-0557(1), not pinned by round 1. On the spider's browser engine, a page Chromium
+  will not render (a download, "Download is starting") is fetched by the static fallback
+  (`_fetch_rendered` -> `_fetch_static`) on the seam, so on the session manager's
+  material, while its selector form is submitted through
+  `tools/spider.py::_isolated_submit`'s Playwright branch, which carries the browser
+  context's cookies (`context.storage_state()`). After a rotation the manager adopted
+  (FR-SESS-24: a browser context is never told of it; `_readopt_session` restores the
+  start's cookies), the page's session-bound field is minted for the rotated id and
+  submitted on the start's id: refused (403), and the crawl loses the page behind the
+  form. Round 1's pin covers the static engine's `_seam_submit` only.
+- **Measured** (the checker's measurement, reproduced with the real code in plain
+  Python, no pytest runner; record `scratchpad/lanes/SESSROT/r1_b2b_proof.log`, script
+  `r1_b2b_proof.py`, `FUZZLAB_REQUIRE_BROWSER=1`): real Chromium, the loopback app
+  serving its form page `/p` as an attachment, one LIVE `check_health` of the real
+  manager that rotates the id just before `/p`'s static fetch. `/p` fetched by the
+  browser on `sid-1` (downloaded), then by the fallback on `sid-r1`; the submission
+  `('sid-1', accepted=False)` carrying the `form_key` of `sid-r1`; 4 pages crawled, no
+  `/secret`. The control (a check that rotates nothing): `('sid-1', True)`, `/secret`
+  crawled.
+- **Correction to the sweep above.** "Consumers that hold their own copy of the
+  material (a disco browser context, the spider's browser context, greybox's header)
+  ... none of them binds a page value through the seam" is wrong for the spider's
+  browser context: on the browser engine it submits a value its static fallback read
+  through the seam.
+- **Why round 1 missed it.** Round 1 pinned the function the sweep named
+  (`_seam_submit`), not every path that submits a selector form:
+  `formnav.enumerate_form` is given `_isolated_submit`, which dispatches by engine, and
+  the browser branch is fed seam-fetched pages by the fallback. PA-0545(1) already asks
+  an identity sweep to list each engine, each fallback and each submission, measured;
+  PA-0557(3) lists the material's writers, and here a value read on one copy of the
+  material (the manager's) is sent on another (the browser context's). No new rule; the
+  lane's failure record holds the entry.
+- **Disposition (PA-0531(4)): pinned for its owner, CRAWL**, in
+  `tests/test_spider_session_material.py` (no product change; `tools/spider.py` is lane
+  BROWSERALIAS's): the strict xfail
+  `test_a_fallback_pages_selector_form_is_submitted_on_the_material_its_page_was_fetched_on`
+  (`raises=AssertionError`; its reason names BUG-0557, PA-0557(1), owner CRAWL and
+  `_isolated_submit`'s browser branch; real browser, `FUZZLAB_REQUIRE_BROWSER` applies;
+  its premises -- one LIVE check that rotated, `/p` fetched by the fallback on the
+  rotated id -- fail with `pytest.fail`, never as the expected `AssertionError`) and its
+  plain control
+  `test_the_browser_engines_fallback_page_form_is_accepted_when_the_check_rotates_nothing`.
+  The plain-Python proof: the control passes; the pin fails at its stated assertion
+  (`assert stale == []`, "a submission carried the page's form_key on another id:
+  [('sid-1-...', 'form_key of sid-r1-...')]"). One pytest invocation of the file
+  (`FUZZLAB_REQUIRE_BROWSER=1`; record `scratchpad/lanes/SESSROT/r1_b2b_pytest.log`):
+  "2 passed, 2 xfailed in 8.78s" (both controls passed, both pins xfailed; 0 failed,
+  0 skipped).
