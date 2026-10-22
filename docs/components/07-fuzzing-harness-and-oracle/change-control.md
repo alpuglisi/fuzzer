@@ -3,6 +3,41 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0115 — A bound send is refused before it is sent when its session material is not its page fetch's (FR-FUZZ-67 amended; BUG-0557) (2026-10-22)
+- Placement: item GAP-SESS, lane SESSROT (branch `lane/SESSROT` on 7393c90): BUG-0544's
+  residual N-R3-2, owner FUZZ with SESS. Numbers pre-assigned (see CC-SESS-0030).
+- Change: `fuzzlab/tools/probesender.py`.
+  - `_FetchRoute` gains `material`: the `AppliedMaterial` the page fetch's `prepare`
+    applied (FR-SESS-24), None without a session. `SeamProbeSender.fetch` dispatches its
+    GET inside a record-only `material_frame()`.
+  - `SeamProbeSender._send_on`: a send carrying a `_FetchRoute` is dispatched inside
+    `material_frame(expect=fetched.material)`; `SessionMaterialChanged` becomes
+    `PrerequisiteUnavailable` ("the bound send's session material (its generation or its
+    cookies) is not the one its page was fetched on: refused before it was sent"), so
+    `UNBOUND`, never a negative. The route, identity and loss checks before it are
+    unchanged; `_on_copy` still verifies a copy's re-login on a refused send. The
+    after-send generation check stays as the fallback for a session addon that keeps no
+    frame (a test double).
+  - Docstrings of `_FetchRoute` and `fetch` state the material.
+- Impact (other components / project): SESS (CC-SESS-0030's frame). The tests'
+  `_CopySession` double keeps the after-send check (unchanged test). FR-FUZZ-67's
+  stated residuals "a re-login's send has gone out before it is refused" and N-R3-2 are
+  closed. No store or wire contract change.
+- Risk (low): the frame is scoped to the one bound dispatch; a PRG follow-up and every
+  unbound send open none.
+- Deliverables:
+  - [x] `_FetchRoute.material`, the frames in `fetch` and `_send_on` -- done
+  - [x] tests: the N-R3-2 pin a plain test (now also asserting no POST);
+    `test_another_sends_policy_block_whose_check_adopts_a_rotation_unbinds_the_bound_send`
+    (N1); `test_a_pauses_live_recheck_that_adopts_a_rotation_unbinds_the_bound_send`
+    (N3); `test_a_bound_send_on_a_real_copy_relogged_in_after_its_fetch_is_never_sent`;
+    `test_a_bound_send_on_a_session_relogged_in_after_its_fetch_is_unbound` amended (no
+    POST, where it asserted the residual's one) -- done
+  - [x] FR-FUZZ-67 amended in place -- done
+- Effectiveness (assessed 2026-10-22): each test fails on 7393c90 with the POST on the
+  wire (`('POST', '/do', 's6')` for the pin) and passes on this change; live lab run
+  pending.
+
 ### CC-FUZZ-0114 — `SeamProbeSender._dispatch` docstring: the transport never re-sends (BUG-0549 review round 1) (2026-10-21)
 - Change: docstring only, `fuzzlab/tools/probesender.py::SeamProbeSender._dispatch`: "it never re-sends: each request has a fresh connection" becomes "it never re-sends, BUG-0147, and neither does its transport, FR-CORE-509".
 - Impact (other components / project): none; FR-FUZZ-61 ("never re-sends, so at most one try per dispatch") holds again since CC-CORE-0075's round 1 removed the transport's resend.

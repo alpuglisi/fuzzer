@@ -1,7 +1,7 @@
 # Session Manager — Requirement Specification
 
 Component code: **SESS** · Status: `[built; live validation + resume pending]` (Phase 1)
-· Last updated: 2026-10-20
+· Last updated: 2026-10-22
 
 Related: `ARCHITECTURE.md` #3; `DECISIONS_AND_ROADMAP.md` (D3, D10, D12, D13);
 `./change-control.md`.
@@ -32,7 +32,16 @@ data. Shared by all tools; a hard dependency for external validation (D10).
   (e.g. a CSRF `user_token`, the submit button's `name=value`, a select's default)
   through by re-fetching the form immediately before submit (fresh, never cached),
   map the username/password fields, and submit the host's credentials. The body is
-  serialised per FR-SESS-14. (D13)
+  serialised per FR-SESS-14. (D13) *(Amended CC-SESS-0030, BUG-0558:)* the handshake
+  is a target exchange: its fetcher (`_requests_fetch_factory`, one `requests` session
+  per login with its own jar) is SP-60-bounded where it is made
+  (`bodyread.bound`: wire and decoded ceilings, a deadline of four 15 s timeouts, pools
+  that keep a connection only after an exactly framed answer, FR-CORE-509), and the
+  credentials POST goes on a connection of its own, closed after it, sharing the
+  login's jar. An incomplete or failed answer (`bodyread.BodyIncomplete`, any
+  `requests.RequestException`) during discovery is a failed fetch that ends the login
+  attempt as a transport failure: never "no login form here", never charged to the
+  re-auth cap.
 - **FR-SESS-4 (session-credential detection)** Detect what the login response
   establishes and reuse it: `Set-Cookie` → session cookie; a token/JWT in a JSON
   body → `Authorization: Bearer` (read `exp` locally to refresh proactively); a
@@ -233,7 +242,10 @@ data. Shared by all tools; a hard dependency for external validation (D10).
       refusal is matched; **lost** for a loss shape or the resource's recorded refusal
       (status or body); **live** for any other 2xx; **inconclusive** otherwise.
     - **Cookies.** A live answer's rotated value of one of the session's own cookies is
-      adopted.
+      adopted. *(Amended CC-SESS-0030, FR-SESS-24, BUG-0557:)* in one assignment of the
+      state's cookies (a `prepare` reads the old material or the new, never a mix), in
+      the same generation; it is a change of the session's material, which a send
+      bound to its setup request's material is refused on (FR-SESS-24).
     - **Single flight, the cover, compare-and-set.** Single flight per (host,
       identity), the verdict recorded before the lock is released. A live verdict
       covers a signal only when the signal was **seen before its GET was sent** (a
@@ -330,6 +342,41 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     strict-xfail pin), `tests/test_core_comparability.py::test_no_module_classifies_a_throttle_or_refusal_but_the_owner`.
     Every test but the pin fails against a named revert of the implementation
     (DRAFT-AU-SESS403 §13).
+- **FR-SESS-24 (the session material a send carries, CC-SESS-0030, BUG-0557; SP-75)**
+  - **The material.** What `prepare` applies to a request: the state's generation and
+    every cookie and header it carries, names and values. It is identified by
+    `AppliedMaterial` -- the generation and an HMAC-SHA256 under a per-process random
+    key (never stored or logged) over each name and value, length-prefixed -- so it
+    holds no value. An install (a login, an `adopt`, an isolated copy's login) and an
+    in-place change (a rotation adopted by a live health check, FR-SESS-23) both change
+    it; a new generation with identical values is other material.
+  - **The frame** (`material_frame(*, expect=...)`, the one owner). Opened by a sender
+    around one `client.send` on its thread. The first `prepare` inside it, of any
+    `SessionManager` (the run's or an isolated copy's), settles it: it records the
+    material it applies (`frame.applied`), or None when it applies no session
+    (anonymous, a host outside its scope, another origin, FR-SESS-20). Later
+    `prepare`s on the thread inside the same frame neither record nor are checked.
+  - **The check, before anything is applied.** Given `expect` (a setup request's
+    `frame.applied`; None: it carried no session), `prepare` compares the material it
+    would apply -- after any login, pause re-check or rotation its own way took -- and
+    raises `SessionMaterialChanged` (a `SessionAuthError` naming no value) when they
+    differ: no header is applied, no generation recorded, nothing is sent, and an
+    out-of-origin send is not counted. One snapshot of the state's cookies and headers
+    is digested and applied, so a rotation another thread adopts meanwhile is the next
+    send's.
+  - **Consumers:** the seam's page fetch and bound send (FR-FUZZ-67). A generation's
+    meaning and its consumers (FR-CORE-509's pool key, disco's execution key, PRG,
+    isolation) are unchanged.
+  - **Stated gaps:** a frame is per thread and per send; a session addon that is not a
+    `SessionManager` keeps no frame (the probe sender then falls back to its after-send
+    generation check). Consumers holding their own copy of the material (a browser
+    context, greybox's header) are not told of an adopted rotation.
+  - Enforced by: `tests/test_session_material.py` (5 tests),
+    `tests/test_replay_bindings.py::test_a_live_health_check_that_adopts_a_rotated_cookie_after_the_fetch_unbinds_the_send`,
+    `::test_another_sends_policy_block_whose_check_adopts_a_rotation_unbinds_the_bound_send`,
+    `::test_a_pauses_live_recheck_that_adopts_a_rotation_unbinds_the_bound_send`,
+    `::test_a_bound_send_on_a_real_copy_relogged_in_after_its_fetch_is_never_sent`,
+    `::test_a_bound_send_on_a_session_relogged_in_after_its_fetch_is_unbound`.
 - **FR-SESS-20 (origin-scoped sessions, CC-SESS-0023, BUG-0134; design Revision 2,
   O1-O13; review rounds 1-2, R1-R9, T1-T6)**
   - **Origins (O1).** `SessionState.origins` is a set of canonical origins
@@ -687,7 +734,10 @@ data. Shared by all tools; a hard dependency for external validation (D10).
 
 ## 5. Interfaces and data contracts
 `prepare`/`observe`/`ensure` API resolved by host, the session sent by origin
-(`SessionState.origins`, FR-SESS-20); attaches as a proxy addon so
+(`SessionState.origins`, FR-SESS-20); `material_frame(*, expect=...)` around one send
+records the session material its `prepare` applied and refuses a send whose material
+changed (`AppliedMaterial`, `SessionMaterialChanged`; FR-SESS-24, SP-75); attaches as a
+proxy addon so
 hand-driven traffic is also handled. Obtains credentials from the credential store
 keyed by host (D12); writes only non-secret, redacted session state to the store.
 Internally, the detected mechanism maps to an auth handler (cookie/form,

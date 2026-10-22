@@ -806,8 +806,10 @@ def test_a_bound_send_on_a_session_relogged_in_after_its_fetch_is_unbound():
     """Review R3-2, the generation half, on the real `SessionManager`: the page is
     fetched on a live session (its answer shows no loss); before the bound send, another
     send sees the session lost, so the bound send's ``prepare`` logs in again and applies
-    a new generation. That send's answer (the old id's token on the new id: 403) is
-    never read as a negative: the test is unbound."""
+    a new generation. At 7393c90 that send went out (the old id's token on the new id:
+    403) and only its answer was left unread (a stated residual); since BUG-0557 its own
+    ``prepare`` refuses the new session material before anything is sent: no POST, and
+    the test is unbound."""
     from fuzzlab.core.http import Request
     from fuzzlab.oracle.oracle import UNBOUND, Oracle
     from fuzzlab.oracle.strategies import ReflectedXssStrategy
@@ -831,29 +833,21 @@ def test_a_bound_send_on_a_session_relogged_in_after_its_fetch_is_unbound():
     fetched = app.seen[before]
     posts = [r for r in app.seen[before:] if r[:2] == ("POST", "/do")]
     assert fetched[:2] == ("GET", "/form")
-    # the stated residual: `prepare` runs inside the client's send, so this one send has
-    # gone out (on the new id) before its generation is known; its answer is not read
-    assert len(posts) == 1 and posts[0][2] != fetched[2]
+    assert any(r[:2] == ("POST", "/login") for r in app.seen[before:])   # logged in again
+    assert posts == []                       # BUG-0557: refused before it was sent
     assert verdict is None and unsure is not None and unsure.mechanism == UNBOUND
     assert "generation" in unsure.evidence["reason"]
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG-0544 residual N-R3-2 (after the final round, 8fee220): a health check that "
-    "answers LIVE adopts a rotated session cookie in place (`session.manager."
-    "_adopt_rotation`) in the same generation, and `_FetchRoute` compares only route, "
-    "identity, generation and loss, so the bound send carries the old cookie's token on "
-    "the new cookie and its 403 is read as a negative; owned by FUZZ with SESS (an "
-    "FR-FUZZ-67 follow-up: record the session material the fetch carried, or start a "
-    "generation on a rotation)"))
 def test_a_live_health_check_that_adopts_a_rotated_cookie_after_the_fetch_unbinds_the_send():
-    """Residual N-R3-2, on the real `SessionManager`: the page is fetched on a live
-    session; before the bound send, a health check (`verify_live`, which `_verify_main`
-    runs after any copy login or re-login; a policy block's `check_health` and a pause's
-    re-check do the same) answers LIVE and the app rotates its id on it. The manager
-    adopts the new id in the same generation, so the bound send carries the token minted
-    for the old id on the new one. That answer (403) must not be read as a negative:
-    the test is unbound."""
+    """BUG-0544 residual N-R3-2 (BUG-0557), on the real `SessionManager`: the page is
+    fetched on a live session; before the bound send, a health check (`verify_live`,
+    which `_verify_main` runs after any copy login or re-login) answers LIVE and the app
+    rotates its id on it. The manager adopts the new id in the same generation, so at
+    7393c90 the bound send carried the token minted for the old id on the new one and
+    its 403 was read as a negative (pinned by a strict xfail). Now the send's own
+    ``prepare`` sees other session material than its fetch's and refuses it before
+    anything is sent: no POST, and the test is unbound."""
     from fuzzlab.oracle.oracle import UNBOUND, Oracle
     from fuzzlab.oracle.strategies import ReflectedXssStrategy
     app = _PhpLikeApp()
@@ -876,7 +870,9 @@ def test_a_live_health_check_that_adopts_a_rotated_cookie_after_the_fetch_unbind
     fetched = app.seen[before]
     assert fetched[:2] == ("GET", "/form")
     assert ("GET", "/", fetched[2]) in app.seen[before:]           # the live check
+    assert [r for r in app.seen[before:] if r[:2] == ("POST", "/do")] == []
     assert verdict is None and unsure is not None and unsure.mechanism == UNBOUND
+    assert "session material" in unsure.evidence["reason"]
 
 
 # --- the source page never stores, nor puts on the wire, a target's value (review B1) ---
@@ -1274,3 +1270,182 @@ def test_a_source_page_on_another_origin_is_never_bound(tmp_path):
         _FormBoundSender(site, cand).send("http://h/app/do.php", "q", "M", method="POST",
                                           location="body")
     assert site.sends("/app/do.php") == []
+
+
+# --- the bound send carries its fetch's session material, or is never sent (BUG-0557) -----
+class _RotatingPhpApp(_PhpLikeApp):
+    """`_PhpLikeApp` in N-R3-2's second layout (BUG-0557): the login box is at
+    ``/login``, and ``GET /`` redirects an id that is not logged in there, so ``/`` is
+    the session's stable protected resource (the first layout has none: its login page
+    is ``/``, an auth endpoint). ``GET /waf`` is a policy block (403) for any id, and
+    while ``busy_root`` is positive each ``GET /`` answers 503 with ``Retry-After: 1``
+    (one per count) first."""
+
+    def __init__(self):
+        super().__init__()
+        self.busy_root = 0
+        app, base = self, self.server.RequestHandlerClass
+        box = ("<html><body><form method=post action='/login'><input name=username>"
+               "<input type=password name=password><input type=submit value=Login>"
+               "</form></body></html>")
+
+        class Handler(base):
+            def do_GET(self):  # noqa: N802 - http.server API
+                path = urlsplit(self.path).path
+                if path not in ("/waf", "/login") and not (path == "/" and (
+                        app.busy_root > 0 or app.users.get(self._sid()) is None)):
+                    return super().do_GET()
+                app.seen.append(("GET", path, self._sid()))
+                if path == "/waf":
+                    return self._answer(403, "<html>blocked</html>")
+                if path == "/" and app.busy_root > 0:
+                    app.busy_root -= 1
+                    return self._answer(503, "busy", [("Retry-After", "1")])
+                _sid, _user, cookie = self._session()
+                if path == "/":
+                    return self._answer(302, "", [("Location", "/login"), *cookie])
+                return self._answer(200, box, cookie)
+        self.server.RequestHandlerClass = Handler
+
+
+class _VirtualClock:
+    """The manager's injectable clock and sleep: a pause is waited out at once."""
+
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.now += seconds
+
+
+def _php_seam_with(app, *, isolated=False, **manager_kw):
+    """`_php_seam` with the manager's keywords, and isolated copies on their own clients
+    when ``isolated``."""
+    from fuzzlab.core.budget import RequestBudget
+    from fuzzlab.core.credentials import CredentialStore
+    from fuzzlab.core.http import HttpClient
+    from fuzzlab.session.manager import SessionManager
+    from fuzzlab.tools.probesender import SeamProbeSender
+    from tests.test_credentials import FakeBackend
+    creds = CredentialStore(backend=FakeBackend())
+    creds.set("127.0.0.1", "alice", "alice", "pw-0544")
+    mgr = SessionManager(creds, scope_hosts=["127.0.0.1"], browser_login=False,
+                         **manager_kw)
+    client = HttpClient(RequestBudget(500), ["127.0.0.1"], session=mgr, timeout=5)
+    copies = (lambda m: HttpClient(RequestBudget(500), ["127.0.0.1"], session=m,
+                                   timeout=5)) if isolated else None
+    return SeamProbeSender(client, "alice", manager=mgr, base_url=app.base + "/",
+                           isolated_client=copies), client
+
+
+def _run_between(app, seam, between):
+    """The control run, then a run whose page fetch is followed by ``between()``:
+    ``(control, verdict, unsure, the requests after the control)``."""
+    from fuzzlab.oracle.oracle import Oracle
+    from fuzzlab.oracle.strategies import ReflectedXssStrategy
+    sender = _BetweenFetchAndSend(seam)
+    cand = _php_candidate(app)
+    oracle = Oracle(strategies=[ReflectedXssStrategy()])
+    control, _ = oracle.confirm_outcome(cand, sender)
+    before = len(app.seen)
+    sender.between = between
+    verdict, unsure = oracle.confirm_outcome(cand, sender)
+    return control, verdict, unsure, app.seen[before:]
+
+
+def _refused_before_it_was_sent(control, verdict, unsure, after):
+    from fuzzlab.oracle.oracle import UNBOUND
+    assert control is not None and control.confirmed
+    assert after[0][:2] == ("GET", "/form")
+    assert [r for r in after if r[:2] == ("POST", "/do")] == []      # nothing sent
+    assert verdict is None and unsure is not None and unsure.mechanism == UNBOUND
+    assert "session material" in unsure.evidence["reason"]
+
+
+def test_another_sends_policy_block_whose_check_adopts_a_rotation_unbinds_the_bound_send():
+    """N-R3-2's N1 (BUG-0557): between the page fetch and the bound send, another send of
+    the identity meets a policy block (403), so the manager checks the session's health;
+    the check answers LIVE and the app rotates its id on it, adopted in place in the same
+    generation. At 7393c90 the bound send carried the old id's token on the new id and
+    its 403 was a negative. Now its own ``prepare`` refuses the changed material before
+    anything is sent."""
+    from fuzzlab.core.http import Request
+    app = _RotatingPhpApp()
+    try:
+        seam, client = _php_seam_with(app)
+
+        def a_policy_blocks_check_rotates():
+            app.rotate_on_root = True
+            client.send(Request("GET", app.base + "/waf", identity="alice"))
+        outcome = _run_between(app, seam, a_policy_blocks_check_rotates)
+        sid = seam._manager._state[("127.0.0.1", "alice")].cookies["sid"]
+    finally:
+        app.close()
+    after = outcome[3]
+    fetched = after[0][2]
+    assert after[1:3] == [("GET", "/waf", fetched), ("GET", "/", fetched)]
+    assert sid != fetched and not app.rotate_on_root            # rotated and adopted
+    _refused_before_it_was_sent(*outcome)
+
+
+def test_a_pauses_live_recheck_that_adopts_a_rotation_unbinds_the_bound_send():
+    """N-R3-2's N3 (BUG-0557): another send's policy block starts a health check that
+    answers 503, so the identity is paused; the bound send's own ``prepare`` waits the
+    pause out (a virtual clock), checks again, gets LIVE and adopts the id the app
+    rotated on that check. FR-FUZZ-67 covered that re-check only when it found a loss.
+    Now the changed material is refused before anything is sent."""
+    from fuzzlab.core.http import Request
+    clock = _VirtualClock()
+    app = _RotatingPhpApp()
+    try:
+        seam, client = _php_seam_with(app, clock=clock, sleep=clock.sleep)
+
+        def a_pause_then_a_rotation():
+            app.busy_root, app.rotate_on_root = 1, True
+            client.send(Request("GET", app.base + "/waf", identity="alice"))
+        outcome = _run_between(app, seam, a_pause_then_a_rotation)
+        report = seam._manager.health_report()
+    finally:
+        app.close()
+    after = outcome[3]
+    fetched = after[0][2]
+    assert after[1:4] == [("GET", "/waf", fetched), ("GET", "/", fetched),
+                          ("GET", "/", fetched)]                # 503, then the re-check
+    assert not app.rotate_on_root and clock.now > 1000.0        # waited, rotated
+    assert report["127.0.0.1/alice"].get("pauses") == 1 and report["paused_s"] > 0
+    _refused_before_it_was_sent(*outcome)
+
+
+def test_a_bound_send_on_a_real_copy_relogged_in_after_its_fetch_is_never_sent():
+    """An isolated copy's re-login (BUG-0557), on the real `SessionManager` and its
+    copy: the page is fetched on the copy's session; the app then logs that id out and
+    the copy sees the loss, so the bound send's ``prepare`` logs the copy in again. At
+    7393c90 that send went out on the new copy id with the old id's token, and only its
+    answer was left unread. Now it is refused before it is sent; the copy's re-login is
+    still verified against the run's session."""
+    from fuzzlab.core.http import Request
+    app = _RotatingPhpApp()
+    try:
+        seam, _client = _php_seam_with(app, isolated=True)
+        seam.isolate([app.base + "/do"])
+
+        def lose_the_copy():
+            (copy,) = seam._copies.values()
+            sid = app.seen[-1][2]                       # the page fetch's: the copy's id
+            with app._lock:
+                app.users[sid] = None                   # logged out, the id kept
+            copy.client.send(Request("GET", app.base + "/form", identity=copy.label))
+        outcome = _run_between(app, seam, lose_the_copy)
+        (copy,) = seam._copies.values()
+        attempts = copy.manager.login_attempts()
+        report = seam.isolation_report()
+    finally:
+        app.close()
+    after = outcome[3]
+    assert attempts == 2                                # it logged in again for the send
+    assert any(r[:2] == ("POST", "/login") for r in after)
+    assert report["verifications"] >= 2                 # the re-login was verified
+    _refused_before_it_was_sent(*outcome)

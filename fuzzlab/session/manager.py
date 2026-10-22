@@ -23,9 +23,13 @@ never a silent unauthenticated run.
 from __future__ import annotations
 
 import base64
+import contextlib
 import dataclasses
+import hashlib
+import hmac
 import json
 import logging
+import secrets
 import threading
 import time
 from collections import Counter
@@ -157,6 +161,105 @@ class SessionHealthUnknown(SessionAuthError):
 class IsolatedHealthUnknown(IsolatedLoginFailed):
     """An isolated copy's session state stayed unknown (FR-SESS-23): FR-SESS-17's one
     class a sender catches, so the copy is released and its path goes anonymous."""
+
+
+class SessionMaterialChanged(SessionAuthError):
+    """A send bound to the session material its setup request carried
+    (`material_frame(expect=...)`) found other material at its own `prepare`: a
+    re-login, an isolated copy's re-login or a rotated cookie a health check adopted in
+    between (FR-SESS-24, BUG-0557). Raised before anything is applied to the request, so
+    nothing is sent; its sender makes the test unbound, never a negative. It names no
+    value."""
+
+
+# --- the session material a send carries (FR-SESS-24, SP-75, BUG-0557) --------------------
+#: The key of the material digest: random per process and never stored or logged, so a
+#: digest cannot be tested against a guessed cookie value anywhere else.
+_MATERIAL_KEY = secrets.token_bytes(32)
+#: `material_frame`'s "no expectation": record what `prepare` applied, check nothing.
+_RECORD_ONLY = object()
+#: The material frame open on this thread (`material_frame`), read by `prepare`.
+_FRAMES = threading.local()
+
+
+@dataclass(frozen=True)
+class AppliedMaterial:
+    """The session material one `prepare` applied to a request (FR-SESS-24): the state's
+    generation and a keyed digest of every cookie and header the state carries, names
+    and values. A cookie the state adopts in place (a rotation), a re-login or another
+    state changes it; the digest holds no value (`_MATERIAL_KEY`)."""
+
+    generation: int | None
+    digest: str
+
+
+class MaterialFrame:
+    """One send's session material, opened by `material_frame` around exactly one
+    ``client.send``: ``expect`` (the material the send must carry, `_RECORD_ONLY` to
+    record only; None: no session), ``applied`` (what its `prepare` applied: an
+    `AppliedMaterial`, or None when it applied no session) and ``prepared`` (whether a
+    `prepare` settled it; only the first one does)."""
+
+    __slots__ = ("expect", "applied", "prepared")
+
+    def __init__(self, expect):
+        self.expect = expect
+        self.applied: AppliedMaterial | None = None
+        self.prepared = False
+
+
+@contextlib.contextmanager
+def material_frame(*, expect=_RECORD_ONLY):
+    """The one owner of "the session material a send carries" (SP-75, FR-SESS-24,
+    BUG-0557). Around one ``client.send`` on this thread: the first `prepare` inside it
+    (of any `SessionManager`: the run's or an isolated copy's) records the material it
+    applies (``frame.applied``), and, given ``expect``, compares the material it would
+    apply with it **before applying anything**: any change -- another generation, or the
+    same generation's cookies or headers changed in place by an adopted rotation --
+    raises `SessionMaterialChanged`, so nothing is sent. ``expect=None`` is a setup
+    request that carried no session (anonymous, out of origin). The material is a
+    generation and a keyed digest, never a value. Yields the `MaterialFrame`."""
+    frame = MaterialFrame(expect)
+    outer = getattr(_FRAMES, "frame", None)
+    _FRAMES.frame = frame
+    try:
+        yield frame
+    finally:
+        _FRAMES.frame = outer
+
+
+def _open_frame() -> MaterialFrame | None:
+    """This thread's open material frame, unless a `prepare` already settled it (a frame
+    is one send's)."""
+    frame = getattr(_FRAMES, "frame", None)
+    return None if frame is None or frame.prepared else frame
+
+
+def _material(generation: int | None, cookies: dict, headers: dict) -> AppliedMaterial:
+    """The material of a state's ``cookies`` and ``headers`` (one snapshot of each) and
+    its ``generation``: an HMAC-SHA256 under `_MATERIAL_KEY` over every name and value,
+    each length-prefixed. Never a value."""
+    mac = hmac.new(_MATERIAL_KEY, digestmod=hashlib.sha256)
+    for kind, items in ((b"c", cookies), (b"h", headers)):
+        for name, value in sorted((str(k), str(v)) for k, v in (items or {}).items()):
+            for part in (name, value):
+                data = part.encode("utf-8", "surrogatepass")
+                mac.update(kind + len(data).to_bytes(8, "big") + data)
+    return AppliedMaterial(generation, mac.hexdigest())
+
+
+def _settle(frame: MaterialFrame | None, material: AppliedMaterial | None) -> None:
+    """`prepare`'s check of its send's frame, before it applies anything: record
+    ``material`` (None: no session applied) and refuse a send whose expectation differs
+    (`SessionMaterialChanged`)."""
+    if frame is None:
+        return
+    frame.prepared, frame.applied = True, material
+    if frame.expect is not _RECORD_ONLY and frame.expect != material:
+        raise SessionMaterialChanged(
+            "refusing the send: the session material it would carry is not the one its "
+            "setup request carried (a re-login, or a session cookie rotated in between; "
+            "FR-SESS-24)")
 
 
 # --- session health (FR-SESS-23, CC-SESS-0029, BUG-0533) ----------------------------------
@@ -346,10 +449,15 @@ def _plain_fetch_factory() -> Callable[[], Fetcher]:
 def _adopt_rotation(state: SessionState, jar) -> None:
     """A live answer that set a new value for one of the session's own cookies (a
     rotating id) is adopted, so a check never kills its own session. Only a cookie the
-    state already holds, never a new name."""
-    for name, value in (jar or {}).items():
-        if name in (state.cookies or {}) and value and state.cookies[name] != value:
-            state.cookies[name] = value
+    state already holds, never a new name. The state's cookies are replaced in one
+    assignment, so a `prepare` reads the old material or the new, never a mix; the
+    change is a change of the state's material (FR-SESS-24), which a send bound to its
+    setup request's material is refused on (`material_frame`, BUG-0557)."""
+    current = state.cookies or {}
+    rotated = {name: value for name, value in (jar or {}).items()
+               if name in current and value and current[name] != value}
+    if rotated:
+        state.cookies = {**current, **rotated}
 
 
 def _transport_errors() -> tuple:
@@ -415,11 +523,22 @@ class Fetcher:
 
 
 def _requests_fetch_factory() -> Callable[[], Fetcher]:
+    """The login handshake's fetcher (FR-SESS-3, BUG-0558): one ``requests`` session per
+    login, with its own cookie jar and the browser header set, **bounded where it is
+    made** (SP-60, `bodyread.bound`): wire and decoded ceilings, a deadline of four 15 s
+    timeouts held by the watchdog, and pools that keep a connection only after an
+    exactly framed answer (`bodyread.exact_end`), so a stray answer past the login page
+    never reaches the next request of the login. An incomplete body raises
+    `bodyread.BodyIncomplete` (a ``RequestException``): a failed fetch, never a login
+    answer. A send with a body (the credentials POST) goes on a connection of its own,
+    closed after it (PA-0549(3), CL.0): a one-shot bounded session that shares the
+    login's jar and headers, so what its answer sets is the login's."""
     def factory() -> Fetcher:
         import requests
 
+        from fuzzlab.core import bodyread
         from fuzzlab.core.http import DEFAULT_BROWSER_HEADERS
-        sess = requests.Session()
+        sess = bodyread.bound(requests.Session())
         sess.headers.update(DEFAULT_BROWSER_HEADERS)
 
         class _RequestsFetcher:
@@ -430,8 +549,11 @@ def _requests_fetch_factory() -> Callable[[], Fetcher]:
                                      _hops(r))
 
             def post(self, url, data=None, headers=None, allow_redirects=True):
-                r = sess.post(url, data=data, headers=headers, timeout=15,
-                              allow_redirects=allow_redirects)
+                with bodyread.bound(requests.Session()) as own:
+                    own.headers = sess.headers.copy()
+                    own.cookies = sess.cookies           # the login's one jar
+                    r = own.post(url, data=data, headers=headers, timeout=15,
+                                 allow_redirects=allow_redirects)
                 return FetchResponse(r.status_code, dict(r.headers), r.text, r.url,
                                      _hops(r))
 
@@ -632,10 +754,19 @@ class SessionManager:
         then records the generation of the state applied (``session_generation``, set
         from that state, never re-read), and ``session_lost`` when that state is one
         this manager knows to be lost and could not yet recover (the re-login budget of
-        an identity with no stable protected resource is spent)."""
+        an identity with no stable protected resource is spent).
+
+        *(FR-SESS-24, BUG-0557.)* Inside a `material_frame` (one send's), it records the
+        material it applies -- the state's generation and a keyed digest of its cookies
+        and headers, from one snapshot that is also what it applies -- or None when it
+        applies no session; given an expected material, it refuses a send whose material
+        differs (`SessionMaterialChanged`) **before applying anything**, after any
+        login, pause re-check or rotation its own way took."""
+        frame = _open_frame()
         host = urlparse(request.url).hostname or ""
         identity = self._own_identity(identity)
         if identity == ANONYMOUS or host not in self._scope:
+            _settle(frame, None)
             return
         current = self._state_for(request.url, identity)
         if current is not None:
@@ -654,6 +785,7 @@ class SessionManager:
                 # this host's session lives on other origins: never a login here (O3);
                 # an https session's http request is still refused loudly (BUG-0098)
                 _check_transport(existing, request.url)
+                _settle(frame, None)                    # FR-SESS-24: before it counts
                 self._withhold(origin, identity, request)
                 return
             # no session on this host yet: the operator's own base when one is known;
@@ -668,9 +800,15 @@ class SessionManager:
                                 or _directory(request.url))
         _check_transport(state, request.url)          # BUG-0098: before any secret
         if origin is None or origin not in state.origins:
+            _settle(frame, None)                       # FR-SESS-24: before it counts
             self._withhold(origin, identity, request)  # FR-SESS-20: before any secret
             return
-        request.headers = state.apply(request.headers)
+        # FR-SESS-24: one snapshot of the material, checked, then applied (a rotation
+        # adopted meanwhile by another thread is the next send's, never half of this one)
+        cookies, headers = dict(state.cookies or {}), dict(state.headers or {})
+        _settle(frame, _material(state.generation, cookies, headers))
+        request.headers = SessionState(state.host, state.identity, cookies=cookies,
+                                       headers=headers).apply(request.headers)
         # FR-SESS-23 (F4): from the state just applied, never re-read from the manager
         request.session_generation = state.generation
         # D' (FR-FUZZ-65): a session known lost and not yet recovered (D's window)
@@ -1845,6 +1983,12 @@ class SessionManager:
                                                         seen=seen)
             except SessionAuthError:
                 raise                                   # an unapproved hop: loud
+            except _transport_errors():
+                # SP-60 (BUG-0558): a page read incomplete (`bodyread.BodyIncomplete`),
+                # cut or unanswered is a failed fetch, never a page without a login form
+                # ("no login detected" would be a conclusion from an answer never read
+                # whole, charged to the re-auth cap)
+                raise
             except Exception:  # noqa: BLE001 - a bad candidate URL is not fatal
                 continue
             if url == base_url and resp.status == 401:

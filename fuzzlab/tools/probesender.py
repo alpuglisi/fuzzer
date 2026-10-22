@@ -244,16 +244,26 @@ class _FetchRoute:
     that session, so the send is refused (`PrerequisiteUnavailable`: unbound, never a
     negative) on another route or identity or after a loss on the page's answer -- before
     anything is sent -- and its answer is not read when its ``prepare`` applied another
-    generation (a re-login in between)."""
+    generation (a re-login in between).
 
-    __slots__ = ("client", "identity", "generation", "lost")
+    *(FR-FUZZ-67 amended, FR-SESS-24, BUG-0557.)* It also records the session
+    **material** the fetch's ``prepare`` applied (``material``: the
+    `session.manager.material_frame`'s `AppliedMaterial` -- the generation and a keyed
+    digest of the cookies and headers, never a value; None when no session was
+    applied). The bound send's own ``prepare`` compares the material it would apply with
+    it and refuses, **before anything is sent**, any change: a re-login, a copy's
+    re-login, or a rotated cookie adopted in place by any health check (`verify_live`,
+    another send's ``check_health``, a pause's re-check)."""
+
+    __slots__ = ("client", "identity", "generation", "lost", "material")
 
     def __init__(self, client, identity: str, generation: int | None = None,
-                 lost: bool = False):
+                 lost: bool = False, material=None):
         self.client = client
         self.identity = identity
         self.generation = generation
         self.lost = lost
+        self.material = material
 
     def same(self, client, identity: str) -> bool:
         return client is self.client and identity == self.identity
@@ -787,19 +797,23 @@ class SeamProbeSender(_ExplicitAllowance):
         never fetched with the run's session -- refused (`PrerequisiteUnavailable`) unless
         the probe's route is anonymous, or is that same path's isolated copy. And no
         route of this seam carries a response's cookies into the next request (the
-        session manager adopts none, and an anonymous route keeps no jar): a page that
-        sets a cookie is refused, since its value may be tied to that cookie (review
-        R2-B1) -- the test is then inconclusive, never a negative.
+        session manager adopts none from a probe's or a page's answer, and an anonymous
+        route keeps no jar): a page that sets a cookie is refused, since its value may be
+        tied to that cookie (review R2-B1) -- the test is then inconclusive, never a
+        negative.
 
         The session the GET actually went out on is returned as ``probe.carry``
-        (`_FetchRoute`: its route, its generation, and whether the manager saw it lost
-        on this page's own answer); the bound send carrying it is refused when it would
-        leave on another route or identity -- e.g. after the copy's re-login on this
-        fetch logged the run's session out and the breaker sent the path anonymous
-        (review R2-2) -- or when the page's own answer lost the session, and its answer
-        is not read when it went out on another generation (review R3-2)."""
+        (`_FetchRoute`: its route, its generation, the session material its ``prepare``
+        applied, and whether the manager saw it lost on this page's own answer); the
+        bound send carrying it is refused when it would leave on another route or
+        identity -- e.g. after the copy's re-login on this fetch logged the run's session
+        out and the breaker sent the path anonymous (review R2-2) -- or when the page's
+        own answer lost the session (review R3-2), and, before anything is sent, when its
+        own ``prepare`` would apply other session material: a re-login, or a cookie a
+        health check rotated in between (FR-SESS-24, BUG-0557)."""
         from fuzzlab.core.http import Request
         from fuzzlab.oracle.probe import PrerequisiteUnavailable
+        from fuzzlab.session.manager import material_frame
         check_send_url(url, self._explicit, method="GET")
         try:
             identity = self._identity_for(route_url)
@@ -819,13 +833,15 @@ class SeamProbeSender(_ExplicitAllowance):
             def dispatch(on_client, on_identity):
                 req = Request("GET", url, identity=on_identity, component="oracle")
                 told = self._losses_told()
-                page = self._dispatch(on_client, on_identity, req, "query", "", url)
+                with material_frame() as carried:      # FR-SESS-24: what it carried
+                    page = self._dispatch(on_client, on_identity, req, "query", "", url)
                 # review R3-2: the generation `prepare` applied, and a loss the manager
                 # saw on this answer (its `observe` marks it lost; `prepare`'s flag on
-                # this request is still False)
+                # this request is still False); BUG-0557: the material it applied
                 went.append(_FetchRoute(on_client, on_identity, req.session_generation,
                                         lost=req.session_lost is True
-                                        or self._losses_told() != told))
+                                        or self._losses_told() != told,
+                                        material=carried.applied))
                 return page
             if copy is None:
                 page = dispatch(client, identity)
@@ -1053,17 +1069,32 @@ class SeamProbeSender(_ExplicitAllowance):
             # instance 4, pinned by a strict xfail, unchanged here)
             req = Request(method.upper(), place_query_param(url, param, value),
                           identity=identity, timing=timing, component="oracle")
-        probe = self._dispatch(client, identity, req, location, param, url)
         fetched = getattr(entries, "carry", None)
-        if isinstance(fetched, _FetchRoute) and req.session_generation != fetched.generation:
-            # FR-FUZZ-67 (BUG-0544 review R3-2): `prepare` (inside the client's send)
-            # applied another session generation than the page's fetch -- a re-login in
-            # between -- so the bound values are the old session's: this answer is not
-            # read, and the test is unbound, never a negative. Stated residual: the send
-            # has gone out by the time its generation is known
+        fetched = fetched if isinstance(fetched, _FetchRoute) else None
+        if fetched is None:
+            probe = self._dispatch(client, identity, req, location, param, url)
+        else:
             from fuzzlab.oracle.probe import PrerequisiteUnavailable
-            raise PrerequisiteUnavailable("the bound send's session generation is not the "
-                                          "one its page was fetched on")
+            from fuzzlab.session.manager import SessionMaterialChanged, material_frame
+            try:
+                # FR-FUZZ-67, FR-SESS-24 (BUG-0557): the send's own `prepare` compares
+                # the session material it would apply with what the page's fetch
+                # carried, after any login, pause re-check or rotation on its way, and
+                # refuses a change before anything is applied: nothing is sent
+                with material_frame(expect=fetched.material):
+                    probe = self._dispatch(client, identity, req, location, param, url)
+            except SessionMaterialChanged as exc:
+                raise PrerequisiteUnavailable(
+                    "the bound send's session material (its generation or its cookies) "
+                    "is not the one its page was fetched on: refused before it was "
+                    "sent") from exc
+            if req.session_generation != fetched.generation:
+                # FR-FUZZ-67 (BUG-0544 review R3-2): a session addon that keeps no
+                # material frame (not a `SessionManager`) applied another generation
+                # than the page's fetch: this answer is not read, and the test is
+                # unbound, never a negative
+                raise PrerequisiteUnavailable("the bound send's session generation is "
+                                              "not the one its page was fetched on")
         return probe
 
     def _dispatch(self, client, identity, req, location, param, url) -> Probe:

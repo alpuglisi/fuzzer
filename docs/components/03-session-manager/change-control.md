@@ -3,6 +3,59 @@
 Component code: **SESS**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SESS-0030 — A send bound to a setup request's session material is refused on any change of it; the login fetcher reads bounded (FR-SESS-24, FR-SESS-3; BUG-0557, BUG-0558) (2026-10-22)
+- Placement: item GAP-SESS, lane SESSROT (branch `lane/SESSROT` on 7393c90): BUG-0544's
+  residual N-R3-2 (gap 2) and BUG-0536's residual R2 (gap 4). Numbers pre-assigned:
+  BUG-0557, PA-0557, BUG-0558, PA-0558, CC-SESS-0030, CC-FUZZ-0115, FR-SESS-24, SP-75.
+- Change: `fuzzlab/session/manager.py` (about +150 lines with docstrings).
+  - **The session material (FR-SESS-24, SP-75's owner).** `material_frame(*,
+    expect=...)`, a per-thread frame around one `client.send`; `AppliedMaterial` (the
+    generation and an HMAC-SHA256, under a per-process random key, over every cookie and
+    header name and value: never a value); `SessionMaterialChanged`
+    (`SessionAuthError`). `prepare` settles the open frame: it records the material it
+    applies, or None (anonymous, out of scope, another origin; before an out-of-origin
+    send is counted), and, given an expectation, refuses other material before applying
+    anything -- after any login, pause re-check or rotation its own way took. It digests
+    and applies one snapshot of the state's cookies and headers.
+  - `_adopt_rotation` replaces `state.cookies` in one assignment (never a mix seen by a
+    `prepare`); unchanged otherwise (only a cookie the state holds, same generation).
+  - **The login fetcher (FR-SESS-3 amended).** `_requests_fetch_factory`'s session is
+    `bodyread.bound(requests.Session())` (SP-60: ceilings, deadline, exact-framing
+    pools); its `post` goes on a one-shot bounded session sharing the login's jar and
+    headers (a connection of its own, closed after it; PA-0549(3)).
+  - `_discover_login_form`: a transport failure (`requests.RequestException`, so
+    `bodyread.BodyIncomplete`) propagates instead of "a bad candidate": never "no login
+    form found", never charged to `max_reauth`.
+  - A generation's meaning is unchanged, so its consumers (FR-CORE-509's pool key,
+    disco's execution key, PRG, isolation) are untouched.
+- Impact (other components / project): FUZZ (CC-FUZZ-0115: the seam's page fetch and
+  bound send open the frames); CORE none (no `core/` file changed; `Request` gains no
+  field: the expectation travels in the frame, not on the request). Every `prepare`
+  caller (the core seam, the spider's `_SessionAddon`, the proxy addon) behaves as
+  before outside a frame. A login whose page is cut, bombed or unanswered now raises the
+  transport error (the seam: "not observed", SP-34) where it raised "no login form".
+- Risk (medium): sessions. Mitigations: the frame is opt-in per send (no frame, no
+  check); the digest is keyed per process and never stored; the whole targeted session
+  suite (773 tests) and the harness run green. Accepted: a frame is per thread (the
+  seam's sends are synchronous on the sending thread); an app that rotates its id on
+  every health check unbinds a bound send whenever a check falls between its fetch and
+  its send (inconclusive, never a negative).
+- Deliverables:
+  - [x] `material_frame`, `AppliedMaterial`, `SessionMaterialChanged`, `prepare`'s
+    check -- done
+  - [x] `_adopt_rotation` in one assignment -- done
+  - [x] the login fetcher bounded, its POST on its own connection -- done
+  - [x] discovery's transport failures propagate -- done
+  - [x] tests: `tests/test_session_material.py` (5), `tests/test_replay_bindings.py`
+    (the N-R3-2 pin a plain test; three new; one amended), `tests/test_bounded_reads.py`
+    (the R2 pin a plain test; two new; the guard's allowance for this file removed) --
+    done
+  - [x] FR-SESS-24 added, FR-SESS-3 and FR-SESS-23 ("Cookies") amended in place -- done
+  - [x] BUG-0557, BUG-0558 -- done
+- Effectiveness (assessed 2026-10-22): every test above fails on 7393c90 for its stated
+  reason (the POST on the wire; the stray's cookie; the unbounded read; the guard) and
+  passes on this change; live lab run pending.
+
 ### CC-SESS-0029 — A forbidden answer is never, by itself, a lost session (FR-SESS-23, BUG-0533) (2026-10-20)
 - Placement: AU-SESS403 (audit defect 6); design record
   `DRAFT-AU-SESS403.md` (revision 3, the owner's decisions D and D′, review round 4's
