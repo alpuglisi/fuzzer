@@ -26,7 +26,7 @@ from urllib.parse import parse_qsl, unquote, unquote_plus, urlparse
 
 from fuzzlab.core.forms import LINK_SET_ENCTYPE
 from fuzzlab.core.store import Store
-from fuzzlab.core.urls import canonical_origin, store_url, to_path
+from fuzzlab.core.urls import canonical_origin, store_url
 
 
 def _upsert_endpoint(store: Store, run_id: int, url_path: str, method: str,
@@ -704,8 +704,11 @@ def _import_forms(src, store: Store, run_id: int, counts: dict,
         stored = [(name, value if kinds.get(name) == "password"
                    else stored_value(name, value, value)) for name, value in filled]
         path = store_url(form["action_url"], main)
-        # the action's query, as the strongest URL redactor stores it (BUG-0556)
-        query = urlparse(redact_url_identifiers(form["action_url"])).query
+        # the action's query, as the strongest URL redactor stores it (BUG-0556); a value
+        # it redacts is recorded as a placeholder, never a blank, so its points are
+        # refused and never send it (PA-0544(1)/(3); review round 1, RU-4)
+        query = urlparse(redact_url_identifiers(form["action_url"],
+                                                placeholder=True)).query
         url = path + ("?" + query if query and form["method"] == "POST" else "")
         endpoint_id = _upsert_endpoint(store, run_id, url, form["method"], "form")
         fresh = [name for (name, value), (_n, kept) in zip(filled, stored)
@@ -956,9 +959,11 @@ def _store_request(store, run_id, counts, kind, method, url, leaves, *,
         if name not in passwords and not pinned and jsonbody.is_point_value(value):
             points.append((name, value))
     # the URL's query as the strongest URL redactor stores it (BUG-0556): a disco
-    # capture redacted names only; the spider's capture already passed it (idempotent)
+    # capture redacted names only; the spider's capture already passed it. A value it
+    # redacts is recorded as a placeholder, never a blank, so the request's points are
+    # refused and never send it (PA-0544(1)/(3); review round 1, RU-4)
     from fuzzlab.core.redaction import redact_url_identifiers
-    parts = urlparse(redact_url_identifiers(url))
+    parts = urlparse(redact_url_identifiers(url, placeholder=True))
     endpoint_url = store_url(url, main) + ("?" + parts.query if parts.query else "")
     endpoint_id = _upsert_endpoint(store, run_id, endpoint_url, method, "request")
     enctype = jsonbody.ENCTYPE if kind == "json" else FORM_URLENCODED
@@ -980,8 +985,16 @@ def _store_request(store, run_id, counts, kind, method, url, leaves, *,
                           counts)
 
 
-def import_audit(audit_db: str | Path, store: Store, run_id: int) -> dict[str, int]:
-    """Import auditor findings -> candidate rows (with rule evidence)."""
+def import_audit(audit_db: str | Path, store: Store, run_id: int, *,
+                 base_url: str | None = None) -> dict[str, int]:
+    """Import auditor findings -> candidate rows (with rule evidence).
+
+    Every stored text passes the redaction owner (BUG-0556 review round 1, PA-0100): a
+    finding's endpoint is `core.urls.store_url` of its page -- a path parameter that
+    holds a secret dropped, as `import_spider` stores the same page, and another origin
+    kept (the run's main origin: ``base_url``'s, else the first finding page's) -- and
+    its ``target_identifier`` and ``html_context`` (stored as ``sink_context``) pass
+    `_audit_text`."""
     src = sqlite3.connect(str(audit_db))
     src.row_factory = sqlite3.Row
     counts = {"candidate": 0}
@@ -992,18 +1005,21 @@ def import_audit(audit_db: str | Path, store: Store, run_id: int) -> dict[str, i
         ).fetchall()
     except sqlite3.Error:
         rows = []
+    main = _main_origin(base_url, (r["page_url"] for r in rows))
     for row in rows:
-        path = to_path(row["page_url"])
-        endpoint_id = _upsert_endpoint(store, run_id, path, "GET", "audit")
+        page = row["page_url"]
+        endpoint_id = _upsert_endpoint(store, run_id, store_url(page, main), "GET",
+                                       "audit")
+        target = _audit_text(row["target_identifier"], page, url=True)
         # the legacy auditor names a parameter only: its first row of that name
         found = store.conn.execute(
             "SELECT id FROM parameter WHERE run_id=? AND endpoint_id=? AND name=? "
-            "ORDER BY id", (run_id, endpoint_id, row["target_identifier"])).fetchone()
+            "ORDER BY id", (run_id, endpoint_id, target)).fetchone()
         param_id = int(found["id"]) if found else None
         evidence = {
             "category": row["category"],
             "transaction_type": row["transaction_type"],
-            "target_identifier": row["target_identifier"],
+            "target_identifier": target,
             "occurrences": row["occurrences"] if "occurrences" in row.keys() else 1,
             "reference": row["reference"] if "reference" in row.keys() else None,
         }
@@ -1011,12 +1027,65 @@ def import_audit(audit_db: str | Path, store: Store, run_id: int) -> dict[str, i
             "INSERT INTO candidate (run_id, parameter_id, rule, evidence, sink_context) "
             "VALUES (?,?,?,?,?)",
             (run_id, param_id, row["transaction_type"], json.dumps(evidence),
-             row["html_context"]),
+             _audit_text(row["html_context"], page)),
         )
         counts["candidate"] += 1
     store.conn.commit()
     src.close()
     return counts
+
+
+#: The lengths the legacy auditor's rules cut a quoted value to (`tools.fetcher`:
+#: ``example value: v[:80]``, ``v[:60]``, ``value 'v[:40]' reflected``, ``supplied Nx:
+#: v[:20], …``).
+_AUDIT_CUTS = (80, 60, 40, 20)
+
+
+def _audit_text(text, page_url, *, url: bool = False):
+    """A legacy-auditor finding's text as it may be stored (BUG-0556 review round 1,
+    PA-0100, D12). Its rules quote the finding page's URL (``called from <url>``), its
+    path (``<path>?<name>``, ``linked from <path>``) and its query values, whole or cut
+    (`_AUDIT_CUTS`). Each is replaced where it appears: the page URL by
+    `core.redaction.redact_url_identifiers`' form of it, the path by
+    `core.redaction.strip_secret_path_params`' form, and every query value the owner's
+    rule would not store (`core.redaction.stored_value`: a sensitive name, or a value
+    that holds a secret anywhere, nested included) by `PLACEHOLDER`, whole or cut. A
+    ``url`` text (the target identifier, which may name another URL: a form action, a
+    link) also passes `strip_secret_path_params` and `redact_url_identifiers` itself.
+    The rest of a quoted HTML snippet is body redaction's (audit defect 26). Total: a
+    non-string is returned as it is."""
+    import re
+
+    from fuzzlab.core.redaction import (PLACEHOLDER, redact_url_identifiers, stored_value,
+                                        strip_secret_path_params)
+    if not isinstance(text, str):
+        return text
+    swaps: dict[str, str] = {}
+    if isinstance(page_url, str):
+        clean = redact_url_identifiers(page_url)
+        if clean != page_url:
+            swaps[page_url] = clean
+        parts = urlparse(page_url)
+        path = parts.path.lstrip("/")                     # as the auditor's page sees it
+        if strip_secret_path_params(path) != path:
+            swaps[path] = strip_secret_path_params(path)
+        for name, raw, value in query_pairs(parts.query):
+            if not value or stored_value(name, raw, value) != "":
+                continue
+            for whole in (value, raw):
+                for cut in (len(whole),) + _AUDIT_CUTS:
+                    if whole[:cut]:
+                        swaps.setdefault(whole[:cut], PLACEHOLDER)
+    out = text
+    if swaps:
+        # longest first, each a whole run (never inside a longer word)
+        alternation = "|".join(re.escape(k) for k in sorted(swaps, key=len, reverse=True))
+        out = re.sub(f"(?<![A-Za-z0-9])(?:{alternation})(?![A-Za-z0-9])",
+                     lambda m: swaps[m.group(0)], out)
+    if url:
+        cut = min([i for i in (out.find("?"), out.find("#")) if i >= 0] or [len(out)])
+        out = redact_url_identifiers(strip_secret_path_params(out[:cut]) + out[cut:])
+    return out
 
 
 def import_fuzz_csv(csv_path: str | Path, store: Store, run_id: int) -> dict[str, int]:

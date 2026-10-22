@@ -7,8 +7,10 @@ redacts:
 
 - **headers:** the values of sensitive headers (`SENSITIVE_HEADERS`, plus any header
   whose name `core.redaction.is_sensitive_name` flags);
-- **URL query parameters:** sensitively named ones, in the request target and in
-  ``Location`` / ``Content-Location`` / ``Refresh`` response headers;
+- **URL values:** sensitively named ones wherever `core.redaction.redact_url` finds
+  them (a query, ``;`` pairs and path parameters, a query-shaped fragment, nested
+  values), in the request target and in ``Location`` / ``Content-Location`` /
+  ``Refresh`` response headers, with or without a query (BUG-0556 review round 1);
 - **bodies:** sensitively named fields of form-urlencoded, JSON (any depth) and
   multipart (non-file) bodies, in requests and responses alike. A sensitive JSON key's
   **whole value** is replaced, whatever its type (list, object, scalar; BUG-0090).
@@ -148,9 +150,13 @@ def redact(raw: bytes, extra_headers: tuple[str, ...] = ()) -> bytes:
             msg = msg.without_header(name)
             for _ in range(n):
                 msg = msg.with_appended_header(name, REDACTED)
-    # the request target's query (a response's start line has none)
+    # the request target (a response's start line has none) and the URL headers, each
+    # passed whole to `redact_url`, never gated on a '?': a ';jsessionid=' path
+    # parameter or a query-shaped fragment holds a secret with no query (Tomcat URL
+    # rewriting; BUG-0556 review round 1). `redact_url` returns a URL holding no value
+    # byte-identical, so a clean message is unchanged.
     target = msg.target.decode("latin-1", "replace")
-    if not msg.start_line.startswith(b"HTTP/") and "?" in target:
+    if not msg.start_line.startswith(b"HTTP/"):
         new_target = redact_url(target)
         if new_target != target:
             parts = msg.start_line.split(b" ")
@@ -158,7 +164,7 @@ def redact(raw: bytes, extra_headers: tuple[str, ...] = ()) -> bytes:
             msg = msg.with_request_line(b" ".join(parts))
     for name in _URL_HEADERS:
         value = _header(msg, name)
-        if "?" in value:
+        if value:
             new = redact_url(value) if name != "refresh" else re.sub(
                 r"(url=)(\S+)", lambda m: m.group(1) + redact_url(m.group(2)), value,
                 flags=re.I)

@@ -467,12 +467,27 @@ def injection_points_from_store(store, run_id: int, base_url: str,
                                            else None),
                                redirect_seed=redirect_seed(example),
                                bindings=bindings,
-                               replay_refusal=_outside_lab(raw, r["name"]))
+                               replay_refusal=(_outside_lab(raw, r["name"])
+                                               or _redacted_url_refusal(url)))
         key = reqctx.point_key(point)
         if key not in seen:
             seen.add(key)
             points.append(point)
     return points
+
+
+def _redacted_url_refusal(url: str) -> str | None:
+    """Why a crawl point's own URL can never be sent, or None: it holds a value
+    redaction replaced when its endpoint was stored (a POST form's action query, a
+    captured request's URL query: `tools.store_adapter`, BUG-0556 review round 1). That
+    value is evidence, never replay material, and no setup step re-obtains an endpoint's
+    own query, so the test is inconclusive with this reason -- never sent with the
+    placeholder or a blank in its place (PA-0544(1)/(3))."""
+    from fuzzlab.core.redaction import holds_placeholder
+    if not holds_placeholder(url):
+        return None
+    return ("its URL holds a value redaction replaced (the endpoint's own query): the "
+            "request cannot be rebuilt without it (PA-0544(3))")
 
 
 def _bindings(row, origin: str, raw, target: str):
