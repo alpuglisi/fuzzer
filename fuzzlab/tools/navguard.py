@@ -44,6 +44,18 @@ port-agnostic, so the context's jar and its pages' ``document.cookie`` /
 A ``request_refusal`` hook sees a request's body before it is sent (FR-SESS-19's login
 window).
 
+**Where the session's cookies reach** (SP-74, BUG-0559): a context that carries a session
+in its cookie jar (the caller's ``session_cookies``: the session's cookies as the context
+holds them) never sends a request -- a navigation, top-level or frame, a redirect hop, a
+subresource, a WebSocket -- to a host those cookies do not reach (`cookie_reaches`, RFC
+6265's domain match: a host-only cookie reaches its own host only, a dotted domain also
+the names under it, never an IP). Such a request would go out without the session to
+what the crawl takes for the session's own origin (``in_origin_scope`` folds the loopback
+aliases ``localhost`` / ``127.0.0.1`` / ``[::1]``, a host-only cookie reaches one of
+them): it is aborted before it is sent, at every hop, and ``on_session_unreached`` is
+told. A request to another origin than the session's keeps FR-SESS-20's disposition
+(above); `checked_api_request` applies the same rule to an API request.
+
 The crawler's **reveal window** (FR-CRAWL-15/16, W1-W3) uses two hooks: ``window`` on
 the route (asked for every request after the scope and destructive checks, and for
 each redirect hop, with whether it is a navigation) and ``ws_hold`` on WebSockets (an
@@ -78,6 +90,90 @@ _LOCAL_SCHEMES = ("data:", "blob:", "about:")
 _REDIRECTS = (301, 302, 303, 307, 308)
 
 
+# --- where a session's cookies reach (SP-74, BUG-0559) -----------------------------------
+def cookie_reaches(cookie, host) -> bool:
+    """Does the browser send ``cookie`` (as a context holds it: a Playwright cookie with a
+    ``url``, or with a ``domain``) to a request for ``host``? **The** predicate (SP-74). A
+    cookie added by URL, or with a domain without a leading dot, is host-only: that exact
+    host (measured on Chromium 141: a ``127.0.0.1`` cookie, by URL or by bare domain, goes
+    to ``127.0.0.1`` and not to ``localhost`` on the same port; Playwright's API request
+    context with that storage state likewise). A dotted domain also reaches the hosts
+    under it, never an IP address (RFC 6265 §5.1.3). A deny-only check: where the session
+    goes is still decided by origin (``cookie_scope``, FR-SESS-20)."""
+    import ipaddress
+    url = cookie.get("url")
+    # one name per assignment, so PA-0134(3)'s host-compare guard sees the compare below
+    if url:
+        domain = (urlsplit(url).hostname or "").lower()
+        host_only = True
+    else:
+        raw = str(cookie.get("domain") or "").lower()
+        domain = raw.lstrip(".")
+        host_only = not raw.startswith(".")
+    host = str(host or "").lower()
+    if not domain or not host:
+        return False
+    if host == domain:
+        return True
+    if host_only or not host.endswith("." + domain):
+        return False
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return True
+    return False
+
+
+def held_session_cookies(cookies, storage_state=None, names=None) -> list[dict]:
+    """The session's cookies as a context that adopted them holds them (SP-74's input):
+    those added by URL (``context.add_cookies``) and those of an adopted
+    ``storage_state`` (by domain), kept to ``names`` -- the session's credential cookies
+    -- when given (``None``: every one is the session's)."""
+    held = [*(cookies or ()), *((storage_state or {}).get("cookies") or ())]
+    keep = None if names is None else set(names)
+    return [dict(c) for c in held if c.get("name") and (keep is None or c["name"] in keep)]
+
+
+def unreached_session_cookies(session_cookies, host) -> list[str]:
+    """The names of the session's cookies none of whose held copies reaches ``host``
+    (`cookie_reaches`), sorted: a request there would go without (part of) the session."""
+    copies: dict[str, list[dict]] = {}
+    for c in session_cookies or ():
+        copies.setdefault(str(c.get("name")), []).append(c)
+    return sorted(n for n, held in copies.items()
+                  if not any(cookie_reaches(c, host) for c in held))
+
+
+def session_host_refusal(session_cookies, url, *, cookie_scope=None) -> str | None:
+    """**Why a request for ``url`` by a context carrying ``session_cookies`` would go
+    without the session** -- a host none of a session cookie's held copies reaches
+    (`unreached_session_cookies`) -- or None (SP-74, BUG-0559). None as well for a
+    context that carries no session in cookies, and for a URL ``cookie_scope`` puts on
+    another origin than the session's (FR-SESS-20 decides that one: its documents are
+    aborted and the rest goes cookie-less). The one decision of the guard's route, its
+    WebSocket handler, `checked_api_request` and a crawler's load gate. The message names
+    the host and the cause, never a URL."""
+    if not session_cookies:
+        return None
+    if cookie_scope is not None and not cookie_scope(url):
+        return None
+    unreached = unreached_session_cookies(session_cookies, urlsplit(url).hostname or "")
+    if not unreached:
+        return None
+    total = len({str(c.get("name")) for c in session_cookies})
+    return (f"the session's cookies do not reach host {urlsplit(url).hostname or ''!r} "
+            f"in the browser "
+            f"({len(unreached)} of {total} scoped to another host; a host-only cookie "
+            f"reaches its own host only): not sent, since it would go without the "
+            f"session (SP-74)")
+
+
+class SessionHostUnreached(PermissionError):
+    """An API request of a context carrying a session, to a host its cookies do not
+    reach (`checked_api_request`, SP-74): refused before it is sent. The message is
+    `session_host_refusal`'s (the host and the cause, never a URL)."""
+
+
 def make_route_handler(allow: frozenset[str] = frozenset(),
                        on_abort: Callable[[str, str], None] | None = None, *,
                        in_scope: Callable[[str], bool],
@@ -92,7 +188,10 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
                        window: Callable[[str, str, bool], str | None] | None = None,
                        cookie_scope: Callable[[str], bool] | None = None,
                        on_session_withheld: Callable[[str, str, str], None] | None = None,
-                       isolated_request: Callable[[], object] | None = None):
+                       isolated_request: Callable[[], object] | None = None,
+                       session_cookies=None,
+                       on_session_unreached: Callable[[str, str, str, str], None]
+                       | None = None):
     """The route handler ``guard_page`` installs (split out so it is testable).
 
     Scope first (BUG-0123): a URL ``in_scope`` refuses is aborted, whatever ``allow``
@@ -141,7 +240,19 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
     asked after the scope and destructive checks, before anything is fetched, for the
     request and again for every redirect hop (a navigation's hop is a navigation too);
     a reason aborts it. The caller keeps its own state (whether the window is open, what it
-    blocked, which navigation targets to enqueue)."""
+    blocked, which navigation targets to enqueue).
+
+    ``session_cookies`` (a context carrying a session in its cookie jar, SP-74,
+    BUG-0559): the session's cookies as the context holds them (`held_session_cookies`).
+    A request to a host they do not reach (`session_host_refusal`; another origin than
+    the session's stays ``cookie_scope``'s) is aborted before anything is sent -- the
+    request itself and every redirect hop, a navigation or not -- right after the scope
+    and destructive checks, and ``on_session_unreached(url, kind, source, reason)`` is
+    told: ``kind`` as ``on_session_withheld``'s (``"document"``, ``"landing"``,
+    ``"frame"``, ``"request"``), ``source`` the URL the chain started at. None or empty:
+    nothing is refused by it (a context with no session cookie)."""
+    session_cookies = [dict(c) for c in (session_cookies or ())]
+
     def refused(url: str) -> bool:
         if not in_scope(url):
             logging.info(f"blocked out-of-scope browser request to "
@@ -175,6 +286,23 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
                      f"({kind}: another origin than the session's, FR-SESS-20)")
         if on_session_withheld is not None:
             on_session_withheld(url, kind, source)
+
+    def unreached(url: str, kind: str, source: str) -> bool:
+        """SP-74: a request of this session-carrying context to a host its cookies do
+        not reach -- refused, told; another origin than the session's is FR-SESS-20's."""
+        if not session_cookies or not in_scope(url):
+            return False
+        why = session_host_refusal(session_cookies, url, cookie_scope=cookie_scope)
+        if why is None:
+            return False
+        logging.info(f"sent nothing to {urlsplit(url).hostname or '?'!r} ({kind}): the "
+                     f"session's cookies do not reach that host (SP-74)")
+        if on_session_unreached is not None:
+            try:
+                on_session_unreached(url, kind, source, why)
+            except Exception as exc:  # noqa: BLE001 - a hook never lets a request out
+                logging.info(f"session-unreached hook failed ({type(exc).__name__})")
+        return True
 
     # the guard's one cookie-less request context (R2, V1), made once, here, when the
     # guard is built: route handlers run concurrently, so a lazy "make it if missing"
@@ -232,6 +360,10 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
         if refused(url):
             abort()
             return
+        doc_kind = "frame" if document and _is_subframe(req) else "document"
+        if unreached(url, doc_kind if document else "request", url):
+            abort()                              # SP-74: never sent without the session
+            return
         navigation = document if window is not None else False
         if window is not None:
             if window_refused(req.method.upper(), url, navigation):
@@ -249,7 +381,6 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
         if body_refused(req.method.upper(), url, req.headers or {}, req.post_data_buffer):
             abort()
             return
-        doc_kind = "frame" if document and _is_subframe(req) else "document"
         if withheld(url) and (document or isolated_request is None):
             tell_withheld(url, doc_kind if document else "request", url)
             abort()                              # FR-SESS-20 (R1): never loaded (T1)
@@ -274,6 +405,11 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
                 nxt = urljoin(final_url, location)
                 if api is None or refused(nxt):
                     abort()
+                    return
+                hop_kind = ("frame" if doc_kind == "frame" else "landing") \
+                    if document else "request"
+                if unreached(nxt, hop_kind, url):
+                    abort()                      # SP-74: the hop is never fetched
                     return
                 if final.status in (301, 302, 303) and method not in ("GET", "HEAD"):
                     method = "GET"                          # as a browser does
@@ -819,7 +955,10 @@ def make_ws_handler(in_scope: Callable[[str], bool],
                     on_drop: Callable[[str, object], None] | None = None,
                     cookie_scope: Callable[[str], bool] | None = None,
                     on_session_withheld: Callable[[str, str, str], None] | None = None,
-                    on_send: Callable[[str], None] | None = None):
+                    on_send: Callable[[str], None] | None = None,
+                    session_cookies=None,
+                    on_session_unreached: Callable[[str, str, str, str], None]
+                    | None = None):
     """WebSockets are routed separately from HTTP: an in-scope socket is connected
     through; an out-of-scope one is **never connected** -- Playwright then serves it as
     a mock with no server connection at all (BUG-0123). Not ``ws.close()``: called in
@@ -837,13 +976,29 @@ def make_ws_handler(in_scope: Callable[[str], bool],
     ``cookie_scope`` (an authenticated context, FR-SESS-20, R1): an in-scope socket on
     another origin than the session's is never connected either (the browser would open
     it with the context's port-agnostic jar); ``on_session_withheld(url,
-    "websocket", url)`` is told."""
+    "websocket", url)`` is told.
+
+    ``session_cookies`` (SP-74, BUG-0559): an in-scope socket on a host the session's
+    cookies do not reach (`session_host_refusal`) is never connected either; it would
+    open without the session. ``on_session_unreached(url, "websocket", url, reason)`` is
+    told."""
+    session_cookies = [dict(c) for c in (session_cookies or ())]
+
     def handler(ws) -> None:
         if in_scope(ws.url) and cookie_scope is not None and not cookie_scope(ws.url):
             logging.info(f"blocked a WebSocket to {urlsplit(ws.url).hostname or '?'!r}: "
                          f"another origin than the session's (FR-SESS-20)")
             if on_session_withheld is not None:
                 on_session_withheld(ws.url, "websocket", ws.url)
+            return
+        why = session_host_refusal(session_cookies, ws.url, cookie_scope=cookie_scope) \
+            if session_cookies and in_scope(ws.url) else None
+        if why is not None:
+            logging.info(f"blocked a WebSocket to {urlsplit(ws.url).hostname or '?'!r}: "
+                         f"the session's cookies do not reach that host (SP-74)")
+            if on_session_unreached is not None:
+                with contextlib.suppress(Exception):
+                    on_session_unreached(ws.url, "websocket", ws.url, why)
             return
         if in_scope(ws.url):
             server = ws.connect_to_server()
@@ -888,7 +1043,10 @@ def guard_page(target, allow: frozenset[str] = frozenset(),
                on_ws_send: Callable[[str], None] | None = None,
                cookie_scope: Callable[[str], bool] | None = None,
                on_session_withheld: Callable[[str, str, str], None] | None = None,
-               isolated_request: Callable[[], object] | None = None) -> None:
+               isolated_request: Callable[[], object] | None = None,
+               session_cookies=None,
+               on_session_unreached: Callable[[str, str, str, str], None]
+               | None = None) -> None:
     """Confine a Playwright ``BrowserContext`` (pass the context, so popups are covered
     too), WebSockets included. ``in_scope`` is required: there is no unscoped guard
     (BUG-0123). ``method_refusal``, ``observe``, ``request_refusal``, ``window``, the
@@ -897,7 +1055,9 @@ def guard_page(target, allow: frozenset[str] = frozenset(),
     `make_route_handler` (a WebSocket off the session's origins is never connected,
     `make_ws_handler`); ``ws_hold`` /
     ``on_ws_drop`` / ``on_ws_send``: see `make_ws_handler`. Session headers are applied by the route only
-    (FR-CRAWL-14)."""
+    (FR-CRAWL-14). ``session_cookies`` / ``on_session_unreached`` (SP-74, BUG-0559): every
+    context that adopts a session's cookies passes them, as it holds them
+    (`held_session_cookies`); nothing it sends goes to a host they do not reach."""
     api = getattr(target, "request", None)
     target.route("**/*", make_route_handler(allow, on_abort, in_scope=in_scope,
                                             on_out_of_scope=on_out_of_scope, api=api,
@@ -907,7 +1067,9 @@ def guard_page(target, allow: frozenset[str] = frozenset(),
                                             headers=headers, header_scope=header_scope,
                                             window=window, cookie_scope=cookie_scope,
                                             on_session_withheld=on_session_withheld,
-                                            isolated_request=isolated_request))
+                                            isolated_request=isolated_request,
+                                            session_cookies=session_cookies,
+                                            on_session_unreached=on_session_unreached))
     route_ws = getattr(target, "route_web_socket", None)
     if route_ws is None:                            # an old Playwright: say so, loudly
         logging.warning("this Playwright cannot route WebSockets; the resolver rules "
@@ -916,7 +1078,8 @@ def guard_page(target, allow: frozenset[str] = frozenset(),
     route_ws("**/*", make_ws_handler(in_scope, on_out_of_scope, hold=ws_hold,
                                      on_drop=on_ws_drop, cookie_scope=cookie_scope,
                                      on_session_withheld=on_session_withheld,
-                                     on_send=on_ws_send))
+                                     on_send=on_ws_send, session_cookies=session_cookies,
+                                     on_session_unreached=on_session_unreached))
 
 
 _LOOPBACK_SPELLINGS = ("127.0.0.1", "localhost", "[::1]")
@@ -1009,13 +1172,21 @@ def chromium_launch_kwargs(args: list[str], *, headless: bool = True,
     return kwargs
 
 
-def checked_api_request(in_scope: Callable[[str], bool], url: str) -> None:
+def checked_api_request(in_scope: Callable[[str], bool], url: str, *,
+                        session_cookies=None,
+                        cookie_scope: Callable[[str], bool] | None = None) -> None:
     """Before a Playwright API-request call (``context.request.*``,
     ``pw.request.new_context().fetch``), which `route` never sees: refuse an
-    out-of-scope URL. Callers pass ``max_redirects=0`` too."""
+    out-of-scope URL. Callers pass ``max_redirects=0`` too. ``session_cookies`` (a request
+    made with a session's cookies, SP-74): a host they do not reach -- on the session's
+    origin by ``cookie_scope`` -- raises `SessionHostUnreached` before anything is
+    sent, as the route refuses it."""
     if not in_scope(url):
         raise PermissionError(f"refusing an out-of-scope request to "
                               f"{urlsplit(url).hostname!r} (BUG-0123)")
+    why = session_host_refusal(session_cookies, url, cookie_scope=cookie_scope)
+    if why is not None:
+        raise SessionHostUnreached(why)
 
 
 #: Redirects a static fetch follows by hand (each hop checked first).

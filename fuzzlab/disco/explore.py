@@ -542,6 +542,10 @@ class ExploreReport:
     auth_ended: str | None = None
     aborted: int = 0
     out_of_scope: dict[str, int] = field(default_factory=dict)
+    #: SP-74 (BUG-0559): requests of an authenticated context never sent because the
+    #: session's cookies do not reach their host (a loopback alias of a host-only
+    #: cookie's host), by host
+    session_host_unreached: dict[str, int] = field(default_factory=dict)
     budget_hit: str | None = None
     #: FR-CRAWL-39 (BUG-0551), per route, a page read again adds nothing
     #: (`compose.Coverage`): open shadow roots and same-origin frames read; what was
@@ -592,6 +596,17 @@ class _SessionMaterial:
     scope: Callable[[str], bool] | None = field(default=None, repr=False)
     login_url: str | None = None
     login_fields: tuple | None = None
+    #: the names of the session's credential cookies (the provider's
+    #: ``checked_cookies``); None: every adopted cookie is the session's (a storage
+    #: state, whose credentials disco cannot tell from its ambient cookies)
+    credential_names: frozenset | None = None
+
+    def session_cookies(self) -> list[dict]:
+        """The session's cookies as a context adopting this material holds them (SP-74,
+        `navguard.held_session_cookies`): the guard refuses any request to a host they
+        do not reach."""
+        return navguard.held_session_cookies(self.cookies, self.storage_state,
+                                             self.credential_names)
 
 
 class SessionUnavailable(RuntimeError):
@@ -857,12 +872,17 @@ class Explorer:
         ctx = browser.new_context(service_workers="block", ignore_https_errors=True,
                                   storage_state=auth.storage_state if auth else None)
         isolate = auth is not None and len(self.origins) > 1
+        # SP-74 (BUG-0559): the session's cookies as this context holds them; nothing
+        # it sends goes to a host they do not reach (a loopback alias of a host-only
+        # cookie's host is in the scope's origin, and would be explored anonymously)
         navguard.guard_page(
             ctx, in_scope=self._in_scope, headers=self._tag_headers,
             on_out_of_scope=self._count_out_of_scope,
             on_abort=lambda url, why: self._count_abort(),
             cookie_scope=auth.scope if isolate else None,
-            isolated_request=(lambda: pw.request.new_context()) if isolate else None)
+            isolated_request=(lambda: pw.request.new_context()) if isolate else None,
+            session_cookies=auth.session_cookies() if auth is not None else None,
+            on_session_unreached=self._count_session_unreached)
         if auth is not None and auth.cookies:
             from fuzzlab.tools import browserauth
             browserauth.apply_to_context(ctx, auth.cookies)
@@ -884,6 +904,16 @@ class Explorer:
 
     def _count_abort(self) -> None:
         self._bump("aborted")
+
+    def _count_session_unreached(self, url: str, kind: str, source: str,
+                                 reason: str) -> None:
+        """SP-74 (BUG-0559): the guard refused a request of the authenticated context to
+        a host the session's cookies do not reach; nothing was sent. Counted by host."""
+        from urllib.parse import urlsplit
+        host = urlsplit(url).hostname or "?"
+        with self._shared.lock:
+            got = self.report.session_host_unreached
+            got[host] = got.get(host, 0) + 1
 
     def _refuse(self, why: str) -> None:
         with self._shared.lock:
@@ -1010,7 +1040,9 @@ class Explorer:
         material = _SessionMaterial(state.generation, storage_state=shaped.storage_state,
                                     cookies=list(shaped.cookies), scope=shaped.cookie_scope,
                                     login_url=state.login_url,
-                                    login_fields=state.login_fields)
+                                    login_fields=state.login_fields,
+                                    credential_names=frozenset(
+                                        n for n, _v in shaped.checked_cookies))
         if revalidate:
             health, _moved = sess.manager.check_health(
                 host, sess.identity, sess.base_url, generation=state.generation,

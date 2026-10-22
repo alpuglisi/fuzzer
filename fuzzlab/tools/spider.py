@@ -770,10 +770,13 @@ class HostNotServed(RuntimeError):
     static send), or the browser holds the session's cookies for another host (a
     loopback alias of a host-only cookie's host: a browser load). Raised before any
     navigation or transport, at `LocalSpider._visit`'s gate for every load
-    (`LocalSpider._session_host_refusal`; review round 2) and at the static seam for a
-    redirect hop or a selector form's submission (`_SessionAddon`): nothing is sent. The
-    page is unresolved (``failed``), never ``withheld``. The message names the host and
-    the cause, never a URL."""
+    (`LocalSpider._session_host_refusal`; review round 2), at the static seam for a
+    redirect hop or a selector form's submission (`_SessionAddon`), and, in the browser,
+    for a load whose redirect hop the guard's route refused (SP-74's
+    ``on_session_unreached``, BUG-0559) and for a selector form's submission
+    (`navguard.checked_api_request`): nothing is sent. The page is unresolved
+    (``failed``), never ``withheld``. The message names the host and the cause, never a
+    URL."""
 
 
 class _SessionAddon:
@@ -805,33 +808,12 @@ class _SessionAddon:
         self._manager.observe(request, response, identity)
 
 
-def _cookie_reaches(cookie, host) -> bool:
-    """Does the browser send ``cookie`` (as a context holds it: a Playwright cookie with
-    a ``url``, or with a ``domain``) to a request for ``host``? A cookie added by URL,
-    or with a domain without a leading dot, is host-only: that exact host (measured:
-    Chromium sends a ``127.0.0.1`` cookie to ``127.0.0.1`` and not to ``localhost`` on
-    the same port, BUG-0545 review round 2). A dotted domain also reaches the hosts
-    under it, never an IP address (RFC 6265 §5.1.3). A deny-only check: where the
-    session goes is still decided by origin (``cookie_scope``)."""
-    import ipaddress
-    url = cookie.get("url")
-    if url:
-        domain, host_only = (urlparse(url).hostname or "").lower(), True
-    else:
-        raw = str(cookie.get("domain") or "").lower()
-        domain, host_only = raw.lstrip("."), not raw.startswith(".")
-    host = str(host or "").lower()
-    if not domain or not host:
-        return False
-    if host == domain:
-        return True
-    if host_only or not host.endswith("." + domain):
-        return False
-    try:
-        ipaddress.ip_address(host)
-    except ValueError:
-        return True
-    return False
+def _target_key(url):
+    """A navigation target as the guard's route reports it and a load names it, for
+    SP-74's refusals: its ``url_key`` (SP-07) and its own host -- ``url_key`` folds the
+    loopback aliases into one origin, and a page that navigates to its own alias is not
+    that alias (BUG-0559)."""
+    return url_key(url), (urlparse(url).hostname or "").lower()
 
 
 class _Transient(Exception):
@@ -1221,6 +1203,10 @@ class LocalSpider:
         #: the navigation targets (``url_key``) whose own document or redirect landing
         #: the route withheld during the current page navigation (FR-SESS-20, T1)
         self._withheld_targets: set = set()
+        #: the navigation targets (`_target_key` -> the cause) whose own document or
+        #: redirect landing the route refused during the current page navigation: a
+        #: host the session's cookies do not reach (SP-74, BUG-0559)
+        self._unreached_targets: dict = {}
         #: the cookie-less request contexts the guards made (R2), disposed at the end
         self._isolated_requests: list = []
         #: how many such contexts were created (review round 2, T6)
@@ -1412,9 +1398,11 @@ class LocalSpider:
           -- is refused (`HostNotServed`'s message). A manager that cannot give the
           session at all is `IdentityUnavailable`, as on a send;
         - **the browser** carries it in its context's cookie jar: a host that one of the
-          session's cookies, as the context holds them (`_cookie_reaches`), does not
-          reach is refused -- a loopback alias of a host-only cookie's host among them.
-          A session without cookies goes by its headers, by origin (``cookie_scope``).
+          session's cookies, as the context holds them (`_session_cookies`), does not
+          reach is refused -- a loopback alias of a host-only cookie's host among them --
+          by the one predicate the guard's route applies to every request and hop
+          (`navguard.session_host_refusal`, SP-74, BUG-0559). A session without cookies
+          goes by its headers, by origin (``cookie_scope``).
 
         Generic: the host a request goes to is compared with the hosts the session
         reaches, never with a list of aliases. A refusal never widens where the session
@@ -1434,22 +1422,26 @@ class LocalSpider:
                 raise IdentityUnavailable(f"{self._identity}'s session is unavailable: "
                                           f"{exc}") from exc
             return None
-        sess = self._browser_session
-        if sess is None:
+        if self._browser_session is None:
             return (f"the browser holds no session for host {host!r}: not loaded, since "
                     f"it would go without the session (FR-CRAWL-34)")
-        held = [*sess.cookies, *((sess.storage_state or {}).get("cookies") or [])]
-        names = {name for name, _value in sess.checked_cookies}
-        unreached = [n for n in sorted(names)
-                     if not any(c.get("name") == n and _cookie_reaches(c, host)
-                                for c in held)]
-        if not unreached:
-            return None
-        return (f"the session's cookies do not reach host {host!r} in the browser "
-                f"({len(unreached)} of {len(names)} scoped to another host; a host-only "
-                f"cookie reaches its own host only): not loaded, since it would go "
-                f"without the session; start the crawl on that host if it is this "
-                f"app's (FR-CRAWL-34)")
+        why = navguard.session_host_refusal(self._session_cookies(), url,
+                                            cookie_scope=self._cookie_scope)
+        return None if why is None else f"{why}; {self.UNREACHED_ADVICE}"
+
+    #: What the operator can do about a host the session's cookies do not reach.
+    UNREACHED_ADVICE = "start the crawl on that host if it is this app's (FR-CRAWL-34)"
+
+    def _session_cookies(self):
+        """The browser session's credential cookies (``checked_cookies``) as this crawl's
+        context holds them -- added by URL and adopted from the browser login's
+        ``storage_state`` (`navguard.held_session_cookies`) -- or ``[]`` (no session)."""
+        sess = self._browser_session
+        if sess is None:
+            return []
+        return navguard.held_session_cookies(
+            sess.cookies, sess.storage_state,
+            {name for name, _value in sess.checked_cookies})
 
     # ----- browser lifecycle (Playwright engine only) -----
     def _start_browser(self):
@@ -1521,8 +1513,10 @@ class LocalSpider:
         requests on the session's origins (FR-CRAWL-14); for an in-scope request on any
         other origin it aborts documents and WebSockets and fetches the rest through a
         cookie-less request context (FR-SESS-20, BUG-0134: an external crawl's scope is
-        its host on every port, and the jar is port-agnostic); an unauthenticated
-        context gets none of this."""
+        its host on every port, and the jar is port-agnostic), and any request, hop or
+        socket to a host the session's cookies do not reach is refused before it is sent
+        (SP-74, BUG-0559: `_note_session_unreached`); an unauthenticated context gets
+        none of this."""
         from fuzzlab.tools.navguard import guard_page
         guard_page(context, allow=self._allow,
                    on_abort=self._note_guard_abort,
@@ -1536,6 +1530,8 @@ class LocalSpider:
                    cookie_scope=self._cookie_scope if session else None,
                    on_session_withheld=self._note_session_withheld if session else None,
                    isolated_request=self._isolated_request if session else None,
+                   session_cookies=self._session_cookies() if session else None,
+                   on_session_unreached=self._note_session_unreached if session else None,
                    # the reveal window (W2, W3): every context this crawl opens
                    window=functools.partial(self._window_refusal, context=context),
                    ws_hold=functools.partial(self._ws_hold, context),
@@ -2080,6 +2076,26 @@ class LocalSpider:
                 self.skipped_other_origin[url] = f"{kind}: {self.OTHER_ORIGIN_REASON}"
                 logging.info(f"skipped {url} ({kind}): {self.OTHER_ORIGIN_REASON}")
 
+    def _note_session_unreached(self, url, kind, source, reason):
+        """The guard's route refused a request of the crawl's authenticated context to a
+        host the session's cookies do not reach (SP-74, BUG-0559): nothing was sent.
+        Counted (``session_host_unserved``). A page navigation whose own target or
+        redirect landing it was (``source`` is that target) is unresolved with the
+        cause (`HostNotServed` from `_fetch_rendered`: stored failed, never visited,
+        never filed as the landing's page); a navigation the page made itself (a script's
+        ``location``, a meta refresh: ``kind`` ``"document"``) leaves the page where it
+        was, and its target is queued through the normal gates, where `_visit`'s gate
+        files it failed with the same cause. A probe's URL is blocked evidence of that
+        probe only (FR-CRAWL-17)."""
+        self._bump_shared("session_host_unserved")
+        if self._probe is not None:
+            self._probe["blocked"].add(url)
+            return
+        if kind in ("document", "landing"):
+            self._unreached_targets.setdefault(_target_key(source or url), reason)
+        if kind == "document":
+            self._query_navs.append(url)
+
     def _isolated_request(self):
         """A cookie-less, storage-less request context for the guard's withheld fetches
         (FR-SESS-20, R2); disposed when the browser stops."""
@@ -2298,6 +2314,7 @@ class LocalSpider:
         self._xhr_urls = []   # collected by _on_request during this navigation
         self._rendered_ok = False
         self._withheld_targets = set()
+        self._unreached_targets = {}
         try:
             result = self._goto_recording(url)
         except Exception as e:
@@ -2307,6 +2324,12 @@ class LocalSpider:
             # captured under the URLs crawled next. The one way (SP-01, BUG-0522): the
             # browser's own error page when the failure settled on one, else about:blank
             navguard.end_failed_load(self._page, e, timeout_ms=self.timeout_ms)
+            unreached = self._unreached_targets.get(_target_key(url))
+            if unreached is not None:
+                # SP-74 (BUG-0559): its redirect hop went to a host the session's
+                # cookies do not reach and was never sent: unresolved with that cause,
+                # and no static fallback (it would load what the browser refused)
+                raise HostNotServed(f"{unreached}; {self.UNREACHED_ADVICE}") from None
             if self._navigation_withheld(url):
                 # this navigation's own target or its redirect landing is on another
                 # origin than the session's (R1, T1): nothing is extracted, and no
@@ -2319,6 +2342,9 @@ class LocalSpider:
             logging.info(f"Browser could not render {url} ({str(e).splitlines()[0][:80]}); "
                          f"falling back to a static request")
             return self._fetch_static(url)
+        unreached = self._unreached_targets.get(_target_key(url))
+        if unreached is not None:
+            raise HostNotServed(f"{unreached}; {self.UNREACHED_ADVICE}")   # SP-74
         if self._navigation_withheld(url):
             raise SessionWithheld(url)            # committed off the session's origins
         return result
@@ -2779,7 +2805,10 @@ class LocalSpider:
 
     def _take_query_navs(self, depth):
         """The navigations a seed's window aborted or its load made (``location.hash``),
-        through the normal queue gates (scope, destructive, visited, depth)."""
+        and those of a page's own (a script's ``location``, a meta refresh) the guard
+        refused for a host the session's cookies do not reach (SP-74, BUG-0559, where
+        `_visit`'s gate files them failed), through the normal queue gates (scope,
+        destructive, visited, depth)."""
         navs, self._query_navs = self._query_navs, []
         more = []
         if depth >= self.max_depth:
@@ -3677,11 +3706,20 @@ class LocalSpider:
     def _isolated_submit(self, method, action_url, entries):
         """Submit a selector form without following redirects, through a client that
         starts with a copy of the crawler's cookies and never writes a response cookie
-        back (reviewers A2/B-M1). Returns ``(status, headers)``."""
+        back (reviewers A2/B-M1). Returns ``(status, headers)``. In the browser engine an
+        action on a host the session's cookies do not reach is never submitted (SP-74,
+        BUG-0559): `HostNotServed` (counted), which stops that form's enumeration."""
         from urllib.parse import urlencode
         pairs = list(entries)
-        from fuzzlab.tools.navguard import checked_api_request
-        checked_api_request(self._in_scope, action_url)          # BUG-0123
+        from fuzzlab.tools.navguard import SessionHostUnreached, checked_api_request
+        try:
+            checked_api_request(                                 # BUG-0123, SP-74
+                self._in_scope, action_url,
+                session_cookies=self._session_cookies() if self._pw is not None else None,
+                cookie_scope=self._cookie_scope)
+        except SessionHostUnreached as exc:
+            self._bump_shared("session_host_unserved")
+            raise HostNotServed(f"{exc}; {self.UNREACHED_ADVICE}") from None
         if self.engine == "playwright" and self._pw is not None:
             # one scope-checked request, no redirects: the session's headers only when
             # the action is on the session's origins over its transport (FR-CRAWL-14)
@@ -3871,6 +3909,7 @@ class LocalSpider:
         other._subresources = self._subresources             # one set: the crawl's
         other._pending_pairs, other._inflight = {}, {}
         other._withheld_targets, other._load_writes = set(), set()
+        other._unreached_targets = {}
         other._last_final_url = other._last_html = other._last_base = None
         other._probe = other._win = other._capture_page = other._delete_ok_for = None
         other._rendered_ok = other._click_attempted = False
