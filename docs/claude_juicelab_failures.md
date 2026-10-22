@@ -1965,3 +1965,10 @@ Juice Shop lab is complete.
 - **Cause:** I searched the PA list for "whole-package guard" and stopped at the first hit instead of searching by the root cause (the verification set) and the failure record.
 - **Status:** corrected (BUG-0559 "The merge fix's review" with the PA-0403 failure analysis; PA-0559(15) restated).
 
+### F-248 — My layered-redactor brief set a second bar against the unpushed round 144d234, repeating F-226, and the round blocked on it
+- **What:** the brief for REDACTURL r6 (`wf_09971c37-a99`) required "N(leak at r6, redacted at 144d234) -- must be 0" beside the owner's criterion (nothing the pushed 7393c90 redacted may leak). The layered design met the owner's criterion on every corpus (0 against 7393c90), but three families 7393c90 also leaks were redacted by the unpushed 144d234, so the agent stopped and asked for a decision the owner had already made (pin what the pushed tree also leaks).
+- **Evidence:** the round's result in `subagents/workflows/wf_09971c37-a99/journal.jsonl` (status blocked; 0 leaks against 7393c90 on the check corpus, r5b's corpus, the tab/CR/LF set and import_spider; 100 + 146 + 3 URLs against 144d234).
+- **Impact:** about an hour of the round and a second dispatch; nothing wrong was merged.
+- **Cause:** F-226 corrected the bar to the pushed tree; I added the unpushed round back as a hard bar to protect the batch's own gains, without checking it against the owner's rule.
+- **Status:** corrected in the continuation brief (`wf_ef48570e-267`: the bar is 7393c90 only; 144d234 deltas are information; the three families are pinned).
+
