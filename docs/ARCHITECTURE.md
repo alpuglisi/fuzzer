@@ -1209,7 +1209,8 @@ tracked in the requirements files, not here.
   - It returns a typed `Body`. `bound(session)` mounts `BoundedAdapter`, which raises `BodyIncomplete` (a `requests.RequestException`) for an incomplete body, with the response closed.
   - Every `requests` session fuzzlab makes for a target is bounded where it is made (an AST guard): the core seam's transport, `navguard.get_checked`, the probe senders, greybox, blind-SQLi and the spider. The contract runner's session is `watched` and calls `read_body` with its own limits. SP-34 makes the marker "not observed"; greybox makes it a typed `UnobservedProbe`.
     - Its urllib3 pools (`bound`, `watched`) keep a connection only when http.client's reader held nothing past the answer's framed end and nothing waits on the socket or in the TLS layer (`exact_end`, FR-CORE-509; BUG-0549 review round 2). A SOCKS proxy's pools are requests' own and do not get it.
-  - Stated limits: the connect is bounded by its own timeout only. The session manager's login fetcher is pinned for its owner.
+  - The session manager's login fetcher is bounded too (one bounded session per login, its credentials POST on a connection of its own; BUG-0558, CC-SESS-0030), so the guard's reasoned list holds no session-layer entry. A login page it cannot read is `LoginFetchFailed` (a `SessionAuthError` with its own cap, after every candidate and the browser fallback), which every login caller handles; the seam classifies it by its cause (SP-34).
+  - Stated limits: the connect is bounded by its own timeout only.
 - **Process trees** `[built]` (CC-CORE-0048, FR-CORE-38, BUG-0125): `fuzzlab/procutil.py`,
   a stdlib-only leaf (the one module `fuzzlab.labgen` may import beyond itself and the
   label contract). Every long-lived child the toolkit or its tests start -- the five
@@ -1408,14 +1409,21 @@ tracked in the requirements files, not here.
     (`core.dedup.wire_request_key`, FR-FUZZ-68); a stored redacted value is a
     placeholder, bound fresh before each send from its page on the probe's session
     route, or the test is inconclusive (`unbound`) (FR-FUZZ-67); FR-AUD-20's lab
-    predicate is one owner (SP-73, `audit.value_shape.names_outside_lab`: a loopback
-    authority plus the `_tail_in_grammar` allow-list). Residuals: per-occurrence
+    predicate is one owner (SP-73, `audit.value_shape.names_outside_lab`: an allow-list
+    from its entry -- a URL or authority shape is the lab only with an explicit
+    loopback authority and a tail in the `_tail_in_grammar` allow-list, and a bare
+    token is a shape only as an IP literal or a name under a TLD delegated in the DNS
+    root, read from IANA's list bundled in `audit/tld_data/`; BUG-0555, FR-AUD-32).
+    Residuals: per-occurrence
     binding (R1) and raw link-set text (R2) are follow-ups; POST action query points
     (AU-REQID-POSTQ); the crawler's own form/request signatures still merge contexts
-    (CRAWL); after the final review round, a loopback authority the recogniser in
-    `neutral_value` misses skips the allow-list (N-R3-1, AUD) and a LIVE health check
-    adopts a rotated session cookie in the same generation (N-R3-2, FUZZ with SESS),
-    each pinned by strict xfails (BUG-0544);
+    (CRAWL); after the final review round, N-R3-1 (the lab predicate's recogniser
+    gate) is fixed by BUG-0555, and N-R3-2 (a LIVE health check adopting a rotated
+    session cookie in the same generation) is closed by SP-75's session material
+    (BUG-0557, CC-SESS-0030, CC-FUZZ-0115): the bound send's own `prepare` refuses any
+    change of the material its page fetch carried before anything is sent; the
+    access-control replay reads a point's own loopback stand-in as its object key
+    (FUZZ), pinned by a strict xfail (BUG-0555);
   - `tests/test_requirements_traceability.py` (PA-0112): every NFR is classified, and
     every safety NFR names the tests that enforce it or says "Not yet enforced";
   - `core/forms.py`: the one HTML form serialiser (a browser's entry list, with a
@@ -1493,6 +1501,17 @@ tracked in the requirements files, not here.
   spent, and every request it sends then is marked lost (`Request.session_lost`), whose
   answer no consumer takes as evidence: the oracle (any sender), the live WAF filter and
   the blind-SQLi builder (FR-FUZZ-65; CC-FUZZ-0107, CC-FUZZ-0110, CC-MUT-0404).
+  A send can be bound to the session material its setup request carried (FR-SESS-24,
+  SP-75, BUG-0557): inside `session.manager.material_frame` around one send, `prepare`
+  records the material it applies (the generation and a keyed digest of the cookies and
+  headers, never a value) and, given an expectation, refuses a change -- a re-login, a
+  copy's re-login, a cookie a LIVE check rotated in place -- before applying anything;
+  the seam's page binding (FR-FUZZ-67) is its consumer (the legacy spider's selector-form
+  submission -- the static engine's, and the browser engine's for a page its static
+  fallback fetched -- is not yet: pinned for CRAWL). The login handshake reads under
+  SP-60, and a login page not read is `LoginFetchFailed` -- a `SessionAuthError` with
+  its own cap, never "no login form" and never charged to the re-auth cap (BUG-0558
+  and its review round 1).
   Internally the
   detected mechanism maps to an auth handler (cookie/form, JSON+token, Basic,
   header-key) — implementation detail, not user config. Post-Phase 6, logins
@@ -1680,7 +1699,9 @@ tracked in the requirements files, not here.
 
 ### 5. Auditor / fetcher `[built; to harden]`
 - **Subcomponents:** rules-as-data registry (`audit/rules_data/default_rules.json`,
-  category-scoped), candidate emission with full per-rule evaluation logging (every
+  category-scoped), IANA's root-zone TLD list bundled verbatim and dated
+  (`audit/tld_data/tlds-alpha-by-domain.txt`, read only by FR-AUD-20's lab predicate;
+  FR-AUD-32), candidate emission with full per-rule evaluation logging (every
   evaluation recorded, not just hits — the `evaluation` table feeds negatives),
   canary reflection probing with context typing, target fingerprinting
   (DBMS/framework/WAF).
