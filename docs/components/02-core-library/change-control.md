@@ -48,6 +48,40 @@ Newest first.
     `tests/test_query_placement.py::ALLOWED` drops the three entries for
     `_redact_query_identifiers` and the two `urlunsplit(_replace(query=))` rebuilds,
     which no longer exist (the walk reassembles the text it split).
+  - *(Review round 1, 2026-10-22, branch `lane/REDACTURL-r1` from c3a13f7; findings
+    RU-1..RU-10, eight defects; BUG-0556 "Review round 1".)*
+    - **A layer left encoded behind a raw `/` or `://` is decoded (RU-1/RU-6).** A value
+      with a percent-escape and no raw `?`, `#`, `=`, `&` or `;` (Python's `quote()`
+      default `safe="/"`, `quote(safe="/:")`, Django's `redirect_to_login`) is decoded
+      one layer first, as a whole, before anything is split; a nested URL's path segment
+      still encoded is decoded and walked (`_UrlWalk.layer`). A value is decoded first or
+      split first, never both: walking every value again decoded (the review's literal
+      proposal) measured 34 steps per URL character against 8.3, doubling per level.
+    - **A nested URL's userinfo is a credential (RU-2):** `_UrlWalk.userinfo` replaces
+      `user[:password]@` (through the authority's last `@` or `%40`) by `PLACEHOLDER@`
+      in both redactors; a URL's scheme and `//` are recognised only at its start
+      (`_authority_start`), so a `://` inside an encoded nested value is never taken for
+      the outer URL's authority.
+    - **`redact_for_record`'s pieces go through `redact_url` (RU-9):** a route
+      fragment's query was judged flat by `redact_query`; the `ValueError` fallback and
+      the separate fragment branches are gone.
+    - **The walk exposes its operation counts (RU-10, PA-0135(2)):** `WalkCounter`
+      (`steps`: the characters every step was given; `calls`), passed to `_walk_url`.
+    - **For the endpoint query's replay (RU-4):** `redact_url_identifiers(url, *,
+      placeholder=False)` -- with `placeholder`, a URL's own identifier-like query or
+      fragment value becomes `PLACEHOLDER` instead of a blank; `holds_placeholder(text)`
+      is the one test of a redaction placeholder at any depth (`page_url_is_clean` uses
+      it; the point builder refuses a point whose URL holds one).
+    - Callers changed outside CORE: `tools/store_adapter.py` (CC-AUD-0059 round 1),
+      `harness/auto.py` (FUZZ) and `proxy/redact.py` (PROXY, RU-7: the `?` gate on the
+      request target and URL headers removed). No FUZZ or PROXY number was pre-assigned:
+      their entry texts are in the lane's doc texts for the coordinator.
+    - Tests (`tests/test_redaction_nested.py`): the sweep's encodings gain `slash`,
+      `slash2` and `colon` and its shapes `userinfo` (1710 cases); the headline test
+      asserts its leak list before `value_holds_secret` (RU-5); new tests per finding;
+      the linearity test counts the walk's own steps and an offender test proves the
+      oracle on three quadratic variants (PA-0135(3)); the R2 strict xfail becomes a
+      passing test and R2's remainder (the spider's capture blank) is pinned.
 - Impact (other components / project):
   - Every producer that calls `redact_url` now redacts nested credential names, `;`
     pairs, path parameters and query-shaped fragments: **PROXY** (flow history's URL,
@@ -80,6 +114,14 @@ Newest first.
     wall-clock guard refused it). The proxy's history flush runs it once per URL.
   - Behaviour change in proxy history for `;`: `?a=1;token=x` now stores
     `token=__REDACTED__` (it was kept).
+  - *(Review round 1:)* over-redaction: a benign value whose decoded layer has a nested
+    pair with a sensitive name, or a nested URL with any userinfo, is now redacted
+    (fail closed). The benign list adds `next=/search%3Fq%3Dpuppies%26page%3D2`,
+    `return=https://www.example.org/home%3Ftab%3D2`, an `@` in a path and `/a%20b/c%2Fd`,
+    all byte-identical. Proxy history now passes every request target and URL header
+    to `redact_url` (byte-identical when it holds no value). A form or captured request
+    whose own query held a redacted value is now inconclusive (`UNBOUND`) where it sent
+    the blank (FUZZ, below).
 - Deliverables:
   - [x] `_UrlWalk`, `_walk_url`, `value_holds_secret`, `stored_value`,
     `strip_secret_path_params`; `redact_url`, `redact_url_identifiers`,
@@ -92,10 +134,21 @@ Newest first.
   - [x] BUG-0556 report; PA-0556, SP-17 row, CHANGELOG, ERROR_LOG, ARCHITECTURE and
     failure-record texts handed to the coordinator (`scratchpad/lanes/REDACTURL/
     doc_texts.md`) — done
+  - [x] *(Review round 1)* RU-1/RU-6, RU-2, RU-9, RU-10 in the owner; RU-3/RU-8 and
+    RU-4 in the importer (CC-AUD-0059); RU-4's point refusal (FUZZ) and RU-7 (PROXY),
+    their entry texts handed over; RU-5's test; each test proven on c3a13f7 (RU-5 on
+    7393c90); FR-CORE-537 and FR-CORE-32 amended in place; BUG-0556 "Review round 1"
+    with the sweep by caller; PA-0556 items 4-6 and the doc texts amended — done
 - Effectiveness (assessed 2026-10-22): the six reported spellings stored their token
   before (measured by `scratchpad/lanes/REDACTURL/exp/repro.py` on 7393c90) and store
   none after; the new tests fail on the pre-fix product files in one invocation and pass
-  now; `scripts/verify_change.py --base 7393c90` result in the lane report.
+  now; `scripts/verify_change.py --base 7393c90` result in the lane report. *(Review
+  round 1:)* the round's tests fail on c3a13f7's product files on their own assertions
+  in one invocation (`scratchpad/lanes/REDACTURL/r1_prefix.log`: 331 failed, 121
+  passed, 2 xfailed, every failure an `AssertionError`), the headline test on
+  7393c90's on its leak assertion (`r1_ru5_7393c90.log`), and all pass on the revision
+  (the targeted run of 33 affected files: 2327 passed, 35 xfailed, `r1_targeted.log`);
+  the harness result is the orchestrator's at merge.
 
 ### CC-CORE-0075 — The seam keeps its connections per identity and session generation (FR-CORE-509, BUG-0549) (2026-10-21)
 - Placement: pre-assigned to POOL24 (audit defect 24); CC-CORE-0073 and CC-CORE-0074 are

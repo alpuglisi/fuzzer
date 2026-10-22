@@ -348,7 +348,9 @@ plugin registry. It is the layer that makes the store the integration bus.
     redactor it compares against walks nested URLs, query strings, `;` pairs and path
     parameters (FR-CORE-537), a nested redaction is a `PLACEHOLDER` (never a blank, so a
     placeholder at any depth keeps the page out), and the empty-value test splits the
-    query on `&` and `;`.
+    query on `&` and `;`. *(Review round 1:)* a layer left encoded behind a raw `/` and a
+    nested URL's userinfo are redacted too (FR-CORE-537), and its placeholder test is
+    `holds_placeholder`.
   - **Header-point names:** `core.http.header_point_refusal` is the one rule
     (framing, routing, method-override and credential headers, and any name
     `is_sensitive_name` flags; whole names, case-insensitive). `check_send_header`
@@ -851,14 +853,25 @@ plugin registry. It is the layer that makes the store the integration bus.
     `#a=b`); and, inside any of those values, a nested URL (`://`, a leading `/`, a `?`
     or a `#`: its path parameters, query and fragment), a nested query string (`=`, `&`
     or `;`: its pairs), or a percent-encoding layer (decoded one layer, then walked
-    again).
+    again). *(Review round 1, BUG-0556:)* a layer is decoded wherever it remains: a value
+    with a percent-escape and no raw `?`, `#`, `=`, `&` or `;` (`quote(safe="/")`,
+    `quote(safe="/:")`, Django's `redirect_to_login`: `/` and `:` raw at every layer) is
+    decoded first, as a whole; a nested URL's path segment still encoded is decoded and
+    walked; a value is decoded first or split first, never both. A nested URL's
+    userinfo (`//user[:password]@`, its `@` raw or `%40`) is a credential in both
+    redactors: `PLACEHOLDER@`. A URL's scheme and `//` count only at its start.
   - **The rule at every level:** a sensitively named pair or path parameter
     (`is_sensitive_name`, name form-decoded) gets `PLACEHOLDER`. With identifiers
     (`redact_url_identifiers`), an identifier-like value (`looks_like_identifier`,
     judged percent-decoded once) is blanked to `name=` at a URL's own query or fragment
     (as before), and is `PLACEHOLDER` when nested or in a path parameter; a token in a
     nested URL's host or path redacts the whole outer value. `redact_url` applies the
-    name rule only.
+    name rule only. *(Review round 1:)* `redact_url_identifiers(url, placeholder=True)`
+    replaces a URL's own identifier-like value by `PLACEHOLDER` instead of blanking it:
+    how an endpoint's own query is stored (by name, never by value or a blank;
+    PA-0544(1)); `holds_placeholder(text)` is the one test of a redaction placeholder at
+    any depth (`page_url_is_clean`; the point builder refuses a point whose own URL holds
+    one, FR-FUZZ-67).
   - **Re-encoding:** only a value that held a secret changes; a decoded layer that
     changed is percent-encoded again (`quote(safe="")`), so the URL stays a URL and the
     value one value. Clean text is byte-identical.
@@ -866,7 +879,10 @@ plugin registry. It is the layer that makes the store the integration bus.
     `MAX_VALUE_CHARS` (64 KiB) per value. A value past either bound, one with a layer
     still undecoded at the last level, or one the walk fails on is redacted whole at
     its top level (`""` with identifiers, `PLACEHOLDER` otherwise; a path parameter
-    `PLACEHOLDER`). Total; linear per level.
+    `PLACEHOLDER`). Total; linear per level. *(Review round 1, PA-0135(2):)* the walk
+    exposes its operation counts (`WalkCounter`: `steps`, the characters every step was
+    given, and `calls`); its linearity test asserts on them, proven on three quadratic
+    variants.
   - **Stored values:** `value_holds_secret(raw_value)` (percent-decoded once) is true
     for an identifier-like value or one the walk would change; `stored_value(name,
     raw_value, value)` is `""` when the name is sensitive or the value holds a secret,
@@ -879,10 +895,16 @@ plugin registry. It is the layer that makes the store the integration bus.
     the body redactors (`redact_body`, `redact_captured_body`, `redact_leaf`; body
     redaction is paused by the owner, audit defect 26): a nested token in a captured
     body's leaf is BUG-0556's pinned residual R1.
+  - **Every caller passes its value whole** *(review round 1)*: no caller gates its call
+    on a `?` (the proxy's request target and URL headers, RU-7), and the project-record
+    redactor's pieces go through `redact_url` (`redact_for_record`, RU-9).
   - Enforced by: `tests/test_redaction_nested.py` (a generated sweep over depth,
-    encoding, separator, credential names and identifier shapes, searched in the store,
-    proxy history, the HTTP recorder and `safe_ref`; the benign list byte-identical;
-    bounds and totality).
+    encoding -- raw, single and double percent, `+`, `quote(safe="/")` single and
+    double, `quote(safe="/:")` -- separator, nested shape -- a path, an absolute URL, a
+    query string, a URL's userinfo -- credential names and identifier shapes, searched in
+    the store, proxy history, the HTTP recorder, `safe_ref` and the project records; the
+    benign list byte-identical; bounds and totality; an operation-count linearity
+    oracle proven on quadratic variants).
 - **FR-CORE-508** *(one read-only opener; a SQLite file is touched only through
   SQLite; `CC-CORE-0071`, 2026-10-20, BUG-0535).*
   - `core.store.open_read_only(path, *, timeout, fold_on_close=False, any_thread=False)`

@@ -79,7 +79,11 @@ that shares the store, never a mandatory pipeline (D5).
   written, these are redacted:
   - sensitively named headers;
   - query parameters of the request target and of `Location` / `Content-Location` /
-    `Refresh`;
+    `Refresh`; *(BUG-0556, review round 1:)* every sensitively named URL value
+    `core.redaction.redact_url` finds (`;` pairs and path parameters, a query-shaped
+    fragment, nested values, a nested URL's userinfo), with or without a query: the
+    target and those headers are always passed to it whole (a `;jsessionid=` path
+    parameter in a URL with no query was kept);
   - form, JSON (any depth) and multipart (non-file) request and response bodies. *(CC-PROXY-0020,
     BUG-0090:)* a sensitive JSON key's **whole value** is replaced, whatever its type
     (scalar, list, object or nested), and plural names are sensitive

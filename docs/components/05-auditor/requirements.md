@@ -444,6 +444,15 @@ budget where a vulnerability is plausible.
     examples). Stated, pinned: a captured body's leaf holding a nested token keeps the
     flat leaf rule (body redaction paused; BUG-0556 R1), and an endpoint query that
     redaction changed is sent so by its points (BUG-0556 R2, PA-0544's scope).
+    *(Review round 1, BUG-0556:)* a POST form's action query and a captured request's
+    URL query record a value redaction replaced as `PLACEHOLDER` (by name; never a
+    blank: `redact_url_identifiers(..., placeholder=True)`), and the point builder
+    refuses such a point (FR-FUZZ-67: `UNBOUND`, never sent); R2 remains only for the
+    spider capture writer's blank (owner CRAWL, pinned). `import_audit` stores a
+    finding's endpoint as `store_url(page, main)` (the spider's form of the page; another
+    origin kept) and passes its `target_identifier` and `html_context` through the owner
+    (`_audit_text`: the page URL, the page path and every query value `stored_value`
+    would not store, whole or cut as the legacy rules cut it).
   - `audit.engine.evaluate` writes each candidate's request fields through
     `core.reqctx.point_evidence` and stamps `identity_scope` and `context_id` (SP-57,
     FR-FUZZ-66). `InjectionPoint` carries `bindings` and `replay_refusal`.

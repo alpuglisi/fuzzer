@@ -32,6 +32,23 @@ Newest first.
   - Tests: `tests/test_redaction_nested.py` (CC-CORE-0076) covers `import_spider`,
     `import_disco` and a crawled form; `tests/test_forms_phase2.py`'s two BUG-0120
     exclusions are removed (`parameter.example` is searched too).
+  - *(Review round 1, 2026-10-22, branch `lane/REDACTURL-r1`; BUG-0556 "Review round
+    1".)*
+    - **`import_audit` passes the owner (RU-3/RU-8).** It wrote `to_path(page_url)` (a
+      middle segment's `;ref=<uuid>` kept: a second endpoint beside the spider's) and the
+      legacy rules' `target_identifier` and `html_context` raw. Now the endpoint is
+      `store_url(page, main)` (a keyword `base_url`; the run's main origin is its, else
+      the first finding page's, as in the other importers) and both texts pass
+      `_audit_text`: the page URL, the page path and every query value the owner's rule
+      would not store (`stored_value`), whole or cut where a rule cuts it, are replaced;
+      a target identifier also passes `strip_secret_path_params` and
+      `redact_url_identifiers`. `to_path` is no longer imported.
+    - **An endpoint's own redacted query is a placeholder (RU-4).** `_import_forms` (a
+      POST action's query) and `_store_request` (a captured request's URL query) store
+      it through `redact_url_identifiers(..., placeholder=True)`: by name, never by
+      value and never a blank (PA-0544(1)); the point builder refuses such a point
+      (FUZZ). This was a regression of this entry (an identifier there was sent as `id=`),
+      mislabelled pre-existing in the first round.
 - Impact (other components / project):
   - **FUZZ (point builder, oracle):** a crawled form whose hidden value is identifier-
     like or holds a nested token now has that name in `form.fresh`, so its points are
@@ -54,14 +71,27 @@ Newest first.
     by the owner); R2, a POST action's or captured request's endpoint query that
     redaction changed is sent so by its points (pre-existing for a spider capture and for
     a sensitive name in an action URL; replay binding's scope, PA-0544).
+  - *(Review round 1:)* R2 is fixed for a form's action query and a disco capture
+    (refused, `UNBOUND`, never sent: a coverage cost, never a negative) and narrowed to
+    the spider capture writer's blank (owner CRAWL, pinned). `import_audit`'s endpoint
+    now equals the spider's for the same page, and a page on another origin keeps its
+    origin (FR-AUD-27) where it was re-rooted at the base.
 - Deliverables:
   - [x] the six writers above through the owner — done
   - [x] FR-AUD-31 and FR-AUD-26 amended in place — done
   - [x] tests (with CC-CORE-0076) — done
+  - [x] *(Review round 1)* `import_audit` and `_audit_text`; the endpoint query's
+    placeholder; FR-AUD-31 amended in place;
+    `test_import_audit_stores_the_spiders_endpoint_and_no_secret`,
+    `test_an_endpoint_query_redaction_changed_is_never_sent` — done
 - Effectiveness (assessed 2026-10-22): `scratchpad/lanes/REDACTURL/exp/repro2.py` found
   the token in `endpoint.url`, `parameter.example` and `form.entries` (spider forms and
   disco captures) before, and only R1's two rows after; the harness result is in the
-  lane report.
+  lane report. *(Review round 1:)* the reviewers' audit probe
+  (`scratchpad/gapvalues_b3/probe.py`) found the uuid in a second `endpoint.url` and the
+  hex in `candidate.sink_context` on c3a13f7, and finds no secret and one endpoint per
+  page on the revision; both round-1 importer tests fail on c3a13f7 on their own
+  assertions.
 
 ### CC-AUD-0057 — The captured-request import refuses and counts a body holding a lone surrogate instead of failing the import (FR-AUD-22, BUG-0554) (2026-10-21)
 - Placement: lane SURROGATE (item AU-REQID78), base 33b423e, with CC-CRAWL-0061 (the

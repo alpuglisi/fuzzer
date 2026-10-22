@@ -128,8 +128,16 @@ CC-CORE-0076 (owner) and CC-AUD-0059 (importer); FR-CORE-537 (new), FR-CORE-32 a
   2 xfailed. Every defect test failed on its assertion (the secret found); the benign,
   bound and totality tests failed only because the new API (`stored_value`,
   `value_holds_secret`, `MAX_VALUE_DEPTH`, `MAX_VALUE_CHARS`) did not exist.
+  *(Corrected in review round 1, RU-5: false for the headline test,
+  `test_every_nested_spelling_of_a_secret_is_redacted_and_the_url_stays_a_url`, which
+  stopped on `AttributeError: … value_holds_secret` (`prefix.log` lines 20-46). It now
+  asserts its leak list first and fails there on 7393c90; see "Review round 1".)*
 
 ### The PA-0002 sweep, by primitive (every caller of the owner and every writer of a URL or sibling value)
+
+*(Superseded by the review-round-1 table below: this one was read from the callers' code,
+and missed `import_audit` (no owner call), the proxy's `?` gate and the record redactor's
+flat fragment.)*
 
 | Writer / caller | Through the owner after the fix | Disposition |
 |---|---|---|
@@ -224,7 +232,10 @@ added to `docs/PREVENTIVE_ACTIONS.md`):
   defect 26, AU-REDACT); this lane may not change it. Pinned by
   `tests/test_redaction_nested.py::test_a_captured_body_leaf_holding_a_nested_token_is_never_stored`
   (strict xfail).
-- **R2 (pre-existing, PA-0544 class, stated for LABAUTH):** a POST form's action query or
+- **R2 (pre-existing, PA-0544 class, stated for LABAUTH)** *(review round 1, RU-4: the
+  label was wrong for an identifier in a form's action query or a disco capture's URL
+  query, which this change began to blank and send; fixed there, narrowed to the spider
+  capture and re-pinned: see "Review round 1: residuals")*: a POST form's action query or
   a captured request's URL query that redaction changed is stored redacted on
   `endpoint.url` and sent so by its probes (a spider-captured URL already was, since
   FR-CRAWL-13). No fresh binding of an endpoint's own query exists; that is replay
@@ -233,3 +244,261 @@ added to `docs/PREVENTIVE_ACTIONS.md`):
   (`/item/<uuid>/view`) is a page's identity and is stored (FR-AUD-26 templates it); a
   token glued to characters outside the identifier alphabet with no separator
   (`(<hex>)`) is SP-18's stated limit, unchanged here.
+
+## Review round 1 (c3a13f7): what the first fix missed
+
+Two reviewers, with a skeptic per finding, reproduced ten findings on c3a13f7: eight
+defects, since RU-1 = RU-6 and RU-3 = RU-8 (`scratchpad/lanes/REDACTURL/review_round1.md`).
+Each is fixed on branch `lane/REDACTURL-r1` (2568927). The owner's and the importer's
+parts are in the review-round sub-bullets of CC-CORE-0076 and CC-AUD-0059. The FUZZ and
+PROXY callers' entry texts are in the lane's doc texts, numbered by the coordinator. Each
+fix has a test in `tests/test_redaction_nested.py` that fails on its own assertion on
+c3a13f7 (RU-5 on 7393c90, as that finding says):
+
+1. **RU-1 / RU-6: a layer left encoded behind a raw `/` or `://`.**
+   - **What failed.** Some encoders leave `/` (and `:`) raw and encode `?`, `=`, `&`,
+     `;`, `#` and `@`: Python's `quote()` by default (`safe="/"`), `quote(safe="/:")`,
+     and Django's `redirect_to_login` (`QueryDict.urlencode(safe="/")`). Such a value
+     took `nested_url`, which partitions on raw delimiters only, so
+     `next=/orders/view%3Fticket%3D<hex>` was kept by every redactor. `page_url_is_clean`
+     held for it, so the page reached `form.source_page` and would have been fetched
+     with the token.
+   - **Fix.** A value with a percent-escape and no raw query structure (no raw `?`, `#`,
+     `=`, `&` or `;`) is decoded one layer first, as a whole. In such a spelling `/` is
+     raw at every layer, so a raw `/` can belong to a value nested inside. Decoding each
+     path segment alone was tried first and missed the sweep's depth-3 userinfo case. In
+     a value whose query structure is raw, each value is decoded at its own level, and a
+     nested URL's path segment that is still encoded is decoded and walked.
+   - **Design measured.** The review proposed walking every value again, decoded, after
+     the raw walk. On the oracle's URL that took 34 steps and 8.3 identifier-predicate
+     characters per URL character and 84 step calls per pair, where the fix takes 8.3,
+     1.6 and 12. It doubles at every encoded level. So a value is decoded first or split
+     first, never both (`scratchpad/lanes/REDACTURL/r1probe/lin.py`).
+   - **Tests.** The sweep's `_ENCODINGS` gains `slash`, `slash2` and `colon`, and with
+     RU-2's shape the sweep has 1710 cases. New:
+     `test_a_layer_left_encoded_behind_a_raw_slash_is_decoded_wherever_it_is_read` (8
+     spellings, Django's included) and
+     `test_the_review_round_1_spellings_store_no_secret_through_import_spider`.
+2. **RU-2: userinfo in a nested URL.**
+   - **What failed.** `https://bob:<password>@host/` in a value was stored in
+     `parameter.example`, `form.entries` and `form.source_page` whenever the password
+     was not identifier-shaped. The record boundary and `safe_ref` already treated
+     userinfo as a credential.
+   - **Fix.** `_UrlWalk.userinfo` replaces `user[:password]@`, through the authority's
+     last `@` or `%40`, by `PLACEHOLDER@`, in both redactors. `value_holds_secret` then
+     holds, and `stored_value` blanks the value. `PLACEHOLDER` survives percent-encoding,
+     so `page_url_is_clean` sees it in any spelling, where `***@` would be encoded to
+     `%2A%2A%2A%40` and missed.
+   - **Tests.** The sweep's new `userinfo` shape, with the password percent-encoded as a
+     URL carries one; `test_a_nested_urls_userinfo_is_a_credential_in_both_redactors`;
+     the round-1 store test.
+3. **RU-3 / RU-8: `import_audit` bypassed the owner.**
+   - **What failed.** `fuzzlab audit --store` runs `import_spider` and then
+     `import_audit`. `import_audit` stored `to_path(page_url)`, which keeps a middle
+     segment's `;ref=<uuid>`. That gave a second endpoint beside the spider's. It also
+     stored the rules' `target_identifier` (`<path>?<name>`) and `html_context`
+     (`example value: …`, `value '…' reflected`, `supplied 2x: …`, `called from <url>`)
+     unredacted.
+   - **Fix.** The endpoint is `store_url(page, main)`; the run's main origin is
+     `base_url`'s, else the first finding page's, as in the other importers.
+     `_audit_text` replaces in both texts the page URL (by
+     `redact_url_identifiers`' form), the page path (by `strip_secret_path_params`'), and
+     every query value the owner's rule would not store, whole or cut where a rule cuts
+     it (80, 60, 40, 20). A target identifier also passes `strip_secret_path_params` and
+     `redact_url_identifiers` itself.
+   - **Test.** `test_import_audit_stores_the_spiders_endpoint_and_no_secret` runs the
+     real chain: the spider's rows, `load_urls`, `audit_page` with every real rule and a
+     fake fetcher, `import_spider`, then `import_audit`.
+4. **RU-4: a regression mislabelled "pre-existing".** BUG-0556's change stored a POST
+   form's action query and a disco-captured request's URL query through
+   `redact_url_identifiers`. An identifier there (`?id=<uuid>`) was stored as `id=`, and
+   every probe sent that blank as the request's own value, a new false negative.
+   - **Disposition (PA-0544).** Recording the names as `fresh` would need a new binder
+     capability: the binder binds sibling entries from the page's form, and an action
+     URL's query is not an entry. So the test is made unbound (PA-0544(3)).
+   - **How.** The importer records the redacted value as `PLACEHOLDER`, by name, never
+     by value (`redact_url_identifiers(..., placeholder=True)`, PA-0544(1)).
+     `harness.auto._redacted_url_refusal` gives a `replay_refusal` to every crawl point
+     whose own URL holds a placeholder (`core.redaction.holds_placeholder`). The oracle
+     then returns `UNBOUND` before any strategy runs, and nothing is sent.
+   - **Also closed.** This closes the part of the old R2 pin that existed before this
+     change: a sensitive name in a crawled action URL (`token=__REDACTED__`) was sent
+     that way.
+   - **Cost.** Such a form's tests are inconclusive where they sent the blank before.
+   - **Test.** `test_an_endpoint_query_redaction_changed_is_never_sent` replaces the
+     strict xfail. It uses the identifier-only action `?id=<uuid>`, `?token=abc&state=
+     <hex>` and a disco `POST /api/x?id=<uuid>`, and runs the oracle with a sender that
+     refuses any send. R2 is narrowed (Residuals below).
+5. **RU-5: the headline test's pre-fix proof was masked.**
+   - **What failed.** On 7393c90 the test stopped with `AttributeError: …
+     value_holds_secret` before its assertion.
+   - **Fix.** The leak, clean-page and shape failures are now asserted first, and
+     `value_holds_secret` is looked up with `getattr` in a separate, later assertion.
+   - **Proof.** The test was run on a `git archive` export of 7393c90, by a plain Python
+     call with no pytest session (`scratchpad/lanes/REDACTURL/r1_ru5_7393c90.log`). It
+     fails with an `AssertionError` at line 158, `assert failures == []`. The proof
+     sentence under "Corrective action" was false for this test, and is corrected there.
+6. **RU-7: the proxy's `?` gate.**
+   - **What failed.** `proxy.redact.redact` passed the request target, `Location`,
+     `Content-Location` and `Refresh` to `redact_url` only when they held a `?`. So a
+     `;jsessionid=` path parameter in a URL with no query (Tomcat's URL rewriting) stayed
+     in the stored raw messages and their full-text index.
+   - **Fix.** Every one of these is passed to `redact_url`. It returns a URL that holds
+     no value byte-identical, so a clean message is unchanged.
+   - **Test.** `test_proxy_history_redacts_a_path_parameter_in_a_message_with_no_query`
+     covers 6 names, each in a middle segment, a last segment and a second parameter, and
+     in `Location`, `Content-Location` and `Refresh`.
+7. **RU-9: the record redactor judged a route fragment flat.**
+   - **What failed.** `redact_for_record`'s `_redact_piece` passed a fragment's query to
+     `redact_query`, so a credential nested in `#/r?next=…` was kept in `launch.argv`,
+     `launch.target` and `project.targets`.
+   - **Fix.** After the matrix substitution, `_redact_piece` returns
+     `redact_url(piece)`. The walk is total, so the `ValueError` fallback is gone.
+   - **Tests.** `test_a_project_record_redacts_a_credential_nested_in_a_route_fragment`
+     (342 generated cases) and
+     `test_a_launch_record_holds_no_credential_nested_in_a_route_fragment` (through
+     `project.insert_launch`).
+8. **RU-10: the linearity oracle was never proven on a quadratic form.**
+   - **What failed.** The oracle counted only the identifier predicate's reads (against
+     PA-0135(2)), and it was never run on a deliberately quadratic variant (PA-0135(3)).
+   - **Fix.** `core.redaction.WalkCounter` (`steps`, `calls`). Every walk step adds the
+     length of its text, and `_walk_url(..., counter)` exposes the counts. The oracle
+     requires steps at most 12 times the URL's length, at most 20 calls per pair, and
+     identifier-predicate reads at most 3 times the URL's length, at 500 and at 4000
+     pairs. Measured: 8.3, 12 and 1.6.
+   - **Tests.** `test_the_linearity_oracle_flags_a_quadratic_walk` runs the same oracle
+     on three variants at 100 pairs, and each is flagged:
+     - (A) a pair step that decodes the whole list once per pair. The first oracle passed
+       this one: 807 steps per character.
+     - (B) the every-layer re-walk that this round rejected for RU-1.
+     - (C) a pair step that judges the whole query per pair.
+
+**Pre-fix proof (PA-0545(6)).** One pytest invocation ran `tests/test_redaction_nested.py`
+with c3a13f7's four product files swapped in (`fuzzlab/core/redaction.py`,
+`fuzzlab/tools/store_adapter.py`, `fuzzlab/harness/auto.py`, `fuzzlab/proxy/redact.py`),
+then restored them (`scratchpad/lanes/REDACTURL/r1_prefix.log`, mapped per line in
+`r1_prefix_map.txt`): 331 failed, 121 passed, 2 xfailed. Every failure is an
+`AssertionError` on the test's own assertion; none is an import, attribute or type
+error. The 16 failing tests:
+- the headline sweep and the name-only sweep (`assert failures == []`);
+- the layer test (8 of 8) and the userinfo test (7 of 7);
+- the `import_spider` and `import_disco` sweeps and the round-1 store test (11 of 11);
+- the existing proxy and recorder test, and the query-less proxy test (6 of 6);
+- the record test (288 of 342; the depth-1 cases passed, caught by `_MATRIX_PARAM` or
+  `redact_query`) and the launch-record test;
+- `safe_ref`;
+- `import_audit` (its leak assertion);
+- the endpoint-query test (`assert blanks == []`);
+- the linearity test and its oracle test (no `WalkCounter`).
+
+The tests that passed are the axis, benign, bound and totality tests, the matrix tests
+and the first round's reported spellings. The two strict xfails are R1 and the narrowed
+R2.
+
+**Why the first fix missed them.**
+- **The sweep read each writer's code instead of measuring what it stored.** It missed
+  `import_audit`, which called no owner. It missed the proxy, which called the owner
+  behind a gate it did not read. It missed the record redactor, which called the owner
+  for the base only (RU-3, RU-7, RU-9).
+- **The sweep's encodings were the author's, not those real encoders produce.** It
+  generated fully encoded values, never the measured defaults (`quote`'s `safe="/"`,
+  Django's `redirect_to_login`). Its positions left out userinfo, which the owner's other
+  redactor already called a credential (RU-1, RU-2).
+- **A change to what a request sends was judged as a storage change only.** An
+  endpoint's own query is replay material, not only a stored value (RU-4).
+- **PA-0545(6) and PA-0135(2)/(3) were read but not applied** (RU-5, RU-10).
+
+**Recurrence review (round 1).** These are BUG-0556's own review findings. PA-0556 is
+strengthened with items 4 to 6, and its enforcement list is extended. No new PA number
+is assigned, as the lane's numbers allow. The prior-PA failure analysis above still
+holds; what this round adds is the way PA-0556(3)'s sweep was carried out: by reading
+callers, not by measuring them.
+
+### The PA-0002 sweep after review round 1, by caller (supersedes the table above)
+
+Every caller of `redact_url`, `redact_url_identifiers`, `store_url` and `stored_value`
+(with `redact_sibling`), every other caller of the owner's URL rules, and every writer of
+a URL or URL-derived text to the store. Measured by the tests named, not read.
+
+| Caller (file:function) | Calls | What it stores or sends | Disposition |
+|---|---|---|---|
+| `core/http.py` `HttpClient` recorder | `redact_url` | `flow.url` of the core client's flows | fixed by the owner (RU-1, RU-2 included); `test_proxy_history_and_the_http_recorder_store_no_nested_credential` |
+| `proxy/history.py` `HistoryWriter._prepare` | `redact_url` | `flow.url` | fixed by the owner; same test |
+| `proxy/redact.py` `redact` (request target; `Location`, `Content-Location`, `Refresh`) | `redact_url` | stored raw messages, `flow_fts` | **fixed in round 1** (RU-7: the `?` gate removed); `test_proxy_history_redacts_a_path_parameter_in_a_message_with_no_query` |
+| `disco/capture.py` `make_record`; `disco/runner.py`; `disco/explore.py` (actions.jsonl); `disco/ede.py` (page, route key) | `redact_url` | the disco capture files the importer reads; ede's key is in memory | fixed by the owner (names; identifiers are re-judged by the importer); `test_no_generated_spelling_reaches_the_store_through_import_disco` |
+| `tools/spider.py` `record_form` (page and action URL); `mark_visited` landing and `found_from` | `redact_url` | spider DB (names only); the importer re-judges | fixed by the owner; the importer's tests |
+| `tools/spider.py` `record_request` (both URLs), `record_revealed_form` (page URL), `_queue_xhr` (an XHR page URL) | `redact_url_identifiers` | spider DB `discovered_requests`, revealed forms, XHR pages | fixed by the owner; an identifier in a captured request URL's own query is stored **blank** by `record_request`: residual R2 (narrowed, pinned) |
+| `tools/spider.py` `_spa_url` | `redact_spa_fragment` | spider DB page URLs | fixed by the owner |
+| `core/trace.py` `safe_ref` (finding and trace evidence, diagrams) | `redact_url_identifiers`, then `redact_for_record` | evidence references | fixed by the owner; `test_a_diagram_reference_holds_no_nested_secret` |
+| `core/redaction.py` `redact_for_record` / `_redact_piece` (`project.py`: `_clean_target`, `add_target`, `set_meta`, `insert_launch`) | `redact_url` | `project.targets`, `launch.argv`, `launch.target` | **fixed in round 1** (RU-9); the two record tests |
+| `core/redaction.py` `page_url_is_clean` (`store_adapter._source_page`; the oracle binder `_FormBoundSender`) | `redact_url_identifiers`, `holds_placeholder` | `form.source_page`; the page the binder fetches | fixed by the owner (RU-1, RU-2); the sweep's clean-page check |
+| `core/redaction.py` `value_holds_secret` / `stored_value` / `strip_secret_path_params` | the walk | (the rules below) | owner |
+| `core/urls.py` `store_url` (`strip_secret_path_params`) | owner | `page.url`, `endpoint.url` | fixed (BUG-0556) |
+| `store_adapter._import_page_url` | `store_url` | `page.url`, `endpoint.url` | fixed; import_spider and import_disco sweeps |
+| `store_adapter._import_link_set` | `redact_sibling` = `stored_value` | `form.entries`, `parameter.example` | fixed (BUG-0556) |
+| `store_adapter._source_page` | `page_url_is_clean`, `store_url(keep_query)` | `form.source_page` | fixed by the owner |
+| `store_adapter._import_path_templates` | `strip_secret_path_params`, `stored_value` | `endpoint.url`, path `parameter.example` | fixed (BUG-0556) |
+| `store_adapter._import_forms` | `stored_value`, `store_url`, `redact_url_identifiers(placeholder=True)` | `form.entries`, `fresh`, examples, a POST action's query on `endpoint.url` | **fixed in round 1** (RU-4: a redacted query value is a placeholder and its points are refused); `test_an_endpoint_query_redaction_changed_is_never_sent` |
+| `store_adapter._import_route_query` | `store_url(route=True)`, `redact_sibling` | `endpoint.url`, fragment examples | fixed (BUG-0556) |
+| `store_adapter._store_request` | `store_url`, `redact_url_identifiers(placeholder=True)`; `redact_leaf` for the body | a captured request's endpoint query; its body leaves | **fixed in round 1** (RU-4) for the query; the body leaf is residual R1 (pinned) |
+| `store_adapter.import_audit` / `_audit_text` | `store_url`, `redact_url_identifiers`, `strip_secret_path_params`, `stored_value` | `endpoint.url`, `candidate.evidence.target_identifier`, `candidate.sink_context` | **fixed in round 1** (RU-3/RU-8); `test_import_audit_stores_the_spiders_endpoint_and_no_secret`. The rest of a quoted HTML snippet is body redaction (audit defect 26, out of scope) |
+| `harness/auto.py` `injection_points_from_store` | `holds_placeholder` | what a crawl point sends | **fixed in round 1** (RU-4: refused, `UNBOUND`, never sent) |
+| `audit/engine.py` `evaluate` (`candidate` rows) | none | the point's stored URL and entries (`point_evidence`) | clean by its source (stored endpoint and entries, above); a placeholder is by name |
+| `oracle/oracle.py` `_write_finding` (`finding.url`) | none (`to_path` of a stored endpoint) | `finding.url` | clean by its source |
+| `tools/fetcher.py` `log_finding` (audit DB) | none | the auditor's own DB (`findings`), raw | not the project store; re-judged by `import_audit` (above). The auditor's DB is the auditor's working file, as the spider DB is the spider's |
+
+### PA-0556, strengthened (review round 1)
+
+Items 1-3 stand. These are added, and the coordinator's text in the lane's doc texts is
+amended to match:
+
+4. **A sweep of an owner's callers is measured, not read.** Each caller's disposition
+   cites a test that drives a secret through that caller and searches what it stored or
+   sent. Some callers decide *whether* the owner runs: a gate on `"?" in target`, a
+   branch that handles part of the value itself, a writer of the same kind of value that
+   calls no owner. Such a caller is part of the owner's coverage. The sweep therefore
+   lists every writer of that kind of value, not only every call of the owner (RU-3,
+   RU-7, RU-9).
+5. **A generated redaction sweep includes what real encoders produce, measured:**
+   Python's `quote()` with its default `safe="/"`, `quote(safe="/:")`, and a framework's
+   redirect helper. Its positions include every place the owner's other boundaries
+   already treat as a credential, such as a URL's userinfo (RU-1, RU-2).
+6. **A redaction that changes what a request sends is a replay change.** The sweep
+   records, for each writer, whether its stored value is sent as the request's own. Where
+   it is, a value that redaction replaces is recorded as a placeholder, by name, and its
+   test is refused (`UNBOUND`): it is never sent blank (PA-0544(1)/(3)). Before a round
+   is reported, each test's pre-fix proof is on its own assertion (PA-0545(6)), and a
+   complexity oracle is proven on a deliberately quadratic variant (PA-0135(3)) (RU-4,
+   RU-5, RU-10).
+
+- Enforced by (added): `tests/test_redaction_nested.py::test_a_layer_left_encoded_behind_a_raw_slash_is_decoded_wherever_it_is_read`,
+  `tests/test_redaction_nested.py::test_a_nested_urls_userinfo_is_a_credential_in_both_redactors`,
+  `tests/test_redaction_nested.py::test_import_audit_stores_the_spiders_endpoint_and_no_secret`,
+  `tests/test_redaction_nested.py::test_proxy_history_redacts_a_path_parameter_in_a_message_with_no_query`,
+  `tests/test_redaction_nested.py::test_a_project_record_redacts_a_credential_nested_in_a_route_fragment`,
+  `tests/test_redaction_nested.py::test_an_endpoint_query_redaction_changed_is_never_sent`,
+  `tests/test_redaction_nested.py::test_the_linearity_oracle_flags_a_quadratic_walk`
+
+## Review round 1: residuals (updated)
+
+- **R1 (pinned, unchanged):** a captured request body's leaf holding a nested token
+  keeps the flat leaf rule. Body redaction is paused by the owner (audit defect 26).
+- **R2 (narrowed and re-pinned; owner CRAWL).** The round-1 label "pre-existing" was
+  wrong for a form's action query and a disco capture's URL query: there BUG-0556's
+  change introduced the blank, and it is now fixed (RU-4). What remains is the spider's
+  own capture writer (`record_request`). It stores an identifier-like
+  query value of a captured request URL as a blank, which the importer cannot tell from
+  an empty value, so that request's points send `id=`. This predates BUG-0556 (since
+  FR-CRAWL-13). The fix belongs to the writer, which should record a placeholder
+  (PA-0544(1)). `tools/spider.py` is held by lane BROWSERALIAS this round. Pinned by
+  `tests/test_redaction_nested.py::test_a_spider_captured_request_query_redaction_is_never_sent`
+  (strict xfail).
+- **R3 (out of the class, by design, extended):**
+  - Unchanged from the first round: an identifier-shaped top-level path segment, and a
+    token glued on with no separator (SP-18's limit).
+  - The URL's own top-level path segments and its own non-query fragment route are not
+    decoded and walked. They are the page's identity, not values.
+  - A pair's *name* is judged by the name rule only, never decoded and walked as a value.
+  - A top-level URL's userinfo is kept by `redact_url`. The project store keeps none of
+    it (`to_path` and `canonical_origin` drop it), and a browser never sends userinfo in
+    a request line.
