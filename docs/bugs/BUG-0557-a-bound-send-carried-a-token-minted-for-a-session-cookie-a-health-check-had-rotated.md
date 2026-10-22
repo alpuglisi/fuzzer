@@ -192,3 +192,93 @@ outside this lane's files and stated for its owner (CRAWL), not fixed here. Cons
 hold their own copy of the material (a disco browser context, the spider's browser
 context, greybox's header) are not told of an adopted rotation; none of them binds a page
 value through the seam.
+
+## Review round 1 (2026-10-22, on ffac4fa; SESSROT-B2, B3)
+
+Two confirmed findings on this fix's bookkeeping (CC-SESS-0030's "Review round 1";
+branch `lane/SESSROT-r1`). The sections above stand as written; where this section
+corrects them, it says so.
+
+### What each was
+- **B2, a known unfixed instance left as prose.** The sweep above found that the legacy
+  spider's selector-form submission (`tools/spider.py::_seam_submit`, CRAWL; from lane
+  SPIDER, BUG-0545, merged in 54f5c8b before this lane's base) is not bound to its
+  page's session material, and stated it "for its owner (CRAWL), not fixed here".
+  PA-0531(4) requires a known unfixed instance in another item's code to be pinned in
+  the same change by an offline strict xfail naming its owner; FR-SESS-24's stated gaps
+  did not mention it either. The skeptic corrected the reviewer's repro: a field whose
+  name `core.redaction` deems sensitive (csrf, token, nonce ...) is stored and sent as
+  `""` (`core.forms.form_record`), so the value that goes out with its page's value is a
+  session-bound hidden field with an ordinary name (Magento's `form_key`, Moodle's
+  `sesskey`, Discuz's `formhash`, `__VIEWSTATE`); a pin on a CSRF-named field would fail
+  with or without a rotation.
+- **B3, the five frame tests had no pre-fix proof on their own assertions.**
+  `tests/test_session_material.py` imports `AppliedMaterial`, `SessionMaterialChanged`
+  and `material_frame`, which 7393c90 does not have: on 7393c90 the file fails at
+  collection (`prefix_proof.log`, lines 9-18 and 489), and no assertion of its five
+  tests was recorded. "Corrective action" above says each listed test "fails on
+  7393c90 and passes now", and CC-SESS-0030's Effectiveness line says every test fails
+  "for its stated reason"; PA-0557's Enforced-by line names three of the five and SP-75's
+  guard four.
+
+**Corrections.** In "Corrective action" above, "each fails on 7393c90 and passes now"
+holds for the `tests/test_replay_bindings.py` tests only (`prefix_proof.log`: the POST
+on the wire); the five `tests/test_session_material.py` tests are proven on a named
+revert of the check on ffac4fa (below), not on 7393c90. In the sweep above, the
+`_seam_submit` sentence ("stated for its owner (CRAWL), not fixed here") is replaced by
+the pin below.
+
+### Root cause analysis (Five Whys)
+1. *Why were the two left?* The lane's checklist ran its tests on the base and read
+   "failed" for every file it listed; it recorded the sweep's finding in prose.
+2. *Why was "failed" enough?* The pre-fix run was read per file (a red file), not per
+   test and assertion; an import error at collection is a red file.
+3. *Why was the finding prose?* The finding was in another component's file (CRAWL),
+   outside the lane's files, and the lane took "not my file" for "not my pin" -- the
+   case PA-0531(4) exists for (a pin is a test, which a lane may add in a new file).
+4. *Why did nothing catch either?* No harness step compares a bug doc's "fails on X"
+   with the record's per-test outcome, and a prose deferral fails no test.
+5. *Why did a pin on the reviewer's repro need care?* The submission's values pass
+   through `form_record`, whose sensitive-name rule blanks the field a CSRF-shaped pin
+   would bind, so a pin has to be measured to fail for its own reason (a control).
+
+**Root cause:** both rules (PA-0531(4), PA-0545(6)) existed and were not followed: the
+proof was read per file, and an out-of-files finding was recorded as prose.
+
+### Prior-preventive-action failure analysis
+- **PA-0531(4) (BUG-0531) -- not followed.** Its rule is exact ("an offline strict
+  xfail naming its owner, never a prose deferral"); the lane wrote the prose.
+- **PA-0545(6) (BUG-0545) -- not followed.** Its rule is exact ("the proof records the
+  failing assertion of every test in the file ... and a bug doc's claim of what the old
+  code did cites that record"); the record showed an ImportError for the file.
+No new rule: both are restated in the corrective action as done, and the lane's failure
+record holds an entry for each (doc_texts.md).
+
+### Corrective action (round 1)
+- **B2:** `tests/test_spider_session_material.py` (new; the lane does not change
+  `tools/spider.py`): a static identity crawl on a loopback app that binds `form_key` to
+  the session id. The form's enumeration first runs one LIVE check of the real manager,
+  on which the app rotates the id (the race another worker's send makes, made
+  deterministic). The strict xfail
+  (`raises=AssertionError`; reason naming BUG-0557, PA-0557(1) and the owner CRAWL)
+  asserts that no submission carried the page's `form_key` on another id; its premises
+  (one LIVE check that rotated, the page fetched) fail loudly with `pytest.fail`, never
+  as the expected `AssertionError`. Its control (a plain test) runs the same crawl with
+  a check that rotates nothing: the submission is accepted and its target crawled.
+  FR-SESS-24's stated gaps cite the pin.
+- **B3:** a named revert of FR-SESS-24's check on ffac4fa's `manager.py` --
+  `material_frame` kept; `_settle` records but never refuses; `_material` digests the
+  names only (it ignores the values); `_open_frame` ignores `prepared` (the skeptic's
+  caveat: without it the one-frame test still passes) -- and the five tests run on it in
+  the round's one pre-fix pytest invocation (record
+  `scratchpad/lanes/SESSROT/r1_prefix_proof.log`; the revert script
+  `scratchpad/lanes/SESSROT/r1_b3_revert.py`). Each fails at its own assertion:
+  `test_a_send_bound_to_its_fetchs_material_is_refused_after_a_live_check_rotates_it`,
+  `test_a_new_generation_with_the_same_cookies_is_other_material` and
+  `test_a_send_with_no_session_records_none_and_a_bound_one_must_match_it` at their
+  `pytest.raises(SessionMaterialChanged)` ("DID NOT RAISE");
+  `test_the_material_is_a_keyed_digest_never_a_value` at `other.digest != one.digest`
+  (a header change left the digest equal); `test_only_the_first_prepare_inside_a_frame_settles_it`
+  at `frame.applied == fetched` (generation 2 != 1). The same invocation ran the B2 pin
+  with `--runxfail`: it fails at its own assertion ("a submission carried the page's
+  form_key on ['sid-r1-...']"), and its control passed.

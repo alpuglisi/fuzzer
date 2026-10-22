@@ -76,7 +76,9 @@ class _Peer:
       (`HEAD_DRIP`), then a 2-byte body;
     - ``silent``: reads the request and answers nothing until the client hangs up;
     - ``echo``: a 200 whose body is the request's ``Accept-Encoding`` (also kept in
-      ``accept``).
+      ``accept``);
+    - ``cut``: a 200 promising ``Content-Length: 100``, ten bytes of it, then the close
+      (a page cut short: a plain ``requests`` session raises on it too).
     """
 
     def __init__(self, mode: str):
@@ -110,6 +112,10 @@ class _Peer:
                 self.requests += 1
                 if self.mode == "silent":
                     continue                     # until the client closes (recv b"")
+                if self.mode == "cut":
+                    conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
+                                 b"Content-Length: 100\r\n\r\n<html><bo")
+                    break                        # the close (`finally`)
                 if self.mode == "echo":
                     value = next((ln.split(b":", 1)[1].strip() for ln in head.split(b"\r\n")
                                   if ln.lower().startswith(b"accept-encoding:")), b"")
@@ -532,27 +538,37 @@ def test_the_session_managers_login_fetch_is_bounded(peer, monkeypatch):
     assert _incomplete(info.value) == "decoded"
 
 
-@pytest.mark.parametrize("peer", ["bomb"], indirect=True)
-def test_an_incomplete_login_page_is_a_failed_fetch_never_a_login_answer(peer,
-                                                                          monkeypatch):
+@pytest.mark.parametrize("peer", ["cut"], indirect=True)
+def test_an_incomplete_login_page_is_a_failed_fetch_never_a_login_answer(peer):
     """BUG-0558: a login page read incomplete is a failed fetch. Login discovery took
     any failed candidate for "no form here" and went on, so the login ended as "no login
     form found" -- a conclusion from pages never read whole, charged to the re-auth cap.
-    Wanted: the incomplete marker reaches the caller, after one GET and no POST."""
-    from fuzzlab.core import bodyread
+    The page here is cut short (``cut``), which the old plain session failed on too (the
+    bomb, which it decoded whole, is the bounded-fetch test's; review round 1, B4).
+    Wanted (review round 1, B1): every candidate is tried, then `LoginFetchFailed` -- a
+    `SessionAuthError` naming only the cut's class, chained to it -- never "no login
+    form" and never charged to the re-auth cap; no POST."""
     from fuzzlab.core.credentials import CredentialStore
-    from fuzzlab.session.manager import SessionManager
+    from fuzzlab.session.manager import SessionAuthError, SessionManager
     from tests.test_credentials import FakeBackend
-    monkeypatch.setattr(bodyread, "MAX_DECODED_BYTES", 1 << 20)
     creds = CredentialStore(backend=FakeBackend())
     creds.set("127.0.0.1", "alice", "alice", "pw-0558")
     mgr = SessionManager(creds, scope_hosts=["127.0.0.1"], browser_login=False)
     base = peer.url.rsplit("/", 1)[0] + "/"
-    with pytest.raises(requests.RequestException) as info:
+    try:
         mgr.ensure("127.0.0.1", "alice", base, operator=True)
-    assert _incomplete(info.value) == "decoded"
-    assert peer.requests == 1                       # no other candidate, no POST
+    except Exception as exc:  # noqa: BLE001 - asserted on below
+        raised = exc
+    else:
+        raised = None
+    assert raised is not None
+    assert "no login form" not in str(raised), str(raised)   # 7393c90: the catch-all's
     assert mgr._failures.get(("127.0.0.1", "alice"), 0) == 0    # not a login failure
+    assert isinstance(raised, SessionAuthError), type(raised).__name__
+    assert type(raised).__name__ == "LoginFetchFailed"
+    assert isinstance(raised.__cause__, requests.exceptions.ChunkedEncodingError)
+    assert "(ChunkedEncodingError)" in str(raised) and base not in str(raised)
+    assert peer.requests == 5                       # every candidate once, no POST
 
 
 def test_a_stray_answer_after_the_login_page_never_reaches_the_credentials_post():

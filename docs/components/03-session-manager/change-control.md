@@ -55,6 +55,85 @@ Newest first.
 - Effectiveness (assessed 2026-10-22): every test above fails on 7393c90 for its stated
   reason (the POST on the wire; the stray's cookie; the unbounded read; the guard) and
   passes on this change; live lab run pending.
+- Review round 1 of ffac4fa (2026-10-22; SESSROT-B1, B2, B3, B4; branch
+  `lane/SESSROT-r1`; no new number):
+  - Change:
+    - **B1 (a login page not read keeps every caller's contract).**
+      `fuzzlab/session/manager.py`: `LoginFetchFailed` (a `SessionAuthError`).
+      `_discover_login_form` records a candidate whose page was not read (`unread`, a
+      required argument) and tries the others; `_login` tries the browser fallback
+      (FR-SESS-19) first and raises `LoginFetchFailed` only when none yields a login,
+      chained to the first unread page's transport error and naming only its class;
+      `_log_in_locked` turns a transport error anywhere else in `_login` (the
+      credentials POST, the follow-up check; open on 7393c90) into one too. Never
+      charged to `max_reauth`: its own cap `max_login_fetch_failures` (default 3)
+      consecutive per (host, identity), reset by a login that succeeds, then a plain
+      `SessionAuthError` before anything is fetched. An isolated copy raises it as is
+      (its sender classifies it, FR-FUZZ-50) and inherits the cap (`isolated_copy`).
+      The seam's side is CC-FUZZ-0115's round 1 (SP-34 by the transport cause).
+    - **The sweep (by function, every caller of `ensure`/`prepare`):** the seam
+      (`SeamProbeSender.send`, `fetch`, `_dispatch`, `_create_copy`: SP-34); disco's
+      `_recover_session` (`_end_authenticated`); the spider's `_seam_send` and
+      `_session_host_refusal`'s `prepare` (`IdentityUnavailable`); `greybox-run`'s
+      `_cookie_for` (`p.error`);
+      `session print` ("login failed", 1); loud as any `SessionAuthError`, as on
+      7393c90: `browserauth._ensure` (disco's start, the spider's browser engine,
+      `tools/fetcher.py`'s browser start), the CLIs' `ensure` in `blind_sqli_fuzzer` and
+      `tools/fetcher.py`, blind-SQLi's `SeamSender` (it maps a timeout only).
+    - **B2 (the CRAWL pin).** `tests/test_spider_session_material.py` (new): the strict
+      xfail for `tools/spider.py::_seam_submit` (owner CRAWL; BUG-0557, PA-0557(1)) on a
+      loopback app binding `form_key` to the session id, a LIVE check that rotates it
+      between the page and the submission, and its plain control (no rotation:
+      accepted, the target crawled). `tools/spider.py` is unchanged.
+    - **B3, B4 (the proofs).** `tests/test_bounded_reads.py`: `_Peer` gains a `cut` mode;
+      `test_an_incomplete_login_page_is_a_failed_fetch_never_a_login_answer` runs on it
+      (the bomb stays the bounded-fetch test's) and asserts the B1 contract. The five
+      `tests/test_session_material.py` tests are proven on a named revert (below).
+  - Corrections to this entry (it stands as written above): the Change's
+    `_discover_login_form` bullet and the Impact line's "A login whose page is cut,
+    bombed or unanswered now raises the transport error (the seam: 'not observed',
+    SP-34) where it raised 'no login form'" are superseded by B1. The Effectiveness
+    line overstated: on 7393c90 the five `tests/test_session_material.py` tests failed
+    at collection (ImportError), not on their assertions, and the incomplete-login-page
+    test failed for the unbounded read (its bomb fixture never reached the catch-all it
+    names). The pre-fix proofs on 7393c90 are the `test_replay_bindings.py` and
+    `test_bounded_reads.py` tests (`prefix_proof.log`).
+  - Impact (other components / project): FUZZ (CC-FUZZ-0115's round 1: SP-34 owner
+    change); CRAWL (a test-only pin in a new file; no product change); every login
+    caller now gets a `SessionAuthError` again, as on 7393c90, but after every
+    candidate and the browser fallback and never charged to the re-auth cap.
+  - Risk (medium): sessions. Mitigations: one test per caller on a loopback app; the
+    cap bounds a login page that keeps failing (at most `max_login_fetch_failures` x
+    five candidate GETs, then no request). Accepted: a login page that is cut on every
+    try ends the run (or the crawl) loudly, as an unreadable login did on 7393c90.
+  - Deliverables:
+    - [x] `LoginFetchFailed`, its cap, discovery's `unread`, the browser fallback
+      first, the credentials POST and check swept -- done
+    - [x] tests: `tests/test_login_fetch_failed.py` (7), the incomplete-login-page test
+      on `cut`, `tests/test_spider_session_material.py` (the pin and its control) --
+      done
+    - [x] FR-SESS-3 and FR-SESS-24 edited in place; BUG-0557 and BUG-0558 "Review round
+      1"; shared-doc texts amended in the lane's `doc_texts.md` -- done
+    - [ ] `tools/spider.py::_seam_submit` bound to its page's material (owner CRAWL) --
+      todo, pinned
+  - Effectiveness (assessed 2026-10-22): one pre-fix pytest invocation on ffac4fa's
+    `manager.py` and `probesender.py` (`manager.py` also carrying B3's named revert of
+    the frame check -- `_settle` never refuses, `_material` ignores the values,
+    `_open_frame` ignores `prepared` -- which no B1, B2 or B4 test reaches; record
+    `scratchpad/lanes/SESSROT/r1_prefix_proof.log`, `--runxfail`): 14 failed, 1 passed.
+    The seven `tests/test_login_fetch_failed.py` tests and the incomplete-login-page test
+    each fail at their own assertion (five "not observed" and no cap; the transport
+    error escaping disco's recovery, both CLIs, the `/signin` login and the credentials
+    POST; the crawl going on, each page "unresolved after 3 load(s)"); the B2 pin at its
+    own assertion (the page's `form_key` sent on the rotated id); the five frame tests on
+    the revert (three "DID NOT RAISE", the digest unchanged by a header, a second
+    `prepare` re-settling the frame). The pass is the B2 control, by design. On 7393c90
+    the incomplete-login-page test fails at its first assertion, "no login form found"
+    (`r1_b4_7393c90.log`, plain Python, no pytest session). Targeted run on this change
+    (34 affected files, one pytest, `-n 3 --dist loadfile`, `FUZZLAB_REQUIRE_BROWSER`,
+    `_LINT`, `_NETNS` set; `r1_targeted.log`): 1371 passed, 33 xfailed (the B2 pin among
+    them), 0 failed, 0 skipped. The harness (`scripts/verify_change.py`) is the
+    orchestrator's, at merge; live lab run pending.
 
 ### CC-SESS-0029 — A forbidden answer is never, by itself, a lost session (FR-SESS-23, BUG-0533) (2026-10-20)
 - Placement: AU-SESS403 (audit defect 6); design record

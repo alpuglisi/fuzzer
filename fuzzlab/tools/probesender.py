@@ -329,11 +329,22 @@ def _unobserved(exc: BaseException) -> ProbeUnobserved | None:
     - a timeout is not one (each sender has its own rule for it, `_is_timeout`);
     - a target that cannot be reached at all (refused, DNS, TLS, proxy) is not one: it
       fails loudly, so a dead target never turns every candidate inconclusive.
+    A login on the probe's way whose page was not read (`session.manager.LoginFetchFailed`,
+    FR-SESS-3, BUG-0558 review round 1: the probe itself was never sent) is classified
+    by its transport cause under these same rules: a cut, reset or incomplete login page
+    is "not observed", an unreachable one (or a timeout) fails loudly. The manager
+    raises it only under its own cap of such logins in a row; past the cap a plain
+    `SessionAuthError` ends the run.
     The message names the error classes only, never the payload or URL."""
     import requests
     from urllib3.exceptions import NewConnectionError, ProxyError, SSLError
 
     from fuzzlab.core.bodyread import BodyIncomplete
+    from fuzzlab.session.manager import LoginFetchFailed
+    if isinstance(exc, LoginFetchFailed):
+        inner = _unobserved(exc.__cause__) if exc.__cause__ is not None else None
+        return None if inner is None else ProbeUnobserved(
+            f"no session: the login's page got no complete response ({inner})")
     if isinstance(exc, BodyIncomplete):
         return ProbeUnobserved(f"no complete response: incomplete body ({exc.reason})")
     if not isinstance(exc, (requests.ConnectionError, requests.exceptions.ChunkedEncodingError,

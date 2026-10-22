@@ -39,9 +39,23 @@ data. Shared by all tools; a hard dependency for external validation (D10).
   that keep a connection only after an exactly framed answer, FR-CORE-509), and the
   credentials POST goes on a connection of its own, closed after it, sharing the
   login's jar. An incomplete or failed answer (`bodyread.BodyIncomplete`, any
-  `requests.RequestException`) during discovery is a failed fetch that ends the login
-  attempt as a transport failure: never "no login form here", never charged to the
-  re-auth cap.
+  `requests.RequestException`) is a failed fetch: never "no login form here", never a
+  login answer, never charged to the re-auth cap. *(Amended in place, CC-SESS-0030
+  review round 1, BUG-0558 B1:)* a discovery candidate whose page was not read is
+  recorded and the other candidates, then the browser fallback (FR-SESS-19), still
+  have their turn; when none yields a login, the login raises **`LoginFetchFailed`**
+  -- a `SessionAuthError`, so every caller's existing handler applies -- chained to
+  the transport error and naming only its class (never a URL). A transport failure of
+  the credentials POST or the follow-up check is the same. It has its own cap,
+  ``max_login_fetch_failures`` (default 3) consecutive per (host, identity), reset by
+  a login that succeeds; past it a login is refused with a plain `SessionAuthError`
+  before anything is fetched. An isolated copy raises it as is (its sender classifies
+  it, FR-FUZZ-50). Dispositions, one test per caller
+  (`tests/test_login_fetch_failed.py`): the seam's probe is "not observed" while
+  under the cap and the run stops loudly at it (SP-34, by the transport cause: an
+  unreachable login page or a timeout is loud at once); disco's recovery ends
+  authenticated exploration; the spider's static crawl stops (`IdentityUnavailable`);
+  `greybox-run` and `session print` report an authentication failure.
 - **FR-SESS-4 (session-credential detection)** Detect what the login response
   establishes and reuse it: `Set-Cookie` → session cookie; a token/JWT in a JSON
   body → `Authorization: Bearer` (read `exp` locally to refresh proactively); a
@@ -370,7 +384,13 @@ data. Shared by all tools; a hard dependency for external validation (D10).
   - **Stated gaps:** a frame is per thread and per send; a session addon that is not a
     `SessionManager` keeps no frame (the probe sender then falls back to its after-send
     generation check). Consumers holding their own copy of the material (a browser
-    context, greybox's header) are not told of an adopted rotation.
+    context, greybox's header) are not told of an adopted rotation. *(Review round 1,
+    B2.)* The legacy spider's selector-form submission (`tools/spider.py::_seam_submit`,
+    owner CRAWL) opens no frame: a rotation a LIVE check adopts between its page's
+    fetch and its submission sends the page's session-bound field on the rotated
+    cookie (refused, the form's targets lost). Pinned by the strict xfail
+    `tests/test_spider_session_material.py::test_a_selector_form_submitted_after_a_rotation_is_refused_or_carries_its_pages_material`
+    (BUG-0557, PA-0557(1)), with its control.
   - Enforced by: `tests/test_session_material.py` (5 tests),
     `tests/test_replay_bindings.py::test_a_live_health_check_that_adopts_a_rotated_cookie_after_the_fetch_unbinds_the_send`,
     `::test_another_sends_policy_block_whose_check_adopts_a_rotation_unbinds_the_bound_send`,

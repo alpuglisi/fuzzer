@@ -148,3 +148,144 @@ PA-0545's consumer rule not reaching the session layer.
 3. **A sweep verdict for a site cites the guard's finding for that site**, never the
    guard's general claim: a site on an allowance list is not "fixed by construction".
 - Enforced by: tests/test_bounded_reads.py::test_every_requests_session_fuzzlab_makes_is_bounded, tests/test_bounded_reads.py::test_the_session_managers_login_fetch_is_bounded, tests/test_bounded_reads.py::test_an_incomplete_login_page_is_a_failed_fetch_never_a_login_answer, tests/test_bounded_reads.py::test_a_stray_answer_after_the_login_page_never_reaches_the_credentials_post
+
+## Review round 1 (2026-10-22, on ffac4fa; SESSROT-B1, B4)
+
+Two confirmed findings on this fix (CC-SESS-0030's and CC-FUZZ-0115's "Review round
+1"; branch `lane/SESSROT-r1`). The sections above stand as written; where this section
+corrects them, it says so.
+
+### What each was
+- **B1, the fix broke every login caller's contract.** The corrective action's
+  `_discover_login_form` change let a transport failure (`requests.RequestException`,
+  `BodyIncomplete` included) escape `ensure` and `prepare`, where a failed login had
+  always been a `SessionAuthError` -- counted toward `max_reauth` and handled by every
+  caller. The fix checked only the seam (its Impact line: "the seam: 'not observed'").
+  Measured by the reviewer on a peer that cuts every GET (`Content-Length: 100`, ten
+  bytes), six `SeamProbeSender.send` calls on the real manager: on 7393c90 three
+  `SessionAuthError` ("no login form") then three "re-auth cap (3) reached"; on
+  ffac4fa six `ProbeUnobserved`, `_failures` empty, `_attempts` 6, one login GET per
+  send -- never capped, every candidate inconclusive. By reading the code, the same
+  change made disco's `_recover_session` (which catches `SessionUnavailable` and
+  `SessionAuthError`) escape its worker (`stop='error'`, the run re-raised), sent the
+  spider's `_seam_send` into its per-page handler (each page failed and retried the
+  login instead of `IdentityUnavailable` stopping the crawl), ended `greybox-run
+  --identity` and `session print` in a traceback, and let one cut candidate
+  (`/login`) end discovery before a form at `/signin` or the browser fallback
+  (FR-SESS-19) was tried. Already open on 7393c90: a transport failure of the
+  credentials POST or of the follow-up check escaped `_log_in_locked` uncaught.
+- **B4, the incomplete-login-page test did not reach the behaviour it names on the old
+  code.** Its fixture was the bomb, which the old plain `requests.Session()` decoded
+  whole (40 MiB, five candidates, no error): no candidate failed, discovery's
+  `except Exception: continue` never ran, and the test failed on 7393c90 for the
+  unbounded read -- the bounded-fetch test's reason (the lane's own record,
+  `prefix_proof.log`, ~lines 276-335; the skeptic's re-run). So "What it caused to
+  fail" bullet 3 ("Discovery caught the failure as 'a bad candidate'...", citing that
+  test) had no record behind it and contradicted bullet 2 ("decoded whole, five
+  times"); CC-SESS-0030's Effectiveness line gave its pre-fix reason as "the unbounded
+  read".
+
+**Corrections.** Bullet 3 of "What it caused to fail" is replaced by: *a login page cut
+short (a short body, a reset) -- which the old plain session raises on
+(`ChunkedEncodingError`) -- was caught by discovery as "a bad candidate"; every
+candidate was tried and the login raised `SessionAuthError("could not detect a login
+... no login form found")`, which counts toward `max_reauth`* -- recorded on 7393c90 by
+the test's new `cut` fixture (below). The corrective action's `_discover_login_form`
+bullet ("a transport failure ... propagates ...; the seam maps it to 'not observed'")
+is superseded by the corrective action of this round.
+
+### Root cause analysis (Five Whys, across the two)
+1. *Why did B1 reach review?* The fix changed what `SessionManager.ensure` and
+   `prepare` raise, and its sweep and tests covered one caller: the seam, the path the
+   residual came from.
+2. *Why one caller?* The sweep followed SP-60's marker (`BodyIncomplete`) to its
+   consumers -- the rule PA-0545(2) states ("SP-60's markers are followed into every
+   handler") -- and SP-34 already maps it on the seam. It did not list the callers of
+   the function whose raise contract changed; a propagated `RequestException` reads as
+   "the typed marker reaching its caller", while to every other caller it is a type
+   they never caught.
+3. *Why was no rule asking for the callers?* PA-0558(1) as drafted said what a failed
+   fetch is not ("never a login answer, never 'no form here', never charged to a
+   re-auth cap") and not what it is to the caller. CLAUDE.md item 7 (sweep every caller
+   of an owner) is written for shared primitives, and `ensure`'s raise contract is in
+   no SP row.
+4. *Why did B4's test fail on 7393c90 for another reason?* It was written against the
+   new code's path (the bounded fetcher raising on the bomb), and its pre-fix run was
+   read as "it failed" rather than at which assertion -- PA-0545(6), not followed.
+5. *Why did the bug doc then claim the catch-all?* The doc's claim was written from the
+   code's reading (the catch-all exists) and attached to the test that was meant to
+   show it, without reading the record that showed it never ran.
+
+**Root cause:** a change to what a widely called function raises was swept by the
+consumers of the marker it carries, not by the function's callers; and a pre-fix proof
+was taken from "failed" instead of from its own assertion.
+
+### Prior-preventive-action failure analysis
+- **PA-0545(6) (BUG-0545) -- not followed.** The record existed (`prefix_proof.log`)
+  and showed the unbounded read; the claim was written from the code.
+- **PA-0002 / CLAUDE.md item 7 -- too narrow for this change.** "Sweep every caller of
+  the owner" is attached to the shared-primitive table; a raise-contract change of a
+  function in no row was swept by symptom (the seam), the failure mode PA-0002 names.
+- **PA-0558(1) (this bug, as first drafted) -- incomplete.** It forbade the old
+  outcomes without saying what a caller receives, so "propagate the transport error"
+  satisfied it while breaking the callers.
+
+### Corrective action (round 1)
+CC-SESS-0030 and CC-FUZZ-0115, "Review round 1" (FR-SESS-3 and FR-FUZZ-50 edited in
+place):
+- `fuzzlab/session/manager.py`: **`LoginFetchFailed`** (a `SessionAuthError`). Discovery
+  records a candidate whose page was not read (`unread`, a required argument) and tries
+  the others; `_login` tries the browser fallback first and raises `LoginFetchFailed`
+  only when none yields a login, chained to the first unread page's transport error
+  and naming only its class; `_log_in_locked` turns a transport error anywhere else in
+  the login (the credentials POST, the follow-up check: the sweep of 7393c90's open
+  paths) into one too. It is never charged to `max_reauth`; its own cap,
+  `max_login_fetch_failures` (default 3) consecutive per (host, identity), reset by a
+  login that succeeds, refuses the next login with a plain `SessionAuthError` before
+  anything is fetched. An isolated copy raises it as is and inherits the cap.
+- `fuzzlab/tools/probesender.py::_unobserved` (SP-34's owner): a `LoginFetchFailed` is
+  classified by its transport cause (cut, reset or incomplete: "not observed"; an
+  unreachable page or a timeout: loud), so the seam's probe is "not observed" only
+  under the cap.
+- The sweep, every caller of `ensure`/`prepare` with its disposition: the seam
+  (`SeamProbeSender.send`, `fetch`, `_dispatch`, `_create_copy`: SP-34 by cause; a
+  copy's cut login is a failed copy login as before); disco's `_recover_session`
+  (`_end_authenticated`); the spider's `_seam_send` and `_session_host_refusal`'s
+  `prepare` (`IdentityUnavailable`: the crawl stops); `greybox-run`'s `_cookie_for` (`p.error`);
+  `session print` ("login failed", 1); and, loud as any `SessionAuthError` as on
+  7393c90: `browserauth._ensure` (disco's start, the spider's browser engine,
+  `tools/fetcher.py`'s browser start), the `ensure` of `blind_sqli_fuzzer` and
+  `tools/fetcher.py`'s CLIs, and blind-SQLi's `SeamSender` (which maps a timeout only).
+- Tests, `tests/test_login_fetch_failed.py`, one per caller on a loopback app that cuts
+  the login page: the seam (three sends "not observed", every candidate once each, then
+  the cap's loud `SessionAuthError` with no request), disco's recovery, the spider's
+  static crawl, `greybox-run`, `session print`; and the login itself: a cut `/login`
+  never hides a form at `/signin`, and a cut credentials POST is `LoginFetchFailed`.
+  `tests/test_bounded_reads.py::test_an_incomplete_login_page_is_a_failed_fetch_never_a_login_answer`
+  runs on a `cut` page (B4) and asserts the new contract.
+- Pre-fix records. **On ffac4fa** (one pytest invocation with ffac4fa's `manager.py` and
+  `probesender.py` swapped in -- `manager.py` also carrying BUG-0557's round-1 revert in
+  three frame functions none of these tests reaches; the same eight failed the same way
+  on the unmodified ffac4fa files in a plain-Python check -- record
+  `scratchpad/lanes/SESSROT/r1_prefix_proof.log`), each of the eight fails at its own
+  assertion: the seam gives five "not observed" where three and then two cap errors are
+  wanted; disco's recovery lets `ChunkedEncodingError` escape; the static crawl returns
+  without `IdentityUnavailable` (its log: `/expiring` and `/secret` each "unresolved
+  after 3 load(s)", every load a login retry); `greybox-run` raises
+  `ChunkedEncodingError`, not `SystemExit(2)`; `session print` the same, not 1; the cut
+  `/login` ends the login before `/signin`; the cut credentials POST is a
+  `ChunkedEncodingError`, not a `SessionAuthError`; and the incomplete-login-page test
+  gets a `ChunkedEncodingError`, not a `SessionAuthError`. **On 7393c90** (this round's
+  `test_bounded_reads.py` on 7393c90's `fuzzlab/`, the test function called with a real
+  `_Peer("cut")` in plain Python, record `scratchpad/lanes/SESSROT/r1_b4_7393c90.log`),
+  the incomplete-login-page test fails at its first assertion: `could not detect a
+  login for alice@127.0.0.1: no login form found ...` -- discovery's catch-all took the
+  cut candidates for pages without a form (the corrected bullet 3).
+
+### Preventive action
+**PA-0558** is amended before its merge (its text in the lane's `doc_texts.md`): item 1
+now says what the caller receives (the layer's own typed failure, `LoginFetchFailed`,
+after every candidate and the browser fallback, with its own cap), and a new item 4
+makes a change to what a function raises a sweep of that function's callers, each
+caller's disposition measured by a test that drives it. Its Enforced-by line adds the
+seven tests above.

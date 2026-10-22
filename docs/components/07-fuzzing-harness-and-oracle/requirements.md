@@ -1438,6 +1438,14 @@ rewards) derives from it.
     its connection failed with no response (never a cut-off or undecodable body), and
     the re-send is counted in the run's requests and the mechanism's cost.
   - An isolated copy whose login gets no response is a failed copy login.
+  - *(Edited in place, CC-FUZZ-0115 review round 1, BUG-0558 B1.)* A login on the
+    probe's way whose page was not read (`session.manager.LoginFetchFailed`, FR-SESS-3:
+    the probe itself never left) is classified by its transport cause under the same
+    rules: a cut, reset or incomplete login page is "not observed" (an isolated copy's:
+    a failed copy login), an unreachable one or a timeout fails loudly. The session
+    manager raises it only under its own cap of such logins in a row; past the cap a
+    plain `SessionAuthError` ends the run, so a login page that keeps failing never
+    makes every candidate inconclusive.
   - The oracle makes it no verdict from that mechanism: the others still run; the
     candidate is inconclusive (`unobserved`, with its reason in the run's detail)
     unless one confirms; and the run continues.
@@ -1453,7 +1461,8 @@ rewards) derives from it.
     timeout (`Probe.timeout == "read"`); a connect timeout, or a stand-in whose kind its
     sender did not say, is not comparable.
 
-  Enforced by `tests/test_probe_unobserved.py`.
+  Enforced by `tests/test_probe_unobserved.py`, and for a login on the probe's way by
+  `tests/test_login_fetch_failed.py::test_a_seams_cut_login_page_costs_a_bounded_number_of_logins_then_stops_loudly`.
 
 - **FR-FUZZ-400** *(training and benchmark group; `CC-FUZZ-0400`, 2026-10-15).*
   `fuzzlab train <sub>` holds the training/benchmark runs (`docs/CLI_WORKING_VS_TRAINING_DESIGN.md`).

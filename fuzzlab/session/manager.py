@@ -163,6 +163,21 @@ class IsolatedHealthUnknown(IsolatedLoginFailed):
     class a sender catches, so the copy is released and its path goes anonymous."""
 
 
+class LoginFetchFailed(SessionAuthError):
+    """A login whose own pages were not read (FR-SESS-3; BUG-0558, review round 1): a
+    page of the handshake -- a discovery candidate, the credentials POST, the follow-up
+    check -- failed at transport (refused, reset, cut, unanswered, or an incomplete
+    body, `bodyread.BodyIncomplete`), and no other candidate and no browser login
+    (FR-SESS-19, tried first) yielded a login. It is neither "no login form" nor a
+    rejected login: it is not charged to ``max_reauth``. Its own cap of consecutive
+    failures per (host, identity) (``max_login_fetch_failures``, reset by a login that
+    succeeds) ends it loud: past the cap a plain `SessionAuthError`. Every caller that
+    handles `SessionAuthError` handles it; the seam maps it by its cause (SP-34). The
+    transport error is its ``__cause__``; its message names only that error's class,
+    never a URL or the error's text. An isolated copy raises it as is (not
+    `IsolatedLoginFailed`), so its sender maps it by that cause too."""
+
+
 class SessionMaterialChanged(SessionAuthError):
     """A send bound to the session material its setup request carried
     (`material_frame(expect=...)`) found other material at its own `prepare`: a
@@ -465,6 +480,14 @@ def _transport_errors() -> tuple:
     return (requests.RequestException,)
 
 
+def _fetch_failed(identity: str, host: str, exc: BaseException) -> LoginFetchFailed:
+    """The `LoginFetchFailed` of a login whose page failed with ``exc`` (raise it ``from
+    exc``): names ``exc``'s class only (FR-SESS-3, BUG-0558 review round 1)."""
+    return LoginFetchFailed(
+        f"could not log {identity}@{host} in: a page of the login was not read "
+        f"({type(exc).__name__}); no login answer, so not charged to the re-auth cap")
+
+
 def _stopped_at_login(resp) -> bool:
     """Did a ``stop_at`` walk (`SessionManager._navigate`) stop at a login redirect? It
     returns a redirect that carries a ``Location`` only when it stopped there."""
@@ -575,8 +598,14 @@ class SessionManager:
                  relogin_refill_s: float = 120.0, max_pause_s: float = 300.0,
                  pause_budget_s: float = 600.0, clock: Callable[[], float] | None = None,
                  sleep: Callable[[float], None] | None = None,
-                 health_fetch_factory: Callable[[], Fetcher] | None = None):
-        """FR-SESS-23's keywords (CC-SESS-0029): ``health_ttl_s`` (a live verdict's
+                 health_fetch_factory: Callable[[], Fetcher] | None = None,
+                 max_login_fetch_failures: int = 3):
+        """``max_login_fetch_failures`` (FR-SESS-3, BUG-0558 review round 1): the logins
+        in a row per (host, identity) whose pages were not read (`LoginFetchFailed`)
+        before a login is refused loudly; apart from ``max_reauth``, and reset by a
+        login that succeeds.
+
+        FR-SESS-23's keywords (CC-SESS-0029): ``health_ttl_s`` (a live verdict's
         cache window), ``relogin_burst`` and ``relogin_refill_s`` (the loss-driven
         re-login bucket), ``max_pause_s`` (one pause's bound) and ``pause_budget_s`` (the
         run's: `prepare`'s pauses and bucket waits share one, `verify_live`'s waits
@@ -611,6 +640,9 @@ class SessionManager:
         self._locks: dict[tuple[str, str], threading.Lock] = {}
         self._locks_guard = threading.Lock()
         self._failures: dict[tuple[str, str], int] = {}
+        # FR-SESS-3 (BUG-0558 review round 1): logins in a row whose pages were not read
+        self._max_fetch_failures = int(max_login_fetch_failures)
+        self._fetch_failures: dict[tuple[str, str], int] = {}
         # forms phase 2 (FR-SESS-16): callbacks told when observe() logs a session out
         self._logout_listeners: list[Callable[[str, str], None]] = []
         # guards only the valid->invalid check-and-set in observe(), so concurrent
@@ -988,22 +1020,42 @@ class SessionManager:
     def _log_in_locked(self, host: str, identity: str, base_url: str) -> SessionState:
         """`ensure`'s login, under the (host, identity) login lock: the caps, the login,
         the isolated copy's distinctness, then the install (`_install`), which ends the
-        old generation's pause first (login lock -> health lock)."""
-        if self._failures.get((host, identity), 0) >= self._max_reauth:
+        old generation's pause first (login lock -> health lock).
+
+        *(FR-SESS-3, BUG-0558 review round 1.)* A login whose page was not read raises
+        `LoginFetchFailed` (a transport error anywhere in `_login` -- discovery, the
+        credentials POST, the follow-up check -- included): counted apart from the
+        re-auth cap, and past ``max_login_fetch_failures`` in a row a login is refused
+        with a plain `SessionAuthError`, before anything is fetched."""
+        key = (host, identity)
+        if self._failures.get(key, 0) >= self._max_reauth:
             raise SessionAuthError(
                 f"re-auth cap ({self._max_reauth}) reached for {identity}@{host}"
             )
+        if self._fetch_failures.get(key, 0) >= self._max_fetch_failures:
+            raise SessionAuthError(
+                f"login-page cap ({self._max_fetch_failures}) reached for "
+                f"{identity}@{host}: the login's pages were not read "
+                f"{self._fetch_failures[key]} times in a row (FR-SESS-3)")
         if self._max_logins is not None and \
-                self._attempts.get((host, identity), 0) >= self._max_logins:
+                self._attempts.get(key, 0) >= self._max_logins:
             raise LoginCapReached(
                 f"login cap ({self._max_logins}) reached for the isolated session "
                 f"{self._label or identity}@{host}", reason="isolated login cap reached")
-        self._attempts[(host, identity)] = self._attempts.get((host, identity), 0) + 1
+        self._attempts[key] = self._attempts.get(key, 0) + 1
         from fuzzlab.core.credentials import CredentialError
         try:
-            state = self._login(host, identity, base_url)
+            try:
+                state = self._login(host, identity, base_url)
+            except _transport_errors() as exc:
+                # the credentials POST or the follow-up check not read: a failed fetch,
+                # as a discovery candidate's (never a traceback past every caller)
+                raise _fetch_failed(identity, host, exc) from exc
             if self._isolated_from is not None:
                 self._check_isolated(host, identity, state)   # FR-SESS-17
+        except LoginFetchFailed:
+            self._fetch_failures[key] = self._fetch_failures.get(key, 0) + 1
+            raise                    # never charged to max_reauth, never "rejected"
         except SessionAuthError as exc:
             self._failures[(host, identity)] = self._failures.get((host, identity), 0) + 1
             if self._isolated_from is not None and \
@@ -1016,7 +1068,8 @@ class SessionManager:
             self._failures[(host, identity)] = self._failures.get((host, identity), 0) + 1
             raise IsolatedLoginFailed(
                 str(exc), reason="isolated login: no credentials") from exc
-        self._failures[(host, identity)] = 0
+        self._failures[key] = 0
+        self._fetch_failures[key] = 0
         rec = self._health_record(host, identity)
         with rec.lock:                 # login -> health: a new generation ends a pause
             rec.pause = None
@@ -1136,7 +1189,8 @@ class SessionManager:
                               relogin_refill_s=self._relogin_refill_s,
                               max_pause_s=self._max_pause_s,
                               pause_budget_s=self._pause_budget_s, clock=self._clock,
-                              sleep=self._sleep, health_fetch_factory=self._health_ff)
+                              sleep=self._sleep, health_fetch_factory=self._health_ff,
+                              max_login_fetch_failures=self._max_fetch_failures)
         # FR-SESS-23: the run's pause budgets and credential-POST count, shared (its
         # health records, generations and re-login bucket are its own)
         copy._run_budget = self._run_budget
@@ -1599,9 +1653,10 @@ class SessionManager:
         cred = self._creds.require(host, identity)   # CredentialError if missing
         fetcher = self._fetch_factory()
         seen: set[str] = set()       # every origin the login handshake fetched (O12)
+        unread: list[BaseException] = []     # candidates whose page was not read
 
         form, login_page_url, challenge, floor_https = \
-            self._discover_login_form(fetcher, base_url, seen=seen)
+            self._discover_login_form(fetcher, base_url, seen=seen, unread=unread)
         if form is None and challenge == "basic":
             # HTTP Basic has no form: the base URL itself challenges (BUG-0081). The
             # header goes only to that same in-scope origin.
@@ -1609,12 +1664,15 @@ class SessionManager:
                                      secure_only=floor_https)
         if form is None:
             if not self._browser_login:
+                if unread:      # FR-SESS-3: a page not read is no "no login form"
+                    raise _fetch_failed(identity, host, unread[0]) from unread[0]
                 raise SessionAuthError(
                     f"could not detect a login for {identity}@{host}: no login form "
                     f"found from {base_url} (multi-step/CAPTCHA logins are not "
                     f"auto-detected, and the browser login fallback, FR-SESS-19, is off "
                     f"for this manager; capture via the proxy post-Phase 6)")
-            return self._browser_login_state(host, identity, base_url, cred)
+            return self._browser_login_state(host, identity, base_url, cred,
+                                             unread=unread)
         if not self._transport_ok(login_page_url, floor_https):
             raise SessionAuthError(
                 f"refusing to log {identity}@{host} in: the login page {login_page_url} "
@@ -1794,18 +1852,23 @@ class SessionManager:
 
     # -- browser login for single-page apps (FR-SESS-19, CC-SESS-0021) -------------
     def _browser_login_state(self, host: str, identity: str, base_url: str,
-                             cred) -> SessionState:
+                             cred, *, unread: Sequence[BaseException] = ()) -> SessionState:
         """No server-rendered form and no Basic challenge: find and perform the login in
         a browser (`session.browserlogin`), detect the credential from the login
         request's own response (`detect.detect_session_credential`), and confirm it by
         a differential on a request the app made after the click (`_spa_probe`). Every
-        failure is a loud `SessionAuthError` (FR-SESS-6)."""
+        failure is a loud `SessionAuthError` (FR-SESS-6). When the browser finds no
+        login either and a discovery candidate's page was not read (``unread``), the
+        failure is that page's: `LoginFetchFailed` (FR-SESS-3, BUG-0558 review round
+        1)."""
         from fuzzlab.session import browserlogin
         try:
             obs = browserlogin.run(self._credential_destination_ok, base_url, cred,
                                    identity=self._label or identity,
                                    auth_origins=sorted(self._auth_origins))
         except browserlogin.BrowserLoginError as exc:
+            if unread:
+                raise _fetch_failed(identity, host, unread[0]) from unread[0]
             raise SessionAuthError(
                 f"could not log {identity}@{host} in: no server-rendered login form or "
                 f"Basic challenge at {base_url}, and the browser login failed: {exc}"
@@ -1963,7 +2026,8 @@ class SessionManager:
         return resp, page, _stopped_at_login(resp), fetcher
 
     def _discover_login_form(self, fetcher: Fetcher, base_url: str, *,
-                             seen: set[str] | None = None):
+                             seen: set[str] | None = None,
+                             unread: list[BaseException]):
         """Look for a login form from the base URL and a few common login paths.
         Returns ``(form, login_page_url, challenge, floor_https)``; ``challenge`` is
         ``"basic"`` when the base URL answered 401 with a Basic ``WWW-Authenticate`` (no
@@ -1972,7 +2036,14 @@ class SessionManager:
 
         Redirects are followed **by hand** (`_navigate`, BUG-0097): every hop is
         authorised against the operator's input before it is fetched, so neither a
-        request nor the page's trust can leave the approved origins."""
+        request nor the page's trust can leave the approved origins.
+
+        A candidate whose page was not read -- a transport failure: refused, reset,
+        cut, unanswered, an incomplete body (`bodyread.BodyIncomplete`) -- is appended
+        to ``unread`` (a required list: such a failure is never dropped) and the next
+        candidate is tried: it is no page without a form (FR-SESS-3, BUG-0558 and its
+        review round 1), and `_login` decides what it means once every candidate and
+        the browser fallback have had their turn."""
         candidates = [base_url] + [urljoin(base_url, p) for p in
                                    ("login", "login.php", "signin", "users/login")]
         challenge = None
@@ -1983,12 +2054,14 @@ class SessionManager:
                                                         seen=seen)
             except SessionAuthError:
                 raise                                   # an unapproved hop: loud
-            except _transport_errors():
+            except _transport_errors() as exc:
                 # SP-60 (BUG-0558): a page read incomplete (`bodyread.BodyIncomplete`),
                 # cut or unanswered is a failed fetch, never a page without a login form
                 # ("no login detected" would be a conclusion from an answer never read
-                # whole, charged to the re-auth cap)
-                raise
+                # whole, charged to the re-auth cap); the other candidates still have
+                # their turn (review round 1: a form at /signin is not lost to /login)
+                unread.append(exc)
+                continue
             except Exception:  # noqa: BLE001 - a bad candidate URL is not fatal
                 continue
             if url == base_url and resp.status == 401:

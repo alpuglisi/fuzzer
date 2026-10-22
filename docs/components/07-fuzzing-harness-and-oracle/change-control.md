@@ -37,6 +37,40 @@ Newest first.
 - Effectiveness (assessed 2026-10-22): each test fails on 7393c90 with the POST on the
   wire (`('POST', '/do', 's6')` for the pin) and passes on this change; live lab run
   pending.
+- Review round 1 of ffac4fa (2026-10-22; SESSROT-B1; branch `lane/SESSROT-r1`; no new
+  number):
+  - Change: `fuzzlab/tools/probesender.py::_unobserved` (SP-34's owner; FR-FUZZ-50
+    edited in place): a `session.manager.LoginFetchFailed` -- a login on the probe's
+    way whose page was not read (CC-SESS-0030's round 1) -- is classified by its
+    transport cause under the same rules: cut, reset or incomplete is "not observed"
+    (`ProbeUnobserved`, "no session: the login's page got no complete response (...)",
+    class names only); unreachable (refused, DNS, TLS, proxy) or a timeout returns None,
+    so it fails loudly. The manager raises it only under its own cap; past the cap the
+    plain `SessionAuthError` is not classified and ends the run. On ffac4fa the raw
+    transport error reached `_unobserved` unbounded: "not observed" on every send, one
+    login per send, never a loud stop.
+  - The sweep (every caller of `_unobserved`): `SeamProbeSender.send` (a first login in
+    `_identity_for`) and `_dispatch` (a re-login in `prepare`): mapped; `fetch`: mapped;
+    `_create_copy` (a copy raises `LoginFetchFailed` as is): a cut copy login is the
+    failed copy login it was on ffac4fa, an unreachable one loud as on ffac4fa;
+    `_verify_main` (`verify_live` never logs in), `_failed_try` (a try that reached the
+    transport only), `RequestsProbeSender` (no session manager) and
+    `disco/runner.py` (catches `requests.RequestException` only; DISCO's file,
+    unchanged): never given one.
+  - Impact (other components / project): SESS (CC-SESS-0030's round 1). No store or
+    wire contract change.
+  - Risk (low): the classification adds one type, judged by the cause the existing
+    rules already judge.
+  - Deliverables:
+    - [x] `_unobserved` classifies `LoginFetchFailed` by its cause -- done
+    - [x] test: `tests/test_login_fetch_failed.py::test_a_seams_cut_login_page_costs_a_bounded_number_of_logins_then_stops_loudly`
+      -- done
+    - [x] FR-FUZZ-50 edited in place; SP-34's row text in the lane's `doc_texts.md` --
+      done
+  - Effectiveness (assessed 2026-10-22): the seam test fails on ffac4fa at its own
+    assertion (five `ProbeUnobserved`, no cap; CC-SESS-0030's round-1 record
+    `r1_prefix_proof.log`) and passes on this change (CC-SESS-0030's round-1 targeted
+    run).
 
 ### CC-FUZZ-0114 — `SeamProbeSender._dispatch` docstring: the transport never re-sends (BUG-0549 review round 1) (2026-10-21)
 - Change: docstring only, `fuzzlab/tools/probesender.py::SeamProbeSender._dispatch`: "it never re-sends: each request has a fresh connection" becomes "it never re-sends, BUG-0147, and neither does its transport, FR-CORE-509".
