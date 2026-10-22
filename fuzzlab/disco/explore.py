@@ -755,12 +755,20 @@ def is_distinctive(value: str) -> bool:
 
 
 def carries_value(req, values: list[str]) -> bool:
-    """Whether a browser request carries one of ``values`` in its URL or body."""
+    """Whether a browser request carries one of ``values`` in its URL or body. The body
+    is read as bytes and decoded by `navguard.decoded_text`, never Playwright's
+    ``post_data`` -- a strict UTF-8 read that raised on a legacy-charset form's body, so
+    a submission that carried the value counted as not sent (BUG-0559 review round 3,
+    BB-4(4), measured on Chromium 141 with an ISO-8859-1 multipart form)."""
     from urllib.parse import unquote_plus
+    text = unquote_plus(req.url)
     try:
-        text = unquote_plus(req.url) + "\n" + (req.post_data or "")
-    except (UnicodeDecodeError, ValueError):     # a binary body: the URL alone
-        text = unquote_plus(req.url)
+        body = req.post_data_buffer
+    except Exception:  # noqa: BLE001 - a body the driver cannot give: the URL alone
+        body = None
+    if body:
+        ctype = (getattr(req, "headers", None) or {}).get("content-type")
+        text += "\n" + navguard.decoded_text(body, ctype)[0]
     return any(v in text for v in values)
 
 

@@ -22,12 +22,16 @@ Every one is checked where it is made (PA-0123):
   loopback proxy in this process that refuses every request Chromium sends itself but
   a WebSocket the guard's socket handler admitted (`admit_socket`) and the browser's
   re-request of a redirect landing the route checked (`admit_landing`: Playwright never
-  routes it). In a guarded context every other request a page makes is answered by the
+  routes it). An ``https`` landing's tunnel carries that one exchange and is closed at
+  the browser's next request on it (`_HeldTunnel`, review round 3: Chromium kept it in
+  its pool and a later prefetch rode it); a certificate error's retry is admitted on the
+  same ticket. In a guarded context every other request a page makes is answered by the
   route (fetched by the Playwright driver, never by Chromium), so nothing else
   Chromium sends on its own is ever needed: a preload of a host the session's cookies
   do not reach, or of a destructive
   URL, is refused there whatever the page's markup (measured on Chromium 141, both
-  binaries). The resolver rules still name only the scope ``host:port`` pairs;
+  binaries, http and https). The resolver rules still name only the scope ``host:port``
+  pairs;
 * **Chromium's preloads, defence in depth** -- ``guard_page`` keeps a speculation rule
   set from being registered where a script can see it (`PRELOAD_OFF_JS`; the route drops
   the ``Speculation-Rules`` header, makes a page's parser-inserted rule sets inert and
@@ -860,7 +864,15 @@ def decoded_text(body: bytes | None, content_type: str | None) -> tuple[str, str
     byte. Returns the text and the codec it was decoded with -- None when the declared
     charset did not decode losslessly (undecodable bytes replaced): such text is read,
     never re-encoded and given in place of the body. The one decoder of a Playwright
-    response body in fuzzlab (an AST guard holds every module to it)."""
+    response body in fuzzlab (an AST guard holds every module to it).
+
+    **Any label a target writes is safe** (BUG-0559 review round 3, BB-4): Python's
+    registry also names codecs that are not text encodings (``hex``, ``base64``,
+    ``rot13``, ``zlib``, ``bz2``, ``uu``, ``quopri``: ``bytes.decode`` raises
+    ``LookupError``) and text codecs that refuse a document (``idna``, ``undefined``:
+    ``UnicodeError``, with ``replace`` too). Such a label is unknown, as a browser
+    treats a label it does not know: the next one decides (the document's own), else the
+    undeclared order. Nothing a codec raises leaves this function."""
     data = bytes(body or b"")
     declared = [name for bom, name in ((codecs.BOM_UTF8, "utf-8-sig"),
                                        (codecs.BOM_UTF16_LE, "utf-16"),
@@ -872,23 +884,44 @@ def decoded_text(body: bytes | None, content_type: str | None) -> tuple[str, str
             name = match.group(1)
             declared.append(name.decode("ascii", "replace") if isinstance(name, bytes)
                             else name)
-    order: list[str] = []
-    for name in declared:
+    for name in declared:                     # the first label known decides
+        codec = _text_codec(name)
+        if codec is None:
+            continue                          # unknown, or no text encoding: not a label
+        if codec in _LATIN_CODECS:
+            # a Latin-1 label is read as windows-1252 (WHATWG), then byte for byte
+            try:
+                return data.decode("cp1252"), "cp1252"
+            except UnicodeDecodeError:
+                return data.decode("latin-1"), "latin-1"
         try:
-            codec = codecs.lookup(name).name
-        except LookupError:
-            continue
-        # a Latin-1 label is read as windows-1252 (WHATWG), then byte for byte
-        order += ["cp1252", "latin-1"] if codec in _LATIN_CODECS else [codec]
-        break                                 # the first known label decides
-    if not order:
-        order = ["utf-8", "cp1252", "latin-1"]   # undeclared: UTF-8, else HTML's default
-    for codec in order:
+            return data.decode(codec), codec
+        except UnicodeDecodeError:            # the declared charset, lossy: read only
+            try:
+                return data.decode(codec, "replace"), None
+            except Exception:  # noqa: BLE001 - it cannot replace (idna): not a label
+                continue
+        except Exception:  # noqa: BLE001 - a codec that refuses a document (undefined,
+            continue       # idna): not a label either
+    for codec in ("utf-8", "cp1252"):         # undeclared: UTF-8, else HTML's default
         try:
             return data.decode(codec), codec
         except UnicodeDecodeError:
             continue
-    return data.decode(order[0], "replace"), None
+    return data.decode("latin-1"), "latin-1"
+
+
+def _text_codec(label: str) -> str | None:
+    """Python's name of the text encoding a charset ``label`` names, or None: an unknown
+    label, or a codec that is not a text encoding (``hex``, ``base64``, ``rot13``, ...;
+    `decoded_text`)."""
+    try:
+        info = codecs.lookup(label)
+    except Exception:  # noqa: BLE001 - LookupError, or a label the registry chokes on
+        return None
+    if not getattr(info, "_is_text_encoding", True):
+        return None
+    return info.name
 
 
 def response_text(response) -> str | None:
@@ -898,9 +931,9 @@ def response_text(response) -> str | None:
     try:
         body = response.body()
         ctype = (response.headers or {}).get("content-type", "")
+        return decoded_text(body, ctype)[0]       # never raises itself (BB-4, round 3)
     except Exception:  # noqa: BLE001 - a body the driver let go (or a double): none
         return None
-    return decoded_text(body, ctype)[0]
 
 
 def _note_received(req, url: str, answer) -> tuple[str | None, str | None]:
@@ -919,8 +952,9 @@ def _note_received(req, url: str, answer) -> tuple[str | None, str | None]:
         _RECEIVED[page] = (document_key(url), html)
         return html, charset
     # no frame (a service worker's request; a request double without one), or a page
-    # that cannot be weakly referenced: nothing is kept
-    except (AttributeError, Error, TypeError, ValueError):
+    # that cannot be weakly referenced: nothing is kept (`decoded_text` itself never
+    # raises; a LookupError escaped it before, BB-4 review round 3)
+    except (AttributeError, Error, LookupError, TypeError, ValueError):
         return None, None
 
 
@@ -1526,34 +1560,69 @@ _HEAD_MAX = 65536
 _REFUSAL = (b"HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nContent-Length: 0\r\n"
             b"Connection: close\r\n\r\n")
 _ENFORCE_LOCK = threading.Lock()
-#: (host, port) -> expiry times of the sockets the guard admitted and not yet tunnelled
-_TICKETS: dict[tuple[str, int], list[float]] = {}
+#: http landing key (`_landing_key`) -> expiry times of the landings the route checked
+_TICKETS: dict[tuple, list[float]] = {}
+#: (host, port) -> the tunnels admitted there and not yet carried (`_TunnelTicket`),
+#: oldest first: a WebSocket's (`admit_socket`) and an https landing's (`admit_landing`)
+_TUNNEL_TICKETS: dict[tuple[str, int], list] = {}
+#: How many tunnels one ticket may open before one of them carries its traffic, and how
+#: long after its first the others may come: the browser's retry after a certificate
+#: error is a second ``CONNECT``, 4-12 ms after the first (BUG-0559 review round 3,
+#: measured on Chromium 141 with ``ignore_https_errors``, both binaries)
+_TICKET_TUNNELS_MAX = 4
+_TICKET_RETRY_WINDOW_S = 3.0
 #: upstream (None: direct) -> (pid, server); endpoint -> its upstream
 _ENFORCERS: dict = {}
 _ENFORCER_UPSTREAM: dict[str, tuple | None] = {}
-_REFUSED = {"request": 0, "preload": 0, "connect": 0}
+_REFUSED = {"request": 0, "preload": 0, "connect": 0, "reuse": 0}
 
 
 def _socket_key(host, port) -> tuple[str, int]:
     return str(host or "").lower().strip("[]"), int(port)
 
 
-def admit_socket(url: str) -> None:
-    """One WebSocket to ``url``'s host and port that a guard's socket handler admitted
-    (scope, FR-SESS-20, SP-74 checked) and is about to open (``connect_to_server``):
-    the enforcer tunnels one ``CONNECT`` there within `SOCKET_TICKET_TTL_S`, and no
-    other (BUG-0559 review round 2, BB-3)."""
-    parts = urlsplit(url)
+class _TunnelTicket:
+    """One tunnel a guard admitted to a host and port (`admit_socket`, `admit_landing`),
+    within `SOCKET_TICKET_TTL_S`. Tunnels open on it until one carries the browser's
+    traffic -- a TLS handshake the browser abandoned on a certificate error carries none,
+    and its retry is a second ``CONNECT`` (measured, BUG-0559 review round 3) --, at
+    most `_TICKET_TUNNELS_MAX`, the later ones within `_TICKET_RETRY_WINDOW_S` of the
+    first. The tunnel that carries it ``claims`` it, and no other tunnel opens on it. A
+    ``landing`` ticket's tunnel carries one exchange (`_HeldTunnel`); a WebSocket's, the
+    socket's life."""
+
+    __slots__ = ("claimed", "expires", "first", "landing", "tunnels")
+
+    def __init__(self, landing: bool, expires: float):
+        self.landing, self.expires, self.tunnels, self.claimed = landing, expires, 0, False
+        self.first = 0.0                  # when its first tunnel opened
+
+
+def _admit_tunnel(url: str, *, landing: bool) -> None:
+    parts = urlsplit(url or "")
     try:
         port = parts.port
     except ValueError:
         return
+    if not parts.hostname:
+        return
     if port is None:
-        port = 443 if parts.scheme in ("wss", "https") else 80
+        port = 443 if parts.scheme.lower() in ("wss", "https") else 80
     key, now = _socket_key(parts.hostname, port), time.monotonic()
     with _ENFORCE_LOCK:
-        live = [t for t in _TICKETS.get(key, ()) if t > now]
-        _TICKETS[key] = (live + [now + SOCKET_TICKET_TTL_S])[-64:]
+        live = [t for t in _TUNNEL_TICKETS.get(key, ()) if t.expires > now and
+                not t.claimed]
+        _TUNNEL_TICKETS[key] = (live + [_TunnelTicket(landing,
+                                                      now + SOCKET_TICKET_TTL_S)])[-64:]
+
+
+def admit_socket(url: str) -> None:
+    """One WebSocket to ``url``'s host and port that a guard's socket handler admitted
+    (scope, FR-SESS-20, SP-74 checked) and is about to open (``connect_to_server``):
+    the enforcer tunnels a ``CONNECT`` there within `SOCKET_TICKET_TTL_S` until one
+    tunnel carries it (`_TunnelTicket`: a certificate error's retry included), and no
+    other (BUG-0559 review rounds 2 and 3, BB-3)."""
+    _admit_tunnel(url, landing=False)
 
 
 def _landing_key(url: str):
@@ -1578,10 +1647,14 @@ def admit_landing(url: str) -> None:
     redirect to it (`make_route_handler`): Playwright never routes the browser's
     re-request of it, which therefore goes through the enforcer -- forwarded once,
     within `SOCKET_TICKET_TTL_S` (a ``GET``/``HEAD``, never a preload); an ``https``
-    landing admits one tunnel to its host and port (measured: an unadmitted re-request
-    was refused and the redirected page never loaded, BUG-0559 review round 2)."""
+    landing admits tunnels to its host and port until one carries the browser's request
+    (a certificate error's retry included), and that tunnel carries that one exchange
+    only (`_TunnelTicket`, `_HeldTunnel`). Measured: an unadmitted re-request was
+    refused and the redirected page never loaded (BUG-0559 review round 2); a tunnel
+    kept in the browser's pool carried a later prefetch, and a certificate error's retry
+    needed a second tunnel (review round 3)."""
     if urlsplit(url or "").scheme.lower() == "https":
-        admit_socket(url)
+        _admit_tunnel(url, landing=True)
         return
     key = _landing_key(url)
     if key is None:
@@ -1592,10 +1665,8 @@ def admit_landing(url: str) -> None:
         _TICKETS[key] = (live + [now + SOCKET_TICKET_TTL_S])[-64:]
 
 
-def _take_ticket(host, port=None) -> bool:
-    """Consume one live ticket: a socket's ``(host, port)``, or a landing's key (``host``
-    given as the key, ``port`` None)."""
-    key = host if port is None else _socket_key(host, port)
+def _take_ticket(key) -> bool:
+    """Consume one live ticket of an http landing (`_landing_key`)."""
     if key is None:
         return False
     now = time.monotonic()
@@ -1608,10 +1679,44 @@ def _take_ticket(host, port=None) -> bool:
         return True
 
 
+def _take_tunnel(host, port):
+    """The `_TunnelTicket` that admits a ``CONNECT`` to ``host:port`` (its tunnel
+    counted), or None: the oldest live one not yet carried -- each is admitted just
+    before the browser opens its connection."""
+    key, now = _socket_key(host, port), time.monotonic()
+    with _ENFORCE_LOCK:
+        live = [t for t in _TUNNEL_TICKETS.pop(key, ()) if t.expires > now and
+                not t.claimed]
+        if live:
+            _TUNNEL_TICKETS[key] = live
+        for ticket in live:
+            if ticket.tunnels == 0:
+                ticket.first = now
+            elif ticket.tunnels >= _TICKET_TUNNELS_MAX or \
+                    now - ticket.first > _TICKET_RETRY_WINDOW_S:
+                continue
+            ticket.tunnels += 1
+            return ticket
+        return None
+
+
+def _claim(ticket: _TunnelTicket) -> bool:
+    """``ticket``'s traffic goes through the tunnel asking: False once another of its
+    tunnels has carried it."""
+    with _ENFORCE_LOCK:
+        if ticket.claimed:
+            return False
+        ticket.claimed = True
+        return True
+
+
 def enforcer_refusals() -> dict:
     """What the enforcer refused in this process, by kind: ``preload`` (a request
     carrying ``Sec-Purpose``: a speculation-rules prefetch or prerender), ``request``
-    (anything else Chromium sent itself), ``connect`` (a tunnel no guard admitted)."""
+    (anything else Chromium sent itself), ``connect`` (a tunnel no guard admitted),
+    ``reuse`` (traffic on an admitted tunnel past what its ticket admits -- a further
+    request on an https landing's, a second tunnel carrying one ticket --: the tunnel is
+    closed instead, BUG-0559 review round 3)."""
     with _ENFORCE_LOCK:
         return dict(_REFUSED)
 
@@ -1646,6 +1751,175 @@ def _pump(src, dst) -> None:
             s.shutdown(socket.SHUT_RDWR)
 
 
+#: TLS record content types (RFC 8446 §5.1)
+_TLS_HANDSHAKE, _TLS_APPLICATION_DATA = 22, 23
+#: The largest encrypted record that cannot hold an HTTP request: an alert or a key
+#: update (TLS 1.3 sends both as application data). The shortest request line with its
+#: blank line is 18 bytes, and every cipher adds at least 16 to it.
+_TLS_CONTROL_MAX = 33
+
+
+def _tls13(record: bytes) -> bool | None:
+    """Did the server choose TLS 1.3 in this ``ServerHello`` record (its
+    ``supported_versions`` extension, RFC 8446 §4.2.1)? None when the record is not one
+    that can be read."""
+    try:
+        if record[0] != _TLS_HANDSHAKE or record[5] != 2:     # handshake, server_hello
+            return None
+        body = record[9:9 + int.from_bytes(record[6:9], "big")]
+        at = 2 + 32                                         # legacy_version, random
+        at += 1 + body[at]                                  # legacy_session_id
+        at += 2 + 1                                         # cipher_suite, compression
+        end = at + 2 + int.from_bytes(body[at:at + 2], "big")
+        at += 2
+        while at + 4 <= end:
+            kind = int.from_bytes(body[at:at + 2], "big")
+            size = int.from_bytes(body[at + 2:at + 4], "big")
+            if kind == 0x002B:                              # supported_versions
+                return body[at + 4:at + 4 + size] == b"\x03\x04"
+            at += 4 + size
+        return False
+    except IndexError:
+        return None
+
+
+class _HeldTunnel:
+    """A tunnel a `_TunnelTicket` admitted, read at the TLS record layer only -- nothing is
+    decrypted or re-signed (BUG-0559 review round 3). It ``claims`` its ticket when it
+    carries the browser's traffic (a WebSocket's first application-data record past an
+    alert's size, or its first plain byte; a landing's request): until then a handshake
+    the browser abandons on a certificate error -- with an alert, which TLS 1.3 sends as
+    application data (measured) -- leaves the ticket to the browser's retry, a second
+    ``CONNECT`` (measured on Chromium 141 with ``ignore_https_errors``, both binaries:
+    without it the redirected page, or the ``wss`` socket, never opened). Traffic past
+    what the ticket admits -- a second tunnel carrying it, a landing's further request --
+    closes the tunnel, counted (``reuse``).
+
+    An https **landing**'s tunnel carries **one exchange**: Chromium keeps an idle tunnel
+    in its pool, and a later same-origin speculation-rules prefetch carrying the session
+    rode the landing's, past the route and the enforcer, which judges a ``CONNECT`` only
+    (measured, both binaries). The browser's records go on until its request has been
+    sent and the server has answered; its next request on the tunnel (an
+    application-data record that can hold one, `_TLS_CONTROL_MAX`) is never forwarded --
+    the tunnel is closed and counted (``reuse``), and the browser's retry on a new tunnel
+    finds no ticket. HTTP/1.1 sends nothing between a request and the end of its answer
+    (`browser_launch_args` disables HTTP/2 for Chromium's own traffic: a multiplexed
+    connection would carry the prefetch beside the landing). The first application-data
+    record of a TLS 1.3 client is its ``Finished`` (the ``ServerHello`` says which
+    version; unreadable, it is taken as 1.2, so the tunnel errs towards closing). A
+    landing's tunnel that does not speak TLS is closed."""
+
+    def __init__(self, ticket: _TunnelTicket, *, via_proxy: bool):
+        self.ticket, self.via_proxy = ticket, via_proxy
+        self.tls13: bool | None = None
+        self.client_data = 0              # the browser's application-data records so far
+        self.claimed = False              # this tunnel carries the ticket's traffic
+        self.sent = False                 # a landing's request has gone
+        self.answered = False             # the server has sent something since
+
+    def from_client(self, client, remote, buffered: bytes) -> None:
+        """Forward the browser's records, whole; a socket's raw once it is claimed; a
+        landing's until its next request."""
+        buf = buffered
+        try:
+            while True:
+                while buf:
+                    if self.claimed and not self.ticket.landing:
+                        remote.sendall(buf)        # a WebSocket's own traffic: as it comes
+                        buf = b""
+                        break
+                    if buf[0] not in (20, 21, _TLS_HANDSHAKE, _TLS_APPLICATION_DATA):
+                        if self.ticket.landing or not self._claim():
+                            self._close(client, remote, "not TLS" if self.ticket.landing
+                                        else "a tunnel carried already")
+                            return
+                        continue                   # a plain ws:// socket
+                    if len(buf) < 5:
+                        break
+                    size = 5 + int.from_bytes(buf[3:5], "big")
+                    if len(buf) < size:
+                        break
+                    record, buf = buf[:size], buf[size:]
+                    if not self._admits(record):
+                        self._close(client, remote, "a further request"
+                                    if self.ticket.landing else "a tunnel carried already")
+                        return
+                    remote.sendall(record)
+                data = client.recv(65536)
+                if not data:
+                    break
+                buf += data
+        except OSError:
+            pass
+        self._close(client, remote, None)
+
+    def _claim(self) -> bool:
+        if not self.claimed:
+            self.claimed = _claim(self.ticket)
+        return self.claimed
+
+    def _admits(self, record: bytes) -> bool:
+        if record[0] != _TLS_APPLICATION_DATA:
+            return True
+        self.client_data += 1
+        if len(record) - 5 <= _TLS_CONTROL_MAX:
+            # an alert or a key update -- a TLS 1.3 client gives up a handshake on a
+            # certificate error with one (measured) --: it carries nothing, no request fits
+            return True
+        if not self.ticket.landing:
+            return self._claim()          # a WebSocket: its handshake went, it is carried
+        if self.tls13 and self.client_data == 1:
+            return True                   # a TLS 1.3 client's Finished
+        if self.answered:
+            return False                  # the exchange is done: a further request
+        if not self.sent:
+            if not self._claim():
+                return False              # another tunnel carried this landing
+            self.sent = True
+        return True
+
+    def from_server(self, remote, client) -> None:
+        """Relay the server's bytes; read its ``ServerHello`` (after a capture proxy's
+        answer to the ``CONNECT``) and note any answer once the request has gone."""
+        head = b""
+        try:
+            while True:
+                data = remote.recv(65536)
+                if not data:
+                    break
+                if self.sent:
+                    self.answered = True
+                if self.tls13 is None:
+                    head += data
+                    self._read_hello(head)
+                client.sendall(data)
+        except OSError:
+            pass
+        for s in (remote, client):
+            with contextlib.suppress(OSError):
+                s.shutdown(socket.SHUT_RDWR)
+
+    def _read_hello(self, head: bytes) -> None:
+        if self.via_proxy:
+            if b"\r\n\r\n" not in head:
+                return
+            head = head.split(b"\r\n\r\n", 1)[1]
+        if len(head) < 5:
+            return
+        size = 5 + int.from_bytes(head[3:5], "big")
+        if len(head) >= size or len(head) > 4096:
+            self.tls13 = bool(_tls13(head[:size]))     # unreadable: 1.2, towards closing
+
+    def _close(self, client, remote, why: str | None) -> None:
+        if why is not None:
+            with _ENFORCE_LOCK:
+                _REFUSED["reuse"] += 1
+            logging.info(f"closed a tunnel the enforcer admitted ({why}; BUG-0559)")
+        for s in (client, remote):
+            with contextlib.suppress(OSError):
+                s.shutdown(socket.SHUT_RDWR)
+
+
 class _EnforcerHandler(socketserver.BaseRequestHandler):
     """One connection from Chromium, one request: a ``CONNECT`` the guard admitted is
     tunnelled (to its host, or through the capture proxy); the re-request of a redirect
@@ -1669,8 +1943,9 @@ class _EnforcerHandler(socketserver.BaseRequestHandler):
         target = rest.split(" ", 1)[0]
         if method.upper() == "CONNECT":
             host, port = _authority(target)
-            if host is not None and _take_ticket(host, port):
-                self._tunnel(client, host, port, head)
+            ticket = _take_tunnel(host, port) if host is not None else None
+            if ticket is not None:
+                self._tunnel(client, host, port, head, ticket)
                 return
             self._refuse(client, "connect", host or "?", "")
             return
@@ -1725,19 +2000,20 @@ class _EnforcerHandler(socketserver.BaseRequestHandler):
         with contextlib.suppress(OSError):
             client.sendall(_REFUSAL)
 
-    def _tunnel(self, client, host: str, port: int, head: bytes) -> None:
+    def _tunnel(self, client, host: str, port: int, head: bytes,
+                ticket: _TunnelTicket) -> None:
+        """Tunnel a ``CONNECT`` ``ticket`` admitted (`_HeldTunnel`): a WebSocket's for its
+        life, an https landing's for its one exchange."""
         upstream = self.server.upstream
         end = head.index(b"\r\n\r\n") + 4
         try:
             if upstream is not None:            # the capture proxy answers the CONNECT
                 remote = socket.create_connection((upstream[0].strip("[]"), upstream[1]),
                                                   timeout=10)
-                remote.sendall(head)
+                remote.sendall(head[:end])
             else:
                 remote = socket.create_connection((host, port), timeout=10)
                 client.sendall(b"HTTP/1.1 200 Connection established\r\n\r\n")
-                if head[end:]:
-                    remote.sendall(head[end:])
         except OSError:
             with contextlib.suppress(OSError):
                 client.sendall(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n"
@@ -1745,10 +2021,11 @@ class _EnforcerHandler(socketserver.BaseRequestHandler):
             return
         remote.settimeout(None)
         client.settimeout(None)
-        back = threading.Thread(target=_pump, args=(remote, client), daemon=True,
-                                name="navguard-enforcer-tunnel")
+        held = _HeldTunnel(ticket, via_proxy=upstream is not None)
+        back = threading.Thread(target=held.from_server, args=(remote, client),
+                                daemon=True, name="navguard-enforcer-tunnel")
         back.start()
-        _pump(client, remote)
+        held.from_client(client, remote, head[end:])
         back.join()
         remote.close()
 
@@ -1796,11 +2073,16 @@ def browser_launch_args(scope_urls, *, any_port_hosts=(), proxy: str | None = No
     background services, a WebSocket, the re-request of a redirect landing (which
     Playwright never routes). It refuses all of it (403, counted in
     `enforcer_refusals`, logged by host) but a WebSocket a guard's socket handler
-    admitted (`admit_socket`, tunnelled once) and a landing the route checked and
+    admitted (`admit_socket`, one tunnel carries it) and a landing the route checked and
     answered with a redirect to (`admit_landing`, forwarded once, never a preload;
     measured: without it a redirected navigation never loaded). An unrouted page
-    therefore loads nothing. For an ``https`` target a tunnel is judged by its host and
-    port only: what Chromium sends inside a tunnel it was admitted for is not seen.
+    therefore loads nothing. A tunnel is admitted by host and port, and read at the TLS
+    record layer only, never decrypted (`_HeldTunnel`, BUG-0559 review round 3): an
+    ``https`` landing's carries its one exchange and is closed at the browser's next
+    request on it; a ticket admits a certificate error's retry. ``--disable-http2`` keeps
+    Chromium's own traffic on HTTP/1.1 (one request at a time on a connection; routed
+    requests are the driver's and never see it); what a WebSocket's tunnel carries is
+    not seen.
 
     ``proxy`` (CC-CRAWL-0031, the disco capture layer): a loopback ``host:port``
     recorder. Pass the same ``proxy`` to `chromium_launch_kwargs`, which gives it to
@@ -1831,6 +2113,11 @@ def browser_launch_args(scope_urls, *, any_port_hosts=(), proxy: str | None = No
     rules.append(f"MAP {enforcer} {enforcer}")
     proxy_args = [f"--proxy-server=http://{enforcer}", "--proxy-bypass-list=<-loopback>"]
     rules = list(dict.fromkeys(rules)) + ["MAP * ~NOTFOUND"]
+    # HTTP/1.1 for what Chromium sends itself: an https landing's tunnel is held to one
+    # exchange (`_HeldTunnel`), which a multiplexed HTTP/2 connection would not be
+    # (measured: Chromium chose h2 inside the tunnel when the server offered it). Routed
+    # requests are fetched by the Playwright driver and do not see this switch
+    proxy_args.append("--disable-http2")
     return ["--no-sandbox", "--disable-dev-shm-usage", *proxy_args,
             f"--host-resolver-rules={', '.join(rules)}", "--disable-background-networking",
             "--disable-component-update", "--disable-sync", "--disable-domain-reliability",

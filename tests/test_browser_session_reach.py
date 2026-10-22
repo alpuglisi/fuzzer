@@ -1333,12 +1333,18 @@ def test_a_guarded_page_loads_a_document_in_a_legacy_charset(monkeypatch):
 def test_no_module_reads_a_response_body_as_strict_utf8():
     """PA-0559(8) (BB-4(2)): no fuzzlab module calls ``.text()`` -- Playwright's strict
     UTF-8 read of a response body, which raises on a legacy charset -- but reads it with
-    `navguard.response_text` / `decoded_text`. Proven on a synthetic offender."""
+    `navguard.response_text` / `decoded_text`. Review round 3 (BB-4(4)): nor reads a
+    request's body with ``.post_data`` / ``.post_data_json`` (the same strict read: disco's
+    `carries_value` dropped a Latin-1 form's body), but ``post_data_buffer`` through
+    `decoded_text`. Proven on synthetic offenders."""
     def offenders(source: str, module: str) -> list[str]:
         out = []
         for node in ast.walk(ast.parse(source)):
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and \
                     node.func.attr == "text" and not node.args and not node.keywords:
+                out.append(f"{module}:{node.lineno}")
+            elif isinstance(node, ast.Attribute) and \
+                    node.attr in ("post_data", "post_data_json"):
                 out.append(f"{module}:{node.lineno}")
         return out
     found = []
@@ -1348,6 +1354,9 @@ def test_no_module_reads_a_response_body_as_strict_utf8():
     assert found == [], found
     assert offenders("def f(resp):\n    return resp.text()\n", "x.py") == ["x.py:2"]
     assert offenders("def f(resp):\n    return resp.text\n", "x.py") == []
+    assert offenders("def f(req):\n    return req.post_data or ''\n", "x.py") == ["x.py:2"]
+    assert offenders("def f(req):\n    return req.post_data_json\n", "x.py") == ["x.py:2"]
+    assert offenders("def f(req):\n    return req.post_data_buffer\n", "x.py") == []
 
 
 # --- review round 2: one comparison of a cookie's domain with a host (BB-2) ---------------
@@ -1439,3 +1448,565 @@ def test_no_cookie_domain_is_compared_with_a_host_outside_the_owner():
     assert offenders("def f(c, h):\n    return h.endswith(c['domain'])\n", "x.py") == [
         "x.py:2"]
     assert offenders("def f(c, h):\n    return cookie_reaches(c, h)\n", "x.py") == []
+
+
+# --- review round 3 (BUG-0559, final): any charset label; an https landing's tunnel -------
+def _codec_names() -> list[str]:
+    """Every codec name Python registers (the ``encodings`` package's modules and every
+    alias with its target): what a target may write as a charset label."""
+    import encodings
+    import encodings.aliases
+    import pkgutil
+    return sorted(set(encodings.aliases.aliases) | set(encodings.aliases.aliases.values())
+                  | {m.name for m in pkgutil.iter_modules(encodings.__path__)})
+
+
+def test_no_charset_label_a_target_writes_makes_the_decoder_raise():
+    """BB-4 (BUG-0559 review round 3): `navguard.decoded_text` and `response_text` never
+    raise, whatever charset the target names, for every codec name Python registers, in
+    the ``Content-Type``, in a ``<meta>``, or both, on a body that decodes and one that
+    does not. A codec that is no text encoding (``hex``, ``base64``, ``rot13``, ``zlib``,
+    ``bz2``, ``uu``, ``quopri``) is an unknown label: the next one decides, else the
+    undeclared order; one that refuses a document even with replacement (``idna``,
+    ``undefined``) falls back to UTF-8 with replacement. Before (1b05e3f): ``LookupError:
+    'hex' is not a text encoding`` and ``UnicodeError`` raised out of both."""
+    dec = navguard.decoded_text
+    names = _codec_names()
+    assert len(names) > 300 and {"hex", "base64", "rot13", "zlib", "bz2", "uu", "quopri",
+                                 "idna", "undefined"} <= set(names)
+    raised = []
+    for name in names:
+        for ctype, body in ((f"text/html; charset={name}", b"<title>t</title>ok"),
+                            ("text/html", f'<meta charset="{name}"><title>t</title>'
+                                          .encode()),
+                            (f"text/html; charset={name}",
+                             f'<meta charset="{name}">\xe9\xff<p>'.encode("latin-1"))):
+            try:
+                text, codec = dec(body, ctype)
+                assert isinstance(text, str) and (codec is None or isinstance(codec, str))
+            except Exception as exc:  # noqa: BLE001 - the defect: collected, named
+                raised.append((name, ctype.split(";")[0], type(exc).__name__))
+    assert raised == [], raised[:20]
+    # an unknown label gives way to the next one, then to the undeclared order
+    cafe = '<meta charset="windows-1252"><title>café</title>'
+    assert dec(cafe.encode("cp1252"), "text/html; charset=hex") == (cafe, "cp1252")
+    assert dec(b"<title>t</title>", "text/html; charset=base64") == ("<title>t</title>",
+                                                                     "utf-8")
+    assert dec(b'<meta charset="rot13"><p>x', None) == ('<meta charset="rot13"><p>x',
+                                                        "utf-8")
+    assert dec("é".encode("latin-1"), "text/html; charset=undefined")[0] == "é"
+    assert dec(b"<p>\xe9\xff</p>", "text/html; charset=idna") == ("<p>éÿ</p>", "cp1252")
+
+    class Resp:
+        def __init__(self, ctype, body):
+            self.headers, self._body = {"content-type": ctype}, body
+
+        def body(self):
+            return self._body
+    for ctype in ("text/css; charset=hex", "text/html; charset=undefined",
+                  "text/html; charset=idna", "text/html; charset=uu"):
+        assert isinstance(navguard.response_text(Resp(ctype, b"\xe9a.b\xff" * 20)), str)
+
+
+def test_a_guarded_page_loads_a_document_whatever_charset_it_names(monkeypatch):
+    """BB-4 (BUG-0559 review round 3), real Chromium, generated: a guarded page loads an
+    ASCII document labelled with each codec name Python registers -- in its
+    ``Content-Type`` and its ``<meta>`` -- through the route, and `navigate` returns its
+    HTML; and the review's three shapes: ``charset=hex`` in the header, ``<meta
+    charset=base64>`` alone, ``charset=idna`` on a body it refuses (that one raised out of
+    `navigate` itself, through `response_text`). Before (1b05e3f): the route's decoder
+    raised ``LookupError`` past `_note_received`, the request was never answered and
+    ``goto`` timed out (measured by the review: pages that loaded at c6296bc)."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from urllib.parse import quote, unquote
+
+    from tests._spa_fixture import chromium_or_skip
+    chromium_or_skip(monkeypatch)
+    from playwright.sync_api import sync_playwright
+
+    from fuzzlab.core.urls import in_origin_scope, origin_scope
+
+    class Site(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):  # noqa: N802 - http.server API
+            how, _sep, name = self.path.lstrip("/").partition("/")
+            name = unquote(name)
+            ctype, body = f"text/html; charset={name}", \
+                f'<meta charset="{name}"><title>labelled</title>ok'.encode()
+            if how == "hex":
+                ctype, body = "text/html; charset=hex", b"<title>hexpage</title>ok"
+            elif how == "b64":
+                ctype, body = "text/html", b'<meta charset="base64"><title>b64page</title>'
+            elif how == "idna":
+                ctype, body = "text/html; charset=idna", \
+                    "<title>idnapage</title>\xe9\xff".encode("latin-1")
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Site)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.server_address[1]}/"
+    failed, titles = [], {}
+    try:
+        with sync_playwright() as pw:
+            try:
+                browser = pw.chromium.launch(**navguard.chromium_launch_kwargs(
+                    navguard.browser_launch_args([base])))
+            except Exception as exc:  # noqa: BLE001 - a launch failure is a skip
+                from tests._browser import skip_or_fail
+                skip_or_fail(f"chromium could not launch: {exc}")
+            try:
+                ctx = browser.new_context(service_workers="block")
+                origins = origin_scope(base)
+                navguard.guard_page(ctx, in_scope=lambda u: in_origin_scope(u, origins))
+                page = ctx.new_page()
+                for path in ["hex/", "b64/", "idna/"] + \
+                        [f"label/{quote(n, safe='')}" for n in _codec_names()]:
+                    try:
+                        nav = navguard.navigate(page, base + path, timeout_ms=5000)
+                        if not nav.reached or not isinstance(nav.html, str):
+                            failed.append((path, nav.reached, type(nav.html).__name__))
+                        elif not path.startswith("label/"):
+                            titles[path] = page.title()
+                    except Exception as exc:  # noqa: BLE001 - the defect: collected
+                        failed.append((path, str(exc).splitlines()[0][:80]))
+                    if len(failed) >= 3:            # a defect shows at once: never wait
+                        break                       # out every label
+            finally:
+                browser.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert failed == [], failed
+    assert titles == {"hex/": "hexpage", "b64/": "b64page", "idna/": "idnapage"}, titles
+
+
+def test_a_legacy_charset_forms_submission_is_seen_carrying_its_value(monkeypatch):
+    """BB-4(4) (BUG-0559 review round 3), real Chromium: a guarded ISO-8859-1 page's
+    multipart form (a hidden ``h=café``, a filled ``q=zzfiller1``) is submitted; disco's
+    `carries_value` sees the request carry ``zzfiller1`` and ``café``. Before (1b05e3f):
+    it read Playwright's ``post_data`` -- strict UTF-8 --, which raised on the ``0xE9``
+    byte, so the body was dropped and a submission that carried the value counted as not
+    sent (measured by the review)."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    from tests._spa_fixture import chromium_or_skip
+    chromium_or_skip(monkeypatch)
+    from playwright.sync_api import sync_playwright
+
+    from fuzzlab.core.urls import in_origin_scope, origin_scope
+    from fuzzlab.disco.explore import carries_value
+
+    class Site(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def _page(self, text: str) -> None:
+            data = text.encode("latin-1")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=iso-8859-1")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def do_GET(self):  # noqa: N802 - http.server API
+            self._page("<title>form</title><form method=post action=/send "
+                       "enctype=multipart/form-data><input type=hidden name=h "
+                       "value='café'><input name=q><button id=b>go</button></form>")
+
+        def do_POST(self):  # noqa: N802 - http.server API
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            self._page("<title>sent</title>")
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Site)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.server_address[1]}/"
+    posts = []
+    try:
+        with sync_playwright() as pw:
+            try:
+                browser = pw.chromium.launch(**navguard.chromium_launch_kwargs(
+                    navguard.browser_launch_args([base])))
+            except Exception as exc:  # noqa: BLE001 - a launch failure is a skip
+                from tests._browser import skip_or_fail
+                skip_or_fail(f"chromium could not launch: {exc}")
+            try:
+                ctx = browser.new_context(service_workers="block")
+                origins = origin_scope(base)
+                navguard.guard_page(ctx, in_scope=lambda u: in_origin_scope(u, origins))
+                page = ctx.new_page()
+                page.on("request", lambda r: posts.append(r) if r.method == "POST"
+                        else None)
+                navguard.navigate(page, base, timeout_ms=5000)
+                page.fill("input[name=q]", "zzfiller1")
+                with page.expect_navigation(timeout=5000):
+                    page.click("#b")
+                (req,) = posts
+                body = req.post_data_buffer
+                got = (b"zzfiller1" in body, b"caf\xe9" in body,
+                       carries_value(req, ["zzfiller1"]), carries_value(req, ["café"]),
+                       carries_value(req, ["absent-value"]))
+            finally:
+                browser.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert got == (True, True, True, True, False), got
+
+
+class _TlsSite:
+    """A loopback HTTPS app with HTTP/1.1 keep-alive (the review's round-3 repro), its
+    certificate a leaf of the test's own CA (`proxy.ca.LocalCA` under ``tmp_path``, one
+    per test; each site its own leaf key): ``/start*`` redirects
+    (302) to ``/land*``, whose closed declarative shadow root holds a rule set with a
+    character-referenced type prefetching ``/logout?tls`` and the alias; ``/wsp`` opens a
+    ``wss`` WebSocket to it. Every request is recorded as ``(client port, path, Cookie,
+    Sec-Purpose, ALPN)``. ``alpn``: the protocols it offers (``h2`` first: Chromium picks
+    it when offered, measured); ``tls12``: TLS 1.2 at most."""
+
+    def __init__(self, tmp_path, *, alpn=None, tls12=False):
+        import base64
+        import hashlib
+        import ssl
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        pytest.importorskip("cryptography")
+        from fuzzlab.core.net import require_loopback
+        from fuzzlab.proxy.ca import LocalCA
+        require_loopback("127.0.0.1")
+        self.ca = LocalCA(tmp_path / "ca")               # one CA per test, shared
+        cert, key = self.ca.leaf_cert_files("127.0.0.1")
+        self.cert_pem = cert.read_bytes()                # this site's own leaf
+        tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        tls.load_cert_chain(str(cert), str(key))
+        if alpn:
+            tls.set_alpn_protocols(list(alpn))
+        if tls12:
+            tls.maximum_version = ssl.TLSVersion.TLSv1_2
+        self.seen: list[tuple] = []
+        self._lock = threading.Lock()
+        site = self
+
+        class Handler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):  # noqa: N802 - http.server API
+                with site._lock:
+                    site.seen.append((self.client_address[1], self.path,
+                                      self.headers.get("Cookie") or "",
+                                      self.headers.get("Sec-Purpose") or "",
+                                      self.connection.selected_alpn_protocol()))
+                if (self.headers.get("Upgrade") or "").lower() == "websocket":
+                    accept = base64.b64encode(hashlib.sha1(
+                        (self.headers.get("Sec-WebSocket-Key", "")
+                         + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest())
+                    self.send_response(101)
+                    self.send_header("Upgrade", "websocket")
+                    self.send_header("Connection", "Upgrade")
+                    self.send_header("Sec-WebSocket-Accept", accept.decode())
+                    self.end_headers()
+                    self.wfile.flush()
+                    self.close_connection = True
+                    try:
+                        self.connection.settimeout(3)
+                        self.connection.recv(64)
+                    except OSError:
+                        pass
+                    return
+                if self.path.startswith("/start"):
+                    self.send_response(302)
+                    self.send_header("Location", "/land" + self.path[len("/start"):])
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                body = "<title>OTHER</title>other"
+                if self.path.startswith("/land"):
+                    rules = ('{"prefetch":[{"source":"list","urls":["/logout?tls",'
+                             '"https://localhost:%d/x"]}]}' % site.port)
+                    body = (f"<title>LAND</title><div><template shadowrootmode=closed>"
+                            f"<script type=\"&#115;peculationrules\">{rules}</script>"
+                            f"</template></div>landed")
+                elif self.path == "/wsp":
+                    body = (f"<title>WSP</title><script>var ws = new WebSocket("
+                            f"'wss://127.0.0.1:{site.port}/ws'); ws.onopen = function () "
+                            f"{{ document.title = 'WS-OPEN'; }};</script>")
+                data = body.encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+        class Server(ThreadingHTTPServer):
+            daemon_threads = True
+
+            def handle_error(self, request, client_address):
+                pass                     # a handshake the client abandoned: expected
+
+        self.server = Server(("127.0.0.1", 0), Handler)
+        self.server.socket = tls.wrap_socket(self.server.socket, server_side=True,
+                                             do_handshake_on_connect=False)
+        self.port = self.server.server_address[1]
+        self.base = f"https://127.0.0.1:{self.port}/"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def paths(self) -> list[str]:
+        with self._lock:
+            return [s[1] for s in self.seen]
+
+    def spki_switch(self) -> str:
+        """The test-only switch that has Chromium trust this site's own key -- and no
+        other: TLS verification stays on (``--ignore-certificate-errors`` never)."""
+        import base64
+        import hashlib
+
+        from cryptography import x509
+        from cryptography.hazmat.primitives import serialization
+        leaf = x509.load_pem_x509_certificate(self.cert_pem)
+        spki = leaf.public_key().public_bytes(
+            serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
+        return ("--ignore-certificate-errors-spki-list="
+                + base64.b64encode(hashlib.sha256(spki).digest()).decode())
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+
+def _guarded_https(pw, site, *, extra_args=(), ignore_https_errors=False, told=None):
+    """A browser and a context guarded as every consumer guards one, carrying a session
+    cookie host-only for ``site``'s ``127.0.0.1``; a launch failure is a skip."""
+    from fuzzlab.core.urls import in_origin_scope, origin_scope
+    kwargs = navguard.chromium_launch_kwargs(navguard.browser_launch_args([site.base]))
+    kwargs["args"] = [*kwargs["args"], *extra_args]
+    try:
+        browser = pw.chromium.launch(**kwargs)
+    except Exception as exc:  # noqa: BLE001 - a launch failure is a skip
+        from tests._browser import skip_or_fail
+        skip_or_fail(f"chromium could not launch: {exc}")
+    ctx = browser.new_context(service_workers="block",
+                              ignore_https_errors=ignore_https_errors)
+    cookies = [{"name": "sid", "value": "S", "url": site.base}]
+    origins = origin_scope(site.base)
+    navguard.guard_page(ctx, in_scope=lambda u: in_origin_scope(u, origins),
+                        session_cookies=cookies,
+                        on_session_unreached=lambda u, k, s, w: (told or []).append((k, u)))
+    ctx.add_cookies(cookies)
+    return browser, ctx
+
+
+@pytest.mark.parametrize("which", ["full", "shell"])
+def test_an_https_landing_and_socket_load_from_a_self_signed_target(monkeypatch, tmp_path,
+                                                                    which):
+    """BUG-0559 review round 3, the https redirect regression, real Chromium, both
+    binaries: a self-signed target in a context with ``ignore_https_errors=True`` (as
+    disco runs). The redirected navigation (``/start`` -> 302 -> ``/land``) loads its
+    landing, and a page's ``wss`` WebSocket opens: the browser's retry after the
+    certificate error is a second ``CONNECT``, which the landing's ticket (the socket's)
+    admits. Nothing rides the landing's tunnel after its exchange (no ``/logout``).
+    Before (1b05e3f): ``net::ERR_TUNNEL_CONNECTION_FAILED`` -- the one ticket was spent
+    on the first ``CONNECT`` (measured by the review; the socket the same, measured in
+    round 3; both loaded at c6296bc)."""
+    _binary(monkeypatch, which)
+    from playwright.sync_api import sync_playwright
+    site = _TlsSite(tmp_path)
+    try:
+        with sync_playwright() as pw:
+            browser, ctx = _guarded_https(pw, site, ignore_https_errors=True)
+            try:
+                page = ctx.new_page()
+                try:
+                    nav = navguard.navigate(page, site.base + "start", timeout_ms=8000)
+                    landed = (nav.reached, page.url, page.title())
+                except Exception as exc:  # noqa: BLE001 - the defect: reported below
+                    landed = (False, str(exc).splitlines()[0][:120], "")
+                page.wait_for_timeout(1500)
+                navguard.navigate(page, site.base + "wsp", timeout_ms=8000)
+                for _ in range(30):
+                    if page.title() == "WS-OPEN":
+                        break
+                    page.wait_for_timeout(100)
+                socket_title = page.title()
+            finally:
+                browser.close()
+    finally:
+        site.close()
+    assert landed == (True, site.base + "land", "LAND"), landed
+    assert socket_title == "WS-OPEN" and "/ws" in site.paths(), (socket_title,
+                                                                site.paths())
+    assert not [p for p in site.paths() if p.startswith("/logout")], site.paths()
+
+
+@pytest.mark.parametrize("which", ["full", "shell"])
+def test_no_request_rides_an_https_landings_tunnel_after_its_exchange(monkeypatch,
+                                                                      tmp_path, which):
+    """BB-3's https neighbour (BUG-0559 review round 3), real Chromium, both binaries,
+    TLS verification on (the test trusts its own key only): a redirected navigation's
+    landing loads through the one tunnel its ticket admits; the landing's closed shadow
+    root prefetches ``/logout?tls`` with the session cookie on that idle tunnel, and the
+    enforcer -- which reads the record layer, never decrypts -- closes it instead of
+    forwarding that second request (counted ``reuse``); the browser's retry finds no
+    ticket. A later redirect still lands; a server offering ``h2`` is spoken to in
+    HTTP/1.1 (``--disable-http2``: a multiplexed tunnel would carry the prefetch beside
+    the landing). Before (1b05e3f): ``GET /logout?tls`` with ``sid=S`` and
+    ``Sec-Purpose: prefetch`` reached the server on the landing's own client port
+    (measured by the review, and again here: TLS 1.2 and 1.3, both binaries)."""
+    _binary(monkeypatch, which)
+    from playwright.sync_api import sync_playwright
+    site = _TlsSite(tmp_path)
+    multi = _TlsSite(tmp_path, alpn=("h2", "http/1.1"))
+    # the Playwright driver fetches every routed request: it trusts the test CA too
+    monkeypatch.setenv("NODE_EXTRA_CA_CERTS", str(site.ca.ca_cert_path))
+    before = navguard.enforcer_refusals()
+    try:
+        with sync_playwright() as pw:
+            browser, ctx = _guarded_https(pw, site, extra_args=[site.spki_switch()])
+            try:
+                page = ctx.new_page()
+                nav = navguard.navigate(page, site.base + "start", timeout_ms=8000)
+                landed = (nav.reached, page.url, page.title())
+                page.wait_for_timeout(2500)
+                nav = navguard.navigate(page, site.base + "start2", timeout_ms=8000)
+                again = (nav.reached, page.url)
+                page.wait_for_timeout(1000)
+            finally:
+                browser.close()
+            browser, ctx = _guarded_https(pw, multi, extra_args=[multi.spki_switch()])
+            try:
+                page = ctx.new_page()
+                try:
+                    nav = navguard.navigate(page, multi.base + "start", timeout_ms=8000)
+                    multiplexed = (nav.reached, page.url)
+                except Exception as exc:  # noqa: BLE001 - reported below
+                    multiplexed = (False, str(exc).splitlines()[0][:120])
+            finally:
+                browser.close()
+    finally:
+        site.close()
+        multi.close()
+    after = navguard.enforcer_refusals()
+    with site._lock:
+        seen = list(site.seen)
+    assert not [s for s in seen if s[1].startswith("/logout")], seen
+    assert landed == (True, site.base + "land", "LAND"), landed
+    assert [s[1] for s in seen].count("/land") == 2, seen     # the route's, the browser's
+    assert after["reuse"] > before.get("reuse", 0), (before, after)
+    assert again == (True, site.base + "land2"), again
+    assert multiplexed == (True, multi.base + "land"), multiplexed
+    with multi._lock:
+        assert "h2" not in {s[4] for s in multi.seen}, multi.seen
+
+
+def _tunnel(endpoint: str, port: int):
+    """A ``CONNECT`` to ``127.0.0.1:port`` through the enforcer: the socket when it was
+    tunnelled, else None (refused)."""
+    import socket
+    host, eport = endpoint.rsplit(":", 1)
+    sock = socket.create_connection((host, int(eport)), timeout=5)
+    sock.sendall(f"CONNECT 127.0.0.1:{port} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n"
+                 .encode())
+    head = b""
+    while b"\r\n\r\n" not in head:
+        more = sock.recv(1)
+        if not more:
+            break
+        head += more
+    if b" 200 " in head.split(b"\r\n", 1)[0]:
+        return sock
+    sock.close()
+    return None
+
+
+def _exchange(tls, path: str) -> bytes | None:
+    """One keep-alive GET on ``tls``: the answer's body, or None when the tunnel closed."""
+    import ssl
+    try:
+        tls.sendall(f"GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nCookie: sid=S\r\n\r\n"
+                    .encode())
+        got = b""
+        while b"\r\n\r\n" not in got:
+            more = tls.recv(4096)
+            if not more:
+                return None
+            got += more
+        head, _sep, body = got.partition(b"\r\n\r\n")
+        size = int([ln.split(b":", 1)[1] for ln in head.split(b"\r\n")
+                    if ln.lower().startswith(b"content-length:")][0])
+        while len(body) < size:
+            more = tls.recv(4096)
+            if not more:
+                return None
+            body += more
+        return body
+    except (OSError, ssl.SSLError):
+        return None
+
+
+@pytest.mark.parametrize("tls12", [False, True], ids=["tls1.3", "tls1.2"])
+def test_the_enforcer_holds_an_https_tunnel_to_its_ticket(monkeypatch, tmp_path, tls12):
+    """The enforcer's tunnels (BUG-0559 review round 3), on raw sockets, TLS 1.3 and 1.2,
+    verification on against the test's own CA: an https landing's ticket admits the
+    retry of a handshake the client abandoned on a certificate it refused (a second
+    ``CONNECT``) and carries one exchange -- a second request on that tunnel never
+    reaches the server, the tunnel is closed and counted (``reuse``), and no further
+    ``CONNECT`` is admitted; a WebSocket's ticket admits the same retry and then carries
+    the socket's traffic whole; a retry later than `_TICKET_RETRY_WINDOW_S` after the
+    first tunnel is refused. Every launch keeps Chromium's own traffic on HTTP/1.1.
+    Before (1b05e3f): the retry was refused (the one ticket spent on the abandoned
+    handshake) and a landing's tunnel carried any number of requests."""
+    import ssl
+    import time
+    site = _TlsSite(tmp_path, tls12=tls12)
+    trusting = ssl.create_default_context(cafile=str(site.ca.ca_cert_path))
+    refusing = ssl.create_default_context()        # the system's roots: not the test CA
+    args = navguard.browser_launch_args([site.base])
+    endpoint = [a for a in args if a.startswith("--proxy-server=")][0].split("//", 1)[1]
+    before = navguard.enforcer_refusals()
+    try:
+        for kind in ("landing", "socket"):
+            if kind == "landing":
+                navguard.admit_landing(site.base + "land")
+            else:
+                navguard.admit_socket(f"wss://127.0.0.1:{site.port}/ws")
+            first = _tunnel(endpoint, site.port)
+            assert first is not None, kind
+            with pytest.raises(ssl.SSLCertVerificationError):
+                refusing.wrap_socket(first, server_hostname="127.0.0.1")
+            first.close()
+            retry = _tunnel(endpoint, site.port)
+            assert retry is not None, f"{kind}: the retry was refused"
+            tls = trusting.wrap_socket(retry, server_hostname="127.0.0.1")
+            assert _exchange(tls, "/land") is not None, kind
+            if kind == "landing":
+                assert _exchange(tls, "/logout?tls") is None     # closed, never sent
+            else:
+                assert _exchange(tls, "/other") is not None      # the socket's own
+            tls.close()
+            assert _tunnel(endpoint, site.port) is None, kind    # the ticket is spent
+        monkeypatch.setattr(navguard, "_TICKET_RETRY_WINDOW_S", 0.2)
+        navguard.admit_landing(site.base + "late")
+        first = _tunnel(endpoint, site.port)
+        assert first is not None
+        first.close()
+        time.sleep(0.4)
+        assert _tunnel(endpoint, site.port) is None               # outside the window
+    finally:
+        site.close()
+    time.sleep(0.2)
+    assert not [p for p in site.paths() if p.startswith("/logout")], site.paths()
+    assert site.paths().count("/land") == 2 and "/other" in site.paths(), site.paths()
+    after = navguard.enforcer_refusals()
+    assert after["reuse"] == before.get("reuse", 0) + 1, (before, after)
+    assert after["connect"] == before["connect"] + 3, (before, after)
+    assert "--disable-http2" in args          # Chromium's own traffic: one request a time
