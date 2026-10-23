@@ -11,7 +11,7 @@ Newest first.
 - Risk (level; mitigation or accepted-risk justification): low.
 - Deliverables:
   - [x] Recorded as affected by construction (as CC-FUZZ-0104 for BUG-0522) — done
-- Effectiveness (assessed 2026-10-23): no M6 outcome change in the caller review; the harness of the pushed head confirms.
+- Effectiveness (assessed 2026-10-23): no M6 outcome change in the caller review; the harness of 9ff916d (111 files, 5292 passed, 0 failed) confirms.
 
 ### CC-FUZZ-0116 — A point whose own URL holds a value redaction replaced is refused, never sent, by every caller of the point builder (FR-FUZZ-67, BUG-0556 review rounds 1-2) (2026-10-22)
 - Placement: lane REDACTURL (item GAP-VALUES), with CC-CORE-0076 and CC-AUD-0059 (their

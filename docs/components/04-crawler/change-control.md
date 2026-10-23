@@ -114,11 +114,15 @@ Newest first.
     load generator stopped afterwards
   - [x] BUG-0561, PA-0561, ERROR_LOG, the SP-01 row, NFR-CRAWL-safe's BUG-0522 clause in
     `requirements.md`, `docs/ARCHITECTURE.md`'s SP-01 sentence, CHANGELOG — done
-  - [ ] `scripts/verify_change.py` on the committed tree — the orchestrator, after this
-    lane (no pytest run in the lane, as instructed)
-- Effectiveness (assessed <date> or pending): pending (the harness's rate of the
-  disco restore failure under I/O load, and `error_page_waits()["expired"]` on real
-  crawls).
+  - [x] `scripts/verify_change.py` on the committed tree — the orchestrator, after this
+    lane (no pytest run in the lane, as instructed): 9ff916d, `--base 1ad0fd0`, 111 files,
+    5292 passed, 0 failed, 0 errors, 1 skipped, 154 xfailed, the 6
+    `tests/test_navigation_settle_load.py` cases and `tests/test_disco_harvest.py` included
+    — done
+- Effectiveness (assessed 2026-10-23): the restore drop is gone under the measured I/O
+  load (0/960 restores against 4-6/960 unfixed in the same rounds, the lane's and the
+  independent check's), and the harness of 9ff916d is green (above). Still to watch:
+  `error_page_waits()["expired"]` on real crawls.
 
 ### CC-CRAWL-0064 — disco's explorer hands its session's cookies to the guard: nothing an authenticated context sends goes to a host they do not reach (FR-CRAWL-43, BUG-0559, SP-74) (2026-10-22)
 - Placement: pre-assigned to lane BROWSERALIAS (item GAP-BROWSER), base 7393c90; merged

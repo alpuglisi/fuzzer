@@ -9,7 +9,7 @@ Newest first.
 - Risk (level; mitigation or accepted-risk justification): low. The worst case is unchanged (the 3 s budget is shared by the commit wait and the load wait); an expiry is counted and logged, never raised.
 - Deliverables:
   - [x] Recorded as affected by construction (as CC-SESS-0027 for BUG-0522) — done
-- Effectiveness (assessed 2026-10-23): no login path changed outcome in the caller review of the independent check (`wf_bcec9007-16d`); the harness of the pushed head confirms.
+- Effectiveness (assessed 2026-10-23): no login path changed outcome in the caller review of the independent check (`wf_bcec9007-16d`); the harness of 9ff916d (111 files, 5292 passed, 0 failed) confirms.
 
 ### CC-SESS-0030 — A send bound to a setup request's session material is refused on any change of it; the login fetcher reads bounded (FR-SESS-24, FR-SESS-3; BUG-0557, BUG-0558) (2026-10-22)
 - Placement: item GAP-SESS, lane SESSROT (branch `lane/SESSROT` on 7393c90): BUG-0544's

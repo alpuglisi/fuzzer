@@ -8,8 +8,8 @@ Newest first.
 - Impact (other components / project): a fetch that fails with a network error returns about 30 ms later at p50; the next fetch's navigation is no longer dropped when it would start before that error page's load. No interface or store change.
 - Risk (level; mitigation or accepted-risk justification): low. Same 3 s budget as before; an expiry is counted and logged.
 - Deliverables:
-  - [x] Recorded as affected by construction (as CC-AUD-0053 for BUG-0522) — done
-- Effectiveness (assessed 2026-10-23): the independent check read `ContentFetcher.fetch` and found no outcome change; the harness of the pushed head confirms.
+  - [x] Recorded as affected by construction — done (BUG-0522's auditor entry, CC-AUD-0053, was a code change in `fetcher.py`; this one changes no auditor code)
+- Effectiveness (assessed 2026-10-23): the independent check read `ContentFetcher.fetch` and found no outcome change; the harness of 9ff916d (111 files, 5292 passed, 0 failed) confirms.
 
 ### CC-AUD-0060 — The auditor's browser fetcher never audits a host the session's cookies do not reach as the identity's page (NFR-AUD-safe, BUG-0559, SP-74) (2026-10-22)
 - Placement: pre-assigned to lane BROWSERALIAS (item GAP-BROWSER), base 7393c90; merged

@@ -215,6 +215,7 @@ same rounds. Its text is in `docs/PREVENTIVE_ACTIONS.md`.
   (4/960 restores on 5502228, 0/960 with the fix; 4 of 119 about:blank navigations started
   before the error page's load timed out, 0 of 841 after it).
 - Records corrected: the CHANGELOG line moved under a 2026-10-23 heading; the components
-  affected by construction recorded, as BUG-0522's were (CC-SESS-0031, CC-AUD-0061,
-  CC-FUZZ-0117); CC-CRAWL-0065's Risk (c) no longer claims a version pin (the project asks
+  affected by construction recorded (CC-SESS-0031, CC-AUD-0061, CC-FUZZ-0117), as
+  BUG-0522's by-construction ones were (CC-SESS-0027, CC-FUZZ-0104; its auditor entry,
+  CC-AUD-0053, was a code change); CC-CRAWL-0065's Risk (c) no longer claims a version pin (the project asks
   `playwright>=1.40,<2`; only 1.56's source was read).
