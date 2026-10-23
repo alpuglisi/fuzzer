@@ -1282,10 +1282,10 @@ tracked in the requirements files, not here.
     background networking off. API-request clients are scope-checked
     and never redirect. An AST guard covers every launch, guard and API-request site.
     A guarded navigation that fails with a network error raises only after the
-    browser's own error page has committed (at most 3 s, judged by commits seen since
-    the navigation started, expiries counted), and a failed load ends its page's
-    previous document through `navguard.end_failed_load` (SP-01, BUG-0522): the error
-    page, or `about:blank`.
+    browser's own error page has committed and then loaded (at most 3 s in all, the
+    commit judged by commits seen since the navigation started, expiries counted;
+    BUG-0522, BUG-0561), and a failed load ends its page's previous document through
+    `navguard.end_failed_load` (SP-01): the error page, or `about:blank`.
     A loopback crawl is scoped to its exact origin. Every probe sender refuses one unless it was explicitly
     enumerated (ground truth / `--url`); an AST guard enforces this. Authenticated
     senders probe the session's auth endpoints anonymously;

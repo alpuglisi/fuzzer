@@ -2203,3 +2203,10 @@ Juice Shop lab is complete.
 - **Cause:** I parallelised a verification and a heavy check on one shared host without accounting for the I/O they contend for.
 - **Status:** root-caused; the fix is the owner's decision (asked); verifications are no longer run beside a heavy check.
 
+### F-282 — My BUG-0522 fix took a failed navigation as over when its error page committed, not when it had loaded, and its proof could not see the residual
+- **What:** BUG-0522's fix (c562e8f, CC-CRAWL-0049) made `navguard._settle_failure` return as soon as the browser's error page committed. That page then still loads for 15-25 ms (p95 about 130 ms under disk I/O), and a navigation started in that window is sometimes dropped by Chromium with no commit and no error, then waited out for 15 s: BUG-0561. PA-0522's concrete clause and SP-01's row both named commits as what "landed" means, although PA-0522 stated the principle ("over only when the browser has finished what the failure starts").
+- **Evidence:** BUG-0561 and CC-CRAWL-0065: the RCA measured about 1% of disco restores under disk I/O load on every tree since c562e8f (7393c90 4/600, e69bd1e 9/840) and 0/1,320 under CPU load alone; CC-CRAWL-0049's own measurements were 20-40 repetitions per path under CPU load, and its tests repeat each path 5 times; in CC-CRAWL-0065's rounds, 6/960 restores failed on 5502228 and 0/960 with the load awaited.
+- **Impact:** a lost restore and a 15 s stall in about 1% of disco restores under disk load, the spider's window exits and pre-seed blank exposed the same way; one failed harness cycle (F-281). Nothing outside the guards was sent.
+- **Cause:** I sized the wait to the symptom I had measured (being overtaken, which a commit cures), called it fixed on a volume and a load that could not see a race of about 1%, and wrote the rule's concrete clause from the fix instead of from the principle the rule stated.
+- **Status:** fixed by BUG-0561 / CC-CRAWL-0065 (lane NAVSETTLE); PA-0561 strengthens PA-0522 (landed means loaded; the order pinned by a deterministic test; a race measured under CPU and disk I/O contention at a volume that can see it).
+

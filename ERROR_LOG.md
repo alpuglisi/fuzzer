@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-23 — crawler / navguard (a navigation started before a failed load's error page had loaded was dropped; BUG-0561)
+- **Symptom:** the harness run of e69bd1e (F-281): `tests/test_disco_harvest.py::test_disco_harvest_and_restore_after_failed_loads[2]` failed in 19.1 s. Disco's `restore` returned "navigation": its `about:blank` `goto` timed out after 15 s and the page stayed on `chrome-error://chromewebdata/`. The RCA measured about 1% of restores under heavy disk I/O on every tree since BUG-0522's fix (7393c90 4/600, e69bd1e 9/840) and 0/1,320 under CPU load alone.
+- **Root cause:** `navguard._settle_failure` (SP-01, BUG-0522's fix) took a failed navigation as over when its error page committed. That page loads 15-25 ms later (p95 about 130 ms under I/O load), and a navigation Chromium started in between was sometimes dropped with no commit and no error, so Playwright waited out the whole `goto` timeout.
+- **Remediation:** the settle also waits for the error page's own `load`, with what is left of the same `ERROR_PAGE_WAIT_MS` budget; an expiry is counted and logged, never raised (CC-CRAWL-0065; BUG-0561, PA-0561). Measured under the RCA's I/O load, in the same rounds: disco restores failed 6/960 on 5502228 and 0/960 on the fixed tree.
+- **Status:** Fixed
+
 ## 2026-10-22 — store adapter (a BLOB text of a finding page the floor rejects was stored verbatim; BUG-0556)
 - **Symptom:** the independent check of 1ad0fd0: an audit finding whose page `urlsplit` rejects with a `?` and whose `html_context` is a BLOB holding a secret was imported with the BLOB stored as `sink_context`; a str context is withheld. 7393c90's whole import raised on such a page and stored nothing.
 - **Root cause:** `_audit_text` returned any non-string unchanged before it reached the rejected page's withhold.

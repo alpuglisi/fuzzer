@@ -1152,10 +1152,12 @@ def release(target) -> None:
 SUPERSEDED_GRACE_MS = 300
 _STEP_MS = 100
 
-#: How long a failed navigation waits, before it raises, for the commits its failure
+#: How long a failed navigation waits in all, before it raises, for what its failure
 #: starts (BUG-0522): Chromium commits its own error page tens of milliseconds after
-#: ``goto`` raised (measured: p50 about 25-45 ms, worst 304 ms). An expiry is counted
-#: (`error_page_waits`) and logged: it reopens BUG-0522 for that one navigation.
+#: ``goto`` raised (measured: p50 about 25-45 ms, worst 304 ms), and loads it after
+#: that (BUG-0561: commit to load p50 15-25 ms, p95 about 130 ms under I/O load). An
+#: expiry of either is counted (`error_page_waits`) and logged: it reopens BUG-0522 or
+#: BUG-0561 for that one navigation.
 ERROR_PAGE_WAIT_MS = 3000
 #: The first line of a failure Chromium answers with its own error page: a network
 #: error other than an abort (ERR_ABORTED leaves the current document; BUG-0136). Only
@@ -1169,7 +1171,7 @@ _OVERTAKEN_BY_ERROR_PAGE = re.compile(
     r'"chrome-error://[^"]*"$')
 #: The attribute a failed `navigate` / `reload` sets on the exception it raises: the URL
 #: of the last main-frame commit its failure settled on (``chrome-error://...`` for the
-#: browser's error page), or None when the wait expired.
+#: browser's error page), or None when the wait for that commit expired.
 NAVIGATION_SETTLED_ATTR = "navguard_settled_on"
 _WAITS_LOCK = threading.Lock()
 _ERROR_PAGE_WAITS = {"waited": 0, "expired": 0}
@@ -1178,7 +1180,8 @@ _log = logging.getLogger("fuzzlab.navguard")
 
 def error_page_waits() -> dict:
     """How many failed navigations waited for their error page, and how many of those
-    waits expired (BUG-0522), in this process."""
+    waits expired -- the error page's commit (BUG-0522) or its load (BUG-0561) did not
+    come within `ERROR_PAGE_WAIT_MS` --, in this process."""
     with _WAITS_LOCK:
         return dict(_ERROR_PAGE_WAITS)
 
@@ -1283,14 +1286,20 @@ def _await_state(page, state: str, wait_ms: float, failures: _NavigationFailures
 
 
 def _settle_failure(page, failures: _NavigationFailures, exc) -> None:
-    """Before a failed navigation raises (BUG-0522): wait, at most `ERROR_PAGE_WAIT_MS`,
-    for the commits its failure starts -- Chromium's error page; when this navigation
-    was overtaken by one, that page and then this navigation's own late commit -- seen
-    by ``failures``, which listens from before the navigation started: a fresh commit,
-    never the page's current URL (an earlier failure's error page). Records the last
-    such commit on ``exc`` (`NAVIGATION_SETTLED_ATTR`; None on expiry, counted and
-    logged). Any navigation made before those commits would be overtaken by them: X1's
-    cleanup, the next load, a restore. Never raises."""
+    """Before a failed navigation raises (BUG-0522, BUG-0561): wait, at most
+    `ERROR_PAGE_WAIT_MS` in all, for what its failure starts -- Chromium's error page,
+    committed and then **loaded**; when this navigation was overtaken by one, that page
+    and then this navigation's own late commit. A commit counts only when ``failures``,
+    which listens from before the navigation started, saw it: a fresh commit, never the
+    page's current URL (an earlier failure's error page). The error page's load is
+    awaited once its fresh commit is seen, with what is left of the budget
+    (`_error_page_loaded`): a navigation started while it still loads is sometimes
+    dropped by Chromium, with no commit and no error, and its ``goto`` waits out its
+    whole timeout (BUG-0561). Records the last such commit on ``exc``
+    (`NAVIGATION_SETTLED_ATTR`; None when no commit came). An expiry -- of the commits or
+    of the error page's load -- is counted and logged. Any navigation made before all
+    that has landed would be overtaken or dropped: X1's cleanup, the next load, a
+    restore. Never raises."""
     kind = _settles_on_error_page(exc)
     if kind is None:
         return
@@ -1309,16 +1318,37 @@ def _settle_failure(page, failures: _NavigationFailures, exc) -> None:
             page.wait_for_timeout(20)              # Playwright's events are pumped
         except Exception:  # noqa: BLE001 - the page has gone: nothing more will come
             break
+    unloaded = (kind == "error-page" and settled is not None
+                and settled.startswith("chrome-error:")
+                and not _error_page_loaded(page, end))
     with _WAITS_LOCK:
         _ERROR_PAGE_WAITS["waited"] += 1
-        if settled is None:
+        if settled is None or unloaded:
             _ERROR_PAGE_WAITS["expired"] += 1
     if settled is None:
         _log.warning(_scrubbed(f"a failed navigation's error page did not come within "
                                f"{ERROR_PAGE_WAIT_MS} ms (BUG-0522): the next navigation "
                                f"of this page may be overtaken"))
+    elif unloaded:
+        _log.warning(_scrubbed(f"a failed navigation's error page did not load within "
+                               f"{ERROR_PAGE_WAIT_MS} ms (BUG-0561): the next navigation "
+                               f"of this page may be dropped"))
     with contextlib.suppress(Exception):           # an exception that takes no attribute
         setattr(exc, NAVIGATION_SETTLED_ATTR, settled)
+
+
+def _error_page_loaded(page, end: float) -> bool:
+    """Whether the error page a failure just committed loaded by ``end`` (a
+    `time.monotonic()`; BUG-0561). The load awaited is the current document's: Playwright
+    clears a frame's load states at each commit, before it reports the commit, so this is
+    the error page's own ``load``, never the previous document's; one already fired
+    returns at once. Never raises: a timeout or a closed page is not loaded."""
+    left_ms = (end - time.monotonic()) * 1000
+    try:
+        page.wait_for_load_state("load", timeout=max(1, left_ms))
+    except Exception:  # noqa: BLE001 - a timeout, or the page has gone
+        return False
+    return True
 
 
 def end_failed_load(page, error, *, timeout_ms: float) -> str:
@@ -1346,8 +1376,9 @@ def navigate(page, url: str, *, timeout_ms: float, wait_until: str = "domcontent
     `SUPERSEDED_GRACE_MS` after a main-frame navigation failed: a page whose script
     navigates to a refused URL while it is parsed never reaches it, and is never
     waited out. The caller reads the page as it is, or ``response``, when not
-    ``reached``. A failure raises only once the commits it starts have landed
-    (`_settle_failure`, BUG-0522); a failed load's cleanup is `end_failed_load`."""
+    ``reached``. A failure raises only once what it starts has landed: its commits and
+    the browser's error page loaded (`_settle_failure`, BUG-0522, BUG-0561); a failed
+    load's cleanup is `end_failed_load`."""
     failures = _NavigationFailures(page)
     if _is_weakref_able(page):
         _RECEIVED.pop(page, None)          # only this navigation's document counts

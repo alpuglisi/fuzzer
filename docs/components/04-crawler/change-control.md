@@ -3,6 +3,120 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0065 — A failed navigation raises only after the browser's error page has loaded, not just committed (SP-01, BUG-0561) (2026-10-23)
+- Placement: pre-assigned to lane NAVSETTLE (item NAVSETTLE), base 5502228; the owner
+  approved this fix on 2026-10-23 (F-281's open defect). Touches SP-01's owner
+  `fuzzlab/tools/navguard.py` only (`_settle_failure`, the new `_error_page_loaded`,
+  three comments and docstrings) and adds `tests/test_navigation_settle_load.py`. No
+  caller changes; `tests/test_disco_harvest.py` is unchanged. Not put through the
+  two-reviewer pre-change gate in this lane (a sub-agent lane with no agent to spawn);
+  the orchestrator verifies it independently before merge.
+- Change (`fuzzlab/tools/navguard.py`):
+  - `_settle_failure(page, failures, exc)`: once a fresh `chrome-error:` commit
+    settles a failure of the "error-page" kind (a network error other than an abort),
+    it also waits for that error page's own `load` -- `_error_page_loaded(page, end)`,
+    `page.wait_for_load_state("load", timeout=max(1, what is left of the same
+    ERROR_PAGE_WAIT_MS budget))`. Playwright 1.56 clears a frame's load states at each
+    commit before it reports the commit (`frames.js`
+    `frameCommittedNewDocumentNavigation` -> `_onClearLifecycle`, then the navigation
+    event), so the load awaited is the error page's own; one already fired returns at
+    once.
+  - An expiry of that load wait (a timeout, or the page gone) is counted in
+    `error_page_waits()["expired"]` and logged as a warning naming BUG-0561, like the
+    commit wait's (BUG-0522). It never raises: the failure's own error is re-raised.
+    `NAVIGATION_SETTLED_ATTR` still records the commit (the error page), so
+    `end_failed_load` keeps the error page as before.
+  - The "overtaken" kind (the error page, then the overtaken navigation's own late
+    commit) is unchanged: it does not wait for a load. Measured, see Impact.
+  - Comments and docstrings: `ERROR_PAGE_WAIT_MS`, `NAVIGATION_SETTLED_ATTR`,
+    `error_page_waits`, `navigate`.
+- Reason: BUG-0561. A navigation Chromium started between the error page's commit and
+  its load (15-25 ms, p95 about 130 ms under disk I/O load) was sometimes dropped, with
+  no commit and no error; Playwright waited out the whole `goto` timeout (15 s). The
+  RCA (`subagents/workflows/wf_133dd7c1-a2f/journal.jsonl`, `scratchpad/rca-restore/`)
+  measured about 1% of disco restores under heavy disk I/O on every tree since
+  BUG-0522 (7393c90 4/600, 1ad0fd0 2/360, e69bd1e 9/840; 0/1,320 under CPU load
+  alone), and a candidate wrapper doing this wait: 0/720 vs 8/720 unfixed in the same
+  rounds. Found by the harness run of e69bd1e (F-281).
+- Impact (other components / project):
+  - **Every SP-01 caller, by construction** (BUG-0561's sweep, by primitive): a failure
+    of the "error-page" kind raises after its error page has loaded. Disco's `restore`
+    and harvest `_load`, the spider's `_fetch_rendered`, `_window` / `_restore`,
+    `_leave`, the pre-seed blank and its other loads, the auditor's `fetch` (AUD),
+    `session.browserlogin` (SESS) and `tools.browserexec` (FUZZ, M6) get the wait with
+    no change of their own; their behaviour changes only in time (below) and in no
+    longer losing a navigation to the drop. `end_failed_load` is unchanged.
+  - **Cost**, measured in the same rounds as the effect below (3,840 failures of the
+    error-page kind per tree): the settle (commit wait, plus the load wait on the
+    fixed tree) took p50 67 ms, p95 165 ms, max 458 ms on the fixed tree against p50
+    37 ms, p95 120 ms, max 645 ms on 5502228 -- about +30 ms at p50 and +45 ms at p95
+    per such failure; 0 expiries in 3,840 waits. Aborts, downloads and timeouts do not
+    wait.
+  - **The overtaken kind does not need the wait** (measured,
+    `scratchpad/navsettle/scripts/overtaken.py` under `lanes.sh`'s load: 4 CPU hogs, 4
+    fsync loops, one bulk writer; PSI io some avg10 median 35.5-39%, load average median
+    21-25; rounds `logs/o1`, `logs/o2`). Each rep: a raw failed `goto` of an empty 404,
+    then a guarded `navigate` the late error page overtakes, then at once
+    `navigate(page, "about:blank")` (what `restore` and `end_failed_load` do next),
+    classed by a CDP timeline. Without a load wait (24 browser runs, 2,400 reps): 996
+    overtaken settles, every `about:blank` after them landed; 283 of them were started
+    before the overtaken document's own `load` -- 0 dropped, against 15 of 268 started
+    before an error page's load in the RCA (Fisher p = 1.6e-5). 1,404 `about:blank`s
+    after a navigation that was not overtaken: 0 dropped. A candidate wait for the
+    overtaken document's load (two lanes of `o1`, 333 settles) cost p50 9.4 ms, p95
+    142 ms, never expired, and changed no count, so it is not added (PA-0561(1)).
+  - **Measured effect** (the RCA's driver `inject.py` and load, `lanes.sh` with 4 CPU
+    hogs, 4 fsync loops and one bulk writer; 5502228 and the fixed tree in the same
+    rounds, two lanes each; rounds `scratchpad/navsettle/logs/r1` and `r2`, 48 browser
+    runs per tree of 20 restore cycles, each with two failed harvest loads before and
+    two after an ok load; PSI io some avg10 median 41%, load average median 25):
+    disco restores failed **6/960 on 5502228 and 0/960 on the fixed tree** (3 and 0 in
+    each round; Fisher p = 0.031). Every failure had the RCA's signature: `restore`
+    returned "navigation", its `about:blank` `goto` timed out after 15,003 ms and the
+    page stayed on `chrome-error://chromewebdata/`. Harvest loads lost: 0 on both.
+    Classed browser-side by the RCA's `window2.py`: on 5502228, 116 of the 960 restore
+    `about:blank`s were started before the error page's `load` and 6 of those timed
+    out; on the fixed tree none was (960/960 after the load), 0 timeouts. The spider's
+    `_leave` path is not driven by these scripts and was not measured separately.
+  - Contracts: none. No schema, store, interface or traffic change;
+    `error_page_waits()` keeps its keys (an expiry of either wait counts in
+    `expired`).
+- Risk: low.
+  - (a) Each failure of the error-page kind now waits for the error page's load too
+    (measured above); an abort, a download or a timeout still raises at once.
+  - (b) A load that never comes is cut at the same 3 s budget, counted and warned:
+    BUG-0561 reopens for that one navigation, never silently.
+  - (c) The wait relies on Playwright clearing the load states at a commit before
+    reporting it (1.56, read in its source above). A Playwright that did not would
+    return at once on the previous document's `load` -- the behaviour before this
+    change, not worse. Pinned only by the version pin.
+  - (d) Residual (unmeasured, BUG-0561's sweep): an error page committed by a
+    navigation navguard did not start (a click, a submission or a script navigation
+    answered by an empty error) has no failure to settle; the callers wait for a quiet
+    period after an action before they navigate.
+- Deliverables:
+  - [x] `_settle_failure` and `_error_page_loaded` in SP-01's owner — done
+  - [x] `tests/test_navigation_settle_load.py` (a page double on a fake clock: the
+    order commit, `wait_for_load_state("load")` with the rest of the budget, load,
+    raise, for one failure and two in a row through `navigate` and `reload`; an error
+    page that never loads expires within the budget, counted and logged; an abort and
+    an overtaken navigation wait as before) — done. Plain-Python proof
+    (`scratchpad/navsettle/scripts/prove.py`; `logs/proof_5502228.log`,
+    `logs/proof_fixed.log`): on 5502228 the four `test_a_failure_raises_only_after_its_error_page_has_loaded`
+    cases fail at their own assertion (`page.steps == expected`; the steps were goto,
+    commit, raise) and `test_an_error_page_that_never_loads_expires_within_the_budget_and_is_counted`
+    at its own assertion (no `wait-load` step); the abort/overtaken test passes there
+    (not pinning). After the fix: 6 passed.
+  - [x] The real-browser measurement under the RCA's I/O load (above) — done; every
+    load generator stopped afterwards
+  - [x] BUG-0561, PA-0561, ERROR_LOG, the SP-01 row, NFR-CRAWL-safe's BUG-0522 clause in
+    `requirements.md`, `docs/ARCHITECTURE.md`'s SP-01 sentence, CHANGELOG — done
+  - [ ] `scripts/verify_change.py` on the committed tree — the orchestrator, after this
+    lane (no pytest run in the lane, as instructed)
+- Effectiveness (assessed <date> or pending): pending (the harness's rate of the
+  disco restore failure under I/O load, and `error_page_waits()["expired"]` on real
+  crawls).
+
 ### CC-CRAWL-0064 — disco's explorer hands its session's cookies to the guard: nothing an authenticated context sends goes to a host they do not reach (FR-CRAWL-43, BUG-0559, SP-74) (2026-10-22)
 - Placement: pre-assigned to lane BROWSERALIAS (item GAP-BROWSER), base 7393c90; merged
   after CC-CRAWL-0063 (the owner). Touches `disco/explore.py` (the session context's
