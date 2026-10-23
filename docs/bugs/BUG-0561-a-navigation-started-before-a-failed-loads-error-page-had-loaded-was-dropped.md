@@ -208,3 +208,13 @@ starts (a document's load, not its commit), the order of those events is fixed b
 deterministic test, and a browser race is measured under each kind of host contention
 the harness sees (CPU and disk I/O), at a volume that can see its rate, both arms in the
 same rounds. Its text is in `docs/PREVENTIVE_ACTIONS.md`.
+
+## After the independent check (coordinator, 2026-10-23)
+- The check (`wf_bcec9007-16d`) confirmed the code and the test (5 of 6 cases fail on
+  5502228 at their own assertions, 6 of 6 pass) and reproduced the drop under I/O load
+  (4/960 restores on 5502228, 0/960 with the fix; 4 of 119 about:blank navigations started
+  before the error page's load timed out, 0 of 841 after it).
+- Records corrected: the CHANGELOG line moved under a 2026-10-23 heading; the components
+  affected by construction recorded, as BUG-0522's were (CC-SESS-0031, CC-AUD-0061,
+  CC-FUZZ-0117); CC-CRAWL-0065's Risk (c) no longer claims a version pin (the project asks
+  `playwright>=1.40,<2`; only 1.56's source was read).

@@ -3,6 +3,16 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0117 — M6's navigations settle a failure on the error page's load (BUG-0561) (2026-10-23)
+- Change: none in `fuzzlab/tools/browserexec.py` or the oracle. The executor's navigations go through SP-01, which now waits for a failed navigation's error page to load, not only to commit, before it raises (CC-CRAWL-0065).
+- Impact (other components / project):
+  - **Trace spans.** `browserexec`'s `navigate_done` spans (FR-FUZZ-62) include that wait when a navigation fails with a network error: about 30 ms more at p50, at most the same 3 s budget.
+  - **M6 step bounds (BUG-0526, CC-FUZZ-0104).** `tests/test_m6_navigation_failures.py` and `tests/test_guarded_navigation.py`'s `FAST` cases fail by abort or commit and never reach the wait (CC-FUZZ-0104 measured `waited: 0`); `page.once('load')` in M6 can now fire during a failed navigation, but `visit._load` is reported only once `_commit` is set, which happens only on success, so no outcome changes (the independent check, `wf_bcec9007-16d`).
+- Risk (level; mitigation or accepted-risk justification): low.
+- Deliverables:
+  - [x] Recorded as affected by construction (as CC-FUZZ-0104 for BUG-0522) — done
+- Effectiveness (assessed 2026-10-23): no M6 outcome change in the caller review; the harness of the pushed head confirms.
+
 ### CC-FUZZ-0116 — A point whose own URL holds a value redaction replaced is refused, never sent, by every caller of the point builder (FR-FUZZ-67, BUG-0556 review rounds 1-2) (2026-10-22)
 - Placement: lane REDACTURL (item GAP-VALUES), with CC-CORE-0076 and CC-AUD-0059 (their
   review-round sub-bullets). Review round 1 on branch `lane/REDACTURL-r1` from c3a13f7

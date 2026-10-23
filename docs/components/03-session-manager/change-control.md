@@ -3,6 +3,14 @@
 Component code: **SESS**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SESS-0031 — The browser login's failed navigations settle on the error page's load (BUG-0561) (2026-10-23)
+- Change: none in `fuzzlab/session/`. `session.browserlogin`'s navigations go through SP-01 (`navguard.navigate`), which now waits for a failed navigation's error page to load, not only to commit, before it raises (CC-CRAWL-0065).
+- Impact (other components / project): a login navigation that fails with a network error (an empty error answer) raises about 30 ms later at p50 (p95 about 45 ms more), inside the same 3 s budget as before; the next login navigation is no longer dropped by Chromium when it starts before that error page's load. No interface or store change.
+- Risk (level; mitigation or accepted-risk justification): low. The worst case is unchanged (the 3 s budget is shared by the commit wait and the load wait); an expiry is counted and logged, never raised.
+- Deliverables:
+  - [x] Recorded as affected by construction (as CC-SESS-0027 for BUG-0522) — done
+- Effectiveness (assessed 2026-10-23): no login path changed outcome in the caller review of the independent check (`wf_bcec9007-16d`); the harness of the pushed head confirms.
+
 ### CC-SESS-0030 — A send bound to a setup request's session material is refused on any change of it; the login fetcher reads bounded (FR-SESS-24, FR-SESS-3; BUG-0557, BUG-0558) (2026-10-22)
 - Placement: item GAP-SESS, lane SESSROT (branch `lane/SESSROT` on 7393c90): BUG-0544's
   residual N-R3-2 (gap 2) and BUG-0536's residual R2 (gap 4). Numbers pre-assigned:

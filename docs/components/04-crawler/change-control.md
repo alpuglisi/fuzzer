@@ -89,7 +89,10 @@ Newest first.
   - (c) The wait relies on Playwright clearing the load states at a commit before
     reporting it (1.56, read in its source above). A Playwright that did not would
     return at once on the previous document's `load` -- the behaviour before this
-    change, not worse. Pinned only by the version pin.
+    change, not worse. No version pin holds it: `pyproject.toml` asks `playwright>=1.40,<2`
+    (the `browser` and `disco` extras) and `fuzzlab/tools/requirements.txt`
+    `playwright>=1.40`; only 1.56's source was read (corrected after the independent
+    check).
   - (d) Residual (unmeasured, BUG-0561's sweep): an error page committed by a
     navigation navguard did not start (a click, a submission or a script navigation
     answered by an empty error) has no failure to settle; the callers wait for a quiet

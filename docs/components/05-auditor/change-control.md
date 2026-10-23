@@ -3,6 +3,14 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0061 — The auditor's browser fetch settles a failed load on the error page's load (BUG-0561) (2026-10-23)
+- Change: none in `fuzzlab/tools/fetcher.py`. `ContentFetcher.fetch` navigates through SP-01 and ends a failed load with `end_failed_load`; SP-01 now waits for the failed navigation's error page to load before it raises (CC-CRAWL-0065). `end_failed_load`'s decision is unchanged (the settled commit is still recorded).
+- Impact (other components / project): a fetch that fails with a network error returns about 30 ms later at p50; the next fetch's navigation is no longer dropped when it would start before that error page's load. No interface or store change.
+- Risk (level; mitigation or accepted-risk justification): low. Same 3 s budget as before; an expiry is counted and logged.
+- Deliverables:
+  - [x] Recorded as affected by construction (as CC-AUD-0053 for BUG-0522) — done
+- Effectiveness (assessed 2026-10-23): the independent check read `ContentFetcher.fetch` and found no outcome change; the harness of the pushed head confirms.
+
 ### CC-AUD-0060 — The auditor's browser fetcher never audits a host the session's cookies do not reach as the identity's page (NFR-AUD-safe, BUG-0559, SP-74) (2026-10-22)
 - Placement: pre-assigned to lane BROWSERALIAS (item GAP-BROWSER), base 7393c90; merged
   after CC-CRAWL-0063 (navguard, the owner). `tools/fetcher.py` only.
