@@ -70,9 +70,26 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Enable M6 browser execution (stored/DOM XSS) via Playwright")
     p.add_argument("--oob", action="store_true",
                    help="Enable M8 out-of-band callback confirmation (blind command "
-                        "injection) via a local, loopback-only listener. Default off; "
-                        "the listener never binds to anything but 127.0.0.1 and is torn "
-                        "down at the end of the run.")
+                        "injection) via a callback listener. Default off; the listener "
+                        "binds loopback unless --oob-listen says otherwise, and is torn "
+                        "down at the end of the run. For a target on another machine, "
+                        "give --oob-public-url and/or --oob-listen (D73, FR-FUZZ-70).")
+    p.add_argument("--oob-public-url", default=None, metavar="URL",
+                   help="With --oob: the externally reachable base URL that forwards to "
+                        "the listener (a tunnel, ssh -R, a port forward), e.g. "
+                        "https://cb.example.net. Payloads embed it instead of the bind "
+                        "address, so a remote target can call back.")
+    p.add_argument("--oob-listen", default=None, metavar="HOST:PORT",
+                   help="With --oob: bind the listener here instead of 127.0.0.1 on a "
+                        "free port, e.g. 0.0.0.0:8000 on a host with a public IP. A "
+                        "non-loopback host exposes the listener (it only records "
+                        "callback tokens). Without --oob-public-url, payloads use "
+                        "http://HOST:PORT, so HOST must be what the target can reach.")
+    p.add_argument("--scope-origin", action="append", default=[], metavar="ORIGIN",
+                   help="An extra origin, scheme://host[:port], whose crawled endpoints "
+                        "are probed too (e.g. your app's API on another host). "
+                        "Repeatable. Crawled endpoints on any other origin are never "
+                        "probed (D73, FR-FUZZ-71).")
     p.add_argument("--greybox-coverage-file", default=None,
                    help="Enable M10 grey-box confirmation (sql-injection/xss) with a "
                         "FileCoverageSource reading the lab shim's per-request pcov "
@@ -159,7 +176,8 @@ def build_parser() -> argparse.ArgumentParser:
                         "default: each probe updates the row the request targets. DELETE "
                         "is never imported.")
     p.add_argument("--authorized", action="store_true",
-                   help="Required: confirm you are authorized to test this lab target")
+                   help="Required: confirm you own this target or are otherwise authorized "
+                        "to test it (D73)")
     from fuzzlab.cli_dryrun import add_dry_run_flag
     add_dry_run_flag(p)
     return p
@@ -175,7 +193,18 @@ def main(argv: list[str]) -> int:
         return 0
 
     if not args.authorized:
-        p.error("refusing to send probes without --authorized (lab-only)")
+        p.error("refusing to send probes without --authorized (you must own or be "
+                "authorized to test the target)")
+    if (args.oob_public_url or args.oob_listen) and not args.oob:
+        p.error("--oob-public-url and --oob-listen need --oob")
+    try:
+        args.oob_bind = _oob_bind(args.oob_listen)
+        if args.oob_public_url:
+            from fuzzlab.oracle.oob import normalize_public_url
+            args.oob_public_url = normalize_public_url(args.oob_public_url)
+        args.scope_origin = _scope_origins(args.scope_origin)
+    except ValueError as exc:
+        p.error(str(exc))
     if args.confirm_budget is not None and args.confirm_budget < 1:
         p.error("--confirm-budget must be at least 1")
     if not 0 < args.anomaly_contamination <= 0.5:
@@ -272,6 +301,37 @@ def _precheck_header_budget(p, args) -> None:
         p.error(f"--header-points: {pages} page(s) x {len(args.header_names)} header(s) "
                 f"need at least {cost} requests, more than budget_total={total}; raise "
                 f"budget_total in the fuzzlab config, or name fewer headers")
+
+
+def _oob_bind(value: str | None) -> tuple[str, int]:
+    """``(host, port)`` of ``--oob-listen HOST:PORT`` (``[v6]:PORT`` for IPv6); the
+    default is loopback on a free port. Raises ``ValueError`` on a malformed value."""
+    if not value:
+        return "127.0.0.1", 0
+    host, sep, port = value.strip().rpartition(":")
+    host = host.strip("[]")
+    if not sep or not host or not port.isdigit() or not 0 <= int(port) <= 65535:
+        raise ValueError(f"--oob-listen is HOST:PORT, not {value!r}")
+    return host, int(port)
+
+
+def _scope_origins(values) -> list[str]:
+    """Each ``--scope-origin`` as its canonical origin (`core.urls.canonical_origin`,
+    SP-05); a value with a path, query, fragment or credentials is refused."""
+    from urllib.parse import urlsplit
+    from fuzzlab.core.urls import canonical_origin
+    out = []
+    for value in values or ():
+        parts = urlsplit(value.strip())
+        if parts.scheme not in ("http", "https") or not parts.hostname or \
+                parts.path not in ("", "/") or parts.query or parts.fragment or \
+                parts.username or parts.password:
+            raise ValueError(f"--scope-origin is scheme://host[:port], not {value!r}")
+        origin = canonical_origin(value.strip())
+        if not origin:
+            raise ValueError(f"--scope-origin {value!r} has no origin")
+        out.append(origin)
+    return out
 
 
 def _auth_origins(p, values, target_url) -> list[str]:
@@ -397,8 +457,13 @@ def _run_traced(p, args, store, run_id: int, plugins, selected, ground_truth) ->
     oob = None
     if args.oob:
         from fuzzlab.oracle.oob import OobListener
-        oob = OobListener()          # loopback-only; refuses any other host
+        host, port = args.oob_bind
+        from fuzzlab.core.net import is_loopback_host
+        oob = OobListener(host, port, public_url=args.oob_public_url,
+                          public_bind=not is_loopback_host(host))   # D73, FR-FUZZ-70
         oob.start()
+        print(f"oob listener on {host}:{oob.port}; callbacks to "
+              f"{oob.callback_url('TOKEN').rsplit('/cb/', 1)[0]}/cb/<token>")
     coverage = None
     if args.greybox_coverage_file:
         from fuzzlab.greybox.coverage import FileCoverageSource
@@ -425,13 +490,14 @@ def _run_traced(p, args, store, run_id: int, plugins, selected, ground_truth) ->
                           confirm_budget=args.confirm_budget,
                           header_names=args.header_names, peer=peer,
                           writes=bool(getattr(args, "fuzz_json_writes", False)),
+                          scope_origins=frozenset(getattr(args, "scope_origin", ()) or ()),
                           account_values=account_values,
                           trace_events=not getattr(args, "no_trace", False))
     except RunModeError as exc:
         p.error(str(exc))            # D15 fail-safe: loud, non-zero exit
     finally:
         if oob is not None:
-            oob.stop()                # tear down the loopback listener every run
+            oob.stop()                # tear down the listener every run
 
     if scheduler is not None:
         scheduler.flush_metrics()            # commit any buffered per-pull metrics

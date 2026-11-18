@@ -14,7 +14,7 @@ redirect-target-control (M9) for open redirect, browser execution (M6) for
 stored + DOM XSS (via an injected `BrowserExecutor`; the live Playwright executor is
 `fuzzlab/tools/browserexec.py`), out-of-band callback (M8) for blind command
 injection (via an injected, already-started `OobListener` — `oracle/oob.py`, a
-loopback-only local canary tracker; default-off, wired through `--oob` on
+per-run canary tracker (loopback by default, D73); default-off, wired through `--oob` on
 `fuzzlab auto`), and grey-box confirmation (M10) for sql-injection/xss (via an
 injected `CoverageSource`/`DbFaultSource` — `fuzzlab/greybox/{coverage,dbfault}.py`
 — wired through `--greybox-coverage-file`/`--greybox-dbfault-file` on `fuzzlab

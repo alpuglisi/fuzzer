@@ -581,7 +581,7 @@ def _browser_step(seq: _Seq, row: dict, tool: str) -> None:
 def _oob_step(seq: _Seq, row: dict) -> None:
     """One out-of-band wait (FR-FUZZ-62): a callback received, or its absence."""
     b, ev = row["body"], [row["key"]]
-    listener = seq.party("oob-listener", "Out-of-band listener (tool, loopback)", "tool")
+    listener = seq.party("oob-listener", "Out-of-band listener (tool)", "tool")
     if b.get("outcome") == "received":
         remote = b.get("remote") or "unknown address"
         src = seq.party(f"callback:{remote}", f"Callback source {remote}", "target")

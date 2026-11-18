@@ -275,15 +275,19 @@ def _password_fields(raw) -> tuple[str, ...] | None:
     return tuple(value)
 
 
-def _crawl_url(stored: str, origin: str) -> tuple[str, str | None]:
+def _crawl_url(stored: str, origin: str,
+               scope_origins: frozenset = frozenset()) -> tuple[str, str | None]:
     """``(url, refusal)`` of a stored page or endpoint (FR-AUD-27): the URL it names
     (`core.urls.stored_absolute`: a path under the run's origin, an absolute URL as
-    stored), and why it is never probed: another origin that is not loopback (D11)."""
+    stored), and why it is never probed: another origin that is neither loopback (a
+    lab's other service, D11) nor one the operator declared with ``--scope-origin``
+    (``scope_origins``, canonical origins; D73, FR-FUZZ-71)."""
     from fuzzlab.core.urls import canonical_origin, is_loopback_origin, stored_absolute
     url = stored_absolute(stored, origin)
     other = canonical_origin(url)
-    if other != canonical_origin(origin) and not is_loopback_origin(other):
-        return url, "another origin, not loopback (D11)"
+    if other != canonical_origin(origin) and not is_loopback_origin(other) \
+            and other not in scope_origins:
+        return url, "another origin, not in scope (add it with --scope-origin)"
     return url, None
 
 
@@ -343,7 +347,8 @@ def _crawl_url_refusal(url: str) -> str | None:
 def injection_points_from_store(store, run_id: int, base_url: str,
                                 skipped: list | None = None,
                                 isolated: set | None = None,
-                                browser_available: bool = False) -> list[InjectionPoint]:
+                                browser_available: bool = False,
+                                scope_origins: frozenset = frozenset()) -> list[InjectionPoint]:
     """Build injection points from the run's endpoint/parameter rows.
 
     A point on a destructive URL (``core.urls.destructive_reason``: logout, reset,
@@ -398,7 +403,7 @@ def injection_points_from_store(store, run_id: int, base_url: str,
     for r in rows:
         path = _stored_key(r["path"])
         method = r["method"] or "GET"
-        url, elsewhere = _crawl_url(path, base)      # its own origin kept (FR-AUD-27)
+        url, elsewhere = _crawl_url(path, base, scope_origins)   # FR-AUD-27, FR-FUZZ-71
         if elsewhere is not None:
             if skipped is not None:
                 skipped.append((path, method, r["name"], elsewhere))
@@ -551,7 +556,8 @@ def _header_page(status) -> bool:
 
 
 def header_points_from_store(store, run_id: int, base_url: str, names,
-                             skipped: list | None = None) -> list[InjectionPoint]:
+                             skipped: list | None = None,
+                             scope_origins: frozenset = frozenset()) -> list[InjectionPoint]:
     """One header point per crawled 2xx GET page and header name (forms phase 2,
     FR-FUZZ-43). The URL carries the page's representative query -- the first crawled
     link set for that path (`core.forms.first_link_set`, already redacted), its ip/host/
@@ -574,7 +580,7 @@ def header_points_from_store(store, run_id: int, base_url: str, names,
         if path in seen or not _header_page(r["status"]):
             continue
         seen.add(path)
-        page_url, elsewhere = _crawl_url(path, origin)      # FR-AUD-27
+        page_url, elsewhere = _crawl_url(path, origin, scope_origins)   # FR-AUD-27, FR-FUZZ-71
         reason = elsewhere or (None if destructive_reason(page_url) is None else
                                f"destructive URL ({destructive_reason(page_url)!r})")
         if reason is not None:
@@ -764,7 +770,8 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
              scheduler=None, plugins=None, confirm_budget: int | None = None,
              prioritizer=None, header_names=None, peer=None,
              writes: bool = False, account_values=None,
-             trace_events: bool = True) -> PipelineResult:
+             trace_events: bool = True,
+             scope_origins: frozenset = frozenset()) -> PipelineResult:
     """Resolve the plan (D14/D15) and run the Phase 2 pipeline.
 
     ``plugins`` (a `PluginManager`) is recorded on the run, may contribute the budget
@@ -785,7 +792,8 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
     ``account_values`` are the run's own account's stored values (FR-LAB-309).
     ``trace_events`` (default on): every send, test, strategy outcome and finding is
     recorded as a trace event (FR-FUZZ-60) with the active `core.trace` recorder, or
-    one opened for this run.
+    one opened for this run. ``scope_origins`` (``--scope-origin``, canonical origins)
+    are other origins whose crawled endpoints are probed too (FR-FUZZ-71, D73).
     """
     source, plan = plan_run(mode=mode, ground_truth=ground_truth,
                             selected_categories=selected_categories,
@@ -805,7 +813,8 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
     else:
         points = injection_points_from_store(store, run_id, base_url, skipped=skipped,
                                              isolated=isolated,
-                                             browser_available=browser is not None)
+                                             browser_available=browser is not None,
+                                             scope_origins=scope_origins)
         if isolated:
             if hasattr(sender, "isolate"):
                 sender.isolate(isolated)       # never the run's session there (FR-FUZZ-44)
@@ -822,7 +831,8 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
         if header_names:
             # last, so they are confirmed last and a budget runs out on them first
             points += header_points_from_store(store, run_id, base_url,
-                                               list(header_names), skipped=skipped)
+                                               list(header_names), skipped=skipped,
+                                               scope_origins=scope_origins)
 
     if plugins is not None:
         plugins.record(store, run_id)          # NFR-PLUG-reproducible: pin the active set

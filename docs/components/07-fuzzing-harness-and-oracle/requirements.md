@@ -108,8 +108,9 @@ rewards) derives from it.
 - **FR-FUZZ-10** The oracle supports **M8 out-of-band (OOB) callback** confirmation
   for blind injection classes with no observable direct-response difference. Scope
   and contract:
-  - `fuzzlab.oracle.oob.OobListener` is a loopback-only (`core.net.is_loopback_host`,
-    CC-CORE-0034; any other host raises) local HTTP callback tracker. *(CC-FUZZ-0057,
+  - `fuzzlab.oracle.oob.OobListener` is a local HTTP callback tracker that binds
+    loopback by default (`core.net.require_loopback`, CC-CORE-0034; any other host
+    raises) unless the operator opts in to a non-loopback bind (FR-FUZZ-70, D73). *(CC-FUZZ-0057,
     BUG-0089:)* its callback serves `proof(token)`, an HMAC under a per-listener
     secret that appears nowhere in the URL. In-band SSRF / XXE confirmation requires
     the proof, never the token, so a page merely reflecting the URL does not confirm. It binds no socket
@@ -1697,7 +1698,9 @@ rewards) derives from it.
   read each stored page or endpoint with `core.urls.stored_absolute` (FR-AUD-27): a
   path under the run's origin, an absolute row at its own origin. A row on another
   origin that is not loopback (`is_loopback_origin`) is never probed: skipped with
-  "another origin, not loopback (D11)". The run's session goes only to its own origins
+  "another origin, not loopback (D11)". *(Amended by FR-FUZZ-71, `CC-FUZZ-0118`,
+  2026-11-18: nor one declared with `--scope-origin`; the skip reason is now "another
+  origin, not in scope (add it with --scope-origin)".)* The run's session goes only to its own origins
   (FR-SESS-20), so such probes go without it unless `--auth-origin` names the origin.
 
 - **FR-FUZZ-60 (the pipeline's trace, `CC-FUZZ-0099`, 2026-10-19)** `run_auto` (with
@@ -2224,13 +2227,48 @@ rewards) derives from it.
     `tests/test_prg_observation.py::test_a_path_points_follow_up_that_would_re_send_the_payload_never_confirms`,
     `tests/test_prg_observation.py::test_a_path_points_follow_up_that_leaves_its_segment_still_confirms`,
     `tests/test_prg_observation.py::test_prg_rule` (`own-segment-never-refetched`)
+- **FR-FUZZ-70 (out-of-band callbacks from a remote target, `CC-FUZZ-0118`, 2026-11-18,
+  D73)** `fuzzlab auto --oob` takes two opt-ins so a target on another machine can reach
+  the M8 listener (FR-FUZZ-10):
+  - `--oob-public-url URL` (`http(s)://host[:port][/path]`, no credentials, query or
+    fragment; `oracle.oob.normalize_public_url`): payloads embed `URL/cb/<token>` instead
+    of the bind address. The operator forwards that URL to the listener (a tunnel,
+    `ssh -R`, a port forward); a request whose path carries a registered token is a hit,
+    whatever prefix the forwarder keeps.
+  - `--oob-listen HOST:PORT` (`[v6]:PORT` for IPv6): the bind address; default
+    `127.0.0.1` on a free port. A non-loopback host is bound only through
+    `OobListener(..., public_bind=True)`; without it `require_loopback` refuses it
+    (PA-0081). Without `--oob-public-url`, payloads use `http://HOST:PORT`.
+  - Either option without `--oob` is a usage error. The listener still records only
+    tokens, serves only the HMAC proof, and is stopped at the end of every run.
+  - Enforced by: `tests/test_external_targets.py::test_a_non_loopback_bind_is_refused_without_the_opt_in`,
+    `tests/test_external_targets.py::test_callback_urls_use_the_public_url_and_a_forwarded_hit_is_recorded`,
+    `tests/test_external_targets.py::test_a_malformed_public_url_is_refused`,
+    `tests/test_external_targets.py::test_the_oob_options_need_oob`,
+    `tests/test_loopback_listeners.py::test_every_listener_in_fuzzlab_is_gated`
+- **FR-FUZZ-71 (operator-declared origins, `CC-FUZZ-0118`, 2026-11-18, D73)**
+  `fuzzlab auto --scope-origin ORIGIN` (repeatable, `scheme://host[:port]`, canonicalised
+  by `core.urls.canonical_origin`, SP-05) declares another origin as part of the target:
+  crawled endpoints and header points there are probed (`run_auto(scope_origins=...)` →
+  `injection_points_from_store` / `header_points_from_store` → `_crawl_url`). A crawled
+  row on any other non-loopback origin is still skipped and reported, with the reason
+  naming `--scope-origin`. It does not widen the session's origins (FR-SESS-20:
+  `--auth-origin`) or the crawler's link-following scope.
+  - Enforced by: `tests/test_external_targets.py::test_a_declared_origin_is_probed_and_an_undeclared_one_is_not`,
+    `tests/test_external_targets.py::test_header_points_follow_the_same_scope`,
+    `tests/test_external_targets.py::test_the_cli_canonicalises_scope_origins_and_refuses_paths`,
+    `tests/test_import_origin.py::test_another_origin_off_the_machine_is_never_probed`
+
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
   finding must reproduce.
 - **NFR-FUZZ-deterministic** Given the same target state and inputs, oracle
   verdicts are reproducible (state reset via snapshot/restore between iterations).
 - **NFR-FUZZ-safe** Destructive payload classes off by default; auth endpoints
-  excluded from scope; no traffic off localhost.
+  excluded from scope; ~~no traffic off localhost~~ *(superseded by D73, `CC-FUZZ-0118`,
+  2026-11-18: no traffic beyond the operator's authorized target -- its origin and the
+  origins declared with `--scope-origin`, FR-FUZZ-71 -- which may be an external host
+  the operator owns).*
   - Clause (in-app login forms; FR-FUZZ-44, CC-FUZZ-0064): the run's session is never
     sent to a path with an in-app login form **for store-sourced (crawl) points in
     `fuzzlab auto`**; such sends use an isolated session or none, and credential-change
@@ -2257,7 +2295,7 @@ rewards) derives from it.
   - Enforced by (PRG follow-ups): `probesender.prg_target` and
     `SeamProbeSender._prg_session_gate` at the send — `tests/test_prg_observation.py::test_a_refused_target_is_never_fetched`, `tests/test_prg_observation.py::test_a_307_after_post_is_not_followed_but_after_get_it_is`, `tests/test_prg_observation.py::test_a_second_redirect_is_no_observation`, `tests/test_prg_observation.py::test_a_redirect_to_the_login_page_is_not_followed`, `tests/test_prg_observation.py::test_a_redirect_to_an_auth_endpoint_is_not_followed`, `tests/test_prg_observation.py::test_a_main_session_probe_redirected_to_an_isolated_path_is_not_followed`, `tests/test_prg_observation.py::test_an_isolated_post_is_followed_on_the_same_copy`, `tests/test_prg_observation.py::test_an_anonymous_probe_follows_anonymously`, `tests/test_prg_observation.py::test_no_follow_up_once_the_header_breaker_stopped_header_probes`, `tests/test_prg_observation.py::test_a_timing_send_never_follows`, `tests/test_prg_observation.py::test_sqli_timing_and_boolean_never_cause_a_follow_up`, `tests/test_prg_observation.py::test_prg_rule`, `tests/test_query_placement.py::test_no_prg_follow_up_carries_the_payload_at_any_location` (never a re-sent payload, at every location; FR-FUZZ-69, BUG-0542)
   - Not yet enforced (BUG-0301, deferred to the owner of `core/urls.py`, CC-CORE-0301): the send gate `check_send_url` lets through Juice Shop's `GET /rest/user/change-password?current=&new=&repeat=` (changes the session user's password; `current` is optional) and `/dataerasure` (files an erasure request, clears the token cookie). An imported change-password URL, or the erasure form once crawled, would be fuzzed. Pinned by strict xfails: `tests/test_destructive_routes_external_labs.py::test_juice_change_password_url_is_refused_at_the_send_gate`, `tests/test_destructive_routes_external_labs.py::test_juice_dataerasure_form_is_never_imported`; the compensating controls are checked by `tests/test_destructive_routes_external_labs.py::test_bug_0301_compensating_controls_hold_meanwhile`.
-  - Not yet enforced: the destructive-**payload** gate on the `auto`/`fuzz` senders (their payload lists are non-destructive today; wiring it needs on-host benchmark verification); "no traffic off localhost" for the probe senders (scope is the operator's target, and BUG-0050 deliberately allows authorized external hosts, so the clause needs re-wording or a loopback gate; the browser part is enforced above, BUG-0123); the CLI `--authorized` refusal is untested for fuzz/auto/greybox-run/mutate-run/proxy. (BUG-0111 sweep; reported to the operator.) The existing SQLi timing templates include an OR form (`1' OR SLEEP(d)-- -`) and comment-terminated forms that can widen a WHERE or strip trailing predicates in a write (BUG-0118, open).
+  - Not yet enforced: the destructive-**payload** gate on the `auto`/`fuzz` senders (their payload lists are non-destructive today; wiring it needs on-host benchmark verification); "no traffic off localhost" for the probe senders (re-worded by D73: the operator's target and declared origins; FR-FUZZ-71 enforces it for crawl points, the browser part is enforced above, BUG-0123); the CLI `--authorized` refusal is untested for fuzz/greybox-run/mutate-run/proxy (`auto`: `tests/test_external_targets.py::test_auto_refuses_without_authorized`, CC-FUZZ-0118). (BUG-0111 sweep; reported to the operator.) The existing SQLi timing templates include an OR form (`1' OR SLEEP(d)-- -`) and comment-terminated forms that can widen a WHERE or strip trailing predicates in a write (BUG-0118, open).
   - Clause (the contract runner, FR-FUZZ-52, CC-FUZZ-0089): every send is gated at the
     send -- scope, the destructive URL and method gate, no redirects, a byte cap -- a
     destructive case is skipped by default, credentials reach only the base origin, and

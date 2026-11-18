@@ -1790,8 +1790,9 @@ tracked in the requirements files, not here.
   (stored/DOM XSS via an injected `BrowserExecutor` — `oracle/browser.py`,
   `tools/browserexec.py`), M7 file-content marker (LFI/traversal), M8 out-of-band
   callback (blind command injection, via an injected, already-started
-  `OobListener` — `oracle/oob.py`, a loopback-only local canary tracker;
-  default-off, wired through `fuzzlab auto --oob`), M9 redirect-target control,
+  `OobListener` — `oracle/oob.py`, a per-run canary tracker, loopback by default;
+  default-off, wired through `fuzzlab auto --oob`; reachable by a remote target via
+  `--oob-public-url` / `--oob-listen`, FR-FUZZ-70, D73), M9 redirect-target control,
   and M10 grey-box confirmation (sql-injection/xss, via an injected
   `CoverageSource`/`DbFaultSource` — `greybox/coverage.py`, `greybox/dbfault.py` —
   consulting the pure `greybox/confirm.py::greybox_confirms()` decision through

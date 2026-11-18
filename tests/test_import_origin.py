@@ -2,7 +2,8 @@
 main origin is stored as its path (as before), one on another origin as its absolute
 URL, so a page's API on another port is probed there, never re-rooted at the base; a
 path on two origins is two endpoints. `auto` probes another origin only when it is
-loopback (D11)."""
+loopback (D11) or declared with --scope-origin (FR-FUZZ-71, D73;
+tests/test_external_targets.py)."""
 
 from __future__ import annotations
 
@@ -79,7 +80,7 @@ def test_another_origin_off_the_machine_is_never_probed(tmp_path):
         points = injection_points_from_store(store, run, PAGE + "/", skipped=skipped)
     assert [p.url for p in points] == [PAGE + "/a"]
     assert ("http://api.example.com:80/b", "GET", "y",
-            "another origin, not loopback (D11)") in skipped
+            "another origin, not in scope (add it with --scope-origin)") in skipped
 
 
 def test_a_disco_run_keeps_its_api_origin(tmp_path):

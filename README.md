@@ -1,18 +1,37 @@
 # fuzzlab
 
-A modular, **lab-only** injection security-testing toolkit and research platform,
-exercised against a self-hosted, deliberately vulnerable web app (Ryder's Puppy
-Fort Factory). Crawler, auditor, and a time-based blind SQLi fuzzer share one
+A modular injection security-testing toolkit and research platform, developed
+against a self-hosted, deliberately vulnerable web app (Ryder's Puppy Fort Factory)
+and usable against any web application you own or are authorized to test, local or
+internet-hosted (D73). Crawler, auditor, and a time-based blind SQLi fuzzer share one
 SQLite store; an integration harness scores runs against a machine-readable
 ground-truth contract; a local web launcher drives it all.
 
 ## Authorized use only
 
 Run this **only** against systems you own or have explicit permission to test.
-The whole project is **lab-only**: the target app is served on loopback and must
-never be exposed, tools that send traffic require an explicit `--authorized`
-flag, and **nothing runs against the target until you ask it to** (no auto-run,
-decision D11).
+Tools that send traffic require an explicit `--authorized` flag, and **nothing runs
+against a target until you ask it to** (no auto-run, decision D11). The bundled
+vulnerable lab is served on loopback and must never be exposed.
+
+### Testing an external (internet-hosted) application
+
+```
+fuzzlab crawl --start https://app.example.com/ --db crawl.db
+fuzzlab auto  --base-url https://app.example.com --spider-db crawl.db --store store.db \
+              --authorized --categories sql-injection,xss,command-injection
+```
+
+- `--categories` is required against a target with no ground truth (D15 fail-safe).
+- Crawled endpoints on another origin are probed only if you declare it:
+  `--scope-origin https://api.example.com` (repeatable). Anything else is skipped and
+  listed (FR-FUZZ-71).
+- Blind command injection (`--oob`) needs a callback the remote app can reach: either
+  `--oob-listen 0.0.0.0:8000` on a host with a public IP, or keep the listener on
+  loopback and forward a public URL to it (`ssh -R`, a tunnel) with
+  `--oob-public-url https://cb.example.net` (FR-FUZZ-70).
+- Scans send real payloads to a live server. Test a staging copy where you can, and
+  expect your hosting provider's or WAF's rate limits to apply.
 
 ## Engineering process (required reading before you change anything)
 

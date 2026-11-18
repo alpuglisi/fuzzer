@@ -13,10 +13,17 @@ Fort Factory). See `README.md` and `docs/ARCHITECTURE.md`.
 
 ## Safety (non-negotiable)
 
-- **Lab-only, authorized-only.** Run tools only against the local lab you own. The target
-  is loopback-only and must never be exposed; anything that sends traffic requires an
-  explicit `--authorized` flag; nothing runs against the target until asked (decision
-  D11). Dual-use tooling (proxy, desync/smuggling, WAF) stays default-off and lab-only.
+- **Authorized-only; any target you own (D73).** The tools may be pointed at the local lab
+  or at any external, internet-hosted application the operator owns or is otherwise
+  authorized to test. Anything that sends traffic requires an explicit `--authorized`
+  flag (the operator's statement of authorization); nothing runs against a target until
+  asked (decision D11). A run stays on the target's origin plus the origins the operator
+  declares (`--scope-origin`); it never probes an undeclared third-party origin.
+- **The deliberately vulnerable lab stays loopback-only and must never be exposed**, and
+  the toolkit's own listeners (web panel, proxy, capture proxy) bind loopback (PA-0081).
+  The one opt-in exception is the out-of-band callback listener (`--oob-listen`,
+  FR-FUZZ-70), which a remote target must be able to reach. Dual-use tooling (proxy,
+  desync/smuggling, WAF) stays default-off.
 - Credentials live in the OS keyring / credential store (D12) — never commit secrets.
 
 ## Definition of done — the bookkeeping checklist (MANDATORY)

@@ -3,6 +3,55 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0118 — External targets: OOB callbacks from a remote target and operator-declared origins (D73, FR-FUZZ-70, FR-FUZZ-71) (2026-11-18)
+- Change:
+  - `fuzzlab/oracle/oob.py`: `OobListener(host, port, *, public_url=None,
+    public_bind=False)`. `public_url` (checked by the new `normalize_public_url`) is
+    the base `callback_url` builds under, so a payload names what a remote target can
+    reach. `public_bind=True` lets `host` be non-loopback; without it `require_loopback`
+    still refuses (the gate moved from `is_loopback_host` + `ValueError` to
+    `require_loopback`, the SP-23 owner). An IPv6 bind host is bracketed in the URL.
+  - `fuzzlab/harness/auto_cli.py`: `--oob-public-url`, `--oob-listen HOST:PORT`
+    (`_oob_bind`), `--scope-origin` (repeatable, `_scope_origins`, canonicalised
+    through SP-05); the OOB options without `--oob` are a usage error; the listener's
+    bind and callback base are printed; `--authorized` help and refusal no longer say
+    "lab".
+  - `fuzzlab/harness/auto.py`: `_crawl_url` admits another origin that is loopback (as
+    before) **or** in `scope_origins`; `run_auto`, `injection_points_from_store` and
+    `header_points_from_store` take `scope_origins` (default empty, so every other
+    caller, greybox's included, is unchanged); the skip reason is now "another origin,
+    not in scope (add it with --scope-origin)".
+  - `fuzzlab/report/diagram.py`: the OOB party is labelled "Out-of-band listener (tool)".
+- Impact (other components / project):
+  - Policy: `CLAUDE.md` Safety, `README.md`, `docs/DECISIONS_AND_ROADMAP.md` (D73, the
+    purpose statement), `docs/ARCHITECTURE.md`, `docs/SHARED_PRIMITIVES.md` SP-23 (the
+    OOB listener's opt-in), NFR-FUZZ-safe re-worded.
+  - The web panel, proxy, capture proxy and the browser enforcer keep their loopback
+    binds (PA-0081); `labgen` oracles keep their loopback checks; the crawler's
+    link-following scope and the session's origins (`--auth-origin`) are unchanged.
+  - A store written before this change reads the same; the one changed string is the
+    skip reason (`tests/test_import_origin.py` updated).
+- Risk (level; mitigation or accepted-risk justification): medium -- the toolkit is
+  now documented for live, internet-hosted targets. Mitigations: `--authorized` is
+  still required; an undeclared non-loopback origin is still never probed; the OOB
+  listener binds non-loopback only on an explicit `--oob-listen`, records only
+  registered tokens, serves only the HMAC proof and stops at the end of the run.
+  Accepted: no request-rate limit exists for production targets (stated in the
+  README); the strategies' OOB wait windows were sized for loopback and may be short
+  for a slow tunnel.
+- Deliverables:
+  - [x] OOB public URL / public bind, `--scope-origin` -- done
+  - [x] `tests/test_external_targets.py` (18 tests, non-loopback hosts per PA-0052) --
+    done
+  - [x] FR-FUZZ-70, FR-FUZZ-71 added; FR-FUZZ-10, FR-FUZZ-59, NFR-FUZZ-safe amended in
+    place -- done
+  - [x] Live check (2026-11-18): a two-origin test app on the container's non-loopback
+    address; without `--scope-origin` the second origin's endpoint was skipped with the
+    new reason; with it, blind command injection there was confirmed through
+    `--oob-listen 192.0.2.2:18099` and through `--oob-public-url` forwarded to a
+    loopback listener -- done
+- Effectiveness (assessed 2026-11-18): see the harness counts in the CHANGELOG line.
+
 ### CC-FUZZ-0117 — M6's navigations settle a failure on the error page's load (BUG-0561) (2026-10-23)
 - Change: none in `fuzzlab/tools/browserexec.py` or the oracle. The executor's navigations go through SP-01, which now waits for a failed navigation's error page to load, not only to commit, before it raises (CC-CRAWL-0065).
 - Impact (other components / project):

@@ -15,9 +15,10 @@ decisions, `CHANGELOG.md`, and `ERROR_LOG.md`.
 
 A modular, Python security-testing toolkit run locally against our own
 deliberately vulnerable lab application ("Ryder's Puppy Fort Factory"). This is
-authorized, educational security research on infrastructure we own. Everything
-runs against localhost. The toolkit is **lab-only** and is not intended to be
-pointed at third-party systems.
+authorized, educational security research on infrastructure we own. The lab runs
+on localhost; since D73 the toolkit may also be pointed at external, internet-hosted
+applications the operator owns or is authorized to test. It is not intended to be
+pointed at third-party systems the operator has no authorization for.
 
 ## Settled decisions
 
@@ -530,6 +531,29 @@ agent chose within it, each open for the owner:
 - **The web page draws its own SVG** (no Mermaid in the browser: the CSP allows
   `'self'` scripts only, and nothing is vendored). Mermaid is an export, with every
   label entity-encoded.
+### D73 — External targets the operator owns are in scope (owner, 2026-11-18)
+
+The toolkit may be run against any web application the operator owns or is otherwise
+authorized to test, including internet-hosted ones, not only the loopback lab.
+
+- **Why:** the owner tests live web applications they publish on external servers.
+  Measured before the change (2026-11-18, a test app on the container's non-loopback
+  address): `fuzzlab crawl` and `fuzzlab auto --authorized` already crawled and
+  confirmed findings on a non-loopback target. What was lab-only: the out-of-band
+  listener (loopback-only, so a remote target could never call back) and the rule that
+  a crawled endpoint on another origin is probed only when that origin is loopback.
+- **What changed:** `fuzzlab auto --oob-public-url` / `--oob-listen` (FR-FUZZ-70) and
+  `--scope-origin` (FR-FUZZ-71); the policy text in `CLAUDE.md`, `README.md` and here.
+- **What did not change:** `--authorized` is still required for every traffic-sending
+  tool and is the operator's statement that they own or may test the target;
+  no-auto-run (D11); the vulnerable lab and every other listener of the toolkit stay
+  loopback-only (PA-0081; only the OOB listener has an opt-in); an undeclared
+  third-party origin is never probed; dual-use tooling stays default-off; the lab-only
+  ground-truth oracles (`labgen`) keep their loopback checks (they drive generated labs).
+- **Supersedes:** the "Everything runs against localhost / lab-only" statement in
+  *Purpose and scope*, and D11's loopback rule as applied to the target (D11's rule for
+  the control panel itself stands).
+
 ### Deferred decisions (revisit at the noted point)
 
 - **Classifier false-positive tolerance (conformal α)** — decide at the

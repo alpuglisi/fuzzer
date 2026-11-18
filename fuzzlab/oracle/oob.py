@@ -13,11 +13,18 @@ only once something explicitly constructs and starts an `OobListener` — the
 oracle strategy that uses it (`CommandInjectionOobStrategy` and friends in
 `strategies.py`) takes the listener by injection and silently no-ops
 (returns ``None``, fail-closed) when none is given, exactly like the M6
-`BrowserExecutor` seam. `OobListener` itself refuses to bind to anything but
-loopback (``127.0.0.1``/``localhost``) — it is a local, per-run, in-memory
-callback tracker for this lab, never a publicly reachable, Burp-Collaborator-
-style interaction service: no DNS component, no persistence beyond the
-process, and no relaying of received data anywhere.
+`BrowserExecutor` seam. It is a per-run, in-memory callback tracker: no DNS
+component, no persistence beyond the process, and no relaying of received data
+anywhere.
+
+Reaching a remote target (D73, FR-FUZZ-70): by default the listener binds loopback
+only, which a target on another machine cannot reach. Two operator opt-ins make it
+reachable: ``public_url`` -- the externally reachable base URL that forwards to this
+listener (a tunnel, ``ssh -R``, a port forward), embedded in payloads in place of the
+bind address -- and ``public_bind=True``, which lets ``host`` be a non-loopback
+address (e.g. ``0.0.0.0`` on a host with a public IP). Without ``public_bind`` a
+non-loopback host is refused through the one listener gate (`core.net.require_loopback`,
+PA-0081).
 """
 
 from __future__ import annotations
@@ -52,12 +59,15 @@ class OobListener:
     Nothing listens until ``start()`` is called (default-off).
     """
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 0):
-        from fuzzlab.core.net import is_loopback_host
-        if not is_loopback_host(host):                 # the one gate (BUG-0080)
-            raise ValueError(
-                f"OobListener is loopback-only (lab-only); refusing host={host!r}")
+    def __init__(self, host: str = "127.0.0.1", port: int = 0, *,
+                 public_url: str | None = None, public_bind: bool = False):
+        from fuzzlab.core.net import require_loopback
+        if not public_bind:                            # the one gate (BUG-0080, PA-0081)
+            require_loopback(host, "OobListener (pass public_bind=True to expose it)")
+        elif not (host or "").strip():
+            raise ValueError("OobListener: public_bind needs an explicit host")
         self._host = host
+        self._public_url = normalize_public_url(public_url) if public_url else None
         self._requested_port = port
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
@@ -115,10 +125,19 @@ class OobListener:
         mac = hmac.new(self._secret, token.encode("ascii"), hashlib.sha256)
         return "fzlproof" + mac.hexdigest()[:24]
 
+    @property
+    def public_url(self) -> str | None:
+        return self._public_url
+
     def callback_url(self, token: str, scheme: str = "http") -> str:
+        """The URL a payload embeds: under ``public_url`` when one is set (what a remote
+        target can reach), else this listener's own bind address and port."""
         if not self.running:
             raise RuntimeError("OobListener.start() must run before minting callback URLs")
-        return f"{scheme}://{self._host}:{self.port}/cb/{token}"
+        if self._public_url:
+            return f"{self._public_url}/cb/{token}"
+        host = f"[{self._host}]" if ":" in self._host else self._host
+        return f"{scheme}://{host}:{self.port}/cb/{token}"
 
     def record(self, token: str, path: str, remote_addr: str) -> None:
         """Record a hit for ``token`` (called by the HTTP handler)."""
@@ -140,6 +159,19 @@ class OobListener:
             if time.monotonic() >= deadline:
                 return None
             time.sleep(poll)
+
+
+def normalize_public_url(url: str) -> str:
+    """``scheme://host[:port][/path]`` with no trailing ``/``, query or fragment: the
+    base a callback URL is built under. Raises ``ValueError`` otherwise."""
+    from urllib.parse import urlsplit
+    parts = urlsplit((url or "").strip())
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise ValueError(f"an OOB public URL is http(s)://host[:port][/path], not {url!r}")
+    if parts.query or parts.fragment or parts.username or parts.password:
+        raise ValueError(f"an OOB public URL has no credentials, query or fragment: {url!r}")
+    parts.port                                        # raises ValueError on a bad port
+    return f"{parts.scheme}://{parts.netloc}{parts.path.rstrip('/')}"
 
 
 def _make_handler(listener: OobListener):
