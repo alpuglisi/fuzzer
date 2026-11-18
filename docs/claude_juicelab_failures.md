@@ -2210,3 +2210,10 @@ Juice Shop lab is complete.
 - **Cause:** I sized the wait to the symptom I had measured (being overtaken, which a commit cures), called it fixed on a volume and a load that could not see a race of about 1%, and wrote the rule's concrete clause from the fix instead of from the principle the rule stated.
 - **Status:** fixed by BUG-0561 / CC-CRAWL-0065 (lane NAVSETTLE); PA-0561 strengthens PA-0522 (landed means loaded; the order pinned by a deterministic test; a race measured under CPU and disk I/O contention at a volume that can see it).
 
+
+### F-283 — My D73 commit added CLI options and a `run_auto` keyword without registering them in the three exhaustive tables
+- **What:** ebc4a00 (CC-FUZZ-0118) added `fuzzlab auto --oob-public-url`, `--oob-listen`, `--scope-origin` and `run_auto(scope_origins=...)`. I ran a hand-picked set of related tests before committing. I did not check `cli_taxonomy.FLAG_CLASSES`, `web/projects.OPTION_CLASS` or `tests/test_confirm_trace.NOT_SENDING`, which a new option or keyword must join.
+- **Evidence:** the second `verify_change.py --base 2be7a50` run failed `test_cli_taxonomy::test_every_dest_of_every_parser_is_classified_and_no_entry_is_stale[auto]`, `test_web_projects::test_every_str_option_of_every_spec_is_classified` and `test_confirm_trace::test_the_count_test_covers_every_sending_keyword_of_run_auto` (ERROR_LOG 2026-11-18); fixed in f17774d.
+- **Impact:** none pushed. The harness caught it before the push, at the cost of one extra harness cycle.
+- **Cause:** I treated my targeted test run as the check, which CLAUDE.md step 2 says it is not, and did not search for the registries a new CLI option or `run_auto` keyword must join.
+- **Status:** fixed (f17774d), before any push.
