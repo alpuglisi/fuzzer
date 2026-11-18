@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-11-18 — verification environment / CC-FUZZ-0118 (harness run errored on missing packages; three classification guards failed)
+- **Symptom:** the first `scripts/verify_change.py --base 2be7a50` run of ebc4a00 collected nothing (0 passed, 24 errors): `ModuleNotFoundError: covertable` / `fastapi`. After installing them, the second run failed 3 guards caused by the change: `test_cli_taxonomy` (unclassified `auto` flags `oob_public_url`, `oob_listen`, `scope_origin`), `test_web_projects` (the same options missing from `OPTION_CLASS`) and `test_confirm_trace` (`run_auto`'s new `scope_origins` keyword unclassified). Every other failure in that run was `FUZZLAB_REQUIRE_BROWSER=1` with no Python `playwright` / `mitmproxy`, or `pyflakes` missing.
+- **Root cause:** the cloud container had only part of the project's dependencies installed; and CC-FUZZ-0118 added CLI options and a `run_auto` keyword without registering them in the three exhaustive tables those guards check.
+- **Remediation:** installed `covertable==3.2.0`, the `web` extra and `pyflakes`; registered the options in `cli_taxonomy.FLAG_CLASSES`, `web/projects.OPTION_CLASS` and `tests/test_confirm_trace.NOT_SENDING` (follow-up commit to CC-FUZZ-0118). Python Playwright and mitmproxy were not installed in this container, so the browser-required tests could not run here.
+- **Status:** Fixed (guards); Environment (browser tests not runnable in this container)
+
 ## 2026-10-23 — crawler / navguard (a navigation started before a failed load's error page had loaded was dropped; BUG-0561)
 - **Symptom:** the harness run of e69bd1e (F-281): `tests/test_disco_harvest.py::test_disco_harvest_and_restore_after_failed_loads[2]` failed in 19.1 s. Disco's `restore` returned "navigation": its `about:blank` `goto` timed out after 15 s and the page stayed on `chrome-error://chromewebdata/`. The RCA measured about 1% of restores under heavy disk I/O on every tree since BUG-0522's fix (7393c90 4/600, e69bd1e 9/840) and 0/1,320 under CPU load alone.
 - **Root cause:** `navguard._settle_failure` (SP-01, BUG-0522's fix) took a failed navigation as over when its error page committed. That page loads 15-25 ms later (p95 about 130 ms under I/O load), and a navigation Chromium started in between was sometimes dropped with no commit and no error, so Playwright waited out the whole `goto` timeout.

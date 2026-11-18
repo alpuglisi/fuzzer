@@ -139,6 +139,8 @@ OPTION_CLASS: dict[tuple[str, str], tuple[str, str]] = {
         # an origin (URL) the session may also be sent to (FR-SESS-20): not a path
         ("crawl", "auth_origin"), ("auto", "auth_origin"), ("greybox-run", "auth_origin"),
         ("session:print", "auth_origin"),
+        # D73: an origin, a public callback URL and a bind address -- not paths
+        ("auto", "scope_origin"), ("auto", "oob_public_url"), ("auto", "oob_listen"),
         ("session:set-credential", "username"), ("session:print", "host"),
         ("session:print", "identity"), ("session:print", "base_url"))},
 }

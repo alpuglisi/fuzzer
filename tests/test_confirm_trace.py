@@ -976,6 +976,7 @@ SENDING_SELF = {
 }
 NOT_SENDING = {
     "base_url": "configuration", "store": "the run's store", "run_id": "configuration",
+    "scope_origins": "configuration: which crawled origins become points (FR-FUZZ-71)",
     "mode": "configuration", "ground_truth": "input points and cases",
     "selected_categories": "configuration", "points_source": "configuration",
     "pages_html": "input HTML, read only", "coverage": "a coverage source it reads",
