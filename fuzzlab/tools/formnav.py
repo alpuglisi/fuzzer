@@ -35,19 +35,76 @@ from fuzzlab.core.redaction import name_tokens
 from fuzzlab.core.urls import destructive_reason, text_destructive_reason, url_key
 
 #: A select or control named with one of these words configures something. Shared by
-#: navigation (`refusal`, `option_refusal`) and the importer's POST-selector rule
-#: (forms phase 2, FR-CRAWL-10 / FR-FUZZ-43). ``t`` is deliberately absent: a lone
-#: ``t`` token comes from contractions ("Don't").
+#: navigation (`refusal`, `option_refusal`), the importer's POST-selector rule (forms
+#: phase 2, FR-CRAWL-10 / FR-FUZZ-43), the captured-body rule (FR-AUD-22) and the SPA
+#: form and label gates. The gate is safety-direction (a word removed means more
+#: submissions of forms that may change server state), so a word stays only with a
+#: public specification, vendor documentation or two independent apps naming it as a
+#: persistent setting (PA-0660(2); FR-CRAWL-680, CC-CRAWL-0680 holds the full record).
+#: No word is kept or added because one lab's recall needed it. ``t`` is deliberately
+#: absent: a lone ``t`` token comes from contractions ("Don't").
 SETTINGS_WORDS = frozenset({
-    "level", "security", "role", "status", "permission", "permissions", "admin",
-    "enable", "disable", "active", "lang", "language", "theme", "mode",
-    # forms phase 2 (reviewer B-R4)
-    "sort", "tz", "currency", "country", "region", "layout", "skin", "view", "display",
-    "default", "notify", "privacy", "visibility",
+    # Security / logging level. Spring Boot Actuator ``loggers`` endpoint (a POST of
+    # ``configuredLevel`` changes the level); GitLab Members API ``access_level``; the
+    # security-level pickers of independent deliberately vulnerable training apps.
+    "level",
+    # Security-level pickers of independent training apps (a select named
+    # ``security``, and ones whose name holds ``security`` and ``level``);
+    # OWASP WSTG 4.2 WSTG-CONF (security configuration).
+    "security",
+    # Authorisation. OWASP Mass Assignment Cheat Sheet (``isAdmin``-style fields);
+    # OWASP API Security Top 10 2023 API5 (BFLA, admin functions); GitHub REST
+    # "Add a repository collaborator" (``permission``: pull/push/admin).
+    "role", "permission", "permissions", "admin",
+    # Publication / account state. WordPress REST API posts ``status``; Drupal core
+    # node base field ``status``; Django ``User.is_active``; GitHub REST webhooks
+    # ``active``.
+    "status", "active",
+    # Toggles. GitHub REST Actions "Enable/Disable a workflow" endpoints; Jenkins
+    # remote access API ``/job/<name>/enable`` and ``/disable``.
+    "enable", "disable",
+    # Locale. WHATWG HTML autofill field name ``language`` and the ``lang`` global
+    # attribute (BCP 47); RFC 9110 §12.5.4 Accept-Language; Django ``set_language``
+    # view (a POST of ``language``); Shopify localization form (``language_code``);
+    # Spring ``LocaleChangeInterceptor`` (default parameter ``locale``); Rails I18n
+    # guide, "Setting the Locale from URL Params" (``params[:locale]``).
+    "lang", "language", "locale",
+    # Appearance. Spring ``ThemeChangeInterceptor`` (default parameter ``theme``);
+    # Bootstrap 5.3 colour modes (``data-bs-theme``, a stored preference).
+    "theme",
+    # Time zone. RFC 6557 (the IANA "tz" database); Django time-zone docs, "Selecting
+    # the current time zone" (a POST of ``timezone``); Rails ``time_zone_select``
+    # (``time_zone``, in `SETTINGS_PAIRS`).
+    "tz", "timezone",
+    # Region and money. WHATWG HTML autofill ``country`` and ``transaction-currency``
+    # (ISO 3166 / ISO 4217); Shopify localization form (``country_code``) and cart
+    # ``currency``.
+    "currency", "country",
+    # A stored default. Shopify Admin API "set a default address"
+    # (``.../addresses/<id>/default``); Stripe ``default_payment_method``.
+    "default",
+    # Notification preferences. WordPress options ``comments_notify`` /
+    # ``moderation_notify``; Jira REST "Edit issue" ``notifyUsers``.
+    "notify",
+    # Privacy. YouTube Data API ``status.privacyStatus``; Vimeo API ``privacy.view``;
+    # GitHub REST and GitLab Projects API ``visibility`` (public/private/internal).
+    "privacy", "visibility",
 })
-#: Adjacent tokens that together are a settings word (``per_page`` tokenises to
-#: ``per``, ``page``; ``page`` alone must not count: it is a common content parameter).
-SETTINGS_PAIRS = frozenset({("per", "page")})
+# Removed by FR-CRAWL-680 (no independent source names them a stored setting; the
+# record is CC-CRAWL-0680): ``sort`` and the pair ``per page`` (read-only list
+# modifiers: JSON:API 1.1 "Sorting", GitHub REST "Using pagination", WordPress REST
+# ``orderby`` / ``per_page``; ORDER BY is an injection point, OWASP WSTG-INPV-05),
+# ``view`` (a navigation parameter, as in Joomla's ``view=article``), ``display``,
+# ``layout``, ``skin``, ``region``, ``mode``. A picker that acts as a setting is
+# still caught by its behaviour (`enumerate_form`'s cookie / self-redirect verdict).
+#: Adjacent tokens that together are a settings word. Rails ``time_zone_select``
+#: (``time_zone`` tokenises to ``time``, ``zone``; neither alone counts).
+SETTINGS_PAIRS = frozenset({("time", "zone")})
+#: IANA tz database areas (tzdata ``Theory``: names are ``Area/Location``, the area a
+#: continent or ocean, or ``Etc``): a select whose every option is one picks a time
+#: zone, whatever its name.
+TZ_AREAS = frozenset({"africa", "america", "antarctica", "arctic", "asia", "atlantic",
+                      "australia", "europe", "indian", "pacific", "etc"})
 #: This many self-redirects in a row, before any real navigation: a settings form.
 MAX_SELF_REDIRECTS = 5
 #: At most this many options of one form are submitted.
@@ -64,6 +121,31 @@ def settings_word(text: str) -> str | None:
     for pair in zip(toks, toks[1:]):
         if pair in SETTINGS_PAIRS:
             return "_".join(pair)
+    return None
+
+
+def _language_tag(value: str) -> bool:
+    """True when ``value`` is a locale name the platform knows (``en``, ``pt-BR``,
+    ``zh_TW``, ``english``): CPython's `locale.locale_alias`, X.Org's ``locale.alias``
+    table keyed by ISO 639 language and ISO 3166 region codes."""
+    import locale
+    key = (value or "").strip().lower().replace("-", "_")
+    return (len(key) >= 2 and key[:2].isalpha() and key not in ("posix", "cextend")
+            and key in locale.locale_alias)
+
+
+def option_set_setting(values) -> str | None:
+    """What setting a select's own option values pick (FR-CRAWL-680), or None: the
+    target's data, read against public code lists, where its names say nothing. At
+    least two values, every one an IANA time zone (``Area/Location``, `TZ_AREAS`) or a
+    known locale name (`_language_tag`)."""
+    values = [v for v in values if (v or "").strip()]
+    if len(values) < 2:
+        return None
+    if all("/" in v and v.split("/", 1)[0].lower() in TZ_AREAS for v in values):
+        return "time zone options"
+    if all(_language_tag(v) for v in values):
+        return "language options"
     return None
 
 
@@ -96,6 +178,9 @@ def refusal(record: dict, named: frozenset[str], allow_get: bool,
         word = settings_word(name)
         if word:
             return f"control {name!r} is a settings control ({word!r})"
+    picked = option_set_setting(v for _n, v, _l in record["options"])
+    if picked:
+        return f"select {select!r} is a settings control ({picked})"
     action = record["action_url"]
     if not in_scope(action):
         return "action out of scope"

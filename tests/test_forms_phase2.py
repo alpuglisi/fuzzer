@@ -1171,7 +1171,7 @@ def test_a_post_selector_without_settings_words_becomes_a_point_with_siblings(tm
 
 
 @pytest.mark.parametrize("name", sorted(formnav.SETTINGS_WORDS) + [
-    "per_page", "perPage", "per-page", "zz", "t", "tz"])
+    "time_zone", "timeZone", "time-zone", "zz", "t", "tz"])
 def test_settings_named_post_selectors_are_skipped(name):
     rec = _rec(f"<form method=post action='/app/p.php'><select name='{name}'>"
                "<option value=1>A</option></select><button name=go value=1>Go</button></form>")
@@ -1223,18 +1223,21 @@ def test_a_picker_seen_setting_a_cookie_is_not_fuzzed(tmp_path, monkeypatch):
     assert counts["form_skipped"] == 1
 
 
-#: The six bWAPP bug-picker option labels Phase 1 already refused (measured offline over
-#: all 159 options of the local build; the extended word set adds none), plus two that
-#: must stay navigable. Inlined: no bWAPP file is copied (CC BY-NC-ND).
+#: The bWAPP bug-picker option labels refused (Phase 1 refused six, measured offline over
+#: all 159 options of the local build). FR-CRAWL-680 removed ``mode`` (no independent
+#: source names it a setting), so "A.I.M. - No-authentication Mode" is now submitted
+#: like any bug page: a lab-visible change, stated in CC-CRAWL-0680, never a reason to
+#: keep a word (PA-0660(3)). Inlined: no bWAPP file is copied (CC BY-NC-ND).
 BWAPP_REFUSED_LABELS = [
     "Cross-Site Scripting - Reflected (phpMyAdmin)", "/ A5 - Security Misconfiguration /",
     "/ A7 - Missing Functional Level Access Control /", "phpMyAdmin BBCode Tag XSS",
-    "A.I.M. - No-authentication Mode", "Unprotected Admin Portal"]
+    "Unprotected Admin Portal"]
 BWAPP_ALLOWED_LABELS = ["Evil 666 Fuzzing Page", "SQL Injection (POST/Select)",
-                        "Don't Click (a synthetic contraction)"]
+                        "Don't Click (a synthetic contraction)",
+                        "A.I.M. - No-authentication Mode"]
 
 
-def test_bwapp_bug_picker_navigation_is_unchanged():
+def test_bwapp_bug_picker_navigation():
     assert all(formnav.option_refusal(str(i), label) for i, label in
                enumerate(BWAPP_REFUSED_LABELS))
     assert not any(formnav.option_refusal(str(i), label) for i, label in
@@ -1249,7 +1252,9 @@ def test_page_alone_is_not_a_settings_word():
     assert formnav.settings_word("page") is None
     assert formnav.settings_word("Evil 666 Fuzzing Page") is None
     assert formnav.settings_word("Don't") is None
-    assert formnav.settings_word("per_page") == "per_page"
+    assert formnav.settings_word("per_page") is None        # FR-CRAWL-680: read-only
+    assert formnav.settings_word("time_zone") == "time_zone"
+    assert formnav.settings_word("zone") is None
 
 
 def test_sqli_in_a_post_select_confirms_end_to_end(tmp_path):
