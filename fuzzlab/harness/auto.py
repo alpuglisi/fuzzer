@@ -23,6 +23,7 @@ from fuzzlab.core.runmode import (RunModeError, RunPlan, categories_from_vuln_cl
                                    resolve_run)
 from fuzzlab.harness.pipeline import PipelineResult, run_pipeline
 from fuzzlab.oracle.strategies import DomXssStrategy, StoredXssStrategy
+from fuzzlab.tools.store_adapter import STORED_LOCATION
 
 
 def _decider(cls) -> tuple[str, str]:
@@ -379,9 +380,11 @@ def injection_points_from_store(store, run_id: int, base_url: str,
     rows = store.conn.execute(
         "SELECT e.url AS path, e.method AS method, p.name AS name, p.location AS location, "
         "p.example AS example, f.entries AS entries, f.source_page AS source_page, "
-        "f.fresh AS fresh "
+        "f.fresh AS fresh, f.enctype AS enctype, we.url AS write_path, "
+        "we.method AS write_method "
         "FROM parameter p JOIN endpoint e ON p.endpoint_id = e.id "
         "LEFT JOIN form f ON f.id = p.form_id "
+        "LEFT JOIN endpoint we ON we.id = f.endpoint_id "
         "WHERE p.run_id = ? ORDER BY p.id",
         (run_id,),
     ).fetchall()
@@ -409,6 +412,17 @@ def injection_points_from_store(store, run_id: int, base_url: str,
                 skipped.append((path, method, r["name"], f"destructive URL ({reason!r})"))
             continue
         location = r["location"] or "query"
+        if location == STORED_LOCATION:
+            point, why = _stored_point(r, url, base, browser_available)
+            if point is None:
+                if skipped is not None:
+                    skipped.append((path, method, r["name"], why))
+                continue
+            key = reqctx.point_key(point)
+            if key not in seen:
+                seen.add(key)
+                points.append(point)
+            continue
         if location == "fragment" and not browser_available:
             if skipped is not None:
                 skipped.append((path, method, r["name"],
@@ -474,6 +488,55 @@ def injection_points_from_store(store, run_id: int, base_url: str,
             seen.add(key)
             points.append(point)
     return points
+
+
+def _stored_point(r, url: str, base: str, browser_available: bool):
+    """``(point, None)`` for a crawl-derived stored-XSS parameter (FR-FUZZ-691,
+    FR-AUD-691), or ``(None, why)``: its endpoint (``url``) is the page that renders the
+    value, its form row the write that stores it (the write's endpoint, method, encoding
+    and entries), its name the written leaf. Built as ground truth's stored-XSS points
+    are (`points_from_ground_truth`): a GET observation of the render page, the store
+    step's request, decided by `StoredXssStrategy`, browser only. The write is refused
+    as any crawl point is: a destructive URL, another origin, a credential name, an
+    entry naming a host outside the lab (``replay_refusal``)."""
+    from fuzzlab.core import jsonbody
+    from fuzzlab.tools.store_adapter import WRITE_METHODS
+    if not browser_available:
+        return None, "stored XSS (needs browser execution, M6)"
+    if not r["write_path"] or not r["entries"]:
+        return None, "malformed stored row (no write)"
+    store_url, elsewhere = _crawl_url(_stored_key(r["write_path"]), base)
+    if elsewhere is not None:
+        return None, elsewhere
+    reason = _crawl_url_refusal(store_url)
+    if reason is not None:
+        return None, f"destructive store URL ({reason!r})"
+    store_method = (r["write_method"] or "POST").upper()
+    if store_method in WRITE_METHODS:
+        return None, f"stored XSS through {store_method}: probed only with --fuzz-json-writes"
+    if r["enctype"] == jsonbody.ENCTYPE:
+        raw = jsonbody.decode_entries(r["entries"])
+        store_location = jsonbody.LOCATION
+    else:
+        try:
+            raw = [(n, v) for n, v in json.loads(r["entries"])]
+        except (ValueError, TypeError):
+            raw = None
+        store_location = "body"
+    if raw is None:
+        return None, "malformed stored row (entries)"
+    names = (jsonbody.segments_of(r["name"]) if store_location == jsonbody.LOCATION
+             else [r["name"]])
+    if any(_credential_name(n) for n in names):
+        return None, "credential parameter"
+    entries = tuple((n, _send_value(v)) for n, v in raw)
+    return InjectionPoint(url=url, param=r["name"], method="GET", location=store_location,
+                          store_url=store_url, store_param=r["name"],
+                          store_method=store_method, store_location=store_location,
+                          store_entries=entries, origin="crawl",
+                          decided_by=STORED_DECIDER,
+                          replay_refusal=(_outside_lab(raw, r["name"])
+                                          or _redacted_url_refusal(store_url))), None
 
 
 def _redacted_url_refusal(url: str) -> str | None:

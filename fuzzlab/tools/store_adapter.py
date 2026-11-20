@@ -306,7 +306,8 @@ def import_disco(run_dir: str | Path, store: Store, run_id: int, *,
     main = _main_origin(base_url, [r.url for r in read.records if r.kind == "http"]
                         + page_urls)
     path_urls = []
-    for rec in read.records:
+    stored_at: dict[int, tuple] = {}     # record index -> its stored request's ids
+    for index, rec in enumerate(read.records):
         if rec.kind != "http" or rec.status is None:
             continue
         referer = rec.req_headers.get("referer") or rec.req_headers.get("Referer")
@@ -333,9 +334,11 @@ def import_disco(run_dir: str | Path, store: Store, run_id: int, *,
         if reason is not None:
             counts["request_refused"] += 1
             continue
-        _store_request(store, run_id, counts, kind, rec.method.upper(), rec.url, leaves,
-                       visible=visible.get(rec.action_id or "", frozenset()), main=main,
-                       page=row["page_url"], bodies=bodies)
+        stored_at[index] = _store_request(
+            store, run_id, counts, kind, rec.method.upper(), rec.url, leaves,
+            visible=visible.get(rec.action_id or "", frozenset()), main=main,
+            page=row["page_url"], bodies=bodies)
+    _import_store_renders(store, run_id, read.records, stored_at, counts, main)
     for url in page_urls:
         _import_page_url(store, run_id, url, None, DISCO_SOURCE, counts, seen_pages,
                          link_sets, main)
@@ -343,6 +346,47 @@ def import_disco(run_dir: str | Path, store: Store, run_id: int, *,
                            main, code=_disco_code_segments(run_dir))
     store.conn.commit()
     return counts
+
+
+#: The ``location`` of a stored-XSS parameter (FR-AUD-691): its endpoint is the page
+#: that renders the value, its form row the write that stores it.
+STORED_LOCATION = "stored"
+#: The ``source`` of a render page's endpoint row.
+STORED_RENDER_SOURCE = "stored-render"
+
+
+def _import_store_renders(store: Store, run_id: int, records, stored_at: dict,
+                          counts: dict, main: str | None) -> None:
+    """Store -> render pairs of a capture (`disco.storerender`, FR-CRAWL-672) ->
+    ``stored`` parameters (FR-AUD-691): for each pair whose write was stored here
+    (``stored_at``: record index -> `_store_request`'s ids) and whose leaf is a point of
+    that write (so every redaction, credential and pinning rule of the write already
+    applied), an endpoint for the render page (GET, `STORED_RENDER_SOURCE`) and a
+    parameter of it named as the leaf, location `STORED_LOCATION`, whose ``form_id`` is
+    the write's own form row: the request that stores the value. A render page whose URL
+    the strongest redactor would change (`_source_page`) is never stored. Counted
+    ``store_render`` (stored) and ``store_render_skipped``."""
+    from fuzzlab.disco.storerender import store_render_pairs
+    counts.setdefault("store_render", 0)
+    counts.setdefault("store_render_skipped", 0)
+    for pair in store_render_pairs(records):
+        ids = stored_at.get(pair.write_index)
+        render = _source_page(pair.render_url, main)
+        if ids is None or render is None:
+            counts["store_render_skipped"] += 1
+            continue
+        write_endpoint, form_id, location = ids
+        row = store.conn.execute(
+            "SELECT example FROM parameter WHERE run_id = ? AND endpoint_id = ? AND name = ? "
+            "AND location = ? AND form_id = ?",
+            (run_id, write_endpoint, pair.param, location, form_id)).fetchone()
+        if row is None:                  # not a point of the write (pinned, redacted)
+            counts["store_render_skipped"] += 1
+            continue
+        endpoint_id = _upsert_endpoint(store, run_id, render, "GET", STORED_RENDER_SOURCE)
+        if _insert_parameter(store, run_id, endpoint_id, pair.param, STORED_LOCATION,
+                             row[0], form_id, {"parameter": 0}):
+            counts["store_render"] += 1
 
 
 def _disco_code_segments(run_dir: Path) -> frozenset[str]:
@@ -930,8 +974,9 @@ def _storable_text(value) -> bool:
 
 def _store_request(store, run_id, counts, kind, method, url, leaves, *,
                    visible: frozenset = frozenset(), main: str | None = None,
-                   page: str | None = None, bodies: dict | None = None) -> None:
-    """Write one accepted captured request (`_import_requests`): every value passes
+                   page: str | None = None, bodies: dict | None = None):
+    """Write one accepted captured request (`_import_requests`) and return ``(endpoint
+    id, form id, parameter location)``: every value passes
     `redact_leaf` before it is stored (PA-0100). ``visible`` names the controls a user
     could see in the form that sent it (a disco form step): an object selector among
     them is a point, as a crawled form's visible field is (`_import_forms`); unseen, it
@@ -984,6 +1029,7 @@ def _store_request(store, run_id, counts, kind, method, url, leaves, *,
         example = value if isinstance(value, str) else json.dumps(value)
         _insert_parameter(store, run_id, endpoint_id, name, location, example, form_id,
                           counts)
+    return endpoint_id, form_id, location
 
 
 def import_audit(audit_db: str | Path, store: Store, run_id: int, *,
