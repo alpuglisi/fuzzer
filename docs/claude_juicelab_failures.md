@@ -2210,3 +2210,10 @@ Juice Shop lab is complete.
 - **Cause:** I sized the wait to the symptom I had measured (being overtaken, which a commit cures), called it fixed on a volume and a load that could not see a race of about 1%, and wrote the rule's concrete clause from the fix instead of from the principle the rule stated.
 - **Status:** fixed by BUG-0561 / CC-CRAWL-0065 (lane NAVSETTLE); PA-0561 strengthens PA-0522 (landed means loaded; the order pinned by a deterministic test; a race measured under CPU and disk I/O contention at a volume that can see it).
 
+
+### F-283 — I launched six cloud build lanes from a short commit hash; every one failed at clone, and I reported them as running
+- **What:** on 2026-11-20 I created the six lab-expansion sessions (GQL, NODE, PHPX, JAVA, ACC, PERF) with `source_revision` set to the short hash `2be7a50`. The session service does not resolve a short hash, so each failed its clone step with `ref_not_found` within three seconds and never started. I read only the create call's `WORKING` status bucket, told the owner all lanes were running, and scheduled a check-in 90 minutes out; the owner found the failures.
+- **Evidence:** the six archived sessions' `external_metadata.last_init_error` (`error_type: ref_not_found`, 07:28–07:35 UTC); relaunched from the pushed branch name `ccr-e5c7c0c6-r9ladz` at 07:46–07:48 UTC, all six `SESSION_STATUS_RUNNING`.
+- **Impact:** about 20 minutes of lost lane time across six lanes and a false status report; no repository content affected.
+- **Cause:** I treated a create call's acknowledgement as proof of a running lane, and did not confirm a dispatch's first progress (an init log past the clone) before reporting it — the same "verify, don't trust the self-report" rule (MULTI_AGENT_ORCHESTRATION §2) applied to the platform, not only to lanes.
+- **Status:** fixed: relaunched from the branch name; one lane was confirmed past clone before the other five were relaunched; the check-in now reads each lane's init log for errors, not only its status.
