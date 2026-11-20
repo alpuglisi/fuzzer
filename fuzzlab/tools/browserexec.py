@@ -459,7 +459,7 @@ class PlaywrightBrowserExecutor:
         - the placement refusals and the visit's session (`_visit_session`, which
           ensures the run's session and may log in, FR-SESS-19): once per scope, before
           any worker starts, so every visit of the wave carries the same session
-          material and nothing logs in while a visit is in flight (FR-SESS-670: the scan
+          material and nothing logs in while a visit is in flight (FR-FUZZ-723: the scan
           is single-threaded, the caller blocks on the wave, and the executor never
           logs in itself);
         - each visit's trace (`_VisitTrace`): created here, where the test and strategy
