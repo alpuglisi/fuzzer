@@ -18,6 +18,19 @@ Format per entry:
 
 ---
 
+## 2026-11-20 — Crawler / importer: the settings words were one lab's measurement plus reviewer intuition (BUG-0731, PA-0730)
+- **Symptom:** the shared settings-word list (`formnav.SETTINGS_WORDS`) refused read-only
+  `sort` / `per_page` pickers and captured bodies (ORDER BY points never fuzzed) and
+  "View ..." SPA menu items, yet missed `locale`, `timezone` and `time_zone`.
+- **Root cause:** the list was measured on bWAPP alone (CC-CRAWL-0013) and grown by
+  reviewer intuition with no per-word source (CC-CRAWL-0014); PA-0660's guard subtracts
+  common vocabulary, so it could not see a lab-fitted selection of common words.
+- **Remediation:** every word cited to two or more independent sources, unsourced words
+  removed, `locale` / `timezone` / `time zone` added, a picker whose options are all IANA
+  time zones or locale names refused from the target's own data, a citation guard
+  (CC-CRAWL-0680, CC-FUZZ-0713, CC-AUD-0730).
+- **Status:** Fixed.
+
 ## 2026-11-20 — Session manager: the browser login's account-form refusal was fitted to one lab (BUG-0730, PA-0730)
 - **Symptom:** `browserlogin.ACCOUNT_WORDS` / `ACCOUNT_PAIRS` held `repeat`, `retype` and
   `security question/answer`, taken from one lab's registration / forgot / change-password
