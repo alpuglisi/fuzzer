@@ -1,0 +1,462 @@
+{
+ "benchmark": "held-out, crawl runs only (lab/HOLDOUT.md)",
+ "fuzzlab_commit": "2ab5955395021d45719777ce50a695fac166fd47",
+ "detection_base": "e14c925",
+ "detection_identical": true,
+ "generated": "2026-11-20T13:36:22Z",
+ "labs": [
+  {
+   "lab": "vampi",
+   "status": "ok",
+   "tp": 0,
+   "fp": 0,
+   "fn": 4,
+   "tn": 5,
+   "precision": 0.0,
+   "recall": 0.0,
+   "requests": 8,
+   "wall_seconds": 13.4,
+   "positives": 4,
+   "negatives": 5,
+   "fns": [
+    {
+     "case_id": "VAMPI-0001",
+     "url": "/users/v1/{username}",
+     "method": "GET",
+     "param": "username",
+     "location": "path",
+     "vuln_class": "sqli",
+     "reach": "crawl,gt",
+     "progress": "no candidate"
+    },
+    {
+     "case_id": "VAMPI-0002",
+     "url": "/books/v1/{book_title}",
+     "method": "GET",
+     "param": "book_title",
+     "location": "path",
+     "vuln_class": "access_control",
+     "reach": "crawl,gt",
+     "progress": "no candidate"
+    },
+    {
+     "case_id": "VAMPI-0003",
+     "url": "/users/v1/{username}/password",
+     "method": "PUT",
+     "param": "username",
+     "location": "path",
+     "vuln_class": "access_control",
+     "reach": "crawl",
+     "progress": "no candidate"
+    },
+    {
+     "case_id": "VAMPI-0004",
+     "url": "/users/v1/register",
+     "method": "POST",
+     "param": "admin",
+     "location": "body",
+     "vuln_class": "mass_assignment",
+     "reach": "gt",
+     "progress": "no candidate"
+    }
+   ],
+   "fps": [],
+   "crawl_rc": 0,
+   "disco_rc": 0,
+   "crawl_auth": "anonymous (the logged-in crawl failed)",
+   "crawl_recorded": 3,
+   "disco_exchanges": 5,
+   "auto_auth": "identity",
+   "auto_rc": 0,
+   "probe_requests": 0,
+   "run_dir": null
+  },
+  {
+   "lab": "dvws-node",
+   "status": "ok",
+   "tp": 0,
+   "fp": 0,
+   "fn": 21,
+   "tn": 11,
+   "precision": 0.0,
+   "recall": 0.0,
+   "requests": 139,
+   "wall_seconds": 59.1,
+   "positives": 21,
+   "negatives": 11,
+   "fns": [
+    {
+     "case_id": "DVWS-0001",
+     "url": "/api/v2/passphrase/{username}",
+     "method": "GET",
+     "param": "username",
+     "location": "path",
+     "vuln_class": "sqli",
+     "reach": "crawl,gt",
+     "progress": "no candidate"
+    },
+    {
+     "case_id": "DVWS-0002",
+     "url": "/api/v2/passphrase",
+     "method": "POST",
+     "param": "passphrase",
+     "location": "body",
+     "vuln_class": "sqli",
+     "reach": "crawl,gt",
+     "progress": "no candidate"
+    },
+    {
+     "case_id": "DVWS-0003",
+     "url": "/api/v2/passphrase",
+     "method": "POST",
+     "param": "reminder",
+     "location": "body",
+     "vuln_class": "sqli",
+     "reach": "crawl,gt",
+     "progress": "no candidate"
+    },
+    {
+     "case_id": "DVWS-0004",
+     "url": "/api/v2/notesearch",
+     "method": "POST",
+     "param": "search",
+     "location": "body",
+     "vuln_class": "ssjs",
+     "reach": "crawl,gt",
+     "progress": "no candidate"
+    },
+    {
+     "case_id": "DVWS-0005",
+     "url": "/api/v2/login",
+     "method": "POST",
+     "param": "username",
+     "location": "body",
+     "vuln_class": "nosqli",
+     "reach": "crawl,gt",
+     "progress": "no candidate for the class"
+    },
+    {
+     "case_id": "DVWS-0006",
+     "url": "/api/v2/sysinfo/{command}",
+     "method": "GET",
+     "param": "command",
+     "location": "path",
+     "vuln_class": "command-injection",
+     "reach": "crawl,gt",
+     "progress": "no candidate"
+    },
+    {
+     "case_id": "DVWS-0007",
+     "url": "/dvwsuserservice",
+     "method": "POST",
+     "param": "username",
+     "location": "body",
+     "vuln_class": "xxe",
+     "reach": "gt",
+     "progress": "no candidate"
+    },
+    {
+     "case_id": "DVWS-0008",
+     "url": "/api/v2/notes/import/xml",
+     "method": "POST",
+     "param": "xml",
+     "location": "body",
+     "vuln_class": "xxe",
+     "reach": "crawl,gt",
+     "progress": "no candidate"
+    },
+    {
+     "case_id": "DVWS-0009",
+     "url": "/xmlrpc",
+     "method": "POST",
+     "param": "body",
+     "location": "body",
+     "vuln_class": "ssrf",
+     "reach": "gt",
+     "progress": "no candidate"
+    },
+    {
+     "case_id": "DVWS-0010",
+     "url": "/api/v2/release/{release}",
+     "method": "GET",
+     "param": "release",
+     "location": "path",
+     "vuln_class": "xpath_injection",
+     "reach": "crawl,gt",
+     "progress": "no candidate"
+    },
+    {
+     "case_id": "DVWS-0011",
+     "url": "/api/v2/users/ldap-search",
+     "method": "GET",
+     "param": "user",
+     "location": "query",
+     "vuln_class": "ldap_injection",
+     "reach": "crawl,gt",
+     "progress": "no candidate"
+    },
+    {
+     "case_id": "DVWS-0012",
+     "url": "/api/v2/users/ldap-search",
+     "method": "POST",
+     "param": "user",
+     "location": "body",
+     "vuln_class": "ldap_injection",
+     "reach": "crawl,gt",
+     "progress": "no candidate"
+    },
+    {
+     "case_id": "DVWS-0013",
+     "url": "/api/download",
+     "method": "POST",
+     "param": "filename",
+     "location": "body",
+     "vuln_class": "path_traversal",
+     "reach": "crawl,gt",
+     "progress": "no candidate"
+    },
+    {
+     "case_id": "DVWS-0014",
+     "url": "/api/v2/reports/monthly",
+     "method": "GET",
+     "param": "period",
+     "location": "query",
+     "vuln_class": "path_traversal",
+     "reach": "crawl,gt",
+     "progress": "no candidate"
+    },
+    {
+     "case_id": "DVWS-0015",
+     "url": "/api/v2/greeter",
+     "method": "GET",
+     "param": "name",
+     "location": "query",
+     "vuln_class": "ssti",
+     "reach": "crawl,gt",
+     "progress": "no candidate"
+    },
+    {
+     "case_id": "DVWS-0016",
+     "url": "/api/v2/export",
+     "method": "POST",
+     "param": "data",
+     "location": "body",
+     "vuln_class": "insecure_deserialization",
+     "reach": "gt",
+     "progress": "no candidate"
+    },
+    {
+     "case_id": "DVWS-0017",
+     "url": "/api/v2/users/logout/{redirect}",
+     "method": "GET",
+     "param": "redirect",
+     "location": "path",
+     "vuln_class": "open_redirect",
+     "reach": "none - the path names logout: fuzzlab's send gate refuses it as destructive and a contract point may not name it (B9); it is in the OpenAPI document",
+     "progress": "no candidate"
+    },
+    {
+     "case_id": "DVWS-0018",
+     "url": "/api/v2/notes/{noteId}",
+     "method": "GET",
+     "param": "noteId",
+     "location": "path",
+     "vuln_class": "access_control",
+     "reach": "gt",
+     "progress": "no candidate"
+    },
+    {
+     "case_id": "DVWS-0019",
+     "url": "/api/v2/users/notification-preferences",
+     "method": "PUT",
+     "param": "admin",
+     "location": "body",
+     "vuln_class": "mass_assignment",
+     "reach": "crawl,gt",
+     "progress": "no candidate"
+    },
+    {
+     "case_id": "DVWS-0020",
+     "url": "/api/v2/resource-store/orders",
+     "method": "POST",
+     "param": "quantity",
+     "location": "body",
+     "vuln_class": "price_integrity_bypass",
+     "reach": "none - the path names an order: fuzzlab's send gate refuses it as a transaction and a contract point may not name it (B9); the Resource Store page posts it",
+     "progress": "no candidate"
+    },
+    {
+     "case_id": "DVWS-0021",
+     "url": "/search",
+     "method": "GET",
+     "param": "body",
+     "location": "body",
+     "vuln_class": "xss-stored",
+     "reach": "gt",
+     "progress": "no candidate"
+    }
+   ],
+   "fps": [],
+   "crawl_rc": 0,
+   "disco_rc": 0,
+   "crawl_auth": "anonymous (the logged-in crawl failed)",
+   "crawl_recorded": 4,
+   "disco_exchanges": 83,
+   "auto_auth": "anonymous (the logged-in run failed)",
+   "auto_identity_rc": 1,
+   "auto_rc": 0,
+   "probe_requests": 52,
+   "run_dir": null
+  },
+  {
+   "lab": "railsgoat",
+   "status": "ok",
+   "tp": 1,
+   "fp": 3,
+   "fn": 12,
+   "tn": 13,
+   "precision": 0.25,
+   "recall": 0.0769,
+   "requests": 792,
+   "wall_seconds": 539.2,
+   "positives": 13,
+   "negatives": 13,
+   "fns": [
+    {
+     "case_id": "RGOAT-0001",
+     "url": "/users/6",
+     "method": "POST",
+     "param": "user[id]",
+     "location": "body",
+     "vuln_class": "sqli",
+     "reach": "crawl",
+     "progress": "no candidate"
+    },
+    {
+     "case_id": "RGOAT-0004",
+     "url": "/users/6",
+     "method": "POST",
+     "param": "user[first_name]",
+     "location": "body",
+     "vuln_class": "xss-stored",
+     "reach": "crawl",
+     "progress": "no candidate"
+    },
+    {
+     "case_id": "RGOAT-0006",
+     "url": "/users/6",
+     "method": "POST",
+     "param": "user[admin]",
+     "location": "body",
+     "vuln_class": "mass_assignment",
+     "reach": "crawl",
+     "progress": "no candidate"
+    },
+    {
+     "case_id": "RGOAT-0007",
+     "url": "/users",
+     "method": "POST",
+     "param": "user[admin]",
+     "location": "body",
+     "vuln_class": "mass_assignment",
+     "reach": "crawl",
+     "progress": "no candidate"
+    },
+    {
+     "case_id": "RGOAT-0009",
+     "url": "/upload",
+     "method": "POST",
+     "param": "benefits[upload]",
+     "location": "body",
+     "vuln_class": "command-injection",
+     "reach": "crawl,gt",
+     "progress": "no candidate"
+    },
+    {
+     "case_id": "RGOAT-0011",
+     "url": "/download",
+     "method": "GET",
+     "param": "name",
+     "location": "query",
+     "vuln_class": "path_traversal",
+     "reach": "crawl,gt",
+     "progress": "no candidate for the class"
+    },
+    {
+     "case_id": "RGOAT-0014",
+     "url": "/forgot_password",
+     "method": "POST",
+     "param": "email",
+     "location": "body",
+     "vuln_class": "xss-stored",
+     "reach": "crawl,gt",
+     "progress": "no candidate"
+    },
+    {
+     "case_id": "RGOAT-0015",
+     "url": "/login",
+     "method": "GET",
+     "param": "lang",
+     "location": "fragment",
+     "vuln_class": "xss-dom",
+     "reach": "gt",
+     "progress": "no candidate"
+    },
+    {
+     "case_id": "RGOAT-0018",
+     "url": "/sessions",
+     "method": "POST",
+     "param": "url",
+     "location": "body",
+     "vuln_class": "open_redirect",
+     "reach": "crawl",
+     "progress": "candidate not checked (inconclusive)"
+    },
+    {
+     "case_id": "RGOAT-0022",
+     "url": "/users/{user_id}/work_info",
+     "method": "GET",
+     "param": "user_id",
+     "location": "path",
+     "vuln_class": "access_control",
+     "reach": "crawl,gt",
+     "progress": "no candidate"
+    },
+    {
+     "case_id": "RGOAT-0024",
+     "url": "/admin/{admin_id}/get_user",
+     "method": "GET",
+     "param": "admin_id",
+     "location": "path",
+     "vuln_class": "access_control",
+     "reach": "gt",
+     "progress": "no candidate"
+    },
+    {
+     "case_id": "RGOAT-0025",
+     "url": "/admin/1/analytics",
+     "method": "GET",
+     "param": "field",
+     "location": "query",
+     "vuln_class": "sqli",
+     "reach": "none - the injectable text is the NAME of a field-hash parameter (its column key, joined into select(...)), never a value",
+     "progress": "no candidate"
+    }
+   ],
+   "fps": [
+    "/users/{id}/messages/4:id:access_control",
+    "/users/{id}/messages:id:access_control",
+    "/users/{id}/pay:id:access_control"
+   ],
+   "crawl_rc": 0,
+   "disco_rc": 0,
+   "crawl_auth": "identity",
+   "crawl_recorded": 19,
+   "disco_exchanges": 309,
+   "auto_auth": "identity",
+   "auto_rc": 0,
+   "probe_requests": 464,
+   "run_dir": null
+  }
+ ]
+}
