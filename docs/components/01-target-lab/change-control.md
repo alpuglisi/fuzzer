@@ -3,6 +3,33 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0370 — Scan performance probe for the external labs (2026-11-20)
+- Change: `scripts/measure_scan_perf.py` (new; FR-LAB-370). Lane PERF's measurement
+  tool: one `fuzzlab auto` run in-process against a running external lab, scored, with
+  per-phase wall-clock timers.
+- Reason: lane PERF must cut scan cost on the existing external labs without losing a
+  detection, and every optimisation must cite a measurement (MULTI_AGENT_ORCHESTRATION
+  §7). A cProfile of `auto` alone was misleading: it put 36 s of a 51 s Juice Shop run
+  under the Playwright driver's stop, which measured 0.09 s with explicit timers (the
+  greenlet dispatcher's work lands under the switch frame).
+- Measured with it (2026-11-20, docker, this container; BEFORE = tree 2be7a50):
+  - `--lab juice-shop --points ground-truth -- --browser --oob`: tp=5 fp=0 fn=10 tn=3
+    (as CC-LAB-0317), 150 requests, 30.0 per finding, 43.7 s; the M6 browser 35.4 s
+    over 9 observations.
+  - `--lab juice-shop --points crawl` (spider: `crawl --start .../#/login --max-depth 0
+    --submit-spa-forms login`) `-- --browser --oob`: tp=1 fp=0 fn=14 tn=3, 69
+    requests, 36.6 s; the browser 30.5 s over 6 observations.
+  - `--lab bwapp --points ground-truth --base-url http://127.0.0.1:8092 -- --browser`:
+    tp=21 fp=0 fn=34 tn=3, 888 requests, 42.3 per finding, 620.9 s; the browser 600.3 s
+    over 126 observations (driver start 0.31 s each, the session 4.4 s each: a payload
+    that does not fire waits out `SETTLE_MS`), HTTP 19.1 s.
+- Impact: none on a scan (a script; it wraps functions only for its own run).
+- Risk: low; lab only, `--authorized` required, loopback labs.
+- Deliverables:
+  - [x] script; first measurements (above) — done
+  - [ ] the remaining labs and the optimisations it motivates — in progress (lane PERF)
+- Effectiveness: pending (lane PERF's AFTER runs).
+
 ### CC-LAB-0317 — Juice Shop measured with every tool at 2edf1b6 (2026-10-19)
 - Change: none to code; a measurement record (the owner asked to run the tools on the
   Juice Shop lab).
