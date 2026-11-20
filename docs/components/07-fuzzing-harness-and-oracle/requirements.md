@@ -2250,6 +2250,28 @@ rewards) derives from it.
     always showing passwd text and a page reflecting the URL are not confirmed,
     PA-0090(2)), the live test above.
 
+- **FR-FUZZ-632 (an open redirect past a prefix filter, `CC-FUZZ-0632`, 2026-11-20)**
+  `OpenRedirectFilterBypassStrategy` (`fuzzlab/oracle/strategies_filters.py`, class
+  `open_redirect`), after `OpenRedirectStrategy`: when the plain canary did not land, the
+  canary as `//host/cb`, `/\host/cb` and `@host/cb` (at most three probes), each judged by
+  where a browser lands (`browser_resolve`: C0 and space trimmed, tab and newline removed,
+  `\` read as `/` before the query after a special scheme, then `urljoin`), never a prefix
+  test. Measured in Chromium 157 on VulnerableApp Http3xxStatusCodeBasedInjection: the
+  backslashed form leaves the origin at LEVEL_2..5, `@host` at LEVEL_6, none at LEVEL_7
+  (`scheme://own/` + the value) or LEVEL_8 (an allowlist); the strategy confirms exactly
+  those.
+  - Enforced by: `tests/test_oracle_strategies_filters.py` (the resolver against the
+    measured readings; a prefix filter passed with a backslash; an app-prefixed origin
+    passed with userinfo; LEVEL_7's shape, an allowlist, a body echo and a redirect
+    elsewhere carrying the canary are not confirmed).
+- **FR-FUZZ-633 (timing payloads carry the baseline's value, `CC-FUZZ-0631`,
+  2026-11-20, BUG-0630)** Every timing mutation is the value its baseline sent followed by
+  the part under test: `cmdi_timing_payloads(base)` prefixes each command-injection
+  template with the point's base value, or with `_CMDI_BASELINE` (`1`) when it has none.
+  - Enforced by: `tests/test_timing_payloads_carry_the_baseline.py` (discovery over every
+    default strategy running `_confirm_timing`, proven on a synthetic offender),
+    `tests/test_oracle_vectors.py::test_command_injection_confirms_past_a_filter_when_the_baseline_runs_a_command`.
+
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
   finding must reproduce.

@@ -6425,6 +6425,13 @@ lane) can submit a payload as
   beyond upstream's list are tagged so (the String answers are content-negotiated:
   `text/html` for a browser, so a reflected SQL error is a reflected XSS). Every case
   was checked live at bring-up (`[prov: ...]` names the source and the check).
+- **FR-LAB-351** *(command injection is a scoreable class; `CC-LAB-0351`, 2026-11-20).*
+  The labels schema's `vuln_class` enum holds `command-injection` (spelled as
+  `CommandInjectionStrategy.vuln_class` records it, so a finding's scoring key matches
+  the case) and `sink_context` holds `shell`. Additive: every existing ground truth
+  loads unchanged; `scoreable_classes()` (the static guard) admits it because a default
+  strategy records it and `R-COMMAND-INJECTION` rules its category. First used by
+  `lab/ground-truth-vulnerableapp/`.
 - **FR-LAB-306** *(secDevLabs apps, one external lab each; `CC-LAB-0303`, 2026-10-18).*
   `fuzzlab/lab_fixtures/external.py` checks globocom/secDevLabs out at commit `10be438`
   once (`secdevlabs_checkout`, gitignored, HEAD verified by the shared

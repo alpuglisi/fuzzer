@@ -2210,3 +2210,17 @@ Juice Shop lab is complete.
 - **Cause:** I sized the wait to the symptom I had measured (being overtaken, which a commit cures), called it fixed on a volume and a load that could not see a race of about 1%, and wrote the rule's concrete clause from the fix instead of from the principle the rule stated.
 - **Status:** fixed by BUG-0561 / CC-CRAWL-0065 (lane NAVSETTLE); PA-0561 strengthens PA-0522 (landed means loaded; the order pinned by a deterministic test; a race measured under CPU and disk I/O contention at a volume that can see it).
 
+
+### F-630 — I ran the JAVA lane's first baseline under the tool's 30-minute background cap, and lost it
+- **What:** on 2026-11-20 I started the first VulnerableApp baseline (`fuzzlab auto --points ground-truth --browser --oob --score`) as a background shell task, whose limit is 30 minutes, without measuring how long a run takes; it was killed at 08:29 UTC with 234 candidates stored and no score printed. I then had to restart it twice more (below and F-631) before a clean baseline ran (08:36-09:12, 2162 s).
+- **Evidence:** the task notification for `b674ksur9` ("stopped after reaching its background time limit"); `scratchpad/vapp/runs/base-gt.log` (empty) of that run; the detached runner `scratchpad/vapp/runbase.sh` used afterwards.
+- **Impact:** about 40 minutes of the lane's 4 h budget; no wrong number recorded.
+- **Cause:** I did not estimate the run's length (105 cases, timing strategies) before choosing how to run it.
+- **Status:** fixed: every later run is detached (`setsid nohup`) with its own `timeout`.
+
+### F-631 — I first labelled VulnerableApp's XSS levels as client-rendered from a curl probe that could not see what a browser gets
+- **What:** my first answer key marked the XSS levels `rendering: "js"` with notes saying the answers are `text/plain`, from curl probes sent with `Accept: */*`. Spring negotiates the String answer: a browser navigation (`Accept: text/html,...`) gets `text/html` and runs the markup. The baseline's first partial run then confirmed reflected XSS on the error-based SQLi levels, which my key had no case for; Chromium confirmed it is real (levels 1-4).
+- **Evidence:** `git show 2658271:lab/ground-truth-vulnerableapp/labels.json` (the `js` cases and the text/plain notes); the Chromium check in the lane transcript (title changed at Error-based LEVEL_1..4, not at 5..7, union or blind).
+- **Impact:** a restarted baseline (F-630) and 16 answer-key cases added or relabelled before any score was recorded; no wrong score reported.
+- **Cause:** I measured the response type on a channel (curl's default `Accept`) that could not carry the difference that mattered (what a browser is served), against PA-0311(2).
+- **Status:** fixed in the key (VAPP-0090..0105 added and the XSS notes name both `Accept` headers); the key's live check (`scratchpad/vapp/gen/verify_key.py`) and the Chromium checks back each verdict.

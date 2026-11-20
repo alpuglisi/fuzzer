@@ -3,6 +3,82 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0632 — An open redirect past a prefix filter, judged as a browser lands (FR-FUZZ-632) (2026-11-20)
+- Change: `fuzzlab/oracle/strategies_filters.py` (new: `browser_resolve`,
+  `OpenRedirectFilterBypassStrategy`, a subclass of `OpenRedirectStrategy` overriding
+  `_lands_on` and `confirm`); `fuzzlab/oracle/strategies.py` (`_follow_on_strategies()`
+  appended to `default_strategies()` before the greybox layer: registry only);
+  `tests/test_oracle_strategies_filters.py`; `tests/test_oracle_comparable_controls.py`
+  (its `CONTROL_READING` row: positive).
+- Reason / measurement (§7): VulnerableApp Http3xxStatusCodeBasedInjection LEVEL_2..6
+  refuse targets starting with `http`, `https`, `www` (and `//` from LEVEL_3), or prefix
+  their own origin (LEVEL_6). The baseline confirmed LEVEL_1, 9 and 10 only. Chromium 157
+  (`page.on("request")`, 8 spellings x 6 levels): `/\host/cb` and `\/host/cb` leave the
+  origin at LEVEL_2..5, `//host/cb` at LEVEL_2, `@host/cb` at LEVEL_6; nothing at LEVEL_7
+  or LEVEL_8. Run directly against levels 1..12 the strategy confirms exactly 1..6, 9, 10.
+- Impact: every lab whose ground truth has an open-redirect positive runs up to three
+  more probes per open-redirect candidate the plain canary did not confirm (no new
+  candidates). The OOB listener is not used. `OpenRedirectStrategy` is unchanged.
+- Risk: low. A confirmation needs the redirect target, read as a browser reads it, to
+  land on the canary host at `/cb`; LEVEL_7's own-origin shape, an allowlist, a body echo
+  and a redirect elsewhere carrying the canary are pinned not to confirm.
+- Deliverables:
+  - [x] strategy, tests, FR-FUZZ-632 — done
+- Effectiveness (assessed 2026-11-20): in the lab run (`fuzzlab auto --base-url http://127.0.0.1:3093 --ground-truth lab/ground-truth-vulnerableapp --points ground-truth --browser --oob --score --authorized` on a freshly restarted container, scored against the final key; CC-LAB-0350) open
+  redirect LEVEL_2..6 newly confirmed (VAPP-0072..0076); LEVEL_7, 8, 11, 12 not; fp=0.
+  Juice Shop regression: CC-LAB-0352.
+
+### CC-FUZZ-0631 — Command-injection timing payloads keep the baseline's value (BUG-0630, FR-FUZZ-633) (2026-11-20)
+- Change: `fuzzlab/oracle/strategies.py` (`_CMDI_BASELINE`, `cmdi_timing_payloads`;
+  `CommandInjectionStrategy.confirm` uses it on both branches);
+  `tests/test_timing_payloads_carry_the_baseline.py` (new discovery guard, PA-0630);
+  `tests/test_oracle_vectors.py` (a ping-shaped fake; three tests);
+  `tests/test_forms_phase2.py::test_ground_truth_cmdi_probes_are_unchanged` (its expected
+  list is derived from `cmdi_timing_payloads(None)`: the forms-phase-2 intent kept, the
+  BUG-0630 change made visible). BUG-0630, ERROR_LOG, PA-0630.
+- Impact: a point with no base value now sends `1; sleep 2`, `1| sleep 2`, ...
+  `1$(sleep 2)`, `` 1`sleep 2` `` (7 templates, the duplicate `1; sleep` folded) instead of
+  the bare 8: one request fewer per template pass. A point with a base value is unchanged.
+  No other lab's ground truth has a command-injection positive (FR-LAB-351), so no other
+  score can change; SQLi timing already prefixed its baseline value (PA-0002 sweep).
+- Risk: low; false negatives fixed, the detection threshold untouched.
+- Deliverables:
+  - [x] fix, guard proven on the pre-fix tree (it fails `CommandInjectionStrategy`
+    there), bug protocol — done
+- Effectiveness (assessed 2026-11-20): live, run directly: LEVEL_3/4 confirm via
+  `1|| sleep {d}` (3.03 s / 5.04 s against a 1.02 s baseline), LEVEL_5 via
+  `1$(sleep {d})`; LEVEL_6..8 do not. In the lab run (CC-LAB-0350): VAPP-0045..0047 newly confirmed; VAPP-0048..0050 negative; fp=0.
+
+### CC-FUZZ-0630 — JVM read sinks: classpath traversal and an in-band `file:` SSRF (FR-FUZZ-630/631) (2026-11-20)
+- Change: `fuzzlab/oracle/strategies_jvm.py` (new: `PathTraversalClasspathResourceStrategy`,
+  `SsrfFileSchemeStrategy`); `fuzzlab/oracle/strategies.py` (registered through
+  `_follow_on_strategies()`, after their category's own); `tests/
+  test_oracle_strategies_jvm.py`; `tests/test_oracle_comparable_controls.py` (two
+  negative-control rows: their sends checked by the M9 send guard);
+  `tests/test_external_labs_live.py::test_vulnerableapp_jvm_read_strategies_confirm_its_levels`.
+- Reason / measurement (§7): VulnerableApp's PathTraversal reads
+  `getClass().getResourceAsStream("/scripts/PathTraversal/" + value)`: LEVEL_1 answers
+  `{"content":null}` for `../../../../etc/passwd` (what `PathTraversalFsPathReadStrategy`
+  needs) and the classpath root's `application.properties` for
+  `../../application.properties`. Its SSRFVulnerability LEVEL_1 answers `/etc/passwd` for
+  `file:///etc/passwd`; the OOB SSRF strategies' callback is on the host's loopback, which
+  the container cannot reach (its 127.0.0.1 is its own). Baseline: no path-traversal and
+  no SSRF finding.
+- Impact: every lab whose ground truth has a path-traversal or SSRF positive runs at
+  most 8 more probes (+1 control per marker seen) per path-traversal candidate and 2 (+1)
+  per SSRF candidate the earlier strategies did not confirm. Juice Shop has one of each:
+  regression run in CC-LAB-0352.
+- Risk: low. Each confirms on a file-content marker absent from a compared control with
+  no read primitive (no `..`; no `file:`), the BUG-0117 rule; "always shows the marker"
+  and "reflects the request" fixtures pinned.
+- Deliverables:
+  - [x] strategies, unit tests, live test (gated), FR-FUZZ-630/631 — done
+- Effectiveness (assessed 2026-11-20): run directly: PathTraversal LEVEL_1/2 confirm
+  (depth 2), LEVEL_3/7/8/13/14/15 do not; SSRF LEVEL_1 confirms, LEVEL_2..5 do not.
+  In the lab run (CC-LAB-0350): VAPP-0051/0052 and VAPP-0066 newly
+  confirmed; no path-traversal or SSRF negative confirmed. Juice Shop regression:
+  CC-LAB-0352.
+
 ### CC-FUZZ-0117 — M6's navigations settle a failure on the error page's load (BUG-0561) (2026-10-23)
 - Change: none in `fuzzlab/tools/browserexec.py` or the oracle. The executor's navigations go through SP-01, which now waits for a failed navigation's error page to load, not only to commit, before it raises (CC-CRAWL-0065).
 - Impact (other components / project):
