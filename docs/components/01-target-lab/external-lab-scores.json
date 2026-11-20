@@ -1,13 +1,13 @@
 {
  "bwapp": {
-  "commit": "83e79c7",
+  "commit": "d9ed59c",
   "command": "fuzzlab auto --store <db> --base-url http://127.0.0.1:8092 --ground-truth lab/ground-truth-bwapp --points ground-truth --identity bwapp-bee --browser --authorized",
-  "tp": 22,
+  "tp": 23,
   "fp": 0,
   "fn": 33,
   "tn": 3,
-  "requests": 887,
-  "wall_s": 636.8,
+  "requests": 915,
+  "wall_s": 674.0,
   "matched": [
    "BWAPP-0001",
    "BWAPP-0002",
@@ -30,7 +30,8 @@
    "BWAPP-0046",
    "BWAPP-0051",
    "BWAPP-0052",
-   "BWAPP-0056"
+   "BWAPP-0056",
+   "BWAPP-0059"
   ],
   "missed": {
    "BWAPP-0006": "not reachable from ground-truth points: [reach: crawl]",

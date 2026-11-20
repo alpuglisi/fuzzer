@@ -11,6 +11,7 @@ Component code: **LAB**. Entry format and required fields: see
 - Risk (level; mitigation or accepted-risk justification): low; data only, hand-verified.
 - Deliverables:
   - [x] key rows; `tests/test_external_labs_static.py` green — done
+  - [x] the scored-run record (`external-lab-scores.json`, PA-0640's guard) re-backed by a fresh scored ground-truth run on the merged tree (d9ed59c, integration ad1da47 with lane ACC's listing phase): tp=23 fp=0 fn=33 tn=3, 915 requests, 674 s (it was tp=22, 887 requests on 83e79c7's 58-case key); matches BWAPP-0059 and BWAPP-0046; the 33 missed ids and their reasons are unchanged — done
 - Effectiveness (assessed 2026-11-20): the RULESEL after crawl run rescores 43/0/13/3 (it was 42/1/13/3 on the 58-case key).
 ### CC-LAB-0362 — VulnerableApp's scored ground-truth run, re-run by lane ACC for the record (FR-LAB-362) (2026-11-20)
 - Change: `docs/components/01-target-lab/external-lab-scores.json` gains `vulnerableapp`
