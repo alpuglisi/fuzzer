@@ -255,6 +255,14 @@ NODEGOAT_REPO = "https://github.com/OWASP/NodeGoat"
 NODEGOAT_COMMIT = "c5cb68a7084e4ae7dcc60e6a98768720a81841e8"
 NODEGOAT_TREE_SHA256 = "78ac112b7bd5083bb065086c4642dcd8a3932a8d3052f9405503124c90a70fe3"
 
+#: VAmPI, the Vulnerable API (erev0s/VAmPI, MIT; held out, lab/HOLDOUT.md): upstream's own
+#: Docker Hub build, pinned by digest. Its /vampi tree is byte for byte VAMPI_COMMIT (the
+#: image was created 39 s after that merge, by upstream's docker-image workflow).
+VAMPI_IMAGE = ("docker.io/erev0s/vampi:latest@sha256:"
+               "0a5a224b6e14ae7da6a6ea265178ff71286ff903aec74adee98f660bb0e4ca12")
+VAMPI_COMMIT = "f16052dce83f05847133ec98f01c5193a41de7d8"
+PINNED_IMAGES = PINNED_IMAGES | {VAMPI_IMAGE}
+
 
 class ExternalLabError(RuntimeError):
     """A fixture operation failed; the message never carries a secret."""
@@ -352,6 +360,11 @@ LAB_META: dict[str, LabMeta] = {
     "vulnerableapp": LabMeta("vulnerableapp", "app", "VAPP_PORT", 3095, 9090,
                              "/VulnerableApp/", "/VulnerableApp/allEndPointJson", None, "",
                              False),
+    # held out (lab/HOLDOUT.md): a JSON REST API with JWT bearer auth; two accounts of our
+    # own, each owning one book: `/books/v1/{book_title}` shows any logged-in caller
+    # another account's book secret
+    "vampi": LabMeta("vampi", "app", "VAMPI_PORT", 3101, 5000, "/", "/", "vampi-user",
+                     "fuzzlab_user", True, (("vampi-peer", "fuzzlab_peer"),)),
 }
 
 
@@ -1597,15 +1610,107 @@ def nodegoat_account_attributes(client: _LabClient, cred: ResolvedCredential
     return {"user_id": ids.pop()}
 
 
+def _vampi_login(client: _LabClient, cred: ResolvedCredential) -> str | None:
+    """The ``auth_token`` of a JSON login, or None (VAmPI answers a failed login 200
+    with ``status: fail``)."""
+    r = client.request("POST", "/users/v1/login",
+                       json={"username": cred.username, "password": cred.password})
+    try:
+        token = r.json().get("auth_token") if r.status_code == 200 else None
+    except (ValueError, AttributeError):
+        return None
+    return token if isinstance(token, str) and token else None
+
+
+def _vampi_book(cred: ResolvedCredential) -> str:
+    """The title of the one book the bootstrap gives each account (titles are unique)."""
+    return f"{cred.username}-book"
+
+
+def bootstrap_vampi(client: _LabClient, cred: ResolvedCredential, *, deadline: float = 180.0,
+                    clock: Callable[[], float] = time.monotonic,
+                    sleep: Callable[[float], None] = time.sleep) -> list[str]:
+    """Create VAmPI's tables when they are missing (``/createdb`` drops and re-creates
+    them, so it is never called on a populated database), log in through the JSON
+    ``/users/v1/login`` -- registering the account (never as admin) through
+    ``/users/v1/register`` when the login fails -- give the account one book of its own,
+    and verify by a positive differential: ``/me`` answers 200 naming the account, not
+    an admin, with ``Authorization: Bearer <auth_token>`` and 401 without it."""
+    wait_ready(client, LAB_META["vampi"].ready_path, deadline=deadline, clock=clock,
+               sleep=sleep)
+    notes: list[str] = []
+    if client.request("GET", "/users/v1").status_code != 200:     # no tables yet
+        if client.request("GET", "/createdb").status_code != 200:
+            raise ExternalLabError("VAmPI /createdb failed")
+        notes.append("database created")
+    token = _vampi_login(client, cred)
+    if token is None:
+        reg = client.request("POST", "/users/v1/register", json={
+            "username": cred.username, "password": cred.password,
+            "email": f"{cred.username}@fuzzlab.lab"})
+        if reg.status_code != 200 or "Successfully registered" not in reg.text:
+            raise ExternalLabError(
+                f"VAmPI registration failed: HTTP {reg.status_code} (an account of that "
+                f"name with another password? run `./labctl.sh reset vampi --authorized`)")
+        notes.append("account registered")
+        token = _vampi_login(client, cred)
+        if token is None:
+            raise ExternalLabError("VAmPI login failed right after registration")
+    auth = {"Authorization": f"Bearer {token}"}
+    authed = client.request("GET", "/me", anonymous=True, headers=auth)
+    anon = client.request("GET", "/me", anonymous=True)
+    try:
+        data = authed.json().get("data") or {}
+    except (ValueError, AttributeError):
+        data = {}
+    if authed.status_code != 200 or anon.status_code != 401 or \
+            data.get("username") != cred.username or data.get("admin") is not False:
+        raise ExternalLabError(f"VAmPI /me: {anon.status_code} anonymous, "
+                               f"{authed.status_code} with the token (want 401 / 200 naming "
+                               f"the account, not an admin)")
+    notes.append("login verified")
+    title = _vampi_book(cred)
+    book = client.request("POST", "/books/v1", anonymous=True, headers=auth,
+                          json={"book_title": title, "secret": f"secret of {cred.username}"})
+    if book.status_code == 200:
+        notes.append("book added")
+    elif not (book.status_code == 400 and "Already exists" in book.text):
+        raise ExternalLabError(f"VAmPI could not add the account's book: HTTP "
+                               f"{book.status_code}")
+    return notes
+
+
+def vampi_account_attributes(client: _LabClient, cred: ResolvedCredential
+                             ) -> dict[str, str]:
+    """The account's ``username`` (``/users/v1/{username}/...`` names it) and the title
+    of its own book, which ``/books/v1/{book_title}`` answers to its owner with the
+    owner's username."""
+    token = _vampi_login(client, cred)
+    title = _vampi_book(cred)
+    if token is None:
+        raise ExternalLabError("VAmPI login failed")
+    r = client.request("GET", f"/books/v1/{title}", anonymous=True,
+                       headers={"Authorization": f"Bearer {token}"})
+    try:
+        owner = r.json().get("owner") if r.status_code == 200 else None
+    except (ValueError, AttributeError):
+        owner = None
+    if owner != cred.username:
+        raise ExternalLabError("VAmPI does not answer the account's own book to it")
+    return {"book_title": title, "username": cred.username}
+
+
 _BOOTSTRAPS = {"bwapp": bootstrap_bwapp, "juice-shop": bootstrap_juice_shop,
                "mutillidae": bootstrap_mutillidae,
                "secdevlabs-gossip-world": bootstrap_secdevlabs_gossip_world,
                "secdevlabs-ecommerce-api": bootstrap_secdevlabs_ecommerce_api,
-               "nodegoat": bootstrap_nodegoat}
+               "nodegoat": bootstrap_nodegoat,
+               "vampi": bootstrap_vampi}
 #: Labs whose accounts have values of their own a ground truth names (`account_value`,
 #: FR-LAB-309): read after the verified login, stored with the credential.
 _ACCOUNT_ATTRIBUTES = {"secdevlabs-ecommerce-api": ecommerce_account_attributes,
-                       "nodegoat": nodegoat_account_attributes}
+                       "nodegoat": nodegoat_account_attributes,
+                       "vampi": vampi_account_attributes}
 
 
 def bootstrap(name: str, *, environ: Mapping[str, str] | None = None,

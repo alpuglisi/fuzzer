@@ -1,0 +1,13 @@
+# fuzzlab expected results (Benchmark-style) for VAmPI at f16052dc (held-out external
+# lab fixture lab/external/vampi, lab/HOLDOUT.md). Derived from labels.json; the loader
+# cross-checks the two. Single-location cases.
+case_id,url,method,param,location,category,expected_vulnerable,primary_endpoint,primary_role,related_endpoints,flow_variant
+VAMPI-0001,/users/v1/{username},GET,username,path,sqli,true,/users/v1/{username},sink,,direct
+VAMPI-0002,/books/v1/{book_title},GET,book_title,path,access_control,true,/books/v1/{book_title},sink,,direct
+VAMPI-0003,/users/v1/{username}/password,PUT,username,path,access_control,true,/users/v1/{username}/password,sink,,direct
+VAMPI-0004,/users/v1/register,POST,admin,body,mass_assignment,true,/users/v1/register,sink,,direct
+VAMPI-0005,/users/v1/login,POST,username,body,sqli,false,/users/v1/login,sink,,direct
+VAMPI-0006,/books/v1/{book_title},GET,book_title,path,sqli,false,/books/v1/{book_title},sink,,direct
+VAMPI-0007,/books/v1,POST,book_title,body,sqli,false,/books/v1,sink,,direct
+VAMPI-0008,/users/v1/{username}/email,PUT,username,path,access_control,false,/users/v1/{username}/email,sink,,direct
+VAMPI-0009,/users/v1/{username}/email,PUT,admin,body,mass_assignment,false,/users/v1/{username}/email,sink,,direct
