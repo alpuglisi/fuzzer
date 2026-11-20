@@ -2383,3 +2383,9 @@ Juice Shop lab is complete.
 - **Impact:** the labgen apps' recall overstated real detection: removing the lab names took twitch-clone 14 -> 11, netflix-clone 11 -> 9, booking-clone 3 -> 2 on ground-truth points. Other heuristics fitted to one lab or one framework remain (Angular Material selectors, bWAPP-measured settings words, the 8 `sink_context_in` rules that fire only from answer-key labels): listed open in the lane report.
 - **Status:** the named items fixed on the BBOX branch (CC-AUD-0660, CC-FUZZ-0660); PA-0660 and its guard added; the remaining items listed for the orchestrator.
 
+### F-750 — My first live check of the DVWA key asserted two premises its channel could not carry
+- **What:** lane NEWLABS2-DVWA's first `verify_key.py` asserted from source reading that DVWA's SQL error path reflects the value raw (`die(mysqli_error())`), and judged "no SQL use" on the XSS page by the substring `SQL`, which the page's own menu ("SQL Injection") always contains. PHP 8's mysqli throws and the exception page escapes the value; the substring check could never pass. Both were PA-0311(2) violations (a check that does not name the observation that differs, on a channel that cannot carry it).
+- **Evidence:** the first run of `scratchpad/dvwa/scripts/verify_key.py` (2026-11-20): 32/37, the two rows failing; corrected before the key was written (CC-LAB-0432 Detail).
+- **Impact:** none on the committed key (caught by the check's own failure before any case was labelled); had the error-path premise been believed, two wrong XSS positives would have entered it.
+- **Status:** corrected (the check now asserts the escaped form and the SQL error signature).
+

@@ -50,7 +50,8 @@ GT_DIRS = {"bwapp": LAB / "ground-truth-bwapp", "juice-shop": LAB / "ground-trut
            "dvga": LAB / "ground-truth-dvga",
            "mutillidae": LAB / "ground-truth-mutillidae",
            "nodegoat": LAB / "ground-truth-nodegoat",
-           "vulnerableapp": LAB / "ground-truth-vulnerableapp"}
+           "vulnerableapp": LAB / "ground-truth-vulnerableapp",
+           "dvwa": LAB / "ground-truth-dvwa"}
 #: Labs scored by URL coverage, not an injection answer key: the lab serves its own
 #: expected set (the Crawl Maze: /fetch-expected-results, CC-LAB-0302).
 COVERAGE_LABS = {"security-crawl-maze"}

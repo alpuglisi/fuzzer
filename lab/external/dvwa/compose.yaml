@@ -1,0 +1,72 @@
+# Damn Vulnerable Web Application (digininja/DVWA, GPL-3.0; external lab fixture,
+# CC-LAB-0430 / FR-LAB-430). Lab-only. A PHP / MariaDB training app: SQL injection
+# (plain and blind), reflected / stored / DOM XSS, OS command injection (its ping form),
+# file inclusion, file upload, CSRF, weak session ids, CSP bypass, JavaScript, open
+# redirect and brute force, each at four security levels. The answer key is
+# lab/ground-truth-dvwa/.
+#
+# Upstream's own pre-built image (ghcr.io/digininja/dvwa, built by its GitHub workflow
+# from commit 502ac150, 2026-11-17; its /var/www/html equals that tree), pinned by
+# digest; the database is the MariaDB 10 upstream's compose.yml names, pinned by digest.
+#
+# Safety: the web tier is published on LOOPBACK ONLY (127.0.0.1); the database is never
+# published and sits on an internal network. The app runs OS commands for its users
+# (vulnerabilities/exec) INSIDE this container only: capabilities dropped,
+# no-new-privileges, pids and memory limited. No name resolution (`dns` below): a
+# crawler's form fill or a file-inclusion probe must not make the lab fetch a named
+# outside host (allow_url_fopen is on in the image; allow_url_include is off). An IP
+# literal still has egress (NFR-LAB-safety "Not yet enforced", as Juice Shop).
+#
+# Security level: a `security` COOKIE the client holds (dvwaPage.inc.php:22), set from
+# DEFAULT_SECURITY_LEVEL for a session without one. `low` here (FR-LAB-431), so any new
+# session -- the scanner's, a crawler's -- starts at low; the bootstrap sets and checks
+# it too. The database is on tmpfs: reset = restart, then the bootstrap's
+# setup.php "Create / Reset Database" re-seeds the users.
+#
+# Run through lab/labctl.sh:  ./labctl.sh up dvwa [--authorized]
+# Port 3097 by default (3091 NodeGoat, 3093 Mutillidae, 3095 VulnerableApp); DVWA_PORT
+# overrides.
+name: fuzzlab-dvwa
+
+x-podman:
+  in_pod: false
+
+services:
+  web:
+    image: ghcr.io/digininja/dvwa:latest@sha256:61167ec23fbf861f7d96a7beb4be3612d043d48dbc6b239d4f90d7e8cdff8115
+    environment:
+      DB_SERVER: db
+      DEFAULT_SECURITY_LEVEL: low
+    networks: [dvwa-front, dvwa-db]
+    dns: ["127.0.0.1"]
+    depends_on: [db]
+    ports:
+      # Loopback only. Never bind 0.0.0.0.
+      - "127.0.0.1:${DVWA_PORT:-3097}:80"
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE, SETUID, SETGID, CHOWN, DAC_OVERRIDE]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    mem_limit: 512m
+
+  db:
+    image: docker.io/library/mariadb:10@sha256:e5fe75b2b9de0eb9f6f9a4d9c97272fb3a7480e389ccd487a786bab2a12cc0d7
+    environment:
+      # upstream's own published defaults (its compose.yml and config.inc.php.dist);
+      # not a secret of ours: the database is reachable only on the internal network.
+      MYSQL_ROOT_PASSWORD: dvwa
+      MYSQL_DATABASE: dvwa
+      MYSQL_USER: dvwa
+      MYSQL_PASSWORD: p@ssw0rd
+    networks: [dvwa-db]
+    tmpfs: [/var/lib/mysql]
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID, DAC_OVERRIDE]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    mem_limit: 512m
+
+networks:
+  dvwa-front: {}
+  dvwa-db:
+    internal: true

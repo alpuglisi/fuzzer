@@ -1,0 +1,101 @@
+{
+  "version": 1,
+  "target": "dvwa_502ac150_low",
+  "points": [
+    {
+      "url": "/vulnerabilities/sqli/?Submit=Submit",
+      "method": "GET",
+      "param": "id",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/vulnerabilities/sqli_blind/?Submit=Submit",
+      "method": "GET",
+      "param": "id",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/vulnerabilities/brute/?password=fuzzlab&Login=Login",
+      "method": "GET",
+      "param": "username",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/vulnerabilities/xss_r/",
+      "method": "GET",
+      "param": "name",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/vulnerabilities/xss_d/",
+      "method": "GET",
+      "param": "default",
+      "location": "query",
+      "rendering": "js",
+      "client_only": true
+    },
+    {
+      "url": "/vulnerabilities/xss_s/",
+      "method": "POST",
+      "param": "mtxMessage",
+      "location": "body",
+      "rendering": "server"
+    },
+    {
+      "url": "/vulnerabilities/xss_s/",
+      "method": "POST",
+      "param": "txtName",
+      "location": "body",
+      "rendering": "server"
+    },
+    {
+      "url": "/vulnerabilities/exec/",
+      "method": "POST",
+      "param": "ip",
+      "location": "body",
+      "rendering": "server"
+    },
+    {
+      "url": "/vulnerabilities/api/v2/health/connectivity",
+      "method": "POST",
+      "param": "target",
+      "location": "body",
+      "rendering": "server-json",
+      "json_body": {
+        "target": "127.0.0.1"
+      }
+    },
+    {
+      "url": "/vulnerabilities/fi/",
+      "method": "GET",
+      "param": "page",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/vulnerabilities/open_redirect/source/low.php",
+      "method": "GET",
+      "param": "redirect",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/vulnerabilities/csp/",
+      "method": "POST",
+      "param": "include",
+      "location": "body",
+      "rendering": "server"
+    },
+    {
+      "url": "/vulnerabilities/brute/?password=fuzzlab&Login=Login",
+      "method": "GET",
+      "param": "password",
+      "location": "query",
+      "rendering": "server"
+    }
+  ]
+}

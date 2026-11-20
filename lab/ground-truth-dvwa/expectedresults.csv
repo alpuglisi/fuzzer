@@ -1,0 +1,37 @@
+# fuzzlab expected results (Benchmark-style) for DVWA (digininja, upstream commit 502ac150)
+# at security level low (external lab fixture lab/external/dvwa), CC-LAB-0432. Derived from
+# labels.json; the loader cross-checks the two. Single-location cases.
+case_id,url,method,param,location,category,expected_vulnerable,primary_endpoint,primary_role,related_endpoints,flow_variant
+DVWA-0001,/vulnerabilities/sqli/?Submit=Submit,GET,id,query,sqli,true,/vulnerabilities/sqli/?Submit=Submit,sink,,direct
+DVWA-0002,/vulnerabilities/sqli/?Submit=Submit,GET,id,query,xss-reflected,true,/vulnerabilities/sqli/?Submit=Submit,sink,,direct
+DVWA-0003,/vulnerabilities/sqli_blind/?Submit=Submit,GET,id,query,sqli,true,/vulnerabilities/sqli_blind/?Submit=Submit,sink,,direct
+DVWA-0004,/vulnerabilities/brute/?password=fuzzlab&Login=Login,GET,username,query,sqli,true,/vulnerabilities/brute/?password=fuzzlab&Login=Login,sink,,direct
+DVWA-0005,/vulnerabilities/xss_r/,GET,name,query,xss-reflected,true,/vulnerabilities/xss_r/,sink,,direct
+DVWA-0006,/vulnerabilities/xss_d/,GET,default,query,xss-dom,true,/vulnerabilities/xss_d/,sink,,direct
+DVWA-0007,/vulnerabilities/xss_s/,GET,mtxMessage,body,xss-stored,true,/vulnerabilities/xss_s/,sink,,direct
+DVWA-0008,/vulnerabilities/xss_s/,GET,txtName,body,xss-stored,true,/vulnerabilities/xss_s/,sink,,direct
+DVWA-0009,/vulnerabilities/xss_s/,POST,mtxMessage,body,xss-reflected,true,/vulnerabilities/xss_s/,sink,,direct
+DVWA-0010,/vulnerabilities/xss_s/,POST,txtName,body,xss-reflected,true,/vulnerabilities/xss_s/,sink,,direct
+DVWA-0011,/vulnerabilities/exec/,POST,ip,body,command-injection,true,/vulnerabilities/exec/,sink,,direct
+DVWA-0012,/vulnerabilities/api/v2/health/connectivity,POST,target,body,command-injection,true,/vulnerabilities/api/v2/health/connectivity,sink,,direct
+DVWA-0013,/vulnerabilities/fi/,GET,page,query,path_traversal,true,/vulnerabilities/fi/,sink,,direct
+DVWA-0014,/vulnerabilities/open_redirect/source/low.php,GET,redirect,query,open_redirect,true,/vulnerabilities/open_redirect/source/low.php,sink,,direct
+DVWA-0015,/vulnerabilities/csp/,POST,include,body,xss-reflected,true,/vulnerabilities/csp/,sink,,direct
+DVWA-0016,/vulnerabilities/upload/,POST,uploaded,body,unrestricted_file_upload,true,/vulnerabilities/upload/,sink,,direct
+DVWA-0017,/vulnerabilities/brute/?password=fuzzlab&Login=Login,GET,password,query,sqli,false,/vulnerabilities/brute/?password=fuzzlab&Login=Login,sink,,direct
+DVWA-0018,/vulnerabilities/brute/?password=fuzzlab&Login=Login,GET,password,query,xss-reflected,false,/vulnerabilities/brute/?password=fuzzlab&Login=Login,sink,,direct
+DVWA-0019,/vulnerabilities/sqli_blind/?Submit=Submit,GET,id,query,xss-reflected,false,/vulnerabilities/sqli_blind/?Submit=Submit,sink,,direct
+DVWA-0020,/vulnerabilities/sqli/?Submit=Submit,GET,id,query,command-injection,false,/vulnerabilities/sqli/?Submit=Submit,sink,,direct
+DVWA-0021,/vulnerabilities/xss_r/,GET,name,query,sqli,false,/vulnerabilities/xss_r/,sink,,direct
+DVWA-0022,/vulnerabilities/xss_r/,GET,name,query,command-injection,false,/vulnerabilities/xss_r/,sink,,direct
+DVWA-0023,/vulnerabilities/xss_r/,GET,name,query,path_traversal,false,/vulnerabilities/xss_r/,sink,,direct
+DVWA-0024,/vulnerabilities/xss_s/,POST,mtxMessage,body,sqli,false,/vulnerabilities/xss_s/,sink,,direct
+DVWA-0025,/vulnerabilities/xss_s/,POST,txtName,body,sqli,false,/vulnerabilities/xss_s/,sink,,direct
+DVWA-0026,/vulnerabilities/exec/,POST,ip,body,sqli,false,/vulnerabilities/exec/,sink,,direct
+DVWA-0027,/vulnerabilities/exec/,POST,ip,body,xss-reflected,false,/vulnerabilities/exec/,sink,,direct
+DVWA-0028,/vulnerabilities/fi/,GET,page,query,xss-reflected,false,/vulnerabilities/fi/,sink,,direct
+DVWA-0029,/vulnerabilities/fi/,GET,page,query,sqli,false,/vulnerabilities/fi/,sink,,direct
+DVWA-0030,/vulnerabilities/fi/,GET,page,query,open_redirect,false,/vulnerabilities/fi/,sink,,direct
+DVWA-0031,/vulnerabilities/open_redirect/source/low.php,GET,redirect,query,xss-reflected,false,/vulnerabilities/open_redirect/source/low.php,sink,,direct
+DVWA-0032,/vulnerabilities/csp/,POST,include,body,sqli,false,/vulnerabilities/csp/,sink,,direct
+DVWA-0033,/vulnerabilities/sqli_blind/?Submit=Submit,GET,id,query,command-injection,false,/vulnerabilities/sqli_blind/?Submit=Submit,sink,,direct

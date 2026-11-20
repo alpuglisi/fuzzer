@@ -3,6 +3,200 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0433 — DVWA measured: crawl run (headline) and ground-truth run, crawl safety, gaps recorded (FR-LAB-433) (2026-11-20)
+- Change: `tests/test_dvwa_lab.py` (the PA-0114 / PA-0301 route table of DVWA's state
+  switches, each row's verdict computed by its gate); `tests/test_dvwa_live.py` (gated live
+  boot and scored run). No detection code changed.
+- Reason: lane NEWLABS2-DVWA (item NEWLABS2-DVWA): score DVWA live at its chosen level and
+  close only generic gaps.
+- Crawl safety (PA-0114, enumerated from upstream's source at 502ac150 before the first
+  crawl; verdicts computed on the base tree 82910aa AND on lane CRAWLSAFE's
+  `origin/ccr-e5c7c0c6-r9ladz-crawlsafe` (94fac7f) `fuzzlab/` tree, by
+  `scratchpad/dvwa/scripts/crawlsafe_eval.py`; identical on both):
+  - `setup.php` link and its "Create / Reset Database" form: refused (SP-09 `setup`;
+    form gate "destructive action"; the button text `reset`).
+  - `logout.php`: refused (SP-09 `logout`).
+  - `security.php` POST (select `security`, `seclev_submit`, CSRF token): the URL is NOT
+    refused by SP-09 on either tree (no destructive token); the **form** is refused by the
+    form gate (`store_adapter.form_skip_reason`: "POST selector with a settings control
+    'security'", SP-120 `settings_word`), so it is never imported or fuzzed, and formnav
+    never submits it (a POST selector not named by the operator; its select is a settings
+    word). Older DVWA's `?phpids=on|off` does not exist at this commit (PHPIDS was
+    removed; only the unlinked `bac` module names it). Compensating control: the level is
+    the client's `security` cookie (dvwaPage.inc.php:22, `dvwaSecurityLevelSet`), not
+    server state, and compose sets `DEFAULT_SECURITY_LEVEL: low`, so every new session
+    (the scanner's own login, a crawler's) starts at low whatever another jar did; the
+    bootstrap checks both (FR-LAB-431). Measured: the crawl recorded the form and the run
+    never sent `POST /security.php` (no flow in the store).
+  - `vulnerabilities/csrf/` (GET `password_new`, `password_conf`, `Change`: changes the
+    session user's password): the form is refused ("credential-change form (2 password
+    controls)"); the bare URL is NOT refused by SP-09 on either tree (residual: no page
+    links it; `password_new` is a credential name never fuzzed; a changed password is
+    restored by the bootstrap's reset-on-failed-login).
+  - API `DELETE`/`PUT /vulnerabilities/api/v2/user/{id}`: refused by the method gate.
+  - `upload` (multipart): refused by the form gate (not sent as multipart).
+  - residuals (no gate refuses them; accepted): the guestbook POST (row creation is the
+    stored-XSS cell; `btnClear` is a second submitter, never sent), `weak_id` POST (a
+    session counter), `authbypass/change_user_details.php` (names only, JSON sent by the
+    page's script on a click; not captured), `exec` (the route is the vulnerability),
+    `brute` (no lockout at low), `captcha` (its form is hidden: no reCAPTCHA key).
+  - No DVWA-named rule anywhere; no change needed in `spider.py`, `spa.py`, `fetcher.py`,
+    `navguard.py`, `rules.py` or the rules data for crawl safety.
+- Runs (level low; a freshly reset lab before each: `labctl.sh reset dvwa --authorized`;
+  4 shared cores, a concurrent lane's containers on the same dockerd, so wall times are
+  upper bounds):
+  - **Crawl run (headline, black-box):** `fuzzlab crawl --start
+    http://127.0.0.1:3097/index.php --engine playwright --identity dvwa-user --max-depth 3
+    --workers 4 --db crawl1.db` (57 pages, 10 s; 2 destructive links skipped: setup.php,
+    logout.php), then `fuzzlab auto --base-url http://127.0.0.1:3097/ --spider-db
+    crawl1.db --ground-truth lab/ground-truth-dvwa --points crawl --identity dvwa-user
+    --browser --oob --score --authorized`: **tp=9 fp=0 fn=7 tn=17**, 382 requests, 288 s
+    (13 endpoints, 17 parameters imported, 35 candidates).
+  - **Ground-truth run (oracle diagnostic, not a detection figure):** the same with
+    `--points ground-truth` and no spider DB: tp=7 fp=0 fn=9 tn=17, 341 requests, 295 s.
+  - fn, crawl run (each verified by hand): DVWA-0002 (the `ID:` echo needs a value the
+    database matches -- a digit before the tag -- and the reflected strategy's probes
+    start with no such prefix); DVWA-0006 (DOM: no confirmation, see GT); DVWA-0007/0008
+    (stored: crawl mode builds no plant step for a stored-XSS candidate, the open gap
+    CC-LAB-0395 records); DVWA-0012 (`[reach: gt]`: no page links the API); DVWA-0013
+    (path traversal: see gap 1); DVWA-0016 (`[reach: none]`).
+  - fn, ground-truth run: DVWA-0002 (as above); DVWA-0006 (gap 2); DVWA-0007..0011 (the
+    handlers need their submit field in the POST body -- `btnSign`, `Submit` -- and a
+    ground-truth body point carries no sibling fields; the crawl run confirms
+    0009/0010/0011); DVWA-0012 (gap 3); DVWA-0016 (`[reach: none]`).
+- Gaps (open, generic; none closed here, so no shared detection code changed and no
+  existing-lab regression run was needed):
+  1. **Crawl-mode file reads are unscoreable.** `R-PATH-TRAVERSAL` fires only on a point
+     whose `sink_context` is `fs_path_read`, which only an answer key supplies; a crawled
+     file-name parameter (`page=include.php`) gets `R-FILE-INCLUSION` /
+     `R-FILE-INCLUSION-VALUE`, category `file-inclusion`, whose strategy records
+     `vuln_class` `file-inclusion` -- not in the labels schema -- and D14 never runs that
+     category for a key whose positives say `path_traversal`. So DVWA-0013 (and, by the
+     same path, bWAPP's BWAPP-0045/0046 and Mutillidae's MUTL-0032 crawl rows) cannot be
+     found by a crawl. The fix spans `rules_data/default_rules.json` / `rules.py` (other
+     lanes' files) and the strategy vocabulary: flagged to the orchestrator.
+  2. **DOM XSS through `decodeURI`.** The page writes `decodeURI(location.href after
+     "default=")`; `decodeURI` leaves `%2F`, `%3D`, `%3A` encoded, and the M6 DOM
+     payloads are fully percent-encoded in the query (`urlencode`), so `</script>` and
+     `onerror=` never decode. A browser leaves `/ = :` raw in a query. Same class as
+     VulnerableApp's raw-URL filter gap (CC-LAB-0350). One target only: recorded.
+  3. **A ground-truth JSON point has no value shape.** `points_from_ground_truth` builds
+     `value_shapes=frozenset()` for a `json_body` point, so the key's own leaf value
+     (`target: 127.0.0.1`, an IP) never meets `R-COMMAND-INJECTION-VALUE`, and `target`
+     is not in `R-COMMAND-INJECTION`'s name list; a crawled JSON request with the same
+     body would carry the shape. A parity fix in `harness/auto.py` would add candidates
+     on DVGA's and Juice Shop's JSON points (regression runs needed): recorded, not
+     built here.
+  4. Unrestricted upload (multipart forms are not sent; the handler also needs `Upload`).
+  5. Not scoreable in the labels schema: CSRF, weak session ids (`weak_id`'s sequential
+     `dvwaSession`; no strategy samples a cookie a POST sets), JavaScript, brute force,
+     cryptography, authorisation bypass (`authbypass/get_user_data.php` answers any
+     logged-in user; no parameter), broken access control (`bac`, a `user_id` cookie).
+  6. Level negatives are not expressible: DVWA's level is a cookie, not part of a
+     request, so the `impossible` variants are not in the key (as Mutillidae's level 5,
+     CC-LAB-0343).
+- Not labelled, found by hand: `brute`'s `username` is echoed raw only on a successful
+  (SQL-bypassed) login (`Welcome ... {$user}`); neither run flagged it.
+- Impact: tests only; no runtime code. The table pins every residual's verdict to None,
+  so CRAWLSAFE's merge (or any later rule) that starts refusing one fails the row until
+  it is moved to "refused".
+- Risk: low.
+- Process: the components README's pre-change review gate (two reviewer agents) was not
+  run: this lane has no sub-agent tool; flagged to the orchestrator.
+- Deliverables:
+  - [x] crawl-safety table and test; both runs; this record — done
+- Effectiveness (assessed 2026-11-20): `tests/test_dvwa_lab.py` 27 passed; the gated live
+  test (`FUZZLAB_LIVE_EXTERNAL_LABS=1 pytest tests/test_dvwa_live.py`): 1 passed, 306 s
+  (its own project on a free port: reset, both accounts bootstrapped, the ground-truth
+  run's floor DVWA-0001/0003/0004/0005/0013/0014/0015 matched, fp=0; torn down by label).
+  The harness run (`scripts/verify_change.py`) is reported in the lane report.
+
+### CC-LAB-0432 — DVWA answer key (FR-LAB-432) (2026-11-20)
+- Change: `lab/ground-truth-dvwa/` (labels, points, expected results; 33 cases
+  DVWA-0001..0033: 16 positives, 17 negatives; 13 points; `[reach:]` / `[prov:]` tags);
+  `.gitignore` negation (PA-0038); `tests/test_external_labs_static.py` (`GT_DIRS`);
+  `tests/test_blackbox_detection.py` (`CITED`: `sqli`, `open_redirect`).
+- Reason: lane NEWLABS2-DVWA: DVWA's classic PHP modules at level low.
+- Detail: every case from upstream's source at 502ac150 (file:line in its note) and
+  DVWA's own module names; **each checked live before any scoring run** (PA-0311) by
+  `scratchpad/dvwa/scripts/verify_key.py` (38 HTTP checks, each with a control, every
+  negative on the paths the value reaches output by, error paths included) and
+  `verify_browser.py` (9 Chromium checks): 38/38 and 9/9. Findings from those checks
+  that shaped the key: PHP 8's mysqli throws, and the uncaught exception page escapes the
+  value (html_errors), so the SQL error path is NOT a reflected XSS; the sqli page's
+  `ID:` echo is (MariaDB casts `1<img ...>` to 1, a row matches); the CSP page's value is
+  a `<script src>` under `script-src 'self' ...`: inline payloads are blocked, a
+  same-origin JSONP script runs (positive); the guestbook POST's own answer renders the
+  new row, so it is a reflected XSS as well as a stored one; `fi`'s include warnings
+  escape the value (negative XSS); `exec` echoes only ping's stdout (negative XSS); the
+  API's `connectivity` is a blind command injection (+3.0 s for `;sleep 3`).
+  Negatives are other classes on the same points (as Mutillidae's key), and `brute`'s
+  `password` (md5()ed before the query).
+- PA-0660 guard: the key's path segments `sqli` and `open_redirect` are also fuzzlab's own
+  vulnerability-class spellings, used in detection code; added to `CITED` with
+  independent sources (PortSwigger / OWASP; CWE-601 / PayloadsAllTheThings). No
+  detection code changed.
+- Impact: one more answer key; the PA-0660 lab-identifier set grows by the key's names
+  (the guard passes with the two citations); no score of another lab changes.
+- Risk: low. The stored-XSS probes add guestbook rows (lab-only; reset = restart).
+- Deliverables:
+  - [x] key; static registration; PA-0038 (`git add -n` lists all three files;
+    `tests/test_external_labs_static.py` alone: 318 passed) — done
+
+### CC-LAB-0431 — DVWA bootstrap: database, seeded accounts, security level (FR-LAB-431) (2026-11-20)
+- Change: `fuzzlab/lab_fixtures/external.py` (`bootstrap_dvwa`, `_dvwa_login`,
+  `_dvwa_reset_database`, `_dvwa_token`, `DVWA_LEVEL`, `_BOOTSTRAPS["dvwa"]`,
+  `LAB_META["dvwa"]` with `extra_identities`); `tests/test_dvwa_lab.py` (fakes).
+- Reason: DVWA needs its database built through setup.php (CSRF token), a login, and a
+  known security level.
+- Decisions: (1) **accounts:** upstream's seeded `admin` (identity `dvwa-user`; admin also
+  sees the Authorisation Bypass page) and `gordonb` (`dvwa-peer`), as NodeGoat does --
+  DVWA has no registration form, setup.php re-creates them with the passwords upstream
+  publishes, and an account of our own would need SQL behind the app's back; the
+  passwords come from the keyring / prompt flow (`may_generate_password` False), never
+  the repo. (2) **level: low** -- the level whose code has no defence, so the key is the
+  vulnerability as upstream's docs describe it; set three ways: compose
+  `DEFAULT_SECURITY_LEVEL`, checked on a cookie-less request, then set through
+  security.php's own form and read back from the page. (3) **reset policy:** the
+  database is created when missing (tmpfs) and reset when the seeded password is refused
+  (a CSRF-page probe changes it on a GET), not on every bootstrap -- the bootstrap runs
+  once per account and a second reset would wipe what the first account's check saw;
+  `labctl.sh reset` gives a clean database.
+- Impact: `labctl.sh up|reset|bootstrap dvwa --authorized` stores `dvwa-user` and
+  `dvwa-peer` after a verified login; no other lab's bootstrap changes.
+- Measured live: `labctl.sh reset dvwa --authorized` 8 s (database created, both accounts
+  verified, level low); after a GET to `csrf/?password_new=zz...` changed admin's
+  password, `labctl.sh bootstrap dvwa --authorized` reset it and logged in.
+- Risk: low.
+- Deliverables:
+  - [x] code; unit tests on a fake DVWA (missing database, existing database, changed
+    password, wrong password, default level, level not applied) — done
+
+### CC-LAB-0430 — DVWA as a loopback-only external lab (FR-LAB-430) (2026-11-20)
+- Change: `lab/external/dvwa/compose.yaml` (project `fuzzlab-dvwa`);
+  `fuzzlab/lab_fixtures/external.py` (`DVWA_IMAGE`, `DVWA_MARIADB_IMAGE` in
+  `PINNED_IMAGES`).
+- Reason: lane NEWLABS2-DVWA: a training PHP / MariaDB lab with the classic modules.
+- Pin: `ghcr.io/digininja/dvwa:latest@sha256:61167ec23fbf861f7d96a7beb4be3612d043d48dbc6b239d4f90d7e8cdff8115`
+  (created 2026-11-17 09:30:48 UTC by upstream's workflow, 90 s after commit
+  502ac150ce37c20ca6e04cab7c5ca959f315f2d0; its `/var/www/html` equals that tree,
+  `diff -r` with only the build's own `config/config.inc.php` and composer `vendor/`
+  added; PHP 8.5.12, Apache 2.4.69); MariaDB `docker.io/library/mariadb:10@sha256:e5fe75b2b9de0eb9f6f9a4d9c97272fb3a7480e389ccd487a786bab2a12cc0d7`
+  (10.11.19; upstream's compose.yml says `mariadb:10`).
+- Detail: web on 127.0.0.1:${DVWA_PORT:-3097} (free across `LAB_META` and every compose
+  file under `lab/`; the no-shared-port guard passes), on a front bridge plus the
+  internal database network; the database unpublished, internal, on tmpfs; capabilities
+  dropped (web keeps NET_BIND_SERVICE/SETUID/SETGID/CHOWN/DAC_OVERRIDE for Apache's
+  start, db CHOWN/SETUID/SETGID/DAC_OVERRIDE), no-new-privileges, pids and memory
+  limits; `dns: [127.0.0.1]` (as DVGA) since `allow_url_fopen` is on and a form fill or
+  an inclusion probe must not fetch a named host (the image keeps
+  `allow_url_include` off: no RFI). `labctl.sh up dvwa` passed the pre-flight and the
+  exposure check live.
+- Impact: a new loopback lab; `discover_labs` and the static registry guard list it.
+- Risk: medium (the app runs OS commands for its users); contained as Mutillidae's.
+- Deliverables:
+  - [x] fixture; exposure check passed live — done
+
 ### CC-LAB-0353 — VulnerableApp moves to 127.0.0.1:3095; a static guard against shared lab ports (FR-LAB-352) (2026-11-20)
 - Change: `lab/external/vulnerableapp/compose.yaml` (`${VAPP_PORT:-3095}`),
   `fuzzlab/lab_fixtures/external.py` (`LAB_META["vulnerableapp"].default_port = 3095`);

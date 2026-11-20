@@ -109,6 +109,13 @@ MUTILLIDAE_LDAP_IMAGE = ("docker.io/webpwnized/mutillidae:ldap@sha256:"
 #: 2025-05-24 (its version.py says 2.1.2; the older `2.1.2` tag is another, 2022 build).
 DVGA_IMAGE = ("docker.io/dolevf/dvga:latest@sha256:"
               "040aa33c199d99f3380c9ff9a1ee5d725e9abca7b189c63a35a2a73bda79c957")
+#: DVWA (digininja, GPL-3.0), CC-LAB-0430: upstream's own pre-built image (its GitHub
+#: workflow, built 2026-11-17 09:30 UTC from commit 502ac150; its /var/www/html equals
+#: that tree) and the MariaDB 10 its compose.yml names (10.11.19), pinned by digest.
+DVWA_IMAGE = ("ghcr.io/digininja/dvwa:latest@sha256:"
+              "61167ec23fbf861f7d96a7beb4be3612d043d48dbc6b239d4f90d7e8cdff8115")
+DVWA_MARIADB_IMAGE = ("docker.io/library/mariadb:10@sha256:"
+                      "e5fe75b2b9de0eb9f6f9a4d9c97272fb3a7480e389ccd487a786bab2a12cc0d7")
 PINNED_IMAGES = frozenset({BUSYBOX_IMAGE, MUTILLIDAE_WWW_IMAGE, MUTILLIDAE_DATABASE_IMAGE,
                            MUTILLIDAE_LDAP_IMAGE, PHP_IMAGE, MYSQL_IMAGE, JUICE_SHOP_IMAGE,
                            CRAWL_MAZE_PYTHON_IMAGE, SECDEVLABS_GOLANG_IMAGE,
@@ -117,7 +124,7 @@ PINNED_IMAGES = frozenset({BUSYBOX_IMAGE, MUTILLIDAE_WWW_IMAGE, MUTILLIDAE_DATAB
                            SECDEVLABS_NODE20_IMAGE, SECDEVLABS_MONGO_IMAGE,
                            SECDEVLABS_NODE13_IMAGE, SECDEVLABS_MAVEN_IMAGE,
                            SECDEVLABS_NGINX_IMAGE, NODEGOAT_NODE12_IMAGE, DVGA_IMAGE,
-                           VULNERABLEAPP_IMAGE})
+                           VULNERABLEAPP_IMAGE, DVWA_IMAGE, DVWA_MARIADB_IMAGE})
 
 BWAPP_ZIP_URL = "https://sourceforge.net/projects/bwapp/files/bWAPP/bWAPP_latest.zip/download"
 BWAPP_ZIP_NAME = "bWAPP_latest.zip"
@@ -352,6 +359,11 @@ LAB_META: dict[str, LabMeta] = {
     "vulnerableapp": LabMeta("vulnerableapp", "app", "VAPP_PORT", 3095, 9090,
                              "/VulnerableApp/", "/VulnerableApp/allEndPointJson", None, "",
                              False),
+    # two of upstream's seeded accounts (dvwa/includes/DBMS/MySQL.php, re-seeded by the
+    # bootstrap's setup.php reset; their passwords are the ones DVWA's README and setup
+    # code publish): DVWA has no registration form (FR-LAB-431)
+    "dvwa": LabMeta("dvwa", "web", "DVWA_PORT", 3097, 80, "/", "/login.php", "dvwa-user",
+                    "admin", False, (("dvwa-peer", "gordonb"),)),
 }
 
 
@@ -1597,11 +1609,116 @@ def nodegoat_account_attributes(client: _LabClient, cred: ResolvedCredential
     return {"user_id": ids.pop()}
 
 
+#: DVWA's anti-CSRF field (dvwaPage.inc.php `tokenField`, upstream 502ac150).
+_DVWA_TOKEN = re.compile(r"""name=['"]user_token['"]\s+value=['"]([0-9a-f]+)['"]""")
+_DVWA_MESSAGE = re.compile(r'<div class="message">(.*?)</div>', re.S)
+#: The level every scored DVWA run uses (FR-LAB-431): `low`, the level whose code has no
+#: defence, so the answer key is the vulnerability as upstream's own docs describe it.
+DVWA_LEVEL = "low"
+DVWA_SEEDED = "Data inserted into 'users' table."
+
+
+def _dvwa_token(client: _LabClient, path: str) -> str | None:
+    r = client.request("GET", path)
+    m = _DVWA_TOKEN.search(r.text or "") if r.status_code == 200 else None
+    return m.group(1) if m else None
+
+
+def _dvwa_login(client: _LabClient, cred: ResolvedCredential) -> str:
+    """Log in through DVWA's form (its CSRF token read first); the redirect's target:
+    ``index.php`` on success, ``login.php`` on a refused password, ``setup.php`` when
+    the database has no users table; "" when the page is not served yet."""
+    token = _dvwa_token(client, "/login.php")
+    if token is None:            # login.php redirects to setup.php while the db is down
+        return ""
+    r = client.request("POST", "/login.php", data={
+        "username": cred.username, "password": cred.password, "Login": "Login",
+        "user_token": token})
+    return r.headers.get("Location", "") if r.status_code == 302 else ""
+
+
+def _dvwa_reset_database(client: _LabClient, *, deadline: float,
+                         clock: Callable[[], float],
+                         sleep: Callable[[float], None]) -> None:
+    """setup.php's "Create / Reset Database" (with its CSRF token): drops and re-creates
+    the database and re-seeds upstream's users with their published passwords. Retried
+    until its own message reports the users inserted (MariaDB starts after the web
+    tier)."""
+    end = clock() + deadline
+    last = ""
+    while True:
+        token = _dvwa_token(client, "/setup.php")
+        if token is not None:
+            client.request("POST", "/setup.php", data={
+                "create_db": "Create / Reset Database", "user_token": token},
+                timeout=120.0)
+            msgs = _DVWA_MESSAGE.findall(client.request("GET", "/setup.php").text or "")
+            if DVWA_SEEDED in msgs:
+                return
+            last = re.sub(r"<[^>]+>", " ", msgs[0])[:160] if msgs else ""
+        if clock() >= end:
+            raise ExternalLabError(f"DVWA setup.php did not build the database within "
+                                   f"{deadline:.0f}s ({last or 'no message'})")
+        sleep(2.0)
+
+
+def bootstrap_dvwa(client: _LabClient, cred: ResolvedCredential, *, deadline: float = 180.0,
+                   clock: Callable[[], float] = time.monotonic,
+                   sleep: Callable[[float], None] = time.sleep) -> list[str]:
+    """Bring DVWA to a scored state for ``cred`` (FR-LAB-431):
+
+    1. log in through the form; when the database is missing (a fresh tmpfs) or the
+       seeded password is refused (a CSRF-page probe changed it), run setup.php's
+       "Create / Reset Database" and log in again -- the accounts are upstream's seed,
+       never registered here (DVWA has no registration form);
+    2. the security level: the lab's default (compose `DEFAULT_SECURITY_LEVEL`) must
+       answer a cookie-less request with ``security=low``, the level every new session
+       -- the scanner's, a crawler's -- starts at; then the level is set to low through
+       security.php's own form (CSRF token) and read back from the page;
+    3. a positive differential (PA-0007): ``index.php`` answers 200 with the session
+       and redirects to ``login.php`` without it."""
+    meta = LAB_META["dvwa"]
+    wait_ready(client, meta.ready_path, deadline=deadline, clock=clock, sleep=sleep)
+    notes: list[str] = []
+    if _dvwa_login(client, cred) != "index.php":
+        _dvwa_reset_database(client, deadline=deadline, clock=clock, sleep=sleep)
+        notes.append("database created / reset (setup.php)")
+        where = _dvwa_login(client, cred)
+        if where != "index.php":
+            raise ExternalLabError(
+                f"DVWA login of {cred.username!r} failed after a database reset "
+                f"(redirect {where!r}); the seeded accounts have the passwords upstream "
+                f"publishes")
+    anon = client.request("GET", "/login.php", anonymous=True)
+    default = anon.cookies.get("security")
+    if default != DVWA_LEVEL:
+        raise ExternalLabError(f"DVWA's default security level is {default!r}, not "
+                               f"{DVWA_LEVEL!r} (compose DEFAULT_SECURITY_LEVEL)")
+    token = _dvwa_token(client, "/security.php")
+    if token is None:
+        raise ExternalLabError("DVWA security.php served no form to the session")
+    client.request("POST", "/security.php", data={
+        "security": DVWA_LEVEL, "seclev_submit": "Submit", "user_token": token})
+    page = client.request("GET", "/security.php").text or ""
+    if (client.session.cookies.get("security") != DVWA_LEVEL
+            or f"Security level is currently: <em>{DVWA_LEVEL}</em>" not in page):
+        raise ExternalLabError(f"DVWA did not set the security level to {DVWA_LEVEL}")
+    notes.append(f"security level {DVWA_LEVEL} (default and set)")
+    authed = client.request("GET", "/index.php")
+    anon = client.request("GET", "/index.php", anonymous=True)
+    if (authed.status_code != 200 or anon.status_code != 302
+            or not anon.headers.get("Location", "").endswith("login.php")):
+        raise ExternalLabError(f"DVWA index.php: {anon.status_code} anonymous, "
+                               f"{authed.status_code} logged in (want 302 / 200)")
+    notes.append("login verified")
+    return notes
+
+
 _BOOTSTRAPS = {"bwapp": bootstrap_bwapp, "juice-shop": bootstrap_juice_shop,
                "mutillidae": bootstrap_mutillidae,
                "secdevlabs-gossip-world": bootstrap_secdevlabs_gossip_world,
                "secdevlabs-ecommerce-api": bootstrap_secdevlabs_ecommerce_api,
-               "nodegoat": bootstrap_nodegoat}
+               "nodegoat": bootstrap_nodegoat, "dvwa": bootstrap_dvwa}
 #: Labs whose accounts have values of their own a ground truth names (`account_value`,
 #: FR-LAB-309): read after the verified login, stored with the credential.
 _ACCOUNT_ATTRIBUTES = {"secdevlabs-ecommerce-api": ecommerce_account_attributes,

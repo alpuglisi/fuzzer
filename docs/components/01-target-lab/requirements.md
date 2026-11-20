@@ -6517,6 +6517,36 @@ lane) can submit a payload as
   labs can run at once. Enforced by
   `tests/test_external_labs_static.py::test_no_two_external_labs_publish_the_same_host_port`
   (proven on a synthetic collision).
+- **FR-LAB-430** *(DVWA, a PHP / MariaDB external lab; `CC-LAB-0430`, 2026-11-20).*
+  `lab/external/dvwa/` runs upstream's pre-built `ghcr.io/digininja/dvwa` (commit
+  502ac150's tree) and MariaDB 10, both pinned by digest (`DVWA_IMAGE`,
+  `DVWA_MARIADB_IMAGE`), the web tier on 127.0.0.1:3097 (`DVWA_PORT`) with no name
+  resolution, the database unpublished on an internal network and on tmpfs (reset =
+  restart); capabilities dropped, no-new-privileges, pids and memory limits.
+- **FR-LAB-431** *(DVWA's bootstrap and security level; `CC-LAB-0431`, 2026-11-20).*
+  `bootstrap_dvwa` logs in through the form (its CSRF token read first); when the
+  database is missing or the seeded password is refused, it runs setup.php's "Create /
+  Reset Database" and logs in again. Its accounts are upstream's seeded `admin`
+  (`dvwa-user`) and `gordonb` (`dvwa-peer`), never registered, their passwords from the
+  credential store or a prompt. Every scored run is at security level **low**
+  (`DVWA_LEVEL`): compose sets `DEFAULT_SECURITY_LEVEL: low` (the level a session
+  without a `security` cookie gets), the bootstrap checks it on a cookie-less request,
+  sets it through security.php's form and reads it back, then verifies the login by a
+  positive differential (`index.php` 200 with the session, 302 to login.php without).
+- **FR-LAB-432** *(DVWA answer key; `CC-LAB-0432`, 2026-11-20).*
+  `lab/ground-truth-dvwa/` (cases `DVWA-NNNN`) labels the level-low modules fuzzlab can
+  score (SQL injection plain, blind and in the brute-force form; reflected, stored, DOM
+  and CSP-page XSS; command injection in the ping form and the API's connectivity check;
+  file inclusion as path traversal; open redirect; file upload), each from upstream's
+  source (file:line) and checked live before scoring, negatives being other classes on
+  the same points. Level variants are not in the key (the level is a cookie, not part
+  of a request).
+- **FR-LAB-433** *(DVWA crawl safety; `CC-LAB-0433`, 2026-11-20).* DVWA's state switches
+  (setup, logout, the security-level form, the CSRF page's password change, the API's
+  user writes, upload, guestbook, session-id generator) are enumerated in
+  `tests/test_dvwa_lab.py` with the verdict of the gate that stops each; the residuals
+  name their compensating control (the level is a client cookie whose default is low;
+  the bootstrap restores a changed seeded password).
 - **FR-LAB-306** *(secDevLabs apps, one external lab each; `CC-LAB-0303`, 2026-10-18).*
   `fuzzlab/lab_fixtures/external.py` checks globocom/secDevLabs out at commit `10be438`
   once (`secdevlabs_checkout`, gitignored, HEAD verified by the shared

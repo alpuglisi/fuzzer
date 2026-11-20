@@ -71,6 +71,12 @@ CITED: dict[str, str] = {
     "webhook": "OWASP SSRF Prevention Cheat Sheet ('webhooks' as an SSRF entry point); "
                "PortSwigger Web Security Academy, 'SSRF'",
     "webhooks": "as 'webhook'",
+    # CC-LAB-0432: vulnerability-class names (the labels schema's own vuln_class
+    # spellings) that a lab also uses as path segments
+    "sqli": "PortSwigger Web Security Academy, 'SQL injection (SQLi)'; OWASP Top 10 "
+            "2021 A03 Injection ('SQLi')",
+    "open_redirect": "CWE-601 'URL Redirection to Untrusted Site (Open Redirect)'; "
+                     "PayloadsAllTheThings 'Open Redirect'",
     "expr": "OWASP WSTG-INPV-09 (XPath injection) / Spring Expression Language docs "
             "('expr' as an expression parameter); MDN XPathEvaluator",
     "cell": "HTML Living Standard autocomplete: 'tel' family -- 'cell' is the common "
