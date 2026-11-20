@@ -114,6 +114,25 @@ _TRAVERSAL_PAYLOADS = [
     "/etc/passwd",
     "../../../../etc/passwd%00",
 ]
+#: FR-FUZZ-640: a sink that *lists* a directory (bWAPP's directory_traversal_2, measured
+#: 2026-11-20: ``../../../../etc`` and ``/etc`` list it, an unknown name answers "doesn't
+#: exist", a file an opendir warning) shows no file content; it is probed for ``/etc``.
+_LISTING_PAYLOADS = ("../../../../../../../../etc", "/etc")
+#: Entries of ``/etc`` on every Linux base the labs run (Debian, Alpine, RHEL): a listing
+#: shows several as separate names. Matched whole (not inside a longer path token).
+_ETC_ENTRIES = ("passwd", "group", "hosts", "hostname", "shadow", "fstab", "os-release",
+                "resolv.conf", "nsswitch.conf", "shells", "issue", "motd", "profile",
+                "ld.so.conf", "ld.so.cache", "mtab", "inittab", "crontab", "login.defs",
+                "sysctl.conf", "securetty", "environment", "subuid", "subgid", "bash.bashrc")
+#: At least this many entries, each absent from the control's answer, make a listing.
+LISTING_MIN_ENTRIES = 4
+_ETC_ENTRY = re.compile(r"(?<![\w./-])(" + "|".join(re.escape(e) for e in _ETC_ENTRIES)
+                        + r")(?![\w/-]|\.\w)")
+
+
+def _etc_entries(text: str) -> set[str]:
+    """The well-known ``/etc`` entry names ``text`` shows as whole names."""
+    return set(_ETC_ENTRY.findall(text or ""))
 
 
 def _ssti_payloads(expr: str) -> list[str]:
@@ -1339,6 +1358,39 @@ class PathTraversalFsPathReadStrategy(ConfirmationStrategy):
                         "not comparable: the control's follow-up got no observation")
                 continue    # the control was not observed alike (FR-FUZZ-49)
             evidence = {"payload": payload}
+            if _via_prg(probe):
+                evidence["observation"] = "prg"
+            return Verdict(True, self.vuln_class, self.mechanism, evidence)
+        return self._directory_listing(candidate, sender)
+
+    #: The control of the listing phase: the directory's own name, no separator.
+    _LISTING_CONTROL = "etc"
+
+    def _directory_listing(self, candidate, sender):
+        """FR-FUZZ-640: a sink that lists a directory instead of reading a file. Each
+        `_LISTING_PAYLOADS` value names ``/etc``; the answer must show at least
+        `LISTING_MIN_ENTRIES` well-known ``/etc`` entries (`_etc_entries`) that a
+        compared control naming ``etc`` with no separator does not show (the same
+        negative-control rule as the file phase: a page that always mentions them is
+        not confirmed). +2 requests when nothing lists; +1 control only on a match."""
+        for payload in _LISTING_PAYLOADS:
+            with trace.role("mutation"):              # FR-FUZZ-60
+                probe = self._send(sender, candidate, payload)
+            listed = _etc_entries(_observed(probe).text or "")
+            if len(listed) < LISTING_MIN_ENTRIES:
+                continue
+            control = self._compared(sender, candidate, self._LISTING_CONTROL,
+                                     role="control")
+            fresh = listed - _etc_entries(_observed(control).text or "")
+            if len(fresh) < LISTING_MIN_ENTRIES:
+                continue                            # shown without traversal
+            if _via_prg(probe) and not _via_prg(control):
+                if getattr(control, "prg", None) == PRG_UNOBSERVED:
+                    raise NotComparable(
+                        "not comparable: the control's follow-up got no observation")
+                continue
+            evidence = {"payload": payload, "listing": sorted(fresh),
+                        "variant": "directory-listing"}
             if _via_prg(probe):
                 evidence["observation"] = "prg"
             return Verdict(True, self.vuln_class, self.mechanism, evidence)
