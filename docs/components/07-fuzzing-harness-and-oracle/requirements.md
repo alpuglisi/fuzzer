@@ -2225,6 +2225,35 @@ rewards) derives from it.
     `tests/test_prg_observation.py::test_a_path_points_follow_up_that_would_re_send_the_payload_never_confirms`,
     `tests/test_prg_observation.py::test_a_path_points_follow_up_that_leaves_its_segment_still_confirms`,
     `tests/test_prg_observation.py::test_prg_rule` (`own-segment-never-refetched`)
+- **FR-FUZZ-610** *(server-side JavaScript injection, evaluation marker; `CC-FUZZ-0610`,
+  2026-11-20).* `SsjsEvaluationMarkerStrategy` (category
+  `server-side-javascript-injection`, class `ssjs`, mechanism `js-evaluation-marker`)
+  sends `Math.abs(-n)/1000` (n in 1001..9999, not a multiple of 10); its result `n/1000`
+  must appear, not inside a longer number, once every reflected form of the expression is
+  stripped, and a second result absent from the first answer must appear in the answer to
+  the probe that computed it. A small decimal so a range-checking app still shows it;
+  `Math.abs` so SQL, template, Python, PHP and Ruby evaluators raise. 1 request
+  unconfirmed, 2 at most; skipped on a raw whole-body point.
+- **FR-FUZZ-611** *(server-side JavaScript injection, boolean differential;
+  `CC-FUZZ-0610`).* `SsjsBooleanDifferentialStrategy` (mechanism
+  `js-boolean-differential`) runs three families through the shared bracketed,
+  replicated engine (`_differential`, `ENGINE_BOUND` per family): base a five-digit
+  number; V `Math.abs(-k)==j` (false) and D `Math.abs(-k)==k` (true), joined with `||`
+  unquoted or as `b+'||…&&'+b` / `b+"||…&&"+b` to leave and re-enter a quoted string.
+  Compared by length (`exact=False`): a `$where` lists matched documents in callback
+  order (measured on NodeGoat). **Non-destructive by construction:** every probe of both
+  strategies is a valid JavaScript expression in an unquoted, a single-quoted and a
+  double-quoted context alike and names nothing but `Math.abs` (no loop, sleep, exit,
+  module or side effect), so an in-process `$where` that dies on an uncaught
+  ReferenceError or SyntaxError (Juice Shop) is never sent one; measured live on NodeGoat
+  and Juice Shop (both survived). Cost: 3 requests per failed family screen, `HARD_CAP`
+  30 with an inconclusive verdict as `SqliBooleanStrategy`'s.
+- **FR-FUZZ-612** *(a NoSQL operator leaf's echo; `CC-FUZZ-0611`, BUG-0610).*
+  `NoSqlOperatorStrategy`'s comparison strips `[object Object]` (JavaScript's rendering of
+  an object it was sent) with the tokens' reflected forms, so a page that re-renders the
+  submitted leaf compares V with B; a server that stringifies every object still answers V
+  and D alike and never confirms.
+
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
   finding must reproduce.

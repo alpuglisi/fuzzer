@@ -752,6 +752,10 @@ CONTROL_READING = {
                                         "from a compared control"),
     "GreyboxConfirmationStrategy": ("positive", "coverage through `send_correlated`; "
                                     "layer 1"),
+    "SsjsEvaluationMarkerStrategy": ("positive", "two evaluated results; an absence "
+                                     "disqualifies"),
+    "SsjsBooleanDifferentialStrategy": ("differential", "B0, V and B are controls; D "
+                                        "admits policy"),
 }
 #: The kinds whose sends the guard checks, and the shared engines each one runs.
 CONTROL_READERS = {"negative-control": (), "differential": ("_differential",),

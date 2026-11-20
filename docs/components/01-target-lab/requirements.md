@@ -6384,6 +6384,39 @@ lane) can submit a payload as
   measurement only); `--cprofile OUT` adds a cProfile (CPU hot spots only: it
   misattributes time across Playwright's greenlets). Lab only; nothing asserted.
 
+- **FR-LAB-331** *(NodeGoat answer key; `CC-LAB-0331`, 2026-11-20).*
+  `lab/ground-truth-nodegoat/` (target `owasp_nodegoat_c5cb68a7`, case ids `NGOAT-`):
+  server-side JavaScript injection (`ssjs`) in `/contributions`' `preTax`, `roth` and
+  `afterTax` (each passed to `eval()` and rendered; the points carry the form's JSON
+  siblings) and in `/allocations/2`'s `threshold` (a MongoDB `$where` built inside a
+  single-quoted string; upstream files it as NoSQL injection); open redirect in `/learn`'s
+  `url`; NoSQL operator injection in `/login`'s JSON `userName` (not an upstream tutorial
+  case, checked live); stored XSS in `/profile`'s `lastName` (observed on `/dashboard`)
+  and reflected XSS in seven `/profile` fields; IDOR in `/allocations/{userId}`
+  (`account_value: user_id`), stored XSS in `/memos`' `memo` and SSRF in `/research`'s
+  `symbol`, each `[reach: none]` with its reason. Negatives: the path `userId`
+  (parseInt'ed), `/login`'s `password` (compared in JavaScript), `/profile`'s `lastName`,
+  `/memos`' `memo` and `/research`'s `symbol` for `ssjs`, `memo` and the ignored
+  `website` for reflected XSS. Every case was checked against upstream's source at the
+  pinned commit and measured live (2026-11-20).
+- **FR-LAB-330** *(OWASP NodeGoat as an external lab; `CC-LAB-0330`, 2026-11-20).*
+  `nodegoat` (Node.js 12 / Express / MongoDB 4.4) on 127.0.0.1:3091 (`NODEGOAT_PORT`):
+  `fetch_nodegoat` checks OWASP/NodeGoat out at `c5cb68a7` (`checkout_pinned`), refuses a
+  checkout whose tracked files do not hash to `NODEGOAT_TREE_SHA256` (`tree_sha256`: one
+  sha256 over each tracked path and its content's sha256), copies it without `.git` into
+  the gitignored `.cache/app` and installs its production packages on the host
+  (`npm_install(production=True)`: `npm ci --omit=dev --ignore-scripts` against the
+  lockfile's integrity hashes); the image builds offline from the pinned
+  `node:12-alpine` (`NODEGOAT_NODE12_IMAGE`). MongoDB (`SECDEVLABS_MONGO_IMAGE`, tmpfs)
+  is unpublished on an internal network; the app's front bridge has egress (its SSRF
+  sink can reach out; not blocked, as Juice Shop's). `NODE_ENV=production` (upstream's
+  development config injects a livereload script). The app re-seeds its database at
+  every start (upstream's `artifacts/db-reset.js`), so its two identities are upstream's
+  seeded accounts: `nodegoat-user` (`user1`) and `nodegoat-peer` (`user2`), whose
+  published passwords the operator stores (`may_generate_password` False, as bWAPP's);
+  `bootstrap_nodegoat` verifies each login by a positive differential on `/dashboard`
+  (200 with the session, 302 without) and stores its `user_id`, read from the
+  dashboard's one `/allocations/<id>` link (FR-LAB-309).
 - **FR-LAB-309** *(per-account values; secDevLabs ecommerce-api; `CC-LAB-0315`,
   2026-10-19).* A lab bootstrap may read values of each account's own after its
   verified login (`_ACCOUNT_ATTRIBUTES`) and store them with the credential
