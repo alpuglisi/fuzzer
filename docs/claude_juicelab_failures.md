@@ -2217,3 +2217,16 @@ Juice Shop lab is complete.
 - **Impact:** about 20 minutes of lost lane time across six lanes and a false status report; no repository content affected.
 - **Cause:** I treated a create call's acknowledgement as proof of a running lane, and did not confirm a dispatch's first progress (an init log past the clone) before reporting it — the same "verify, don't trust the self-report" rule (MULTI_AGENT_ORCHESTRATION §2) applied to the platform, not only to lanes.
 - **Status:** fixed: relaunched from the branch name; one lane was confirmed past clone before the other five were relaunched; the check-in now reads each lane's init log for errors, not only its status.
+### F-610 — I designed the server-side JavaScript differential to compare answers by text without measuring whether the true branch answers the same twice
+- **What:** lane NODE's first `SsjsBooleanDifferentialStrategy` ran its families with `exact=True` (status and text after stripping reflections). NodeGoat's `$where` true branch lists the matched users in the order their lookups finish, so two identical D requests differed and every round failed: NGOAT-0004 (`threshold`) was missed in the first AFTER run.
+- **Evidence:** the AFTER run's trace (screen passed: B 500, D 200, V 500; round 1 failed on "D same as the first D"); six identical true-branch requests by hand listed the three users in three orders (CC-FUZZ-0610).
+- **Impact:** none committed or pushed; one extra live run. Fixed by comparing by length (`exact=False`), measured.
+- **Cause:** I measured that the true branch differs from the false one, not that it repeats, before choosing the comparison (CLAUDE.md item 8).
+- **Status:** fixed before the commit (CC-FUZZ-0610 records the measurement).
+
+### F-611 — Lane NODE's component changes did not pass the pre-change review gate before implementation
+- **What:** `docs/components/README.md` asks that a substantive change's change-control entry be drafted and agreed by two independent reviewers before implementation. In this lane the strategies, the rule, the mapping, the NoSQL fix and the fixture were built and measured first; the entries were written after.
+- **Evidence:** CC-FUZZ-0610, CC-FUZZ-0611, CC-AUD-0610, CC-CORE-0605, CC-LAB-0330 each say so.
+- **Impact:** the review the gate provides has not happened; the orchestrator's independent verification before the merge is the first review.
+- **Cause:** I followed the lane brief's work order (measure, build, re-measure) and did not stop to run the gate.
+- **Status:** open; flagged in the lane's final report for the orchestrator.

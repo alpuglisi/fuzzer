@@ -1,0 +1,28 @@
+# fuzzlab expected results (Benchmark-style) for OWASP NodeGoat at c5cb68a7 (external
+# lab fixture lab/external/nodegoat), CC-LAB-0331. Derived from labels.json; the
+# loader cross-checks the two. Single-location cases.
+case_id,url,method,param,location,category,expected_vulnerable,primary_endpoint,primary_role,related_endpoints,flow_variant
+NGOAT-0001,/contributions,POST,preTax,body,ssjs,true,/contributions,sink,,direct
+NGOAT-0002,/contributions,POST,roth,body,ssjs,true,/contributions,sink,,direct
+NGOAT-0003,/contributions,POST,afterTax,body,ssjs,true,/contributions,sink,,direct
+NGOAT-0004,/allocations/2,GET,threshold,query,ssjs,true,/allocations/2,sink,,direct
+NGOAT-0005,/allocations/{userId},GET,userId,path,access_control,true,/allocations/{userId},sink,,direct
+NGOAT-0006,/allocations/{userId},GET,userId,path,ssjs,false,/allocations/{userId},sink,,direct
+NGOAT-0007,/learn,GET,url,query,open_redirect,true,/learn,sink,,direct
+NGOAT-0008,/dashboard,GET,lastName,body,xss-stored,true,/dashboard,sink,,direct
+NGOAT-0009,/profile,POST,lastName,body,xss-reflected,true,/profile,sink,,direct
+NGOAT-0010,/profile,POST,lastName,body,ssjs,false,/profile,sink,,direct
+NGOAT-0011,/memos,POST,memo,body,xss-stored,true,/memos,sink,,direct
+NGOAT-0012,/memos,POST,memo,body,xss-reflected,false,/memos,sink,,direct
+NGOAT-0013,/memos,POST,memo,body,ssjs,false,/memos,sink,,direct
+NGOAT-0014,/login,POST,userName,body,nosqli,true,/login,sink,,direct
+NGOAT-0015,/login,POST,password,body,nosqli,false,/login,sink,,direct
+NGOAT-0016,/research,GET,symbol,query,ssrf,true,/research,sink,,direct
+NGOAT-0017,/research,GET,symbol,query,ssjs,false,/research,sink,,direct
+NGOAT-0018,/profile,POST,firstName,body,xss-reflected,true,/profile,sink,,direct
+NGOAT-0019,/profile,POST,ssn,body,xss-reflected,true,/profile,sink,,direct
+NGOAT-0020,/profile,POST,dob,body,xss-reflected,true,/profile,sink,,direct
+NGOAT-0021,/profile,POST,address,body,xss-reflected,true,/profile,sink,,direct
+NGOAT-0022,/profile,POST,bankAcc,body,xss-reflected,true,/profile,sink,,direct
+NGOAT-0023,/profile,POST,bankRouting,body,xss-reflected,true,/profile,sink,,direct
+NGOAT-0024,/profile,POST,website,body,xss-reflected,false,/profile,sink,,direct

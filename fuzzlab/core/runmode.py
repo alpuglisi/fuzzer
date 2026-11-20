@@ -57,6 +57,9 @@ MANUAL = "manual"
 _VULN_TO_CATEGORY = {
     "sqli": "sql-injection",
     "nosqli": "nosql-injection",
+    # `ssjs` (CC-FUZZ-0610): `R-SSJS` / the two server-side JavaScript strategies,
+    # verified live against NodeGoat (CC-LAB-0331)
+    "ssjs": "server-side-javascript-injection",
     "xss-reflected": "xss",
     "xss-stored": "xss",
     "xss-dom": "xss",
