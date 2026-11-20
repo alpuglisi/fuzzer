@@ -2375,6 +2375,19 @@ rewards) derives from it.
   and its macro line the same way (`TargetOutcome.points_source`, summary key
   `measures`: `detection` / `oracle-diagnostic` / `mixed`). Presentation only: no score
   is computed differently.
+- **FR-FUZZ-710** *(the grey-box endpoint file is read from the coverage;
+  `CC-FUZZ-0710`, 2026-11-20, BUG-0732, SP-145).* Which covered file serves a point's
+  URL is decided by one owner, `fuzzlab.greybox.coverage.endpoint_file`, read by
+  `greybox.run.run_greybox` and `GreyboxConfirmationStrategy`: the covered file whose
+  path ends with the URL path's whole segments (RFC 3875 §4.1.13 `SCRIPT_NAME`,
+  §4.1.5 `PATH_INFO`; Apache `DocumentRoot`), a directory URL's `index.<ext>`
+  (Apache `mod_dir`), the single shallowest of several (or, under a known root, the
+  one directly below it). No covered file maps (a front controller) or a tie: the
+  sink is not covered, no M10 verdict. No document root is assumed: `run_greybox`'s
+  coverage filter is the operator's `--app-root` when given, else the root the point's
+  baseline endpoint file implies (`coverage.document_root`), else every non-excluded
+  file. The former `/var/www/html` default and `<root>/<last path segment or
+  index.php>` mapping are withdrawn.
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
   finding must reproduce.

@@ -207,3 +207,60 @@ def test_end_to_end_two_requests_reward_ordering(tmp_path):
         stored = {r["id"]: r["reward"] for r in store.conn.execute(
             "SELECT id, reward FROM attempt WHERE run_id=?", (run_id,))}
         assert max(stored.values()) == rewards["r1"]
+
+
+# --- FR-FUZZ-710 (BUG-0732, SP-145): the endpoint file, read from the coverage -------
+
+def test_endpoint_file_matches_the_urls_whole_segments_under_any_root():
+    from fuzzlab.greybox.coverage import document_root, endpoint_file
+    flat = {"/var/www/html/login.php": [1]}
+    assert endpoint_file("http://h/login.php", flat) == "/var/www/html/login.php"
+    assert document_root("http://h/login.php", "/var/www/html/login.php") == "/var/www/html/"
+    nested = {"/srv/app/public/admin/users.php": [1], "/srv/app/public/users.php": [2]}
+    assert endpoint_file("http://h/admin/users.php?x=1", nested) == \
+        "/srv/app/public/admin/users.php"
+    assert document_root("http://h/admin/users.php",
+                         "/srv/app/public/admin/users.php") == "/srv/app/public/"
+    # whole segments: `xlogin.php` is not `login.php`
+    assert endpoint_file("http://h/login.php", {"/a/xlogin.php": [1]}) is None
+
+
+def test_endpoint_file_never_flattens_a_directory_into_the_root():
+    """The former mapping read `/admin/login.php` as `<root>/login.php`; a covered root
+    `login.php` is another file."""
+    from fuzzlab.greybox.coverage import endpoint_file
+    assert endpoint_file("http://h/admin/login.php", {"/var/www/html/login.php": [1]}) \
+        is None
+
+
+def test_endpoint_file_path_info_index_front_controller_and_ties():
+    from fuzzlab.greybox.coverage import endpoint_file
+    # RFC 3875 4.1.5: `/index.php/orders/7` runs index.php with PATH_INFO /orders/7
+    assert endpoint_file("http://h/index.php/orders/7", {"/w/index.php": [1]}) == \
+        "/w/index.php"
+    # a directory URL names its index file; the shallowest when an include shares it
+    cov = {"/w/index.php": [1], "/w/includes/index.php": [2]}
+    assert endpoint_file("http://h/", cov) == "/w/index.php"
+    # a front controller routing /users/5: nothing maps, no verdict
+    assert endpoint_file("http://h/users/5", {"/app/public/index.php": [1]}) is None
+    # two equally deep candidates: a tie is no verdict
+    assert endpoint_file("http://h/login.php",
+                         {"/a/x/login.php": [1], "/b/y/login.php": [1]}) is None
+    # a known root selects the file directly below it
+    assert endpoint_file("http://h/login.php",
+                         {"/a/x/login.php": [1], "/b/y/login.php": [1]},
+                         root="/b/y") == "/b/y/login.php"
+
+
+def test_both_greybox_call_sites_use_the_one_endpoint_owner():
+    """SP-145: the live run and the M10 strategy decide sink coverage through
+    `greybox.coverage.endpoint_file`; neither keeps an assumed root or a basename map."""
+    import inspect
+
+    from fuzzlab.greybox import run
+    from fuzzlab.oracle import strategies
+    for module in (run, strategies):
+        src = inspect.getsource(module)
+        assert "endpoint_file(" in src, module.__name__
+        assert "/var/www/html" not in src, module.__name__
+        assert 'rsplit("/", 1)[-1] or "index.php"' not in src, module.__name__

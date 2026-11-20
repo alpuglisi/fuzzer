@@ -72,7 +72,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--cov-dir", default="/tmp/fzl-cov",
                    help="Side-channel dir the cov.php shim writes (default /tmp/fzl-cov)")
     p.add_argument("--app-root", default=gbrun.DEFAULT_APP_ROOT,
-                   help="Document root inside the container (coverage prefix filter)")
+                   help="Document root inside the container (coverage prefix filter); "
+                        "default: each point's root read from its baseline's coverage "
+                        "(FR-FUZZ-710)")
     p.add_argument("--labctl", default=None,
                    help="Path to labctl.sh; enables DB snapshot/restore for --reset")
     p.add_argument("--reset", action="store_true",

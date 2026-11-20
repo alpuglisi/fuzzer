@@ -28,7 +28,7 @@ from fuzzlab.oracle.browser import (
     StoreStep,
 )
 from fuzzlab.greybox.confirm import greybox_confirms, m10_evidence
-from fuzzlab.greybox.coverage import CoverageSource, app_lines
+from fuzzlab.greybox.coverage import CoverageSource, app_lines, endpoint_file
 from fuzzlab.greybox.dbfault import DbFaultSource
 from fuzzlab.greybox.reward import GreyboxSignal
 from fuzzlab.oracle.context import (locate_reflection, split_form_control_values,
@@ -2468,19 +2468,17 @@ class UnrestrictedFileUploadContentTypeTrustStrategy(ConfirmationStrategy):
 # side channel has something to observe. Distinct from the black-box strategies'
 # own probes above -- this one probe is purely to *generate* the signal, not to
 # read the HTTP response for a verdict (the verdict comes from coverage/db_fault).
-_GREYBOX_APP_ROOT = "/var/www/html"
 _GREYBOX_PROBE_PAYLOADS = {
     "sqli": "1' OR '1'='1' -- -",
     "xss": "<fzlgbx>",
 }
 
 
-def _greybox_sink_file(url: str, app_root: str = _GREYBOX_APP_ROOT) -> str:
-    """Map a candidate's URL to the app file expected to serve it (…/login.php)."""
-    from urllib.parse import urlparse
-    path = urlparse(url).path or "/"
-    base = path.rsplit("/", 1)[-1] or "index.php"
-    return app_root.rstrip("/") + "/" + base
+def _greybox_sink_file(url: str, coverage, app_root: str | None = None) -> str | None:
+    """The covered file that serves a candidate's URL, read from the coverage
+    (SP-145's `greybox.coverage.endpoint_file`, FR-FUZZ-710): no assumed document root;
+    ``app_root`` only when the operator gave one; None when no covered file maps."""
+    return endpoint_file(url, coverage, root=app_root)
 
 
 class GreyboxConfirmationStrategy(ConfirmationStrategy):
@@ -2512,7 +2510,7 @@ class GreyboxConfirmationStrategy(ConfirmationStrategy):
 
     def __init__(self, coverage: CoverageSource | None = None,
                  dbfault: DbFaultSource | None = None,
-                 app_root: str = _GREYBOX_APP_ROOT):
+                 app_root: str | None = None):
         self._coverage = coverage
         self._dbfault = dbfault
         self._app_root = app_root
@@ -2540,7 +2538,8 @@ class GreyboxConfirmationStrategy(ConfirmationStrategy):
                                              location=candidate.location)
         coverage = app_lines(self._coverage.lines_for(request_id)) \
             if self._coverage is not None else {}
-        sink_covered = _greybox_sink_file(candidate.url, self._app_root) in coverage
+        sink_covered = _greybox_sink_file(candidate.url, coverage, self._app_root) \
+            is not None
         db_fault = self._dbfault.fault_for(request_id).faulted \
             if self._dbfault is not None else False
         signal = GreyboxSignal(sink_covered=sink_covered, db_fault=db_fault)

@@ -399,3 +399,61 @@ def test_requests_correlating_sender_sets_header(monkeypatch):
     # handed to requests' `params=`, which appends a second occurrence.
     assert captured["url"] == "http://h/x.php?id=1" and captured["params"] is None
     assert probe.status == 200
+
+
+# --- FR-FUZZ-710 (BUG-0732, SP-145): the endpoint file and the root come from coverage --
+
+def _run_one(tmp_path, url, script, **kw):
+    probes = (ProbeSpec("baseline", "1", "baseline"),
+              ProbeSpec("sqli-error", "'", "sqli"))
+    sender = FakeSender(script)
+    point = GreyboxPoint(url=url, param="id", method="GET", location="query",
+                         vuln_class="sqli-error")
+    with Store(tmp_path / "u.db") as store:
+        run_id = store.start_run("greybox", "127.0.0.1")
+        summary = run_greybox(base_url="http://127.0.0.1:8080", store=store,
+                              run_id=run_id, points=[point], sender=sender,
+                              coverage_source=DictCoverage(sender),
+                              dbfault_source=DictFault(sender), probes=probes, **kw)
+        rows = store.conn.execute(
+            "SELECT payload_family, coverage FROM attempt WHERE run_id=? ORDER BY id",
+            (run_id,)).fetchall()
+    return summary, {r["payload_family"]: json.loads(r["coverage"]) for r in rows}
+
+
+def test_run_greybox_reads_the_root_from_coverage_not_an_assumed_one(tmp_path):
+    """An app under another root and in a sub-directory (`/srv/shop/public/admin/
+    product.php` for `/admin/product.php`): the endpoint is covered and the coverage
+    filter is the root its baseline implies -- a file outside it is not counted. The
+    former `/var/www/html/<basename>` mapping saw no sink and no lines here."""
+    app = "/srv/shop/public/admin/product.php"
+    outside = "/srv/shop/lib/boot.php"
+    summary, cov = _run_one(tmp_path, "http://127.0.0.1:8080/admin/product.php", [
+        (Probe(200, "ok"), {app: [10, 11], outside: [1]}, False),
+        (Probe(500, "You have an error in your SQL syntax"),
+         {app: [10, 11, 40], outside: [1, 2]}, True),
+    ])
+    assert summary["m10_would_confirm"] == 1                  # sink covered + db fault
+    assert cov["baseline"]["n_lines"] == 2                    # the root's file only
+    assert summary["coverage_lines_seen"] == 5
+
+
+def test_run_greybox_front_controller_is_never_sink_covered(tmp_path):
+    """`/users/5` routed through `index.php`: no covered file maps the URL, so the sink
+    is not covered (no M10 verdict) -- a stated miss, never `<root>/5`."""
+    front = "/var/www/app/public/index.php"
+    summary, _cov = _run_one(tmp_path, "http://127.0.0.1:8080/users/5", [
+        (Probe(200, "ok"), {front: [1, 2]}, False),
+        (Probe(500, "You have an error in your SQL syntax"), {front: [1, 2, 9]}, True),
+    ])
+    assert summary["m10_would_confirm"] == 0
+
+
+def test_run_greybox_operator_app_root_still_overrides(tmp_path):
+    app = "/opt/site/search.php"
+    summary, cov = _run_one(tmp_path, "http://127.0.0.1:8080/search.php", [
+        (Probe(200, "ok"), {app: [1], "/opt/other/x.php": [3]}, False),
+        (Probe(500, "You have an error in your SQL syntax"), {app: [1, 2]}, True),
+    ], app_root="/opt/site")
+    assert summary["m10_would_confirm"] == 1
+    assert cov["baseline"]["n_lines"] == 1

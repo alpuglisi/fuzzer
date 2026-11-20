@@ -3,6 +3,52 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0710 — Grey-box endpoint file read from the coverage, no assumed document root (BUG-0732, FR-FUZZ-710, SP-145) (2026-11-20)
+- Change: `fuzzlab/greybox/coverage.py` (new `endpoint_file`, `document_root`, with
+  `_url_segments`, `_segments_of`, `_pick`); `fuzzlab/greybox/run.py` (`_endpoint_file`
+  removed; `DEFAULT_APP_ROOT` `"/var/www/html"` -> `None`; `run_greybox`'s coverage filter
+  per point: the operator's `--app-root`, else the root its baseline's endpoint file
+  implies, else every non-excluded file; `sink_covered` through `endpoint_file`);
+  `fuzzlab/oracle/strategies.py` (`_GREYBOX_APP_ROOT` removed; `_greybox_sink_file`
+  delegates to `endpoint_file`; `GreyboxConfirmationStrategy(app_root=None)`);
+  `fuzzlab/greybox/greybox_cli.py` (`--app-root` help); tests in `tests/test_greybox.py`
+  (4), `tests/test_greybox_live.py` (3), `tests/test_oracle_greybox.py` (2). FR-FUZZ-710.
+- Provenance: CC-FUZZ-0016 (2026-09-21, T3.2-T3.7) built `run_greybox` with
+  `DEFAULT_APP_ROOT = "/var/www/html"` and `_endpoint_file` (`<root>/<last path segment or
+  index.php>`), matching CC-LAB-0009's instrumented PFF image (`pcov.directory=/var/www/html`,
+  a flat directory of PHP scripts); CC-FUZZ-0024 copied the mapping into the M10 strategy
+  (`_GREYBOX_APP_ROOT`, `_greybox_sink_file`). No requirement or record cites a public
+  convention for either; both fit the flat lab only.
+- Mechanism (as specified): the endpoint is the covered file whose path ends with the URL
+  path's whole segments, independent of the root -- RFC 3875 (CGI/1.1) §4.1.13
+  `SCRIPT_NAME` and §4.1.5 `PATH_INFO`; Apache httpd core `DocumentRoot` ("the path from
+  the URL is appended to the document root"); a directory URL's `index.<ext>` per Apache
+  `mod_dir` `DirectoryIndex`; several matches: the single shallowest, or under a known
+  root the one directly below it; none (a front controller) or a tie: no verdict. The
+  include filter derives from the coverage (`document_root`: the matched file minus the
+  URL's script path). No default root is kept (the official `php` Docker image's
+  `/var/www/html` DocumentRoot was not needed once the root is read from coverage).
+  Both call sites use the one helper (SP-145, proposed to the lane; this sub-agent may
+  not edit `docs/SHARED_PRIMITIVES.md`).
+- Impact (other components / project): FUZZ. `greybox-run` without `--app-root` now
+  derives each point's filter; on the flat PFF lab the derived root is `/var/www/html/`
+  (same as before), so its figures should not move. An app in a sub-directory or under
+  another root is now sink-covered where it was never before; a front-controller app is
+  never sink-covered (before: never either, by a wrong file). Not swept (component MUT, no
+  IDs): `fuzzlab/mutation/cli.py:38` and `fuzzlab/mutation/run.py:29` keep the same
+  `/var/www/html` default (reported to the lane).
+- Risk (level; mitigation or accepted-risk justification): low -- additive owner, two
+  call sites, explicit `--app-root` unchanged in meaning; ties and front controllers are
+  stated misses.
+- Deliverables:
+  - [x] `endpoint_file` / `document_root`, both call sites, tests — done
+  - [x] BUG-0732; FR-FUZZ-710; SP-145 row and MUT finding proposed to the lane — done
+- Measured (2026-11-20): unit/offline only (no docker labs in this sub-task): the
+  existing flat-root tests (`/var/www/html/login.php` for `/login.php`) pass unchanged; a
+  `/srv/shop/public/admin/product.php` app is sink-covered and its filter excludes
+  `/srv/shop/lib/`; `/users/5` through `index.php` maps nothing.
+- Effectiveness (assessed pending): the lane's grey-box measurement.
+
 ### CC-FUZZ-0633 — Black-box review of CC-FUZZ-0630..0632 (owner directive, 2026-11-20)
 - Change: `fuzzlab/oracle/strategies_jvm.py` (the `WEB-INF/web.xml` probe removed;
   docstrings state the evidence and the jar-classpath limit); `fuzzlab/oracle/
