@@ -3,6 +3,288 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0353 — VulnerableApp moves to 127.0.0.1:3095; a static guard against shared lab ports (FR-LAB-352) (2026-11-20)
+- Change: `lab/external/vulnerableapp/compose.yaml` (`${VAPP_PORT:-3095}`),
+  `fuzzlab/lab_fixtures/external.py` (`LAB_META["vulnerableapp"].default_port = 3095`);
+  `tests/test_external_labs_static.py` (`lab_host_ports`, `port_collisions`,
+  `test_no_two_external_labs_publish_the_same_host_port`,
+  `test_the_port_guard_flags_a_synthetic_collision`); FR-LAB-350 restated, FR-LAB-352.
+- Reason: the orchestrator reported that lane PHPX's Mutillidae publishes 127.0.0.1:3093,
+  the port this lane chose; two labs on one port cannot run together (the second `up`
+  fails). 3095 is free across `LAB_META` and every compose file under `lab/` (checked:
+  NodeGoat 3091; DVGA's 5013 is not merged yet). No guard caught a shared port before.
+- Found while checking: the main lab's `PFF_WEB_PORT` default (8080) equals
+  secDevLabs Streaming's fixed 8080 (`LabMeta.fixed_ports`). The main lab is not an
+  external lab, so the new guard does not cover it; flagged to the orchestrator, not
+  changed here.
+- Impact: `labctl.sh up vulnerableapp` publishes 3095 (`VAPP_PORT` still overrides).
+  The lab runs recorded in CC-LAB-0350 used 3093; nothing else depends on the number.
+- Risk: low.
+- Deliverables:
+  - [x] port, guard, records — done
+- Effectiveness (assessed 2026-11-20): the guard passes on the merged registry and fails
+  on its synthetic collision; re-checked after the PHPX merge (see the merge commit).
+
+### CC-LAB-0352 — Juice Shop regression check of CC-FUZZ-0630..0632 (2026-11-20)
+- Change: none to code; a measurement record. CC-FUZZ-0630..0632 change shared
+  detection code (the default strategy list, the command-injection strategy); Juice
+  Shop's answer key has an SSRF and a path-traversal case, so its categories run the new
+  strategies.
+- Runs (2026-11-20, the same command on each side, Juice Shop reset before each:
+  `fuzzlab auto --base-url http://127.0.0.1:3000 --ground-truth
+  lab/ground-truth-juice-shop --points ground-truth --identity juice-user --browser
+  --oob --score --authorized`):
+  - before (detection code of 2658271): tp=5 fp=0 fn=10 tn=3, 150 requests, 45 s;
+  - after (this lane's tip): tp=5 fp=0 fn=10 tn=3, 155 requests, 44 s;
+  - the same five cases matched on both sides (JUICE-0002, 0003, 0004, 0006, 0007): the
+    counts CC-LAB-0317 recorded at 2edf1b6 (it does not list ids). The five extra requests are the new strategies'
+    probes of the SSRF and path-traversal points, which confirm nothing there.
+- Deliverables:
+  - [x] both runs, this record — done
+- Effectiveness (assessed 2026-11-20): no regression.
+
+### CC-LAB-0351 — `command-injection` and `os_command` in the labels schema (FR-LAB-351) (2026-11-20)
+- Change: `fuzzlab/labels/schemas/labels.schema.json`: `vuln_class` enum gains
+  `command-injection`, `sink_context` gains `os_command` (first written `shell`; renamed at
+  the merge with lane NODE so lanes JAVA and GQL add one identical spelling, the
+  orchestrator's instruction).
+- Reason: VulnerableApp's CommandInjection levels (5 positives, 3 negatives) could not be
+  labelled: a command-injection finding matched no case and scored as a false positive.
+  Spelled as `CommandInjectionStrategy.vuln_class` records it (hyphenated), since the
+  scorer matches `(url, method, param, vuln_class)` exactly. This departs from
+  PA-0047(2)'s underscore convention, which binds *new* strategy spellings; renaming the
+  existing strategy's class would touch its consumers (`web/results.py` severities,
+  `mutation/payloads.py`, `mutation/semantics.py`, `mutation/operators.py`,
+  `audit/value_shape.py`, `core/reqctx.py`, `_CATEGORY_TO_CLASS`, and 13 test files):
+  flagged to the orchestrator, not done here.
+- Impact (PA-0152, consumers found by searching the enum's readers): `labels/
+  contract.py` (schema validation: additive, every existing ground truth loads
+  unchanged, `tests/test_labels_contract_category4.py` passes);
+  `tests/test_external_labs_static.py::scoreable_classes` (admits the class: in the enum,
+  recorded by a default strategy, its category ruled by `R-COMMAND-INJECTION`); its
+  opaque-id guard (no case id holds `COMMAND`, `INJECTION` or `SHELL`). No runtime code
+  reads the enum. No other lab's ground truth has a command-injection positive, so D14
+  never runs the category there and no score elsewhere changes.
+- Risk: low; additive contract change.
+- Deliverables:
+  - [x] schema; FR-LAB-351 — done
+- Effectiveness (assessed 2026-11-20): VAPP-0043..0050 load and score (see CC-LAB-0350).
+
+### CC-LAB-0350 — SasanLabs OWASP VulnerableApp (Java / Spring Boot) as an external lab (FR-LAB-350) (2026-11-20)
+- Change: `lab/external/vulnerableapp/compose.yaml` (image
+  `sasanlabs/owasp-vulnerableapp:2.2.115@sha256:160bdbdf...` pinned by digest, published
+  127.0.0.1:${VAPP_PORT:-3093} -> 9090, read-only root, `cap_drop: [ALL]`,
+  no-new-privileges, tmpfs for `/tmp`, `/app/logs`, the upload and benchmark dirs);
+  `fuzzlab/lab_fixtures/external.py` (`VULNERABLEAPP_IMAGE` in `PINNED_IMAGES`;
+  `LAB_META["vulnerableapp"]`, no identity); `lab/ground-truth-vulnerableapp/`
+  (105 cases VAPP-0001..0105: 63 positives, 42 negatives; 84 points); `.gitignore` (its
+  CSV tracked, PA-0038); `tests/test_external_labs_static.py` (`GT_DIRS`);
+  `tests/test_external_labs_live.py` (a gated live test of the JVM strategies).
+- Reason: the JAVA lane: a Java / Spring stack built for testing DAST scanners. Docker
+  ran here (dockerd started in the container), so the documented WebGoat fallback was
+  not needed.
+- Pin: Docker Hub tags `2.2.115`, `latest` and `unreleased` all resolved to
+  `sha256:160bdbdf0490e27a5904d496c4a13b5e1541957dc4df5d05c611b1caec3b0193`, pushed
+  2026-11-19 11:31 UTC, seven minutes after upstream commit 821b347; the image's
+  resources match that tree (its i18n `messages.properties` blob is d5cf8d97's and later;
+  its `/sitemap.html` is 3730677's).
+- Measurements (live, 2026-11-20, before the key was written; PA-0311):
+  - the app's own metadata: `/VulnerableApp/allEndPointJson` (23 classes, 187 levels with
+    UNSECURE / SECURE variants, attack-vector text, challenge payloads) and
+    `/VulnerableApp/scanner/dast` (175 URLs); parameter names read in upstream's source
+    at 821b347 and its level pages' scripts;
+  - every case checked live by `scratchpad/vapp/gen/verify_key.py` (a fixed payload set
+    per class: a positive must show its class's signal, a negative none): 96 of 100
+    reachable cases agreed; of the four left, two path-traversal positives (LEVEL_5,
+    LEVEL_11) need a raw `/` after `%2e%2e` and were checked by hand with upstream's own
+    payloads (both read the properties file; SECURE LEVEL_13 refuses the same), XXE
+    LEVEL_1 was checked by hand (`/etc/hostname` echoed in `<name>`), and XXE LEVEL_2
+    could not be confirmed here (its entity needs an OOB channel the container cannot
+    reach on the host's loopback): kept per upstream;
+  - Spring negotiates every `ResponseEntity<String>`: `text/plain` for `Accept: */*`,
+    `text/html` for a browser. Chromium 157: `1<img src=x onerror=...>` runs at
+    ErrorBasedSQLInjection LEVEL_1..4 (the SQL error quotes it) and not at LEVEL_5..7,
+    the union or blind levels -- reflected XSS beyond upstream's list (VAPP-0090..0096);
+    the Persistent XSS GET echoes its own comment (VAPP-0097..0105);
+  - Chromium 157 follows Http3xxStatusCodeBasedInjection LEVEL_6's `@host` off-site but
+    keeps LEVEL_7 on the origin for upstream's own payload and every bypass spelling
+    (VAPP-0077: `[reach: none - ...]`);
+  - XXE LEVEL_1 resolves a file entity into `<name>` only for a short file
+    (`/etc/hostname`, `/proc/sys/kernel/ostype`); `/etc/passwd` makes the app's unmarshal
+    fail (`isValid:false`); LEVEL_2 returns the entity empty (OOB only);
+  - PathTraversal LEVEL_14/15 (SECURE) serve `secret.json`, upstream's only payload for
+    LEVEL_6/10/12: those three are `[reach: none - ...]`.
+- Where the key departs from upstream's variant: ErrorBasedSQLInjection LEVEL_3/4 are
+  negatives (upstream: UNSECURE). Both strip every quote and quote-wrap the value (no H2
+  breakout); upstream's own payload is `not-a-number` (an error disclosure), and
+  UnionBasedSQLInjection LEVEL_3, the same code, is SECURE.
+- BASELINE (before any detection change; the code of 2658271, the key as committed
+  here; a fresh container): see Effectiveness.
+- Impact: a new loopback lab (127.0.0.1:3093); `labctl.sh up vulnerableapp` passes the
+  pre-flight and the exposure check. The app's SSRF levels fetch what they are given:
+  the bridge has egress (NFR-LAB-safety "Not yet enforced", as Juice Shop).
+- Risk: low. Command execution, file reads and XXE run inside a read-only, capability-
+  less container published on loopback only.
+- Deliverables:
+  - [x] fixture, pin, ground truth, static guard registration; lab brought up and the
+    key checked live — done
+  - [x] baseline and after runs (CC-FUZZ-0630..0632) — done
+  - [x] FR-LAB-350, ARCHITECTURE external labs, CHANGELOG — done
+- Effectiveness (assessed 2026-11-20). **Headline (crawl-based discovery, the owner's
+  measure since 2026-11-20): tp=0 fp=0 fn=63 tn=42 before and after** (commands below):
+  fuzzlab's spider finds no level parameter on this SPA, so discovery reaches none of
+  the cases. The ground-truth-point runs below are an oracle diagnostic only. Lab
+  knowledge (the app's scanner metadata, its level numbers and parameter names) is used
+  only in this fixture and the answer key, never in detection (CC-FUZZ-0633). Diagnostic:
+  `fuzzlab auto --base-url http://127.0.0.1:3093 --ground-truth lab/ground-truth-vulnerableapp --points ground-truth --browser --oob --score --authorized` on a freshly restarted container, scored against the final key:
+  - BASELINE (detection code of 2658271): tp=26 fp=0 fn=37 tn=42, 2402 requests, 2162 s
+    (its own printout, under the key before VAPP-0003/0004 became negatives, said
+    tp=26 fp=0 fn=39 tn=40).
+  - AFTER (CC-FUZZ-0630..0632): tp=37 fp=0 fn=26 tn=42, 2496 requests, 2129 s. Gained 11,
+    lost none: CommandInjection LEVEL_3..5, PathTraversal LEVEL_1/2, SSRF LEVEL_1, open
+    redirect LEVEL_2..6. fp=0 on every SECURE level in both runs.
+  - Crawl-based: `fuzzlab crawl --start http://127.0.0.1:3094/VulnerableApp/ --engine
+    playwright --max-depth 3 --workers 4` (a second container; 172 pages from the app's
+    `sitemap.html`, 21 s), then `auto --points crawl --spider-db ... --browser --oob
+    --score`: BASELINE tp=0 fp=0 fn=63 tn=42 (609 requests, 3 s), AFTER the same (612
+    requests, 3 s). The spider captured no level parameter (every level's input lives in
+    the SPA page its script renders) and the auditor folded the 23 sibling classes into
+    one templated segment (`/VulnerableApp/{id}/LEVEL_n`).
+  - Verification: `scripts/verify_change.py --base 2be7a50` on 6d290f4: 194 files,
+    5961 passed, 5 failed, 10 skipped, 156 xfailed; the 5 are
+    `tests/test_navigation_aborts.py` cases that fail identically on an untouched
+    2be7a50 worktree in this container (ERROR_LOG 2026-11-20). PA-0038: the three key
+    files are tracked; `tests/test_external_labs_static.py` run alone: 275 passed; the
+    gated live test (`FUZZLAB_LIVE_EXTERNAL_LABS=1 ... -k vulnerableapp`): 1 passed.
+    After the black-box review (CC-FUZZ-0633), on 4c92820: 194 files, 5962 passed, the
+    same 5 failed, 10 skipped, 156 xfailed.
+  - Open (measured, not built here): stored XSS on a same-URL store and render (the
+    reflected strategy confirms first and the oracle stops: VAPP-0034..0039); blind SQLi
+    LEVEL_1 (`{ "isCarPresent": true}` vs `false}`: 23 vs 24 bytes, the boolean
+    engine's length similarity reads them as one page); filters on the raw URL
+    (PathTraversal LEVEL_3..5/9/11 need `%2e` in the wire form, which the senders'
+    urlencode never emits); null-byte and allowlisted-name levels (PathTraversal
+    LEVEL_7/8, XSSInImgTagAttribute LEVEL_5, Persistent LEVEL_6's reflected form) need
+    the point's own default value, which a ground-truth point does not carry; XXE LEVEL_1
+    needs the app's `<book>` document (no XML template field exists for a point); SSRF
+    LEVEL_2..4 need an internal host the container can reach; the crawler gaps above.
+### CC-LAB-0373 — Correction to CC-LAB-0371: the measured cut was withdrawn (2026-11-20)
+- Change: none to code; a correction (change-control is append-only).
+- CC-LAB-0371's AFTER column measured CC-FUZZ-0650's quiet-settle early end, withdrawn
+  by CC-FUZZ-0651 after it missed late XSS sinks the labs do not exercise (BUG-0650).
+  Its "no detection lost" covered the ten lab configurations only, with 2 positive
+  browser observations among the shadow run's 311: too few to see a miss (PA-0650(3)).
+  The branch's timing is CC-LAB-0371's BEFORE column again. CC-LAB-0370's probe and the
+  BEFORE profile stand: the M6 settle is still the measured cost, to be cut without
+  shortening the window (FR-FUZZ-653).
+- Deliverables:
+  - [x] this correction — done
+- Effectiveness: n/a (a record).
+
+### CC-LAB-0372 — Lane PERF: the cost of `R-SSJS` on two labs that do not need it (2026-11-20)
+- Change: none to code; a measurement on the merged tree 4cc25dd (lane NODE's
+  CC-FUZZ-0610 rule), asked by the orchestrator as a candidate for lane PERF's next cut.
+- How: `scripts/measure_scan_perf.py --authorized --lab <lab> --points ground-truth
+  -- --browser [--oob] --mode manual --categories <the categories automatic mode plans
+  for the lab>`, then the same with `server-side-javascript-injection` added. Juice
+  Shop: insecure-deserialization, open-redirect, path-traversal,
+  server-side-template-injection, sql-injection, ssrf, xss, xxe (with `--oob`);
+  bWAPP (`--base-url http://127.0.0.1:8092`): open-redirect, path-traversal,
+  sql-injection, xss. In automatic mode the rule runs only where the key labels a
+  `ssjs` case (NodeGoat), so neither lab pays it today.
+- Results (tp/fp/fn/tn identical with and without it: Juice Shop 5/0/10/3, bWAPP
+  21/0/34/3):
+  - Juice Shop: +8 candidates (30 -> 38), requests 150 -> 190 (+40, 5 per candidate),
+    wall 24.6 -> 24.2 s (within run-to-run noise).
+  - bWAPP: +48 candidates (102 -> 150), requests 888 -> 1285 (+397, +45%, about 8.3
+    per candidate), wall 195.7 -> 200.2 s.
+  - No finding and no false positive from it on either lab.
+- Candidate cut (not built): `R-SSJS` fires on every query, body, JSON and path point;
+  a value-shape or technology gate (a fingerprint or answer that names a JavaScript
+  server) would keep the cost off PHP apps like bWAPP. That is NODE's rule: a change
+  to it is lane NODE's or the orchestrator's decision.
+- Deliverables:
+  - [x] runs; this record — done
+- Effectiveness: n/a (a record).
+
+### CC-LAB-0371 — Lane PERF: BEFORE and AFTER on five external labs (2026-11-20)
+- Change: none to code; the measurement record of CC-FUZZ-0650 (FR-FUZZ-650).
+- How (this container, docker, sequentially, nothing else running beside a timed
+  run): each lab up with `lab/labctl.sh up <lab> --authorized`; spider databases made
+  once and reused by every run (`crawl --engine playwright --no-reveal --db ...`:
+  Juice Shop `--start http://127.0.0.1:3000/#/login --max-depth 0 --submit-spa-forms
+  login`; bWAPP `--start http://127.0.0.1:8092/bWAPP/portal.php --identity bwapp-bee
+  --follow-selector-forms bug`; SSType, CopyNPaste, Mongection from `/`, anonymous);
+  then `python scripts/measure_scan_perf.py --authorized --store <fresh> --lab <lab>
+  --points <gt|crawl> [--spider-db ...] -- --browser` (Juice Shop adds `--oob`;
+  bWAPP gt `--base-url http://127.0.0.1:8092`, bWAPP crawl `--base-url
+  http://127.0.0.1:8092/bWAPP/ ... --header-points User-Agent,Referer,bWAPP`).
+  BEFORE ran tree 2be7a50 (a separate worktree, F-650), AFTER the commit of
+  CC-FUZZ-0650. Labs with an identity ran as it (`juice-user`, `bwapp-bee`).
+- Results (tp/fp/fn/tn identical BEFORE and AFTER for every row, with the same
+  matched case ids and no false alarm; BEFORE / AFTER):
+
+    | lab, points | tp/fp/fn/tn | requests | requests per finding | wall s | M6 browser s |
+    |---|---|---|---|---|---|
+    | Juice Shop gt | 5/0/10/3 | 150 / 150 | 30.0 / 30.0 | 43.7 / 24.6 | 35.4 / 15.4 |
+    | Juice Shop crawl | 1/0/14/3 | 69 / 69 | 69.0 / 69.0 | 36.6 / 37.6 | 30.5 / 31.0 |
+    | bWAPP gt | 21/0/34/3 | 888 / 885 | 42.286 / 42.143 | 620.9 / 198.7 | 600.3 / 175.4 |
+    | bWAPP crawl | 46/0/9/3 | 11367 / 11367 | 247.109 / 247.109 | 842.0 / 391.4 | 659.3 / 195.2 |
+    | SSType gt | 1/0/1/2 | 22 / 22 | 22.0 / 22.0 | 28.4 / 7.9 | 28.2 / 7.8 |
+    | SSType crawl | 0/0/2/2 | 0 / 0 | None / None | 0.1 / 0.1 | 0.0 / 0.0 |
+    | CopyNPaste gt | 0/0/3/1 | 67 / 67 | None / None | 0.2 / 0.2 | 0.0 / 0.0 |
+    | CopyNPaste crawl | 0/0/3/1 | 23 / 23 | None / None | 28.5 / 7.9 | 28.4 / 7.7 |
+    | Mongection gt | 0/0/2/2 | 12 / 12 | None / None | 0.2 / 0.1 | 0.0 / 0.0 |
+    | Mongection crawl | 0/0/2/2 | 0 / 0 | None / None | 0.1 / 0.1 | 0.0 / 0.0 |
+
+  bWAPP gt's 888 / 885 requests is run-to-run drift of bWAPP's own answers, not the
+  change: the shadow run (same verdict code as BEFORE, the whole wait kept) sent 11 364
+  on bWAPP crawl against BEFORE's 11 367.
+- Profile (BEFORE, `phases`): the M6 browser was 81-99% of every run that used it:
+  each observation of a payload that does not fire waited `SETTLE_MS` (4 s), plus a
+  driver start (0.31 s) and the launch and navigation; HTTP sends 19 s (bWAPP gt) and
+  141 s (bWAPP crawl, 11 367 requests); fingerprint baseline, audit, session login and
+  store writes under 3 s each. AFTER, bWAPP crawl's remaining time is the browser
+  (195 s, 138 observations: driver start, launch, navigation, the 0.5 s quiet period)
+  and HTTP (154 s).
+- Juice Shop crawl gained nothing: every observation's page opened socket.io's
+  WebSocket, which keeps the whole window (FR-FUZZ-651(4)).
+- Not measured here: Gossip World (its login failed under the session manager while
+  the lab's own bootstrap logged in: `SessionAuthError` at `crawl --identity
+  sdl-gossip-user`), and the other five secDevLabs apps.
+- Deliverables:
+  - [x] BEFORE, shadow, AFTER runs; this record — done
+- Effectiveness (assessed 2026-11-20): met for the measured labs: no detection lost,
+  wall time down 68% (bWAPP gt), 54% (bWAPP crawl), 44% (Juice Shop gt), 72% (SSType
+  gt, CopyNPaste crawl).
+
+### CC-LAB-0370 — Scan performance probe for the external labs (2026-11-20)
+- Change: `scripts/measure_scan_perf.py` (new; FR-LAB-370). Lane PERF's measurement
+  tool: one `fuzzlab auto` run in-process against a running external lab, scored, with
+  per-phase wall-clock timers.
+- Reason: lane PERF must cut scan cost on the existing external labs without losing a
+  detection, and every optimisation must cite a measurement (MULTI_AGENT_ORCHESTRATION
+  §7). A cProfile of `auto` alone was misleading: it put 36 s of a 51 s Juice Shop run
+  under the Playwright driver's stop, which measured 0.09 s with explicit timers (the
+  greenlet dispatcher's work lands under the switch frame).
+- Measured with it (2026-11-20, docker, this container; BEFORE = tree 2be7a50):
+  - `--lab juice-shop --points ground-truth -- --browser --oob`: tp=5 fp=0 fn=10 tn=3
+    (as CC-LAB-0317), 150 requests, 30.0 per finding, 43.7 s; the M6 browser 35.4 s
+    over 9 observations.
+  - `--lab juice-shop --points crawl` (spider: `crawl --start .../#/login --max-depth 0
+    --submit-spa-forms login`) `-- --browser --oob`: tp=1 fp=0 fn=14 tn=3, 69
+    requests, 36.6 s; the browser 30.5 s over 6 observations.
+  - `--lab bwapp --points ground-truth --base-url http://127.0.0.1:8092 -- --browser`:
+    tp=21 fp=0 fn=34 tn=3, 888 requests, 42.3 per finding, 620.9 s; the browser 600.3 s
+    over 126 observations (driver start 0.31 s each, the session 4.4 s each: a payload
+    that does not fire waits out `SETTLE_MS`), HTTP 19.1 s.
+- Impact: none on a scan (a script; it wraps functions only for its own run).
+- Risk: low; lab only, `--authorized` required, loopback labs.
+- Deliverables:
+  - [x] script; first measurements (above) — done
+  - [ ] the remaining labs and the optimisations it motivates — in progress (lane PERF)
+- Effectiveness: pending (lane PERF's AFTER runs).
+
 ### CC-LAB-0343 — Mutillidae II measured: BASELINE and AFTER, gaps recorded (2026-11-20)
 - Change: none to code; the measurement record of lane PHPX (item PHPX).
 - Results (scored against `lab/ground-truth-mutillidae`, 39 cases, 28 positives, 11

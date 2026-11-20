@@ -1848,6 +1848,30 @@ fuzzer.
   `{variable: (named type, list depth)}` from the selected operation's variable
   definitions (`$a: [Int!]!` -> `("Int", 1)`; a name declared twice keeps its first);
   None as FR-CRAWL-600. Linear.
+- **FR-CRAWL-640** *(CC-CRAWL-0640, BUG-0670)* **An empty HTTP error answer fails a
+  guarded main-frame navigation onto the browser's error page, on every Chromium
+  binary.** When the answer a guarded top-level navigation gets -- after its checked
+  redirect chain, the landing included -- is HTTP 400-599 with an empty body, the route
+  handler aborts it with `navguard.ERROR_ANSWER_ABORT` (`"failed"`, `net::ERR_FAILED`)
+  after its observer has seen the answer, so the browser commits its own error page and
+  SP-01 settles on it (committed, then loaded) before `goto`'s error is raised. This is
+  what the full Chromium does itself for such an answer
+  (`net::ERR_HTTP_RESPONSE_CODE_FAILURE`; measured on 141 and 153.0.8010.12), and what
+  the headless shell 157.0.8103.78 -- the product's default binary -- no longer does
+  (it loads the answer as an empty page). Any other answer is given as it was: a frame's
+  empty 404 (a page on both binaries, measured), a status outside 400-599, a body of one
+  byte or more, a subresource. Measured: `tests/test_chromium_navigation_outcomes.py`
+  (the raw-browser facts per binary); pinned: `tests/test_navigation_error_answer.py`
+  (unit, and real Chromium on both binaries).
+
+- **FR-CRAWL-641** *(CC-CRAWL-0641, BUG-0672)* **Releasing a guarded context never
+  hangs.** Every call of `navguard.close_pages` / `release` that the page's renderer
+  must answer -- the freeze, the refusing route -- is bounded by
+  `navguard.RELEASE_CALL_MS` through `navguard._bounded`; an expiry is counted
+  (`release_expiries()`) and logged, and a page that did not answer its freeze is closed
+  after the drain and before the refusing route is added. Measured: a page whose main
+  thread is blocked answers neither, on both binaries, and answers stopping its load,
+  the drain timer and its close.
 
 - **FR-CRAWL-670 (a GraphQL schema's operations; CC-CRAWL-0670, 2026-11-20)**
   `tools/gqlschema.py` builds one bounded introspection request (`introspection_body`)
@@ -1961,6 +1985,10 @@ fuzzer.
     error, and waited out its whole timeout: disco's restore `about:blank`, the
     spider's window exits and pre-seed blank (BUG-0561, about 1% of restores under
     disk I/O load).
+    *(CC-CRAWL-0640, BUG-0670:)* the error-page path holds on every binary: an empty
+    HTTP error answer is made a failure by the guard itself (FR-CRAWL-640), so it never
+    depends on whether the binary fails it (the full Chromium) or loads it (the
+    headless shell 157).
   - `networkidle` is waited for (`wait_for_state`) only after a completed load. The
     body text is read without waiting for a body.
   - A page whose load did not complete is read without a second request (review Q2).

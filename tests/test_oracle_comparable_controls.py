@@ -750,6 +750,12 @@ CONTROL_READING = {
                                         "from a compared control"),
     "PathTraversalFsPathReadStrategy": ("negative-control", "the marker must be absent "
                                         "from a compared control"),
+    "PathTraversalClasspathResourceStrategy": ("negative-control", "the file's marker "
+                                               "must be absent from a compared control"),
+    "SsrfFileSchemeStrategy": ("negative-control", "the marker must be absent from a "
+                               "compared bare-path control"),
+    "OpenRedirectFilterBypassStrategy": ("positive", "the raw redirect, read as a "
+                                         "browser resolves it, is the evidence; layer 1"),
     "GreyboxConfirmationStrategy": ("positive", "coverage through `send_correlated`; "
                                     "layer 1"),
     # FR-FUZZ-620/621 (CC-FUZZ-0620/0621): the shared engine, from a common base

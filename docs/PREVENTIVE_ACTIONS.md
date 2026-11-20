@@ -3044,3 +3044,53 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
   2. **The narrowed rule refuses any input it cannot judge** (here: a router URL that names no route is the auth endpoint).
   3. **It is measured live with the gate's own counter** on a run that exercises the narrowed shape. (from BUG-0620)
   - Enforced by: tests/test_front_controller_routes.py::test_the_sender_judges_the_request_as_sent, tests/test_front_controller_routes.py::test_send_passes_the_requests_entries_to_the_gate, tests/test_front_controller_routes.py::test_a_router_url_that_names_no_route_is_the_auth_endpoint
+- **PA-0670** — Strengthens `PA-0522(3)` and `PA-0561(3)`, after BUG-0670: an empty HTTP 4xx/5xx answer fails a navigation onto the error page on the full Chromium but is a page on the headless shell 157 -- the product's default binary --, and SP-01's error-page path and every measurement of it had been made on the full browser only. PA-0522(3) and PA-0561(3) varied the failures and the host's contention, never the binary, and their tests drove the premise through navguard, so a changed browser fact showed up as "DID NOT RAISE" with nothing measuring why.
+  1. **Every browser behaviour a shared primitive relies on is pinned by a raw-browser probe, on each binary the product can run** -- Playwright's default (the headless shell) and the full Chromium, named by Playwright's own channel (`tests/_browser.py::CHROMIUM_BINARIES`) -- asserting the per-binary value, so a browser upgrade that changes one fails there, by name (`tests/test_chromium_navigation_outcomes.py`).
+  2. **Where binaries differ on something a primitive relies on, the primitive fixes the outcome itself** (here: the guard aborts an empty 4xx/5xx main-frame answer with `ERROR_ANSWER_ABORT`), and a real-browser test of the primitive runs on every binary.
+  3. A measurement record names the **binary and its version**, not only the version. (from BUG-0670)
+  - Enforced by: tests/test_navigation_error_answer.py::test_a_guarded_empty_error_answer_settles_on_the_error_page_on_every_binary, tests/test_navigation_error_answer.py::test_an_empty_error_answer_fails_the_navigation_and_nothing_else_does, tests/test_chromium_navigation_outcomes.py::test_an_empty_body_answer
+- **PA-0671** — Strengthens `PA-0126(1)`, after BUG-0671: the harness and eleven test helpers chose the full Chromium by an install-path glob while the product launches the headless shell; when the layout changed the glob matched nothing and every browser test switched binary silently. PA-0126(1) held product launch sites to one helper, but its guard scanned `fuzzlab/` only.
+  1. **A test runs the product's binary**: the operator's `PLAYWRIGHT_CHROMIUM_EXECUTABLE` if set, else Playwright's default; neither the harness nor a test helper sets it.
+  2. **No file of `fuzzlab/`, `scripts/` or `tests/` names a browser install path**; a fact that differs between binaries is measured on each by name (`CHROMIUM_BINARIES`), never by a path that can fail open. (from BUG-0671)
+  - Enforced by: tests/test_browser_binary_choice.py::test_no_python_file_chooses_a_browser_binary_by_its_install_path, tests/test_browser_binary_choice.py::test_the_install_path_guard_catches_synthetic_offenders
+- **PA-0672** — Strengthens `PA-0128(1)` and `PA-0504(2)`, after BUG-0672: `navguard.release` hung forever on a page whose main thread was blocked, because its freeze (`Emulation.setScriptExecutionDisabled`) and its refusing route are answered by the page's renderer and Playwright's sync calls take no deadline. PA-0128(1) made quiescing first mandatory because a sync call cannot be bounded, and took the quiescing call itself to be one that returns; PA-0504(2) made the freeze mandatory, unbounded; neither tested a renderer that cannot answer.
+  1. **Every call a teardown makes that the page's renderer must answer is bounded** (`navguard._bounded`: the call's coroutine on Playwright's loop, driven by a driver timer, for at most its budget), counted and logged on expiry; the teardown then goes on with what the browser itself answers (stopping the load, the drain timer, closing the page), never waiting on the page again.
+  2. **A teardown is tested against a page whose main thread is blocked**, in the real browser, on every binary, beside BUG-0504's refused request at teardown. (from BUG-0672)
+  - Enforced by: tests/test_release_blocked_page.py::test_release_of_a_blocked_page_is_bounded_counted_and_refuses_the_rest, tests/test_release_blocked_page.py::test_the_m6_executor_returns_on_a_page_that_blocks_its_main_thread, tests/test_chromium_navigation_outcomes.py::test_a_blocked_main_thread_answers_only_the_browsers_own_calls
+- **PA-0630** — Strengthens `PA-0117(1)` (the control is the probe minus what it tests) from the control side to the mutation side, after BUG-0630: command-injection timing payloads on a point with no base value replaced the baseline's value (`1`) instead of extending it, so the command the app ran on it (a ~1 s `ping`) was in the baseline only and every 2 s sleep measured ~1 s, under the floor.
+  1. **A differential's mutation is its baseline's own value plus the part under test, never a replacement of it.** Whatever the baseline value makes the application do is then on both sides, and the difference is the payload's alone.
+  2. **Enforced by discovery:** every default strategy that runs the shared timing engine is run with and without a base value, and every mutation must start with the value its baseline sent; the guard is proven on a synthetic offender (PA-0034(2)).
+  3. **A fake application in a timing test costs time for the base value too** (a ping-shaped sender), so a payload that drops it is seen to miss. (from BUG-0630)
+  - Enforced by: tests/test_timing_payloads_carry_the_baseline.py::test_every_timing_mutation_carries_the_baselines_value, tests/test_timing_payloads_carry_the_baseline.py::test_the_guard_flags_a_payload_that_drops_the_baseline_value, tests/test_oracle_vectors.py::test_command_injection_confirms_past_a_filter_when_the_baseline_runs_a_command
+- **PA-0650** — Strengthens `PA-0126(2)`, extends `PA-0551(2)` from discovery to
+  confirmation mechanisms, and strengthens `PA-0507(1)`, after BUG-0650: lane PERF's
+  quiet-settle early end (CC-FUZZ-0650) ended the M6 sentinel wait once a tracker saw no
+  pending timer, request or animation, and missed sinks run by SMIL animation events,
+  `scheduler.postTask`, message ports, `postMessage`, a meta refresh, media events and a
+  request held past SP-40's limit. PA-0126(2)'s one fixture (a timer sink) let a design
+  that tracks timers pass; the shadow run held 2 positives.
+  1. **A confirmation mechanism's observation window ends only on its evidence, its
+     deadline or an error**, never on a prediction that nothing more can happen (for M6:
+     the hit, `SETTLE_MS` from `load` within its cap, or a Playwright error).
+  2. **A change that shortens or skips part of an observation is tested against a
+     fixture built from the platform's ways of running work later**, not from the
+     change's own list (for a browser: timers, requests including long-held ones,
+     animation frames, SMIL and CSS animation events, the task-scheduling and
+     message-port APIs, `postMessage`, refresh navigation, media events, workers,
+     popups), each a real-browser test judged by the sentinel.
+  3. **A "no detection lost" claim states how many positive observations its evidence
+     holds**; a shadow or BEFORE/AFTER run with too few positives to see a miss is not
+     evidence that nothing is missed. (from BUG-0650)
+  - Enforced by: tests/test_m6_window_guard.py::test_the_wait_lasts_its_whole_window_without_a_hit, tests/test_m6_window_guard.py::test_the_guard_catches_an_early_end, tests/test_m6_window_guard.py::test_the_wait_takes_no_early_end_hook, tests/test_m6_slow_sinks.py::test_the_full_window_sees_a_late_sink, tests/test_m6_slow_sinks.py::test_the_fixture_really_is_late
+- **PA-0651** — *(SUPERSEDED by `PA-0671`, lane NAV, BUG-0671: a test launches the
+  product's binary and never chooses one by install path; rule (1) below, matching
+  every install layout, is withdrawn, and rule (2) is met by PA-0671's guard.)* Extends
+  `PA-0035` (probe the real operation) to how a test finds a pre-installed browser,
+  after BUG-0651: twelve lookups named `chrome-linux/chrome`, matched
+  nothing on a `chrome-linux64` image and silently fell back to Playwright's own lookup.
+  1. **A lookup of a pre-installed browser matches every layout the pinned Playwright
+     range installs** (`chromium-*/chrome-linux*/chrome`), never one spelled out.
+  2. **A lookup that finds nothing is a fall-back the code chose, not an accident:** a
+     helper that pins a binary says (by its result) whether it pinned one. (from BUG-0651)
+  - Enforced by: tests/test_browser_binary_choice.py::test_no_python_file_chooses_a_browser_binary_by_its_install_path, tests/test_browser_binary_choice.py::test_the_install_path_guard_catches_synthetic_offenders
+

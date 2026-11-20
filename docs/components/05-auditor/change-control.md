@@ -147,6 +147,13 @@ Newest first.
   - [x] context module, rule predicates and rules, tests (`tests/test_graphql_args.py`)
     — done
   - [x] FR-AUD-600, CHANGELOG — done
+### CC-AUD-0670 — The auditor's browser fetch treats an empty 4xx/5xx answer as a failed load on every binary (BUG-0670) (2026-11-20)
+- Change: none in `fuzzlab/tools/fetcher.py`. `ContentFetcher.fetch` navigates through SP-01; since CC-CRAWL-0640 the guard fails a top-level navigation whose answer is an empty 400-599, so `fetch` takes its failure path (`end_failed_load`, then the static fetch) on the headless shell as it already did on the full Chromium.
+- Impact (other components / project): on the headless shell (the default binary) such a fetch now returns the static fetch's status, content type and (empty) body, with no XHR list, instead of an empty rendered document; one more GET of that URL (the static fallback), as on the full browser. No interface change.
+- Risk (level; mitigation or accepted-risk justification): low; the full browser's behaviour, which the auditor was built and measured on.
+- Deliverables:
+  - [x] Recorded as affected by construction; `tests/test_navigation_aborts.py::test_the_auditors_load_after_failed_loads_is_rendered` passes on both binaries — done
+- Effectiveness: pending (the lane's harness run, CC-CRAWL-0640).
 
 ### CC-AUD-0061 — The auditor's browser fetch settles a failed load on the error page's load (BUG-0561) (2026-10-23)
 - Change: none in `fuzzlab/tools/fetcher.py`. `ContentFetcher.fetch` navigates through SP-01 and ends a failed load with `end_failed_load`; SP-01 now waits for the failed navigation's error page to load before it raises (CC-CRAWL-0065). `end_failed_load`'s decision is unchanged (the settled commit is still recorded).

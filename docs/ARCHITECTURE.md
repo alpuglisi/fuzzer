@@ -195,7 +195,14 @@ tracked in the requirements files, not here.
   are GraphQL requests whose variables are JSON leaves, and it made command injection
   a scoreable class (FR-LAB-321). The auditor judges a GraphQL variable by its own and its
   argument's name under the generic rules (no target-derived rule) and skips the document leaf and non-string scalar variables
-  (FR-AUD-600/601, read through `tools/apiop.py`'s GraphQL reader, SP-80).
+  (FR-AUD-600/601, read through `tools/apiop.py`'s GraphQL reader, SP-80). SasanLabs
+  OWASP VulnerableApp 2.2.115 (`vulnerableapp`, FR-LAB-350, CC-LAB-0350) is the first
+  Java / Spring Boot external lab: a pinned upstream image (no build), its answer key
+  derived from the app's own scanner metadata (UNSECURE / SECURE level variants), and
+  the first scored `command-injection` cases (FR-LAB-351); its measured gaps added the
+  JVM read-sink strategies (`fuzzlab/oracle/strategies_jvm.py`, FR-FUZZ-630/631) and the
+  open-redirect filter bypass (`fuzzlab/oracle/strategies_filters.py`, FR-FUZZ-632),
+  both registered after their category's own strategies.
   A discovery run asks a GraphQL endpoint the app used for its schema once (one bounded
   introspection request, `tools/gqlschema.py`) and fuzzes the schema's String/ID-argument
   operations as captured requests (FR-CRAWL-670/671, FR-AUD-690, FR-FUZZ-690).
@@ -1310,7 +1317,16 @@ tracked in the requirements files, not here.
     browser's own error page has committed and then loaded (at most 3 s in all, the
     commit judged by commits seen since the navigation started, expiries counted;
     BUG-0522, BUG-0561), and a failed load ends its page's previous document through
-    `navguard.end_failed_load` (SP-01): the error page, or `about:blank`.
+    `navguard.end_failed_load` (SP-01): the error page, or `about:blank`. An empty
+    HTTP 4xx/5xx answer to a guarded top-level navigation is made such a failure by the
+    guard itself (`ERROR_ANSWER_ABORT`; BUG-0670), so the outcome is the same on the
+    full Chromium (which fails it) and the headless shell, the product's default binary
+    (which, at 157, loads it as a page). Tests launch the product's binary; a browser
+    fact that differs between binaries is measured on each by name (BUG-0671).
+    A guarded context's release never hangs: the calls a page's renderer must answer
+    (the freeze, the refusing route) are bounded (`navguard._bounded`, SP-115), counted
+    and logged, and a page whose main thread is blocked is closed before the route
+    (BUG-0672). The callers' own reads of such a page are not yet bounded (BUG-0673, open).
     A loopback crawl is scoped to its exact origin. Every probe sender refuses one unless it was explicitly
     enumerated (ground truth / `--url`); an AST guard enforces this. Authenticated
     senders probe the session's auth endpoints anonymously;

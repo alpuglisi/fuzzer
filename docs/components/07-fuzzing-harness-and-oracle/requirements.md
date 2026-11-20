@@ -1280,7 +1280,8 @@ rewards) derives from it.
   - **Settle.** The sentinel wait lasts `SETTLE_MS` from the end of that load wait.
     Once `load` fires (recorded by `page.once("load")`), it lasts a full `SETTLE_MS`
     from `load`, capped at `timeout_ms` + `SETTLE_MS` after the commit, so a slow
-    page's sink is still seen. Only a Playwright error ends the wait early.
+    page's sink is still seen. Only a Playwright error ends the wait early (or the
+    hit). *(An early end on a "quiet" page, FR-FUZZ-650, was withdrawn: BUG-0650.)*
   - **Per probe.** A Playwright error or timeout of the context set-up, the plant or
     the observe navigation raises `NotObserved` (a subclass of `UnplaceableLocation`,
     in `oracle/browser.py`). So does a page that never reached `load` by the end of the
@@ -2264,6 +2265,57 @@ rewards) derives from it.
   an object it was sent) with the tokens' reflected forms, so a page that re-renders the
   submitted leaf compares V with B; a server that stringifies every object still answers V
   and D alike and never confirms.
+- **FR-FUZZ-630 (a classpath-confined read is a path traversal, `CC-FUZZ-0630`,
+  2026-11-20)** `PathTraversalClasspathResourceStrategy` (`fuzzlab/oracle/
+  strategies_jvm.py`, category `path-traversal`, class `path_traversal`), after
+  `PathTraversalFsPathReadStrategy`: `../` * 1..4 + `application.properties` (the file
+  Spring Boot loads from the classpath root), confirmed when a Spring-defined key and `=`
+  is in the answer and absent from a compared control naming the file with no traversal.
+  At most 4 mutations and one control. Black-box (owner directive, 2026-11-20): the
+  behaviour is measured on two independent targets (VulnerableApp's resource read and a
+  standalone JDK 11 `getResourceAsStream`: `..` resolves inside a directory classpath,
+  never above its root). Stated limit: a jar classpath does not resolve `..` (measured),
+  so a packaged fat jar's read is a false negative.
+  - Enforced by: `tests/test_oracle_strategies_jvm.py` (confirms at depth; misses for the
+    OS-file strategy; a file served without traversal, a reflected payload and a confined
+    directory are not confirmed; only the root's file is probed; the marker's false-match
+    set), `tests/test_external_labs_live.py::test_vulnerableapp_jvm_read_strategies_confirm_its_levels`
+    (live, gated).
+- **FR-FUZZ-631 (an in-band SSRF through the `file:` scheme, `CC-FUZZ-0630`,
+  2026-11-20)** `SsrfFileSchemeStrategy` (category and class `ssrf`), after the OOB SSRF
+  strategies: `file:///etc/passwd` then `file:/etc/passwd`, confirmed when the passwd
+  marker comes back and is absent from a compared control sending the bare path. Needs
+  no OOB listener, so it decides where the target cannot reach the scanner's loopback
+  callback (a container). Black-box evidence: JDK 11 `URL.openStream` and CPython
+  `urllib.request.urlopen` both read both spellings and refuse the bare path (measured);
+  PayloadsAllTheThings lists `file:///etc/passwd` as an SSRF payload; VulnerableApp's
+  unfiltered SSRF level reads it, its filtered levels refuse it.
+  - Enforced by: `tests/test_oracle_strategies_jvm.py` (confirmed; refused; a page
+    always showing passwd text and a page reflecting the URL are not confirmed,
+    PA-0090(2)), the live test above.
+
+- **FR-FUZZ-632 (an open redirect past a prefix filter, `CC-FUZZ-0632`, 2026-11-20)**
+  `OpenRedirectFilterBypassStrategy` (`fuzzlab/oracle/strategies_filters.py`, class
+  `open_redirect`), after `OpenRedirectStrategy`: when the plain canary did not land, the
+  canary as `//host/cb`, `/\host/cb` and `@host/cb` (at most three probes), each judged by
+  where a browser lands (`browser_resolve`: C0 and space trimmed, tab and newline removed,
+  `\` read as `/` before the query after a special scheme, then `urljoin`), never a prefix
+  test. Black-box evidence: the spellings are PayloadsAllTheThings' (Open Redirect);
+  `browser_resolve` agrees with Chromium 157 on 10 of 10 `Location` shapes from a
+  synthetic loopback server independent of any lab (enforced below); on VulnerableApp the
+  filtered levels confirm and its own-origin and allowlisted levels do not.
+  - Enforced by: `tests/test_oracle_strategies_filters.py` (the resolver against the
+    measured readings; a prefix filter passed with a backslash; an app-prefixed origin
+    passed with userinfo; an own-origin-plus-slash shape, an allowlist, a body echo and a
+    redirect elsewhere carrying the canary are not confirmed;
+    `test_browser_resolve_agrees_with_chromium`, real Chromium).
+- **FR-FUZZ-633 (timing payloads carry the baseline's value, `CC-FUZZ-0631`,
+  2026-11-20, BUG-0630)** Every timing mutation is the value its baseline sent followed by
+  the part under test: `cmdi_timing_payloads(base)` prefixes each command-injection
+  template with the point's base value, or with `_CMDI_BASELINE` (`1`) when it has none.
+  - Enforced by: `tests/test_timing_payloads_carry_the_baseline.py` (discovery over every
+    default strategy running `_confirm_timing`, proven on a synthetic offender),
+    `tests/test_oracle_vectors.py::test_command_injection_confirms_past_a_filter_when_the_baseline_runs_a_command`.
 
 - **FR-FUZZ-690 (GraphQL schema discovery in `auto`; CC-FUZZ-0690, 2026-11-20)** With
   crawl points (`--points crawl`, or `auto` without a ground truth) and without
@@ -2755,3 +2807,49 @@ and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
       it got a login page;
     - an unrecognised, short, low-entropy equal session id is accepted as distinct
       (FR-SESS-17).
+
+- **FR-FUZZ-650** *(SUPERSEDED by FR-FUZZ-653, `CC-FUZZ-0651`: withdrawn, it missed
+  late sinks, BUG-0650; kept for the record)* *(the M6 wait ends on a quiet page;
+  `CC-FUZZ-0650`, 2026-11-20).*
+  `PlaywrightBrowserExecutor._wait_for_token` ends the sentinel wait before `SETTLE_MS`
+  once `load` has fired and `pagequiet.PageQuiet.settled` reads the page quiet for
+  `QUIET_MS` (500 ms): no request SP-40's `Inflight` counts (its last start or end
+  restarts the period), and in **every** frame no timer due before the wait's
+  deadline, no interval, no animation frame, no idle callback and no running animation
+  (read from `TRACKER_JS`, an init script installed on the context before the first
+  navigation, which wraps the timer functions); and no WebSocket, EventSource or worker
+  on the page at all. A frame whose tracker cannot be read (with the Playwright error
+  class, or with no tracker) is not quiet: the wait runs as before. Before breaking,
+  the wait pumps Playwright's events once more, so a sentinel call the read raced is
+  kept. `EARLY_END = False` keeps the whole window and only records `settled_at` (the
+  measurement mode of `scripts/measure_scan_perf.py --shadow-quiet`). The verdicts are
+  unchanged: a hit is still executed=True, a page that never loaded still
+  `NotObserved`.
+- **FR-FUZZ-651** *(SUPERSEDED with FR-FUZZ-650 by FR-FUZZ-653)* *(FR-FUZZ-650's
+  residuals; `CC-FUZZ-0650`).* (1) A sink fed only by
+  a long-poll answered more than `netquiet.LONG_LIVED_MS` after it opened is not
+  waited for, as SP-40 decides for every settle. (2) A sink run by an event no tracker
+  sees (a media element's events with no request, a message from a cross-origin frame
+  that ran no tracked work) is not waited for after `QUIET_MS`. (3) A page's own script
+  can replace the wrapped timer functions or the tracker's reads; the tracker is
+  defined non-writable, and the labs are not adversarial. (4) A page with a WebSocket
+  (Juice Shop's socket.io), an interval or an endless animation keeps the whole
+  window: no saving there.
+- **FR-FUZZ-652** *(a held Playwright driver: measured, not built; `CC-FUZZ-0650`).*
+  Keeping one Playwright driver for a run would save its start (0.31 s per browser
+  observation on bWAPP), but a held sync driver leaves its event loop on the thread,
+  and every other sync Playwright use there then fails ("using Playwright Sync API
+  inside the asyncio loop", measured in `tests/test_browser_scope.py` and
+  `tests/test_confirm_trace.py`). The executor keeps a driver per probe.
+- **FR-FUZZ-653** *(the M6 observation window is never shortened; `CC-FUZZ-0651`,
+  BUG-0650, 2026-11-20).* The sentinel wait of `PlaywrightBrowserExecutor` ends only on
+  the hit, on its deadline (`SETTLE_MS` from `load`, capped as FR-FUZZ-48's settle
+  says) or on a Playwright error; never on a judgement that nothing else can run. A
+  page's script can be run again by events no tracker sees (an SVG animation's
+  `onend`/`onbegin`, `scheduler.postTask` with a delay, a MessageChannel or
+  `postMessage` chain, a meta refresh, a media element's events, a request answered
+  after SP-40's long-lived limit), measured by the independent verification of
+  CC-FUZZ-0650. A faster M6 keeps the whole window (more observations at once, or
+  less work outside the window), and each such sink stays a real-browser regression
+  test (`tests/test_m6_slow_sinks.py`).
+
