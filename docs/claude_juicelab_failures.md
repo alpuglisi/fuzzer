@@ -2210,3 +2210,17 @@ Juice Shop lab is complete.
 - **Cause:** I sized the wait to the symptom I had measured (being overtaken, which a commit cures), called it fixed on a volume and a load that could not see a race of about 1%, and wrote the rule's concrete clause from the fix instead of from the principle the rule stated.
 - **Status:** fixed by BUG-0561 / CC-CRAWL-0065 (lane NAVSETTLE); PA-0561 strengthens PA-0522 (landed means loaded; the order pinned by a deterministic test; a race measured under CPU and disk I/O contention at a volume that can see it).
 
+### F-650 — I started lane PERF's BEFORE runner from the working tree I then edited
+- **What:** the BEFORE measurements (`runset.sh B1`) ran `scripts/measure_scan_perf.py` from `/home/user/fuzzer`, a new process per lab. I edited `fuzzlab/tools/browserexec.py` there while the runner was on its fourth lab, so its later labs would have imported the changed executor and been AFTER runs labelled BEFORE.
+- **Evidence:** this session: `ps` showed the runner (started 08:00) and the bWAPP crawl process (08:11:47) before the first edit; I stopped the runner by its PID, kept the running process (it had imported the unchanged code), and ran the rest from a worktree of 2be7a50 (`TREE=/home/user/base`).
+- **Impact:** none recorded: every BEFORE number comes from unchanged code.
+- **Cause:** I treated the working tree as fixed for the length of a batch I had left running.
+- **Status:** corrected; BEFORE runs now always use a separate worktree of the base.
+
+### F-651 — I wrote a per-run Playwright driver without checking Playwright's one-sync-driver-per-thread rule
+- **What:** I implemented a held driver (FR-FUZZ-652) on the assumption that a sync Playwright driver can stay open between probes. A held driver keeps its event loop on the thread; every later `sync_playwright()` there fails.
+- **Evidence:** three real-browser tests failed with "It looks like you are using Playwright Sync API inside the asyncio loop" (`tests/test_browser_scope.py`, `tests/test_confirm_trace.py`) before any commit.
+- **Impact:** none: never committed; reverted and recorded as measured-not-built.
+- **Cause:** I designed from the saving I had measured, not from the platform's constraint, which I had not measured (MULTI_AGENT_ORCHESTRATION §7).
+- **Status:** reverted.
+

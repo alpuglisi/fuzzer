@@ -3,6 +3,35 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0650 — The M6 sentinel wait ends once the page has gone quiet (SP-105) (2026-11-20)
+- Change: `fuzzlab/tools/pagequiet.py` (new: `PageQuiet`, `TRACKER_JS`, `QUIET_MS`);
+  `fuzzlab/tools/browserexec.py` (`EARLY_END`; `_in_browser` installs `PageQuiet`
+  before the first navigation; `_wait_for_token(..., quiet=)` breaks once settled,
+  after one more event pump); `tests/test_pagequiet.py` (new); the fake Playwright
+  contexts of `tests/test_confirm_trace.py` and `tests/test_m6_navigation_failures.py`
+  gain `add_init_script`; SP-105; FR-FUZZ-650..652.
+- Reason (measured, `scripts/measure_scan_perf.py`, CC-LAB-0370): the M6 browser was
+  600 of 621 s on bWAPP's ground truth and 659 of 842 s on its crawl; each observation
+  of a payload that does not fire waited the whole `SETTLE_MS` (4 s). The shadow run
+  (`--browser-timeline --shadow-quiet`: the whole wait kept, the early end recorded)
+  over Juice Shop gt/crawl, SSType gt, CopyNPaste crawl and bWAPP gt: 173
+  observations, every hit before the would-be end (0 after), every settled negative
+  settled at 0.52-0.56 s; Juice Shop's pages with socket.io's WebSocket kept the
+  whole window (7 of 15 observations).
+- Not built (measured): keeping one Playwright driver per run (FR-FUZZ-652). A held
+  sync driver broke later sync Playwright use on the thread (3 real-browser tests).
+- Impact: M6 only. Verdicts unchanged by construction (a hit still confirms; a page
+  that never loaded is still `NotObserved`); trace spans (`waited`) record the shorter
+  wait. SP-40 unchanged (a consumer).
+- Risk: medium -- an early end could miss a sink a tracker cannot see (FR-FUZZ-651);
+  mitigated: fail closed on any unreadable frame, streams and workers keep the whole
+  window, real-browser tests for sinks run by a request's answer, an interval, an
+  animation-frame loop and a timer chain, the shadow run on the labs.
+- Deliverables:
+  - [x] code, tests, SP-105, FR-FUZZ-650..652, ARCHITECTURE — done
+  - [ ] BEFORE/AFTER on the labs (tp/fp/fn/tn identical) — in progress
+- Effectiveness: pending (AFTER runs).
+
 ### CC-FUZZ-0117 — M6's navigations settle a failure on the error page's load (BUG-0561) (2026-10-23)
 - Change: none in `fuzzlab/tools/browserexec.py` or the oracle. The executor's navigations go through SP-01, which now waits for a failed navigation's error page to load, not only to commit, before it raises (CC-CRAWL-0065).
 - Impact (other components / project):

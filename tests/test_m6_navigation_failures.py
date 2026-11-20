@@ -192,6 +192,9 @@ def _fake_playwright(monkeypatch, goto=None, *, fires=lambda url: False,
         def expose_binding(self, name, fn):
             self._binding[0] = fn
 
+        def add_init_script(self, script):        # SP-105's quiet tracker
+            pass
+
         def route(self, pattern, handler):
             pass
 

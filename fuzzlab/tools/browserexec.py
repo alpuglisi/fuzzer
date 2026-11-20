@@ -19,6 +19,7 @@ from fuzzlab.core import trace
 from fuzzlab.core.urls import bind_query, place_query_param   # the one placement (SP-42)
 from fuzzlab.oracle.browser import SENTINEL, ExecObservation, ExecRequest, NotObserved
 from fuzzlab.oracle.probe import UnplaceableLocation
+from fuzzlab.tools.pagequiet import PageQuiet
 
 
 def _with_fragment(url: str, param: str, value: str) -> str:
@@ -361,6 +362,11 @@ class PlaywrightBrowserExecutor:
     #: search sink, which fires at about one second). Polled; the wait ends on the hit.
     SETTLE_MS = 4000
     _POLL_MS = 100
+    #: End the sentinel wait once the page has been quiet for `pagequiet.QUIET_MS`
+    #: (SP-105, FR-FUZZ-650): nothing left that could run its script. False keeps the
+    #: whole `SETTLE_MS` and only records when it would have ended (``settled_at``):
+    #: the measurement that justified it (`scripts/measure_scan_perf.py`).
+    EARLY_END = True
     #: How long the observe navigation waits for ``load`` after it commits (BUG-0137).
     #: Bounded and suppressed: a page whose script navigates to a refused URL before
     #: ``load`` never fires it (the aborted navigation stopped the load), and the
@@ -368,14 +374,18 @@ class PlaywrightBrowserExecutor:
     LOAD_WAIT_MS = 3000
 
     def _wait_for_token(self, page, hits: set, token: str, error, load_at=None,
-                        cap: float | None = None) -> bool:
+                        cap: float | None = None, quiet=None) -> bool:
         """Wait up to `SETTLE_MS` for ``token`` in ``hits``, which the context's
         sentinel binding fills from any document of the page -- a hit before a
         navigation is kept (reviewers A and B). Waiting pumps Playwright's events; a page
         that closes or navigates under the wait is "not yet", never an error (only a
         Playwright error ends the wait, BUG-0137 review A-N1). Once ``load`` has fired
         (``load_at[0]``, a `time.monotonic()`), the wait lasts a full `SETTLE_MS` from
-        it, up to ``cap`` (BUG-0137 review Z3): a slow page's sink is still seen."""
+        it, up to ``cap`` (BUG-0137 review Z3): a slow page's sink is still seen.
+        With ``quiet`` (a `pagequiet.PageQuiet`), the wait ends earlier once ``load``
+        has fired and the page has been quiet for `QUIET_MS` (SP-105): a sink can only
+        run from something still pending. The events a quiet read raced are pumped
+        once more before the answer."""
         settle = self.SETTLE_MS / 1000
         deadline = time.monotonic() + settle
         while token not in hits:
@@ -385,6 +395,14 @@ class PlaywrightBrowserExecutor:
                                min(after_load, cap))
             if time.monotonic() >= deadline:
                 break
+            if quiet is not None and load_at is not None and load_at[0] is not None \
+                    and quiet.settled(page, deadline):
+                if quiet.settled_at is None:
+                    quiet.settled_at = time.monotonic()
+                if self.EARLY_END:
+                    with suppress(error):       # a binding call the read raced
+                        page.wait_for_timeout(self._POLL_MS)
+                    break
             try:
                 page.wait_for_timeout(self._POLL_MS)
             except error:                # the page or context went away: no more hits
@@ -477,6 +495,10 @@ class PlaywrightBrowserExecutor:
             context.expose_binding(SENTINEL, (lambda _source, t: hits.add(str(t)))
                                    if visit is None else visit.binding(hits))
             page = context.new_page()
+            # SP-105: the quiet tracker in every document, SP-40's counter on the page,
+            # before the first navigation (FR-FUZZ-650)
+            quiet = PageQuiet(error)
+            quiet.install(context, page)
             if visit is not None:                         # FR-FUZZ-62: counted only
                 visit.listen(page)
             # Abort destructive subresources/redirects; the navigation targets
@@ -562,7 +584,8 @@ class PlaywrightBrowserExecutor:
             waiting = time.monotonic()
             fired = self._wait_for_token(                  # BUG-0126: async sinks
                 page, hits, token, error, load_at,
-                cap=nav.committed_at + (self._timeout + self.SETTLE_MS) / 1000)
+                cap=nav.committed_at + (self._timeout + self.SETTLE_MS) / 1000,
+                quiet=quiet)
             if visit is not None:
                 visit.waited(self.SETTLE_MS, time.monotonic() - waiting)
             loaded = fired or load_state_reached(page, "load")
