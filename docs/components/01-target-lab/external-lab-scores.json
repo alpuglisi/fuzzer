@@ -413,5 +413,58 @@
    "VAPP-0102": "open: missed by the ground-truth pass (xss-reflected GET /VulnerableApp/PersistentXSSInHTMLTagVulnerability/LEVEL_6 comment); CC-LAB-0350's 'Open' lists the measured causes (same-URL stored XSS, blind SQLi LEVEL_1, raw-URL filters, null-byte/allowlisted levels, XXE document, internal SSRF hosts) [tracked: CC-LAB-0350]"
   },
   "source": "re-run by lane ACC on the merged tree (7c6f8ca; 94fac7f changes no VulnerableApp point's URL verdict), the container restarted first; the same matched set on da1a5d6's merge (2492 requests). Lane JAVA's crawl (headline, CC-LAB-0350): tp=0 fp=0 fn=63 tn=42"
+ },
+ "dvwa": {
+  "commit": "250c8177",
+  "command": "fuzzlab auto --base-url http://127.0.0.1:3097/ --ground-truth lab/ground-truth-dvwa --points ground-truth --identity dvwa-user --browser --oob --score --authorized",
+  "tp": 7,
+  "fp": 0,
+  "fn": 9,
+  "tn": 17,
+  "requests": 341,
+  "wall_s": 295.0,
+  "matched": [
+   "DVWA-0001",
+   "DVWA-0003",
+   "DVWA-0004",
+   "DVWA-0005",
+   "DVWA-0013",
+   "DVWA-0014",
+   "DVWA-0015"
+  ],
+  "missed": {
+   "DVWA-0002": "open: the `ID:` echo needs a value the database matches (a digit before the tag); the reflected probes start with none [tracked: CC-LAB-0433]",
+   "DVWA-0006": "open: DOM XSS through decodeURI -- the browser-check payloads are fully percent-encoded, so `/ = :` never decode (gap 2) [tracked: CC-LAB-0433]",
+   "DVWA-0007": "not reachable from ground-truth points: [reach: crawl] -- the handler needs `btnSign` in the body and a ground-truth point carries no sibling fields",
+   "DVWA-0008": "not reachable from ground-truth points: [reach: crawl] -- as DVWA-0007",
+   "DVWA-0009": "not reachable from ground-truth points: [reach: crawl] -- as DVWA-0007 (the crawl run confirms it)",
+   "DVWA-0010": "not reachable from ground-truth points: [reach: crawl] -- as DVWA-0007 (the crawl run confirms it)",
+   "DVWA-0011": "not reachable from ground-truth points: [reach: crawl] -- the handler needs `Submit` in the body (the crawl run confirms it)",
+   "DVWA-0012": "open: a ground-truth JSON point gets no value shape, so `target: 127.0.0.1` never selects R-COMMAND-INJECTION-VALUE (gap 3) [tracked: CC-LAB-0433]",
+   "DVWA-0016": "not reachable from ground-truth points: [reach: none - multipart upload; multipart forms are not sent]"
+  },
+  "source": "lane NEWLABS2-DVWA's recorded gt run (CC-LAB-0433, oracle diagnostic) on a freshly reset lab, level low; matched ids are the floor of tests/test_dvwa_live.py, which re-confirmed them live; its crawl (headline): tp=9 fp=0 fn=7 tn=17, 382 requests, 288 s"
+ },
+ "crapi": {
+  "commit": "0c5d8962",
+  "command": "fuzzlab auto --base-url http://127.0.0.1:3101 --store <db> --ground-truth lab/ground-truth-crapi --points ground-truth --identity crapi-user --peer-identity crapi-peer --browser --oob --score --authorized",
+  "tp": 4,
+  "fp": 0,
+  "fn": 3,
+  "tn": 7,
+  "requests": 280,
+  "wall_s": 22.0,
+  "matched": [
+   "CRAPI-0001",
+   "CRAPI-0002",
+   "CRAPI-0004",
+   "CRAPI-0005"
+  ],
+  "missed": {
+   "CRAPI-0003": "open: no access-control candidate -- R-ACCESS-CONTROL-PATH selects id-shaped names and this point is named `vin` (rules_data is another lane's) [tracked: CC-LAB-0438]",
+   "CRAPI-0006": "not reachable from ground-truth points: [reach: none - the workshop sits on an internal network and cannot reach the oracle's host-loopback listener]",
+   "CRAPI-0007": "not reachable from ground-truth points: [reach: none - the alg:none probe's fresh-marker sub names no account, so crAPI never echoes it]"
+  },
+  "source": "lane NEWLABS2-CRAPI's recorded gt run `gt2` (CC-LAB-0438, oracle diagnostic) on a freshly reset lab; matched ids as that entry names them; its crawl (headline): tp=0 fp=0 fn=7 tn=7, 174 requests, 9 s"
  }
 }
