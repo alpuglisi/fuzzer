@@ -18,6 +18,18 @@ Format per entry:
 
 ---
 
+## 2026-11-20 — Lab fixtures (HOLDOUT lane): two held-out bootstraps tripped the classified-status guard (BUG-0721)
+- **Symptom:** `scripts/verify_change.py --base e14c925` on 6ddac13: 1 failure,
+  `test_core_comparability.py::test_no_module_classifies_a_throttle_or_refusal_but_the_owner`
+  (sites `bootstrap_vampi`, `bootstrap_dvws_node`).
+- **Root cause:** their login differential compared `anon.status_code != 401`, a status SP-56
+  classifies, outside its owner; the subagents verified with the two test files my dispatch
+  prompt named, not the harness, so the whole-package guard ran only at the lane's end.
+- **Remediation:** the differential requires a client-error refusal (4xx) and 200 with the
+  token (CC-LAB-0427); PA-0721 (dispatch prompts name the harness; harness after each merge).
+  See `docs/bugs/BUG-0721-held-out-bootstraps-compared-a-classified-status-outside-its-owner.md`.
+- **Status:** Fixed.
+
 ## 2026-11-20 — Test guard (HOLDOUT lane): the GraphQL-context guard failed on a second lab's GraphQL answer key (BUG-0720)
 - **Symptom:** after merging the held-out lab DVWS-node,
   `tests/test_graphql_args.py::test_no_other_labs_ground_truth_point_has_a_graphql_context`

@@ -1823,10 +1823,11 @@ def bootstrap_vampi(client: _LabClient, cred: ResolvedCredential, *, deadline: f
         data = authed.json().get("data") or {}
     except (ValueError, AttributeError):
         data = {}
-    if authed.status_code != 200 or anon.status_code != 401 or \
+    # a positive differential: refused anonymously (a client error), 200 with the token
+    if authed.status_code != 200 or not 400 <= anon.status_code < 500 or \
             data.get("username") != cred.username or data.get("admin") is not False:
         raise ExternalLabError(f"VAmPI /me: {anon.status_code} anonymous, "
-                               f"{authed.status_code} with the token (want 401 / 200 naming "
+                               f"{authed.status_code} with the token (want 4xx / 200 naming "
                                f"the account, not an admin)")
     notes.append("login verified")
     title = _vampi_book(cred)
@@ -1896,9 +1897,10 @@ def bootstrap_dvws_node(client: _LabClient, cred: ResolvedCredential, *,
             f"account)")
     authed = client.request("GET", "/api/v2/notes", headers={"Authorization": f"Bearer {token}"})
     anon = client.request("GET", "/api/v2/notes", anonymous=True)
-    if authed.status_code != 200 or anon.status_code != 401:
+    # a positive differential: refused anonymously (a client error), 200 with the token
+    if authed.status_code != 200 or not 400 <= anon.status_code < 500:
         raise ExternalLabError(f"DVWS-node /api/v2/notes: {anon.status_code} anonymous, "
-                               f"{authed.status_code} with the token (want 401 / 200)")
+                               f"{authed.status_code} with the token (want 4xx / 200)")
     notes.append("login verified")
     return notes
 

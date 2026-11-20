@@ -2362,3 +2362,10 @@ Juice Shop lab is complete.
 - **Impact:** one extra benchmark run; the wrong table was never committed.
 - **Cause:** I wrote a metric reader from a schema name without measuring it.
 - **Status:** fixed; the committed baseline (CC-LAB-0426) counts what the run sent.
+
+### F-725 — My dispatch prompts told the onboarding subagents to verify with two named test files, not the harness
+- **What:** the HOLDOUT dispatch prompts said "`python -m pytest … tests/test_external_labs_static.py tests/test_holdout_benchmark.py`" as the verification step, against CLAUDE.md step 2 ("never a hand-picked list"). Their code tripped a whole-package guard (BUG-0721) that ran only in my final harness.
+- **Evidence:** the three dispatch prompts (this session, 2026-11-20); `scratchpad/verify/parallel.log` of 6ddac13 (1 failure).
+- **Impact:** one failed harness run and a fix commit, on the lane branch only.
+- **Cause:** I wrote a quick check as the verification step, and ran a subset myself after each merge instead of the harness.
+- **Status:** fixed (CC-LAB-0427); PA-0721.

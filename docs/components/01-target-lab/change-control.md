@@ -3,6 +3,22 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0427 — The VAmPI and DVWS-node bootstraps check a differential, not a classified 401 (BUG-0721) (2026-11-20)
+- Change: `fuzzlab/lab_fixtures/external.py` (`bootstrap_vampi`, `bootstrap_dvws_node`): the
+  login is verified when the request answers 200 with the token and a client error (4xx)
+  without it, instead of exactly 401; `tests/test_holdout_benchmark.py`: the DVWS
+  differential test covers anonymous 200, 302 and 500.
+- Reason: BUG-0721 — a literal 401 outside `core.comparability` fails FR-CORE-507's guard,
+  and an allowance row would name held-out labs in that test file (lab/HOLDOUT.md rule 4).
+- Impact: none on the labs (both answer 401 anonymously, a 4xx); the baseline
+  (CC-LAB-0426, at 2ab5955) is unaffected: only the bootstrap's acceptance test changed,
+  and both labs bootstrapped there.
+- Risk: low.
+- Deliverables:
+  - [x] fix, tests, BUG-0721 / PA-0721 / ERROR_LOG — done
+- Effectiveness (assessed 2026-11-20): the harness re-run on this commit (see the lane's
+  final record).
+
 ### CC-LAB-0426 — The held-out baseline at e14c925's detection code (holdout-scores.json) (2026-11-20)
 - Change: new `docs/components/01-target-lab/holdout-scores.json` and `.md`, written by
   `scripts/holdout_score.py --authorized` (CC-LAB-0424) at fuzzlab commit 2ab5955, whose

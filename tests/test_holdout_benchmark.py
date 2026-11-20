@@ -641,10 +641,12 @@ def test_the_dvws_bootstrap_registers_both_accounts_and_verifies_by_differential
     assert keyring.attrs["dvws-user"] == {"note_id": "1"}
 
 
-def test_the_dvws_bootstrap_stores_nothing_without_a_positive_differential():
-    lab, keyring = _DvwsLab(anon_notes_status=200), _DvwsStore()
+@pytest.mark.parametrize("anon_status", [200, 302, 500])
+def test_the_dvws_bootstrap_stores_nothing_without_a_positive_differential(anon_status):
+    """Anonymous must be refused with a client error (not served, redirected or broken)."""
+    lab, keyring = _DvwsLab(anon_notes_status=anon_status), _DvwsStore()
     from fuzzlab.lab_fixtures import external as ext
-    with pytest.raises(ext.ExternalLabError, match="want 401 / 200"):
+    with pytest.raises(ext.ExternalLabError, match="want 4xx / 200"):
         _dvws_boot(lab, keyring)
     assert keyring.sets == [] and keyring.attrs == {}
 
