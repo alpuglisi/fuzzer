@@ -38,7 +38,7 @@ def parse_holdout_table(text: str) -> list[HeldOutLab]:
     if SECTION not in text:
         raise HoldoutTableError(f"no {SECTION!r} section")
     body = text.split(SECTION, 1)[1]
-    body = re.split(r"^## ", body, maxsplit=1, flags=re.M)[0]
+    body = re.split(r"^## ", body, maxsplit=1, flags=re.MULTILINE)[0]
     rows = [ln.strip() for ln in body.splitlines() if ln.strip().startswith("|")]
     if len(rows) < 3:
         raise HoldoutTableError("the held-out table has no rows")
