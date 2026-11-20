@@ -3,6 +3,42 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0426 — The held-out baseline at e14c925's detection code (holdout-scores.json) (2026-11-20)
+- Change: new `docs/components/01-target-lab/holdout-scores.json` and `.md`, written by
+  `scripts/holdout_score.py --authorized` (CC-LAB-0424) at fuzzlab commit 2ab5955, whose
+  detection code is identical to e14c925 (the table checks it: `detection_identical: true`).
+- Results (crawl runs only; requests = auto's sends + crawl-recorded + disco exchanges):
+  - vampi: tp 0, fp 0, fn 4, tn 5; 8 requests, 13 s. fuzzlab's login failed (a JSON API
+    with no form: `SessionAuthError`), so the crawl ran anonymously; the app's root is JSON
+    with no links and its OpenAPI document is not linked, so discovery found no endpoint
+    and auto audited no point. Every fn: "no candidate".
+  - dvws-node: tp 0, fp 0, fn 21, tn 11; 139 requests, 59 s. The browser login could not be
+    verified (an SPA keeping its JWT in localStorage: "no request the app made after the
+    login click answers differently without the credential", FR-SESS-5), so crawl and auto
+    ran anonymously: one parameter discovered (the login's), 20 fns "no candidate", one
+    "no candidate for the class" (the login's NoSQL injection).
+  - railsgoat: tp 1 (RGOAT-0013, reflected XSS), fp 3, fn 12, tn 13; 792 requests, 539 s;
+    logged in as its identity throughout. Ten fns had no candidate (the jQuery-sent
+    `_method=patch` updates, signup, upload, forgot-password, DOM fragment, the id-in-path
+    access-control pages), one had no candidate for its class (path traversal on
+    `/download`), and one candidate was not checked (open redirect on `/sessions`,
+    inconclusive). False alarms: access control on `/users/{id}/messages`,
+    `/users/{id}/messages/4` and `/users/{id}/pay` — **not adjudicated** (a real flaw the key
+    lacks, or a false positive): re-examining the key after seeing a benchmark result would
+    tune the measure, so it is left to the owner (lab/HOLDOUT.md rule 3).
+- Reproducibility: the same command run twice (f8c0169's script with only the request
+  count fixed, then 2ab5955): identical tp / fp / fn / tn and identical fn and fp lists on
+  every lab.
+- Recorded, not fixed (lab/HOLDOUT.md rule 3; for the owner): fuzzlab cannot log into a
+  JSON-API login or verify an SPA's localStorage bearer session; the crawler does not read
+  an unlinked OpenAPI document; jQuery-sent forms and multipart uploads were not
+  discovered as points; `GET /createdb`-style destructive GETs are not refused by name.
+- Risk: none (a measurement).
+- Deliverables:
+  - [x] baseline table, this record — done
+- Effectiveness (assessed 2026-11-20): the table is the benchmark's first point; later
+  detection changes are compared with it by re-running the script.
+
 ### CC-LAB-0425 — Seeded-account labs read their published passwords into the keyring (FR-LAB-425) (2026-11-20)
 - Change: `fuzzlab/lab_fixtures/external.py`: `railsgoat_published_credentials` (the app's
   own `/tutorials/credentials` table), `_PUBLISHED_CREDENTIALS`, `seed_published_credentials`

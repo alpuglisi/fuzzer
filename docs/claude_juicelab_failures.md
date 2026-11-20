@@ -2355,3 +2355,10 @@ Juice Shop lab is complete.
 - **Impact:** one wasted benchmark run (~15 min).
 - **Cause:** I designed the runner for the success path only.
 - **Status:** fixed; the baseline (CC-LAB-0426) is from the fixed script.
+
+### F-724 — My benchmark counted requests from a table auto does not write; the first baseline table under-counted every lab
+- **What:** `holdout_score.score_store` summed `request_budget.used` for the run's sends; auto records them in `run_metrics.pipeline_requests`, so the first full run reported only crawl and disco traffic (railsgoat 328 instead of 792). I had not checked the source against a real store before writing it, and the offline test faked `score_store` away.
+- **Evidence:** the first baseline's `probe_requests: null` on every lab, against auto's own "requests: 464" line in the run log; fixed in 2ab5955 with a test reading a real store.
+- **Impact:** one extra benchmark run; the wrong table was never committed.
+- **Cause:** I wrote a metric reader from a schema name without measuring it.
+- **Status:** fixed; the committed baseline (CC-LAB-0426) counts what the run sent.
