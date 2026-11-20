@@ -176,6 +176,13 @@ tracked in the requirements files, not here.
   (FR-LAB-306, CC-LAB-0303: copied from one pinned checkout, dependencies verified on
   the host, built offline; `secdevlabs-copy-n-paste` first; nine built as of
   2026-10-19, `secdevlabs-streaming` the first planted through a JSON PUT, FR-FUZZ-56;
+  `secdevlabs-ecommerce-api` the first with per-account values, FR-LAB-309). OWASP
+  NodeGoat (`nodegoat`, FR-LAB-330/331, CC-LAB-0330/0331) is the first source pinned by
+  commit plus a sha256 over its tracked files (`tree_sha256`), with production-only npm
+  packages; its answer key carries the first server-side JavaScript injection cases
+  (`ssjs`: `eval` and a `$where`), confirmed by two non-destructive strategies
+  (FR-FUZZ-610/611, rule `R-SSJS` FR-AUD-610) whose every probe is valid JavaScript in
+  any quoting context, so an in-process `$where` (Juice Shop's) is never crashed.
   `secdevlabs-ecommerce-api` the first with per-account values, FR-LAB-309). SasanLabs
   OWASP VulnerableApp 2.2.115 (`vulnerableapp`, FR-LAB-350, CC-LAB-0350) is the first
   Java / Spring Boot external lab: a pinned upstream image (no build), its answer key

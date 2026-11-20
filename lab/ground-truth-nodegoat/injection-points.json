@@ -1,0 +1,165 @@
+{
+ "version": 1,
+ "target": "owasp_nodegoat_c5cb68a7",
+ "points": [
+  {
+   "url": "/contributions",
+   "method": "POST",
+   "param": "preTax",
+   "location": "body",
+   "rendering": "server",
+   "json_body": {
+    "preTax": "0",
+    "roth": "0",
+    "afterTax": "0"
+   }
+  },
+  {
+   "url": "/contributions",
+   "method": "POST",
+   "param": "roth",
+   "location": "body",
+   "rendering": "server",
+   "json_body": {
+    "preTax": "0",
+    "roth": "0",
+    "afterTax": "0"
+   }
+  },
+  {
+   "url": "/contributions",
+   "method": "POST",
+   "param": "afterTax",
+   "location": "body",
+   "rendering": "server",
+   "json_body": {
+    "preTax": "0",
+    "roth": "0",
+    "afterTax": "0"
+   }
+  },
+  {
+   "url": "/allocations/2",
+   "method": "GET",
+   "param": "threshold",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/allocations/{userId}",
+   "method": "GET",
+   "param": "userId",
+   "location": "path",
+   "rendering": "server",
+   "account_value": "user_id"
+  },
+  {
+   "url": "/learn",
+   "method": "GET",
+   "param": "url",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/profile",
+   "method": "POST",
+   "param": "lastName",
+   "location": "body",
+   "rendering": "server",
+   "json_body": {
+    "firstName": "John",
+    "lastName": "Doe",
+    "ssn": "",
+    "dob": "",
+    "address": "",
+    "bankAcc": "",
+    "bankRouting": "0198212#"
+   }
+  },
+  {
+   "url": "/memos",
+   "method": "POST",
+   "param": "memo",
+   "location": "body",
+   "rendering": "server"
+  },
+  {
+   "url": "/login",
+   "method": "POST",
+   "param": "userName",
+   "location": "body",
+   "rendering": "server",
+   "json_body": {
+    "userName": "user1",
+    "password": "not-the-password"
+   }
+  },
+  {
+   "url": "/login",
+   "method": "POST",
+   "param": "password",
+   "location": "body",
+   "rendering": "server",
+   "json_body": {
+    "userName": "user1",
+    "password": "not-the-password"
+   }
+  },
+  {
+   "url": "/research",
+   "method": "GET",
+   "param": "symbol",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/profile",
+   "method": "POST",
+   "param": "firstName",
+   "location": "body",
+   "rendering": "server"
+  },
+  {
+   "url": "/profile",
+   "method": "POST",
+   "param": "ssn",
+   "location": "body",
+   "rendering": "server"
+  },
+  {
+   "url": "/profile",
+   "method": "POST",
+   "param": "dob",
+   "location": "body",
+   "rendering": "server"
+  },
+  {
+   "url": "/profile",
+   "method": "POST",
+   "param": "address",
+   "location": "body",
+   "rendering": "server"
+  },
+  {
+   "url": "/profile",
+   "method": "POST",
+   "param": "bankAcc",
+   "location": "body",
+   "rendering": "server"
+  },
+  {
+   "url": "/profile",
+   "method": "POST",
+   "param": "bankRouting",
+   "location": "body",
+   "rendering": "server"
+  },
+  {
+   "url": "/profile",
+   "method": "POST",
+   "param": "website",
+   "location": "body",
+   "rendering": "server"
+  }
+ ]
+}

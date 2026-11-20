@@ -1,0 +1,59 @@
+# OWASP NodeGoat (Apache-2.0; external lab fixture, CC-LAB-0330 / FR-LAB-330). Lab-only.
+# A Node.js / Express / MongoDB app built to teach the OWASP Top 10 to Node developers:
+# its contributions form passes each input to eval() (server-side JavaScript
+# injection), its allocations page builds a MongoDB $where from the `threshold` query
+# value, and it has an open redirect (/learn?url=), stored XSS (autoescape off),
+# SSRF (/research) and an IDOR (/allocations/:userId).
+#
+# Built by ./Dockerfile from the source at the pinned commit, which
+# `labctl.sh up nodegoat` checks out into the gitignored .cache/app (its files hashed
+# against NODEGOAT_TREE_SHA256) with its production npm packages installed on the
+# host by `npm ci --omit=dev`; the image copies them and fetches nothing. The database
+# runs the pinned MongoDB 4.4 image (upstream's compose says `mongo:4.4`), re-seeded by
+# upstream's artifacts/db-reset.js at every app start (three accounts: admin, user1,
+# user2, with the passwords NodeGoat's README publishes).
+#
+# Safety: the app is published on LOOPBACK ONLY (127.0.0.1); the database is never
+# published and sits on an internal network. Capabilities dropped. NODE_ENV=production
+# selects upstream's empty production config (its development config injects a
+# livereload <script> from port 35729 into every page).
+#
+# Run through lab/labctl.sh:  ./labctl.sh up nodegoat [--authorized]
+name: fuzzlab-nodegoat
+
+x-podman:
+  in_pod: false
+
+services:
+  web:
+    build:
+      context: .
+    networks: [nodegoat-front, nodegoat-db]
+    ports:
+      # Loopback only. Never bind 0.0.0.0.
+      - "127.0.0.1:${NODEGOAT_PORT:-3091}:4000"
+    environment:
+      NODE_ENV: production
+      MONGODB_URI: mongodb://mongo:27017/nodegoat
+    depends_on: [mongo]
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 128
+    mem_limit: 512m
+
+  mongo:
+    image: mirror.gcr.io/library/mongo:4.4@sha256:4be76f674fc4b27859816811b8baa3c51830eb1dbf4ca81a51e26b79edd662ef
+    networks: [nodegoat-db]
+    tmpfs: [/data/db, /data/configdb]
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID, DAC_OVERRIDE]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    mem_limit: 512m
+
+networks:
+  nodegoat-front: {}
+  nodegoat-db:
+    internal: true

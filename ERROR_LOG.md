@@ -52,6 +52,16 @@ Format per entry:
 - **Remediation:** every timing payload is the baseline's own value plus a template
   (`cmdi_timing_payloads`, CC-FUZZ-0631); a discovery guard checks every timing strategy
   for it (PA-0630). Live: LEVEL_3..5 confirm, LEVEL_6..8 (SECURE) do not.
+## 2026-11-20 — environment: lane NODE's container lacked the harness's tools; five navigation tests fail on its newer Chromium (fixed / open)
+- **Symptom:** `scripts/verify_change.py --base 2be7a50` on e19f6fc: 9 `tests/test_labgen_*::test_cli_check_passes_end_to_end*` failed (the labgen check's secret-scanner gate: `'gitleaks' executable not found on PATH`), and 5 in `tests/test_navigation_aborts.py` (`DID NOT RAISE playwright Error`, a `KeyError` on an error page's URL). Before that, `keyring`, `playwright` and `pytest-xdist` were not installed, and the first pip-installed Playwright looked for Chromium build 1255 where the preinstalled one is 1243.
+- **Root cause:** the container's image, not the code: no `gitleaks`, no project dependencies; the preinstalled Chromium is 157 (Playwright 1.63), where `navguard`'s error-page expectations were measured on Chromium 141. The five navigation failures reproduce on untouched 2be7a50 in this container.
+- **Remediation:** `pip install -e .[browser,web,labgen,labgen-stats,labgen-python-fastapi,disco,dev]`, `playwright==1.63.0` (the preinstalled browser's), `pytest-xdist`, `apt-get install gitleaks`; the nine labgen tests pass. The navigation tests need the SP-01 owner's decision for Chromium 157 (not lane NODE's file: `navguard.py` is a hot file).
+- **Status:** Environment (tools fixed); navigation tests Open (pre-existing on this Chromium).
+
+## 2026-11-20 — FUZZ: the NoSQL operator differential missed a login that echoes the submitted name (fixed, BUG-0610/PA-0610)
+- **Symptom:** NodeGoat's `/login` JSON `userName` (an operator reaches `findOne`) was not confirmed: `NoSqlOperatorStrategy`'s screen stopped after B, V, D (NGOAT-0014 a false negative in the BASELINE run, CC-LAB-0331).
+- **Root cause:** the login page re-renders the submitted name; an operator leaf echoes as `[object Object]` in V and D, B's token as itself. The differential stripped the tokens' reflected forms only, so V never looked like B.
+- **Remediation:** `same()` also strips `[object Object]` (`_JS_OBJECT_STRING`, CC-FUZZ-0611); a server that stringifies every object still answers V and D alike (no confirmation). NGOAT-0014 confirmed live; Mongection unchanged (tp=2 fp=0).
 - **Status:** Fixed.
 
 ## 2026-10-23 — crawler / navguard (a navigation started before a failed load's error page had loaded was dropped; BUG-0561)

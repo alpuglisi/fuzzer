@@ -3,6 +3,18 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0610 — `R-SSJS`: server-side JavaScript injection on every value point (FR-AUD-610) (2026-11-20)
+- Change: `fuzzlab/audit/rules_data/default_rules.json` (appended rule `R-SSJS`, category
+  `server-side-javascript-injection`, locations query, body, json, path).
+- Impact (other components / project): FUZZ's two new strategies (CC-FUZZ-0610) get
+  candidates; more requests on runs that include the category (see CC-FUZZ-0610).
+- Risk (level; mitigation or accepted-risk justification): low (a nomination; the
+  strategies decide). The pre-change review gate was not run (F-611).
+- Deliverables:
+  - [x] rule; `tests/test_oracle_strategies_ssjs.py::test_the_category_is_ruled_mapped_and_registered` — done
+- Effectiveness (assessed 2026-11-20): NodeGoat's `ssjs` positives were nominated in
+  both passes (CC-LAB-0331).
+
 ### CC-AUD-0061 — The auditor's browser fetch settles a failed load on the error page's load (BUG-0561) (2026-10-23)
 - Change: none in `fuzzlab/tools/fetcher.py`. `ContentFetcher.fetch` navigates through SP-01 and ends a failed load with `end_failed_load`; SP-01 now waits for the failed navigation's error page to load before it raises (CC-CRAWL-0065). `end_failed_load`'s decision is unchanged (the settled commit is still recorded).
 - Impact (other components / project): a fetch that fails with a network error returns about 30 ms later at p50; the next fetch's navigation is no longer dropped when it would start before that error page's load. No interface or store change.

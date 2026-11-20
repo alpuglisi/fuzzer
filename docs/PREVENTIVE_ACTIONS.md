@@ -3021,6 +3021,23 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
   2. **The order of events a fix waits for is pinned by a deterministic test** -- a double that records each event, the wait and the return or raise, on a fake clock -- beside any real-browser test. A race of about 1% passes a handful of real repetitions on the old code.
   3. **A browser race is called fixed only after a measurement under each kind of host contention the harness meets (CPU and disk I/O), both arms in the same rounds, at a volume that can see the race's rate** (here at least 300 per arm), reported as counts per arm. (from BUG-0561)
   - Enforced by: tests/test_navigation_settle_load.py::test_a_failure_raises_only_after_its_error_page_has_loaded, tests/test_navigation_settle_load.py::test_an_error_page_that_never_loads_expires_within_the_budget_and_is_counted
+
+- **PA-0610** — Strengthens `PA-0133(2)` (from evaluation markers to every confirmer, and
+  from the input as sent to the input as rendered), after BUG-0610: the NoSQL operator
+  differential stripped the reflections of the strings it sent but not the echo of the
+  object it sent (`[object Object]`), so a login that re-renders the submitted name never
+  confirmed.
+  1. **A confirmer's normalisation covers every value it sends as the target renders it:**
+     a string in its reflected forms (`_reflection_forms`), and a non-string JSON value as
+     the server stringifies it (JavaScript's `String(object)`), each stripped from both
+     sides of a comparison.
+  2. **Every differential confirmer has a true-positive fixture whose page echoes the
+     submitted value**, beside the one that proves the normalisation keeps the
+     differential sound (a server that stringifies every object answers V and D alike).
+  3. **The sweep goes by what a confirmer sends, not by the failing page** (`PA-0002`):
+     every confirmer that sends a non-string value is listed with how it judges (BUG-0610
+     "Preventive action"). (from BUG-0610)
+  - Enforced by: tests/test_oracle_strategies_ssjs.py::test_nosql_confirms_a_login_that_echoes_the_submitted_leaf, tests/test_oracle_strategies_ssjs.py::test_nosql_still_refuses_a_server_that_stringifies_every_object
 - **PA-0630** — Strengthens `PA-0117(1)` (the control is the probe minus what it tests) from the control side to the mutation side, after BUG-0630: command-injection timing payloads on a point with no base value replaced the baseline's value (`1`) instead of extending it, so the command the app ran on it (a ~1 s `ping`) was in the baseline only and every 2 s sleep measured ~1 s, under the floor.
   1. **A differential's mutation is its baseline's own value plus the part under test, never a replacement of it.** Whatever the baseline value makes the application do is then on both sides, and the difference is the payload's alone.
   2. **Enforced by discovery:** every default strategy that runs the shared timing engine is run with and without a base value, and every mutation must start with the value its baseline sent; the guard is proven on a synthetic offender (PA-0034(2)).
