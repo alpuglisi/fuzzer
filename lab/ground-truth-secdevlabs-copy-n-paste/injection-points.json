@@ -7,21 +7,34 @@
    "method": "POST",
    "param": "user",
    "location": "body",
-   "rendering": "server-json"
+   "rendering": "server-json",
+   "json_body": {
+    "user": "user",
+    "pass": "password"
+   }
   },
   {
    "url": "/register",
    "method": "POST",
    "param": "user",
    "location": "body",
-   "rendering": "server-json"
+   "rendering": "server-json",
+   "json_body": {
+    "user": "user",
+    "pass": "password",
+    "passcheck": "password"
+   }
   },
   {
    "url": "/login",
    "method": "POST",
    "param": "pass",
    "location": "body",
-   "rendering": "server-json"
+   "rendering": "server-json",
+   "json_body": {
+    "user": "user",
+    "pass": "password"
+   }
   }
  ]
 }

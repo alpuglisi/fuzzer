@@ -427,7 +427,7 @@ BWAPP_ROUTES = [
     Route("bwapp", "GET", _bw("sqli_9.php?action=stop"),
           "sets a session flag (manual_interv) only", "visit",
           lambda: destructive_reason(_bw("sqli_9.php?action=stop")),
-          "residual: session-scoped flag, no lab state"),
+          "refused"),   # BUG-0680: an action slot naming a state verb ('action stop')
     Route("bwapp", "POST", _bw("xss_stored_3.php"),
           "UPDATE users SET secret for the hidden login", "form",
           _bw_form(BW_SECRET_OWN, "xss_stored_3.php"),

@@ -94,6 +94,25 @@ Format per entry:
   FR-SESS-660).
 - **Status:** Fixed.
 
+## 2026-11-20 — FUZZ: the directory-listing traversal phase confirmed on prose and on an error page (fixed before merge; BUG-0641)
+- **Symptom:** the orchestrator's review of lane ACC (2275dcb): "Welcome to the group! Edit your profile. Report an issue. Shells and hosts." matched 4 `/etc` names; an error page for any `/`-holding value matched 5; both confirmed through `Oracle.confirm_outcome` (reproduced).
+- **Root cause:** names matched as words anywhere, seven of them English words; the control `etc` dropped the probe's separators as well as its target; the probe status was not read (a recurrence of BUG-0083/BUG-0117's class).
+- **Remediation:** whole listing items only, a non-English name set, a 2xx probe, a random-sibling control with the probe's separators (CC-FUZZ-0641, FR-FUZZ-641, PA-0641); measured on os.listdir, Node readdir, http.server, nginx autoindex and bWAPP.
+- **Status:** Fixed
+
+## 2026-11-20 — target lab / external labs (gt-tagged secDevLabs positives no scored run could reach; BUG-0640)
+- **Symptom:** lane ACC's first scored ground-truth runs of the secDevLabs apps at 2be7a50: copy-n-paste tp=0 fn=3 (every probe answered `400 "All fields are required"`), mongection tp=0 fn=2 (every operator probe `Bad Credentials`), comment-killer's stored case never audited; all tagged `[reach: gt]`.
+- **Root cause:** reach tags were set from hand-made requests (all fields present, accounts created by hand, a store URL known), never from a scored run: copy-n-paste's points lacked the JSON body its handler requires, mongection's fresh tmpfs database has no account for its flaw to answer, comment-killer's case has no `source_url`.
+- **Remediation:** copy-n-paste points carry the page's JSON body; mongection gets an identity and a bootstrap (CC-LAB-0360, 684fab9); each lab's scored run is recorded in `docs/components/01-target-lab/external-lab-scores.json` and checked against its reach tags (PA-0640). Live: copy-n-paste tp 0→2, mongection tp 0→2, fp 0. SDLCK-0001 recorded open.
+- **Status:** Fixed (comment-killer open: an answer-key decision)
+
+## 2026-11-20 — core / crawler (the destructive rule missed state toggles; two lab crawls changed the lab's state; BUG-0680)
+- **Symptom:** the lab-expansion lanes' crawls fetched Mutillidae's `index.php?do=toggle-security`, `?do=toggle-enforce-ssl`, `?do=toggle-hints` (after the SSL toggle the session went to https and 121 pages stayed unresolved) and DVGA's `/difficulty/hard` and `/start_over` (global mode flipped, state reset).
+- **Root cause:** SP-09 (`core.urls.destructive_reason`) was grown one lab spelling at a time and only checked against our own labs; it had no state-switch class (`disable` listed, `enable` not; action slots knew only `update`/`upgrade`).
+- **Remediation:** `enable`/`activate`/`toggle`, action-slot state verbs and fused verb-object compounds are refused, measured against a cited independent corpus (cited GET state changes refused 8/33 → 18/33, lab cells/points refused 0/505 → 0/505); DVGA's two links are stated residuals (no second independent source). CC-CORE-0650, CC-CRAWL-0650; BUG-0680, PA-0680, PA-0681.
+- **Status:** Fixed (Mutillidae toggles); DVGA `/difficulty/<level>`, `/start_over` open as stated residuals
+
+---
 ## 2026-11-20 — Cloud container (JAVA lane): gitleaks and Python Playwright missing; five navigation tests fail on this container's Chromium at the base tree too (environment)
 - **Symptom:** `scripts/verify_change.py --base 2be7a50` on f78ae08: 16 failures. Eight
   `test_cli_check_passes_end_to_end*` (`secret scanner: 'gitleaks' executable not found`,
