@@ -47,6 +47,7 @@ GT_DIRS = {"bwapp": LAB / "ground-truth-bwapp", "juice-shop": LAB / "ground-trut
            "secdevlabs-comment-killer": LAB / "ground-truth-secdevlabs-comment-killer",
            "secdevlabs-streaming": LAB / "ground-truth-secdevlabs-streaming",
            "secdevlabs-ecommerce-api": LAB / "ground-truth-secdevlabs-ecommerce-api",
+           "dvga": LAB / "ground-truth-dvga",
            "mutillidae": LAB / "ground-truth-mutillidae",
            "nodegoat": LAB / "ground-truth-nodegoat"}
 #: Labs scored by URL coverage, not an injection answer key: the lab serves its own

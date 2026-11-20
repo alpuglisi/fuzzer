@@ -1,0 +1,31 @@
+{
+ "version": 1,
+ "target": "dvga_2_1_2_040aa33c",
+ "description": "DVGA's GraphQL-implementation issues: answer-key entries kept OUT of labels.json because no fuzzlab strategy records their class (the labels-schema enum admits only classes a default strategy can confirm, tests/test_external_labs_static.py::test_ground_truth_uses_only_scoreable_classes), so they are never scored. Every entry is [reach: none]; the denial-of-service ones stay out of scope: no DoS probe is built (CC-LAB-0320). Measured live on 2026-11-20 against the pinned image in Beginner mode unless stated.",
+ "issues": [
+  {"case_id": "DVGA-0016", "issue": "graphql_introspection", "url": "/graphql", "method": "POST",
+   "notes": "[reach: none - no introspection check is built] [prov: DVGA solution 6] {__schema{queryType{name}}} answers the schema in Beginner mode; Expert mode answers 'Introspection is Disabled' (measured)."},
+  {"case_id": "DVGA-0017", "issue": "graphql_field_suggestions", "url": "/graphql", "method": "POST",
+   "notes": "[reach: none - no schema-enumeration check is built] [prov: DVGA solution 8] { pastess { id } } answers 'Did you mean \"pastes\" or \"paste\"?' (measured); both modes."},
+  {"case_id": "DVGA-0018", "issue": "graphql_batching_dos", "url": "/graphql", "method": "POST",
+   "notes": "[reach: none - denial of service: out of scope, no probe built] [prov: DVGA solution 1] the endpoint takes a JSON array of operations (batch=True); two {systemHealth} in one array answered two results (measured); systemUpdate sleeps 20-50 s per call."},
+  {"case_id": "DVGA-0019", "issue": "graphql_alias_dos", "url": "/graphql", "method": "POST",
+   "notes": "[reach: none - denial of service: out of scope, no probe built] [prov: DVGA solution 5] aliases repeat an expensive field in one operation; no cost analysis in Beginner mode (core/middleware.py CostProtectionMiddleware runs only in Expert mode)."},
+  {"case_id": "DVGA-0020", "issue": "graphql_deep_recursion_dos", "url": "/graphql", "method": "POST",
+   "notes": "[reach: none - denial of service: out of scope, no probe built] [prov: DVGA solution 2] Owner and Paste reference each other; no depth limit in Beginner mode (MAX_DEPTH=8 only in Expert mode)."},
+  {"case_id": "DVGA-0021", "issue": "graphql_field_duplication_dos", "url": "/graphql", "method": "POST",
+   "notes": "[reach: none - denial of service: out of scope, no probe built] [prov: DVGA solution 4] repeated fields are not de-duplicated."},
+  {"case_id": "DVGA-0022", "issue": "graphql_circular_fragment_dos", "url": "/graphql", "method": "POST",
+   "notes": "[reach: none - denial of service: out of scope, no probe built] [prov: DVGA solution 20] fragments that spread each other."},
+  {"case_id": "DVGA-0023", "issue": "graphiql_exposed_cookie_bypass", "url": "/graphiql", "method": "POST",
+   "notes": "[reach: none - an access-control bypass by a client-set cookie; no check is built] [prov: DVGA solutions 7 and 16] /graphiql is reachable with the env=graphiql:enable cookie the server itself sets as graphiql:disable."},
+  {"case_id": "DVGA-0024", "issue": "graphql_stack_trace_errors", "url": "/graphiql", "method": "POST",
+   "notes": "[reach: none - information disclosure, no check is built] [prov: DVGA solution 21] the GraphiQL endpoint answers erroneous queries with stack traces."},
+  {"case_id": "DVGA-0025", "issue": "jwt_unverified_identity", "url": "/graphql", "method": "POST",
+   "notes": "[reach: none - the token is a field argument (me(token:)), not the request's session; the JWT strategy tests a session token] [prov: DVGA solution 22; core/helpers.py get_identity] me(token) decodes the JWT with verify_signature=False and trusts its identity claim."},
+  {"case_id": "DVGA-0026", "issue": "log_injection_operation_name", "url": "/graphql", "method": "POST",
+   "notes": "[reach: none - log spoofing through the operation name; no check is built] [prov: DVGA solution 13] the audit log (/audit) records the client's operation name verbatim (Jinja-escaped: no XSS)."},
+  {"case_id": "DVGA-0027", "issue": "graphql_query_denylist_bypass", "url": "/graphql", "method": "POST",
+   "notes": "[reach: none - an Expert-mode control bypass, no check is built] [prov: DVGA solution 17; core/security.py on_denylist] the deny list matches only the exact text {systemHealth} / query{systemHealth}; an operation name or alias passes."}
+ ]
+}

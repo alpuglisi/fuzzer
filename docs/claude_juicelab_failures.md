@@ -2251,4 +2251,24 @@ Juice Shop lab is complete.
 - **Impact:** a safety regression on the pushed branch for crawled front-controller logins (not merged; not observed sending in a run).
 - **Cause:** I tested the narrowed rule on ground-truth URLs only and gave it a fail-open default; I swept the finding URL's readers but not the gate's callers.
 - **Status:** fixed (CC-SESS-0612); PA-0620.
+### F-600 — While measuring DVGA I sent an import of the lab's own port, which hung the whole lab
+- **What:** my first probe of `importPaste` named `localhost:5013`, DVGA itself. Its resolver runs curl with no timeout inside the server's only loop, so the request and every later one hung; I had to stop my probe and restart the container.
+- **Evidence:** ERROR_LOG 2026-11-20 (DVGA); CC-LAB-0320 "Measured".
+- **Impact:** about two minutes of a hung lab and one restart; no traffic left the lab; nothing measured from that state was used.
+- **Cause:** I chose the probe's host from the upstream solution's example (`localhost`) without first reading what the resolver does with it.
+- **Status:** corrected: the answer key's import point names a refused loopback port, and FR-LAB-320 states the rule.
+
+### F-601 — My first DVGA answer key held a negative no run could test
+- **What:** the draft scored `uploadPaste(filename)` as a command-injection negative, but no command-injection rule fires on that point (its name, field and siblings carry no command signal), so it would have counted as a true negative without ever being probed.
+- **Evidence:** `tests/test_external_labs_live.py::_assert_pass` requires a checked candidate for every gt-tagged case; designing `tests/test_dvga_live.py` on it showed the gap before any commit.
+- **Impact:** none committed; it would have inflated tn by one.
+- **Cause:** I chose negatives by what the sink does, not by whether the run's rules reach the point.
+- **Status:** corrected before the first commit: the negative is `systemDiagnostics(password)`, which a rule reaches and which never reaches a shell.
+
+### F-602 — I built two detection rules from DVGA's own field names
+- **What:** CC-AUD-0600's `R-COMMAND-INJECTION-GRAPHQL-FIELD` matched field names (`system|debug|diagnos|...`) chosen from DVGA's `systemDebug` / `systemDiagnostics`, and its sibling rule was justified by DVGA's `importPaste` alone; the lane reported tp 5 -> 8 from them.
+- **Evidence:** CC-AUD-0600 ("the field regex's words come from DVGA's own field names ... no second GraphQL target has been measured"); the orchestrator's review of 7ea2018 (owner directive: black-box detection only).
+- **Impact:** a lab-fitted detection gain reported as an improvement; never merged. Removed in CC-AUD-0602; DVGA gt is back to the baseline's tp=5.
+- **Cause:** I tuned a heuristic to the lab I was measuring and treated a disclosure of that as sufficient, instead of requiring evidence from an independent target.
+- **Status:** corrected (CC-AUD-0602).
 

@@ -101,6 +101,10 @@ MUTILLIDAE_DATABASE_IMAGE = ("docker.io/webpwnized/mutillidae:database@sha256:"
                              "5569286c0d4bc3436f28e91c2c029613910c02cd440ccd9e39dc11dddee9e6ec")
 MUTILLIDAE_LDAP_IMAGE = ("docker.io/webpwnized/mutillidae:ldap@sha256:"
                          "bc98847a4cc53fff691b68e2e5b9358f00c3a2ef4ae4985e899ef8a7cf3116cf")
+#: Damn Vulnerable GraphQL Application (dolevf, MIT), CC-LAB-0320: the `latest` build of
+#: 2025-05-24 (its version.py says 2.1.2; the older `2.1.2` tag is another, 2022 build).
+DVGA_IMAGE = ("docker.io/dolevf/dvga:latest@sha256:"
+              "040aa33c199d99f3380c9ff9a1ee5d725e9abca7b189c63a35a2a73bda79c957")
 PINNED_IMAGES = frozenset({BUSYBOX_IMAGE, MUTILLIDAE_WWW_IMAGE, MUTILLIDAE_DATABASE_IMAGE,
                            MUTILLIDAE_LDAP_IMAGE, PHP_IMAGE, MYSQL_IMAGE, JUICE_SHOP_IMAGE,
                            CRAWL_MAZE_PYTHON_IMAGE, SECDEVLABS_GOLANG_IMAGE,
@@ -108,7 +112,7 @@ PINNED_IMAGES = frozenset({BUSYBOX_IMAGE, MUTILLIDAE_WWW_IMAGE, MUTILLIDAE_DATAB
                            SECDEVLABS_PYTHON312_IMAGE, SECDEVLABS_PHP_IMAGE,
                            SECDEVLABS_NODE20_IMAGE, SECDEVLABS_MONGO_IMAGE,
                            SECDEVLABS_NODE13_IMAGE, SECDEVLABS_MAVEN_IMAGE,
-                           SECDEVLABS_NGINX_IMAGE, NODEGOAT_NODE12_IMAGE})
+                           SECDEVLABS_NGINX_IMAGE, NODEGOAT_NODE12_IMAGE, DVGA_IMAGE})
 
 BWAPP_ZIP_URL = "https://sourceforge.net/projects/bwapp/files/bWAPP/bWAPP_latest.zip/download"
 BWAPP_ZIP_NAME = "bWAPP_latest.zip"
@@ -336,6 +340,8 @@ LAB_META: dict[str, LabMeta] = {
     # shows any caller the allocations of the userId in the path (FR-LAB-330)
     "nodegoat": LabMeta("nodegoat", "web", "NODEGOAT_PORT", 3091, 4000, "/", "/login",
                         "nodegoat-user", "user1", False, (("nodegoat-peer", "user2"),)),
+    # GraphQL over one endpoint (FR-LAB-320); no account: its resolvers take no session
+    "dvga": LabMeta("dvga", "app", "DVGA_PORT", 5013, 5013, "/", "/", None, "", False),
 }
 
 

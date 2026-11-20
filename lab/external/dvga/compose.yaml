@@ -1,0 +1,47 @@
+# Damn Vulnerable GraphQL Application 2.1.2 (the `latest` build of 2025-05-24 -- not the
+# older `2.1.2` tag, a 2022 build; dolevf, MIT; external lab fixture,
+# CC-LAB-0320 / FR-LAB-320). Lab-only. A Flask + Graphene GraphQL API over SQLite whose
+# resolvers run shell commands (importPaste, systemDebug, systemDiagnostics), build raw
+# SQL (pastes.filter), write files (uploadPaste.filename) and store unescaped pastes
+# that its own pages render as HTML. The answer key is lab/ground-truth-dvga/.
+#
+# Safety: published on LOOPBACK ONLY (127.0.0.1), on its own bridge network. The image
+# is pinned by digest (tag kept for readability; the digest is what resolves). DVGA
+# listens on WEB_HOST, 127.0.0.1 by default *inside* the container (unreachable through
+# a publish), so WEB_HOST=0.0.0.0 here; the host side stays loopback. Its command and
+# file-write resolvers execute INSIDE this container only: capabilities dropped,
+# no-new-privileges, pids and memory limited. The bridge has egress to IP literals
+# (importPaste is an SSRF case; not blocked, NFR-LAB-safety "Not yet enforced", as Juice
+# Shop); names do not resolve (`dns` below).
+#
+# Its difficulty is one global server mode (Beginner / Expert), switched by
+# `/difficulty/<easy|hard>` or any request carrying `X-DVGA-MODE`; the database and
+# mode are rebuilt from scratch on every start (setup.py), so reset = restart.
+#
+# Run through lab/labctl.sh:  ./labctl.sh up dvga [--authorized]
+name: fuzzlab-dvga
+
+x-podman:
+  in_pod: false
+
+services:
+  app:
+    image: docker.io/dolevf/dvga:latest@sha256:040aa33c199d99f3380c9ff9a1ee5d725e9abca7b189c63a35a2a73bda79c957
+    environment:
+      WEB_HOST: 0.0.0.0
+      WEB_PORT: "5013"
+    networks: [dvga-net]
+    # No name resolution: a crawler's form fill (disco typed https://example.com into
+    # the import form, measured 2026-11-20) must not make the lab fetch a named outside
+    # host. An IP literal still has egress (see above).
+    dns: ["127.0.0.1"]
+    ports:
+      # Loopback only. Never bind 0.0.0.0.
+      - "127.0.0.1:${DVGA_PORT:-5013}:5013"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    mem_limit: 512m
+
+networks:
+  dvga-net: {}

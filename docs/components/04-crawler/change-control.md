@@ -3,6 +3,26 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0600 — The GraphQL reader names each variable's field argument and declared type (2026-11-20)
+- Placement: lane GQL (item GQL), base 2be7a50, pre-assigned CC-CRAWL-0600..0604. Not a
+  change to `spider.py` or `navguard.py`.
+- Change: `fuzzlab/tools/apiop.py` (the one GraphQL reader, SP-80): two functions on
+  its linear token scanner (`_tokens`/`_document`), both total and bounded:
+  `graphql_variable_bindings` (FR-CRAWL-600: `{variable: [(field, argument, siblings)]}`
+  for the selected operation, at any depth, aliases resolved, input-object and list
+  values followed, directives and variable definitions not uses, at most
+  `MAX_BINDINGS`) and `graphql_variable_types` (FR-CRAWL-601: `{variable: (named type,
+  list depth)}` from the variable definitions). `operation_key` and every existing
+  function are unchanged.
+- Impact (other components / project): read by the auditor (CC-AUD-0600/0601); nothing
+  in the capture writer changes.
+- Risk (level; mitigation or accepted-risk justification): low; linear time is tested
+  in a child process under a time bound on long runs of each construct (PA-0559(14)).
+- Deliverables:
+  - [x] the two readers, tests (`tests/test_graphql_args.py`) — done
+  - [x] FR-CRAWL-600/601, SP-80, CHANGELOG — done
+- Effectiveness: see CC-AUD-0600/0601 (DVGA gt tp 5 -> 8; crawl 454 -> 202 requests).
+
 ### CC-CRAWL-0065 — A failed navigation raises only after the browser's error page has loaded, not just committed (SP-01, BUG-0561) (2026-10-23)
 - Placement: pre-assigned to lane NAVSETTLE (item NAVSETTLE), base 5502228; the owner
   approved this fix on 2026-10-23 (F-281's open defect). Touches SP-01's owner
