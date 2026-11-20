@@ -14,8 +14,8 @@ Component code: **LAB**. Entry format and required fields: see
   --oob --score --authorized`):
   - before (detection code of 2658271): tp=5 fp=0 fn=10 tn=3, 150 requests, 45 s;
   - after (this lane's tip): tp=5 fp=0 fn=10 tn=3, 155 requests, 44 s;
-  - the same five cases matched on both sides (JUICE-0002, 0003, 0004, 0006, 0007), as
-    CC-LAB-0317 recorded at 2edf1b6. The five extra requests are the new strategies'
+  - the same five cases matched on both sides (JUICE-0002, 0003, 0004, 0006, 0007): the
+    counts CC-LAB-0317 recorded at 2edf1b6 (it does not list ids). The five extra requests are the new strategies'
     probes of the SSRF and path-traversal points, which confirm nothing there.
 - Deliverables:
   - [x] both runs, this record — done
