@@ -196,6 +196,13 @@
       "transaction_type": "File Inclusion / Traversal",
       "when": { "location_not_in": ["fragment"], "value_shape_in": ["filename", "path"] },
       "reference": "file-inclusion"
+    },
+    {
+      "id": "R-SSJS",
+      "category": "server-side-javascript-injection",
+      "transaction_type": "Server-Side JavaScript Injection",
+      "when": { "location_in": ["query", "body", "json", "path"] },
+      "reference": "server-side-javascript-injection"
     }
   ]
 }

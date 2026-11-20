@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-11-20 — FUZZ: the NoSQL operator differential missed a login that echoes the submitted name (fixed, BUG-0610/PA-0610)
+- **Symptom:** NodeGoat's `/login` JSON `userName` (an operator reaches `findOne`) was not confirmed: `NoSqlOperatorStrategy`'s screen stopped after B, V, D (NGOAT-0014 a false negative in the BASELINE run, CC-LAB-0331).
+- **Root cause:** the login page re-renders the submitted name; an operator leaf echoes as `[object Object]` in V and D, B's token as itself. The differential stripped the tokens' reflected forms only, so V never looked like B.
+- **Remediation:** `same()` also strips `[object Object]` (`_JS_OBJECT_STRING`, CC-FUZZ-0611); a server that stringifies every object still answers V and D alike (no confirmation). NGOAT-0014 confirmed live; Mongection unchanged (tp=2 fp=0).
+- **Status:** Fixed.
+
 ## 2026-10-23 — crawler / navguard (a navigation started before a failed load's error page had loaded was dropped; BUG-0561)
 - **Symptom:** the harness run of e69bd1e (F-281): `tests/test_disco_harvest.py::test_disco_harvest_and_restore_after_failed_loads[2]` failed in 19.1 s. Disco's `restore` returned "navigation": its `about:blank` `goto` timed out after 15 s and the page stayed on `chrome-error://chromewebdata/`. The RCA measured about 1% of restores under heavy disk I/O on every tree since BUG-0522's fix (7393c90 4/600, e69bd1e 9/840) and 0/1,320 under CPU load alone.
 - **Root cause:** `navguard._settle_failure` (SP-01, BUG-0522's fix) took a failed navigation as over when its error page committed. That page loads 15-25 ms later (p95 about 130 ms under I/O load), and a navigation Chromium started in between was sometimes dropped with no commit and no error, so Playwright waited out the whole `goto` timeout.
