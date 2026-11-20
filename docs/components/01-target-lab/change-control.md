@@ -109,7 +109,8 @@ Component code: **LAB**. Entry format and required fields: see
   test (`FUZZLAB_LIVE_EXTERNAL_LABS=1 pytest tests/test_dvwa_live.py`): 1 passed, 306 s
   (its own project on a free port: reset, both accounts bootstrapped, the ground-truth
   run's floor DVWA-0001/0003/0004/0005/0013/0014/0015 matched, fp=0; torn down by label).
-  The harness run (`scripts/verify_change.py`) is reported in the lane report.
+  Harness: `scripts/verify_change.py --base 82910aae` on 250c8177: 96 files, 4232 passed,
+  0 failed, 0 errors, 8 skipped, 29 xfailed. gitleaks 8.21.2 over the diff: no leaks.
 
 ### CC-LAB-0432 — DVWA answer key (FR-LAB-432) (2026-11-20)
 - Change: `lab/ground-truth-dvwa/` (labels, points, expected results; 33 cases
