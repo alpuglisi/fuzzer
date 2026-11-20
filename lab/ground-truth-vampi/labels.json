@@ -1,0 +1,123 @@
+{
+ "version": 1,
+ "target": "erev0s_vampi_f16052dc",
+ "cases": [
+  {
+   "case_id": "VAMPI-0001",
+   "url": "/users/v1/{username}",
+   "method": "GET",
+   "param": "username",
+   "location": "path",
+   "vuln_class": "sqli",
+   "sink_context": "sql",
+   "expected_vulnerable": true,
+   "rendering": "server-json",
+   "stack": "python_flask_connexion_vampi",
+   "notes": "[reach: crawl,gt] [prov: VAmPI README 'List of Vulnerabilities' (SQLi Injection); models/user_model.py:70-75 at f16052dc] User.get_user formats the path value into SELECT * FROM users WHERE username = '{username}' and executes it raw (vulnerable=1); the endpoint is in the OpenAPI document the app serves at /openapi.json. checked live 2026-11-20 on the loopback lab: name1' AND '1'='1 -> 200 name1, name1' AND '1'='2 -> 404 'User not found', name1' -> 500 sqlite3.OperationalError traceback (Werkzeug debug page), zz' UNION SELECT 1,sqlite_version(),3,'x',0-- -> 200 username '3.51.2'."
+  },
+  {
+   "case_id": "VAMPI-0002",
+   "url": "/books/v1/{book_title}",
+   "method": "GET",
+   "param": "book_title",
+   "location": "path",
+   "vuln_class": "access_control",
+   "sink_context": "object_lookup",
+   "expected_vulnerable": true,
+   "rendering": "server-json",
+   "stack": "python_flask_connexion_vampi",
+   "notes": "[reach: crawl,gt] [prov: VAmPI README 'List of Vulnerabilities' (Broken Object Level Authorization); api_views/books.py:45-58 at f16052dc] get_by_title requires a valid token but looks the book up by title alone (vulnerable=1) and answers its secret and owner to any logged-in caller; titles are listed publicly by GET /books/v1. The bootstrap gives each account one book (account_value book_title = '<username>-book'). checked live 2026-11-20 on the loopback lab: GET /books/v1/fuzzlab_user-book with fuzzlab_peer's token -> 200 owner fuzzlab_user and its secret; with fuzzlab_user's own token -> the same 200; with no token -> 401."
+  },
+  {
+   "case_id": "VAMPI-0003",
+   "url": "/users/v1/{username}/password",
+   "method": "PUT",
+   "param": "username",
+   "location": "path",
+   "vuln_class": "access_control",
+   "sink_context": "object_lookup",
+   "expected_vulnerable": true,
+   "rendering": "server-json",
+   "stack": "python_flask_connexion_vampi",
+   "notes": "[reach: crawl] [prov: VAmPI README 'List of Vulnerabilities' (Unauthorized Password Change); api_views/users.py:179-201 at f16052dc] Not gt: the endpoint needs its JSON body {\"password\": ...} (connexion answers 400 'None is not of type object' without one, measured) and a path point of the contract cannot carry a json_body; a crawl-derived request from the OpenAPI document carries the body. update_password checks only that the token is valid, then sets the password of the user named in the path (vulnerable=1). DESTRUCTIVE to whichever account the path names (the run's own identities included). checked live 2026-11-20 on the loopback lab: as fuzzlab_peer, PUT /users/v1/name2/password {\"password\": \"changed-by-peer\"} -> 204; name2/pass2 login then -> 'Password is not correct', name2/changed-by-peer -> 200 auth_token (restored after)."
+  },
+  {
+   "case_id": "VAMPI-0004",
+   "url": "/users/v1/register",
+   "method": "POST",
+   "param": "admin",
+   "location": "body",
+   "vuln_class": "mass_assignment",
+   "sink_context": "mass_assignment",
+   "expected_vulnerable": true,
+   "rendering": "server-json",
+   "stack": "python_flask_connexion_vampi",
+   "notes": "[reach: gt] [prov: VAmPI README 'List of Vulnerabilities' (Mass Assignment); api_views/users.py:60-66 at f16052dc] register_user copies an 'admin' key of the JSON body onto the new account (vulnerable=1). The OpenAPI document lists only username/password/email for this body (admin appears only in the /me and /users/v1/_debug responses), so a crawl sees the endpoint but not this field. The field is read only for a username not yet registered (an existing one answers 200 'User already exists. Please Log in.' first; the point's json_body is the spec's example, name1, which exists, with a lab email address). checked live 2026-11-20 on the loopback lab: register ma_admin with admin:true -> 200, its /me -> admin true; ma_plain without it -> admin false, and its DELETE /users/v1/ma_plain -> 401 'Only Admins may delete users!'."
+  },
+  {
+   "case_id": "VAMPI-0005",
+   "url": "/users/v1/login",
+   "method": "POST",
+   "param": "username",
+   "location": "body",
+   "vuln_class": "sqli",
+   "sink_context": "sql",
+   "expected_vulnerable": false,
+   "rendering": "server-json",
+   "stack": "python_flask_connexion_vampi",
+   "notes": "[reach: crawl,gt] [prov: api_views/users.py:85-92 at f16052dc] login_user looks the user up with the ORM's filter_by (bound parameter); the password is compared in Python. checked live 2026-11-20 on the loopback lab: username name1 with a wrong password -> 'Password is not correct for the given username.'; name1' AND '1'='1 and name1' OR '1'='1' -- -> 'Username does not exist' (no injection)."
+  },
+  {
+   "case_id": "VAMPI-0006",
+   "url": "/books/v1/{book_title}",
+   "method": "GET",
+   "param": "book_title",
+   "location": "path",
+   "vuln_class": "sqli",
+   "sink_context": "sql",
+   "expected_vulnerable": false,
+   "rendering": "server-json",
+   "stack": "python_flask_connexion_vampi",
+   "notes": "[reach: crawl,gt] [prov: api_views/books.py:51 at f16052dc] the title reaches the database only through filter_by(book_title=...) (bound parameter). checked live 2026-11-20 on the loopback lab: fuzzlab_user-book -> 200; fuzzlab_user-book' OR '1'='1 and fuzzlab_user-book' AND '1'='1 -> 404 'Book not found!'."
+  },
+  {
+   "case_id": "VAMPI-0007",
+   "url": "/books/v1",
+   "method": "POST",
+   "param": "book_title",
+   "location": "body",
+   "vuln_class": "sqli",
+   "sink_context": "sql",
+   "expected_vulnerable": false,
+   "rendering": "server-json",
+   "stack": "python_flask_connexion_vampi",
+   "notes": "[reach: crawl,gt] [prov: api_views/books.py:30-36 at f16052dc] add_new_book reads and inserts book_title through the ORM (filter_by, Book(...)); bound parameters. checked live 2026-11-20 on the loopback lab: book_title zz' OR '1'='1 -> 200 'Book has been added.', listed verbatim by GET /books/v1; the same again -> 400 'Book Already exists!' (stored as data, no SQL error)."
+  },
+  {
+   "case_id": "VAMPI-0008",
+   "url": "/users/v1/{username}/email",
+   "method": "PUT",
+   "param": "username",
+   "location": "path",
+   "vuln_class": "access_control",
+   "sink_context": "object_lookup",
+   "expected_vulnerable": false,
+   "rendering": "server-json",
+   "stack": "python_flask_connexion_vampi",
+   "notes": "[reach: crawl] [prov: api_views/users.py:132-157 at f16052dc] Not gt, as VAMPI-0003: the endpoint needs its JSON body {\"email\": ...} (400 without, measured) and a path point cannot carry one. update_email ignores the path value and updates the account the token names (resp['sub']). checked live 2026-11-20 on the loopback lab: as fuzzlab_peer, PUT /users/v1/name1/email {\"email\": \"peer2@fuzzlab.lab\"} -> 204; GET /users/v1/name1 still mail1@mail.com, GET /users/v1/fuzzlab_peer -> peer2@fuzzlab.lab."
+  },
+  {
+   "case_id": "VAMPI-0009",
+   "url": "/users/v1/{username}/email",
+   "method": "PUT",
+   "param": "admin",
+   "location": "body",
+   "vuln_class": "mass_assignment",
+   "sink_context": "mass_assignment",
+   "expected_vulnerable": false,
+   "rendering": "server-json",
+   "stack": "python_flask_connexion_vampi",
+   "notes": "[reach: gt] [prov: api_views/users.py:142-148 at f16052dc] update_email reads only the 'email' key; any other key of the body is ignored. Not in the OpenAPI document's body for this endpoint. checked live 2026-11-20 on the loopback lab: as fuzzlab_peer, PUT /users/v1/fuzzlab_peer/email {\"email\": \"peer3@fuzzlab.lab\", \"admin\": true} -> 204; /me -> admin false, email peer3@fuzzlab.lab."
+  }
+ ]
+}

@@ -28,8 +28,18 @@ FIELDS = {"commit", "command", "tp", "fp", "fn", "tn", "requests", "wall_s", "ma
           "missed"}
 
 
+def _held_out() -> set[str]:
+    """Held-out labs (lab/HOLDOUT.md, FR-LAB-420..423) are scored only by crawl runs, in
+    their own record (`holdout-scores.json`, `tests/test_holdout_benchmark.py`): a
+    ground-truth-point run of one is forbidden, so this record never holds one."""
+    from fuzzlab.lab_fixtures.heldout import held_out_labs
+    return {lab.name for lab in held_out_labs()}
+
+
 def _labs_with_ground_truth() -> list[str]:
-    return sorted(n for n in ext.LAB_META if (ROOT / "lab" / f"ground-truth-{n}").is_dir())
+    held = _held_out()
+    return sorted(n for n in ext.LAB_META
+                  if (ROOT / "lab" / f"ground-truth-{n}").is_dir() and n not in held)
 
 
 def _reach(notes: str) -> set[str]:

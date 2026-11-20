@@ -1,0 +1,163 @@
+{
+ "version": 1,
+ "target": "owasp_railsgoat_f5951f13",
+ "points": [
+  {
+   "url": "/users/6",
+   "method": "POST",
+   "param": "user[id]",
+   "location": "body",
+   "rendering": "server"
+  },
+  {
+   "url": "/users/6",
+   "method": "POST",
+   "param": "user[first_name]",
+   "location": "body",
+   "rendering": "server"
+  },
+  {
+   "url": "/users/6",
+   "method": "POST",
+   "param": "user[email]",
+   "location": "body",
+   "rendering": "server"
+  },
+  {
+   "url": "/users/6",
+   "method": "POST",
+   "param": "user[last_name]",
+   "location": "body",
+   "rendering": "server"
+  },
+  {
+   "url": "/users/6",
+   "method": "POST",
+   "param": "user[admin]",
+   "location": "body",
+   "rendering": "server"
+  },
+  {
+   "url": "/users",
+   "method": "POST",
+   "param": "user[admin]",
+   "location": "body",
+   "rendering": "server"
+  },
+  {
+   "url": "/schedule.json",
+   "method": "POST",
+   "param": "schedule[user_id]",
+   "location": "body",
+   "rendering": "server-json"
+  },
+  {
+   "url": "/upload",
+   "method": "POST",
+   "param": "benefits[upload]",
+   "location": "body",
+   "rendering": "server"
+  },
+  {
+   "url": "/upload",
+   "method": "POST",
+   "param": "benefits[backup]",
+   "location": "body",
+   "rendering": "server"
+  },
+  {
+   "url": "/download",
+   "method": "GET",
+   "param": "name",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/download",
+   "method": "GET",
+   "param": "type",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/dashboard/home",
+   "method": "GET",
+   "param": "font",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/forgot_password",
+   "method": "POST",
+   "param": "email",
+   "location": "body",
+   "rendering": "server"
+  },
+  {
+   "url": "/login",
+   "method": "GET",
+   "param": "lang",
+   "location": "fragment",
+   "rendering": "js"
+  },
+  {
+   "url": "/login",
+   "method": "GET",
+   "param": "url",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/sessions",
+   "method": "POST",
+   "param": "url",
+   "location": "body",
+   "rendering": "server"
+  },
+  {
+   "url": "/sessions",
+   "method": "POST",
+   "param": "email",
+   "location": "body",
+   "rendering": "server"
+  },
+  {
+   "url": "/users/6/messages",
+   "method": "POST",
+   "param": "message[message]",
+   "location": "body",
+   "rendering": "server"
+  },
+  {
+   "url": "/users/{user_id}/work_info",
+   "method": "GET",
+   "param": "user_id",
+   "location": "path",
+   "rendering": "server",
+   "account_value": "user_id"
+  },
+  {
+   "url": "/users/{user_id}/retirement",
+   "method": "GET",
+   "param": "user_id",
+   "location": "path",
+   "rendering": "server",
+   "account_value": "user_id"
+  },
+  {
+   "url": "/admin/{admin_id}/get_user",
+   "method": "GET",
+   "param": "admin_id",
+   "location": "path",
+   "rendering": "server",
+   "account_value": "user_id"
+  },
+  {
+   "url": "/admin/1/analytics",
+   "method": "GET",
+   "param": "ip",
+   "location": "query",
+   "rendering": "server"
+  }
+ ]
+}

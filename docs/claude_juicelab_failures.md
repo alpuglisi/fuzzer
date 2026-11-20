@@ -2363,6 +2363,47 @@ Juice Shop lab is complete.
 - **Cause:** I generalised the design past what I had measured (§7: measure before design).
 - **Status:** fixed in CC-FUZZ-0633 (removed; only the measured file is probed).
 
+### F-720 — The VAmPI onboarding subagent showed generated lab passwords in its transcript and sent stray GETs through the proxy
+- **What:** lane HOLDOUT's VAmPI subagent (a) printed the first pair of generated lab passwords in a helper's output, and (b) ran `curl --noproxy *` unquoted, so the shell expanded `*` to scratchpad file names that curl then fetched as URLs through the agent proxy.
+- **Evidence:** the subagent's own report (hand-back of the VAmPI lane, 2026-11-20); the stored passwords were rotated (keyring entries deleted, lab re-bootstrapped from an empty database).
+- **Impact:** two loopback-lab passwords (since rotated, never committed) in a transcript; a handful of stray GETs to unrelated hosts, none to the lab, none carrying data.
+- **Cause:** unquoted shell glob; a debug print of a credential, against D12.
+- **Status:** remediated by the subagent (passwords rotated); no repository content affected.
+
+### F-721 — I dispatched three worktree subagents told they were based on f5db593 without checking; their worktrees started at 2be7a50
+- **What:** the HOLDOUT dispatch prompts said "an isolated git worktree … based on commit f5db593". The worktree isolation created all three from 2be7a50 (an older ancestor without lab/HOLDOUT.md). I did not verify the base the mechanism would use.
+- **Evidence:** each subagent's report (start HEAD 2be7a50; each ran `git reset --hard f5db593` on its new branch before editing); the merged branches' parent is f5db593 (`git log holdout-vampi holdout-dvws-node holdout-railsgoat`).
+- **Impact:** none on content (all three caught it); had one not, its lab would have been built against a tree without the guard and the discovery change, and the merge would have pulled unrelated older history.
+- **Cause:** I trusted the delegation mechanism's base instead of confirming it (MULTI_AGENT_ORCHESTRATION §4 asks sub-agents to confirm the mechanism; I did ask for `git rev-parse HEAD`, which is how it was caught).
+- **Status:** recorded; future dispatches state the base and require the agent to check it first.
+
+### F-722 — My resolution of the RailsGoat merge dropped DVWS-node's `return dest` and its fetch branch's `return 0`
+- **What:** resolving the external.py conflicts by concatenating both sides put the shared trailing lines (`return dest`, `return 0`) after the second side only, so `fetch_dvws_node` returned None and the DVWS `fetch` CLI branch fell through to the RailsGoat one.
+- **Evidence:** caught by my own read of the resolved regions before the merge commit (2c1694f carries the corrected lines).
+- **Impact:** none committed.
+- **Cause:** a mechanical conflict resolution; the shared context of two appended blocks belongs to both.
+- **Status:** fixed before commit.
+
+### F-723 — My first benchmark design gave up discovery when the lab's login failed; the first baseline run had to be stopped and repeated
+- **What:** `holdout_score.py` as first committed (75f4691) treated a failed logged-in crawl as "no crawl", so VAmPI was scored on a near-empty discovery and DVWS-node's run would have been the same. A black-box tester whose login fails still crawls anonymously.
+- **Evidence:** the first run's VAmPI log (`SessionAuthError` from the crawl, then auto over 0 points); fixed in f8c0169 (anonymous fallback for crawl and auto, recorded per row); the run was stopped and repeated with the fixed script.
+- **Impact:** one wasted benchmark run (~15 min).
+- **Cause:** I designed the runner for the success path only.
+- **Status:** fixed; the baseline (CC-LAB-0426) is from the fixed script.
+
+### F-724 — My benchmark counted requests from a table auto does not write; the first baseline table under-counted every lab
+- **What:** `holdout_score.score_store` summed `request_budget.used` for the run's sends; auto records them in `run_metrics.pipeline_requests`, so the first full run reported only crawl and disco traffic (railsgoat 328 instead of 792). I had not checked the source against a real store before writing it, and the offline test faked `score_store` away.
+- **Evidence:** the first baseline's `probe_requests: null` on every lab, against auto's own "requests: 464" line in the run log; fixed in 2ab5955 with a test reading a real store.
+- **Impact:** one extra benchmark run; the wrong table was never committed.
+- **Cause:** I wrote a metric reader from a schema name without measuring it.
+- **Status:** fixed; the committed baseline (CC-LAB-0426) counts what the run sent.
+
+### F-725 — My dispatch prompts told the onboarding subagents to verify with two named test files, not the harness
+- **What:** the HOLDOUT dispatch prompts said "`python -m pytest … tests/test_external_labs_static.py tests/test_holdout_benchmark.py`" as the verification step, against CLAUDE.md step 2 ("never a hand-picked list"). Their code tripped a whole-package guard (BUG-0721) that ran only in my final harness.
+- **Evidence:** the three dispatch prompts (this session, 2026-11-20); `scratchpad/verify/parallel.log` of 6ddac13 (1 failure).
+- **Impact:** one failed harness run and a fix commit, on the lane branch only.
+- **Cause:** I wrote a quick check as the verification step, and ran a subset myself after each merge instead of the harness.
+- **Status:** fixed (CC-LAB-0427); PA-0721.
 ### F-654 — My correction F-653 named the wrong cause too: I re-aimed the tests at a binary the product does not run
 - **What:** F-653 (and BUG-0651's "Correction") said the five `test_navigation_aborts` failures came from the tests running Playwright's headless shell instead of full Chrome, and my fix (931311b) pointed every test at full Chrome. The product launches the headless shell; on it SP-01's guarantee was really broken (BUG-0670, found by lane NAV), and my fix would have hidden that product defect behind a green suite.
 - **Evidence:** BUG-0670 / BUG-0671 (lane NAV, merged at 9cabe61): an empty-body error answer is a page on the headless shell and an error page on full Chrome; NAV's harness green with the product fixed and the tests on the product's binary.
