@@ -3,6 +3,29 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0692 — A login-shaped GET lookup form is not refused for a word on its button (FR-AUD-692, SP-19) (2026-11-20)
+- Placement: lane CRAWLCOV (item CRAWLCOV-GETFORM), base 94fac7f.
+- Change: `fuzzlab/tools/store_adapter.py::credential_change_reason` (the forms-side
+  caller of SP-19's `credential_change_rule`, which is unchanged): a GET form that is
+  login-shaped (`login_shaped`: one password control, one user field) is judged by its
+  password controls and its action path only -- its submitter and hidden-field words no
+  longer refuse it. A POST form and every captured request keep the whole rule.
+- Measured (CC-LAB-0411): on Mutillidae at 94fac7f the spider recorded the user-info and
+  user-info-xpath GET forms (page, username, password, a button labelled "View Account
+  Details"), and both were skipped as `credential-change form (submitter has
+  'account')`, so 7 answer-key positives had no point. After the change both import;
+  the register and edit-profile forms (two password controls) stay refused.
+- Why this is safe: a GET is a safe request (RFC 9110 §9.2.1); a login-shaped form's
+  points are probed on an isolated session (FR-FUZZ-44) with the password sent empty,
+  so no probe can change the run's account; structure (two passwords, a change word in a
+  password name) and an account word in the action path still refuse.
+- Impact (other components / project): more crawled GET forms become points.
+- Risk (level; mitigation or accepted-risk justification): low-medium (a safety rule's
+  caller); bounded as above and pinned by `tests/test_get_lookup_forms.py`.
+- Deliverables:
+  - [x] the caller's rule, tests — done
+  - [x] FR-AUD-692, SP-19 row, CHANGELOG — done
+
 ### CC-AUD-0691 — A capture's store -> render pairs imported as `stored` parameters (FR-AUD-691) (2026-11-20)
 - Placement: lane CRAWLCOV (part 5), base f6b4790.
 - Change: `fuzzlab/tools/store_adapter.py`: `import_disco` keeps each stored captured

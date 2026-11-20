@@ -801,6 +801,12 @@ budget where a vulnerability is plausible.
   `Authorization` header only (RFC 6750, RFC 7235); `value_shape.FILE_EXTENSIONS` has
   no `lang`. Enforced for every rules-data file and every detection module by
   `tests/test_blackbox_detection.py`.
+- **FR-AUD-692 (a login-shaped GET form and the credential-change rule; CC-AUD-0692,
+  2026-11-20, SP-19)** A crawled GET form that is login-shaped is a credential-change
+  form only by its password controls (two or more, or a change word in a name) or an
+  account word in its action path; a word on its submitter or a hidden field does not
+  refuse it. Every other form and every captured request is judged by the whole rule.
+
 ## 4. Non-functional requirements
 - **NFR-AUD-explainable** Every candidate is traceable to the rule evidence that
   produced it; a candidate with no evidence is a bug.

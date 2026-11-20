@@ -592,8 +592,17 @@ _LOGIN_USER_KINDS = frozenset({"text", "email", "tel"})
 def credential_change_reason(form: dict) -> str | None:
     """Why a form with a password control changes a credential or manages an account
     (never imported, even with an isolated session: it changes the account, not the
-    session), or None. Reviewers A/B (FR-FUZZ-44)."""
+    session), or None. Reviewers A/B (FR-FUZZ-44). A login-shaped GET form is judged
+    by its password controls and action path only (FR-AUD-692)."""
     kinds = dict(form["controls"])
+    if (form.get("method") or "GET").upper() == "GET" and login_shaped(form):
+        # FR-AUD-692: a GET form is a safe request (RFC 9110 §9.2.1) and a login-shaped
+        # one is probed on an isolated session with its password sent empty
+        # (FR-FUZZ-44), so a word on its submitter or a hidden field (``View Account
+        # Details``) does not make it a credential change; its structure and action
+        # path still do (SP-19's rule, unchanged)
+        return credential_change_rule(
+            [n for n, k in form["controls"] if k == "password"], form["action_url"])
     return credential_change_rule(
         [n for n, k in form["controls"] if k == "password"], form["action_url"],
         submitters=[t for n, v in form["entries"] if kinds.get(n) == "submit"
