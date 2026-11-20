@@ -2,7 +2,7 @@ rc=0
 
 auto run (automatic, scored; categories=['sql-injection', 'xss']; source=ground-truth)
   points from: ground-truth
-  points audited: 23   candidates: 46   negatives: 87
+  points audited: 23   candidates: 46   negatives: 110
   findings (oracle-confirmed): 3
   oracle budget NOT applied: no usable earlier labels for this target — confirmed all 44 confirmable candidate(s)
   oracle diagnostic (ground-truth points: the answer key supplied the points; not a detection figure) vs ground truth: tp=3 fp=0 fn=5 tn=8
