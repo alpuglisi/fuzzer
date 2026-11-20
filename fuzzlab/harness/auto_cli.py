@@ -70,6 +70,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help=AUTH_ORIGIN_HELP)
     p.add_argument("--browser", action="store_true",
                    help="Enable M6 browser execution (stored/DOM XSS) via Playwright")
+    p.add_argument("--browser-workers", type=int, default=None, metavar="N",
+                   choices=range(1, 4),
+                   help="M6 browser visits one candidate observes at a time (1-3; "
+                        "default 3; 1 = one after another). Each visit keeps the full "
+                        "observation window (FR-FUZZ-722)")
     p.add_argument("--oob", action="store_true",
                    help="Enable M8 out-of-band callback confirmation (blind command "
                         "injection) via a local, loopback-only listener. Default off; "
@@ -399,7 +404,8 @@ def _run_traced(p, args, store, run_id: int, plugins, selected, ground_truth) ->
         # sender's own, through its gates -- never a session of their own, never none
         # while the probes carry one (``--no-login``: the plain sender has no route)
         browser = PlaywrightBrowserExecutor(
-            session_route=getattr(sender, "browser_session_route", None))
+            session_route=getattr(sender, "browser_session_route", None),
+            workers=args.browser_workers)
     oob = None
     if args.oob:
         from fuzzlab.oracle.oob import OobListener

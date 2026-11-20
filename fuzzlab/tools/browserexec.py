@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 import time
 import uuid
 from contextlib import suppress
@@ -32,6 +33,18 @@ def _with_fragment(url: str, param: str, value: str) -> str:
 
 
 #: What a failure text may not keep: a quoted string, or a ``scheme://`` token.
+
+
+#: A sentinel token as `oracle.strategies` draws it (alphanumeric, bounded).
+_TOKEN_SHAPE = re.compile(r"[0-9A-Za-z]{1,64}")
+
+
+def _fired_tokens(hits: set) -> frozenset:
+    """FR-FUZZ-721: the sentinel tokens that fired on the page -- its own and any other
+    of the candidate's (a stored sibling's echo) --, so the strategy credits the payload
+    whose token fired, never the page that saw it. Only a token's shape is kept: what a
+    page passes the binding is the page's."""
+    return frozenset(t for t in list(hits) if _TOKEN_SHAPE.fullmatch(t))
 
 
 def _store_plan(store) -> tuple[str | None, bytes | None]:
@@ -346,8 +359,25 @@ class _VisitTrace:
 class PlaywrightBrowserExecutor:
     """Drive a headless browser to confirm stored/DOM XSS. Lab-only, loopback targets."""
 
+    #: FR-FUZZ-722: the most visits one candidate observes at a time. Bounded by the
+    #: strategy's cost rule (FR-FUZZ-48: a page that cannot be loaded costs at most
+    #: ``MAX_NOT_OBSERVED`` + 1 = 3 loads), so one wave never spends more than that.
+    MAX_WORKERS = 3
+    #: The default: the bound (measured, CC-FUZZ-0720).
+    DEFAULT_WORKERS = 3
+
     def __init__(self, headless: bool = True, timeout_ms: int = 8000,
-                 storage_headers: dict | None = None, session_route=None):
+                 storage_headers: dict | None = None, session_route=None,
+                 workers: int | None = None):
+        workers = self.DEFAULT_WORKERS if workers is None else workers
+        if not isinstance(workers, int) or isinstance(workers, bool) or \
+                not 1 <= workers <= self.MAX_WORKERS:
+            raise ValueError(f"browser workers must be an integer from 1 to "
+                             f"{self.MAX_WORKERS}")
+        #: FR-FUZZ-722: visits observed at a time by `run_many` (1: one after another)
+        self.workers = workers
+        #: the run-wide counters below are shared by `run_many`'s workers
+        self._lock = threading.Lock()
         self._headless = headless
         self._timeout = timeout_ms
         self._headers = storage_headers or {}
@@ -404,29 +434,135 @@ class PlaywrightBrowserExecutor:
         # FR-FUZZ-62: one visit's steps, only with an active recorder (none: ``None``,
         # and every ``visit`` use below is skipped)
         visit = _VisitTrace(request, token) if trace.active() is not None else None
+        try:
+            try:
+                session = self._prepare(request, visit)
+            except BaseException as exc:
+                if visit is not None:
+                    visit.end_raised(exc)              # contained; re-raised unchanged
+                raise
+            return self._observe(request, token, visit, session)
+        finally:
+            if visit is not None:
+                visit.emit()                           # contained (FR-FUZZ-62)
+
+    def run_many(self, items) -> list:
+        """FR-FUZZ-720: observe ``items`` (``[(request, token), ...]``) -- one
+        candidate's next payloads -- at most `workers` at a time, each in its own worker
+        thread with its own driver, browser and context (a fresh `sync_playwright()` per
+        visit, as `run`: never a held driver, F-651). One result per item, in order: its
+        `ExecObservation`, the exception `run` would have raised for it, or None for an
+        item left unobserved after an earlier item failed before any browser started (a
+        placement refusal, a login failure) or once the browser is unavailable.
+
+        What stays on the calling thread (measured and reasoned in CC-FUZZ-0720):
+        - the placement refusals and the visit's session (`_visit_session`, which
+          ensures the run's session and may log in, FR-SESS-19): once per scope, before
+          any worker starts, so every visit of the wave carries the same session
+          material and nothing logs in while a visit is in flight (FR-SESS-670: the scan
+          is single-threaded, the caller blocks on the wave, and the executor never
+          logs in itself);
+        - each visit's trace (`_VisitTrace`): created here, where the test and strategy
+          are visible, noted by its worker, and emitted here after the join -- a
+          recorder writes its store on its own thread only (`trace.TraceRecorder`).
+        Workers run in a copy of the caller's context (`contextvars`)."""
+        items = list(items)
+        if self.workers <= 1 or len(items) <= 1:
+            return [self._captured(self.run, request, token) for request, token in items]
+        import contextvars
+        from concurrent.futures import ThreadPoolExecutor
+        visits = [(_VisitTrace(request, token) if trace.active() is not None else None)
+                  for request, token in items]
+        results: list = [None] * len(items)
+        sessions: dict = {}
+        todo = []
+        try:
+            for i, ((request, token), visit) in enumerate(zip(items, visits)):
+                try:
+                    session = self._prepare(request, visit, sessions)
+                except BaseException as exc:  # noqa: BLE001 - the item's own result
+                    if visit is not None:
+                        visit.end_raised(exc)
+                    results[i] = exc
+                    # a refusal or a login failure ends the candidate where its strategy
+                    # reads it: the items after it are left unobserved (None), never
+                    # prepared, so a wave records one refusal, as one visit at a time does
+                    visits[i + 1:] = [None] * (len(visits) - i - 1)
+                    break
+                todo.append((i, request, token, visit, session))
+            if self._unavailable is not None and todo:  # BUG-0126: one refusal, not N
+                for _i, _r, _t, visit, _s in todo[1:]:
+                    if visit is not None:
+                        visits[visits.index(visit)] = None
+                todo = todo[:1]
+            if todo:
+                with ThreadPoolExecutor(max_workers=min(self.workers, len(todo)),
+                                        thread_name_prefix="fuzzlab-m6") as pool:
+                    futures = [(i, pool.submit(contextvars.copy_context().run,
+                                               self._captured, self._observe, request,
+                                               token, visit, session))
+                               for i, request, token, visit, session in todo]
+                    for i, future in futures:
+                        results[i] = future.result()
+        finally:
+            for visit in visits:
+                if visit is not None:
+                    visit.emit()                       # the calling thread (FR-FUZZ-62)
+        return results
+
+    @staticmethod
+    def _captured(fn, *args):
+        """``fn(*args)``'s result, or the exception it raised (a `run_many` item's)."""
+        try:
+            return fn(*args)
+        except BaseException as exc:  # noqa: BLE001 - handed back to the caller
+            return exc
+
+    def _prepare(self, request: ExecRequest, visit: _VisitTrace | None,
+                 sessions: dict | None = None):
+        """The checks before any browser starts, then the session the visit carries.
+        ``sessions``: a wave's sessions by scope (`run_many`), so one wave ensures the
+        run's session once per scope."""
+        # refuse, never relocate (BUG-0115, PA-0115): checked before any browser
+        # starts. A refusal is the oracle's no-verdict signal, raised -- never a
+        # returned observation, which its reader takes as "observed, not executed"
+        # (BUG-0523, PA-0523)
+        if request.param is not None and request.location not in ("query", "fragment"):
+            detail = f"unplaceable location {request.location!r}"
+            if visit is not None:
+                visit.refused_placement("navigate", request, detail)
+            raise UnplaceableLocation(detail)
+        if request.store is not None:
+            refusal, _body = _store_plan(request.store)
+            if refusal is not None:
+                if visit is not None:
+                    visit.refused_placement("store", request, refusal)
+                raise UnplaceableLocation(refusal)
+        # FR-FUZZ-680 (BUG-0690): the session the visit carries -- the run's, through
+        # its sender's gates -- ensured before the driver starts (a browser login,
+        # FR-SESS-19, runs on its own thread); a login failure propagates as it
+        # does from the sender's own sends, never an anonymous visit
+        if sessions is None:
+            return self._visit_session(request)
+        key = tuple(self._scope(request)[0])
+        if key not in sessions:
+            try:
+                sessions[key] = (True, self._visit_session(request))
+            except BaseException as exc:  # noqa: BLE001 - every visit of the scope's
+                sessions[key] = (False, exc)
+        ok, value = sessions[key]
+        if not ok:
+            raise value
+        return value
+
+    def _observe(self, request: ExecRequest, token: str, visit: _VisitTrace | None,
+                 session) -> ExecObservation:
+        """One visit with its own driver: start it, observe, stop it. Ends ``visit``
+        (never emits it: its caller does, on the caller's thread)."""
         manager = PlaywrightError = None
         entered = False
+        hits: set = set()
         try:
-            # refuse, never relocate (BUG-0115, PA-0115): checked before any browser
-            # starts. A refusal is the oracle's no-verdict signal, raised -- never a
-            # returned observation, which its reader takes as "observed, not executed"
-            # (BUG-0523, PA-0523)
-            if request.param is not None and request.location not in ("query", "fragment"):
-                detail = f"unplaceable location {request.location!r}"
-                if visit is not None:
-                    visit.refused_placement("navigate", request, detail)
-                raise UnplaceableLocation(detail)
-            if request.store is not None:
-                refusal, _body = _store_plan(request.store)
-                if refusal is not None:
-                    if visit is not None:
-                        visit.refused_placement("store", request, refusal)
-                    raise UnplaceableLocation(refusal)
-            # FR-FUZZ-680 (BUG-0690): the session the visit carries -- the run's, through
-            # its sender's gates -- ensured before the driver starts (a browser login,
-            # FR-SESS-19, runs on its own thread); a login failure propagates as it
-            # does from the sender's own sends, never an anonymous visit
-            session = self._visit_session(request)
             from playwright.sync_api import Error as PlaywrightError
             from playwright.sync_api import sync_playwright
 
@@ -444,8 +580,13 @@ class PlaywrightBrowserExecutor:
             entered = True
             # a result, or the probe's own no-verdict (NotObserved / a launch failure),
             # or a defect: the driver's stop below never replaces any of them (Z2)
-            obs = self._in_browser(pw, request, token, PlaywrightError, visit,
-                                   session=session)
+            try:
+                obs = self._in_browser(pw, request, token, PlaywrightError, visit,
+                                       session=session, hits=hits)
+            except NotObserved as exc:
+                exc.hits = _fired_tokens(hits)         # FR-FUZZ-721
+                raise
+            obs.hits = _fired_tokens(hits)             # FR-FUZZ-721
             if visit is not None:
                 visit.end_returned(obs)
             return obs
@@ -454,12 +595,8 @@ class PlaywrightBrowserExecutor:
                 visit.end_raised(exc)                  # contained; re-raised unchanged
             raise
         finally:
-            try:
-                if entered:
-                    self._stop_driver(manager, PlaywrightError)
-            finally:
-                if visit is not None:
-                    visit.emit()                       # contained (FR-FUZZ-62)
+            if entered:
+                self._stop_driver(manager, PlaywrightError)
 
     @staticmethod
     def _scope(request: ExecRequest):
@@ -544,7 +681,7 @@ class PlaywrightBrowserExecutor:
 
     def _in_browser(self, pw, request: ExecRequest, token: str,
                     error, visit: _VisitTrace | None = None, *,
-                    session=None) -> ExecObservation:
+                    session=None, hits: set | None = None) -> ExecObservation:
         from fuzzlab.core.urls import url_key
         from fuzzlab.tools import browserauth
         from fuzzlab.tools.navguard import (browser_launch_args, checked_api_request,
@@ -560,9 +697,10 @@ class PlaywrightBrowserExecutor:
             if visit is not None:
                 visit.launch_failed(exc)
             self._launch_failed(exc)
-        self._failures = 0
+        with self._lock:
+            self._failures = 0
         context = page = None
-        hits: set = set()
+        hits = set() if hits is None else hits
         load_ms = min(self.LOAD_WAIT_MS, self._timeout)
         try:
             # BUG-0111; FR-FUZZ-680: a session's browser login state adopted the one way
@@ -723,17 +861,19 @@ class PlaywrightBrowserExecutor:
         try:
             manager.__exit__(None, None, None)
         except error as exc:
-            self._stop_failures += 1
             logging.warning(f"M6: the Playwright driver did not stop cleanly "
                             f"({type(exc).__name__})")
-            if self._stop_failures >= self.MAX_LAUNCH_FAILURES:
-                self._unavailable = (f"browser unavailable: the Playwright driver did "
-                                     f"not stop cleanly {self._stop_failures} times in "
-                                     f"a row ({type(exc).__name__})")
-                logging.warning(f"M6 browser execution disabled for this run: "
-                                f"{self._unavailable}")
+            with self._lock:
+                self._stop_failures += 1
+                if self._stop_failures >= self.MAX_LAUNCH_FAILURES:
+                    self._unavailable = (f"browser unavailable: the Playwright driver "
+                                         f"did not stop cleanly {self._stop_failures} "
+                                         f"times in a row ({type(exc).__name__})")
+                    logging.warning(f"M6 browser execution disabled for this run: "
+                                    f"{self._unavailable}")
             return
-        self._stop_failures = 0
+        with self._lock:
+            self._stop_failures = 0
 
     #: Launch failures in a row before the browser mechanisms are off for the run: one
     #: transient failure (memory pressure) does not silence M6 (reviewer A).
@@ -745,8 +885,9 @@ class PlaywrightBrowserExecutor:
         `MAX_LAUNCH_FAILURES` in a row it is remembered for the run, so later probes do
         not retry; the reason reaches every such candidate's inconclusive record."""
         why = f"browser unavailable: {str(exc).splitlines()[0][:160] if str(exc) else exc!r}"
-        self._failures += 1
-        if self._failures >= self.MAX_LAUNCH_FAILURES:
-            self._unavailable = why
-            logging.warning(f"M6 browser execution disabled for this run: {why}")
+        with self._lock:
+            self._failures += 1
+            if self._failures >= self.MAX_LAUNCH_FAILURES:
+                self._unavailable = why
+                logging.warning(f"M6 browser execution disabled for this run: {why}")
         raise UnplaceableLocation(why) from None

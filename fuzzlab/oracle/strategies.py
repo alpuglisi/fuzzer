@@ -26,6 +26,8 @@ from fuzzlab.oracle.browser import (
     ExecRequest,
     NotObserved,
     StoreStep,
+    observe_many,
+    workers_of,
 )
 from fuzzlab.greybox.confirm import greybox_confirms, m10_evidence
 from fuzzlab.greybox.coverage import CoverageSource, app_lines
@@ -2593,7 +2595,16 @@ def _quote_free(payload: str) -> bool:
 
 
 class _BrowserXssStrategy(ConfirmationStrategy):
-    """Shared M6 logic: place a tokened payload, execute in a browser, confirm on fire."""
+    """Shared M6 logic: place a tokened payload, execute in a browser, confirm on fire.
+
+    FR-FUZZ-720/721: each payload carries its own token, and the payloads are observed in
+    waves of the executor's ``workers`` (`browser.workers_of`; 1 is one after another,
+    exactly as before). The decision walks the outcomes in payload order with the rules
+    of a one-at-a-time loop (stop on a hit, `MAX_NOT_OBSERVED`, `_last_try`), so a wave
+    changes when a load happens, never what a set of outcomes decides. A hit is credited
+    to the payload whose token fired (`ExecObservation.hits`), never to the page that
+    saw it: a stored sibling's echo on another payload's page names its own payload, and
+    another candidate's token is never this candidate's."""
     category = "xss"
     #: Payloads not observed in a row before the strategy stops trying (BUG-0137 review
     #: Z1): a page that cannot be loaded costs at most this many browser loads.
@@ -2602,23 +2613,83 @@ class _BrowserXssStrategy(ConfirmationStrategy):
     def __init__(self, executor: BrowserExecutor | None = None):
         self._executor = executor
 
-    def _observe(self, candidate: Candidate, payload: str, token: str) -> ExecObservation:
+    def _exec_request(self, candidate: Candidate, payload: str) -> ExecRequest:
         raise NotImplementedError
 
-    def _last_try(self, candidate, payloads, tried, token, not_observed):
+    def _observe(self, candidate: Candidate, payload: str, token: str) -> ExecObservation:
+        return self._executor.run(self._exec_request(candidate, payload), token)
+
+    def _hit(self, obs, index, payloads, tokens):
+        """The verdict of an observation that saw one of this candidate's tokens, or
+        None: its own token first, else the lowest payload whose token fired."""
+        own = tokens[index]
+        fired = set(getattr(obs, "hits", ()) or ())
+        if obs.executed or own in fired:
+            credited = index
+        else:
+            credited = next((j for j, t in enumerate(tokens) if t in fired), None)
+            if credited is None:
+                return None
+        evidence = {"payload": payloads[credited], "detail": obs.detail}
+        if credited != index:
+            evidence["observed_with"] = payloads[index]
+        return Verdict(True, self.vuln_class, self.mechanism, evidence)
+
+    def _outcomes(self, candidate, payloads, tokens):
+        """``get(i, fill)``: payload ``i``'s outcome, observed on first need. Not yet
+        observed: a wave of ``i`` and, with ``fill``, the next unobserved payloads after
+        it, up to the executor's ``workers`` (FR-FUZZ-720). An outcome is the
+        observation or the exception its observation raised (re-raised by ``get``)."""
+        cache: dict[int, object] = {}
+        workers = workers_of(self._executor)
+
+        def get(i: int, fill: bool = True):
+            if i not in cache:
+                wave = [i]
+                if fill:
+                    wave += [j for j in range(i + 1, len(payloads))
+                             if j not in cache][:workers - 1]
+                items, built = [], []
+                for j in wave:
+                    try:
+                        items.append((self._exec_request(candidate, payloads[j]),
+                                      tokens[j]))
+                        built.append(j)
+                    except Exception as exc:  # noqa: BLE001 - payload j's outcome
+                        cache[j] = exc
+                if len(built) == 1:
+                    try:
+                        cache[built[0]] = self._executor.run(*items[0])
+                    except Exception as exc:  # noqa: BLE001 - payload j's outcome
+                        cache[built[0]] = exc
+                elif built:
+                    for j, result in zip(built, observe_many(self._executor, items)):
+                        if result is not None:         # None: left unobserved
+                            cache[j] = result
+                if i not in cache:                     # never: the first is observed
+                    raise UnplaceableLocation("the browser left the payload unobserved")
+            result = cache[i]
+            if isinstance(result, BaseException):
+                raise result
+            return result
+        return get
+
+    def _last_try(self, candidate, payloads, tried, tokens, not_observed, get):
         """After `MAX_NOT_OBSERVED` unobserved payloads in a row: one more load, of the
-        first untried quote-free payload, if any (at most 1 extra load). A hit
-        confirms; anything else leaves the candidate inconclusive (Z4)."""
+        first untried quote-free payload, if any (at most 1 extra load; an outcome its
+        wave already holds costs none). A hit confirms; anything else leaves the
+        candidate inconclusive (Z4)."""
         nxt = next((i for i, p in enumerate(payloads)
                     if i not in tried and _quote_free(p)), None)
         if nxt is not None:
             try:
-                obs = self._observe(candidate, payloads[nxt], token)
+                obs = get(nxt, fill=False)
             except UnplaceableLocation:              # NotObserved, or no browser now
                 obs = None
-            if obs is not None and obs.executed:
-                return Verdict(True, self.vuln_class, self.mechanism,
-                               {"payload": payloads[nxt], "detail": obs.detail})
+            if obs is not None:
+                verdict = self._hit(obs, nxt, payloads, tokens)
+                if verdict is not None:
+                    return verdict
         return Verdict(False, self.vuln_class, self.mechanism,
                        {"not_observed": not_observed[:200]}, inconclusive=True)
 
@@ -2633,23 +2704,33 @@ class _BrowserXssStrategy(ConfirmationStrategy):
                                       "a fragment point is placed by the browser only")
         not_observed: str | None = None
         misses = 0                                   # payloads not observed in a row
-        payloads = _xss_exec_payloads((token := _token()))
+        # FR-FUZZ-721: one fresh token per payload (payload i is the i-th shape of
+        # `_xss_exec_payloads` around its own token)
+        tokens = [_token() for _ in _xss_exec_payloads("0")]
+        payloads = [_xss_exec_payloads(t)[i] for i, t in enumerate(tokens)]
+        get = self._outcomes(candidate, payloads, tokens)
         tried: set[int] = set()
         for index, payload in enumerate(payloads):
             tried.add(index)
             try:
-                obs = self._observe(candidate, payload, token)
+                obs = get(index)
             except NotObserved as exc:
                 # BUG-0137 review (Z1): this payload's page could not be observed; the
                 # next payload is still tried. A browser that cannot start
                 # (`UnplaceableLocation`) or a placement refusal stops at once.
+                hits = set(getattr(exc, "hits", ()) or ()) & set(tokens)
+                if hits:                             # a sibling fired before the error
+                    credited = next(j for j, t in enumerate(tokens) if t in hits)
+                    return Verdict(True, self.vuln_class, self.mechanism,
+                                   {"payload": payloads[credited], "detail": "playwright",
+                                    "observed_with": payload})
                 not_observed = not_observed or str(exc)
                 misses += 1
                 if misses >= self.MAX_NOT_OBSERVED:  # cost bound (FR-FUZZ-48)
                     # still the first untried quote-free payload: a path that fails on
                     # a quote may fail the quoted payloads' loads (review B-S1)
-                    return self._last_try(candidate, payloads, tried, token,
-                                          not_observed)
+                    return self._last_try(candidate, payloads, tried, tokens,
+                                          not_observed, get)
                 continue
             except UnplaceableLocation:
                 # the browser cannot start (BUG-0126) after a payload went unobserved:
@@ -2658,9 +2739,9 @@ class _BrowserXssStrategy(ConfirmationStrategy):
                     raise
                 break
             misses = 0
-            if obs.executed:
-                return Verdict(True, self.vuln_class, self.mechanism,
-                               {"payload": payload, "detail": obs.detail})
+            verdict = self._hit(obs, index, payloads, tokens)
+            if verdict is not None:
+                return verdict
         if not_observed is not None:
             # Z4 (D54): no hit, and a payload was not observed: inconclusive
             # (FR-FUZZ-45) -- never a negative, so it never enters the ML negatives
@@ -2682,7 +2763,7 @@ class DomXssStrategy(_BrowserXssStrategy):
     def applies(self, candidate: Candidate) -> bool:
         return super().applies(candidate) and candidate.location in self._PLACEABLE
 
-    def _observe(self, candidate, payload, token):
+    def _exec_request(self, candidate, payload):
         if candidate.location not in self._PLACEABLE:     # refuse, never relocate
             raise UnplaceableLocation(f"DOM XSS places query or fragment points only, "
                                       f"not {candidate.location!r}")
@@ -2697,11 +2778,9 @@ class DomXssStrategy(_BrowserXssStrategy):
             raise PrerequisiteUnavailable("the browser cannot bind fresh values for "
                                           + ", ".join(candidate.bindings.get("fresh")
                                                       or ()))
-        return self._executor.run(
-            ExecRequest(url=candidate.url, param=candidate.param, value=payload,
-                        location=candidate.location,
-                        entries=tuple(tuple(e) for e in entries) if entries else None),
-            token)
+        return ExecRequest(url=candidate.url, param=candidate.param, value=payload,
+                           location=candidate.location,
+                           entries=tuple(tuple(e) for e in entries) if entries else None)
 
 
 class StoredXssStrategy(_BrowserXssStrategy):
@@ -2709,14 +2788,14 @@ class StoredXssStrategy(_BrowserXssStrategy):
     vuln_class = "xss-stored"
     mechanism = "browser-execution"
 
-    def _observe(self, candidate, payload, token):
+    def _exec_request(self, candidate, payload):
         if not candidate.store_url:            # need the store endpoint (source_url)
             raise UnplaceableLocation("stored XSS needs the candidate's store URL")
         store = StoreStep(url=candidate.store_url, param=candidate.store_param or candidate.param,
                           value=payload, method=candidate.store_method,
                           location=candidate.store_location,
                           entries=candidate.store_entries)
-        return self._executor.run(ExecRequest(url=candidate.url, store=store), token)
+        return ExecRequest(url=candidate.url, store=store)
 
 
 class PriceTrustDifferentialStrategy(ConfirmationStrategy):

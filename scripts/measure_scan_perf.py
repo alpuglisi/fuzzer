@@ -59,6 +59,8 @@ PHASES = (
     ("fuzzlab.harness.pipeline", "evaluate", "audit"),
     ("fuzzlab.oracle.oracle", "Oracle._confirm_outcome", "oracle_confirm"),
     ("fuzzlab.tools.browserexec", "PlaywrightBrowserExecutor.run", "browser_total"),
+    # FR-FUZZ-720: a wave of concurrent visits (absent on a tree before it: skipped)
+    ("fuzzlab.tools.browserexec", "PlaywrightBrowserExecutor.run_many", "browser_batch"),
     ("fuzzlab.tools.browserexec", "PlaywrightBrowserExecutor._in_browser",
      "browser_session"),
     ("fuzzlab.tools.browserexec", "PlaywrightBrowserExecutor._stop_driver",
@@ -86,7 +88,9 @@ class Timers:
         if "." in attr:
             cls, name = attr.split(".", 1)
             owner = getattr(mod, cls)
-        original = getattr(owner, name)
+        original = getattr(owner, name, None)
+        if original is None:                 # a phase this tree does not have
+            return
         timers = self
 
         @functools.wraps(original)

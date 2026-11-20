@@ -14,7 +14,7 @@ fired. Confirmation is execution, never mere reflection (fail-closed).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
 from fuzzlab.oracle.probe import UnplaceableLocation
@@ -64,12 +64,44 @@ class ExecRequest:
 class ExecObservation:
     executed: bool                          # did the tokened sentinel actually fire?
     detail: str = ""                        # how (onerror/script/…), for evidence
+    #: FR-FUZZ-721: every sentinel token that fired on the page -- its own and any other
+    #: (a stored sibling payload's echo). The strategy credits a hit to the payload whose
+    #: token fired, never to the page that saw it. Empty: the executor reports its own
+    #: token only (``executed``).
+    hits: frozenset = field(default_factory=frozenset)
 
 
 @runtime_checkable
 class BrowserExecutor(Protocol):
     def run(self, request: ExecRequest, token: str) -> ExecObservation:
         ...
+
+
+def observe_many(executor, items) -> list:
+    """FR-FUZZ-720: ``[(request, token), ...]`` observed by ``executor``: its own
+    `run_many` (concurrent, bounded by its ``workers``) when it has one, else ``run``
+    one after another. One result per item, in order: the observation, the exception
+    ``run`` raised for that item (handed back, never raised here), or None for an item
+    `run_many` left unobserved (an earlier item's refusal)."""
+    many = getattr(executor, "run_many", None)
+    if many is not None:
+        return list(many(items))
+    out = []
+    for request, token in items:
+        try:
+            out.append(executor.run(request, token))
+        except BaseException as exc:  # noqa: BLE001 - the item's own result
+            out.append(exc)
+    return out
+
+
+def workers_of(executor) -> int:
+    """How many visits ``executor`` observes at a time (FR-FUZZ-722): its ``workers``
+    when it has `run_many`, else 1."""
+    if getattr(executor, "run_many", None) is None:
+        return 1
+    workers = getattr(executor, "workers", 1)
+    return workers if isinstance(workers, int) and workers >= 1 else 1
 
 
 class FakeBrowserExecutor:
