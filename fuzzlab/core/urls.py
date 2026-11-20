@@ -511,3 +511,48 @@ def check_send_url(url: str, explicit: frozenset[str] = frozenset(),
         raise DestructiveUrlRefused(
             f"refusing to send to {url.split('?', 1)[0]}: it looks destructive "
             f"({reason!r}) and was not explicitly enumerated (ground truth)")
+
+
+# --- operator URL exclusions (FR-CORE-662, CC-CORE-0662) -----------------------------
+#: At most this many ``--exclude`` patterns, each at most this long.
+MAX_EXCLUSIONS = 64
+MAX_EXCLUSION_CHARS = 512
+
+
+def compile_exclusions(patterns) -> tuple:
+    """The operator's ``--exclude`` patterns as compiled regular expressions; raises
+    ``ValueError`` for an invalid, empty or over-long one, or too many. An exclusion is
+    the operator's (or a lab fixture's) knowledge of its own target -- never a word of
+    detection code (PA-0660): a URL it matches is never loaded by either crawler."""
+    patterns = [p for p in (patterns or ())]
+    if len(patterns) > MAX_EXCLUSIONS:
+        raise ValueError(f"at most {MAX_EXCLUSIONS} --exclude patterns")
+    out = []
+    for pat in patterns:
+        if not isinstance(pat, str) or not pat or len(pat) > MAX_EXCLUSION_CHARS:
+            raise ValueError(f"an --exclude pattern must be 1..{MAX_EXCLUSION_CHARS} "
+                             "characters")
+        try:
+            out.append(re.compile(pat))
+        except re.error as exc:
+            raise ValueError(f"--exclude {pat!r} is not a regular expression: {exc}") \
+                from None
+    return tuple(out)
+
+
+def exclusion_reason(url: str, exclusions) -> str | None:
+    """The first operator exclusion (`compile_exclusions`) that matches ``url``'s path
+    and query (``/difficulty/hard``, ``/a?x=1``; searched, not anchored unless the
+    pattern is), or None. A URL ``urlsplit`` rejects is judged as written."""
+    if not exclusions:
+        return None
+    try:
+        parts = urlsplit(url or "")
+        text = (parts.path or "/") + (("?" + parts.query) if parts.query else "")
+    except ValueError:
+        text = url or ""
+    for rx in exclusions:
+        if rx.search(text):
+            return rx.pattern
+    return None
+

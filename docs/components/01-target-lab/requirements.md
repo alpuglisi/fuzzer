@@ -6622,6 +6622,11 @@ lane) can submit a payload as
   "nothing left". bWAPP additionally survives a restart and a killed DB, and its
   build fails on a wrong zip hash.
 
+- **FR-LAB-410 (a lab's crawl exclusions; CC-LAB-0412, 2026-11-20)** `LabMeta.crawl_exclude`
+  lists the URL patterns a crawl of that lab must never load (GET state switches no
+  generic rule can tell apart); `--exclude-lab <lab>` applies it (FR-CRAWL-675). DVGA:
+  `^/difficulty/`, `^/start_over`.
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.

@@ -209,11 +209,11 @@ FLAG_CLASSES: dict[str, dict[str, str]] = {
                         "identity", "follow_selector_forms", "no_spa_routes",
                         "submit_spa_forms", "no_reveal", "no_dry_submit", "dry_run",
                         "auth_origin",
-                        "no_spa_query", "workers"]),
+                        "no_spa_query", "workers", "exclude", "exclude_lab"]),
     "disco": {
         **_all("B", [f"capture:{d}" for d in (
             "start", "scope", "out", "profile", "storage_state", "max_states", "max_actions", "workers", "max_harvest",
-            "deadline", "deny", "keep_tag", "upstream_insecure", "authorized", "dry_run",
+            "deadline", "deny", "exclude", "exclude_lab", "keep_tag", "upstream_insecure", "authorized", "dry_run",
             "store", "record")]),
         **_all("B", ["synth:capture", "synth:out"]),
         **_all("B", [f"generate:{d}" for d in (

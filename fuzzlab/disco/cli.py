@@ -50,6 +50,12 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--deadline", type=float, default=900.0, help="seconds")
     c.add_argument("--deny", action="append", default=[], metavar="WORD",
                    help="never act on an element whose label/name holds WORD (repeatable)")
+    c.add_argument("--exclude", action="append", default=[], metavar="REGEX",
+                   help="never load a URL whose path and query match REGEX (repeatable; "
+                        "FR-CRAWL-675)")
+    c.add_argument("--exclude-lab", default=None, metavar="LAB",
+                   help="also exclude a bundled lab fixture's own list of state-changing "
+                        "URLs (FR-CRAWL-675)")
     c.add_argument("--keep-tag", action="store_true",
                    help="forward x-disco-action to the target (default: stripped)")
     c.add_argument("--upstream-insecure", action="store_true",
@@ -181,9 +187,16 @@ def _capture(ns) -> int:
     from fuzzlab.disco.proxyproc import CaptureProxy
     if not 1 <= ns.workers <= MAX_WORKERS:
         return _fail(f"--workers must be 1..{MAX_WORKERS}")
+    from fuzzlab.core.urls import compile_exclusions
+    from fuzzlab.lab_fixtures.external import ExternalLabError, exclusions_for
+    try:
+        compile_exclusions(exclusions_for(ns))              # FR-CRAWL-675
+    except (ValueError, ExternalLabError) as exc:
+        return _fail(str(exc))
     opts = ExploreOptions(max_states=ns.max_states, max_actions=ns.max_actions,
                           workers=ns.workers, max_harvest=ns.max_harvest,
-                          deadline_s=ns.deadline, deny=tuple(ns.deny))
+                          deadline_s=ns.deadline, deny=tuple(ns.deny),
+                          exclude=exclusions_for(ns))
     store = run_id = live = None
     if recording is not None:
         from urllib.parse import urlsplit

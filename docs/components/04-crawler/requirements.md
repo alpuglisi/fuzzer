@@ -1917,6 +1917,13 @@ fuzzer.
   2026-11-20, SP-120)** `disco.explore.form_refusal` refuses a form whose controls or
   submitter are named or labelled by a settings word (`formnav.settings_word`).
 
+- **FR-CRAWL-675 (operator URL exclusions; CC-CRAWL-0674, 2026-11-20)** `fuzzlab crawl`
+  and `fuzzlab disco capture` take `--exclude REGEX` (repeatable, matched against a URL's
+  path and query) and `--exclude-lab LAB` (that bundled lab's `crawl_exclude` list); no
+  matching URL is loaded by either crawler, through a link, a click, a harvest load, a
+  route or a page's own script. The spider counts each refusal as
+  `loads_refused[excluded]`. An invalid pattern is a usage error before any traffic.
+
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive and state-switching actions (delete/logout/reset;
   toggle/enable/activate, an action slot naming a state verb: FR-CRAWL-650); default

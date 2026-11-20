@@ -3,6 +3,18 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0412 — A lab fixture names the crawl exclusions its state switches need (FR-LAB-410) (2026-11-20)
+- Placement: lane CRAWLCOV (item CRAWLCOV-EXCLUDE), base 94fac7f.
+- Change: `fuzzlab/lab_fixtures/external.py`: `LabMeta.crawl_exclude` (default empty),
+  `crawl_exclusions(name)`, `exclusions_for(args)`; DVGA's entry excludes
+  `^/difficulty/` and `^/start_over` (lane CRAWLSAFE measured a crawl following both).
+  Used with `--exclude-lab dvga` (CC-CRAWL-0674).
+- Impact (other components / project): fixture data only; detection code names no lab.
+- Risk (level; mitigation or accepted-risk justification): low.
+- Deliverables:
+  - [x] field, DVGA list, test (every fixture's list compiles) — done
+  - [x] FR-LAB-410, CHANGELOG — done
+
 ### CC-LAB-0410 — Crawl coverage measured: DVGA before/after GraphQL schema discovery and store -> render pairing (2026-11-20)
 - Placement: lane CRAWLCOV (item CRAWLCOV-MEAS2); measurement only, pre-assigned
   CC-LAB-0410..0414.

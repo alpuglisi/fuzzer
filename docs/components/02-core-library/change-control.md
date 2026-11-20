@@ -3,6 +3,18 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0662 — `compile_exclusions` / `exclusion_reason`: operator URL exclusions (FR-CORE-662) (2026-11-20)
+- Placement: lane CRAWLCOV (item CRAWLCOV-EXCLUDE), base 94fac7f.
+- Change: `fuzzlab/core/urls.py`: `compile_exclusions(patterns)` (at most
+  `MAX_EXCLUSIONS` = 64 patterns of at most `MAX_EXCLUSION_CHARS` = 512 characters,
+  `ValueError` otherwise) and `exclusion_reason(url, exclusions)` (the first pattern
+  searched in the URL's path and query). Read by both crawlers (CC-CRAWL-0674).
+- Impact (other components / project): new functions; SP-09 unchanged.
+- Risk (level; mitigation or accepted-risk justification): low.
+- Deliverables:
+  - [x] functions, tests — done
+  - [x] FR-CORE-662, CHANGELOG — done
+
 ### CC-CORE-0661 — `form_structure` and `values_select_pages`: does a value select a page? (FR-CORE-661, SP-130) (2026-11-20)
 - Placement: lane CRAWLCOV (item CRAWLCOV-SPIDER), base 82910aa.
 - Change: `fuzzlab/core/pathtemplate.py` (SP-45's owner, PA-0507(2): the variation

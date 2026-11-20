@@ -960,7 +960,7 @@ FRONTIER_REASONS = ("url_length", "total", "origin", "route_shape", "pending")
 #: Why a load was refused before any request (`LocalSpider._load_refusal`, asked first by
 #: `LocalSpider._visit` for every load; BUG-0545 review, B1), in the order it checks;
 #: counted in ``crawl_stats`` as ``loads_refused[<reason>]``.
-LOAD_REFUSALS = ("out_of_scope", "destructive")
+LOAD_REFUSALS = ("out_of_scope", "excluded", "destructive")
 
 
 class _Frontier:
@@ -1144,8 +1144,11 @@ class LocalSpider:
                  session_manager=None, identity=None, selector_forms=None,
                  spa_routes=True, submit_spa_forms=None, reveal=True, spa_query=True,
                  dry_submit=True,
-                 workers=1, limits=None):
+                 workers=1, limits=None, exclude=()):
         self._sh = {}                    # the crawl-wide fields (`_shared_field`)
+        #: FR-CRAWL-675: the operator's URL exclusions (`core.urls.compile_exclusions`)
+        from fuzzlab.core.urls import compile_exclusions
+        self._exclusions = compile_exclusions(exclude)
         if not 1 <= workers <= MAX_WORKERS:
             raise ValueError(f"workers must be 1..{MAX_WORKERS}")
         self.workers = workers
@@ -1433,9 +1436,22 @@ class LocalSpider:
         request around the crawl's scope and destructive rules (BUG-0545 review, B1)."""
         if not self._in_scope(url):
             return "out_of_scope"
+        if self._excluded(url):
+            return "excluded"                       # FR-CRAWL-675
         if self._destructive(url):
             return "destructive"
         return None
+
+    def _excluded(self, url):
+        """Whether an operator exclusion (``--exclude`` / ``--exclude-lab``,
+        FR-CRAWL-675) matches ``url``."""
+        from fuzzlab.core.urls import exclusion_reason
+        return exclusion_reason(url, self._exclusions) is not None
+
+    def _guard_scope(self, url):
+        """The browser guard's scope: in scope and not excluded (FR-CRAWL-675), so a
+        page's own script never loads an excluded URL either."""
+        return self._in_scope(url) and not self._excluded(url)
 
     def _session_host_refusal(self, url):
         """Why an identity crawl's load of ``url`` would go without the session -- the
@@ -1571,7 +1587,7 @@ class LocalSpider:
         from fuzzlab.tools.navguard import guard_page
         guard_page(context, allow=self._allow,
                    on_abort=self._note_guard_abort,
-                   in_scope=self._in_scope, on_out_of_scope=self._note_out_of_scope,
+                   in_scope=self._guard_scope, on_out_of_scope=self._note_out_of_scope,
                    method_refusal=functools.partial(self._method_refusal,
                                                     context=context),
                    observe=functools.partial(self._observe,
@@ -4503,6 +4519,13 @@ def build_parser():
                    help=f"Pages loaded at once, one browser each (1-{MAX_WORKERS}, "
                         f"default 1); anything that can write runs one at a time")
     p.add_argument("--db", default="spider_results.db", help="SQLite output database")
+    p.add_argument("--exclude", action="append", default=[], metavar="REGEX",
+                   help="never load a URL whose path and query match REGEX (repeatable; "
+                        "the operator's knowledge of the target, e.g. a state-changing "
+                        "GET route; FR-CRAWL-675)")
+    p.add_argument("--exclude-lab", default=None, metavar="LAB",
+                   help="also exclude a bundled lab fixture's own list of state-changing "
+                        "URLs (FR-CRAWL-675)")
     p.add_argument(
         "--engine", choices=["auto", "playwright", "requests"], default="auto",
         help="auto (default): use Playwright if installed, else static requests. "
@@ -4597,10 +4620,16 @@ def spider_kwargs(args, session_manager=None) -> dict:
         dry_submit=not args.no_dry_submit,
         spa_query=not args.no_spa_query,
         workers=args.workers,
+        exclude=_exclusions_for(args),
         # FR-CRAWL-35: the frontier's default budgets (no CLI flag; every refusal is
         # counted and reported)
         limits=None,
     )
+
+
+def _exclusions_for(args):
+    from fuzzlab.lab_fixtures.external import exclusions_for    # one place (FR-CRAWL-675)
+    return exclusions_for(args)
 
 
 def session_manager_for(args):
@@ -4618,6 +4647,12 @@ def parse_args(argv=None):
     args = p.parse_args(argv)
     if not 1 <= args.workers <= MAX_WORKERS:
         p.error(f"--workers must be 1..{MAX_WORKERS}")
+    from fuzzlab.core.urls import compile_exclusions
+    from fuzzlab.lab_fixtures.external import ExternalLabError, exclusions_for
+    try:
+        compile_exclusions(exclusions_for(args))          # FR-CRAWL-675, before anything
+    except (ValueError, ExternalLabError) as exc:
+        p.error(str(exc))
     if args.auth_origin:                 # a usage error before any side effect (R5)
         from fuzzlab.session.manager import parse_auth_origins
         from fuzzlab.tools.authhttp import scope_hosts_for

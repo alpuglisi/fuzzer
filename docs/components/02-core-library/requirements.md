@@ -1229,6 +1229,11 @@ plugin registry. It is the layer that makes the store the integration bus.
   decides that the values of one URL position select distinct pages when at least two
   known structures differ.
 
+- **FR-CORE-662 (operator URL exclusions; CC-CORE-0662, 2026-11-20)**
+  `core.urls.compile_exclusions` compiles at most 64 regular expressions of at most 512
+  characters (else `ValueError`); `exclusion_reason(url, exclusions)` names the first one
+  found in the URL's path and query, or None. The host is never matched.
+
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers
   never block the writer (WAL).

@@ -3,6 +3,29 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0674 — Operator URL exclusions honoured by both crawlers (`--exclude`, `--exclude-lab`) (FR-CRAWL-675) (2026-11-20)
+- Placement: lane CRAWLCOV (item CRAWLCOV-EXCLUDE), base 94fac7f; lane CRAWLSAFE's open
+  gap 1, handed to this lane by the orchestrator. `navguard.py` untouched.
+- Change: `fuzzlab/tools/spider.py`: `LocalSpider(exclude=...)` compiles the patterns
+  (`core.urls.compile_exclusions`); `_load_refusal` refuses a match as `excluded` (a new
+  `LOAD_REFUSALS` reason, counted `loads_refused[excluded]`), and the browser guard's
+  scope (`_guard_scope`) refuses it too, so a page's own script never loads one; CLI
+  `--exclude REGEX` (repeatable) and `--exclude-lab LAB`, validated in `parse_args`.
+  `fuzzlab/disco/explore.py`: `ExploreOptions.exclude`; `Explorer._in_scope` (the guard's
+  scope and every click, harvest and route check) refuses a match. `fuzzlab/disco/cli.py`:
+  the same two flags, validated before the browser starts. `cli_taxonomy` classifies
+  them. The merge of the two flags is `lab_fixtures.external.exclusions_for` (one place).
+- Measured: lane CRAWLSAFE's live crawls of DVGA followed `/difficulty/<level>` and
+  `/start_over` (state switches for every later request), which it kept out of SP-09 as
+  single-source words (PA-0660). The exclusion is the operator's knowledge, never
+  detection code; the DVGA list is a fixture (CC-LAB-0412).
+- Impact (other components / project): none unless a flag is given.
+- Risk (level; mitigation or accepted-risk justification): low; an operator's regex is
+  bounded in count and length (FR-CORE-662).
+- Deliverables:
+  - [x] both crawlers, CLI, `tests/test_crawl_exclusions.py` — done
+  - [x] FR-CRAWL-675, CHANGELOG — done
+
 ### CC-CRAWL-0673 — Disco never submits a settings form (SP-120 in the explorer's form refusal) (FR-CRAWL-674) (2026-11-20)
 - Placement: lane CRAWLCOV (item CRAWLCOV-DISCOSAFE), base 94fac7f; lane CRAWLSAFE's open
   gap 2, handed to this lane by the orchestrator.

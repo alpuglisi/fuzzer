@@ -439,6 +439,9 @@ class ExploreOptions:
     max_same_signature: int = 2
     max_states_per_route: int = 8
     deny: tuple[str, ...] = ()
+    #: URL path/query patterns never loaded (`core.urls.compile_exclusions`; the
+    #: operator's ``--exclude`` / ``--exclude-lab``, FR-CRAWL-675)
+    exclude: tuple[str, ...] = ()
     headless: bool = True
     #: Browsers exploring frontier states at once (`Explorer.run`); 1 is sequential.
     workers: int = 1
@@ -826,6 +829,8 @@ class Explorer:
         self.clock = clock
         if not 1 <= self.opts.workers <= MAX_WORKERS:
             raise ValueError(f"workers must be 1..{MAX_WORKERS}")
+        from fuzzlab.core.urls import compile_exclusions
+        self._exclusions = compile_exclusions(self.opts.exclude)
         self.report = ExploreReport()
         self._shared = _Shared(self.opts, self.report)
         self._worker_state()
@@ -884,7 +889,13 @@ class Explorer:
 
     # --- browser lifecycle -------------------------------------------------------
     def _in_scope(self, url: str) -> bool:
-        return in_origin_scope(url, self.origins)
+        """In the run's origins and matched by no operator exclusion (FR-CRAWL-675):
+        the guard's scope, so neither a click, a harvest load nor a page's own script
+        loads an excluded URL (counted as out of scope by host)."""
+        if not in_origin_scope(url, self.origins):
+            return False
+        from fuzzlab.core.urls import exclusion_reason
+        return exclusion_reason(url, self._exclusions) is None
 
     def _new_context(self, browser, pw):
         """A guarded context for this worker, carrying the run's session of the current
