@@ -785,6 +785,16 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
                 logging.info(_scrubbed(
                     f"request observer failed on {url.split('?', 1)[0]} "
                     f"({str(exc).splitlines()[0][:80] if str(exc) else exc!r})"))
+        if document and doc_kind == "document" and _is_navigation(req) and \
+                _empty_error_answer(final):
+            # BUG-0670: an empty HTTP error answer fails a main-frame navigation onto
+            # the browser's own error page on every binary (the headless shell 157 would
+            # load it as a page; the full browser fails it itself; a frame's loads as a
+            # page on both, measured, so a frame's is given as it is) -- SP-01's settle then
+            # waits for that page, committed and loaded, before `goto`'s error is raised.
+            # The observer above has seen the answer; nothing else is sent.
+            route.abort(ERROR_ANSWER_ABORT)
+            return
         html, charset = None, None                # a main-frame document's HTML, as given
         if document and doc_kind == "document" and \
                 (stripped or final is first or not req.is_navigation_request()
@@ -842,6 +852,37 @@ def _abort_code(document: bool) -> str | None:
     request (a navigation, top-level or frame, and its redirect hops), else None (the
     default), whatever the reason (PA-0136: one rule, one place)."""
     return DOCUMENT_ABORT if document else None
+
+
+#: The code a guarded navigation whose answer is an **empty HTTP error** is aborted with
+#: (BUG-0670, SP-01): ERR_FAILED, so the browser commits its own error page in the
+#: navigation's place -- what the full Chromium does itself for such an answer
+#: (``net::ERR_HTTP_RESPONSE_CODE_FAILURE``, measured on 141 and 153.0.8010.12), and what
+#: the headless shell 157.0.8103.78 no longer does (it loads the empty answer as a page;
+#: measured, `tests/test_chromium_navigation_outcomes.py`). One outcome on every binary.
+ERROR_ANSWER_ABORT = "failed"
+#: The statuses that answer counts for: 400-599, as measured on the full Chromium (399
+#: and a one-byte body load as a page there too).
+_ERROR_ANSWER_STATUSES = range(400, 600)
+
+
+def _empty_error_answer(answer) -> bool:
+    """Is ``answer`` (a fetched response) an HTTP error status (400-599) with an empty
+    body (BUG-0670)? Never raises: an answer that cannot say is not one."""
+    try:
+        if int(answer.status) not in _ERROR_ANSWER_STATUSES:
+            return False
+        return not answer.body()
+    except Exception:  # noqa: BLE001 - a double or a disposed response: not one
+        return False
+
+
+def _is_navigation(req) -> bool:
+    """``req.is_navigation_request()``, False when it cannot say."""
+    try:
+        return bool(req.is_navigation_request())
+    except Exception:  # noqa: BLE001 - a request that cannot say
+        return False
 
 
 #: page -> (document_key, HTML) of the last main-frame document its guard fulfilled (BUG-0138

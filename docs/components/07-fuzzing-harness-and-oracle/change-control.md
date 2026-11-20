@@ -3,6 +3,14 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0670 — M6's navigation of an empty 4xx/5xx answer is a failed load on every binary (BUG-0670) (2026-11-20)
+- Change: none in `fuzzlab/tools/browserexec.py`. Its store and observe navigations go through SP-01; since CC-CRAWL-0640 an empty 400-599 top-level answer raises on the headless shell as on the full browser.
+- Impact (other components / project): such a target is `NotObserved` (no verdict) on both binaries; on the headless shell it was a negative (`executed=False`) read from an empty page. No interface change.
+- Risk (level; mitigation or accepted-risk justification): low; the change removes a binary-dependent negative.
+- Deliverables:
+  - [x] Recorded as affected by construction (the caller sweep, BUG-0670) — done
+- Effectiveness: pending (the lane's harness run, CC-CRAWL-0640).
+
 ### CC-FUZZ-0117 — M6's navigations settle a failure on the error page's load (BUG-0561) (2026-10-23)
 - Change: none in `fuzzlab/tools/browserexec.py` or the oracle. The executor's navigations go through SP-01, which now waits for a failed navigation's error page to load, not only to commit, before it raises (CC-CRAWL-0065).
 - Impact (other components / project):

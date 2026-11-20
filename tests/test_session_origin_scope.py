@@ -24,7 +24,6 @@ request it gets.
 from __future__ import annotations
 
 import ast
-import glob
 import logging
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -763,9 +762,6 @@ def _chromium_or_skip(monkeypatch):
         import playwright.sync_api  # noqa: F401
     except ImportError as exc:
         skip_or_fail(f"playwright unavailable: {exc}")
-    exe = sorted(glob.glob("/opt/pw-browsers/chromium-*/chrome-linux/chrome"))[-1:]
-    if exe:
-        monkeypatch.setenv("PLAYWRIGHT_CHROMIUM_EXECUTABLE", exe[0])
 
 
 def test_an_authenticated_crawl_never_hands_the_session_to_another_port(monkeypatch,

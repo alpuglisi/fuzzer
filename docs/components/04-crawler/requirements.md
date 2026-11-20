@@ -1833,6 +1833,22 @@ fuzzer.
     `test_a_document_reads_as_chromium_decodes_it_under_every_whatwg_label`,
     `test_the_static_engine_reads_a_page_whatever_charset_it_names`.
 
+- **FR-CRAWL-640** *(CC-CRAWL-0640, BUG-0670)* **An empty HTTP error answer fails a
+  guarded main-frame navigation onto the browser's error page, on every Chromium
+  binary.** When the answer a guarded top-level navigation gets -- after its checked
+  redirect chain, the landing included -- is HTTP 400-599 with an empty body, the route
+  handler aborts it with `navguard.ERROR_ANSWER_ABORT` (`"failed"`, `net::ERR_FAILED`)
+  after its observer has seen the answer, so the browser commits its own error page and
+  SP-01 settles on it (committed, then loaded) before `goto`'s error is raised. This is
+  what the full Chromium does itself for such an answer
+  (`net::ERR_HTTP_RESPONSE_CODE_FAILURE`; measured on 141 and 153.0.8010.12), and what
+  the headless shell 157.0.8103.78 -- the product's default binary -- no longer does
+  (it loads the answer as an empty page). Any other answer is given as it was: a frame's
+  empty 404 (a page on both binaries, measured), a status outside 400-599, a body of one
+  byte or more, a subresource. Measured: `tests/test_chromium_navigation_outcomes.py`
+  (the raw-browser facts per binary); pinned: `tests/test_navigation_error_answer.py`
+  (unit, and real Chromium on both binaries).
+
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default
   to not clicking them. *(Built CC-CRAWL-0011, BUG-0111:)* the one rule is
@@ -1921,6 +1937,10 @@ fuzzer.
     error, and waited out its whole timeout: disco's restore `about:blank`, the
     spider's window exits and pre-seed blank (BUG-0561, about 1% of restores under
     disk I/O load).
+    *(CC-CRAWL-0640, BUG-0670:)* the error-page path holds on every binary: an empty
+    HTTP error answer is made a failure by the guard itself (FR-CRAWL-640), so it never
+    depends on whether the binary fails it (the full Chromium) or loads it (the
+    headless shell 157).
   - `networkidle` is waited for (`wait_for_state`) only after a completed load. The
     body text is read without waiting for a body.
   - A page whose load did not complete is read without a second request (review Q2).

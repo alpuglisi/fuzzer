@@ -3,6 +3,17 @@
 Component code: **SESS**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SESS-0640 — The browser login's route search goes on past a login route that fails to load (BUG-0670 sweep) (2026-11-20)
+- Placement: lane NAV (item NAV), base d492b9d; SP-01's caller sweep (CLAUDE.md item 7).
+- Change: `fuzzlab/session/browserlogin.py::_drive` -- each candidate login route is navigated in its own `try`; a `PlaywrightError` ends that route's failed load through `navguard.end_failed_load` (PA-0522(2)), notes `"<host>: a login route did not load"` in the refusals the final error names, and the search goes on to the next route. Before, one route's failed load raised out of the loop and ended the login.
+- Impact (other components / project): since BUG-0670 an empty 4xx/5xx answer is a failed navigation on every binary (CC-CRAWL-0640), so a stale login link answering an empty 404 would have hidden the next route on the headless shell as it already did on the full browser; now it does not. A login that finds no form still raises `BrowserLoginError` (its text now names the routes that did not load, by host). No contract, store or traffic change: the next route was going to be requested anyway had the first loaded.
+- Risk (level; mitigation or accepted-risk justification): low. The cancellation check runs before every route as before; a route that fails costs its own navigation timeout at most, as a route that loaded without a form already did.
+- Deliverables:
+  - [x] `_drive`'s per-route catch — done
+  - [x] `tests/test_browser_login_route_fails.py` (real Chromium: `/` links an empty-404 `/signin` before `/login`; the login posts at `/login`) — done; fails on the base with `BrowserLoginError: ... net::ERR_FAILED at .../signin`
+  - [x] SP-01's failed navigations of this module otherwise unchanged by construction (base URL: a failed load still fails the login, now on both binaries) — done
+- Effectiveness: pending (the harness run of the lane's tree is cited in CC-CRAWL-0640).
+
 ### CC-SESS-0031 — The browser login's failed navigations settle on the error page's load (BUG-0561) (2026-10-23)
 - Change: none in `fuzzlab/session/`. `session.browserlogin`'s navigations go through SP-01 (`navguard.navigate`), which now waits for a failed navigation's error page to load, not only to commit, before it raises (CC-CRAWL-0065).
 - Impact (other components / project): a login navigation that fails with a network error (an empty error answer) raises about 30 ms later at p50 (p95 about 45 ms more), inside the same 3 s budget as before; the next login navigation is no longer dropped by Chromium when it starts before that error page's load. No interface or store change.

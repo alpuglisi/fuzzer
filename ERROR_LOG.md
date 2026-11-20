@@ -18,6 +18,18 @@ Format per entry:
 
 ---
 
+## 2026-11-20 — crawler / navguard (an empty HTTP error answer was a page on the headless shell, a failure on the full browser; BUG-0670)
+- **Symptom:** five `tests/test_navigation_aborts.py` cases failed "DID NOT RAISE" since the container moved to Playwright 1.63 / build 1243; a guarded navigation to an empty-bodied 404 returned a page instead of raising onto the browser's error page.
+- **Root cause:** the headless shell 157.0.8103.78 (Playwright's default, so the product's) loads an empty 400-599 answer as a page; the full Chromium (153.0.8010.12, and 141 as measured before) fails it with `ERR_HTTP_RESPONSE_CODE_FAILURE`. navguard fulfilled the answer as fetched, so SP-01's premise belonged to the binary, and it had been measured on the full browser only (BUG-0671).
+- **Remediation:** the guard aborts such a main-frame navigation with `ERROR_ANSWER_ABORT` (`"failed"`) after its observer saw the answer: one outcome on every binary, SP-01 settling on the error page (CC-CRAWL-0640; BUG-0670, PA-0670); the browser login's route search survives a route's failed load (CC-SESS-0640).
+- **Status:** Fixed
+
+## 2026-11-20 — test harness (every browser test ran another binary than the product, chosen by a path glob that stopped matching; BUG-0671)
+- **Symptom:** the same five failures appeared with no product change; the base passes them with `PLAYWRIGHT_CHROMIUM_EXECUTABLE` set to the full Chromium.
+- **Root cause:** `scripts/verify_change.py` and eleven test helpers set the binary from `/opt/pw-browsers/chromium-*/chrome-linux/chrome` (the full browser, not the product's default); build 1243's layout is `chrome-linux64/`, so the glob matched nothing and the suite moved to the headless shell silently.
+- **Remediation:** no binary chosen by install path anywhere (a guard over `fuzzlab/`, `scripts/`, `tests/`); tests run the product's binary; a fact that differs is measured on each binary by name (BUG-0671, PA-0671).
+- **Status:** Fixed
+
 ## 2026-10-23 — crawler / navguard (a navigation started before a failed load's error page had loaded was dropped; BUG-0561)
 - **Symptom:** the harness run of e69bd1e (F-281): `tests/test_disco_harvest.py::test_disco_harvest_and_restore_after_failed_loads[2]` failed in 19.1 s. Disco's `restore` returned "navigation": its `about:blank` `goto` timed out after 15 s and the page stayed on `chrome-error://chromewebdata/`. The RCA measured about 1% of restores under heavy disk I/O on every tree since BUG-0522's fix (7393c90 4/600, e69bd1e 9/840) and 0/1,320 under CPU load alone.
 - **Root cause:** `navguard._settle_failure` (SP-01, BUG-0522's fix) took a failed navigation as over when its error page committed. That page loads 15-25 ms later (p95 about 130 ms under I/O load), and a navigation Chromium started in between was sometimes dropped with no commit and no error, so Playwright waited out the whole `goto` timeout.

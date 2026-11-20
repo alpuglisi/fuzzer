@@ -3,6 +3,93 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0640 — An empty HTTP error answer fails a guarded navigation onto the error page on every Chromium binary; the raw-browser facts SP-01 relies on are measured per binary (FR-CRAWL-640, BUG-0670, BUG-0671, SP-01) (2026-11-20)
+- Placement: lane NAV (item NAV), base d492b9d, outcome branch
+  `ccr-e5c7c0c6-r9ladz-navguard`; sole owner of `fuzzlab/tools/navguard.py` for this
+  work. The owner authorised taking the recommended option at each decision point; not
+  put through the two-reviewer pre-change gate in this lane (the orchestrator verifies
+  it independently before merge).
+- Change:
+  - `fuzzlab/tools/navguard.py::make_route_handler`: after the observer saw the final
+    answer of a guarded **main-frame** navigation (its checked redirect chain walked,
+    the landing included), an answer of HTTP 400-599 with an empty body
+    (`_empty_error_answer`) is aborted with the new `ERROR_ANSWER_ABORT = "failed"`
+    (`net::ERR_FAILED`): the browser commits its own error page, and SP-01's
+    `_settle_failure` waits for it, committed and loaded, before `goto`'s error is
+    raised (the leading code matches `_ERROR_PAGE_FAILURE`). New helpers
+    `_empty_error_answer`, `_is_navigation`. A frame's answer, a status outside 400-599,
+    a body of one byte or more and a subresource are fulfilled as before. SP-02's
+    refusal code (`DOCUMENT_ABORT`, PA-0136) is unchanged: this is not a refusal.
+  - Tests: `tests/test_chromium_navigation_outcomes.py` (52 raw-Playwright cells, no
+    guard, on the headless shell and the full Chromium: every outcome SP-01 relies on);
+    `tests/test_navigation_error_answer.py` (the handler on doubles; real Chromium on
+    both binaries); `tests/test_browser_binary_choice.py` (BUG-0671's guard);
+    `tests/_browser.py` (`CHROMIUM_BINARIES`, `chromium_binary_kwargs`,
+    `guarded_chromium`; `launch_browser_or_skip` launches the product's binary).
+  - BUG-0671: the install-path glob removed from `scripts/verify_change.py::pytest_env`
+    (no binary chosen by the harness) and eleven test helpers.
+- Reason (measured before design, §7): BUG-0670. Measured with
+  `FUZZLAB_REQUIRE_BROWSER=1 python -m pytest -q -s tests/test_chromium_navigation_outcomes.py`
+  (three runs, identical; headless shell 157.0.8103.78 = `pw.chromium.launch()`, full
+  Chromium 153.0.8010.12 = `channel="chromium"`, both Playwright 1.63 / build 1243):
+  - same on both: `abort("aborted")` and a 204 keep the document, no commit;
+    `abort("failed")`/`("blockedbyclient")`, an unsafe or a closed port, a 302 to
+    either, a dropped connection (direct) raise and commit the error page after the
+    raise, then load it; a dropped connection through a fetch route is aborted
+    (`aborted`, document kept); a frame's empty 404, a 399 and a one-byte 404 are pages;
+  - differs: an empty 400/404/500/599 (direct and through `route.fulfill(response=
+    route.fetch())`) -- shell: a page with its status; full:
+    `ERR_HTTP_RESPONSE_CODE_FAILURE`, error page committed 7-80 ms after the raise;
+  - timing (p50/p95/max ms, range over three runs, 30 reps each): raise-to-commit full
+    24-27/56-123/74-234, shell 27-35/73-120/79-307; commit-to-load full 21-36/65-90/
+    67-103, shell 3-7/18-50/19-90; the commit came after the raise in 360/360;
+  - a navigation started right after the raise is overtaken: shell 30/30, full
+    18-30/30, and the overtaken navigation still lands afterwards (100%).
+  - The base passes the five failing tests on the full binary
+    (`PLAYWRIGHT_CHROMIUM_EXECUTABLE=/opt/pw-browsers/chromium`: 89 passed) and fails
+    them on the default: the binary is the cause; the harness ran the full binary on the
+    earlier layout by its glob (BUG-0671).
+- Impact (other components / project):
+  - Every SP-01 caller (the sweep, by primitive; BUG-0670): on the full Chromium, the
+    main frame's behaviour is unchanged by construction (it already failed); on the
+    headless shell an empty 4xx/5xx top-level answer now takes each caller's failure
+    path, as on the full browser: the spider (`_fetch_rendered` -> `end_failed_load` ->
+    static fallback; a seed or probe window a failed visit), the auditor's fetcher
+    (AUD, CC-AUD-0670), disco's seed (fatal, as on the full browser), restore and
+    harvest (`errors`), ede (`pages_failed`), the browser login (SESS, CC-SESS-0640:
+    its route search now goes on), M6 (FUZZ, CC-FUZZ-0670: no verdict instead of a
+    negative).
+  - Cost: one more GET of such a URL where a caller falls back to a static fetch (as on
+    the full browser), and the error-page settle (above).
+  - Contracts: none changed; `Navigation`, `error_page_waits()` and
+    `NAVIGATION_SETTLED_ATTR` as before. Tests now run the product's binary.
+- Risk: low to medium.
+  - (a) A target's empty 4xx/5xx is no longer an empty rendered page on the shell; this
+    is the full browser's behaviour, which the callers were built and measured on.
+  - (b) The observer still sees the answer; nothing more is sent by the guard.
+  - (c) **Open, flagged (not SP-01, not changed here):** a top-level navigation that
+    reaches the browser unrouted -- a redirect landing's re-request after its ticket
+    expired or was used (`admit_landing`), refused by the enforcer's `_REFUSAL` (an
+    empty 403) or answered by `_forward`'s empty 502 -- is a page at that URL on the
+    shell and an error page on the full browser. Recommended fix (SP-04's owner): close
+    such a refused navigation's connection without a response (`ERR_EMPTY_RESPONSE`, an
+    error page on both binaries, measured direct). Also: the landing's re-request is a
+    second live request the route never observes.
+  - (d) PA-0522(2)'s `_leave` after an `end_failed_load` that returned "error-page"
+    (spider seed windows) is newly reachable on the shell; safe because `navigate`
+    already waited for that page's load (BUG-0561).
+- Deliverables:
+  - [x] the guard's empty-error-answer abort (main frame only) — done
+  - [x] the raw-browser probe matrix on both binaries — done
+  - [x] the product tests on both binaries, each failing on the base (unit: 6 cases;
+    real: both binaries) — done
+  - [x] the caller sweep and the browser-login fix (CC-SESS-0640) — done
+  - [x] BUG-0670, BUG-0671, PA-0670, PA-0671, ERROR_LOG, FR-CRAWL-640, the NFR-CRAWL
+    clause, SESS requirements, SP-01's row, ARCHITECTURE, CHANGELOG, F-670, F-671 — done
+  - [ ] the race under CPU and disk I/O load on both binaries — in-progress (below)
+  - [ ] `scripts/verify_change.py --base d492b9d` on the committed tree — in-progress
+- Effectiveness: pending.
+
 ### CC-CRAWL-0065 — A failed navigation raises only after the browser's error page has loaded, not just committed (SP-01, BUG-0561) (2026-10-23)
 - Placement: pre-assigned to lane NAVSETTLE (item NAVSETTLE), base 5502228; the owner
   approved this fix on 2026-10-23 (F-281's open defect). Touches SP-01's owner

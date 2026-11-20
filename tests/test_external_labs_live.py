@@ -75,8 +75,8 @@ def _free_port() -> int:
 
 
 def _chromium() -> str | None:
-    found = sorted(Path("/opt/pw-browsers").glob("chromium-*/chrome-linux/chrome"))
-    return str(found[-1]) if found else os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE")
+    # the operator's binary, else Playwright's default -- the product's (BUG-0671)
+    return os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE")
 
 
 class Lab:

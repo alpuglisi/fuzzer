@@ -542,7 +542,10 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     *(CC-SESS-0024, BUG-0138:)* the base page and each login route are loaded through
     `navguard.navigate` (the commit, then a bounded load). A page whose script
     navigates to a refused URL while it is parsed is never waited out: with no form on
-    it, the login fails loudly, and fast.
+    it, the login fails loudly, and fast. *(CC-SESS-0640, BUG-0670:)* a login route
+    whose load fails (an empty 4xx/5xx answer is a failure on every binary) is ended by
+    `navguard.end_failed_load`, named by host among the refusals, and the next route is
+    tried; only the base page's failed load ends the login.
   - **The form.** On the base page, then on SPA routes (from the app's own scripts and
     links, hash or history mode) and same-origin links whose last segment is a login
     word (`detect._LOGIN_SEGMENTS`, whole segment), at most 5: the first rendered form
