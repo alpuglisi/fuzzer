@@ -10,6 +10,7 @@ throwaway keyring, torn down by the exact project label)."""
 from __future__ import annotations
 
 import os
+import sys
 
 from tests.test_external_labs_live import (REPO, _score, _up, lab_factory,  # noqa: F401
                                            pytestmark)
@@ -28,7 +29,7 @@ def _store_accounts(lab) -> None:
             "s = CredentialStore(allow_env=False)\n"
             "s.set('127.0.0.1', 'dvwa-user', 'admin', os.environ['P1'])\n"
             "s.set('127.0.0.1', 'dvwa-peer', 'gordonb', os.environ['P2'])\n")
-    res = run_bounded([os.sys.executable, "-c", code], timeout=60,
+    res = run_bounded([sys.executable, "-c", code], timeout=60,
                       env={**lab.env, "P1": "password", "P2": "abc123"})
     assert res.returncode == 0, res.stderr
 

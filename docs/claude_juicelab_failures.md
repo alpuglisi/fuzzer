@@ -2389,3 +2389,9 @@ Juice Shop lab is complete.
 - **Impact:** none on the committed key (caught by the check's own failure before any case was labelled); had the error-path premise been believed, two wrong XSS positives would have entered it.
 - **Status:** corrected (the check now asserts the escaped form and the SQL error signature).
 
+### F-756 — The orchestrator's NEWLABS2 dispatch omitted the change-control review gate
+- **What:** the orchestrating session's dispatch prompts for lanes NEWLABS2-DVWA and NEWLABS2-CRAPI listed the CLAUDE.md bookkeeping but not `docs/components/README.md`'s pre-change review gate (two reviewer agents agree on each change-control entry before implementation), and the lanes had no sub-agent tool to run it. The DVWA lane implemented first and flagged it.
+- **Evidence:** DVWA lane report; CC-LAB-0433 "Process".
+- **Impact:** the gate ran after implementation instead of before (CC-LAB-0434: two reviewers, AGREE, no must-fix); for crAPI it will likewise run at merge.
+- **Status:** mitigated (post-hoc review); the gate belongs in every lane dispatch.
+

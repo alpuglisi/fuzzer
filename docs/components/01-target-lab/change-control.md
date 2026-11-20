@@ -3,6 +3,36 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0434 — DVWA lane: the change-control review gate, run after implementation; two test nits (2026-11-20)
+- Change: `tests/test_dvwa_live.py` uses `sys.executable` (was `os.sys.executable`);
+  `tests/test_dvwa_lab.py::test_the_dvwa_level_survives_a_crawled_level_change` renamed
+  `test_every_new_dvwa_session_starts_at_the_compose_default_level` (it checks the compose
+  default only, which is what it can show). No fixture, key or detection change.
+- Reason: CC-LAB-0433 "Process" records that the `docs/components/README.md` pre-change
+  review gate was not run (the lane had no sub-agent tool, and the orchestrator's dispatch
+  did not ask for it: F-756). The orchestrator ran it after implementation: two
+  independent reviewer agents on `82910aae..c42cda54`, one on the entries' accuracy and
+  adequacy and the key against upstream 502ac150, one on the bootstrap, compose, tests,
+  the `CITED` additions and the crawl-safety verdicts (re-computed with
+  `destructive_reason` / `settings_word`). Both: AGREE, no must-fix.
+- Follow-ups the reviewers listed (not built here; open): the bootstrap's `deadline` is
+  not one end time over `wait_ready`, the reset loop and setup.php's own 120 s POST (as
+  Mutillidae's); a wrong stored admin password resets the database before the error; no
+  fake test of the reset loop's timeout or of both accounts against one fake; brute
+  force's `username` (echoed raw after a successful login) is a confirmed reflected XSS
+  left unlabelled; no crawl-mode floor in the live test; `DVWA_ROUTES` is not fed to the
+  PA-0301 compound scan; the `xss_s`/`exec` ground-truth points cannot be reached without
+  their submit field; the compose file does not say why each added capability is needed;
+  `dns: [127.0.0.1]` measured on Docker only; the lane's key-check scripts live in its
+  scratchpad, not the repo; CC-LAB-0431 Decision (1)'s "never the repo" -- the live test
+  carries upstream's published seed passwords (public values, not secrets).
+- Impact: none on behaviour. Risk: none.
+- Deliverables:
+  - [x] review gate run (2 reviewers, 3/3 agree) — done
+  - [x] two test nits — done
+- Effectiveness (assessed 2026-11-20): `scripts/verify_change.py` on the merged tree (see
+  the merge record in CHANGELOG).
+
 ### CC-LAB-0433 — DVWA measured: crawl run (headline) and ground-truth run, crawl safety, gaps recorded (FR-LAB-433) (2026-11-20)
 - Change: `tests/test_dvwa_lab.py` (the PA-0114 / PA-0301 route table of DVWA's state
   switches, each row's verdict computed by its gate); `tests/test_dvwa_live.py` (gated live

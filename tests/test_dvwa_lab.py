@@ -306,7 +306,7 @@ def test_the_dvwa_residuals_hold_for_the_reason_stated():
     assert settings_word("security") == "security"               # the level form's select
 
 
-def test_the_dvwa_level_survives_a_crawled_level_change():
+def test_every_new_dvwa_session_starts_at_the_compose_default_level():
     """The level is the `security` cookie, not server state (dvwaPage.inc.php:22,
     dvwaSecurityLevelSet): a crawler that changed it changed only its own jar. Every new
     session gets the compose default, which the bootstrap checks (FR-LAB-431)."""
