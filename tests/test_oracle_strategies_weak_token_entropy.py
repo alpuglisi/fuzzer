@@ -73,8 +73,8 @@ def test_confirms_the_vulnerable_timestamp_twin():
     assert verdict is not None and verdict.confirmed
     assert verdict.vuln_class == "weak_token_entropy"
     assert verdict.mechanism == "timestamp-derived-token"
-    assert "delta_ns" in verdict.evidence
-    assert verdict.evidence["delta_ns"] >= 0
+    assert "delta" in verdict.evidence
+    assert verdict.evidence["delta"] >= 0
 
 
 def test_fails_closed_on_the_secure_csprng_twin():
@@ -96,15 +96,38 @@ def test_evidence_never_records_the_full_raw_token():
     assert "token_a" not in verdict.evidence and "token_b" not in verdict.evidence
 
 
-def test_confirms_a_zero_delta_stale_token_a_known_accepted_edge_case():
-    # Documented, accepted limitation (see the strategy's own docstring):
-    # a delta of exactly 0 is not itself treated as suspicious, so a
-    # target that always issues the literal same token value also
-    # confirms here -- pinned so this narrow false-positive class stays
-    # a documented, deliberate choice, not a silent surprise.
+def test_a_fixed_token_far_from_the_epoch_is_not_a_clock():
+    # BUG-0661 (PA-0660): the earlier accepted edge case (a fixed 19-digit value
+    # confirmed at delta 0) is closed: a value that is not near this host's epoch in
+    # any unit and does not move by a round trip is no clock reading.
     strategy = PredictableTokenSourceStrategy()
-    verdict = strategy.confirm(_cand(), _StaleTokenSender())
-    assert verdict is not None and verdict.evidence["delta_ns"] == 0
+    assert strategy.confirm(_cand(), _StaleTokenSender()) is None
+
+
+def test_a_java_nanotime_monotonic_counter_confirms():
+    """`System.nanoTime` has no epoch origin (Java SE API docs): read as a
+    nanosecond monotonic counter that moves by at least a round trip."""
+    class _NanoTime:
+        def send(self, url, param, value, timing=False, method="POST", location="body",
+                 content_type=None):
+            time.sleep(0.001)
+            return Probe(200, json.dumps({"token": str(time.monotonic_ns())}))
+
+    verdict = PredictableTokenSourceStrategy().confirm(_cand(), _NanoTime())
+    assert verdict is not None and verdict.evidence["clock"] in ("monotonic-ns", "epoch-ns")
+
+
+def test_a_sequence_counter_stepping_by_one_is_not_a_clock():
+    class _Counter:
+        def __init__(self):
+            self.n = 4_000_000_000
+
+        def send(self, url, param, value, timing=False, method="POST", location="body",
+                 content_type=None):
+            self.n += 1
+            return Probe(200, json.dumps({"id": self.n}))
+
+    assert PredictableTokenSourceStrategy().confirm(_cand(), _Counter()) is None
 
 
 def test_registered_in_default_strategies():
@@ -135,3 +158,34 @@ def test_r_weak_token_entropy_rule_does_not_match_a_get_point():
     rules = load_rules()
     rule = next(r for r in rules if r.id == "R-WEAK-TOKEN-ENTROPY")
     assert not matches(rule, _Point())
+
+
+def test_the_key_name_is_never_read_a_millisecond_clock_under_any_key_confirms():
+    """PA-0660 / BUG-0661: any JSON leaf of an epoch timestamp's width (here
+    milliseconds, nested under a name no lab uses) is read; the key is not."""
+    class _MillisSender:
+        def send(self, url, param, value, timing=False, method="POST", location="body",
+                 content_type=None):
+            return Probe(200, json.dumps({"data": {"sid": str(int(time.time() * 1000))}}))
+
+    verdict = PredictableTokenSourceStrategy().confirm(_cand(), _MillisSender())
+    assert verdict is not None and verdict.confirmed
+    assert verdict.evidence["clock"] == "epoch-ms"
+
+
+def test_a_non_epoch_width_or_a_far_jump_is_not_a_clock():
+    class _Seq:
+        def __init__(self, values):
+            self.values = list(values)
+
+        def send(self, url, param, value, timing=False, method="POST", location="body",
+                 content_type=None):
+            return Probe(200, json.dumps({"t": self.values.pop(0)}))
+
+    assert PredictableTokenSourceStrategy().confirm(_cand(), _Seq(["12345678", "12345679"])) is None
+    # a reading that goes backwards, and one that jumps by days in any unit
+    now_ms = int(time.time() * 1000)
+    assert PredictableTokenSourceStrategy().confirm(
+        _cand(), _Seq([str(now_ms), str(now_ms - 5)])) is None
+    assert PredictableTokenSourceStrategy().confirm(
+        _cand(), _Seq([str(now_ms), str(now_ms + 10**12)])) is None

@@ -2224,3 +2224,10 @@ Juice Shop lab is complete.
 - **Impact:** an overstated picture of real-world detection for about an hour; nothing lab-fitted was merged (GQL had not been merged).
 - **Cause:** I took the lanes' chosen headline (the oracle diagnostic) as the progress measure, and reviewed the GQL rules for correctness and safety but not for where their evidence came from.
 - **Status:** corrected: crawl runs are now the headline measure; GQL sent back to remove or independently justify the DVGA-derived words; every lane given the black-box rule; a black-box audit lane queued to sweep existing detection code and add the rule (PA) with a guard.
+
+### F-660 — Detection code built by earlier agent sessions spoke the labs' own names (found by the black-box audit)
+- **What:** the 2026-11-20 black-box audit (lane BBOX) found lab knowledge in detection logic written by this agent in earlier sessions: audit rules named twitch-clone's `channel_id`, netflix-clone's `account_id` (added after that lab's miss), expedia-clone's `sortBy`, booking-clone's `label`, twitch-clone's `thumbnail`; seven strategies sent one labgen cell's own claim, field, element or attribute names, and their docstrings called this a project convention ("hardcode the sink's own known field name"). Each was justified in its CC entry by that lab's recall rising and "no other ground truth uses X".
+- **Evidence:** BUG-0660, BUG-0661; CC-AUD-0016/0017/0024, CC-FUZZ-0037/0038/0041/0042/0047, FR-FUZZ-15/16/17/23; the guard `tests/test_blackbox_detection.py` on d492b9d.
+- **Impact:** the labgen apps' recall overstated real detection: removing the lab names took twitch-clone 14 -> 11, netflix-clone 11 -> 9, booking-clone 3 -> 2 on ground-truth points. Other heuristics fitted to one lab or one framework remain (Angular Material selectors, bWAPP-measured settings words, the 8 `sink_context_in` rules that fire only from answer-key labels): listed open in the lane report.
+- **Status:** the named items fixed on the BBOX branch (CC-AUD-0660, CC-FUZZ-0660); PA-0660 and its guard added; the remaining items listed for the orchestrator.
+

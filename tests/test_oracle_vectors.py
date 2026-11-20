@@ -158,9 +158,30 @@ def test_price_integrity_bypass_canary_cannot_collide_with_the_real_rate_table()
         sender = EchoExactlyWhatItReceivedSender()
         strategy.confirm(_cand("price-integrity-bypass"), sender)
         assert sender.last_value is not None
-        assert sender.last_value not in PriceIntegrityBypassStrategy._RATE_TABLE_AMOUNTS
         whole, _, frac = sender.last_value.partition(".")
         assert len(frac) == 3, sender.last_value
+
+
+def test_price_integrity_bypass_needs_a_price_context_not_a_bare_reflection():
+    """PA-0660 / BUG-0661: the anchor is a currency symbol or price word before the
+    canary, never one app's own attribute name -- a plain reflection of the value
+    elsewhere on the page is not a charged amount."""
+    class Echo:
+        def __init__(self, template):
+            self.template = template
+
+        def send(self, url, param, value, timing=False, method="POST", location="body"):
+            return Probe(200, self.template.format(v=value), headers={})
+
+    priced = ['<td class="total">Total: {v}</td>', '{{"order":{{"amount":{v}}}}}',
+              "<p>You were charged \u20ac{v} today</p>", '<span data-price="{v}"></span>']
+    for template in priced:
+        v = PriceIntegrityBypassStrategy().confirm(_cand("price-integrity-bypass"), Echo(template))
+        assert v is not None and v.confirmed, template
+    plain = ["<p>You searched for {v}</p>", '<input value="{v}">', "Total: 1{v}"]
+    for template in plain:
+        assert PriceIntegrityBypassStrategy().confirm(
+            _cand("price-integrity-bypass"), Echo(template)) is None, template
 
 
 # --- CSV formula injection (CWE-1236) -----------------------------------------

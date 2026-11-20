@@ -371,7 +371,12 @@ def _candidates(strategy) -> list[Candidate]:
             Candidate(base, "body", method="POST", location="body", vuln_class=vc,
                       category=cat, content_type="application/json"),
             Candidate(base, "q", method="POST", location="json", vuln_class=vc,
-                      category=cat, base_entries=((("q",), "x"), (("p",), "y")))]
+                      category=cat, base_entries=((("q",), "x"), (("p",), "y"))),
+            # A captured JSON body with a numeric leaf (PA-0660: the price-trust
+            # differential varies the app's own numeric leaves, never an assumed name).
+            Candidate(base, "body", method="POST", location="body", vuln_class=vc,
+                      category=cat, content_type="application/json",
+                      base_entries=((("plan",), "x"), (("amount",), 1.5)))]
 
 
 #: Default mechanisms that refuse before sending anything when their own dependency is

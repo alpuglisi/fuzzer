@@ -38,7 +38,8 @@ budget where a vulnerability is plausible.
   `R-COMMAND-INJECTION` already use. Rule-generation only — confirmation is
   `fuzzlab.oracle`'s job (`FR-FUZZ-18`).
 - **FR-AUD-8** *(`CC-AUD-0017`, 2026-09-23; regex widened by
-  `CC-AUD-0024`, 2026-09-23).* A candidate is generated for the
+  `CC-AUD-0024`, 2026-09-23; **name list superseded by FR-AUD-660**, 2026-11-20 --
+  the names below came from two labgen apps and now match by shape only).* A candidate is generated for the
   `access-control` category: `R-ACCESS-CONTROL`
   (`fuzzlab/audit/rules_data/default_rules.json`) matches a `GET`/`query`
   parameter whose name looks like an object identifier (`channel_id`,
@@ -753,6 +754,18 @@ budget where a vulnerability is plausible.
     field is (`_import_forms`); a hidden or unseen one stays pinned (FR-AUD-22).
   - Malformed `actions.jsonl` lines are counted `quarantined`, with the capture's own.
 
+- **FR-AUD-660** *(the black-box rule for audit rules; `CC-AUD-0660`, 2026-11-20,
+  BUG-0660, PA-0660).* No rule's predicate names a parameter, path or value that only a
+  lab supplied; a word a rule relies on is justified by a public source or two
+  independent targets. Concretely: `R-ACCESS-CONTROL` matches a GET query parameter by
+  the object-identifier shape `R-ACCESS-CONTROL-PATH` uses (`id`/`uuid`/`guid`, a
+  `_`/`-` suffix of one, camelCase `…Id`/`…Uuid`; OWASP API Security Top 10 2023 API1,
+  OWASP WSTG-ATHZ-04), never a list of app names; `R-SPEL-INJECTION` nominates by
+  location alone (query, body, json), as `R-SSTI` does; `R-SSRF` has no `thumbnail`;
+  `R-CSV-FORMULA-INJECTION` has no `label`; `R-JWT-ALG-NONE` matches the
+  `Authorization` header only (RFC 6750, RFC 7235); `value_shape.FILE_EXTENSIONS` has
+  no `lang`. Enforced for every rules-data file and every detection module by
+  `tests/test_blackbox_detection.py`.
 ## 4. Non-functional requirements
 - **NFR-AUD-explainable** Every candidate is traceable to the rule evidence that
   produced it; a candidate with no evidence is a bug.

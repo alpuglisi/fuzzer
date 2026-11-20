@@ -3,6 +3,15 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0630 — `runmode` no longer calls a ground-truth-point run a detection benchmark (PA-0660, CC-FUZZ-0661) (2026-11-20)
+- Placement: lane BBOX, base d492b9d.
+- Change: `core/runmode.py` module docstring only: an automatic run with ground truth is scored; on crawl points it is the detection figure, on the answer key's own points (`--points ground-truth`) only an oracle diagnostic.
+- Impact: none at run time.
+- Risk: none.
+- Deliverables:
+  - [x] Docstring — done
+- Effectiveness (assessed 2026-11-20): n/a (documentation).
+
 ### CC-CORE-0076 — A secret in a URL is redacted wherever it sits: one walk over nested URLs, query strings, `;` pairs and path parameters (FR-CORE-537, BUG-0556) (2026-10-22)
 - Placement: pre-assigned to lane REDACTURL (item GAP-VALUES, audit Gap 5), base
   7393c90, with CC-AUD-0059 (the importer's callers). PA-0541: implemented first, no
