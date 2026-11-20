@@ -3,6 +3,27 @@
 Component code: **SESS**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SESS-0612 — The routed-login gate judges the request as sent, and fails closed (BUG-0620) (2026-11-20)
+- Change: `fuzzlab/session/manager.py` (`_same_routed_page` fails closed: a router URL
+  naming no route is the auth endpoint; `_names_a_route`), `fuzzlab/tools/probesender.py`
+  (`_identity_for(url, entries)`, `_as_sent`; `_send` passes its entries).
+- Reason: BUG-0620 (orchestrator review round 1): a crawled login form's URL is
+  `/index.php`, its route in its entries, so CC-SESS-0611's rule sent it with the session.
+- Callers (what each passes): `SeamProbeSender._send` -- the point URL plus its entries
+  (now judged together); `fetch` -- the page URL and the route URL; `_prg_session_gate`
+  -- the follow-up's full target; `SessionManager` health walk -- full candidate URLs;
+  greybox `run.py:189` -- its request URL. A bare router URL from any of them fails
+  closed. A routed logout (`index.php?do=logout`) is refused by SP-09 before any send,
+  and is an auth endpoint by the fail-closed rule.
+- Impact: measured live on Mutillidae: the ground-truth run is unchanged (tp=24 fp=0 fn=4
+  tn=11, 482 requests), 34 probes anonymous (the bare `/index.php` `page` point, before
+  0); with a login-page point added, 65 anonymous (its 31 probes); the crawl run
+  unchanged (tp=6 fp=0 fn=22 tn=11, 970 requests), 36 anonymous.
+- Risk: low; it only adds refusals to CC-SESS-0611.
+- Deliverables:
+  - [x] code; `tests/test_front_controller_routes.py` (gate, per-entry shapes, AST pin
+    of `_send`); BUG-0620, PA-0620, ERROR_LOG — done
+
 ### CC-SESS-0611 — A front controller's auth endpoint is its routed page only (2026-11-20)
 - Change: `fuzzlab/session/manager.py` (`is_auth_endpoint` with `_same_routed_page`).
 - Reason: measured on Mutillidae: with the login at `/index.php?page=login.php`, the

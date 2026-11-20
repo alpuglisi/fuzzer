@@ -173,7 +173,8 @@ def test_a_routed_login_is_its_own_page_only():
     assert mgr.is_auth_endpoint(
         "http://127.0.0.1:3093/index.php?username=x&page=login.php")
     assert not mgr.is_auth_endpoint("http://127.0.0.1:3093/index.php?page=user-info.php")
-    assert not mgr.is_auth_endpoint("http://127.0.0.1:3093/index.php")
+    # a bare router URL names no route: fail closed (BUG-0620)
+    assert mgr.is_auth_endpoint("http://127.0.0.1:3093/index.php")
     assert mgr.is_auth_endpoint("http://127.0.0.1:3093/logout?x=1")
 
 
@@ -183,3 +184,65 @@ def test_a_plain_auth_endpoint_is_still_compared_by_its_path():
     assert mgr.is_auth_endpoint("http://127.0.0.1:8092/bWAPP/login.php?x=1")
     assert mgr.is_auth_endpoint("http://127.0.0.1:3000/login")
     assert not mgr.is_auth_endpoint("http://127.0.0.1:3001/login")
+
+
+# --- BUG-0620 (CC-SESS-0612): the gate judges the request as sent, fail closed ----------
+
+_LOGIN = "http://127.0.0.1:3093/index.php?page=login.php"
+_B = "http://127.0.0.1:3093/index.php"
+
+
+def test_a_router_url_that_names_no_route_is_the_auth_endpoint():
+    """Fail closed: a bare ``/index.php`` (a crawled point's URL, its route in its
+    entries) or a ``do=logout`` URL may reach the login; it is never sent with the
+    session on the URL alone."""
+    mgr = _manager(_LOGIN, "http://127.0.0.1:3093/logout")
+    assert mgr.is_auth_endpoint(_B)
+    assert mgr.is_auth_endpoint(_B + "?do=logout")
+    assert mgr.is_auth_endpoint(_B + "?username=x")
+    assert not mgr.is_auth_endpoint(_B + "?page=user-info.php")
+
+
+def _seam(mgr):
+    from fuzzlab.tools.probesender import SeamProbeSender
+    sender = SeamProbeSender.__new__(SeamProbeSender)
+    sender._manager, sender._identity, sender._ensured = mgr, "mutillidae-user", True
+    sender.auth_endpoint_anonymous_sends = 0
+    return sender
+
+
+@pytest.mark.parametrize("url,entries,anonymous", [
+    # a crawled login form: URL /index.php, route in its entries
+    (_B, (("page", "login.php"), ("username", "x"), ("password", "y")), True),
+    # a ground-truth login point: the route in its URL
+    (_LOGIN, None, True),
+    # a crawled page that is not the login: the route in its entries keeps the session
+    (_B, (("page", "user-info.php"), ("username", "x")), False),
+    (_B + "?page=user-info.php&username=x", None, False),
+    # a body that routes to the login overrides the URL's page ($_REQUEST: POST wins)
+    (_B + "?page=user-info.php", (("page", "login.php"),), True),
+    # no route anywhere: fail closed
+    (_B, (("username", "x"),), True),
+    (_B, None, True),
+])
+def test_the_sender_judges_the_request_as_sent(url, entries, anonymous):
+    from fuzzlab.core.forms import FormEntries
+    mgr = _manager(_LOGIN, "http://127.0.0.1:3093/logout")
+    sender = _seam(mgr)
+    got = sender._identity_for(url, FormEntries(entries) if entries else None)
+    assert (got == "anonymous") is anonymous
+    assert sender.auth_endpoint_anonymous_sends == int(anonymous)
+
+
+def test_send_passes_the_requests_entries_to_the_gate():
+    """AST pin: `SeamProbeSender._send` hands its entries to `_identity_for`."""
+    import ast
+    import inspect
+    import textwrap
+
+    from fuzzlab.tools.probesender import SeamProbeSender
+    tree = ast.parse(textwrap.dedent(inspect.getsource(SeamProbeSender._send)))
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+             and getattr(n.func, "attr", None) == "_identity_for"]
+    assert calls and all(len(c.args) == 2 and getattr(c.args[1], "id", None) == "entries"
+                         for c in calls)

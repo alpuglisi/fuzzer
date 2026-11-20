@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-11-20 — session / probe sender (a routed login's auth gate judged the URL, not the request; BUG-0620)
+- **Symptom:** orchestrator review of lane PHPX: with `/index.php?page=login.php` recorded, `is_auth_endpoint("/index.php")` was False, so a crawled login form (route in its sibling entries) would be probed with the run's session.
+- **Root cause:** CC-SESS-0611 narrowed the gate for routed logins against ground-truth URLs only; `SeamProbeSender._send` judges the URL before binding the entries, and a URL naming no route defaulted to "not an auth endpoint".
+- **Remediation:** the gate fails closed for a router URL naming no route; the sender judges the URL with its entries' route pairs (CC-SESS-0612; BUG-0620, PA-0620). Live: login-page probes anonymous (65 with a login point vs 34 without; crawl run 36), scores unchanged.
+- **Status:** Fixed
+
 ## 2026-10-23 — crawler / navguard (a navigation started before a failed load's error page had loaded was dropped; BUG-0561)
 - **Symptom:** the harness run of e69bd1e (F-281): `tests/test_disco_harvest.py::test_disco_harvest_and_restore_after_failed_loads[2]` failed in 19.1 s. Disco's `restore` returned "navigation": its `about:blank` `goto` timed out after 15 s and the page stayed on `chrome-error://chromewebdata/`. The RCA measured about 1% of restores under heavy disk I/O on every tree since BUG-0522's fix (7393c90 4/600, e69bd1e 9/840) and 0/1,320 under CPU load alone.
 - **Root cause:** `navguard._settle_failure` (SP-01, BUG-0522's fix) took a failed navigation as over when its error page committed. That page loads 15-25 ms later (p95 about 130 ms under I/O load), and a navigation Chromium started in between was sometimes dropped with no commit and no error, so Playwright waited out the whole `goto` timeout.

@@ -588,20 +588,29 @@ def _requests_fetch_factory() -> Callable[[], Fetcher]:
     return factory
 
 
+def _names_a_route(url: str) -> bool:
+    """Does ``url``'s query name a front controller's route (``page=``, ``action=``...)?"""
+    from urllib.parse import parse_qsl, urlsplit
+    return any(k.lower() in detect._ROUTE_PARAMS
+               for k, _v in parse_qsl(urlsplit(url).query, keep_blank_values=True))
+
+
 def _same_routed_page(url: str, known: str) -> bool:
     """CC-SESS-0611: True unless ``known`` is a front controller's routed page (its last
     path segment a router, its query naming a route: the shapes `detect` reads a
-    query-routed login with) that ``url`` does not carry every query pair of
-    (`detect._same_login_url`). Every other endpoint is compared by its path alone, as
-    before. Same path is the caller's check."""
-    from urllib.parse import parse_qsl, urlsplit
+    query-routed login with) and ``url`` names **another** route: it must then carry
+    every query pair of ``known`` (`detect._same_login_url`). Fail closed (BUG-0620,
+    CC-SESS-0612): a URL that names no route at all may be routed by what else its
+    request carries (a crawled point's sibling entries, a body), so it is the auth
+    endpoint. Every other endpoint is compared by its path alone, as before. Same path
+    is the caller's check."""
+    from urllib.parse import urlsplit
     parts = urlsplit(known)
     segments = [s for s in parts.path.split("/") if s]
     routed = bool(segments) and \
         segments[-1].lower().rsplit(".", 1)[0] in detect._ROUTER_SEGMENTS and \
-        any(k.lower() in detect._ROUTE_PARAMS
-            for k, _v in parse_qsl(parts.query, keep_blank_values=True))
-    return not routed or detect._same_login_url(url, known)
+        _names_a_route(known)
+    return not routed or not _names_a_route(url) or detect._same_login_url(url, known)
 
 
 class SessionManager:

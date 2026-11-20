@@ -5,6 +5,7 @@ Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
 ## 2026-11-20
+- **What:** the routed-login auth gate judges the request as sent (a crawled point's entries) and fails closed for a router URL naming no route (BUG-0620, PA-0620, CC-SESS-0612). **Why:** orchestrator review of lane PHPX found CC-SESS-0611 would send a crawled login form's probes with the session.
 - **What:** OWASP Mutillidae II 2.12.8 onboarded as a loopback external lab (upstream's images by digest; bootstrap loads its directory, builds its database, registers an account) with a 39-case answer key, and two new classes with boolean-differential strategies: LDAP filter injection and XPath injection (`fuzzlab/oracle/ldap_xpath.py`); a front controller's page is now part of a finding's URL and scoring key, login discovery follows the base page's own login link, and a routed login is an auth endpoint for its page only. Ground-truth run: BASELINE aborts at login (anonymous tp=5 fp=5), AFTER tp=24 fp=0 fn=4 tn=11. **Why:** lane PHPX, expand detection to a PHP/MariaDB/OpenLDAP app (CC-LAB-0340..0343, CC-FUZZ-0620..0622, CC-AUD-0620, CC-CORE-0610, CC-SESS-0610/0611, SP-90).
 
 ## 2026-10-23

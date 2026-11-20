@@ -2217,3 +2217,11 @@ Juice Shop lab is complete.
 - **Impact:** none shipped: both bootstrap defects were fixed before the first commit, each with a fake-runner / fake-app test (`tests/test_mutillidae_fixture.py`); the URL finding became CC-FUZZ-0622. The budget overrun is reported to the orchestrator.
 - **Cause:** I wrote the container query from memory instead of from `extctl.sh`'s own `_ids` (which says `label=`), and tested the bootstrap first against a lab that had been up for minutes.
 - **Status:** fixed (CC-LAB-0341); budget overrun flagged in the lane report.
+
+### F-621 — Lane PHPX: I narrowed the auth-endpoint safety gate without checking what its callers pass (BUG-0620)
+- **What:** CC-SESS-0611 made a routed login an auth endpoint for its own page only, judged on the URL; a crawled point's route is in its entries, so its login form's probes would have gone out with the session. My own `_front_controller_route` docstring stated the entries fact.
+- **Evidence:** the orchestrator's review round 1 of `d321289`; BUG-0620's reproduction.
+- **Impact:** a safety regression on the pushed branch for crawled front-controller logins (not merged; not observed sending in a run).
+- **Cause:** I tested the narrowed rule on ground-truth URLs only and gave it a fail-open default; I swept the finding URL's readers but not the gate's callers.
+- **Status:** fixed (CC-SESS-0612); PA-0620.
+

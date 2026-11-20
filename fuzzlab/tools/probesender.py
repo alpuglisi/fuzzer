@@ -419,6 +419,26 @@ def _follow_up_record(target: str, outcome: str, attempts, *, status: int | None
             "attempts": list(attempts)}
 
 
+def _as_sent(url: str, entries) -> list[str]:
+    """The URLs whose page a request to ``url`` with sibling ``entries`` may reach
+    (BUG-0620): ``url`` with each route pair (`session.detect._ROUTE_PARAMS`) the entries
+    carry appended, and ``url`` itself unless those pairs give it the route its own
+    query lacks (then the bare URL is not what is sent). No route anywhere: ``[url]``,
+    which the auth-endpoint check judges fail closed. Entries that are not
+    ``(name, value)`` string pairs are ignored."""
+    from urllib.parse import parse_qsl, urlencode, urlsplit
+
+    from fuzzlab.session.detect import _ROUTE_PARAMS
+    routed = [url + ("&" if "?" in url else "?") + urlencode([tuple(pair)])
+              for pair in entries or ()
+              if isinstance(pair, (tuple, list)) and len(pair) == 2
+              and isinstance(pair[0], str) and isinstance(pair[1], str)
+              and pair[0].lower() in _ROUTE_PARAMS]
+    own = any(k.lower() in _ROUTE_PARAMS
+              for k, _v in parse_qsl(urlsplit(url).query, keep_blank_values=True))
+    return ([url] if own or not routed else []) + routed
+
+
 class SeamProbeSender(_ExplicitAllowance):
     """Authenticated: routes through the core HTTP seam + session manager.
 
@@ -769,7 +789,12 @@ class SeamProbeSender(_ExplicitAllowance):
         self.header_stop_reason = (f"session bound to a probed header ({culprit[0]} on "
                                    f"{urlsplit(culprit[1]).path or '/'})")
 
-    def _identity_for(self, url: str) -> str:
+    def _identity_for(self, url: str, entries=None) -> str:
+        """The identity a request to ``url`` goes out as. ``entries``: the request's
+        sibling entries (a crawled point's query or form fields), which may carry a front
+        controller's route that its URL lacks (``/index.php`` + ``page=login.php``):
+        the auth-endpoint check judges the request as sent, the URL with each such route
+        pair too (BUG-0620, CC-SESS-0612)."""
         if self._manager is None or self._identity == "anonymous":
             return self._identity
         if not self._ensured:
@@ -785,7 +810,7 @@ class SeamProbeSender(_ExplicitAllowance):
                 self._manager.ensure(urlparse(url).hostname or "", self._identity,
                                      _directory(url))
             self._ensured = True
-        if self._manager.is_auth_endpoint(url):
+        if any(self._manager.is_auth_endpoint(u) for u in _as_sent(url, entries)):
             self.auth_endpoint_anonymous_sends += 1
             return "anonymous"
         return self._identity
@@ -907,7 +932,7 @@ class SeamProbeSender(_ExplicitAllowance):
               prg, own) -> Probe:
         """The probe's routing and network, after `send`'s gates. ``own`` is the probe's
         own URL (a path point's template), which a PRG follow-up is resolved against."""
-        identity = self._identity_for(url)
+        identity = self._identity_for(url, entries)
         with self._iso_lock:
             self._counts["send_ordinal"] += 1
         client, copy = self._client, None
