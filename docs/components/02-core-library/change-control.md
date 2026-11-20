@@ -3,6 +3,36 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0672 — A captured JSON request's whole body becomes a point with its own media type; XML stays refused (FR-CORE-672) (2026-11-20)
+- Placement: lane RULESEL (item RULESEL2).
+- Change: `tools/store_adapter.py`: `_body_kind` through `media_family`; a JSON request's `form.enctype` is its captured media type (`_captured_media`); one `WHOLE_BODY` parameter per JSON request without a password leaf; an XML request refused with its reason (the body gate cannot judge a body it never reads). `core/forms.py::whole_body_media` (the guard keeps `form.enctype` readers in `core/forms.py`). `harness/auto.py` builds the whole-body point (CC-FUZZ-0700).
+- Measured before design (§7): the first draft imported XML requests as whole-body points; `tests/test_destructive_routes_external_labs.py` then showed bWAPP's `xxe-2.php` and `sqli_8-2.php` (UPDATE a user's secret from an XML body) were refused only because XML was unsupported, so XML stays refused (fail closed, PA-0112).
+- Impact (other components / project): AUD (`content_type_in`), FUZZ (point builder, greybox skip, oracle refusal of unbound whole bodies).
+- Risk (level; mitigation or accepted-risk justification): low; refusals unchanged; one more point per JSON request.
+- Deliverables:
+  - [x] importer, reader, tests (`tests/test_rule_selection_blackbox.py`, `tests/test_json_points.py`, `tests/test_capture_surrogates.py`) — done
+  - [x] FR-CORE-672 — done
+- Effectiveness (assessed 2026-11-20): unit-proven; no measured lab's crawl captured a non-password JSON body (see CC-AUD-0701's measurements).
+
+### CC-CORE-0671 — `core.fingerprint.server_language` (FR-CORE-671, SP-136) (2026-11-20)
+- Placement: lane RULESEL (item RULESEL2).
+- Change: `core/fingerprint.py`: `LANGUAGES`, `_POWERED_BY_LANGUAGE`, `_COOKIE_LANGUAGE` (each cited: Express docs, Next.js docs, express-session / koa-session / Sails docs, php.net, Jakarta Servlet, Microsoft Learn), `server_language(headers, cookies)`; two different languages read as unknown.
+- Measured before design (§7): NodeGoat answers `X-Powered-By: Express` and sets `connect.sid`; Mutillidae `X-Powered-By: PHP/8.5.11`, `PHPSESSID` (baseline sub-agent, by curl and the stored fingerprint).
+- Impact (other components / project): AUD (FR-AUD-706), FUZZ (the pipeline records it).
+- Risk (level; mitigation or accepted-risk justification): low; total, fails to unknown.
+- Deliverables:
+  - [x] reader + tests — done
+- Effectiveness (assessed 2026-11-20): read javascript on NodeGoat, php on Mutillidae, bWAPP and vinijr; unknown on Juice Shop and amarelo (stated in CC-AUD-0703).
+
+### CC-CORE-0670 — `core.redaction.media_family` (FR-CORE-670, SP-135) (2026-11-20)
+- Placement: lane RULESEL (item RULESEL2).
+- Change: `core/redaction.py`: `media_family` (json / xml / form / multipart from the media type alone; RFC 8259, RFC 6839, RFC 7303); `body_kind` reads its declared part through it, behaviour unchanged (XML is still sniffed, never redacted as XML).
+- Impact (other components / project): AUD, CORE importer, FUZZ.
+- Risk (level; mitigation or accepted-risk justification): low; `tests/test_redaction*` unchanged and green.
+- Deliverables:
+  - [x] owner + tests (`test_media_family`) — done
+- Effectiveness (assessed 2026-11-20): one family reader for four callers.
+
 ### CC-CORE-0610 — The `ldap_injection` and `xpath_injection` classes (FR-CORE-610) (2026-11-20)
 - Change: `fuzzlab/core/runmode.py` (`_VULN_TO_CATEGORY`), `fuzzlab/labels/schemas/
   labels.schema.json` (vuln classes `ldap_injection`, `xpath_injection`; sink contexts

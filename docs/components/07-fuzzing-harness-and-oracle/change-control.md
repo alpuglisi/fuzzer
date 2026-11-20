@@ -3,6 +3,17 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0700 — The target's language reaches the audit; crawled whole-body points (FR-FUZZ-700) (2026-11-20)
+- Placement: lane RULESEL (item RULESEL2).
+- Change: `harness/pipeline.py` (reads `server_language` from the baseline probe, records it in `target.fingerprint`, passes `target=` to `evaluate`); `harness/auto.py` (`injection_points_from_store` builds a captured JSON request's whole-body point: `body_content_type` from `core.forms.whole_body_media`, every leaf as `base_entries`); `greybox/run.py` (skips a whole-body point: it cannot place a raw body); `oracle/oracle.py` (a whole-body candidate with fresh leaves is inconclusive before any send, as a JSON-leaf point is).
+- Measured before design (§7): see CC-AUD-0701 / CC-AUD-0703 (the whole-body strategies' exact `content_type == "application/json"` checks and `_send`'s raw-body path read from `oracle/strategies.py` and `tools/probesender.py`).
+- Impact (other components / project): AUD, CORE.
+- Risk (level; mitigation or accepted-risk justification): low; the sweep covered both callers of `injection_points_from_store` (auto, greybox) and the oracle's binder.
+- Deliverables:
+  - [x] pipeline, builder, greybox, oracle; tests — done
+  - [x] FR-FUZZ-700 — done
+- Effectiveness (assessed 2026-11-20): see CC-AUD-0703 (Mutillidae SSJS-selected 1279 -> 1003 requests).
+
 ### CC-FUZZ-0633 — Black-box review of CC-FUZZ-0630..0632 (owner directive, 2026-11-20)
 - Change: `fuzzlab/oracle/strategies_jvm.py` (the `WEB-INF/web.xml` probe removed;
   docstrings state the evidence and the jar-classpath limit); `fuzzlab/oracle/

@@ -755,6 +755,19 @@
       "rendering": "server",
       "stack": "php_bwapp",
       "notes": "[reach: crawl,gt] [prov: unlisted by bWAPP (verified)] A title that breaks the query makes the page print mysql_error() raw (sqli_6.php:156), which quotes the input from the failure point. Verified live: x' AND <b>zz</b> renders a b element. Not detected by fuzzlab's probes so far (they do not break the query first). Gate (only this parameter): sqli_6.php:138."
+    },
+    {
+      "case_id": "BWAPP-0059",
+      "url": "/bWAPP/rlfi.php",
+      "method": "GET",
+      "param": "language",
+      "location": "query",
+      "vuln_class": "path_traversal",
+      "sink_context": "fs_path_read",
+      "expected_vulnerable": true,
+      "rendering": "server",
+      "stack": "php_bwapp",
+      "notes": "[reach: crawl,gt] [prov: Remote & Local File Inclusion (RFI/LFI)] rlfi.php:34 takes language from the request at level 0 and :174 include()s it verbatim: ../../../../../../../../etc/passwd prints the file (verified live 2026-11-20 by hand: the traversal shows root:x:0:0, the control `passwd` and the default lang_en.php do not). Found unlabelled by lane RULESEL's crawl run (R-PATH-TRAVERSAL-VALUE on the crawled value lang_en.php, CC-AUD-0702), checked by hand, then labelled (CC-LAB-0415). Labelled path_traversal as MUTL-0032's include() is."
     }
   ]
 }

@@ -61,3 +61,4 @@ BWAPP-0055,/bWAPP/iframei.php,GET,ParamHeight,query,xss-reflected,true,/bWAPP/if
 BWAPP-0056,/bWAPP/sqli_5.php,GET,title,query,sqli,true,/bWAPP/sqli_5.php,sink,,direct
 BWAPP-0057,/bWAPP/sqli_1.php,GET,title,query,xss-reflected,true,/bWAPP/sqli_1.php,sink,,direct
 BWAPP-0058,/bWAPP/sqli_6.php,POST,title,body,xss-reflected,true,/bWAPP/sqli_6.php,sink,,direct
+BWAPP-0059,/bWAPP/rlfi.php,GET,language,query,path_traversal,true,/bWAPP/rlfi.php,sink,,direct

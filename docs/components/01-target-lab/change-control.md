@@ -3,6 +3,16 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0415 — bWAPP's `rlfi.php?language` labelled (BWAPP-0059, FR-LAB-415) (2026-11-20)
+- Placement: lane RULESEL (item RULESEL2).
+- Change: `lab/ground-truth-bwapp/` (labels.json, injection-points.json, expectedresults.csv): BWAPP-0059, GET `/bWAPP/rlfi.php` `language`, `path_traversal`, `fs_path_read`, expected vulnerable.
+- Why: lane RULESEL's crawl run confirmed it (R-PATH-TRAVERSAL-VALUE on the crawled value `lang_en.php`; the passwd-content differential) and the scorer counted it fp. Checked by hand on the live lab (2026-11-20): `language=../../../../../../../../etc/passwd` shows `root:x:0:0`, `language=passwd` and `lang_en.php` do not; source `rlfi.php:34` (level 0 takes the parameter verbatim) and `:174` (`include($language)`). Labelled `path_traversal` as MUTL-0032's include() is.
+- Impact (other components / project): bWAPP's key grows to 59 cases; a ground-truth-point run audits one more point (not re-measured).
+- Risk (level; mitigation or accepted-risk justification): low; data only, hand-verified.
+- Deliverables:
+  - [x] key rows; `tests/test_external_labs_static.py` green — done
+- Effectiveness (assessed 2026-11-20): the RULESEL after crawl run rescores 43/0/13/3 (it was 42/1/13/3 on the 58-case key).
+
 ### CC-LAB-0353 — VulnerableApp moves to 127.0.0.1:3095; a static guard against shared lab ports (FR-LAB-352) (2026-11-20)
 - Change: `lab/external/vulnerableapp/compose.yaml` (`${VAPP_PORT:-3095}`),
   `fuzzlab/lab_fixtures/external.py` (`LAB_META["vulnerableapp"].default_port = 3095`);

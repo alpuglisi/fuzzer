@@ -6622,6 +6622,10 @@ lane) can submit a payload as
   "nothing left". bWAPP additionally survives a restart and a killed DB, and its
   build fails on a wrong zip hash.
 
+- **FR-LAB-415** *(bWAPP's local file inclusion labelled; `CC-LAB-0415`, 2026-11-20).*
+  bWAPP's answer key holds BWAPP-0059: GET `/bWAPP/rlfi.php` `language` (`path_traversal`,
+  `fs_path_read`, level 0 `include()` of the parameter, hand-verified).
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.

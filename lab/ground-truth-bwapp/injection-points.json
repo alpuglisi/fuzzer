@@ -323,6 +323,13 @@
       "param": "title",
       "location": "query",
       "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/rlfi.php",
+      "method": "GET",
+      "param": "language",
+      "location": "query",
+      "rendering": "server"
     }
   ]
 }
