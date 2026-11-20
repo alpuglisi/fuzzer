@@ -2238,3 +2238,10 @@ Juice Shop lab is complete.
 - **Impact:** none shipped: corrected before the first commit; it cost one review cycle.
 - **Cause:** I wrote the fix's scope from the shape of the main-frame measurement instead of waiting for the frame cell (MULTI_AGENT_ORCHESTRATION §7, measure before design).
 - **Status:** fixed before commit: the abort is main-frame only, pinned by `tests/test_navigation_error_answer.py::test_an_iframes_empty_error_answer_is_given_as_it_is`.
+
+### F-672 — BUG-0504's freeze was made mandatory in teardown without measuring a page that cannot answer it, and PA-0128 called quiescing safe
+- **What:** the BUG-0504 fix made `close_pages` freeze every page (`Emulation.setScriptExecutionDisabled`) before the drain, and `release` add a route, both unbounded sync calls answered by the page's renderer. A page whose main thread is blocked never answers them, so every guarded teardown with such a page open hung forever (BUG-0672); PA-0128(1) had stated that quiescing first is the remedy for unboundable calls without noticing that the quiescing call is one.
+- **Evidence:** BUG-0672 (both binaries: the freeze and `context.route` never return on a blocked page); the M6 executor killed after 90 s at d492b9d; the verifier's report relayed 2026-11-20.
+- **Impact:** a run against a target with a runaway script never finished; found by an independent verifier, not by the suite.
+- **Cause:** the teardown was tested against work in flight, not against a page that cannot respond, and a liveness rule was written from the order of calls rather than from what each call waits on.
+- **Status:** fixed by CC-CRAWL-0641 (PA-0672); the callers' reads of such a page remain open (BUG-0673).

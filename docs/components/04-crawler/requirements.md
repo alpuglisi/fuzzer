@@ -1849,6 +1849,15 @@ fuzzer.
   (the raw-browser facts per binary); pinned: `tests/test_navigation_error_answer.py`
   (unit, and real Chromium on both binaries).
 
+- **FR-CRAWL-641** *(CC-CRAWL-0641, BUG-0672)* **Releasing a guarded context never
+  hangs.** Every call of `navguard.close_pages` / `release` that the page's renderer
+  must answer -- the freeze, the refusing route -- is bounded by
+  `navguard.RELEASE_CALL_MS` through `navguard._bounded`; an expiry is counted
+  (`release_expiries()`) and logged, and a page that did not answer its freeze is closed
+  after the drain and before the refusing route is added. Measured: a page whose main
+  thread is blocked answers neither, on both binaries, and answers stopping its load,
+  the drain timer and its close.
+
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default
   to not clicking them. *(Built CC-CRAWL-0011, BUG-0111:)* the one rule is

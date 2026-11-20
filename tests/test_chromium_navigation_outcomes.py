@@ -93,6 +93,10 @@ class _Site:
                         ("Location", f"http://127.0.0.1:{port}/")])
                 if path == "/nocontent":
                     return self._send(204)
+                if path == "/blocked":                   # BUG-0672
+                    return self._send(200, b"<html><body>b<script>addEventListener("
+                                           b"'load',()=>setTimeout(()=>{while(true){}}"
+                                           b",50))</script></body></html>")
                 if path == "/frame404":
                     return self._send(200, b"<html><body><iframe src='/empty/404'>"
                                            b"</iframe></body></html>")
@@ -505,3 +509,40 @@ def test_a_navigation_right_after_the_raise_can_be_overtaken(page, site, browser
           f"commits of each that landed: {landed}")
     assert outcomes.get("overtaken", 0) >= 1, outcomes
     assert set(late) == {"lands after the error page"}, late
+
+
+# --- BUG-0672: what a page whose main thread is blocked still answers ---------------
+def test_a_blocked_main_thread_answers_only_the_browsers_own_calls(browser, site):
+    """A page in ``while(true){}``: freezing its scripts
+    (``Emulation.setScriptExecutionDisabled``) and adding a context route are not
+    answered (each bounded here by `navguard._bounded`; unbounded they never return),
+    while ``Page.stopLoading``, a driver timer and closing the page are, on both
+    binaries -- what `navguard.close_pages` relies on to stay bounded."""
+    from fuzzlab.tools import navguard
+    ctx = browser.new_context()
+    try:
+        page = ctx.new_page()
+        page.goto(site.base + "/blocked", wait_until="load")
+        page.wait_for_timeout(300)
+        cdp = ctx.new_cdp_session(page)
+        freeze = navguard._bounded(
+            cdp, lambda: None,
+            lambda impl, _w: impl.send(method="Emulation.setScriptExecutionDisabled",
+                                       params={"value": True}), page, 1500)
+        route = navguard._bounded(
+            ctx, lambda: None,
+            lambda impl, wrap: impl.route(url="**/*", handler=wrap(lambda r: r.abort())),
+            page, 1500)
+        t = time.monotonic()
+        cdp.send("Page.stopLoading")
+        page.wait_for_timeout(50)
+        answered_ms = (time.monotonic() - t) * 1000
+        t = time.monotonic()
+        page.close()
+        close_ms = (time.monotonic() - t) * 1000
+        print(f"[{browser.binary}] blocked: freeze answered={freeze} route answered="
+              f"{route} stopLoading+timer {answered_ms:.0f} ms close {close_ms:.0f} ms")
+        assert (freeze, route) == (False, False)
+        assert answered_ms < 1500 and close_ms < 5000
+    finally:
+        ctx.close()

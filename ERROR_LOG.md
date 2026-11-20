@@ -18,6 +18,18 @@ Format per entry:
 
 ---
 
+## 2026-11-20 — crawler / navguard (releasing a guarded context hung forever on a page whose main thread was blocked; BUG-0672)
+- **Symptom:** an independent verifier on Chromium 1243: `PlaywrightBrowserExecutor.run` never returned on a page whose script blocks after load; it hung in `navguard.release()` (reproduced: killed after 90 s at d492b9d).
+- **Root cause:** `close_pages`' freeze (`Emulation.setScriptExecutionDisabled`) and `release`'s refusing route are answered by the page's renderer, which a blocked main thread never frees, and Playwright's sync calls take no deadline (measured on both binaries; stop, timer and close are answered).
+- **Remediation:** both calls bounded by `RELEASE_CALL_MS` through `navguard._bounded`, every expiry counted (`release_expiries()`) and logged; a page that did not answer is closed before the route is added (CC-CRAWL-0641; BUG-0672, PA-0672). The executor returns in 7.3 s.
+- **Status:** Fixed
+
+## 2026-11-20 — fetcher / spider (a caller's unbounded read of a rendered page hangs on a blocked main thread; BUG-0673)
+- **Symptom:** the same page hangs `ContentFetcher.fetch` at `page.content()` and `LocalSpider._fetch_rendered` at `page.title()`, before teardown (killed after 60 s).
+- **Root cause:** renderer-bound reads with no bound (BUG-0672's class, outside teardown).
+- **Remediation:** none yet; flagged to the orchestrator for its own item (the means: `navguard._bounded`, SP-115).
+- **Status:** Open
+
 ## 2026-11-20 — crawler / navguard (an empty HTTP error answer was a page on the headless shell, a failure on the full browser; BUG-0670)
 - **Symptom:** five `tests/test_navigation_aborts.py` cases failed "DID NOT RAISE" since the container moved to Playwright 1.63 / build 1243; a guarded navigation to an empty-bodied 404 returned a page instead of raising onto the browser's error page.
 - **Root cause:** the headless shell 157.0.8103.78 (Playwright's default, so the product's) loads an empty 400-599 answer as a page; the full Chromium (153.0.8010.12, and 141 as measured before) fails it with `ERR_HTTP_RESPONSE_CODE_FAILURE`. navguard fulfilled the answer as fetched, so SP-01's premise belonged to the binary, and it had been measured on the full browser only (BUG-0671).

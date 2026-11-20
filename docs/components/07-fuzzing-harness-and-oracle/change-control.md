@@ -3,6 +3,14 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0671 — M6 returns on a page whose main thread is blocked (BUG-0672) (2026-11-20)
+- Change: none in `fuzzlab/tools/browserexec.py`; its teardown (`navguard.release`) is bounded by CC-CRAWL-0641.
+- Impact (other components / project): `PlaywrightBrowserExecutor.run` on such a page returns within its timeout, the settle and `RELEASE_CALL_MS` (measured 7.3 s at `timeout_ms=5000`) instead of never. Its verdict there is its existing rule ("loaded, no hit": `executed=False`); whether a page whose main thread blocked should be no verdict instead is an open question for M6's owner, not changed here.
+- Risk (level; mitigation or accepted-risk justification): low.
+- Deliverables:
+  - [x] `tests/test_release_blocked_page.py::test_the_m6_executor_returns_on_a_page_that_blocks_its_main_thread` — done
+- Effectiveness: pending.
+
 ### CC-FUZZ-0670 — M6's navigation of an empty 4xx/5xx answer is a failed load on every binary (BUG-0670) (2026-11-20)
 - Change: none in `fuzzlab/tools/browserexec.py`. Its store and observe navigations go through SP-01; since CC-CRAWL-0640 an empty 400-599 top-level answer raises on the headless shell as on the full browser.
 - Impact (other components / project): such a target is `NotObserved` (no verdict) on both binaries; on the headless shell it was a negative (`executed=False`) read from an empty page. No interface change.

@@ -3,6 +3,55 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0641 — Releasing a guarded context is bounded on a page whose main thread is blocked (FR-CRAWL-641, BUG-0672, SP-38, SP-115) (2026-11-20)
+- Placement: lane NAV (item NAV), on top of CC-CRAWL-0640; requested by the orchestrator
+  from an independent verifier's finding (pre-existing at d492b9d). `navguard.py` only,
+  plus tests.
+- Change (`fuzzlab/tools/navguard.py`):
+  - New `_bounded(owner, sync_call, impl_call, pump, budget_ms)` (SP-115): one call of a
+    Playwright sync object run as a task on Playwright's loop, driven by
+    `pump.wait_for_timeout` in 20 ms steps, for at most `budget_ms`; True if it finished,
+    else left pending with its late outcome consumed; a double is called plainly. It
+    reads Playwright's sync internals (`_impl_obj`, `_loop`, `_wrap_handler`,
+    1.63's `SyncBase._sync` pattern) and falls back to the plain call without them.
+  - `close_pages(context, pages, before_close=None, *, add_route=None)`: the freeze
+    (`Emulation.setScriptExecutionDisabled`) and `add_route` (the refusing route) each
+    bounded by `RELEASE_CALL_MS = 2000`; an expiry counted in `release_expiries()`
+    (`freeze`, `route`) and logged as a warning naming BUG-0672; a page that did not
+    answer its freeze is closed after the drain and before the route, the rest after it.
+  - `release` passes its refusing route as `add_route` (bounded) instead of a
+    `before_close` lambda; a context with no page still gets the route plainly.
+- Reason (measured, §7): on a page in `while(true){}`, one process per call, both
+  binaries: freeze, `context.route`, `Runtime.terminateExecution` never return;
+  `Page.stopLoading` 6-9 ms, `wait_for_timeout(100)` 102-105 ms, `page.close()` 505-509
+  ms, `context.close()` 11-17 ms. The verifier's path: `PlaywrightBrowserExecutor.run`
+  (`timeout_ms=5000`) killed after 90 s at d492b9d; 7.3 s here, `release_expiries()`
+  `{'freeze': 1, 'route': 0}` (`scratchpad/probe/hang.py`, `hang2.py`, `exec_hang.py`).
+- Impact (other components / project): every caller of `release`/`close_pages` (M6,
+  fetcher, spider, disco, ede, browser login) now ends its teardown within about
+  `RELEASE_CALL_MS` + the close per blocked page; a healthy release is unchanged (no
+  expiry, the same order). Contracts: `close_pages` gains the keyword `add_route`;
+  `before_close` kept. Not covered here: the callers' own reads of such a page hang
+  before teardown (BUG-0673, open).
+- Risk: low to medium. (a) `_bounded` relies on Playwright's sync internals; without
+  them it is the old plain call (a hang, not a wrong answer). (b) A healthy page slower
+  than 2 s to freeze (heavy load) is treated as blocked: it is closed before the
+  refusing route; it was frozen-or-busy and drained, so BUG-0504's window reopens only
+  for that page, counted and logged. (c) A route call that expired may land later
+  (harmless: one more refusing route).
+- Deliverables:
+  - [x] `_bounded`, the bounded freeze and route, `release_expiries` — done
+  - [x] `tests/test_release_blocked_page.py` (both binaries: a blocked page and a page
+    navigating to `/logout.php` every 20 ms in one context -- release within bound, one
+    freeze counted, no route expiry, both closed, the refused URL never sent; a healthy
+    release counts nothing; the M6 executor returns) — done; a mutant with the bound
+    removed hangs (killed at 120 s)
+  - [x] the probe cell in `tests/test_chromium_navigation_outcomes.py` — done
+  - [x] BUG-0672, PA-0672, BUG-0673 (open), ERROR_LOG, FR-CRAWL-641, SP-38 and SP-115,
+    ARCHITECTURE, CHANGELOG, F-672 — done
+  - [ ] the harness on the committed tree — in-progress
+- Effectiveness: pending.
+
 ### CC-CRAWL-0640 — An empty HTTP error answer fails a guarded navigation onto the error page on every Chromium binary; the raw-browser facts SP-01 relies on are measured per binary (FR-CRAWL-640, BUG-0670, BUG-0671, SP-01) (2026-11-20)
 - Placement: lane NAV (item NAV), base d492b9d, outcome branch
   `ccr-e5c7c0c6-r9ladz-navguard`; sole owner of `fuzzlab/tools/navguard.py` for this
@@ -86,9 +135,38 @@ Newest first.
   - [x] the caller sweep and the browser-login fix (CC-SESS-0640) — done
   - [x] BUG-0670, BUG-0671, PA-0670, PA-0671, ERROR_LOG, FR-CRAWL-640, the NFR-CRAWL
     clause, SESS requirements, SP-01's row, ARCHITECTURE, CHANGELOG, F-670, F-671 — done
-  - [ ] the race under CPU and disk I/O load on both binaries — in-progress (below)
-  - [ ] `scripts/verify_change.py --base d492b9d` on the committed tree — in-progress
-- Effectiveness: pending.
+  - [x] the race under CPU and disk I/O load on both binaries (PA-0561(3)) — done.
+    Lane scripts `scratchpad/race/{worker,driver,analyze}.py` (`python driver.py 20 20`,
+    then `python analyze.py`; raw `results.jsonl`, `vmstat_*.txt`): three persistent
+    worker processes, sub-arms interleaved in the same rounds, worker order rotated;
+    20 rounds x 20 iterations per arm per condition (400 iterations, 600 failed loads).
+    Load: none; CPU (4 busy loops on 4 cores, us~85%, idle 0); disk I/O (4 `dd
+    oflag=direct conv=fsync` loops plus a `dsync` loop, bo~400 MB/s, wa 21-49%).
+    Each iteration: an ok load, one or two empty-404 loads (`navigate` +
+    `end_failed_load`), then at once `navigate(next, wait_until="load")`, checked by
+    URL and the page's own script.
+    - A (shell 157, this tree): 1,200/1,200 next loads landed; 1,800/1,800 404s raised
+      `ERR_FAILED` and settled on the error page; 1,800 waits, 0 expired; failed
+      navigate p50/p95/max 54/81/281 ms (none), 72/138/320 (CPU), 52/59/110 (I/O).
+    - B (full 153, this tree): 1,200/1,200 landed; 1,800/1,800 settled; 0 expired;
+      65/100/259, 110/203/543, 60/107/208 ms.
+    - C (shell, base d492b9d): the 404 never raised (0/1,800: a page); nothing to race.
+    - Controls without the settle (raw `goto` of the 404, then the next navigation):
+      D shell overtaken 395/400 (none), 271/400 (CPU), 397/400 (I/O); E full 395,
+      189, 397 of 400 -- each overtaken navigation still landed.
+    - Not reproduced here: BUG-0561's silent drop (0/2,400 even in the controls), so
+      this run shows the overtake cured on both binaries and no drop with the guard
+      (0/1,200 per arm, 95% upper bound about 0.25%), not the drop's cure on this host;
+      that remains CC-CRAWL-0065's measurement (full binary, 141).
+  - [x] `scripts/verify_change.py --base d492b9d` on the committed tree — done: 5a03795,
+    124 files, 4849 passed, 0 failed, 0 errors, 4 skipped (the opt-in live external
+    labs), 39 xfailed; `tests/test_navigation_aborts.py` included, the five former
+    failures passing
+- Effectiveness (assessed 2026-11-20): the five SP-01 failures are gone on the default
+  binary and the suite passes on both (above); the guarded empty-404 path settles on
+  the error page with 0 lost next loads in 2,400 iterations across both binaries and
+  three host conditions. Still to watch: `error_page_waits()["expired"]` on real crawls,
+  and the unrouted-navigation gap (Risk (c)).
 
 ### CC-CRAWL-0065 — A failed navigation raises only after the browser's error page has loaded, not just committed (SP-01, BUG-0561) (2026-10-23)
 - Placement: pre-assigned to lane NAVSETTLE (item NAVSETTLE), base 5502228; the owner

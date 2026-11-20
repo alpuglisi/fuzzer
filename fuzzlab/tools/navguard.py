@@ -1110,9 +1110,68 @@ def _merged(request_headers, extra: dict[str, str]) -> dict[str, str]:
 #: How long a frozen page's already-started requests get to reach the guard before the
 #: page closes (`close_pages`).
 RELEASE_DRAIN_MS = 100
+#: The most one renderer-bound call of a page's release may take (BUG-0672): freezing
+#: its scripts, and adding the refusing route. A page whose main thread is blocked
+#: (``while(true){}``) never answers either -- measured, both binaries: the call never
+#: returns --, while stopping its loading, the drain timer and closing it do. An expiry
+#: is counted (`release_expiries`) and logged; the page is then closed before the
+#: refusing route is added, and nothing waits on it any longer.
+RELEASE_CALL_MS = 2000
+_RELEASE_LOCK = threading.Lock()
+_RELEASE_EXPIRED = {"freeze": 0, "route": 0}
 
 
-def close_pages(context, pages, before_close: Callable[[], None] | None = None) -> None:
+def release_expiries() -> dict:
+    """How many renderer-bound release calls expired in this process (BUG-0672):
+    ``freeze`` (a page's scripts could not be disabled in time) and ``route`` (the
+    refusing route could not be added in time)."""
+    with _RELEASE_LOCK:
+        return dict(_RELEASE_EXPIRED)
+
+
+def _bounded(owner, sync_call: Callable[[], object],
+             impl_call: Callable[[object, Callable], object],
+             pump, budget_ms: float) -> bool:
+    """Run one call of the Playwright sync object ``owner`` for at most ``budget_ms``
+    (BUG-0672): True when it finished (returned or raised) in time, False when it did
+    not -- then it is left pending, its late outcome consumed. Playwright's sync calls
+    take no deadline of their own, so the call's coroutine (``impl_call(impl, wrap)``,
+    on ``owner``'s implementation object, a handler wrapped by ``wrap``) runs as a task
+    of Playwright's loop, which ``pump.wait_for_timeout`` drives in short steps (a timer
+    of the driver, answered while a renderer is blocked; measured). An object without
+    that loop (a double) is called plainly."""
+    impl, loop = getattr(owner, "_impl_obj", None), getattr(owner, "_loop", None)
+    wrap = getattr(owner, "_wrap_handler", None)
+    if impl is None or loop is None or wrap is None or pump is None:
+        try:
+            sync_call()
+        except Exception:  # noqa: BLE001 - best effort, as the plain call always was
+            pass
+        return True
+    try:
+        task = loop.create_task(impl_call(impl, wrap))
+    except Exception:  # noqa: BLE001 - a closed loop: nothing more can be sent
+        return True
+    task.add_done_callback(lambda t: t.cancelled() or t.exception())   # consumed
+    end = time.monotonic() + budget_ms / 1000
+    while not task.done() and time.monotonic() < end:
+        try:
+            pump.wait_for_timeout(_STEP_MS / 5)
+        except Exception:  # noqa: BLE001 - the pump has gone: nothing more is driven
+            break
+    return task.done()
+
+
+def _note_release_expiry(kind: str) -> None:
+    with _RELEASE_LOCK:
+        _RELEASE_EXPIRED[kind] += 1
+    _log.warning(f"a guarded page did not answer its release's {kind} within "
+                 f"{RELEASE_CALL_MS} ms (BUG-0672: its main thread is blocked); it is "
+                 f"closed without waiting for it")
+
+
+def close_pages(context, pages, before_close: Callable[[], None] | None = None, *,
+                add_route=None) -> None:
     """Close ``pages`` of a guarded ``context`` without letting a request out (BUG-0504):
     the one way a guarded page is closed, mid-run (a popup) or at teardown (`release`).
 
@@ -1125,14 +1184,33 @@ def close_pages(context, pages, before_close: Callable[[], None] | None = None) 
     1. every page is frozen (scripts disabled, loading stopped): nothing new starts;
     2. drained: `RELEASE_DRAIN_MS` of event dispatch, so a paused request gets the
        guard's own answer;
-    3. ``before_close()`` if given (`release` adds its refusing route there);
-    4. closed. Each step is best effort: a page already closed starts nothing."""
+    3. ``before_close()`` if given, or ``add_route(handler)`` -- `release`'s refusing
+       route, added on ``context`` within `RELEASE_CALL_MS`;
+    4. closed. Each step is best effort: a page already closed starts nothing.
+
+    Never hangs (BUG-0672): the freeze of a page whose main thread is blocked does not
+    return, and neither does adding a route while such a page is open (measured). Each
+    is bounded by `RELEASE_CALL_MS`, counted and logged on expiry; a page that did not
+    answer its freeze is closed after the drain and **before** the route is added (it
+    starts nothing: its main thread is blocked), the others after."""
     pages = list(pages)
+    stuck = []
     for page in pages:
         try:
             cdp = context.new_cdp_session(page)
-            cdp.send("Emulation.setScriptExecutionDisabled", {"value": True})
-            cdp.send("Page.stopLoading")
+        except Exception:  # noqa: BLE001 - a closed page starts nothing
+            continue
+        answered = _bounded(
+            cdp, lambda cdp=cdp: cdp.send("Emulation.setScriptExecutionDisabled",
+                                          {"value": True}),
+            lambda impl, _w: impl.send(method="Emulation.setScriptExecutionDisabled",
+                                       params={"value": True}),
+            page, RELEASE_CALL_MS)
+        if not answered:
+            _note_release_expiry("freeze")
+            stuck.append(page)
+        try:
+            cdp.send("Page.stopLoading")       # the browser's own: answered (measured)
         except Exception:  # noqa: BLE001 - a closed page starts nothing
             pass
     for page in pages:
@@ -1140,16 +1218,41 @@ def close_pages(context, pages, before_close: Callable[[], None] | None = None) 
             page.wait_for_timeout(RELEASE_DRAIN_MS)
         except Exception:  # noqa: BLE001 - a closed page has nothing to drain
             pass
+    for page in stuck:                         # before the route: it would not return
+        try:
+            page.close()
+        except Exception:  # noqa: BLE001 - best effort, it may have closed itself
+            pass
+    rest = [p for p in pages if p not in stuck]
+    if add_route is not None:
+        # driven by an open page that answered its freeze; with none left (every
+        # blocked page closed above), the plain call returns
+        pump = next((p for p in rest if not _closed(p)), None)
+        if not _bounded(
+                context, lambda: context.route("**/*", add_route),
+                lambda impl, wrap: impl.route(url="**/*", handler=wrap(add_route)),
+                pump, RELEASE_CALL_MS):
+            _note_release_expiry("route")
     if before_close is not None:
         try:
             before_close()
         except Exception:  # noqa: BLE001 - a context already closed sends nothing
             pass
-    for page in pages:
+    for page in rest:
         try:
             page.close()
         except Exception:  # noqa: BLE001 - best effort, it may have closed itself
             pass
+
+
+def _closed(page) -> bool:
+    is_closed = getattr(page, "is_closed", None)
+    if is_closed is None:                  # a double that cannot say: open
+        return False
+    try:
+        return bool(is_closed())
+    except Exception:  # noqa: BLE001 - a page that cannot say is treated as gone
+        return True
 
 
 def release(target) -> None:
@@ -1171,17 +1274,18 @@ def release(target) -> None:
             route.abort(_abort_code(document))
         except Exception:  # noqa: BLE001 - a closed target: nothing left to refuse
             pass
-    refusing = [lambda: target.route("**/*", refuse)]
+    routed = False
     # until no page is left (bounded): a page may open a popup while another closes,
     # and a popup missed here would be left open (reviewer B)
     for _ in range(3):
         pages = list(getattr(target, "pages", None) or [])
         if not pages:
             break
-        close_pages(target, pages, refusing.pop() if refusing else None)
-    for add in refusing:                   # no page at all: still refuse from now on
+        close_pages(target, pages, add_route=None if routed else refuse)
+        routed = True
+    if not routed:                         # no page at all: still refuse from now on
         try:
-            add()
+            target.route("**/*", refuse)
         except Exception:  # noqa: BLE001 - a context already closed sends nothing
             pass
 

@@ -1291,6 +1291,10 @@ tracked in the requirements files, not here.
     full Chromium (which fails it) and the headless shell, the product's default binary
     (which, at 157, loads it as a page). Tests launch the product's binary; a browser
     fact that differs between binaries is measured on each by name (BUG-0671).
+    A guarded context's release never hangs: the calls a page's renderer must answer
+    (the freeze, the refusing route) are bounded (`navguard._bounded`, SP-115), counted
+    and logged, and a page whose main thread is blocked is closed before the route
+    (BUG-0672). The callers' own reads of such a page are not yet bounded (BUG-0673, open).
     A loopback crawl is scoped to its exact origin. Every probe sender refuses one unless it was explicitly
     enumerated (ground truth / `--url`); an AST guard enforces this. Authenticated
     senders probe the session's auth endpoints anonymously;
