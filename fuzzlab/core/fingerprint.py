@@ -22,6 +22,36 @@ _COOKIE_FRAMEWORK = {
     "sessionid": "Django",           # with csrftoken; weak on its own
 }
 
+#: The languages `server_language` can name (the ``server_language_in`` predicate's
+#: closed set, FR-AUD-706 / FR-CORE-671).
+LANGUAGES = ("javascript", "php", "java", "python", "ruby", "dotnet")
+
+#: What names a server-side language in an answer's own headers, each cited (PA-0660):
+#: an ``X-Powered-By`` product token (lower-cased, the product name before any ``/``
+#: version) and a session cookie's default name.
+#:  - ``Express``: Express sends ``X-Powered-By: Express`` by default (expressjs.com,
+#:    "Production Best Practices: Security", `app.disable('x-powered-by')`; OWASP WSTG
+#:    v4.2 WSTG-INFO-08 lists ``X-Powered-By`` as a framework fingerprint).
+#:  - ``Next.js``: ``poweredByHeader`` (nextjs.org docs, next.config.js) defaults on.
+#:  - ``connect.sid``: express-session's default cookie name (the express-session
+#:    README, option ``name``); ``koa.sess``: koa-session's default ``key`` (its README);
+#:    ``sails.sid``: Sails' default session cookie (sailsjs.com docs, config.session).
+#:  - ``PHP/x.y``: PHP's ``expose_php`` header (php.net, ini.core ``expose_php``);
+#:    ``PHPSESSID``: PHP's default ``session.name`` (php.net, session configuration).
+#:  - ``JSESSIONID``: the Servlet specification's default session cookie name (Jakarta
+#:    Servlet 6.0 §7.1.1); ``ASP.NET`` / ``ASP.NET_SessionId``: IIS/ASP.NET defaults
+#:    (Microsoft Learn, "Remove unwanted HTTP response headers"; `sessionState`).
+_POWERED_BY_LANGUAGE = {
+    "express": "javascript", "next.js": "javascript", "nuxt": "javascript",
+    "php": "php", "asp.net": "dotnet", "servlet": "java", "jsp": "java",
+    "phusion passenger": "ruby", "django": "python",
+}
+_COOKIE_LANGUAGE = {
+    "connect.sid": "javascript", "koa.sess": "javascript", "sails.sid": "javascript",
+    "phpsessid": "php", "jsessionid": "java", "asp.net_sessionid": "dotnet",
+    "_rails_session": "ruby",
+}
+
 # WAF hints by response header name (lowercased)
 _WAF_HEADERS = {
     "cf-ray": "Cloudflare",
@@ -102,3 +132,25 @@ def fingerprint(headers: dict[str, str], body: str = "",
         fp.waf = "Cloudflare"
 
     return fp
+
+
+def server_language(headers: dict[str, str] | None,
+                    cookies: dict[str, str] | None = None) -> str | None:
+    """The server-side language an answer's own headers name, one of `LANGUAGES`, or
+    ``None`` when they name none or name two (FR-CORE-671). Read from the
+    ``X-Powered-By`` product tokens and the session cookie names set or held
+    (`_POWERED_BY_LANGUAGE`, `_COOKIE_LANGUAGE`, each cited); never from a URL, a path
+    or a page's text. Total: never raises."""
+    try:
+        low = {str(k).lower(): str(v) for k, v in (headers or {}).items()}
+        found: set[str] = set()
+        for product in low.get("x-powered-by", "").split(","):
+            token = product.strip().split("/", 1)[0].strip().lower()
+            if token in _POWERED_BY_LANGUAGE:
+                found.add(_POWERED_BY_LANGUAGE[token])
+        for name in _cookie_names(low, cookies):
+            if name in _COOKIE_LANGUAGE:
+                found.add(_COOKIE_LANGUAGE[name])
+        return found.pop() if len(found) == 1 else None
+    except Exception:                         # total (PA-0096)
+        return None

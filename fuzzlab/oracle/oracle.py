@@ -556,9 +556,11 @@ class Oracle:
         refusal = candidate.replay_refusal
         fresh = (candidate.bindings or {}).get("fresh") \
             if isinstance(candidate.bindings, dict) else None
-        if not refusal and fresh and candidate.location == jsonbody.LOCATION:
+        if not refusal and fresh and (candidate.location == jsonbody.LOCATION
+                                      or candidate.content_type):
             # no page holds a captured JSON body's leaves: nothing can bind them, so no
-            # mechanism -- whatever it sends -- may run (BUG-0544 review B4)
+            # mechanism -- whatever it sends -- may run (BUG-0544 review B4); a captured
+            # request's whole-body point carries the same leaves (FR-CORE-672)
             refusal = (f"fresh {', '.join(sorted(map(str, fresh)))}: a captured JSON body "
                        "has no page to bind them from")
         if refusal:

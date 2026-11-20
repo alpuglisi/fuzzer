@@ -295,7 +295,7 @@ def import_disco(run_dir: str | Path, store: Store, run_id: int, *,
     from fuzzlab.tools.observe import observe_disco
     observe_disco(run_dir, read.records)   # FR-AUD-28: what the capture observed
     counts = {"page": 0, "endpoint": 0, "parameter": 0, "quarantined": read.quarantined}
-    for key in ("request", "request_json", "request_form", "request_refused"):
+    for key in ("request", "request_json", "request_form", "request_xml", "request_refused"):
         counts.setdefault(key, 0)
     seen_pages: set[tuple[str, str]] = set()
     link_sets: dict[tuple[int, str], int] = {}       # FR-AUD-31
@@ -335,7 +335,7 @@ def import_disco(run_dir: str | Path, store: Store, run_id: int, *,
             continue
         _store_request(store, run_id, counts, kind, rec.method.upper(), rec.url, leaves,
                        visible=visible.get(rec.action_id or "", frozenset()), main=main,
-                       page=row["page_url"], bodies=bodies)
+                       page=row["page_url"], bodies=bodies, content_type=rec.req_ctype)
     for url in page_urls:
         _import_page_url(store, run_id, url, None, DISCO_SOURCE, counts, seen_pages,
                          link_sets, main)
@@ -764,14 +764,18 @@ FORM_URLENCODED = "application/x-www-form-urlencoded"
 
 
 def _body_kind(content_type) -> str | None:
-    """``"json"``, ``"form"`` or None for a captured request's content type."""
-    media = (content_type or "").split(";", 1)[0].strip().lower()
-    if media == "application/json" or (media.startswith("application/")
-                                        and media.endswith("+json")):
-        return "json"
-    if media == FORM_URLENCODED:
-        return "form"
-    return None
+    """``"json"``, ``"form"``, ``"xml"`` or None for a captured request's content type
+    (`core.redaction.media_family`, SP-135; ``xml`` since FR-CORE-672)."""
+    from fuzzlab.core.redaction import media_family
+    family = media_family(content_type)
+    return family if family in ("json", "form", "xml") else None
+
+
+#: The parameter name of a captured request's **whole body** (FR-CORE-672): one per
+#: JSON or XML request, location ``body``, its `form` row's ``enctype`` the captured
+#: request's own media type -- the point the whole-body strategies (mass assignment,
+#: price trust, a JSON template, Jackson typing, XXE) send to.
+WHOLE_BODY = "body"
 
 
 def redact_leaf(segments, value):
@@ -872,7 +876,7 @@ def _import_requests(src, store: Store, run_id: int, counts: dict, *,
         rows = src.execute("SELECT * FROM discovered_requests ORDER BY id").fetchall()
     except sqlite3.Error:
         return                                   # a spider DB from before FR-CRAWL-13
-    for key in ("request", "request_json", "request_form", "request_refused"):
+    for key in ("request", "request_json", "request_form", "request_xml", "request_refused"):
         counts.setdefault(key, 0)
     bodies: dict = {}                                # identical stored bodies are one
     for row in rows:
@@ -882,7 +886,8 @@ def _import_requests(src, store: Store, run_id: int, counts: dict, *,
             counts["request_refused"] += 1
             continue
         _store_request(store, run_id, counts, kind, row["method"].upper(), row["url"],
-                       leaves, main=main, page=row["page_url"], bodies=bodies)
+                       leaves, main=main, page=row["page_url"], bodies=bodies,
+                       content_type=row["content_type"])
 
 
 def captured_request(row: dict, *, fuzz_json_writes: bool = False):
@@ -902,6 +907,11 @@ def captured_request(row: dict, *, fuzz_json_writes: bool = False):
         reason = f"unsupported content type {row.get('content_type')!r}"
     if reason is not None:
         return reason, kind, None
+    if kind == "xml":
+        # FR-CORE-672: an XML body is never read or stored (no XML redactor exists):
+        # the request is kept as its endpoint, method and media type -- a whole-body
+        # point whose strategies send their own document. Refused on its URL alone.
+        return body_refusal(url, []), kind, []
     try:
         leaves = _captured_leaves(kind, jsonbody.loads(row.get("body_json") or ""))
     except (ValueError, TypeError, RecursionError):
@@ -930,7 +940,8 @@ def _storable_text(value) -> bool:
 
 def _store_request(store, run_id, counts, kind, method, url, leaves, *,
                    visible: frozenset = frozenset(), main: str | None = None,
-                   page: str | None = None, bodies: dict | None = None) -> None:
+                   page: str | None = None, bodies: dict | None = None,
+                   content_type: str | None = None) -> None:
     """Write one accepted captured request (`_import_requests`): every value passes
     `redact_leaf` before it is stored (PA-0100). ``visible`` names the controls a user
     could see in the form that sent it (a disco form step): an object selector among
@@ -941,7 +952,13 @@ def _store_request(store, run_id, counts, kind, method, url, leaves, *,
     rows of its own `form` row -- never "the first captured request's leaf wins a name".
     Identical stored bodies (endpoint, encoding, entries) are one (``bodies``). The
     row's replay recipe (FR-FUZZ-67): the page that sent it, and the leaves redaction
-    blanked (never a password, sent empty by policy)."""
+    blanked (never a password, sent empty by policy).
+
+    A JSON or XML request also gets its whole-body parameter (`WHOLE_BODY`, location
+    ``body``; none when the body has a password leaf) and its `form` row keeps the
+    captured media type as ``enctype`` (FR-CORE-672): the point builder gives that point
+    its ``body_content_type``. An XML request stores no entries (its body is never
+    stored)."""
     from fuzzlab.core import jsonbody
     from fuzzlab.core.redaction import is_credential_name, is_sensitive_name
     passwords, entries, points, fresh = [], [], [], []
@@ -967,10 +984,13 @@ def _store_request(store, run_id, counts, kind, method, url, leaves, *,
     parts = urlparse(redact_url_identifiers(url, placeholder=True))
     endpoint_url = store_url(url, main) + ("?" + parts.query if parts.query else "")
     endpoint_id = _upsert_endpoint(store, run_id, endpoint_url, method, "request")
-    enctype = jsonbody.ENCTYPE if kind == "json" else FORM_URLENCODED
+    enctype = (_captured_media(content_type, kind,
+                               jsonbody.ENCTYPE if kind == "json" else "application/xml")
+               if kind in ("json", "xml") else FORM_URLENCODED)
     stored_entries = (jsonbody.encode_entries(entries) if kind == "json"
                       else json.dumps(entries))
-    counts["request_json" if kind == "json" else "request_form"] += 1
+    counts.setdefault("request_" + kind, 0)
+    counts["request_" + kind] += 1
     bodies = {} if bodies is None else bodies
     key = (endpoint_id, enctype, stored_entries)
     form_id = bodies.get(key)
@@ -984,6 +1004,20 @@ def _store_request(store, run_id, counts, kind, method, url, leaves, *,
         example = value if isinstance(value, str) else json.dumps(value)
         _insert_parameter(store, run_id, endpoint_id, name, location, example, form_id,
                           counts)
+    if kind in ("json", "xml") and not passwords:
+        # FR-CORE-672: never for a body with a password leaf -- a whole-body probe
+        # replaces every leaf, the password's too, on an endpoint that authenticates
+        _insert_parameter(store, run_id, endpoint_id, WHOLE_BODY, "body", None, form_id,
+                          counts)
+
+
+def _captured_media(content_type, kind: str, default: str) -> str:
+    """The captured request's own media type, parameters dropped (``application/json``
+    for ``application/json; charset=utf-8``); ``default`` (the family's base type) when
+    it names none of ``kind``'s family (FR-CORE-672)."""
+    from fuzzlab.core.redaction import media_family
+    media = (content_type or "").split(";", 1)[0].strip().lower()
+    return media if media_family(media) == kind else default
 
 
 def import_audit(audit_db: str | Path, store: Store, run_id: int, *,

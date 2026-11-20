@@ -924,16 +924,38 @@ def redact_multipart_body(body: bytes, content_type: str) -> bytes:
     return delim.join(parts)
 
 
-def body_kind(body: bytes, content_type: str) -> str | None:
-    """``json`` / ``form`` / ``multipart`` from the declared type, else sniffed (bounded:
-    the first bytes and the urlencoded shape), else ``None``."""
-    ct = (content_type or "").split(";", 1)[0].strip().lower()
+def media_family(content_type) -> str | None:
+    """A declared ``Content-Type``'s family -- ``json``, ``xml``, ``form``,
+    ``multipart`` -- or ``None`` (FR-CORE-670; the one reader, SP-135). Read from the
+    media type alone, its parameters ignored: ``application/json`` and any ``+json``
+    suffix (RFC 8259 §11, RFC 6839 §3.1); ``application/xml``, ``text/xml`` and any
+    ``+xml`` suffix (RFC 7303 §4, §9.2); ``application/x-www-form-urlencoded`` and
+    ``multipart/form-data`` (HTML Living Standard §4.10.21.7). Total: never raises."""
+    if not isinstance(content_type, str):
+        return None
+    ct = content_type.split(";", 1)[0].strip().lower()
     if ct == "application/x-www-form-urlencoded":
         return "form"
-    if ct == "application/json" or ct.endswith("+json"):
+    if ct == "application/json" or (ct.startswith("application/") and ct.endswith("+json")):
         return "json"
+    if ct in ("application/xml", "text/xml") or (
+            ct.startswith(("application/", "text/")) and ct.endswith("+xml")):
+        return "xml"
     if ct.startswith("multipart/form-data"):
         return "multipart"
+    return None
+
+
+def body_kind(body: bytes, content_type: str) -> str | None:
+    """``json`` / ``form`` / ``multipart`` from the declared type (`media_family`), else
+    sniffed (bounded: the first bytes and the urlencoded shape), else ``None``. A
+    declared XML type is sniffed like an undeclared one: this boundary redacts no XML."""
+    family = media_family(content_type)
+    if family in ("form", "json", "multipart"):
+        return family
+    ct = (content_type or "").split(";", 1)[0].strip().lower()
+    if ct.endswith("+json"):
+        return "json"                          # a non-application `+json` (as before)
     head = body[:1024].lstrip()
     if head[:1] in (b"{", b"["):
         return "json?"                                  # JSON only if it parses

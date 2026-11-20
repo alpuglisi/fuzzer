@@ -72,7 +72,7 @@ def test_ssrf_nominates_url_shaped_names(param):
 
 
 def test_ssrf_no_longer_nominates_a_bare_thumbnail():
-    assert "thumbnail" not in RULES["R-SSRF"].when["name_regex"]
+    assert "thumbnail" not in RULES["R-SSRF"].when["name_token_regex"]
     assert not matches(RULES["R-SSRF"], _q("thumbnail"))
 
 

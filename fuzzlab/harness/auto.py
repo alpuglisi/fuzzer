@@ -358,14 +358,19 @@ def injection_points_from_store(store, run_id: int, base_url: str,
     that path is never a point.
 
     A ``json`` point (a captured request's leaf, forms phase 3) carries its body's
-    other leaves as ``base_entries`` (paths and typed values). A ``fragment`` point (an
+    other leaves as ``base_entries`` (paths and typed values); the request's whole-body
+    point (`store_adapter.WHOLE_BODY`) carries all of them and the captured media type
+    as ``body_content_type`` (FR-CORE-672; an XML body carries none). A ``fragment`` point (an
     SPA hash route's query) is built only with ``browser_available``; without a browser
     it is reported, as ground truth's DOM points are.
     """
     from urllib.parse import urlsplit
 
     from fuzzlab.core import jsonbody
+    from fuzzlab.core.redaction import media_family
     from fuzzlab.core.urls import url_key
+    from fuzzlab.core.forms import whole_body_media
+    from fuzzlab.tools.store_adapter import WHOLE_BODY
     # Stored crawl paths are absolute (`to_path`), so they join to the base URL's
     # origin, never its path: `--base-url .../bWAPP/` must not give /bWAPP/bWAPP/
     # (BUG-0113).
@@ -379,12 +384,13 @@ def injection_points_from_store(store, run_id: int, base_url: str,
     rows = store.conn.execute(
         "SELECT e.url AS path, e.method AS method, p.name AS name, p.location AS location, "
         "p.example AS example, f.entries AS entries, f.source_page AS source_page, "
-        "f.fresh AS fresh "
+        "f.fresh AS fresh, f.id AS form_id "
         "FROM parameter p JOIN endpoint e ON p.endpoint_id = e.id "
         "LEFT JOIN form f ON f.id = p.form_id "
         "WHERE p.run_id = ? ORDER BY p.id",
         (run_id,),
     ).fetchall()
+    body_media = whole_body_media(store.conn, run_id)          # FR-CORE-672
     # (c2) a field whose own example says nothing ("" or our filler) takes the shapes
     # its name has elsewhere in the run: one pass over the rows (PA-0095)
     shapes_by_name: dict[str, set[str]] = {}
@@ -434,7 +440,22 @@ def injection_points_from_store(store, run_id: int, base_url: str,
                     skipped.append((path, method, r["name"], why))
                 continue
         raw = None                                   # the stored entries, before sending
-        if location == jsonbody.LOCATION:
+        # FR-CORE-672: a captured JSON or XML request's whole body, its own media type
+        # from the captured request (`store_adapter.WHOLE_BODY`); a JSON body's leaves
+        # are its entries, an XML body has none (never stored)
+        media = (body_media.get(r["form_id"]) if location == "body"
+                 and r["name"] == WHOLE_BODY and r["form_id"] is not None else None)
+        whole = media_family(media) if media else None
+        if whole == "json":
+            raw = jsonbody.decode_entries(r["entries"]) if r["entries"] else None
+            if raw is None:
+                if skipped is not None:
+                    skipped.append((path, method, r["name"],
+                                    "malformed form row (JSON entries)"))
+                continue
+        elif whole == "xml":
+            raw = None
+        elif location == jsonbody.LOCATION:
             raw = jsonbody.decode_entries(r["entries"]) if r["entries"] else None
             if raw is None:
                 if skipped is not None:
@@ -462,6 +483,7 @@ def injection_points_from_store(store, run_id: int, base_url: str,
         point = InjectionPoint(url=url, param=r["name"],
                                method=method, location=location,
                                base_entries=entries, origin="crawl",
+                               body_content_type=media if whole else None,
                                value_shapes=shapes,
                                base_value=(SAFE_HOST if shapes & {"ip", "hostname"}
                                            else None),

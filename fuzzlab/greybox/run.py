@@ -558,6 +558,13 @@ def points_from_store(store, run_id: int, base_url: str,
                 skipped.append((urlsplit(p.url).path or "/", p.method, p.param,
                                 "JSON body point (greybox cannot place it)"))
             continue
+        if p.body_content_type:
+            # FR-CORE-672: a captured request's whole body (JSON or XML) is a raw body
+            # the greybox sender cannot place (it sends a form field)
+            if skipped is not None:
+                skipped.append((urlsplit(p.url).path or "/", p.method, p.param,
+                                "whole-body point (greybox cannot place it)"))
+            continue
         # greybox sends no siblings (FR-FUZZ-8), so its request is (url, param, method,
         # location): the point builder's request contexts that differ only in their
         # siblings are one greybox request, kept once in order (BUG-0530 review B7)

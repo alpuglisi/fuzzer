@@ -28,12 +28,14 @@ import string
 SHAPES = ("ip", "hostname", "filename", "path", "url")
 #: The categories each shape implies (PA-0124): the default rules carry exactly one
 #: ``R-*-VALUE`` rule per pair, and a test keeps every shape in this table.
+#: ``path-traversal`` for a file name or a path and ``http-header-injection`` for a URL
+#: since FR-AUD-700 / FR-AUD-703 (each cited on its rule's ``basis``).
 SHAPE_CATEGORIES = {
     "ip": ("command-injection",),
     "hostname": ("command-injection",),
-    "filename": ("file-inclusion",),
-    "path": ("file-inclusion",),
-    "url": ("open-redirect", "ssrf"),
+    "filename": ("file-inclusion", "path-traversal"),
+    "path": ("file-inclusion", "path-traversal"),
+    "url": ("open-redirect", "ssrf", "http-header-injection"),
 }
 #: Pairs deliberately left out, with the reason (PA-0124: the table is never silent).
 SHAPE_EXCLUSIONS = {

@@ -144,7 +144,7 @@ def test_an_id_shaped_path_segment_draws_the_access_control_rule():
     (rule,) = [r for r in load_rules() if r.id == "R-ACCESS-CONTROL-PATH"]
     rx = rule.when["name_regex"]
     hits = [n for n in ("id", "user_id", "userId", "ticket-id", "uuid", "ID", "paid",
-                        "video", "userid", "idea") if re.search(rx, n, re.I)]
+                        "video", "userid", "idea") if re.fullmatch(rx, n, re.I)]
     assert hits == ["id", "user_id", "userId", "ticket-id", "uuid", "ID"]
     assert rule.when["location_in"] == ["path"] and rule.when["method_in"] == ["GET"]
 

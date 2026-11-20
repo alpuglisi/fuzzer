@@ -131,6 +131,21 @@ def first_link_set(conn, run_id: int, path: str, accept=None) -> list[tuple[str,
     return None
 
 
+def whole_body_media(conn, run_id: int) -> dict[int, str]:
+    """``{form id: media type}`` of a run's captured JSON and XML requests' `form` rows
+    (`core.redaction.media_family` ``json`` or ``xml`` of ``form.enctype``, which the
+    importer sets to the captured request's own media type; FR-CORE-672). The point
+    builder gives their whole-body point that ``body_content_type``. A reader of
+    ``form.enctype`` here, beside `first_link_set` (the guard's one module)."""
+    from fuzzlab.core.redaction import media_family
+    out: dict[int, str] = {}
+    for row in conn.execute("SELECT f.id AS id, f.enctype AS enctype FROM form f "
+                            "WHERE f.run_id = ? ORDER BY f.id", (run_id,)).fetchall():
+        if not is_link_set(row) and media_family(row["enctype"]) in ("json", "xml"):
+            out[int(row["id"])] = row["enctype"]
+    return out
+
+
 def _input_type(el) -> str:
     return (el.get("type") or "text").strip().lower()
 

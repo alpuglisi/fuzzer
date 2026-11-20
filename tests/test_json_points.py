@@ -170,6 +170,8 @@ def test_leaf_names_and_bodies_round_trip_byte_for_byte_over_adversarial_keys(tm
         assert jsonbody.display_name(jsonbody.parse_name(name)) == name
     # every string/number/bool leaf is a json point; null and empty containers are not
     want = {jsonbody.display_name(p) for p, v in entries if jsonbody.is_point_value(v)}
+    # FR-CORE-672: the whole body is its own point beside the leaves
+    assert params.pop("body")["location"] == "body"
     assert set(params) == want and {p["location"] for p in params.values()} == {"json"}
     assert params["a\\.b"]["example"] == "1" and params["\\[0\\]"]["example"] == "true"
     assert params["x.y\\.z[0].\\[1\\]"]["example"] == "deep"
@@ -215,7 +217,8 @@ def test_a_nested_json_body_becomes_json_points_with_typed_siblings(tmp_path):
         params = _params(store, run)
         (form,) = _forms(store, run)
         pts = injection_points_from_store(store, run, BASE, skipped=[])
-    assert set(params) == {"user.email", "user.tags[0]", "user.tags[1]", "q", "count", "on"}
+    assert set(params) == {"user.email", "user.tags[0]", "user.tags[1]", "q", "count", "on",
+                           "body"}                            # + the whole body (FR-CORE-672)
     assert {p["url"] for p in params.values()} == {"/app/api/search?v=1"}   # query kept
     assert params["count"]["example"] == "3" and params["on"]["example"] == "true"
     assert json.loads(form["password_fields"]) == []
@@ -305,7 +308,8 @@ def test_put_and_patch_import_only_with_the_flag_and_a_safe_url(tmp_path):
     store, run, counts = _import(tmp_path, rows, writes=True)
     with store:
         params = _params(store, run)
-    assert set(params) == {"message", "author"} and params["message"]["method"] == "PATCH"
+    assert set(params) == {"message", "author", "body"} \
+        and params["message"]["method"] == "PATCH"
     assert (counts["request_json"], counts["request_refused"]) == (1, 1)
 
 
@@ -373,7 +377,7 @@ def test_object_selectors_sensitive_and_identifier_leaves_are_pinned(tmp_path):
         (form,) = _forms(store, run)
         params = _params(store, run)
         text = _all_text(store)
-    assert set(params) == {"captcha", "comment", "rating"}
+    assert set(params) == {"captcha", "comment", "rating", "body"}
     stored = dict(jsonbody.decode_entries(form["entries"]))
     assert stored[("UserId",)] == 1 and stored[("BasketId",)] == "7"   # sent as captured
     assert stored[("auth", "token")] == "" and stored[("ref",)] == ""  # blanked, typed
@@ -489,7 +493,8 @@ def test_a_json_url_leaf_gets_the_seed_only_without_an_identifier_in_host_or_pat
                                                                skipped=[])}
         text = _all_text(store)
     assert pts["a.next"].redirect_seed == clean
-    assert set(pts) == {"a.next"}            # the others are identifier-like: pinned
+    # the others are identifier-like: pinned; + the whole body (FR-CORE-672), no seed
+    assert set(pts) == {"a.next", "body"} and pts["body"].redirect_seed is None
     assert HEX32 not in text
     assert redirect_seed(host_id) is None and redirect_seed(path_id) is None
 
@@ -616,7 +621,9 @@ def test_greybox_refuses_a_json_point_and_never_gets_one_from_the_store(tmp_path
     with store:
         skipped: list = []
         assert points_from_store(store, run, BASE, skipped=skipped) == []
-    assert skipped == [("/app/api/x", "POST", "q", "JSON body point (greybox cannot place it)")]
+    assert skipped == [("/app/api/x", "POST", "q", "JSON body point (greybox cannot place it)"),
+                       ("/app/api/x", "POST", "body",
+                        "whole-body point (greybox cannot place it)")]       # FR-CORE-672
 
 
 def test_the_m6_executor_refuses_a_json_point_before_any_browser():

@@ -28,7 +28,7 @@ from urllib.parse import urlparse
 from fuzzlab.audit import InjectionPoint, evaluate
 from fuzzlab.core import reqctx, trace
 from fuzzlab.core.dedup import fold_points
-from fuzzlab.core.fingerprint import fingerprint
+from fuzzlab.core.fingerprint import fingerprint, server_language
 from fuzzlab.core.oracle_status import (CHECKED, INCONCLUSIVE,  # migration 13
                                          NO_CONFIRMER, PENDING, SKIPPED_BUDGET)
 from fuzzlab.core.runmode import RunPlan
@@ -171,14 +171,16 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
             # no response to the baseline (BUG-0147): an unprobed target row, as for
             # header points only; the candidates still run
             pass
+    target_facts: dict = {}                     # FR-AUD-706: what the target's answer named
     if probe is not None:
         fp = fingerprint(probe.headers, probe.text)
+        target_facts["server_language"] = server_language(probe.headers)
         origin = urlparse(fp_point.url)
         store.conn.execute(
             "INSERT INTO target (run_id, base_url, dbms, framework, waf, fingerprint) "
             "VALUES (?,?,?,?,?,?)",
             (run_id, f"{origin.scheme}://{origin.netloc}", fp.dbms, fp.framework,
-             fp.waf, json.dumps(fp.as_dict())),
+             fp.waf, json.dumps({**fp.as_dict(), **target_facts})),
         )
         store.conn.commit()
     elif points:
@@ -192,7 +194,7 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
 
     # Audit: rules-as-data, scoped to the plan's categories (T2.3 / D14 / D15).
     counts = evaluate(points, store, run_id, categories=plan.categories, plugins=plugins,
-                      identity=identity)
+                      identity=identity, target=target_facts)
 
     # Confirm each candidate with the oracle (sole finding-writer).
     oracle = Oracle(store=store, run_id=run_id, browser=browser, oob=oob,

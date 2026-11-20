@@ -11,8 +11,26 @@ changes. The predicate is a small, safe condition language:
   reaches the server; FR-AUD-22)
 - ``method_in``: [GET, POST]
 - ``sink_context_in``: [html, html-attribute, url-attribute, js]
-- ``name_regex``: a regex matched (case-insensitively) against the parameter name (a
-  ``json`` point's last object key, `rule_name`; forms phase 3, FR-AUD-22)
+- ``name_regex``: a regex that must match (case-insensitively) the **whole** parameter
+  name (a ``json`` point's last object key, `rule_name`; forms phase 3, FR-AUD-22;
+  anchored by construction since FR-AUD-702, BUG-0710)
+- ``name_token_regex``: a regex that must match (case-insensitively) one **whole token**
+  of that name (`core.redaction.name_tokens`: split at ``_ - . [ ]``, camelCase and
+  letter/digit boundaries; FR-AUD-702, BUG-0710). A word never matches inside another
+  word (``ip`` in ``description``, ``load`` in ``payload``); a compound a rule means is
+  written out in the regex (``\\w*url`` for ``returnurl``, ``dest\\w*`` for
+  ``destination``)
+- ``content_type_in``: [none, json, xml, multipart, form] -- the family of the point's
+  own body content type (`core.redaction.media_family` of ``body_content_type``;
+  ``none`` when the point has none: a field of a form, a query, a JSON leaf;
+  FR-AUD-701). A whole-body point carries the captured request's own type
+- ``path_token_regex``: a regex that must match one whole token of the point's URL path
+  (FR-AUD-704)
+- ``body_leaf_token_regex``: a regex that must match one whole token of the last key of
+  one of a whole-body point's own captured leaves (``base_entries``; FR-AUD-705)
+- ``server_language_in``: [javascript, ...] -- the language the run's fingerprint read
+  from the target's own answer (`core.fingerprint.server_language`; FR-AUD-706). Never
+  true when the run has no such evidence
 - ``value_shape_in``: [ip, hostname, filename, path, url] — the point's example value
   has one of these shapes (`fuzzlab.audit.value_shape`; forms phase 2, FR-AUD-20)
 - ``origin_in``: [crawl, ground-truth] — where the point came from (FR-AUD-20)
@@ -51,17 +69,24 @@ class Rule:
 
 #: Every ``when`` key the predicate language understands.
 WHEN_KEYS = frozenset({"always", "location_in", "location_not_in", "method_in",
-                       "sink_context_in", "name_regex", "value_shape_in", "origin_in"})
+                       "sink_context_in", "name_regex", "name_token_regex",
+                       "value_shape_in", "origin_in", "content_type_in",
+                       "path_token_regex", "body_leaf_token_regex",
+                       "server_language_in"})
 #: Where an injection point can come from (``origin_in``).
 ORIGINS = ("crawl", "ground-truth")
 #: Every location a point can have (``location_in`` / ``location_not_in``): the ground
 #: truth's (`labels.schema.json`, `manifest.schema.json`) and the crawler's ``json``
 #: (forms phase 3 merge, reviewer A: a typo must never silently widen a rule).
 LOCATIONS = ("query", "body", "header", "cookie", "json", "fragment", "path")
+#: A point's body content-type family (``content_type_in``; `core.redaction.
+#: media_family`, ``none`` when the point has no body type of its own; FR-AUD-701).
+CONTENT_TYPES = ("none", "json", "xml", "multipart", "form")
 #: The ``when`` keys whose value is a regex (checked to compile at load).
-_REGEX_KEYS = ("name_regex",)
+_REGEX_KEYS = ("name_regex", "name_token_regex", "path_token_regex",
+               "body_leaf_token_regex")
 _LIST_KEYS = ("location_in", "location_not_in", "method_in", "sink_context_in",
-              "value_shape_in", "origin_in")
+              "value_shape_in", "origin_in", "content_type_in", "server_language_in")
 
 
 class RuleError(ValueError):
@@ -74,6 +99,7 @@ def validate_rule(rule) -> None:
     ``origin_in`` / ``location_in`` / ``location_not_in``, and a ``name_regex`` that
     compiles."""
     from fuzzlab.audit.value_shape import SHAPES
+    from fuzzlab.core.fingerprint import LANGUAGES
     if not isinstance(rule, Rule):
         raise RuleError(f"not a Rule: {type(rule).__name__}")
     when = rule.when
@@ -87,7 +113,9 @@ def validate_rule(rule) -> None:
                                 and all(isinstance(v, str) for v in when[key])):
             raise RuleError(f"{rule.id}: {key} must be a list of strings")
     for key, allowed in (("value_shape_in", SHAPES), ("origin_in", ORIGINS),
-                         ("location_in", LOCATIONS), ("location_not_in", LOCATIONS)):
+                         ("location_in", LOCATIONS), ("location_not_in", LOCATIONS),
+                         ("content_type_in", CONTENT_TYPES),
+                         ("server_language_in", LANGUAGES)):
         bad = sorted(set(when.get(key, [])) - set(allowed))
         if bad:
             raise RuleError(f"{rule.id}: {key} has unknown value(s) {bad}")
@@ -134,8 +162,51 @@ def rule_name(point) -> str:
     return name
 
 
-def matches(rule: Rule, point) -> bool:
-    """Evaluate a rule's ``when`` predicate against an injection point."""
+def content_type_family(point) -> str:
+    """The point's body content-type family for ``content_type_in`` (FR-AUD-701):
+    `core.redaction.media_family` of its ``body_content_type``, ``none`` when it has
+    none, ``other`` (in no rule's set) for a type outside the families."""
+    from fuzzlab.core.redaction import media_family
+    declared = getattr(point, "body_content_type", None)
+    if not declared:
+        return "none"
+    return media_family(declared) or "other"
+
+
+def _token_match(pattern: str, names) -> bool:
+    """True when ``pattern`` matches one whole token of one of ``names``, case
+    insensitively (`core.redaction.name_tokens`; FR-AUD-702, BUG-0710)."""
+    from fuzzlab.core.redaction import name_tokens
+    return any(re.fullmatch(pattern, token, re.I)
+               for name in names for token in name_tokens(name))
+
+
+def _path_of(url: str) -> str:
+    from urllib.parse import urlsplit
+    try:
+        return urlsplit(url or "").path
+    except ValueError:
+        return ""
+
+
+def _leaf_names(point) -> list[str]:
+    """The last key of each of a whole-body point's own captured leaves (FR-AUD-705):
+    its ``base_entries`` read as `core.jsonbody` entries; none for any other point."""
+    from fuzzlab.core import jsonbody
+    if not getattr(point, "body_content_type", None) or not point.base_entries:
+        return []
+    names = []
+    for path, _value in point.base_entries:
+        parsed = path if isinstance(path, (list, tuple)) else jsonbody.parse_name(path)
+        if parsed:
+            names.append(jsonbody.name_segment(parsed))
+    return [n for n in names if isinstance(n, str)]
+
+
+def matches(rule: Rule, point, target: dict | None = None) -> bool:
+    """Evaluate a rule's ``when`` predicate against an injection point. ``target`` holds
+    what the run read from the target itself (``{"server_language": ...}``, FR-AUD-706);
+    a ``server_language_in`` rule never fires without it."""
     from fuzzlab.audit import graphql_context
     when = rule.when
     if graphql_context.not_a_data_point(point) is not None:
@@ -151,13 +222,24 @@ def matches(rule: Rule, point) -> bool:
         checks.append(point.method in when["method_in"])
     if "sink_context_in" in when:
         checks.append((point.sink_context or "") in when["sink_context_in"])
-    if "name_regex" in when:
+    if "name_regex" in when or "name_token_regex" in when:
         names = (rule_name(point), *graphql_context.argument_names(point))
-        checks.append(any(re.search(when["name_regex"], n, re.I) for n in names))
-
+        if "name_regex" in when:
+            checks.append(any(re.fullmatch(when["name_regex"], n, re.I) for n in names))
+        if "name_token_regex" in when:
+            checks.append(_token_match(when["name_token_regex"], names))
     if "value_shape_in" in when:
         shapes = getattr(point, "value_shapes", None) or ()
         checks.append(bool(set(shapes) & set(when["value_shape_in"])))
     if "origin_in" in when:
         checks.append(getattr(point, "origin", None) in when["origin_in"])
+    if "content_type_in" in when:
+        checks.append(content_type_family(point) in when["content_type_in"])
+    if "path_token_regex" in when:
+        checks.append(_token_match(when["path_token_regex"], [_path_of(point.url)]))
+    if "body_leaf_token_regex" in when:
+        checks.append(_token_match(when["body_leaf_token_regex"], _leaf_names(point)))
+    if "server_language_in" in when:
+        language = (target or {}).get("server_language")
+        checks.append(language is not None and language in when["server_language_in"])
     return bool(checks) and all(checks)

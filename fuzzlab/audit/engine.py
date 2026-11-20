@@ -72,7 +72,8 @@ class InjectionPoint:
 def evaluate(points: list[InjectionPoint], store, run_id: int,
              rules: list[Rule] | None = None,
              categories: list[str] | None = None, plugins=None,
-             identity: str | None = None) -> dict[str, int]:
+             identity: str | None = None,
+             target: dict | None = None) -> dict[str, int]:
     """Evaluate every rule against every point; record all evaluations + candidates.
 
     ``categories`` (None = all) scopes the active rules — the hook for D14/T2.9
@@ -82,6 +83,10 @@ def evaluate(points: list[InjectionPoint], store, run_id: int,
     Every candidate's evidence carries its request context's id and the run's
     ``identity`` scope (`core.reqctx.stamp`, SP-57, FR-FUZZ-66): the one identity the
     pipeline confirms on, the oracle attributes a finding to and ML labels by.
+
+    ``target`` is what the run read from the target's own answers
+    (``{"server_language": ...}``, `core.fingerprint.server_language`; FR-AUD-706): a
+    ``server_language_in`` rule fires only on it.
     """
     from fuzzlab.core import reqctx
     rules = load_rules() if rules is None else rules
@@ -103,7 +108,7 @@ def evaluate(points: list[InjectionPoint], store, run_id: int,
 
     for point in points:
         for rule in active:
-            fired = matches(rule, point)
+            fired = matches(rule, point, target)
             store.conn.execute(
                 "INSERT INTO evaluation (run_id, url, method, param, location, "
                 "rule_id, category, transaction_type, fired, sink_context, evidence) "
