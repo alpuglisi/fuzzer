@@ -7,12 +7,12 @@ DVGA-0002,/graphql,POST,variables.path,body,command-injection,true,/graphql,sink
 DVGA-0003,/graphql,POST,variables.host,body,command-injection,true,/graphql,sink,,direct
 DVGA-0004,/graphql,POST,variables.scheme,body,command-injection,true,/graphql,sink,,direct
 DVGA-0005,/graphql,POST,variables.cmd,body,command-injection,true,/graphql,sink,,direct
-DVGA-0006,/graphql,POST,variables.username,body,command-injection,false,/graphql,sink,,direct
+DVGA-0006,/graphql,POST,variables.username,body,sqli,false,/graphql,sink,,direct
 DVGA-0007,/graphql,POST,variables.filter,body,sqli,true,/graphql,sink,,direct
 DVGA-0008,/graphql,POST,variables.pasteTitle,body,sqli,false,/graphql,sink,,direct
 DVGA-0009,/graphql,POST,variables.keyword,body,sqli,false,/graphql,sink,,direct
 DVGA-0010,/graphql,POST,variables.content,body,sqli,false,/graphql,sink,,direct
-DVGA-0011,/graphql,POST,variables.password,body,command-injection,false,/graphql,sink,,direct
+DVGA-0011,/graphql,POST,variables.password,body,sqli,false,/graphql,sink,,direct
 DVGA-0012,/public_pastes,GET,variables.title,body,xss-stored,true,/public_pastes,sink,,direct
 DVGA-0013,/public_pastes,GET,variables.content,body,xss-stored,true,/public_pastes,sink,,direct
 DVGA-0014,/graphql,POST,variables.host,body,ssrf,true,/graphql,sink,,direct

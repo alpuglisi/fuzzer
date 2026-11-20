@@ -4,8 +4,8 @@ fixture of `tests.test_external_labs_live` (its own compose project on a free lo
 port, torn down by label, nothing left).
 
 The gt pass runs `fuzzlab auto --points ground-truth --browser` through the CLI and
-asserts the floor of matched case ids confirmed live when this was built, that no
-negative was flagged, and that every case tagged ``gt`` got a checked candidate.
+asserts the floor of matched case ids confirmed live, that no negative was flagged,
+that every negative and floor case got a checked candidate, and the stated misses.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import time
 
 import pytest
 
-from tests.test_external_labs_live import (FLAG, REPO, _assert_pass, _get, _score, _up,
+from tests.test_external_labs_live import (FLAG, REPO, _get, _score, _up,
                                            lab_factory)  # noqa: F401 - the fixture
 
 pytestmark = [
@@ -25,9 +25,11 @@ pytestmark = [
                               f"with a compose provider; boots DVGA on loopback)"),
 ]
 
-#: Confirmed live on 2026-11-20 (CC-LAB-0320 Effectiveness). A floor only grows.
-DVGA_GT_FLOOR = {"DVGA-0001", "DVGA-0002", "DVGA-0003", "DVGA-0004", "DVGA-0005",
-                 "DVGA-0007", "DVGA-0012", "DVGA-0013"}
+#: Confirmed live on 2026-11-20 (CC-LAB-0321 Effectiveness). A floor only grows.
+#: DVGA-0001/0002/0004 left it when the lab-derived GraphQL rules were removed
+#: (CC-AUD-0602): their arguments carry no generic command-injection signal.
+DVGA_GT_FLOOR = {"DVGA-0003", "DVGA-0005", "DVGA-0007", "DVGA-0012", "DVGA-0013"}
+STATED_MISSES = {"DVGA-0001", "DVGA-0002", "DVGA-0004", "DVGA-0014", "DVGA-0015"}
 
 
 def test_dvga_fixture_scores_its_confirmed_rows(lab_factory):  # noqa: F811
@@ -51,7 +53,15 @@ def test_dvga_fixture_scores_its_confirmed_rows(lab_factory):  # noqa: F811
                       "--browser", "--authorized", timeout=1800)
     assert res.returncode == 0, res.stdout[-3000:] + res.stderr[-3000:]
     gt, report, checked = _score(store, gt_dir)
-    _assert_pass(gt, report, checked, DVGA_GT_FLOOR, "gt")
-    # the two [reach: none] rows stay documented misses; the day one is found this
-    # fails and the answer key's tag must be updated
-    assert {"DVGA-0014", "DVGA-0015"} <= set(report.missed)
+    from fuzzlab.core.runmode import to_category
+    assert DVGA_GT_FLOOR <= set(report.matched), (sorted(DVGA_GT_FLOOR - set(report.matched)),
+                                                  report.as_dict())
+    assert not {c.case_id for c in gt.negatives()} & set(report.false_alarms)
+    # every negative and every floor case was really probed (a checked candidate)
+    for case in gt.cases:
+        if case.case_id in DVGA_GT_FLOOR or not case.expected_vulnerable:
+            key = (case.url, case.method, case.param, to_category(case.vuln_class))
+            assert key in checked, f"{case.case_id} got no checked candidate"
+    # stated misses: the [reach: none] rows, and three command sinks whose argument
+    # names carry no generic signal (CC-AUD-0602); the day one is found this fails
+    assert STATED_MISSES <= set(report.missed)

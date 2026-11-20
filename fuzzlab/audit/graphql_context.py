@@ -7,8 +7,9 @@ on is the **field argument** it feeds (``importPaste(host: $h)``). This module r
 for a JSON-leaf point under ``variables``, which ``(field, argument, sibling
 arguments)`` the variable is bound to in the request's own document
 (`tools.apiop.graphql_variable_bindings`, the one GraphQL reader), so a name rule sees
-the argument's name, and the `graphql_field_regex` / `graphql_sibling_regex`
-predicates see the field and the field call's other arguments (`audit.rules`).
+the argument's name as well as the variable's (`audit.rules`). Nothing here names a
+field, argument or value of any target: the bindings come from the request's own
+document, read by the GraphQL grammar.
 
 Total on hostile input: a point that is not such a leaf, or whose entries hold no
 parseable document, has no binding (an empty tuple), never an error.
@@ -61,13 +62,6 @@ def bindings(point) -> tuple:
 def argument_names(point) -> tuple[str, ...]:
     return tuple(dict.fromkeys(arg for _f, arg, _s in bindings(point)))
 
-
-def field_names(point) -> tuple[str, ...]:
-    return tuple(dict.fromkeys(f for f, _a, _s in bindings(point)))
-
-
-def sibling_names(point) -> tuple[str, ...]:
-    return tuple(dict.fromkeys(s for _f, _a, sib in bindings(point) for s in sib))
 
 
 #: GraphQL's built-in scalars whose input coercion never yields a string (GraphQL spec

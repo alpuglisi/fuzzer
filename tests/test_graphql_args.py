@@ -7,9 +7,10 @@ FR-AUD-600/601, FR-CRAWL-600/601).
 * `audit.graphql_context`: a JSON-leaf point under ``variables`` is judged by the
   argument it feeds; the document leaf and a variable declared Int/Float/Boolean are not
   data points;
-* `audit.rules`: the GraphQL predicates and rules, proven on DVGA's own documents (the
-  answer key's points) and on synthetic offenders; nothing changes for a body that is
-  not a GraphQL request (every other lab's ground-truth points, swept).
+* `audit.rules`: a GraphQL variable gets only the generic rules, by its own and its
+  argument's name (CC-AUD-0602: no rule reads a target's field names); nothing changes
+  for a body that is not a GraphQL request (every other lab's ground-truth points,
+  swept).
 """
 
 from __future__ import annotations
@@ -129,28 +130,26 @@ def _fired(point, rules=None) -> set[str]:
     return {r.id for r in (rules or load_rules()) if matches(r, point)}
 
 
-def test_the_dvga_command_sinks_get_a_command_injection_candidate():
+def test_no_rule_names_a_field_argument_or_value_of_any_target():
+    """Owner directive (2026-11-20): detection is black-box. No rule's predicate reads a
+    GraphQL field or a sibling argument (a lab-derived heuristic was removed, F-602); a
+    GraphQL variable gets only the generic rules, judged by its own and its argument's
+    name."""
+    from fuzzlab.audit.rules import WHEN_KEYS
+    assert not {k for k in WHEN_KEYS if k.startswith("graphql")}
+    assert not [r.id for r in load_rules() if "GRAPHQL" in r.id]
+
+
+def test_a_dvga_variable_gets_the_generic_rules_by_its_argument_name():
     pts = _dvga_points()
     cmdi = {r.id for r in load_rules() if r.category == "command-injection"}
-    for param in ("variables.arg", "variables.path", "variables.scheme", "variables.host",
-                  "variables.cmd"):
-        assert _fired(pts[param]) & cmdi, param
-
-
-def test_each_graphql_rule_fires_for_its_own_reason():
-    pts = _dvga_points()
-    assert "R-COMMAND-INJECTION-GRAPHQL-FIELD" in _fired(pts["variables.arg"])
-    assert "R-COMMAND-INJECTION-GRAPHQL-SIBLING" in _fired(pts["variables.path"])
-    # host's siblings (port, path, scheme) carry no command signal of their own
-    assert "R-COMMAND-INJECTION-GRAPHQL-SIBLING" not in _fired(pts["variables.host"])
-
-
-def test_points_with_no_command_signal_get_no_command_injection_candidate():
-    pts = _dvga_points()
-    cmdi = {r.id for r in load_rules() if r.category == "command-injection"}
-    for param in ("variables.filter", "variables.pasteTitle", "variables.keyword",
-                  "variables.title", "variables.content", "variables.filename"):
+    assert _fired(pts["variables.cmd"]) & cmdi          # `cmd`: the generic name rule
+    assert _fired(pts["variables.host"]) & cmdi         # `host`
+    # no name signal: no command-injection candidate (a stated miss, CC-AUD-0602)
+    for param in ("variables.arg", "variables.path", "variables.scheme",
+                  "variables.filter", "variables.title", "variables.filename"):
         assert not _fired(pts[param]) & cmdi, param
+    assert "R-SQLI-PARAM" in _fired(pts["variables.filter"])
 
 
 def test_a_variable_is_named_by_the_argument_it_feeds():
@@ -202,17 +201,8 @@ def test_no_other_labs_ground_truth_point_has_a_graphql_context():
     assert seen > 50
 
 
-@pytest.mark.parametrize("key", ["graphql_field_regex", "graphql_sibling_regex"])
-def test_a_graphql_regex_that_does_not_compile_is_refused_at_load(key):
+def test_a_regex_that_does_not_compile_is_refused_at_load():
     with pytest.raises(RuleError):
-        validate_rule(Rule("R-X", "command-injection", "x", {key: "("}))
+        validate_rule(Rule("R-X", "command-injection", "x", {"name_regex": "("}))
     with pytest.raises(RuleError):
-        validate_rule(Rule("R-X", "command-injection", "x", {key: 3}))
-    validate_rule(Rule("R-X", "command-injection", "x", {key: "a|b"}))
-
-
-def test_a_graphql_predicate_is_false_for_a_point_with_no_binding():
-    rule = Rule("R-X", "command-injection", "x", {"graphql_field_regex": "."})
-    assert not matches(rule, InjectionPoint(url="u", param="cmd", location="query"))
-    rule = Rule("R-X", "command-injection", "x", {"graphql_sibling_regex": ".*"})
-    assert not matches(rule, InjectionPoint(url="u", param="cmd", location="query"))
+        validate_rule(Rule("R-X", "command-injection", "x", {"graphql_field_regex": "a"}))

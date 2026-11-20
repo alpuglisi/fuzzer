@@ -16,12 +16,6 @@ changes. The predicate is a small, safe condition language:
 - ``value_shape_in``: [ip, hostname, filename, path, url] — the point's example value
   has one of these shapes (`fuzzlab.audit.value_shape`; forms phase 2, FR-AUD-20)
 - ``origin_in``: [crawl, ground-truth] — where the point came from (FR-AUD-20)
-- ``graphql_field_regex``: a regex matched (case-insensitively) against the name of the
-  GraphQL field whose argument the point's variable feeds (`audit.graphql_context`;
-  FR-AUD-600); never true for a point that is not a bound GraphQL variable
-- ``graphql_sibling_regex``: a regex matched (case-insensitively, as a whole name)
-  against each *other* argument of that field call; true when one matches (FR-AUD-600)
-
 A GraphQL variable's ``name_regex`` is matched against its leaf name and against the
 name of every field argument it feeds (``$h`` in ``importPaste(host: $h)`` is judged as
 ``host`` too; FR-AUD-600).
@@ -57,8 +51,7 @@ class Rule:
 
 #: Every ``when`` key the predicate language understands.
 WHEN_KEYS = frozenset({"always", "location_in", "location_not_in", "method_in",
-                       "sink_context_in", "name_regex", "value_shape_in", "origin_in",
-                       "graphql_field_regex", "graphql_sibling_regex"})
+                       "sink_context_in", "name_regex", "value_shape_in", "origin_in"})
 #: Where an injection point can come from (``origin_in``).
 ORIGINS = ("crawl", "ground-truth")
 #: Every location a point can have (``location_in`` / ``location_not_in``): the ground
@@ -66,7 +59,7 @@ ORIGINS = ("crawl", "ground-truth")
 #: (forms phase 3 merge, reviewer A: a typo must never silently widen a rule).
 LOCATIONS = ("query", "body", "header", "cookie", "json", "fragment", "path")
 #: The ``when`` keys whose value is a regex (checked to compile at load).
-_REGEX_KEYS = ("name_regex", "graphql_field_regex", "graphql_sibling_regex")
+_REGEX_KEYS = ("name_regex",)
 _LIST_KEYS = ("location_in", "location_not_in", "method_in", "sink_context_in",
               "value_shape_in", "origin_in")
 
@@ -161,12 +154,7 @@ def matches(rule: Rule, point) -> bool:
     if "name_regex" in when:
         names = (rule_name(point), *graphql_context.argument_names(point))
         checks.append(any(re.search(when["name_regex"], n, re.I) for n in names))
-    if "graphql_field_regex" in when:
-        checks.append(any(re.search(when["graphql_field_regex"], f, re.I)
-                          for f in graphql_context.field_names(point)))
-    if "graphql_sibling_regex" in when:
-        checks.append(any(re.fullmatch(when["graphql_sibling_regex"], s, re.I)
-                          for s in graphql_context.sibling_names(point)))
+
     if "value_shape_in" in when:
         shapes = getattr(point, "value_shapes", None) or ()
         checks.append(bool(set(shapes) & set(when["value_shape_in"])))

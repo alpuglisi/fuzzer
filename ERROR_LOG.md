@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-11-20 — environment (the lane's Docker daemon stopped during the review rework)
+- **Symptom:** a DVGA ground-truth re-run failed at once with "Connection refused" on 127.0.0.1:5013, and a readiness loop waited out its 30-minute limit; `docker ps` answered "Cannot connect to the Docker daemon".
+- **Root cause:** the `dockerd` started by hand at the beginning of the lane had exited; its log ends without an error at 08:20 (the last lines are only the DVGA container's refused DNS lookups, expected under `dns: 127.0.0.1`). Probably stopped along with the background job it was started from; not measured further.
+- **Remediation:** restarted `dockerd`, `labctl.sh reset dvga`, and re-ran with a bounded readiness wait.
+- **Status:** Environment (fixed outside the repo)
+
 ## 2026-11-20 — environment / browser (five SP-01 tests fail on this container's Chromium 157, at 2be7a50 too)
 - **Symptom:** the GQL lane's harness run: `tests/test_navigation_aborts.py::test_a_failed_navigation_returns_after_its_own_error_page[1-3]`, `::test_a_navigation_overtaken_by_an_error_page_waits_for_it` and `::test_an_error_page_ends_the_previous_document` fail ("DID NOT RAISE Error"; a missing `_fetch_static` mark). The same five fail on 2be7a50 itself (84 passed, 5 failed), so the lane's change does not cause them.
 - **Root cause:** measured: the container's Chromium 157.0.8103.78 (Playwright 1.63.0) answers `page.goto` of a 404 with an empty body as a normal 404 response (`no raise 404`); the tests' fixture relies on an older Chromium turning that answer into a failed navigation onto its own error page (`chrome-error://`), which SP-01's settle path (BUG-0522/0561) and these tests pin.

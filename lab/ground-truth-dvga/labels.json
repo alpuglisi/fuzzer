@@ -73,12 +73,12 @@
    "method": "POST",
    "param": "variables.username",
    "location": "body",
-   "vuln_class": "command-injection",
-   "sink_context": "os_command",
+   "vuln_class": "sqli",
+   "sink_context": "sql",
    "expected_vulnerable": false,
    "rendering": "server-json",
    "stack": "python_flask_graphene_sqlite_dvga",
-   "notes": "[reach: gt] [prov: DVGA core/security.py check_creds] username is only compared with 'admin' in Python (`Username is invalid` otherwise); it never reaches a shell."
+   "notes": "[reach: gt] [prov: DVGA core/security.py check_creds; core/views.py resolve_system_diagnostics] username is only compared with 'admin' in Python (`Username is invalid` otherwise); it never reaches SQL or a shell (the admin row is fetched by a constant filter_by)."
   },
   {
    "case_id": "DVGA-0007",
@@ -138,12 +138,12 @@
    "method": "POST",
    "param": "variables.password",
    "location": "body",
-   "vuln_class": "command-injection",
-   "sink_context": "os_command",
+   "vuln_class": "sqli",
+   "sink_context": "sql",
    "expected_vulnerable": false,
    "rendering": "server-json",
    "stack": "python_flask_graphene_sqlite_dvga",
-   "notes": "[reach: gt] [prov: DVGA core/security.py check_creds; solution 19] password is only compared with the admin's stored password in Python ('Password Incorrect' otherwise); it never reaches a shell. A command in it fails the login, so nothing runs (the same field's cmd, DVGA-0005, does)."
+   "notes": "[reach: gt] [prov: DVGA core/security.py check_creds; solution 19] password is only compared with the admin's stored password in Python ('Password Incorrect' otherwise); it never reaches SQL or a shell."
   },
   {
    "case_id": "DVGA-0012",
