@@ -1,0 +1,44 @@
+# OWASP RailsGoat (MIT; external lab fixture, HELD OUT: lab/HOLDOUT.md). Lab-only.
+# A Ruby on Rails 8 app built to teach the OWASP Top 10 to Rails developers.
+#
+# Built by ./Dockerfile from the source at the pinned commit, which
+# `labctl.sh up railsgoat` checks out into the gitignored .cache/app (its files hashed
+# against RAILSGOAT_TREE_SHA256) with every gem of its Gemfile.lock downloaded on the host
+# and checked against the lock's CHECKSUMS sha256; the image installs them with no
+# network. The database is upstream's development sqlite3 file, on a tmpfs: re-created
+# and re-seeded by `rails db:setup` (db/seeds.rb) at every start.
+#
+# Safety: the app is published on LOOPBACK ONLY (127.0.0.1), on its own bridge network.
+# Capabilities dropped, read-only root; only the database, tmp/, log/ and the upload
+# directory (public/data) are writable tmpfs.
+#
+# Run through lab/labctl.sh:  ./labctl.sh up railsgoat [--authorized]
+name: fuzzlab-railsgoat
+
+x-podman:
+  in_pod: false
+
+services:
+  web:
+    build:
+      context: .
+      network: none
+    networks: [railsgoat-front]
+    ports:
+      # Loopback only. Never bind 0.0.0.0.
+      - "127.0.0.1:${RAILSGOAT_PORT:-3103}:3000"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /data:uid=10001,gid=10001,mode=0700
+      - /app/tmp:uid=10001,gid=10001,mode=0700
+      - /app/log:uid=10001,gid=10001,mode=0700
+      - /app/public/data:uid=10001,gid=10001,mode=0755
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    mem_limit: 1g
+
+networks:
+  railsgoat-front: {}

@@ -37,22 +37,12 @@ from fuzzlab.procutil import run_bounded
 REPO = Path(__file__).resolve().parent.parent
 LAB = REPO / "lab"
 EXTERNAL = LAB / "external"
-GT_DIRS = {"bwapp": LAB / "ground-truth-bwapp", "juice-shop": LAB / "ground-truth-juice-shop",
-           "secdevlabs-copy-n-paste": LAB / "ground-truth-secdevlabs-copy-n-paste",
-           "secdevlabs-gossip-world": LAB / "ground-truth-secdevlabs-gossip-world",
-           "secdevlabs-sstype": LAB / "ground-truth-secdevlabs-sstype",
-           "secdevlabs-vinijr-blog": LAB / "ground-truth-secdevlabs-vinijr-blog",
-           "secdevlabs-amarelo-designs": LAB / "ground-truth-secdevlabs-amarelo-designs",
-           "secdevlabs-mongection": LAB / "ground-truth-secdevlabs-mongection",
-           "secdevlabs-comment-killer": LAB / "ground-truth-secdevlabs-comment-killer",
-           "secdevlabs-streaming": LAB / "ground-truth-secdevlabs-streaming",
-           "secdevlabs-ecommerce-api": LAB / "ground-truth-secdevlabs-ecommerce-api",
-           "dvga": LAB / "ground-truth-dvga",
-           "mutillidae": LAB / "ground-truth-mutillidae",
-           "nodegoat": LAB / "ground-truth-nodegoat",
-           "vulnerableapp": LAB / "ground-truth-vulnerableapp",
-           "dvwa": LAB / "ground-truth-dvwa",
-           "crapi": LAB / "ground-truth-crapi"}
+#: Every external lab's answer key, discovered from the layout (``lab/ground-truth-<lab>/``
+#: beside ``lab/external/<lab>/compose.yaml``), so a held-out lab's key is checked here
+#: without this file naming it (lab/HOLDOUT.md, FR-LAB-421).
+GT_DIRS = {d.name.removeprefix("ground-truth-"): d
+           for d in sorted(LAB.glob("ground-truth-*"))
+           if (EXTERNAL / d.name.removeprefix("ground-truth-") / "compose.yaml").is_file()}
 #: Labs scored by URL coverage, not an injection answer key: the lab serves its own
 #: expected set (the Crawl Maze: /fetch-expected-results, CC-LAB-0302).
 COVERAGE_LABS = {"security-crawl-maze"}

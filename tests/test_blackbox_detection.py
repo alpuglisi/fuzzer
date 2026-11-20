@@ -90,6 +90,11 @@ CITED: dict[str, str] = {
                 "ids; Shopify Admin REST API ('order_id')",
     "product_id": "OWASP API Security Top 10 2023, API1 (BOLA); Shopify Admin REST "
                   "API ('product_id')",
+    "user_id": "WordPress core database schema: wp_usermeta.user_id (and the user_id "
+               "argument of get_user_meta / update_user_meta); OWASP API Security Top 10 "
+               "2023, API1 (BOLA) and API3 (object property level authorization): user ids "
+               "as object / property identifiers. Added at the HOLDOUT merge: a held-out "
+               "key named it; the detection use (fetcher.PRIVILEGED_FIELDS) predates it",
     "graphql": "GraphQL over HTTP specification (graphql/graphql-over-http, 'URL': "
                "the conventional endpoint path is /graphql) and graphql.org 'Serving over "
                "HTTP' (\"respond at a single endpoint, typically /graphql\")",
@@ -143,7 +148,24 @@ def lab_tokens(root: Path = ROOT) -> dict[str, set[str]]:
                 _add(out, d.name, f"lab/external/{d.name}")
     for name in LAB_PRODUCT_NAMES:
         _add(out, name, "LAB_PRODUCT_NAMES")
+    holdout = root / "lab" / "HOLDOUT.md"
+    if holdout.is_file():
+        # held-out labs' product names, read from their list (SP-140): this file may not
+        # name them (lab/HOLDOUT.md rule 4)
+        from fuzzlab.lab_fixtures.heldout import parse_holdout_table
+        for lab in parse_holdout_table(holdout.read_text(encoding="utf-8")):
+            for name in lab.names:
+                _add(out, name, "lab/HOLDOUT.md")
     return out
+
+
+def test_the_held_out_labs_names_are_lab_identifiers():
+    """Every name lab/HOLDOUT.md lists is in the lab-only vocabulary, so detection code
+    can never contain one (CC-LAB-0428)."""
+    from fuzzlab.lab_fixtures.heldout import held_out_labs
+    tokens = lab_tokens()
+    for lab in held_out_labs():
+        assert set(lab.names) <= set(tokens), lab.name
 
 
 def common_vocabulary(vocab_dir: Path = VOCAB_DIR) -> set[str]:

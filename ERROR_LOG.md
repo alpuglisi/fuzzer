@@ -44,6 +44,32 @@ Format per entry:
 - **Root cause:** reach tags were set from hand-made requests (all fields present, accounts created by hand, a store URL known), never from a scored run: copy-n-paste's points lacked the JSON body its handler requires, mongection's fresh tmpfs database has no account for its flaw to answer, comment-killer's case has no `source_url`.
 - **Remediation:** copy-n-paste points carry the page's JSON body; mongection gets an identity and a bootstrap (CC-LAB-0360, 684fab9); each lab's scored run is recorded in `docs/components/01-target-lab/external-lab-scores.json` and checked against its reach tags (PA-0640). Live: copy-n-paste tp 0→2, mongection tp 0→2, fp 0. SDLCK-0001 recorded open.
 - **Status:** Fixed (comment-killer open: an answer-key decision)
+## 2026-11-20 — Lab fixtures (HOLDOUT lane): two held-out bootstraps tripped the classified-status guard (BUG-0721)
+- **Symptom:** `scripts/verify_change.py --base e14c925` on 6ddac13: 1 failure,
+  `test_core_comparability.py::test_no_module_classifies_a_throttle_or_refusal_but_the_owner`
+  (sites `bootstrap_vampi`, `bootstrap_dvws_node`).
+- **Root cause:** their login differential compared `anon.status_code != 401`, a status SP-56
+  classifies, outside its owner; the subagents verified with the two test files my dispatch
+  prompt named, not the harness, so the whole-package guard ran only at the lane's end.
+- **Remediation:** the differential requires a client-error refusal (4xx) and 200 with the
+  token (CC-LAB-0427); PA-0721 (dispatch prompts name the harness; harness after each merge).
+  See `docs/bugs/BUG-0721-held-out-bootstraps-compared-a-classified-status-outside-its-owner.md`.
+- **Status:** Fixed.
+
+## 2026-11-20 — Test guard (HOLDOUT lane): the GraphQL-context guard failed on a second lab's GraphQL answer key (BUG-0720)
+- **Symptom:** after merging the held-out lab DVWS-node,
+  `tests/test_graphql_args.py::test_no_other_labs_ground_truth_point_has_a_graphql_context`
+  failed: `graphql_context.bindings(pt) != ()` on the new key's three GraphQL `variables.*`
+  negatives.
+- **Root cause:** the guard skipped GraphQL requests by naming the one lab that had them
+  (`gt.parent == DVGA_GT`) instead of by the body; its premise went stale with the second
+  GraphQL lab. PA-0001 (do not hard-code) was review-only.
+- **Remediation:** the guard skips a point whose `json_body.query` parses as an executable
+  GraphQL document (`is_graphql_request`, the auditor's own reader, SP-80), for every lab
+  (CC-AUD-0720); PA-0720 with an AST guard that no answer-key loop singles out a lab;
+  the static tests' hand-written answer-key list replaced by discovery (CC-LAB-0420).
+  See `docs/bugs/BUG-0720-a-whole-repo-graphql-guard-named-the-one-lab-allowed-graphql-points.md`.
+- **Status:** Fixed.
 
 ## 2026-11-20 — core / crawler (the destructive rule missed state toggles; two lab crawls changed the lab's state; BUG-0680)
 - **Symptom:** the lab-expansion lanes' crawls fetched Mutillidae's `index.php?do=toggle-security`, `?do=toggle-enforce-ssl`, `?do=toggle-hints` (after the SSL toggle the session went to https and 121 pages stayed unresolved) and DVGA's `/difficulty/hard` and `/start_over` (global mode flipped, state reset).
