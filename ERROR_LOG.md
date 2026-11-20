@@ -27,26 +27,9 @@ Format per entry:
 ## 2026-11-20 — tests (black-box guard failed on the integration merge; BUG-0711)
 - **Symptom:** `test_detection_code_names_no_lab_identifier` failed after merging the integration branch: `graphql` (DVGA's answer key) in GraphQL reader literals.
 - **Root cause:** a data-driven guard merged with new data without a re-run; a protocol term was not cited.
-- **Remediation:** `CITED["graphql"]` with the GraphQL-over-HTTP specification and graphql.org; PA-0711.
+- **Remediation:** `CITED["graphql"]` with the GraphQL-over-HTTP specification and graphql.org (landed on the integration branch at 82910aa); PA-0711.
 - **Status:** Fixed.
 
-## 2026-11-20 — oracle (seven strategies sent one labgen cell's own field names; BUG-0661)
-- **Symptom:** lane BBOX's black-box audit: `JwtAlgNoneConfusionStrategy` forged `channel_id`/`role` claims, `PredictableTokenSourceStrategy` read `session_token`, `MassAssignmentPrivilegedFieldStrategy` sent `is_partner`, `PriceTrustDifferentialStrategy` sent `monthly_charge`/`plan_tier`, `PriceIntegrityBypassStrategy` matched `data-charged-amount`, `GoTemplateSstiStrategy` sent `{"template": ...}`, and an XXE wrapper named `<title>`: each one generated cell's own names.
-- **Root cause:** no rule or guard kept lab knowledge out of detection logic; a docstring "convention" made the practice precedent.
-- **Remediation:** CC-FUZZ-0660: names come from the target (captured body, response) or a public standard (RFC 7519, OIDC Core, W3C XML); no verdict when the target offers none. PA-0660 and its guard. Measured (oracle diagnostic): twitch-clone 14 -> 11, netflix-clone 11 -> 9.
-- **Status:** Fixed
-
-## 2026-11-20 — auditor (audit rules nominated by parameter names only one lab supplied; BUG-0660)
-- **Symptom:** `R-ACCESS-CONTROL` named `channel_id`/`account_id`, `R-SPEL-INJECTION` `sort|sortby|...` (expedia's `sortBy`), `R-SSRF` `thumbnail`, `R-CSV-FORMULA-INJECTION` `label`, `R-JWT-ALG-NONE` a `jwt` header, `FILE_EXTENSIONS` `lang`; the guard `tests/test_blackbox_detection.py` reported `default_rules.json:71: lab identifier 'channel_id'`.
-- **Root cause:** rule words grounded in one lab's parameter and verified by that lab's recall; no rule or guard required independent evidence.
-- **Remediation:** CC-AUD-0660: shape-based id rule (OWASP API1:2023), location-only SpEL, lab words removed; PA-0660. booking-clone 3/3 -> 2/3 (BKNG-0002, honest miss).
-- **Status:** Fixed
-
-## 2026-11-20 — environment (gitleaks not installed in lane BBOX's container)
-- **Symptom:** `tests/test_labgen_price_integrity.py::test_cli_check_passes_end_to_end_on_the_new_manifest` and `tests/test_labgen_csv_export_injection.py::...` fail (the `gitleaks` executable is missing), on base d492b9d as on the lane's tree.
-- **Root cause:** the lane's attempt to install gitleaks 8.21.2 into the container was refused by the session's permission policy.
-- **Remediation:** none in the repository; install gitleaks 8.21.2 where the harness runs.
-- **Status:** Environment (open)
 ## 2026-11-20 — Cloud container (JAVA lane): gitleaks and Python Playwright missing; five navigation tests fail on this container's Chromium at the base tree too (environment)
 - **Symptom:** `scripts/verify_change.py --base 2be7a50` on f78ae08: 16 failures. Eight
   `test_cli_check_passes_end_to_end*` (`secret scanner: 'gitleaks' executable not found`,
@@ -179,6 +162,23 @@ Format per entry:
 - **Root cause:** `scripts/verify_change.py` and eleven test helpers set the binary from `/opt/pw-browsers/chromium-*/chrome-linux/chrome` (the full browser, not the product's default); build 1243's layout is `chrome-linux64/`, so the glob matched nothing and the suite moved to the headless shell silently.
 - **Remediation:** no binary chosen by install path anywhere (a guard over `fuzzlab/`, `scripts/`, `tests/`); tests run the product's binary; a fact that differs is measured on each binary by name (BUG-0671, PA-0671).
 - **Status:** Fixed
+## 2026-11-20 — oracle (seven strategies sent one labgen cell's own field names; BUG-0661)
+- **Symptom:** lane BBOX's black-box audit: `JwtAlgNoneConfusionStrategy` forged `channel_id`/`role` claims, `PredictableTokenSourceStrategy` read `session_token`, `MassAssignmentPrivilegedFieldStrategy` sent `is_partner`, `PriceTrustDifferentialStrategy` sent `monthly_charge`/`plan_tier`, `PriceIntegrityBypassStrategy` matched `data-charged-amount`, `GoTemplateSstiStrategy` sent `{"template": ...}`, and an XXE wrapper named `<title>`: each one generated cell's own names.
+- **Root cause:** no rule or guard kept lab knowledge out of detection logic; a docstring "convention" made the practice precedent.
+- **Remediation:** CC-FUZZ-0660: names come from the target (captured body, response) or a public standard (RFC 7519, OIDC Core, W3C XML); no verdict when the target offers none. PA-0660 and its guard. Measured (oracle diagnostic): twitch-clone 14 -> 11, netflix-clone 11 -> 9.
+- **Status:** Fixed
+
+## 2026-11-20 — auditor (audit rules nominated by parameter names only one lab supplied; BUG-0660)
+- **Symptom:** `R-ACCESS-CONTROL` named `channel_id`/`account_id`, `R-SPEL-INJECTION` `sort|sortby|...` (expedia's `sortBy`), `R-SSRF` `thumbnail`, `R-CSV-FORMULA-INJECTION` `label`, `R-JWT-ALG-NONE` a `jwt` header, `FILE_EXTENSIONS` `lang`; the guard `tests/test_blackbox_detection.py` reported `default_rules.json:71: lab identifier 'channel_id'`.
+- **Root cause:** rule words grounded in one lab's parameter and verified by that lab's recall; no rule or guard required independent evidence.
+- **Remediation:** CC-AUD-0660: shape-based id rule (OWASP API1:2023), location-only SpEL, lab words removed; PA-0660. booking-clone 3/3 -> 2/3 (BKNG-0002, honest miss).
+- **Status:** Fixed
+
+## 2026-11-20 — environment (gitleaks not installed in lane BBOX's container)
+- **Symptom:** `tests/test_labgen_price_integrity.py::test_cli_check_passes_end_to_end_on_the_new_manifest` and `tests/test_labgen_csv_export_injection.py::...` fail (the `gitleaks` executable is missing), on base d492b9d as on the lane's tree.
+- **Root cause:** the lane's attempt to install gitleaks 8.21.2 into the container was refused by the session's permission policy.
+- **Remediation:** none in the repository; install gitleaks 8.21.2 where the harness runs.
+- **Status:** Environment (open)
 
 ## 2026-10-23 — crawler / navguard (a navigation started before a failed load's error page had loaded was dropped; BUG-0561)
 - **Symptom:** the harness run of e69bd1e (F-281): `tests/test_disco_harvest.py::test_disco_harvest_and_restore_after_failed_loads[2]` failed in 19.1 s. Disco's `restore` returned "navigation": its `about:blank` `goto` timed out after 15 s and the page stayed on `chrome-error://chromewebdata/`. The RCA measured about 1% of restores under heavy disk I/O on every tree since BUG-0522's fix (7393c90 4/600, e69bd1e 9/840) and 0/1,320 under CPU load alone.

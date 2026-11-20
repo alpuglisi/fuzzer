@@ -771,6 +771,11 @@ budget where a vulnerability is plausible.
     field is (`_import_forms`); a hidden or unseen one stays pinned (FR-AUD-22).
   - Malformed `actions.jsonl` lines are counted `quarantined`, with the capture's own.
 
+- **FR-AUD-610** *(a server-side JavaScript injection rule; `CC-AUD-0610`, 2026-11-20).*
+  `R-SSJS` (`default_rules.json`) nominates category `server-side-javascript-injection`
+  for every query, body, JSON-leaf and path point (where `R-SQLI-PARAM` and `R-SSTI`
+  apply): the value may reach `eval`, `new Function` or a `$where` whatever its name.
+
 - **FR-AUD-660** *(the black-box rule for audit rules; `CC-AUD-0660`, 2026-11-20,
   BUG-0660, PA-0660).* No rule's predicate names a parameter, path or value that only a
   lab supplied; a word a rule relies on is justified by a public source or two
@@ -783,11 +788,6 @@ budget where a vulnerability is plausible.
   `Authorization` header only (RFC 6750, RFC 7235); `value_shape.FILE_EXTENSIONS` has
   no `lang`. Enforced for every rules-data file and every detection module by
   `tests/test_blackbox_detection.py`.
-- **FR-AUD-610** *(a server-side JavaScript injection rule; `CC-AUD-0610`, 2026-11-20).*
-  `R-SSJS` (`default_rules.json`) nominates category `server-side-javascript-injection`
-  for every query, body, JSON-leaf and path point (where `R-SQLI-PARAM` and `R-SSTI`
-  apply): the value may reach `eval`, `new Function` or a `$where` whatever its name.
-
 - **FR-AUD-700** *(path traversal from what a crawl sees; `CC-AUD-0702`, 2026-11-20).*
   `R-PATH-TRAVERSAL-NAME` (a name token of the file-inclusion vocabulary: file, path,
   folder, dir..., page, doc..., template..., include..., load) and

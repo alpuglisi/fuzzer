@@ -2239,36 +2239,6 @@ rewards) derives from it.
     `tests/test_prg_observation.py::test_a_path_points_follow_up_that_would_re_send_the_payload_never_confirms`,
     `tests/test_prg_observation.py::test_a_path_points_follow_up_that_leaves_its_segment_still_confirms`,
     `tests/test_prg_observation.py::test_prg_rule` (`own-segment-never-refetched`)
-- **FR-FUZZ-660** *(strategies read only what a black-box target offers;
-  `CC-FUZZ-0660`, 2026-11-20, BUG-0661, PA-0660).* No confirmation strategy sends or
-  reads a field, claim, element, attribute or constant that only a lab supplied. Where a
-  strategy needs a name it takes it from the target (the captured request body's own
-  leaves, the response's own properties) or from a public standard, and it gives no
-  verdict when the target offers none (a stated miss, never a guess):
-  - `JwtAlgNoneConfusionStrategy` carries its marker in `STANDARD_CLAIMS` (RFC 7519
-    §4.1.2 `sub`; OIDC Core §5.1 `name`, `preferred_username`).
-  - `PredictableTokenSourceStrategy` reads every decimal JSON leaf of the response
-    and confirms a clock reading: an epoch count (s/ms/us/ns) near this host's time or
-    a nanosecond monotonic counter, each moving by no more than the measured window
-    around its two sends (an upper bound by causality).
-  - `MassAssignmentPrivilegedFieldStrategy` flips the response's own unsent
-    top-level `false` booleans and confirms one reading back `true`, with a
-    never-existing control property that must not come back.
-  - `PriceTrustDifferentialStrategy` varies the captured body's numeric leaves and
-    reads the response's leaf at the same path; no captured body, no verdict.
-  - `PriceIntegrityBypassStrategy` anchors its canary to a currency symbol or price
-    word within 40 characters, digit-bounded.
-  - `GoTemplateSstiStrategy` places a JSON point's expression in every string leaf
-    of the captured body; no captured body, no verdict.
-  - The XXE strategies reference the entity in the root element's text only.
-- **FR-FUZZ-661** *(the reported detection figure is a crawl run's; `CC-FUZZ-0661`,
-  2026-11-20, PA-0660).* `fuzzlab auto`'s score line names its points source: a crawl
-  run prints "detection score (crawl run, black-box)", a ground-truth-point run prints
-  "oracle diagnostic (ground-truth points: the answer key supplied the points; not a
-  detection figure)". The multi-target transfer summary labels each target's line
-  and its macro line the same way (`TargetOutcome.points_source`, summary key
-  `measures`: `detection` / `oracle-diagnostic` / `mixed`). Presentation only: no score
-  is computed differently.
 - **FR-FUZZ-610** *(server-side JavaScript injection, evaluation marker; `CC-FUZZ-0610`,
   2026-11-20).* `SsjsEvaluationMarkerStrategy` (category
   `server-side-javascript-injection`, class `ssjs`, mechanism `js-evaluation-marker`)
@@ -2375,6 +2345,36 @@ rewards) derives from it.
   its cookie) or no cookie is refused (`SessionAuthError`, a usage error before any side
   effect), never probed anonymously or with half of it.
 
+- **FR-FUZZ-660** *(strategies read only what a black-box target offers;
+  `CC-FUZZ-0660`, 2026-11-20, BUG-0661, PA-0660).* No confirmation strategy sends or
+  reads a field, claim, element, attribute or constant that only a lab supplied. Where a
+  strategy needs a name it takes it from the target (the captured request body's own
+  leaves, the response's own properties) or from a public standard, and it gives no
+  verdict when the target offers none (a stated miss, never a guess):
+  - `JwtAlgNoneConfusionStrategy` carries its marker in `STANDARD_CLAIMS` (RFC 7519
+    §4.1.2 `sub`; OIDC Core §5.1 `name`, `preferred_username`).
+  - `PredictableTokenSourceStrategy` reads every decimal JSON leaf of the response
+    and confirms a clock reading: an epoch count (s/ms/us/ns) near this host's time or
+    a nanosecond monotonic counter, each moving by no more than the measured window
+    around its two sends (an upper bound by causality).
+  - `MassAssignmentPrivilegedFieldStrategy` flips the response's own unsent
+    top-level `false` booleans and confirms one reading back `true`, with a
+    never-existing control property that must not come back.
+  - `PriceTrustDifferentialStrategy` varies the captured body's numeric leaves and
+    reads the response's leaf at the same path; no captured body, no verdict.
+  - `PriceIntegrityBypassStrategy` anchors its canary to a currency symbol or price
+    word within 40 characters, digit-bounded.
+  - `GoTemplateSstiStrategy` places a JSON point's expression in every string leaf
+    of the captured body; no captured body, no verdict.
+  - The XXE strategies reference the entity in the root element's text only.
+- **FR-FUZZ-661** *(the reported detection figure is a crawl run's; `CC-FUZZ-0661`,
+  2026-11-20, PA-0660).* `fuzzlab auto`'s score line names its points source: a crawl
+  run prints "detection score (crawl run, black-box)", a ground-truth-point run prints
+  "oracle diagnostic (ground-truth points: the answer key supplied the points; not a
+  detection figure)". The multi-target transfer summary labels each target's line
+  and its macro line the same way (`TargetOutcome.points_source`, summary key
+  `measures`: `detection` / `oracle-diagnostic` / `mixed`). Presentation only: no score
+  is computed differently.
 - **FR-FUZZ-700** *(the target's language reaches the audit; whole-body points from a
   crawl; `CC-FUZZ-0700`, 2026-11-20).* The pipeline reads
   `core.fingerprint.server_language` from its baseline probe, records it in the

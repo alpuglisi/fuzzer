@@ -3,22 +3,6 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
-### CC-AUD-0660 — Lab-fitted audit rule words generalised or removed: the black-box rule (BUG-0660, PA-0660, FR-AUD-660) (2026-11-20)
-- Placement: lane BBOX (item BBOX), base d492b9d; pre-assigned CC-AUD-0660..0669.
-- Change (`fuzzlab/audit/rules_data/default_rules.json`, `fuzzlab/audit/value_shape.py`):
-  - `R-ACCESS-CONTROL`: `channel_id|resource_id|object_id|item_id|record_id|owner_id|account_id` -> the object-identifier shape of `R-ACCESS-CONTROL-PATH` (`^(id|uuid|guid)$|[_-](id|uuid|guid)$|(?-i:[a-z](Id|ID|Uuid|UUID))$`). Evidence of the old list: CC-AUD-0017 (twitch-clone `channel_id`) and CC-AUD-0024 (netflix-clone `account_id`, added after that lab's miss); the other four names appear in no target. Source of the new shape: OWASP API Security Top 10 2023 API1 (BOLA), OWASP WSTG-ATHZ-04 (IDOR).
-  - `R-SPEL-INJECTION`: `sort|sortby|filter|order|expr|expression` (grounded only in expedia-clone's `sortBy`, FR-FUZZ-15; `sortby` was dead) -> location-only (`query`, `body`, `json`), as `R-SSTI`. The SpEL strategy decides; it sends 1 request per candidate (2 only when the first shows the evaluated canary).
-  - `R-SSRF`: `thumbnail` removed (an echo of twitch-clone's `/api/clips/thumbnail`, CC-AUD-0016); `image` stays (OWASP SSRF Prevention Cheat Sheet; PortSwigger Web Security Academy, SSRF).
-  - `R-CSV-FORMULA-INJECTION`: `label` removed (booking-clone's export parameter, FR-FUZZ-17).
-  - `R-JWT-ALG-NONE`: header names `authorization` only (RFC 6750, RFC 7235); `jwt` had no source.
-  - `value_shape.FILE_EXTENSIONS`: `lang` removed (bWAPP's `lang_en.php`; not a web file extension).
-- Impact: crawl runs nominate access-control on every id-shaped GET query parameter and SpEL on every query/body/json point (about +1 request per such point). Measured on the labgen live boots (ground-truth points, oracle diagnostic): booking-clone 3/3 -> 2/3 (BKNG-0002, `label`, an honest miss); `channel_id`, `account_id`, `sortBy`, `thumbnail_url` still nominated by shape. Expedia tp=1 unchanged.
-- Risk: low. Wider nomination costs requests, never safety (every send still passes SP-09). A lab case the old words reached is an honest miss.
-- Deliverables:
-  - [x] Rules generalised; `tests/test_audit_rule_words_generic.py` (52 cases: non-lab names nominated or not by each rule) — done (sub-agent in a worktree, verified by the lane: diff read, tests re-run)
-  - [x] `tests/test_blackbox_detection.py` (PA-0660's guard) passes on the rules data — done
-  - [x] Booking multitarget tests assert the honest 2/3 and `missed == ["BKNG-0002"]` — done
-- Effectiveness (assessed 2026-11-20): see the lane's harness run in the CHANGELOG line; crawl-run effect on the external labs not measured in this lane (open, listed in the lane report).
 ### CC-AUD-0620 — Rules for LDAP and XPath injection (FR-AUD-620) (2026-11-20)
 - Change: `fuzzlab/audit/rules_data/default_rules.json` (`R-LDAP-INJECTION`,
   `R-XPATH-INJECTION`: query, body and JSON points, references `ldap-injection` and
@@ -130,6 +114,22 @@ Newest first.
 - Deliverables:
   - [x] Recorded as affected by construction; `tests/test_navigation_aborts.py::test_the_auditors_load_after_failed_loads_is_rendered` passes on both binaries — done
 - Effectiveness: pending (the lane's harness run, CC-CRAWL-0640).
+### CC-AUD-0660 — Lab-fitted audit rule words generalised or removed: the black-box rule (BUG-0660, PA-0660, FR-AUD-660) (2026-11-20)
+- Placement: lane BBOX (item BBOX), base d492b9d; pre-assigned CC-AUD-0660..0669.
+- Change (`fuzzlab/audit/rules_data/default_rules.json`, `fuzzlab/audit/value_shape.py`):
+  - `R-ACCESS-CONTROL`: `channel_id|resource_id|object_id|item_id|record_id|owner_id|account_id` -> the object-identifier shape of `R-ACCESS-CONTROL-PATH` (`^(id|uuid|guid)$|[_-](id|uuid|guid)$|(?-i:[a-z](Id|ID|Uuid|UUID))$`). Evidence of the old list: CC-AUD-0017 (twitch-clone `channel_id`) and CC-AUD-0024 (netflix-clone `account_id`, added after that lab's miss); the other four names appear in no target. Source of the new shape: OWASP API Security Top 10 2023 API1 (BOLA), OWASP WSTG-ATHZ-04 (IDOR).
+  - `R-SPEL-INJECTION`: `sort|sortby|filter|order|expr|expression` (grounded only in expedia-clone's `sortBy`, FR-FUZZ-15; `sortby` was dead) -> location-only (`query`, `body`, `json`), as `R-SSTI`. The SpEL strategy decides; it sends 1 request per candidate (2 only when the first shows the evaluated canary).
+  - `R-SSRF`: `thumbnail` removed (an echo of twitch-clone's `/api/clips/thumbnail`, CC-AUD-0016); `image` stays (OWASP SSRF Prevention Cheat Sheet; PortSwigger Web Security Academy, SSRF).
+  - `R-CSV-FORMULA-INJECTION`: `label` removed (booking-clone's export parameter, FR-FUZZ-17).
+  - `R-JWT-ALG-NONE`: header names `authorization` only (RFC 6750, RFC 7235); `jwt` had no source.
+  - `value_shape.FILE_EXTENSIONS`: `lang` removed (bWAPP's `lang_en.php`; not a web file extension).
+- Impact: crawl runs nominate access-control on every id-shaped GET query parameter and SpEL on every query/body/json point (about +1 request per such point). Measured on the labgen live boots (ground-truth points, oracle diagnostic): booking-clone 3/3 -> 2/3 (BKNG-0002, `label`, an honest miss); `channel_id`, `account_id`, `sortBy`, `thumbnail_url` still nominated by shape. Expedia tp=1 unchanged.
+- Risk: low. Wider nomination costs requests, never safety (every send still passes SP-09). A lab case the old words reached is an honest miss.
+- Deliverables:
+  - [x] Rules generalised; `tests/test_audit_rule_words_generic.py` (52 cases: non-lab names nominated or not by each rule) — done (sub-agent in a worktree, verified by the lane: diff read, tests re-run)
+  - [x] `tests/test_blackbox_detection.py` (PA-0660's guard) passes on the rules data — done
+  - [x] Booking multitarget tests assert the honest 2/3 and `missed == ["BKNG-0002"]` — done
+- Effectiveness (assessed 2026-11-20): see the lane's harness run in the CHANGELOG line; crawl-run effect on the external labs not measured in this lane (open, listed in the lane report).
 
 ### CC-AUD-0061 — The auditor's browser fetch settles a failed load on the error page's load (BUG-0561) (2026-10-23)
 - Change: none in `fuzzlab/tools/fetcher.py`. `ContentFetcher.fetch` navigates through SP-01 and ends a failed load with `end_failed_load`; SP-01 now waits for the failed navigation's error page to load before it raises (CC-CRAWL-0065). `end_failed_load`'s decision is unchanged (the settled commit is still recorded).

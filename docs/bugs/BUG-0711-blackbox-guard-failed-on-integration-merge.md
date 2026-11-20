@@ -29,9 +29,10 @@ The two branches each passed alone; only their merge failed.
    without re-running it before the merge, and a public protocol term was not cited.
 
 ## Corrective action
-`CITED["graphql"]` in `tests/test_blackbox_detection.py` with its independent sources
-(GraphQL over HTTP specification; graphql.org "Serving over HTTP"; GitHub GraphQL API),
-lane RULESEL (CC-AUD-0700's commit).
+`CITED["graphql"]` in `tests/test_blackbox_detection.py` with independent sources
+(GraphQL over HTTP specification; graphql.org "Serving over HTTP"). Lane RULESEL added it
+first on its branch; the orchestrator landed the same fix on the integration branch
+(82910aa) when it merged BBOX, and RULESEL's copy was dropped in favour of it at the merge.
 
 ## Recurrence review
 Checked PA-0660 / BUG-0660 / BUG-0661 (the guard's origin) and PA-0031 / PA-0146 (merge
