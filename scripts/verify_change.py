@@ -710,11 +710,6 @@ class Runner:
 # ------------------------------------------------------------------ main flow
 
 
-def chromium_executable() -> str | None:
-    cands = sorted(Path("/opt/pw-browsers").glob("chromium-*/chrome-linux/chrome"))
-    return str(cands[-1]) if cands else None
-
-
 def have_xdist() -> bool:
     import importlib.util
 
@@ -739,9 +734,10 @@ def pytest_env(wait_other: float) -> dict[str, str]:
     env = dict(os.environ, **REQUIRE_FLAGS)
     env.setdefault("PYTHONDONTWRITEBYTECODE", "1")
     env.setdefault(PYTEST_LOCK_WAIT, f"{wait_other:g}")
-    chrome = chromium_executable()
-    if chrome and "PLAYWRIGHT_CHROMIUM_EXECUTABLE" not in env:
-        env["PLAYWRIGHT_CHROMIUM_EXECUTABLE"] = chrome
+    # No browser binary is chosen here (BUG-0671): every test launches the product's
+    # own -- the operator's PLAYWRIGHT_CHROMIUM_EXECUTABLE if set, else Playwright's
+    # default. A path glob here once ran the suite on another binary than the product,
+    # and switched binary silently when the install layout changed.
     return env
 
 

@@ -2272,3 +2272,24 @@ Juice Shop lab is complete.
 - **Cause:** I tuned a heuristic to the lab I was measuring and treated a disclosure of that as sufficient, instead of requiring evidence from an independent target.
 - **Status:** corrected (CC-AUD-0602).
 
+
+### F-670 — SP-01's error-page path and its tests were measured on the full Chromium while the product launches the headless shell, and nothing said which binary a measurement was on
+- **What:** BUG-0522's and BUG-0561's measurements and SP-01's real-browser tests ran with `PLAYWRIGHT_CHROMIUM_EXECUTABLE` set by a path glob (`/opt/pw-browsers/chromium-*/chrome-linux/chrome`, in `scripts/verify_change.py` and eleven test helpers) to the **full** Chromium; the product, with no operator setting, launches Playwright's default, the **headless shell**. The records say "measured on Chromium 141" without naming the binary. When the install layout became `chrome-linux64/` (build 1243) the globs matched nothing and the suite moved to the headless shell 157.0.8103.78 silently, which loads an empty-bodied 404 as a page: five `tests/test_navigation_aborts.py` cases failed "DID NOT RAISE" and were carried as "known failures" by every lane.
+- **Evidence:** BUG-0670 and BUG-0671; `tests/test_chromium_navigation_outcomes.py` (the empty-404 cell: shell "page", full "error page"); the base passes those five on the full binary (`PLAYWRIGHT_CHROMIUM_EXECUTABLE=/opt/pw-browsers/chromium`, 89 passed) and fails them on the default.
+- **Impact:** on the default binary a guarded crawl or audit took an empty 4xx/5xx for a rendered page (the outcome of one target depended on the binary); SP-01's error-page path was untested on the product's binary; five red tests normalised as "known" across lanes.
+- **Cause:** a test-side binary choice that differed from the product's, made by a path glob that fails open (no match = another binary, no word), and measurement records that named a version but not the binary.
+- **Status:** fixed by CC-CRAWL-0640 (BUG-0670: one outcome on every binary) and BUG-0671 (no binary chosen by install path; facts that differ are measured on each binary by name), PA-0670, PA-0671.
+
+### F-671 — I first applied BUG-0670's abort to frame navigations too, before measuring what a frame does
+- **What:** my first cut of the fix aborted every navigation request (main frame and iframes) whose answer was an empty 4xx/5xx. The measurement lane I had dispatched then showed that both binaries load an iframe's empty 404 as a page (the full browser's error-page rule is a main-frame rule), so the cut would have changed frames on the full browser and 141 as well, and the caller sweep found two consumers it would have misled (the spider's window `blocked` evidence, disco's FR-CRAWL-41 answer sign).
+- **Evidence:** `tests/test_chromium_navigation_outcomes.py` `FRAME_404 = {"shell": "page", "full": "page"}`; the sweep's R1; the working-tree diff before commit.
+- **Impact:** none shipped: corrected before the first commit; it cost one review cycle.
+- **Cause:** I wrote the fix's scope from the shape of the main-frame measurement instead of waiting for the frame cell (MULTI_AGENT_ORCHESTRATION §7, measure before design).
+- **Status:** fixed before commit: the abort is main-frame only, pinned by `tests/test_navigation_error_answer.py::test_an_iframes_empty_error_answer_is_given_as_it_is`.
+
+### F-672 — BUG-0504's freeze was made mandatory in teardown without measuring a page that cannot answer it, and PA-0128 called quiescing safe
+- **What:** the BUG-0504 fix made `close_pages` freeze every page (`Emulation.setScriptExecutionDisabled`) before the drain, and `release` add a route, both unbounded sync calls answered by the page's renderer. A page whose main thread is blocked never answers them, so every guarded teardown with such a page open hung forever (BUG-0672); PA-0128(1) had stated that quiescing first is the remedy for unboundable calls without noticing that the quiescing call is one.
+- **Evidence:** BUG-0672 (both binaries: the freeze and `context.route` never return on a blocked page); the M6 executor killed after 90 s at d492b9d; the verifier's report relayed 2026-11-20.
+- **Impact:** a run against a target with a runaway script never finished; found by an independent verifier, not by the suite.
+- **Cause:** the teardown was tested against work in flight, not against a page that cannot respond, and a liveness rule was written from the order of calls rather than from what each call waits on.
+- **Status:** fixed by CC-CRAWL-0641 (PA-0672); the callers' reads of such a page remain open (BUG-0673).

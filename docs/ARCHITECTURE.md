@@ -1304,7 +1304,16 @@ tracked in the requirements files, not here.
     browser's own error page has committed and then loaded (at most 3 s in all, the
     commit judged by commits seen since the navigation started, expiries counted;
     BUG-0522, BUG-0561), and a failed load ends its page's previous document through
-    `navguard.end_failed_load` (SP-01): the error page, or `about:blank`.
+    `navguard.end_failed_load` (SP-01): the error page, or `about:blank`. An empty
+    HTTP 4xx/5xx answer to a guarded top-level navigation is made such a failure by the
+    guard itself (`ERROR_ANSWER_ABORT`; BUG-0670), so the outcome is the same on the
+    full Chromium (which fails it) and the headless shell, the product's default binary
+    (which, at 157, loads it as a page). Tests launch the product's binary; a browser
+    fact that differs between binaries is measured on each by name (BUG-0671).
+    A guarded context's release never hangs: the calls a page's renderer must answer
+    (the freeze, the refusing route) are bounded (`navguard._bounded`, SP-115), counted
+    and logged, and a page whose main thread is blocked is closed before the route
+    (BUG-0672). The callers' own reads of such a page are not yet bounded (BUG-0673, open).
     A loopback crawl is scoped to its exact origin. Every probe sender refuses one unless it was explicitly
     enumerated (ground truth / `--url`); an AST guard enforces this. Authenticated
     senders probe the session's auth endpoints anonymously;
