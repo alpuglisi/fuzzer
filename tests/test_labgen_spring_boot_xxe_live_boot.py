@@ -145,9 +145,18 @@ def test_real_boot_proves_the_xxe_strategy_end_to_end() -> None:
                     resp = harness.post("/issues/import", data=value.encode("utf-8"))
                     return Probe(resp.status, resp.body)
 
-            verdict = strategy.confirm(_cand(), _HarnessSender())
+            # BUG-0661 / PA-0660 (lane BBOX, measured here 2026-11-20): this twin
+            # echoes only the text of one element its source extracts (`<title>`).
+            # The in-band marker no longer names that element (an app's own element
+            # name is lab knowledge), so in-band gives no verdict on it -- an honest
+            # miss -- while the out-of-band strategy, which needs no echo (an
+            # external entity is fetched when the parser expands its reference,
+            # wherever it sits: W3C XML 1.0 §4.4), still confirms it.
+            assert strategy.confirm(_cand(), _HarnessSender()) is None
+            from fuzzlab.oracle.strategies import XxeOobStrategy
+            verdict = XxeOobStrategy(listener).confirm(_cand(), _HarnessSender())
             assert verdict is not None and verdict.confirmed, (
-                "strategy failed to confirm the real vulnerable twin"
+                "the out-of-band strategy failed to confirm the real vulnerable twin"
             )
             assert verdict.vuln_class == "xxe"
 

@@ -4,7 +4,8 @@ Decides which injection categories a run tests, and whether it is scored, from t
 launcher run mode and whether the target has ground truth:
 
 - **automatic + ground truth** (our lab): categories auto-derived from the ground
-  truth; scored (a detection benchmark). (D14)
+  truth; scored. Scored on crawl points it is the detection figure; on the answer
+  key's own points (``--points ground-truth``) only an oracle diagnostic (PA-0660). (D14)
 - **automatic + no ground truth** (validation lab / unknown target): requires an
   explicit selection, else **fails loudly**; unscored. (D15 fail-safe)
 - **manual**: the user selects; unselected defaults to all known categories;
