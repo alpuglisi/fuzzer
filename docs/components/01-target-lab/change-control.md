@@ -3,6 +3,66 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0440 — Lane M6CONC: concurrent M6 waves measured BEFORE and AFTER on four lab configurations; SP-04 under concurrency (2026-11-20)
+- Change: `scripts/measure_scan_perf.py` (a ``browser_batch`` phase for `run_many`; a
+  phase the measured tree lacks is skipped; FR-LAB-370 amended in place). Otherwise a
+  measurement record of CC-FUZZ-0720/0721 and CC-CRAWL-0690.
+- How (this container, docker, 4 CPUs, Chromium build 1243 headless shell, Playwright
+  1.63; runs one at a time with nothing else heavy running, F-281): labs up with
+  `lab/labctl.sh up <lab> --authorized` (a scratch keyring, identities stored with
+  upstream's published passwords) and **reset before every run**; spider databases made
+  once and reused by both arms (bWAPP `crawl --engine playwright --no-reveal --start
+  http://127.0.0.1:8092/bWAPP/portal.php --identity bwapp-bee --follow-selector-forms
+  bug`: 180 pages; NodeGoat `crawl --engine playwright --no-reveal --start
+  http://127.0.0.1:3091/dashboard --identity nodegoat-user --max-depth 3 --workers 4`: 13
+  pages); then `python scripts/measure_scan_perf.py --authorized --store <fresh> --lab
+  <lab> --points <gt|crawl> [--spider-db ...] -- --browser` (Juice Shop adds `--oob`;
+  NodeGoat `--peer-identity nodegoat-peer`; bWAPP gt `--base-url
+  http://127.0.0.1:8092`; bWAPP crawl `--base-url http://127.0.0.1:8092/bWAPP/ --
+  --browser --header-points User-Agent,Referer,bWAPP` with `FUZZLAB_BUDGET_TOTAL=20000`,
+  whose header points need more than the default 5000). BEFORE ran tree 82910aae (a
+  separate worktree, each arm its own copy of the script); AFTER ran this branch at the
+  default `--browser-workers 3` (Juice Shop and NodeGoat re-run on 0563f37, with the SP-04
+  fix; bWAPP on a1aff56, whose difference from 0563f37 is that fix: bWAPP pages open no
+  WebSocket).
+- Results (tp/fp/fn/tn, matched, missed and false-alarm case ids identical BEFORE and
+  AFTER on every row; BEFORE / AFTER):
+
+    | lab, points | tp/fp/fn/tn | HTTP requests | M6 visits | wall s | M6 browser s |
+    |---|---|---|---|---|---|
+    | Juice Shop gt | 5/0/10/3 | 155 / 155 | 9 / 12 | 51.2 / 30.4 | 39.3 / 20.1 |
+    | NodeGoat crawl | 12/0/5/7 | 292 / 289 | 18 / 18 | 99.0 / 45.8 | 91.5 / 31.3 |
+    | bWAPP gt | 21/0/34/3 | 892 / 892 | 126 / 126 | 646.7 / 251.0 | 623.9 / 227.6 |
+    | bWAPP crawl | 46/0/9/3 | 11376 / 11373 | 138 / 138 | 922.7 / 492.5 | 690.8 / 250.3 |
+
+  Wall time down 41% (Juice Shop gt), 54% (NodeGoat crawl), 61% (bWAPP gt), 47% (bWAPP
+  crawl). M6 visits (browser loads) rose only where a hit came in a wave's first payload
+  (Juice Shop: +3, a wave's siblings); HTTP request differences are the labs' own drift
+  (the M6 change sends no HTTP request; PERF recorded the same bWAPP drift, CC-LAB-0371).
+  The first AFTER of Juice Shop and NodeGoat (before the SP-04 fix) gave the same scores
+  (31.3 s / 39.9 s).
+- SP-04 under concurrency (`navguard`, PERF's risk (c)): Juice Shop's search page (a DOM
+  sink; every load opens socket.io's WebSocket through an enforcer ticket), each round a
+  wave of 3 visits (payload 0, which fires there, and two `<script>` payloads, which do
+  not under innerHTML) through `run_many`, arms `workers` 1 and 3 interleaved per round:
+  - on 0563f37's parent (no SP-04 fix), 20 rounds (60 visits per arm): verdicts
+    identical (20 hits, 40 no hit, 0 not observed per arm); enforcer refusals 0 at 1
+    worker, 1 `reuse` at 3 -- BUG-0742, fixed in CC-CRAWL-0690;
+  - on 0563f37, 100 rounds (300 visits per arm): verdicts identical (100 hits, 200 no
+    hit, 0 not observed, 0 errors per arm); enforcer refusals 0 in both arms; wall
+    1295.4 s / 653.0 s.
+  The SP-04 fix is also pinned by a deterministic order-of-events test (PA-0742).
+- Late sinks under concurrency: `tests/test_m6_concurrency.py::test_real_every_late_sink_is_seen_in_a_wave_of_three`
+  (each of `tests/test_m6_slow_sinks.py`'s 8 cases in a wave beside two escaping twins,
+  the three visits overlapping in time) and the stored cross-talk test pass in real
+  Chromium (14 real-browser tests, `FUZZLAB_REQUIRE_BROWSER=1`).
+- Impact: none on a scan (a script and a record).
+- Risk: low; lab only, `--authorized`, loopback labs. Held-out labs not run.
+- Deliverables:
+  - [x] BEFORE/AFTER on four configurations; SP-04 probe; this record — done
+- Effectiveness (assessed 2026-11-20): met: no detection changed on any configuration,
+  wall time down 41-61%; goal metric (bWAPP gt wall) 621 -> 251 s.
+
 ### CC-LAB-0353 — VulnerableApp moves to 127.0.0.1:3095; a static guard against shared lab ports (FR-LAB-352) (2026-11-20)
 - Change: `lab/external/vulnerableapp/compose.yaml` (`${VAPP_PORT:-3095}`),
   `fuzzlab/lab_fixtures/external.py` (`LAB_META["vulnerableapp"].default_port = 3095`);

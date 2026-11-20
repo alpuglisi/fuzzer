@@ -6383,6 +6383,9 @@ lane) can submit a payload as
   hit, last network activity and timer activity (a timer-logging init script:
   measurement only); `--cprofile OUT` adds a cProfile (CPU hot spots only: it
   misattributes time across Playwright's greenlets). Lab only; nothing asserted.
+  *(CC-LAB-0440, FR-LAB-440:)* a concurrent M6 wave (`run_many`, FR-FUZZ-720) is its own
+  phase, ``browser_batch``; a phase the measured tree does not define is skipped, so the
+  script also measures a tree from before it.
 
 - **FR-LAB-340** *(OWASP Mutillidae II; `CC-LAB-0340`, 2026-11-20).* Mutillidae II
   2.12.8 is an external lab (`lab/external/mutillidae/`): upstream's www, database and
