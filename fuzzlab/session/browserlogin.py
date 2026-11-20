@@ -29,7 +29,8 @@ How (Revision 2 of the reviewed design; every bound is explicit):
   Aborted-request log lines name the host only;
 * **a login-shaped form only** (`login_form_refusal`): exactly one enabled password
   control and one user field (`store_adapter.login_shaped`), no account word on the
-  route, button labels, action or control names (`ACCOUNT_WORDS`), not a
+  route, button labels, action or control names (`ACCOUNT_WORDS`), no control the
+  target marks ``autocomplete="new-password"`` (WHATWG autofill), not a
   credential-change form (`store_adapter.credential_change_reason`), and the crawler's
   SPA form gate (`spa.form_refusal`). Forms are read with `spa.FORMS_JS` on the base
   page, then on SPA routes (from the page's own scripts and links) whose last segment
@@ -77,14 +78,59 @@ MAX_PROBES = 8
 MAX_BODY = 1 << 20
 
 #: Words (whole `name_tokens` tokens) that mark a form or its button as one that
-#: creates, recovers or changes an account rather than logging in (reviewers A4/B3).
+#: creates, recovers or changes an account rather than logging in (reviewers A4/B3;
+#: grounded CC-SESS-0660, FR-SESS-660, BUG-0730). Each is cited to independent public
+#: sources, never to a lab (PA-0660(2)). `spa.label_refusal` shares them (`_account_hit`).
+#:   register, registration -- OWASP WSTG-IDNT-02 (Test User Registration Process);
+#:     Laravel Breeze ``/register``; WordPress ``wp-login.php?action=register``
+#:   signup, ("sign", "up") -- Devise ``/users/sign_up``; django-allauth
+#:     ``/accounts/signup/``
+#:   create -- MediaWiki ``Special:CreateAccount``; Devise ``RegistrationsController
+#:     #create``
+#:   join -- GitHub ``/join``; LinkedIn's sign-up button "Join now"
+#:   enroll, enrol -- Okta factor enrollment (``/api/v1/users/{id}/factors``); Moodle
+#:     self enrolment (its enrolment key is a password control)
+#:   new -- Rails resourceful routes (``GET /users/new`` renders the creation form);
+#:     Django ``PasswordChangeForm`` (``new_password1``)
+#:   forgot -- Laravel Breeze ``/forgot-password``; Devise "Forgot your password?"
+#:   recover, recovery -- OWASP Forgot Password Cheat Sheet (account recovery); Okta
+#:     ``/api/v1/authn/recovery/password``
+#:   reset -- Django ``password_reset``; Laravel ``/reset-password``; Devise
+#:     ``reset_password_token``
+#:   change -- Django ``password_change``; Devise "Change your password"
+#:   confirm, confirmation -- Rails ``password_confirmation`` (ActiveModel confirmation
+#:     validation); Laravel ``confirmed`` rule (``password_confirmation``); ASP.NET Core
+#:     Identity ``ConfirmPassword``; Devise confirmable ``/users/confirmation``
+#:   otp, totp -- RFC 4226 (HOTP), RFC 6238 (TOTP); WHATWG autofill ``one-time-code``
+#: Removed (BUG-0730): ``repeat`` and ``retype`` named only a second password control
+#: and had no source beyond one lab's field names. A form with a second password
+#: control is refused by the password count in `login_form_refusal` (Django
+#: ``password1``/``password2``, Devise/Laravel ``password_confirmation``, ASP.NET
+#: ``ConfirmPassword``, MediaWiki ``wpRetype`` all render two), a lone password control
+#: so named by `credential_change_reason`, and a single-password sign-up form by
+#: `NEW_PASSWORD_TOKEN`.
 ACCOUNT_WORDS = frozenset({
     "register", "registration", "signup", "create", "join", "enroll", "enrol", "new",
-    "forgot", "recover", "recovery", "reset", "change", "repeat", "confirm",
-    "confirmation", "retype", "otp", "totp"})
-#: ... or two adjacent tokens that do.
+    "forgot", "recover", "recovery", "reset", "change", "confirm", "confirmation",
+    "otp", "totp"})
+#: ... or two adjacent tokens that do. ``security question`` / ``security answer``:
+#: knowledge-based account recovery -- OWASP WSTG-ATHN-08 (Testing for Weak Security
+#: Question Answer); OWASP Choosing and Using Security Questions Cheat Sheet; NIST SP
+#: 800-63B §5.1.1.2 (verifiers do not prompt for knowledge-based authentication).
+#: Decisive only where the answer is a password control beside a user field (a
+#: recovery form of login shape); `formnav.settings_word` ("security") refuses the
+#: same control names too.
 ACCOUNT_PAIRS = frozenset({("sign", "up"), ("security", "question"),
                            ("security", "answer")})
+#: WHATWG HTML Living Standard §4.10.18.7 (Autofill): the autofill field name
+#: ``new-password`` is "a new password (e.g. when creating an account or changing a
+#: password)"; a login's password is ``current-password``. Read from each control's own
+#: ``autocomplete`` attribute as the target renders it (`spa.FORMS_JS` ``autocomplete``).
+#: The same use is set out by the Chromium password manager's form guide ("Password
+#: Form Styles that Chromium Understands"), MDN's ``autocomplete`` reference and
+#: web.dev's sign-up form guidance (one ``new-password`` control, no repeat field:
+#: a sign-up form the password count alone does not refuse).
+NEW_PASSWORD_TOKEN = "new-password"
 #: Methods that write: in the window, none may target an account endpoint (A-S1).
 WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 #: Path tokens of an account endpoint nothing may be written to in the window.
@@ -179,6 +225,20 @@ def account_word_reason(form: dict, route: str) -> str | None:
     return None
 
 
+def new_password_reason(form: dict) -> str | None:
+    """A control whose ``autocomplete`` attribute holds the WHATWG autofill token
+    ``new-password`` (`NEW_PASSWORD_TOKEN`): the target itself marks the form as one
+    that creates an account or changes a password (FR-SESS-660). The attribute is split
+    on ASCII whitespace and compared case-insensitively, as the standard reads it."""
+    controls = form.get("controls") or []
+    for i, auto in enumerate(form.get("autocomplete") or []):
+        if NEW_PASSWORD_TOKEN in (auto or "").lower().split():
+            name = controls[i][0] if i < len(controls) else ""
+            return (f"account form (control {name!r} has autocomplete "
+                    f"{NEW_PASSWORD_TOKEN!r})")
+    return None
+
+
 def login_form_refusal(form: dict, route: str) -> str | None:
     """Why this rendered form is not the login form to use, or None (FR-SESS-19)."""
     from fuzzlab.tools.spa import form_refusal, normalise_route
@@ -189,7 +249,7 @@ def login_form_refusal(form: dict, route: str) -> str | None:
         return f"{len(passwords)} password controls (a login form has exactly one)"
     if not login_shaped({"controls": controls}):
         return "not login-shaped (one password, one user field, nothing else typed)"
-    why = account_word_reason(form, route)
+    why = account_word_reason(form, route) or new_password_reason(form)
     if why:
         return why
     label, aria = form.get("button") or "", form.get("button_aria") or ""

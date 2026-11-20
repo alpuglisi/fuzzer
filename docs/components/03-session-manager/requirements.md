@@ -555,9 +555,12 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     word (`detect._LOGIN_SEGMENTS`, whole segment), at most 5: the first rendered form
     (`spa.FORMS_JS`) with exactly one enabled password control that is login-shaped
     (`store_adapter.login_shaped`), has no account word (register, sign up, create,
-    join, enroll, new, forgot, recover, reset, change, repeat, confirm, retype, security
-    question/answer, OTP) on its route, button text or aria-label, action or control
-    names, is not a credential-change form (`store_adapter.credential_change_reason`)
+    join, enroll, new, forgot, recover, reset, change, confirm, security
+    question/answer, OTP; each cited to independent sources, FR-SESS-660) on its route,
+    button text or aria-label, action or control names, has no control the target marks
+    `autocomplete="new-password"` (FR-SESS-660), ~~repeat, retype~~ *(superseded
+    CC-SESS-0660, BUG-0730: words of one lab's repeat-password field; a second password
+    control is refused by the count)*, is not a credential-change form (`store_adapter.credential_change_reason`)
     and passes `spa.form_refusal`. The username goes into the one user field
     (`_USERNAME_HINT` or `type=email`, else the only one: BUG-0121 owns the hint); the
     password only into the password control, from the credential store, never logged.
@@ -753,6 +756,31 @@ data. Shared by all tools; a hard dependency for external validation (D10).
   (FR-FUZZ-44; a browser visit has no isolated copy). One context carries one session,
   so one gated URL sends the whole visit anonymously. No second session is made: the
   browser adopts the run manager's current state (`browserauth.browser_session`).
+- **FR-SESS-660 (the browser login's account-form refusal is grounded, not fitted,
+  CC-SESS-0660, BUG-0730)** `browserlogin.login_form_refusal` refuses a rendered form as
+  an account form (creation, recovery, credential change) on signals the target supplies
+  and public sources define, never on one lab's field names (PA-0660):
+  1. **The password count:** a form with other than exactly one password control is
+     refused first; this is what refuses every confirmation-field form (Django
+     `password1`/`password2`, Devise/Laravel `password_confirmation`, ASP.NET Core
+     Identity `ConfirmPassword`).
+  2. **The target's autofill token:** a control whose `autocomplete` attribute (as
+     `spa.FORMS_JS` reports it) holds the WHATWG autofill field name `new-password`
+     (HTML Living Standard §4.10.18.7: "a new password (e.g. when creating an account
+     or changing a password)"), split on ASCII whitespace, case-insensitive, refuses the
+     form (`new_password_reason`). This refuses a single-password sign-up form whose
+     words name nothing (web.dev's sign-up guidance), which no word list could.
+  3. **Account words** (`ACCOUNT_WORDS`, `ACCOUNT_PAIRS`, by whole token on the route,
+     button labels, action and control names): each word carries, in the module's
+     comment, at least two independent public sources (framework documentation, OWASP
+     WSTG / cheat sheets, an RFC, WHATWG); a test fails on a word without one
+     (`test_every_account_word_names_its_independent_source`). `repeat` and `retype`
+     are removed (they named only a second password control: rule 1, and a lone
+     password control so named is refused by `credential_change_reason`).
+  The same words are `spa.label_refusal`'s account rule (`_account_hit`, one
+  implementation). Known limit: a sign-up form with one password control, no
+  `new-password` token and no account word anywhere is still accepted; the request-side
+  gate (`account_endpoint_reason`) remains its backstop.
 
 ## 4. Non-functional requirements
 - **NFR-SESS-single-flight** Concurrent expiry triggers exactly one re-auth. *(Amended

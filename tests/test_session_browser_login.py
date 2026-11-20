@@ -156,6 +156,137 @@ def test_only_a_login_shaped_form_with_no_account_word_is_used(form, route, expe
         assert why is not None and expect in why, why
 
 
+# FR-SESS-660 / BUG-0730: form shapes as frameworks render them (field names, input
+# types and ``autocomplete`` tokens from each framework's own templates and docs), so
+# the gate is judged on targets other than the lab its words were fitted to.
+def _fw(controls, button, route, action=None):
+    """``controls``: (name, kind, autocomplete) as `spa.FORMS_JS` reports them."""
+    form = _form([(n, k) for n, k, _a in controls], button=button, aria="",
+                 action=action)
+    form["autocomplete"] = [a for _n, _k, a in controls]
+    return form, route
+
+
+ACCOUNT_FORMS = {
+    # Django ``UserCreationForm`` (contrib.auth.forms): password1 / password2, both
+    # ``autocomplete="new-password"``
+    "django-usercreation": _fw([("csrfmiddlewaretoken", "hidden", ""),
+                                ("username", "text", "username"),
+                                ("password1", "password", "new-password"),
+                                ("password2", "password", "new-password")],
+                               "Save", "accounts/create"),
+    # Django ``PasswordChangeForm``: old_password (current-password), new_password1/2
+    "django-passwordchange": _fw([("old_password", "password", "current-password"),
+                                  ("new_password1", "password", "new-password"),
+                                  ("new_password2", "password", "new-password")],
+                                 "Change my password", "password_change"),
+    # Devise ``registrations/new``: email, password, password_confirmation
+    "devise-registration": _fw([("user[email]", "email", "email"),
+                                ("user[password]", "password", "new-password"),
+                                ("user[password_confirmation]", "password",
+                                 "new-password")], "Sign up", "users/sign_up",
+                               action="/users"),
+    # Laravel Breeze ``register``: name, email, password, password_confirmation
+    "laravel-register": _fw([("_token", "hidden", ""), ("name", "text", "name"),
+                             ("email", "email", "username"),
+                             ("password", "password", "new-password"),
+                             ("password_confirmation", "password", "new-password")],
+                            "Register", "register"),
+    # ASP.NET Core Identity ``Register``: Input.Email, Input.Password,
+    # Input.ConfirmPassword
+    "aspnet-register": _fw([("Input.Email", "email", "username"),
+                            ("Input.Password", "password", "new-password"),
+                            ("Input.ConfirmPassword", "password", "new-password")],
+                           "Register", "Identity/Account/Register"),
+    # web.dev sign-up form guidance: one ``new-password`` control, no repeat field, and
+    # nothing in its words marks it -- only the target's autofill token does
+    "single-password-signup": _fw([("email", "email", "username"),
+                                   ("password", "password", "new-password")],
+                                  "Continue", "start"),
+    # the same with the token among others, upper case (WHATWG: ASCII
+    # case-insensitive, whitespace-separated)
+    "single-password-signup-sectioned": _fw([("email", "email", "section-a username"),
+                                             ("password", "password",
+                                              "section-a NEW-PASSWORD")],
+                                            "Continue", "start"),
+}
+
+LOGIN_FORMS = {
+    # Django ``LoginView`` / ``AuthenticationForm``
+    "django-login": _fw([("csrfmiddlewaretoken", "hidden", ""),
+                         ("username", "text", "username"),
+                         ("password", "password", "current-password")],
+                        "Log in", "accounts/login"),
+    # Laravel Breeze ``login``
+    "laravel-login": _fw([("_token", "hidden", ""), ("email", "email", "username"),
+                          ("password", "password", "current-password"),
+                          ("remember", "checkbox", "")], "Log in", "login"),
+    # WordPress ``wp-login.php``
+    "wordpress-login": _fw([("log", "text", "username"),
+                            ("pwd", "password", "current-password"),
+                            ("rememberme", "checkbox", ""),
+                            ("redirect_to", "hidden", ""), ("testcookie", "hidden", "")],
+                           "Log In", "wp-login.php", action="/wp-login.php"),
+    # an app that sets no autocomplete at all (the attribute is optional)
+    "no-autocomplete-login": _fw([("email", "email", ""), ("password", "password", "")],
+                                 "Sign in", "signin"),
+}
+
+
+@pytest.mark.parametrize("name", sorted(ACCOUNT_FORMS))
+def test_a_framework_account_form_is_refused(name):
+    form, route = ACCOUNT_FORMS[name]
+    assert login_form_refusal(form, route) is not None, name
+
+
+@pytest.mark.parametrize("name", sorted(LOGIN_FORMS))
+def test_a_framework_login_form_is_accepted(name):
+    form, route = LOGIN_FORMS[name]
+    assert login_form_refusal(form, route) is None, name
+
+
+def test_a_single_password_signup_is_refused_by_its_autofill_token_alone():
+    """The case the words never covered: nothing but ``new-password`` marks it."""
+    form, route = ACCOUNT_FORMS["single-password-signup"]
+    assert browserlogin.account_word_reason(form, route) is None
+    why = login_form_refusal(form, route)
+    assert why and "new-password" in why, why
+    form = dict(form, autocomplete=["username", "current-password"])
+    assert login_form_refusal(form, route) is None
+
+
+@pytest.mark.parametrize("controls", [
+    [("email", "text"), ("password", "password"), ("passwordRepeat", "password")],
+    [("username", "text"), ("password1", "password"), ("password2", "password")],
+    [("email", "text"), ("password", "password"),
+     ("password_confirmation", "password")],
+    [("email", "text"), ("repeatPassword", "password")],
+    [("username", "text"), ("retype", "password")],
+])
+def test_a_second_or_renamed_password_control_is_refused_without_a_repeat_word(controls):
+    """BUG-0730: ``repeat`` / ``retype`` were removed from `ACCOUNT_WORDS`; the password
+    count and `credential_change_reason` refuse every form they ever decided."""
+    assert "repeat" not in browserlogin.ACCOUNT_WORDS
+    assert "retype" not in browserlogin.ACCOUNT_WORDS
+    assert login_form_refusal(_form(controls), "login") is not None
+
+
+def test_every_account_word_names_its_independent_source():
+    """PA-0660(2): each word of `ACCOUNT_WORDS` / `ACCOUNT_PAIRS` appears in the
+    module's citation comment on a line that names a source (``word -- source``)."""
+    import inspect
+    import re
+    src = inspect.getsource(browserlogin)
+    cited = " ".join(line.split(" -- ")[0] for line in src.splitlines()
+                     if line.startswith("#:") and " -- " in line)
+    pair_text = src.split("ACCOUNT_PAIRS = ")[0]
+    missing = [w for w in browserlogin.ACCOUNT_WORDS
+               if not re.search(rf"\b{w}\b", cited)]
+    missing += [" ".join(p) for p in browserlogin.ACCOUNT_PAIRS
+                if " ".join(p) not in pair_text and str(p).replace("'", '"') not in cited]
+    assert not missing, missing
+
+
 def test_the_request_side_gate_needs_the_window():
     """Since A-S1 the gate is on every write in the window, password or not."""
     gate = LoginGate(_Dest("http://h"), "http://h/", forms=secret_forms("s3cret"))

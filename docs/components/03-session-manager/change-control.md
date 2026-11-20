@@ -3,6 +3,92 @@
 Component code: **SESS**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SESS-0660 — The browser login's account-form refusal is grounded: `repeat`/`retype` removed, the target's `new-password` autofill token read, every word cited (FR-SESS-660, BUG-0730) (2026-11-20)
+- Placement: lane HEUR, item HEUR-A, base 82910aa.
+- Change: `fuzzlab/session/browserlogin.py`:
+  - `ACCOUNT_WORDS` loses `repeat` and `retype`; every remaining word, and each
+    `ACCOUNT_PAIRS` pair, carries its independent public sources in the module comment
+    (framework docs, OWASP WSTG / cheat sheets, RFC 4226/6238, WHATWG, NIST SP 800-63B).
+  - New `NEW_PASSWORD_TOKEN` and `new_password_reason(form)`: a control whose
+    `autocomplete` attribute (`spa.FORMS_JS`'s existing `autocomplete` list, one entry
+    per control; `spa.py` not edited) holds the WHATWG autofill token `new-password`
+    (whitespace-split, case-insensitive) makes `login_form_refusal` refuse the form,
+    right after the account words.
+  - Module docstring lists the new refusal.
+- Provenance (step 1 of the brief; history squashed at 6f566c1, so CC entries are the
+  source): the words entered in CC-SESS-0021 (2026-10-14, FR-SESS-19) as "account words
+  (reviewers A4/B3)" from the design review of the SPA browser login (Revision 2, items
+  1-12). That entry records no measurement or source for any word; its only target was
+  the offline fixture `tests/_spa_login_fixture.py`, "a loopback fake of Juice Shop's
+  login", whose register form is `email`, `password`, `repeat`. The camel-case names the
+  audit flagged (`repeatPassword`, `securityQuestion`, `securityAnswer`,
+  `newPasswordRepeat`) are Juice Shop's registration / forgot-password / change-password
+  controls, i.e. measured on one lab only. FR-SESS-19's word list (requirements.md)
+  copied the set unchanged. `store_adapter._CHANGE_SUBSTRINGS` (`repeat`, `retype`;
+  FR-FUZZ-44) has the same shape and is outside this change (finding below).
+- Measured (CLAUDE.md item 8; form shapes from each framework's own templates and
+  documentation, not from any lab; offline, `login_form_refusal` on each, base = these
+  words plus `repeat`/`retype` and no autofill rule):
+
+  | form | base | now | decided by |
+  | --- | --- | --- | --- |
+  | Django `UserCreationForm` (password1/password2) | refuse | refuse | 2 password controls |
+  | Django `PasswordChangeForm` | refuse | refuse | 3 password controls |
+  | Devise `registrations/new` (password_confirmation) | refuse | refuse | 2 password controls |
+  | Laravel Breeze register (password_confirmation) | refuse | refuse | 2 password controls |
+  | ASP.NET Core Identity Register (ConfirmPassword) | refuse | refuse | 2 password controls |
+  | single-password sign-up (web.dev guidance; `new-password`, button "Continue") | **accept** | refuse | `new-password` token |
+  | the same, `section-a NEW-PASSWORD` | **accept** | refuse | `new-password` token |
+  | Juice-shaped registration / forgot / change | refuse | refuse | 2 / 2 / 3 password controls |
+  | security answer as a password control beside a user field | refuse | refuse | `security answer` (and `formnav.settings_word` "security") |
+  | Django `LoginView`, Laravel Breeze login, WordPress `wp-login.php`, a login with no autocomplete, the fixture's login | accept | accept | -- |
+
+  `repeat` / `retype` decided no verdict the password count (or, for a lone password
+  control so named, `credential_change_reason`) does not: every repeat-password form in
+  the sources renders two password controls. The `security` pairs are redundant on
+  control names with `formnav.settings_word` ("security"), kept with their OWASP / NIST
+  citation (account recovery by knowledge-based answers, independent of any lab). The
+  base accepted a single-password sign-up: the gap BUG-0730 records.
+- Impact (other components / project):
+  - **CRAWL** (no code change): `spa.label_refusal` reads the same words through
+    `_account_hit` (the one account rule). Measured with `label_refusal`: "Repeat",
+    "Repeat password", "Retype" and "Retype password" are no longer refused as account
+    words; "Repeat order/payment/transfer/last purchase" stay refused (transaction
+    words); "Security question(s)" / "Security answer" stay refused (settings word). A
+    reveal candidate or option labelled only "Repeat" may now be clicked. **Flagged** to
+    the lane (findings for CRAWLSAFE): a transaction verb on its own ("Repeat <noun>"
+    where the noun is not a transaction word) is the transaction rule's concern, not an
+    account word.
+  - No store, contract or traffic change; the browser login's request-side gate
+    (`account_endpoint_reason`) unchanged.
+- Risk (level; mitigation or accepted-risk justification): low. The login gate only gains
+  a refusal (the autofill token); the two removed words are covered by the password
+  count and `credential_change_reason`, shown by test on five framework shapes and the
+  renamed single-control cases. Accepted residual: a sign-up form with one password
+  control, no `new-password` token and no account word is still accepted (FR-SESS-660).
+- Deliverables:
+  - [x] `fuzzlab/session/browserlogin.py` — done
+  - [x] `tests/test_session_browser_login.py`: `test_a_framework_account_form_is_refused`
+    (7 shapes), `test_a_framework_login_form_is_accepted` (4 shapes),
+    `test_a_single_password_signup_is_refused_by_its_autofill_token_alone`,
+    `test_a_second_or_renamed_password_control_is_refused_without_a_repeat_word`,
+    `test_every_account_word_names_its_independent_source` — done
+  - [x] mutation checks: `new_password_reason` removed from `login_form_refusal` -> 3
+    failed (both single-password sign-ups, the autofill-alone test); `repeat` put back
+    uncited -> the citation test failed (`['repeat']`); each reverted — done
+  - [x] FR-SESS-660 added; FR-SESS-19's word list amended in place (`repeat`, `retype`
+    marked superseded) — done
+  - [x] BUG-0730 — done; PA-0730, ERROR_LOG and CHANGELOG drafted for the lane (not
+    written here)
+- Effectiveness (assessed 2026-11-20): pytest (not the harness; the lane runs
+  `scripts/verify_change.py`) of `test_session_browser_login.py`, `test_forms_phase4.py`,
+  `test_blackbox_detection.py`, `test_pa_enforcement.py`,
+  `test_browser_login_route_fails.py`, `test_browser_scope.py`, `test_logout_redirect.py`,
+  `test_disco_compose.py`, `test_composed_tree_guard.py`,
+  `test_requirements_traceability.py`, `test_shared_primitives.py` (11 files,
+  `FUZZLAB_REQUIRE_BROWSER=1`, real Chromium): 546 passed, 2 xfailed, 0 skipped, 0 failed.
+  Not verified: any live target (no lab traffic in this change).
+
 ### CC-SESS-0612 — The routed-login gate judges the request as sent, and fails closed (BUG-0620) (2026-11-20)
 - Change: `fuzzlab/session/manager.py` (`_same_routed_page` fails closed: a router URL
   naming no route is the auth endpoint; `_names_a_route`), `fuzzlab/tools/probesender.py`
