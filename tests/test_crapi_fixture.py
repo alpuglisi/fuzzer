@@ -1,6 +1,6 @@
 """The crAPI fixture's bootstrap and account values, with a fake of crAPI's API
 (FR-LAB-436, CC-LAB-0436): sign-up when the login fails, a verified login (dashboard
-names the account, a wrong password 401), the vehicle from the welcome mail, a mechanic
+names the account, a wrong password gets no token), the vehicle from the welcome mail, a mechanic
 report, an order and a claimed coupon; the stored values are the account's own ids."""
 
 from __future__ import annotations
@@ -73,9 +73,12 @@ class FakeCrapi:
             return _Resp(200, {"message": "User registered successfully! Please Login."})
         if path == "/identity/api/v2/user/dashboard":
             return _Resp(200, {"email": who}) if who else _Resp(404, {})
-        if path == "/mailhog/api/v2/search":
+        if path.startswith("/mailhog/api/v2/search?"):
+            from urllib.parse import parse_qs, urlsplit
+            query = parse_qs(urlsplit(path).query)
+            assert query["kind"] == ["to"]
             items = [{"Created": "2026-11-20T13:39:28Z", "Raw": {"Data": body}}
-                     for to, body in self.mails if to == params["query"]]
+                     for to, body in self.mails if to == query["query"][0]]
             return _Resp(200, {"items": items})
         assert who, (method, path)
         if path == "/identity/api/v2/vehicle/vehicles":

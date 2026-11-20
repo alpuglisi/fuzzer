@@ -123,7 +123,7 @@ Component code: **LAB**. Entry format and required fields: see
   (new; a fake of crAPI's API).
 - Flow (each account on its own client, through the app's own API): log in, else sign up
   (`/identity/api/auth/signup`, a stable 10-digit number per email) and log in; verify
-  by a positive differential (the JWT's dashboard names the email; a wrong password 401);
+  by a positive differential (the JWT's dashboard names the email; a wrong password gets no token);
   read the welcome mail through crapi-web's `/mailhog/` proxy (mailhog's v2 search),
   decode its quoted-printable body for the VIN and pincode, `add_vehicle`; `contact_mechanic`
   with crapi-web's own receive_report URL (a report); one order of a listed product; and
@@ -133,6 +133,11 @@ Component code: **LAB**. Entry format and required fields: see
   both accounts with every value, in 1 m 44 s (first boot) to 2.5 min (under the DVWA
   lane's load); fuzzlab's own session manager logs in to crAPI unaided (`fuzzlab session
   print`: a bearer), and its browser login's storage state carries the SPA's token.
+- Review fix (same lane, before merge): the first commit's mailhog query used
+  `params=` and its login check compared a literal 401; `verify_change.py` failed the two
+  whole-package guards (`test_query_placement`, the one query owner `core.urls.with_query`;
+  `test_core_comparability`, SP-56's classified statuses). Now the query is built by
+  `with_query` and the wrong-password leg checks that no token is issued; re-run live.
 - Impact: none for other labs (new dict entries). Risk: low; loopback only.
 - Deliverables:
   - [x] bootstrap, attributes, unit tests, live run — done

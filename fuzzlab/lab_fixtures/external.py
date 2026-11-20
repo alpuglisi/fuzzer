@@ -1664,8 +1664,9 @@ def _crapi_welcome_vehicle(client: _LabClient, email: str) -> tuple[str, str] | 
     """The newest VIN and pincode mailed to ``email``, read through crapi-web's own
     /mailhog/ proxy (mailhog's v2 search API; its UI is not published)."""
     import quopri
-    r = client.request("GET", "/mailhog/api/v2/search",
-                       params={"kind": "to", "query": email, "limit": "50"})
+    from fuzzlab.core.urls import with_query
+    r = client.request("GET", with_query("/mailhog/api/v2/search", [
+        ("kind", "to"), ("query", email), ("limit", "50")]))
     body = _crapi_json(r)
     items = body.get("items") if isinstance(body, dict) else None
     for item in sorted(items or [], key=lambda m: str(m.get("Created", "")), reverse=True):
@@ -1707,7 +1708,7 @@ def bootstrap_crapi(client: _LabClient, cred: ResolvedCredential, *,
                     sleep: Callable[[float], None] = time.sleep) -> list[str]:
     """Sign the account up through the identity API when its login fails, and verify the
     login by a positive differential: the JWT's dashboard names the account's email, a
-    wrong password is refused (401). Then give the account the objects crAPI's
+    wrong password gets no token. Then give the account the objects crAPI's
     object-level cases need, through the app's own flows: the vehicle its welcome mail
     names (VIN and pincode, read from mailhog), a mechanic report for it (contact
     mechanic, whose `mechanic_api` is crapi-web's own receive_report URL, which nginx
@@ -1729,20 +1730,20 @@ def bootstrap_crapi(client: _LabClient, cred: ResolvedCredential, *,
                 f"with another password? run `./labctl.sh reset crapi --authorized`)")
         notes.append("account signed up")
         token = _crapi_token(client, email, cred.password)
-    bad = client.request("POST", "/identity/api/auth/login",
-                         json={"email": email, "password": cred.password + "-wrong"})
+    wrong = _crapi_token(client, email, cred.password + "-wrong")
     auth = {"Authorization": f"Bearer {token}"} if token else {}
     dash = client.request("GET", "/identity/api/v2/user/dashboard", headers=auth) \
         if token else None
     dash_body = _crapi_json(dash) if dash is not None else None
-    if token is None or bad.status_code != 401 or dash is None or \
+    if token is None or wrong is not None or dash is None or \
             dash.status_code != 200 or not isinstance(dash_body, dict) or \
             dash_body.get("email") != email:
         raise ExternalLabError(
             f"crAPI login of {email!r}: a token {'issued' if token else 'refused'}, a wrong "
-            f"password HTTP {bad.status_code}, the dashboard "
+            f"password {'also given one' if wrong else 'refused'}, the dashboard "
             f"{dash.status_code if dash is not None else '-'} (want a token naming the "
-            f"account / 401; run `./labctl.sh reset crapi --authorized`)")
+            f"account, none for a wrong password; run `./labctl.sh reset crapi "
+            f"--authorized`)")
     notes.append("login verified")
     objects = _crapi_objects(client, auth)
     if objects["vehicle"] is None:
