@@ -20,7 +20,7 @@ Newest first.
 - Deliverables:
   - [x] fix, tests, guards, ERROR_LOG, BUG-0690, PA-0690, SP-125 — done
   - [x] live re-runs (CC-LAB-0395) — see there
-- Effectiveness (assessed 2026-11-20): see CC-LAB-0395 for the live numbers; harness counts in the lane report.
+- Effectiveness (assessed 2026-11-20): NodeGoat ground truth tp 12 -> 13 (NGOAT-0008), fp 0; NodeGoat crawl unchanged tp=12 fp=0 (crawl builds no plant step: open gap); bWAPP plant 302 -> 200 with the session (CC-LAB-0395). Harness counts in the lane report.
 
 ### CC-FUZZ-0611 — The NoSQL operator differential compares a page that echoes the submitted leaf (FR-FUZZ-612, BUG-0610) (2026-11-20)
 - Change: `fuzzlab/oracle/strategies.py`: `_JS_OBJECT_STRING` and
