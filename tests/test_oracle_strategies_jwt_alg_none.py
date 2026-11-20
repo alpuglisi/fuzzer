@@ -40,8 +40,7 @@ class _AlgNoneVulnerableSender:
               content_type=None):
         header, payload = _decode_jwt(value)
         if header.get("alg", "").lower() == "none":
-            return Probe(200, json.dumps({"channel_id": payload.get("channel_id"),
-                                          "role": payload.get("role"), "settings": "private"}))
+            return Probe(200, json.dumps({"sub": payload.get("sub"), "settings": "private"}))
         return Probe(401, '{"error":"invalid token"}')
 
 
@@ -61,8 +60,7 @@ class _AcceptsAnythingSender:
     def send(self, url, param, value, timing=False, method="GET", location="header",
               content_type=None):
         _header, payload = _decode_jwt(value)
-        return Probe(200, json.dumps({"channel_id": payload.get("channel_id"),
-                                      "role": payload.get("role")}))
+        return Probe(200, json.dumps({"sub": payload.get("sub")}))
 
 
 class _CrashesOnGarbageSender:
@@ -74,8 +72,7 @@ class _CrashesOnGarbageSender:
               content_type=None):
         header, payload = _decode_jwt(value)
         if header.get("alg", "").lower() == "none":
-            return Probe(200, json.dumps({"channel_id": payload.get("channel_id"),
-                                          "role": payload.get("role")}))
+            return Probe(200, json.dumps({"sub": payload.get("sub")}))
         return Probe(500, "internal server error")
 
 
@@ -129,3 +126,23 @@ def test_r_jwt_alg_none_rule_does_not_match_an_unrelated_header():
     rules = load_rules()
     rule = next(r for r in rules if r.id == "R-JWT-ALG-NONE")
     assert not matches(rule, _Point())
+
+
+def test_the_marker_travels_only_in_standard_claims():
+    """PA-0660 / BUG-0661: RFC 7519 `sub` and the OIDC standard claims, never an
+    app's own claim name; a target that reads only an app-specific claim is a
+    stated miss."""
+    seen = []
+
+    class _Recorder:
+        def send(self, url, param, value, timing=False, method="GET", location="header",
+                 content_type=None):
+            header, payload = _decode_jwt(value)
+            seen.append(payload)
+            if header.get("alg", "").lower() == "none":
+                return Probe(200, json.dumps({"tenant": payload.get("tenant_ref")}))
+            return Probe(401, "{}")
+
+    assert JwtAlgNoneConfusionStrategy().confirm(_cand(), _Recorder()) is None
+    assert set(seen[0]) == set(JwtAlgNoneConfusionStrategy.STANDARD_CLAIMS)
+    assert set(JwtAlgNoneConfusionStrategy.STANDARD_CLAIMS) == {"sub", "name", "preferred_username"}

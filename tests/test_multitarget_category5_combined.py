@@ -121,14 +121,17 @@ def test_booking_and_expedia_run_together_in_one_call(tmp_path) -> None:
             # Per-target assertions, not a shared loop -- CC-CORE-0020's own
             # adequacy review caught exactly this pitfall (a shared loop would
             # silently apply one target's own numbers to the other). Booking.com
-            # genuinely detects all three of its own classes -- open_redirect
-            # (CC-CORE-0021/FR-CORE-11), price_integrity_bypass (CC-FUZZ-0029),
-            # and csv_formula_injection (CC-FUZZ-0030); Expedia genuinely
+            # detects open_redirect (CC-CORE-0021/FR-CORE-11) and
+            # price_integrity_bypass (CC-FUZZ-0029); its csv_formula_injection
+            # (BKNG-0002, parameter `label`) is an honest false negative since
+            # BUG-0660 dropped the lab-only word `label` from
+            # R-CSV-FORMULA-INJECTION. Expedia genuinely
             # detects spel_injection (CC-FUZZ-0028) but not
             # insecure_deserialization (CC-LAB-0220's EXPD-0002, no verified
             # confirmer yet -- an honest false negative).
-            assert booking_outcome.report.tp == 3 and booking_outcome.report.fn == 0
-            assert booking_outcome.report.recall == 1.0
+            assert booking_outcome.report.tp == 2 and booking_outcome.report.fn == 1
+            assert booking_outcome.report.missed == ["BKNG-0002"]
+            assert booking_outcome.report.recall == 2 / 3
             assert expedia_outcome.report.tp == 1 and expedia_outcome.report.fn == 1
             assert expedia_outcome.report.recall == 0.5
             # Two independent real run_ids, one per target, in the same call.

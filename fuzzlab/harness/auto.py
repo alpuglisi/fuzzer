@@ -43,7 +43,7 @@ DECIDERS = (STORED_DECIDER, DOM_DECIDER)
 
 def points_from_ground_truth(ground_truth, base_url: str, browser_available: bool = False,
                              writes: bool = False, account_values=None):
-    """Injection points from the enumerated ground-truth contract (detection benchmark).
+    """Injection points from the enumerated ground-truth contract (an oracle diagnostic).
 
     Returns ``(points, skipped)``. Server-rendered **GET query**, **POST body**,
     and **header-carried** (``location="header"``, e.g. a webhook-signature check
@@ -838,9 +838,11 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
     `RunModeError`), and has its ``after_run`` stages dispatched once the pipeline is
     done — their outcomes land on ``result.plugin_outcomes`` (CC-FUZZ-0050).
 
-    ``points_source``: ``"ground-truth"`` audits the enumerated contract points (a
-    detection benchmark, decoupled from crawl coverage); ``"crawl"`` audits what the
-    crawl discovered (a discovery run); ``"auto"`` (default) picks ground-truth when a
+    ``points_source``: ``"ground-truth"`` audits the enumerated contract points (an
+    oracle diagnostic: the answer key supplies the points, so it measures only the
+    confirmation oracle, never detection; PA-0660); ``"crawl"`` audits what the
+    crawl discovered (a discovery run: the reported detection figure); ``"auto"``
+    (default) picks ground-truth when a
     contract is present, else crawl. ``browser`` (a `BrowserExecutor`) enables M6
     stored/DOM XSS confirmation and, for ground-truth sourcing, the DOM points.
     ``oob`` (an already-started `OobListener`) enables M8 out-of-band confirmation

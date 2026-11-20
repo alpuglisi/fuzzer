@@ -17,10 +17,16 @@ from fuzzlab.oracle.probe import Candidate, Probe
 from fuzzlab.oracle.strategies import PriceTrustDifferentialStrategy
 
 
-def _cand():
+#: A captured JSON body (the app's own request, as a crawl records it; PA-0660): the
+#: strategy reads the numeric leaves of this, never a field name it assumes.
+_CAPTURED = ((("plan_tier",), "standard"), (("monthly_charge",), 15.49))
+
+
+def _cand(base_entries=_CAPTURED):
     return Candidate(url="http://h/api/subscription/change-plan", param="body",
                      method="POST", location="body", vuln_class="price_integrity_bypass",
-                     category="price-integrity-bypass", content_type="application/json")
+                     category="price-integrity-bypass", content_type="application/json",
+                     base_entries=base_entries)
 
 
 _PLAN_PRICES = {"basic": 6.99, "standard": 15.49, "premium": 22.99}
@@ -174,3 +180,25 @@ def test_r_price_integrity_rule_does_not_match_an_unrelated_sink_context():
     rules = load_rules()
     rule = next(r for r in rules if r.id == "R-PRICE-TRUST-DIFFERENTIAL")
     assert not matches(rule, _Point())
+
+
+def test_the_field_is_the_captured_bodys_own_numeric_leaf_not_an_assumed_name():
+    """PA-0660 / BUG-0661: any captured numeric leaf (nested, any name) is tried."""
+    class _Echo:
+        def send(self, url, param, value, timing=False, method="POST", location="body",
+                 content_type=None):
+            return Probe(200, value)
+
+    captured = ((("order",), "o-1"), (("line", "unit_fee"), 3.0))
+    verdict = PriceTrustDifferentialStrategy().confirm(_cand(captured), _Echo())
+    assert verdict is not None and verdict.evidence["field"] == "line.unit_fee"
+
+
+def test_no_captured_body_gives_no_verdict():
+    """A point the answer key named but no crawl captured has nothing to vary: a
+    stated miss, never a guess at the app's field names (PA-0660)."""
+    class _Never:
+        def send(self, *a, **k):  # pragma: no cover - gated before any send
+            raise AssertionError("no send without a captured body")
+
+    assert PriceTrustDifferentialStrategy().confirm(_cand(None), _Never()) is None
