@@ -3057,5 +3057,5 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
   3. **A "no detection lost" claim states how many positive observations its evidence
      holds**; a shadow or BEFORE/AFTER run with too few positives to see a miss is not
      evidence that nothing is missed. (from BUG-0650)
-  - Enforced by: tests/test_m6_window_guard.py::test_the_wait_lasts_its_whole_window_without_a_hit, tests/test_m6_window_guard.py::test_the_guard_catches_an_early_end, tests/test_m6_window_guard.py::test_the_wait_takes_no_early_end_hook
+  - Enforced by: tests/test_m6_window_guard.py::test_the_wait_lasts_its_whole_window_without_a_hit, tests/test_m6_window_guard.py::test_the_guard_catches_an_early_end, tests/test_m6_window_guard.py::test_the_wait_takes_no_early_end_hook, tests/test_m6_slow_sinks.py::test_the_full_window_sees_a_late_sink, tests/test_m6_slow_sinks.py::test_the_fixture_really_is_late
 
