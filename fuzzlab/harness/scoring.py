@@ -5,7 +5,7 @@ have found, compute the confusion matrix (TP/FP/TN/FN) and the metrics the
 project reports (precision, recall, F1, and Matthews correlation — MCC — which
 stays honest under class imbalance, per D10).
 
-Matching is by case key ``(url, method, param, vuln_class)`` so a detection is
+Matching is by case key ``(url, method, param, vuln_class)`` (`case_key`) so a detection is
 credited only when it names the right class on the right parameter — flagging
 SQLi on an XSS-only parameter is a false positive, not a hit.
 """
@@ -78,6 +78,19 @@ class ScoreReport:
         }
 
 
+def case_key(case) -> tuple[str, str, str, str]:
+    """A case's scoring key, its URL recorded the way a finding's is
+    (`oracle.finding_url`, PA-0003; FR-FUZZ-622): a front controller's point URL may
+    carry the form's other fields for the probe to send
+    (``/index.php?page=x.php&submit=1``) while its finding is recorded at the page
+    (``/index.php?page=x.php``). For every case whose URL is a plain path -- every
+    answer key before Mutillidae's -- this is ``case.key`` unchanged (guarded)."""
+    from fuzzlab.oracle.oracle import finding_url       # lazy: pulls in the strategies
+    from fuzzlab.oracle.probe import Candidate
+    url = finding_url(Candidate(url=case.url, param=case.param, location=case.location))
+    return (url, case.method, case.param, case.vuln_class)
+
+
 def score(detections: list[Detection], ground_truth: GroundTruth) -> ScoreReport:
     """Confusion matrix of ``detections`` against the ground-truth cases.
 
@@ -93,8 +106,9 @@ def score(detections: list[Detection], ground_truth: GroundTruth) -> ScoreReport
     case_keys = set()
 
     for case in ground_truth.cases:
-        case_keys.add(case.key)
-        hit = case.key in detected_keys
+        key = case_key(case)
+        case_keys.add(key)
+        hit = key in detected_keys
         if case.expected_vulnerable:
             if hit:
                 report.tp += 1

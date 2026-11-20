@@ -3,6 +3,17 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0620 — Rules for LDAP and XPath injection (FR-AUD-620) (2026-11-20)
+- Change: `fuzzlab/audit/rules_data/default_rules.json` (`R-LDAP-INJECTION`,
+  `R-XPATH-INJECTION`: query, body and JSON points, references `ldap-injection` and
+  `xpath-injection`).
+- Reason: a category with no rule gets no candidate (CC-FUZZ-0620, CC-FUZZ-0621).
+- Impact: a run whose categories include them nominates every query/body/JSON point;
+  a ground-truth run selects them only for a key with such cases.
+- Risk: low.
+- Deliverables:
+  - [x] rules; `tests/test_ldap_xpath.py::test_both_classes_are_wired_end_to_end` — done
+
 ### CC-AUD-0610 — `R-SSJS`: server-side JavaScript injection on every value point (FR-AUD-610) (2026-11-20)
 - Change: `fuzzlab/audit/rules_data/default_rules.json` (appended rule `R-SSJS`, category
   `server-side-javascript-injection`, locations query, body, json, path).

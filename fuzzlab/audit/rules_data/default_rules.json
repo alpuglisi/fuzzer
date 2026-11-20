@@ -156,6 +156,20 @@
       "reference": "directory-traversal"
     },
     {
+      "id": "R-LDAP-INJECTION",
+      "category": "ldap-injection",
+      "transaction_type": "LDAP Injection",
+      "when": { "location_in": ["query", "body", "json"] },
+      "reference": "ldap-injection"
+    },
+    {
+      "id": "R-XPATH-INJECTION",
+      "category": "xpath-injection",
+      "transaction_type": "XPath Injection",
+      "when": { "location_in": ["query", "body", "json"] },
+      "reference": "xpath-injection"
+    },
+    {
       "id": "R-SQLI-HEADER",
       "category": "sql-injection",
       "transaction_type": "SQL Injection",

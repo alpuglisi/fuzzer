@@ -6384,6 +6384,20 @@ lane) can submit a payload as
   measurement only); `--cprofile OUT` adds a cProfile (CPU hot spots only: it
   misattributes time across Playwright's greenlets). Lab only; nothing asserted.
 
+- **FR-LAB-340** *(OWASP Mutillidae II; `CC-LAB-0340`, 2026-11-20).* Mutillidae II
+  2.12.8 is an external lab (`lab/external/mutillidae/`): upstream's www, database and
+  directory images pinned by digest; the web tier on loopback only, the database and
+  directory unpublished on internal networks.
+- **FR-LAB-341** *(Mutillidae bootstrap; `CC-LAB-0341`).* Under `--authorized` the
+  bootstrap loads upstream's LDIF (fetched from a pinned commit, verified by sha256)
+  into the directory, builds the database when the app reports it offline, and
+  registers and verifies the lab's own account (`mutillidae-user`).
+- **FR-LAB-342** *(Mutillidae answer key; `CC-LAB-0342`).* `lab/ground-truth-mutillidae/`
+  scores level 0: LDAP and XPath injection with cross-class negatives, plus SQL injection,
+  reflected XSS, XXE, open redirect and file inclusion (`path_traversal`) as a regression
+  target. Level 5 is session state and is not part of the key.
+- **FR-LAB-343** *(the measurement; `CC-LAB-0343`).* Its BASELINE / AFTER numbers and
+  open gaps are recorded with the exact commands.
 - **FR-LAB-331** *(NodeGoat answer key; `CC-LAB-0331`, 2026-11-20).*
   `lab/ground-truth-nodegoat/` (target `owasp_nodegoat_c5cb68a7`, case ids `NGOAT-`):
   server-side JavaScript injection (`ssjs`) in `/contributions`' `preTax`, `roth` and
