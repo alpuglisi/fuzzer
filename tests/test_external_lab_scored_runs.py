@@ -23,6 +23,7 @@ from fuzzlab.lab_fixtures import external as ext
 ROOT = Path(__file__).resolve().parents[1]
 RECORD = ROOT / "docs" / "components" / "01-target-lab" / "external-lab-scores.json"
 _REACH = re.compile(r"\[reach:\s*([a-z, ]+?)(?:\s+-|\])")
+_TRACKED = re.compile(r"\b(CC-[A-Z]+-\d{4}|BUG-\d{4})\b")
 FIELDS = {"commit", "command", "tp", "fp", "fn", "tn", "requests", "wall_s", "matched",
           "missed"}
 
@@ -60,6 +61,14 @@ def problems(record: dict, name: str, gt) -> list[str]:
                    f"(fn={run['fn']})")
     out += [f"{name}: {i} missed with no reason" for i, why in missed.items()
             if not str(why).strip()]
+    out += [f"{name}: {i} matched but not a positive" for i in sorted(matched - positives)]
+    negatives = len(ids) - len(positives)
+    if not 0 <= run["tn"] <= negatives or run["fp"] < negatives - run["tn"]:
+        out.append(f"{name}: tn={run['tn']} fp={run['fp']} disagree with the key's "
+                   f"{negatives} negatives")
+    out += [f"{name}: {i} is open with no tracked id (CC-<CODE>-NNNN or BUG-NNNN)"
+            for i, why in missed.items()
+            if str(why).startswith("open") and not _TRACKED.search(str(why))]
     out += [f"{name}: {i} is tagged [reach: gt] but the recorded run missed it and its "
             f"reason does not say it is open" for i in sorted(gt_reachable_positives(gt))
             if i in missed and not str(missed[i]).startswith("open")]
@@ -93,3 +102,22 @@ def test_the_guard_catches_a_reach_tag_no_scored_run_backs(record):
     assert not any("SDLCNP-0004 is tagged" in p for p in got)
     assert problems({}, "secdevlabs-copy-n-paste", gt) == [
         "secdevlabs-copy-n-paste: no scored ground-truth run recorded"]
+
+
+def test_the_guard_catches_an_untracked_open_reason_a_non_positive_match_and_bad_counts(
+        record):
+    """FR-LAB-363 (BUG-0641's review follow-ups): an `open:` reason names the record that
+    tracks it, a matched id is a positive, and tn/fp agree with the key's negatives."""
+    gt = contract.load(ROOT / "lab" / "ground-truth-secdevlabs-copy-n-paste")
+    good = dict(record["secdevlabs-copy-n-paste"])
+    assert problems({"secdevlabs-copy-n-paste": good}, "secdevlabs-copy-n-paste", gt) == []
+    untracked = {**good, "missed": {k: "open: someday" for k in good["missed"]}}
+    assert any("no tracked id" in p for p in problems(
+        {"secdevlabs-copy-n-paste": untracked}, "secdevlabs-copy-n-paste", gt))
+    negative = next(c.case_id for c in gt.cases if not c.expected_vulnerable)
+    wrong = {**good, "matched": good["matched"][:-1] + [negative]}
+    assert any("matched but not a positive" in p for p in problems(
+        {"secdevlabs-copy-n-paste": wrong}, "secdevlabs-copy-n-paste", gt))
+    counts = {**good, "tn": good["tn"] + 5}
+    assert any("disagree" in p for p in problems(
+        {"secdevlabs-copy-n-paste": counts}, "secdevlabs-copy-n-paste", gt))

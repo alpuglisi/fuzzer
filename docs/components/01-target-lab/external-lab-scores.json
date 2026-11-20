@@ -64,8 +64,8 @@
    "BWAPP-0053": "not reachable from ground-truth points: [reach: crawl]",
    "BWAPP-0054": "not reachable from ground-truth points: [reach: crawl]",
    "BWAPP-0055": "not reachable from ground-truth points: [reach: crawl]",
-   "BWAPP-0057": "open: the query must break before mysql_error() echoes the input; measured: `x' AND <zqxb..>` echoes a tag, `'<zqxb..>` parses and echoes nothing. Needs a quote prefix carried through every reflected-XSS break-out (a confirmer redesign, not built)",
-   "BWAPP-0058": "open: as BWAPP-0057 (sqli_6.php, POST)"
+   "BWAPP-0057": "open: the query must break before mysql_error() echoes the input; measured: `x' AND <zqxb..>` echoes a tag, `'<zqxb..>` parses and echoes nothing. Needs a quote prefix carried through every reflected-XSS break-out (a confirmer redesign, not built) [tracked: CC-LAB-0360]",
+   "BWAPP-0058": "open: as BWAPP-0057 (sqli_6.php, POST) [tracked: CC-LAB-0360]"
   }
  },
  "juice-shop": {
@@ -111,7 +111,7 @@
    "SDLCNP-0002"
   ],
   "missed": {
-   "SDLCNP-0004": "open: needs a register-then-login flow (the login echoes the stored user into innerHTML); no mechanism drives it"
+   "SDLCNP-0004": "open: needs a register-then-login flow (the login echoes the stored user into innerHTML); no mechanism drives it [tracked: CC-LAB-0360]"
   }
  },
  "secdevlabs-gossip-world": {
@@ -125,10 +125,10 @@
   "wall_s": 0.6,
   "matched": [],
   "missed": {
-   "SDLGW-0001": "open: no session -- the session manager verifies a login at the base URL and gossip-world's `/` always redirects to /login (routes.py:73-75); a change to SP-61's protected-resource choice, flagged",
-   "SDLGW-0002": "open: no session (as SDLGW-0001)",
-   "SDLGW-0003": "open: no session (as SDLGW-0001)",
-   "SDLGW-0006": "open: no session (as SDLGW-0001)"
+   "SDLGW-0001": "open: no session -- the session manager verifies a login at the base URL and gossip-world's `/` always redirects to /login (routes.py:73-75); a change to SP-61's protected-resource choice, flagged [tracked: CC-LAB-0360]",
+   "SDLGW-0002": "open: no session (as SDLGW-0001) [tracked: CC-LAB-0360]",
+   "SDLGW-0003": "open: no session (as SDLGW-0001) [tracked: CC-LAB-0360]",
+   "SDLGW-0006": "open: no session (as SDLGW-0001) [tracked: CC-LAB-0360]"
   },
   "error": "the run stopped at the login (SessionAuthError): see SDLGW-0001"
  },
@@ -160,8 +160,8 @@
   "matched": [],
   "missed": {
    "SDLVJ-0001": "open: contact.php parses a raw XML body; the point is form-encoded and the XXE strategies wrap their entity in <title> or the root, never the point's element (CC-LAB-0307)",
-   "SDLVJ-0002": "open: as SDLVJ-0001",
-   "SDLVJ-0003": "open: a form-encoded `name` never reaches the XML parser (points carry no XML body shape)"
+   "SDLVJ-0002": "open: as SDLVJ-0001 [tracked: CC-LAB-0360]",
+   "SDLVJ-0003": "open: a form-encoded `name` never reaches the XML parser (points carry no XML body shape) [tracked: CC-LAB-0360]"
   }
  },
  "secdevlabs-amarelo-designs": {
@@ -175,7 +175,7 @@
   "wall_s": 0.4,
   "matched": [],
   "missed": {
-   "SDLAD-0001": "open: a ground-truth cookie point is skipped: the probe sender has no cookie placement (auto.py files it as 'client-only/DOM')"
+   "SDLAD-0001": "open: a ground-truth cookie point is skipped: the probe sender has no cookie placement (auto.py files it as 'client-only/DOM') [tracked: CC-LAB-0360]"
   }
  },
  "secdevlabs-mongection": {
