@@ -97,7 +97,29 @@ DESTRUCTIVE_TOKENS = frozenset({
     # file. (`update` is a pair below: as a bare word it is a REST route's name, e.g.
     # ForgeCart's /admin/customers/update, which the crawl must reach.)
     "insert", "updatedb", "dbupdate", "upgradedb", "dbupgrade",
+    # BUG-0680: a state switch is a state change. `disable`/`deactivate` were listed and
+    # their opposites were not (GET evidence: WordPress plugins.php?action=activate,
+    # WebGoat service/enable-security.mvc, Gitea /user/activate?code=; Jenkins
+    # toggleLogKeep, Mutillidae ?do=toggle-security). Corpus: CC-CORE-0650.
+    "enable", "activate", "toggle",
 })
+#: Query/path slots that name the action a request performs (``?action=``, ``?do=``).
+#: A state verb in one is a state change even when the verb alone is too common to
+#: list (``stop``, ``resume``, ``switch``): BUG-0680; GET evidence WordPress
+#: ``action=activate|resume|enable-auto-update``, bWAPP ``sqli_9.php?action=stop``,
+#: Mutillidae ``do=toggle-hints``; zero false refusals over the lab routes and the
+#: CC-CORE-0650 benign corpus.
+ACTION_SLOTS = ("action", "op", "do", "cmd", "task", "mode", "method", "func")
+SLOT_VERBS = ("update", "upgrade", "toggle", "enable", "activate", "resume", "stop",
+              "switch")
+#: A destructive verb fused with its object in one token (``resetbutton``,
+#: ``deletesnippet``, ``restartlesson``): BUG-0680, GET evidence Google Gruyere
+#: (/resetbutton/<id>, /<id>/deletesnippet) and WebGoat (restartlesson.mvc). Matched as
+#: a token prefix whose remainder is not an inflection, doubled consonant or not
+#: (``deleted``, ``toggles``, ``resetting`` are words of their own). Stems of five letters or more only, as PA-0301's scan.
+COMPOUND_STEMS = ("reset", "restart", "delete", "remove", "destroy", "toggle",
+                  "logout", "signout", "uninstall", "purge")
+_INFLECTIONS = frozenset({"s", "d", "ed", "es", "ing", "er", "ers", "able", "al", "ion"})
 #: Two adjacent tokens that together name such an action (``sign-out``, ``set_up``).
 DESTRUCTIVE_PAIRS = frozenset({
     ("log", "out"), ("log", "off"), ("sign", "out"), ("sign", "off"), ("set", "up"),
@@ -108,8 +130,7 @@ DESTRUCTIVE_PAIRS = frozenset({
     # route segment merely named `update` (reviewers A/B)
     *{(verb, ext) for verb in ("update", "upgrade")
       for ext in ("php", "php5", "asp", "aspx", "jsp", "cgi", "pl", "py")},
-    *{(slot, verb) for verb in ("update", "upgrade")
-      for slot in ("action", "op", "do", "cmd", "task", "mode", "method", "func")},
+    *{(slot, verb) for verb in SLOT_VERBS for slot in ACTION_SLOTS},
     *{pair for verb in ("update", "upgrade") for db in ("db", "database", "schema")
       for pair in ((verb, db), (db, verb))},
 })
@@ -169,6 +190,12 @@ def _destructive_tokens(tokens: list[str]) -> str | None:
     for pair in zip(tokens, tokens[1:]):
         if pair in DESTRUCTIVE_PAIRS:
             return " ".join(pair)
+    for tok in tokens:
+        for stem in COMPOUND_STEMS:
+            rest = tok[len(stem):]
+            if tok.startswith(stem) and rest and rest not in _INFLECTIONS \
+                    and not (rest[0] == stem[-1] and rest[1:] in _INFLECTIONS):
+                return f"{stem} in {tok}"
     return None
 
 

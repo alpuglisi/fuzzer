@@ -30,6 +30,13 @@ Format per entry:
 - **Remediation:** copy-n-paste points carry the page's JSON body; mongection gets an identity and a bootstrap (CC-LAB-0360, 684fab9); each lab's scored run is recorded in `docs/components/01-target-lab/external-lab-scores.json` and checked against its reach tags (PA-0640). Live: copy-n-paste tp 0→2, mongection tp 0→2, fp 0. SDLCK-0001 recorded open.
 - **Status:** Fixed (comment-killer open: an answer-key decision)
 
+## 2026-11-20 — core / crawler (the destructive rule missed state toggles; two lab crawls changed the lab's state; BUG-0680)
+- **Symptom:** the lab-expansion lanes' crawls fetched Mutillidae's `index.php?do=toggle-security`, `?do=toggle-enforce-ssl`, `?do=toggle-hints` (after the SSL toggle the session went to https and 121 pages stayed unresolved) and DVGA's `/difficulty/hard` and `/start_over` (global mode flipped, state reset).
+- **Root cause:** SP-09 (`core.urls.destructive_reason`) was grown one lab spelling at a time and only checked against our own labs; it had no state-switch class (`disable` listed, `enable` not; action slots knew only `update`/`upgrade`).
+- **Remediation:** `enable`/`activate`/`toggle`, action-slot state verbs and fused verb-object compounds are refused, measured against a cited independent corpus (cited GET state changes refused 8/33 → 18/33, lab cells/points refused 0/505 → 0/505); DVGA's two links are stated residuals (no second independent source). CC-CORE-0650, CC-CRAWL-0650; BUG-0680, PA-0680, PA-0681.
+- **Status:** Fixed (Mutillidae toggles); DVGA `/difficulty/<level>`, `/start_over` open as stated residuals
+
+---
 ## 2026-11-20 — Cloud container (JAVA lane): gitleaks and Python Playwright missing; five navigation tests fail on this container's Chromium at the base tree too (environment)
 - **Symptom:** `scripts/verify_change.py --base 2be7a50` on f78ae08: 16 failures. Eight
   `test_cli_check_passes_end_to_end*` (`secret scanner: 'gitleaks' executable not found`,
