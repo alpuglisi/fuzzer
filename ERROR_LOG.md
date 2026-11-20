@@ -18,6 +18,18 @@ Format per entry:
 
 ---
 
+## 2026-11-20 — target lab / DVGA (an import of DVGA's own port hung the lab)
+- **Symptom:** while measuring DVGA, a probe `importPaste(host: "localhost", port: 5013, ...)` never answered, and every later request to the lab hung.
+- **Root cause:** DVGA's `importPaste` runs `curl --insecure <url>` through `os.popen` with no timeout, inside a single gevent loop: a URL naming DVGA itself waits for an answer the blocked loop can never give.
+- **Remediation:** the container was restarted (F-600); the answer key's import point names `127.0.0.1:1` (refused at once) and FR-LAB-320 states the rule (CC-LAB-0320). Not a fuzzlab defect.
+- **Status:** Environment (lab behaviour; avoided by the answer key)
+
+## 2026-11-20 — environment (Python Playwright and mitmproxy missing in the lane's container)
+- **Symptom:** `fuzzlab auto --browser` refused ("--browser needs Playwright") and `fuzzlab disco capture` failed with `ServerDidNotListen` (its mitm child exited at once).
+- **Root cause:** the container had the Chromium build and Node Playwright 1.63.0 but not the Python `playwright` package nor `mitmproxy` (the `browser` / `disco` extras); a Debian-installed `pyparsing` blocked the mitmproxy install.
+- **Remediation:** `pip install playwright==1.63.0` (matching the pre-installed browsers) and `pip install --ignore-installed pyparsing "mitmproxy>=12,<13"` (12.3.1).
+- **Status:** Environment (fixed outside the repo)
+
 ## 2026-10-23 — crawler / navguard (a navigation started before a failed load's error page had loaded was dropped; BUG-0561)
 - **Symptom:** the harness run of e69bd1e (F-281): `tests/test_disco_harvest.py::test_disco_harvest_and_restore_after_failed_loads[2]` failed in 19.1 s. Disco's `restore` returned "navigation": its `about:blank` `goto` timed out after 15 s and the page stayed on `chrome-error://chromewebdata/`. The RCA measured about 1% of restores under heavy disk I/O on every tree since BUG-0522's fix (7393c90 4/600, e69bd1e 9/840) and 0/1,320 under CPU load alone.
 - **Root cause:** `navguard._settle_failure` (SP-01, BUG-0522's fix) took a failed navigation as over when its error page committed. That page loads 15-25 ms later (p95 about 130 ms under I/O load), and a navigation Chromium started in between was sometimes dropped with no commit and no error, so Playwright waited out the whole `goto` timeout.

@@ -719,6 +719,23 @@ budget where a vulnerability is plausible.
   - *CC-AUD-0049:* each importer passes the crawl's code segments to
     `_import_path_templates` (`code=`): the spider DB's `script_segments` table, a disco
     run's `script_segments.json` (FR-CRAWL-28). Neither present: no code evidence.
+- **FR-AUD-601** *(a GraphQL request's document and non-string scalars are not data
+  points; `CC-AUD-0601`, 2026-11-20).* `audit.rules.matches` fires no rule on a point
+  `audit.graphql_context.not_a_data_point` names: the `query` leaf of a JSON body whose
+  `query` parses as an executable GraphQL document (FR-CRAWL-601), or a
+  `variables.<name>` leaf declared `Int`, `Float` or `Boolean` (not a list) in it
+  (GraphQL's input coercion of these never yields a string; measured on DVGA). The
+  evaluation is still recorded. A body whose `query` is no GraphQL document is
+  unaffected.
+- **FR-AUD-600** *(GraphQL variables judged by the argument they feed; `CC-AUD-0600`,
+  2026-11-20).* For a JSON-leaf point under `variables`, `audit.graphql_context`
+  reads the `(field, argument, siblings)` its variable feeds in the request's own
+  document (FR-CRAWL-600). `name_regex` matches the leaf's name or any bound argument's
+  name; `graphql_field_regex` matches the field's name; `graphql_sibling_regex` matches
+  (whole name) another argument of the same field call; both are false for a point with
+  no binding and must compile at load. Rules `R-COMMAND-INJECTION-GRAPHQL-FIELD` and
+  `R-COMMAND-INJECTION-GRAPHQL-SIBLING` use them (DVGA: `systemDebug(arg)`,
+  `importPaste(path, scheme)`).
 - **FR-AUD-25** *(an id-shaped path segment; `CC-AUD-0046`, 2026-10-19, FR-FUZZ-57).*
   `R-ACCESS-CONTROL-PATH` fires on a GET `path` point whose name is `id`, `uuid` or
   `guid`, ends in `_id`/`-id` (or `_uuid`/`-guid`…), or is camelCase `…Id`/`…Uuid`

@@ -479,3 +479,137 @@ def graphql_operations(text, operation_name=None) -> list | None:
             return None
         out.append([kind, name, sorted(fields)[:MAX_ROOT_FIELDS]])
     return sorted(out)
+
+
+#: At most this many argument bindings are read from one document (the first, in
+#: document order), so the walk stays linear and its answer bounded (FR-CRAWL-600).
+MAX_BINDINGS = 256
+
+
+def _field_bindings(toks, i, end, field, out) -> int | None:
+    """Read the argument list at ``toks[i] == "("`` of ``field``: every ``arg: $var``
+    (at the argument's top level or inside an input object or list value) adds
+    ``(field, arg, siblings)`` to ``out[var]``. The index after the list, or None."""
+    close = _close(toks, i, end)
+    if close is None:
+        return None
+    args: list[str] = []
+    uses: list[tuple[str, str]] = []
+    j, depth, arg = i + 1, 0, None
+    while j < close - 1:
+        tok = toks[j]
+        if depth == 0 and _is_name(tok) and j + 1 < close and toks[j + 1] == ":":
+            arg = tok
+            args.append(tok)
+            j += 2
+            continue
+        if tok in ("{", "["):
+            depth += 1
+        elif tok in ("}", "]"):
+            depth -= 1
+        elif tok == "$" and j + 1 < close and _is_name(toks[j + 1]) and arg is not None:
+            uses.append((toks[j + 1], arg))
+            j += 2
+            continue
+        j += 1
+    for var, arg in uses:
+        if sum(len(v) for v in out.values()) >= MAX_BINDINGS:
+            break
+        siblings = tuple(a for a in dict.fromkeys(args) if a != arg)
+        out.setdefault(var, []).append((field, arg, siblings))
+    return close
+
+
+def graphql_variable_bindings(text, operation_name=None) -> dict | None:
+    """Which field argument each variable of a GraphQL request feeds (FR-CRAWL-600):
+    ``{variable: [(field, argument, sibling arguments), ...]}`` for the operation
+    ``operation_name`` selects (else every operation, at most `MAX_OPERATIONS`), read
+    at every depth of its selection set, an aliased field by its field name; the
+    variable definitions themselves (``query Q($a: String)``) are not uses. A variable
+    a fragment uses is not followed (no binding). None when ``text`` is not an
+    executable GraphQL document or is over `MAX_GRAPHQL_TOKENS`. Linear in the
+    document (`_tokens`), at most `MAX_BINDINGS` bindings."""
+    if not isinstance(text, str) or len(text) > CAPTURE_MAX_BYTES:
+        return None
+    doc = _document(text)
+    if doc is None or doc is _OVER:
+        return None
+    toks, ops, _frags = doc
+    chosen = [op for op in ops if op[1] == operation_name] or ops
+    out: dict = {}
+    for _kind, _name, (start, end) in chosen[:MAX_OPERATIONS]:
+        i, prev = start + 1, None
+        while i < end - 1:
+            tok = toks[i]
+            if tok == "(" and prev is not None:
+                nxt = _field_bindings(toks, i, end, prev, out)
+                if nxt is None:
+                    return None
+                i, prev = nxt, None
+                continue
+            if _is_name(tok) and tok not in ("on",):
+                # `alias: field` -- the field is the name after the colon
+                prev = tok
+            elif tok == ":" and prev is not None:
+                pass
+            elif tok == "@":
+                prev = None
+                i += 2                                  # a directive's name
+                if i < end and toks[i] == "(":
+                    close = _close(toks, i, end)
+                    if close is None:
+                        return None
+                    i = close
+                continue
+            else:
+                prev = None
+            i += 1
+    return out
+
+
+def graphql_variable_types(text, operation_name=None) -> dict | None:
+    """The named type each variable of the selected operation is declared with
+    (FR-CRAWL-601): ``{variable: (type name, list depth)}`` from its variable
+    definitions (``query Q($a: [Int!]!)`` -> ``{"a": ("Int", 1)}``), for the operation
+    ``operation_name`` selects (else every operation, at most `MAX_OPERATIONS`; a name
+    declared twice keeps its first type). None when ``text`` is not an executable
+    GraphQL document or is over `MAX_GRAPHQL_TOKENS`. Linear (`_tokens`)."""
+    if not isinstance(text, str) or len(text) > CAPTURE_MAX_BYTES:
+        return None
+    doc = _document(text)
+    if doc is None or doc is _OVER:
+        return None
+    toks, ops, _frags = doc
+    wanted = {name for _k, name, _s in ops if name == operation_name}
+    out: dict = {}
+    n, i, seen = len(toks), 0, 0
+    while i < n and seen < MAX_OPERATIONS:
+        if toks[i] not in _OPERATION_TYPES:
+            i += 1
+            continue
+        j = i + 1
+        name = ""
+        if j < n and _is_name(toks[j]):
+            name, j = toks[j], j + 1
+        if j >= n or toks[j] != "(":
+            i = j
+            continue
+        close = _close(toks, j, n)
+        if close is None:
+            return None
+        seen += 1
+        if wanted and name not in wanted:
+            i = close
+            continue
+        k = j + 1
+        while k < close - 1:
+            if toks[k] == "$" and k + 2 < close and _is_name(toks[k + 1]) \
+                    and toks[k + 2] == ":":
+                var, k, depth = toks[k + 1], k + 3, 0
+                while k < close - 1 and toks[k] == "[":
+                    depth, k = depth + 1, k + 1
+                if k < close - 1 and _is_name(toks[k]):
+                    out.setdefault(var, (toks[k], depth))
+            k += 1
+        i = close
+    return out

@@ -177,6 +177,20 @@
       "reference": "command-injection"
     },
     {
+      "id": "R-COMMAND-INJECTION-GRAPHQL-FIELD",
+      "category": "command-injection",
+      "transaction_type": "Command Injection",
+      "when": { "location_in": ["json"], "graphql_field_regex": "system|debug|diagnos|exec|command|shell|ping|cmd" },
+      "reference": "command-injection"
+    },
+    {
+      "id": "R-COMMAND-INJECTION-GRAPHQL-SIBLING",
+      "category": "command-injection",
+      "transaction_type": "Command Injection",
+      "when": { "location_in": ["json"], "graphql_sibling_regex": "cmd|exec|command|ping|host|hostname|dns|domain|ip|ip_?addr(ess)?" },
+      "reference": "command-injection"
+    },
+    {
       "id": "R-OPEN-REDIRECT-VALUE",
       "category": "open-redirect",
       "transaction_type": "Open Redirect",

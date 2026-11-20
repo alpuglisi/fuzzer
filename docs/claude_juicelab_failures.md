@@ -2210,3 +2210,17 @@ Juice Shop lab is complete.
 - **Cause:** I sized the wait to the symptom I had measured (being overtaken, which a commit cures), called it fixed on a volume and a load that could not see a race of about 1%, and wrote the rule's concrete clause from the fix instead of from the principle the rule stated.
 - **Status:** fixed by BUG-0561 / CC-CRAWL-0065 (lane NAVSETTLE); PA-0561 strengthens PA-0522 (landed means loaded; the order pinned by a deterministic test; a race measured under CPU and disk I/O contention at a volume that can see it).
 
+### F-600 — While measuring DVGA I sent an import of the lab's own port, which hung the whole lab
+- **What:** my first probe of `importPaste` named `localhost:5013`, DVGA itself. Its resolver runs curl with no timeout inside the server's only loop, so the request and every later one hung; I had to stop my probe and restart the container.
+- **Evidence:** ERROR_LOG 2026-11-20 (DVGA); CC-LAB-0320 "Measured".
+- **Impact:** about two minutes of a hung lab and one restart; no traffic left the lab; nothing measured from that state was used.
+- **Cause:** I chose the probe's host from the upstream solution's example (`localhost`) without first reading what the resolver does with it.
+- **Status:** corrected: the answer key's import point names a refused loopback port, and FR-LAB-320 states the rule.
+
+### F-601 — My first DVGA answer key held a negative no run could test
+- **What:** the draft scored `uploadPaste(filename)` as a command-injection negative, but no command-injection rule fires on that point (its name, field and siblings carry no command signal), so it would have counted as a true negative without ever being probed.
+- **Evidence:** `tests/test_external_labs_live.py::_assert_pass` requires a checked candidate for every gt-tagged case; designing `tests/test_dvga_live.py` on it showed the gap before any commit.
+- **Impact:** none committed; it would have inflated tn by one.
+- **Cause:** I chose negatives by what the sink does, not by whether the run's rules reach the point.
+- **Status:** corrected before the first commit: the negative is `systemDiagnostics(password)`, which a rule reaches and which never reaches a shell.
+

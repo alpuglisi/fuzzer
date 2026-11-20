@@ -6371,6 +6371,24 @@ lane) can submit a payload as
   targets (D10); bWAPP's page names carry class words, so NFR-LAB-no-leak does not hold
   for them and a model trained on runs against them would learn from the URL (recorded as
   not enforced under NFR-ML-no-leak; the training question is the operator's).
+- **FR-LAB-321** *(command injection is a scoreable class; `CC-LAB-0320`,
+  2026-11-20).* The labels contract's `vuln_class` admits `command-injection` (the
+  oracle's own spelling, `CommandInjectionStrategy` / `CommandInjectionOobStrategy`)
+  and `sink_context` admits `os_command`; a ground truth may score command injection.
+- **FR-LAB-320** *(Damn Vulnerable GraphQL Application; `CC-LAB-0320`, 2026-11-20).*
+  `lab/external/dvga/` (`fuzzlab-dvga`) runs DVGA 2.1.2 (`docker.io/dolevf/dvga:latest`
+  pinned by digest, `DVGA_IMAGE`; the 2025-05-24 build) on 127.0.0.1 port `DVGA_PORT`,
+  default 5013, no login (no identity), capabilities dropped, names unresolvable
+  inside (`dns: 127.0.0.1`). Its database and difficulty mode are rebuilt on every start
+  (reset = restart). Answer key `lab/ground-truth-dvga/`: GraphQL requests as JSON-body
+  points naming one `variables.<name>` leaf (the app's own documents where its pages
+  send one); command injection (systemDebug, importPaste host/path/scheme,
+  systemDiagnostics), SQL injection (pastes filter), stored XSS (createPaste title and
+  content, rendered by /public_pastes), with safe arguments as negatives;
+  `[reach: none]` SSRF and file write; DVGA's GraphQL-implementation issues in
+  `graphql-issues.json`, unscored. An import point never names DVGA's own port (its
+  curl has no timeout and blocks the server's only loop). Live test:
+  `tests/test_dvga_live.py`.
 - **FR-LAB-309** *(per-account values; secDevLabs ecommerce-api; `CC-LAB-0315`,
   2026-10-19).* A lab bootstrap may read values of each account's own after its
   verified login (`_ACCOUNT_ATTRIBUTES`) and store them with the credential

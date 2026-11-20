@@ -3,6 +3,91 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0320 — The Damn Vulnerable GraphQL Application (DVGA) as an external lab; command injection scoreable (2026-11-20)
+- Placement: lane GQL (item GQL), base 2be7a50, pre-assigned CC-LAB-0320..0324 /
+  FR-LAB-320..324 (this entry uses CC-LAB-0320, FR-LAB-320 and FR-LAB-321).
+- Change: `lab/external/dvga/compose.yaml` (the image pinned by digest,
+  `docker.io/dolevf/dvga:latest@sha256:040aa33c...` -- the 2025-05-24 build, whose
+  `version.py` says 2.1.2; the older `2.1.2` tag is another, 2022 build
+  (`sha256:d8e9590c...`), measured by pulling both; loopback-only publish on
+  `${DVGA_PORT:-5013}`, `WEB_HOST=0.0.0.0` inside the container since DVGA binds
+  127.0.0.1 by default, capabilities dropped, no-new-privileges, pids/memory limits,
+  `dns: 127.0.0.1`); `fuzzlab/lab_fixtures/external.py` (`DVGA_IMAGE` in
+  `PINNED_IMAGES`, `LAB_META["dvga"]`, no identity); `lab/ground-truth-dvga/` (15 cases:
+  10 positives, 5 negatives; 13 points, every one a GraphQL request whose JSON body
+  holds its document and variables, the point naming one `variables.<name>` leaf,
+  FR-FUZZ-54) and `graphql-issues.json` (12 GraphQL-implementation issues, DVGA-0016..
+  0027, kept out of `labels.json`: no strategy records their class, so the static guard
+  refuses them there; all `[reach: none]`, the DoS ones out of scope, no probe built);
+  `fuzzlab/labels/schemas/labels.schema.json` (`vuln_class` gains `command-injection`,
+  the oracle's own class spelling, and `sink_context` gains `os_command`: no external lab
+  could score command injection before); `.gitignore` (the CSV tracked);
+  `tests/test_external_labs_static.py` (the GT dir registered); `tests/test_dvga_live.py`
+  (gated by `FUZZLAB_LIVE_EXTERNAL_LABS=1`).
+- Measured before the answer key (live, 2026-11-20, Beginner mode unless stated):
+  `systemDebug(arg)` runs `ps <arg>`: `; echo FZL$((7*6))` as a variable answered FZL42;
+  `importPaste` runs `curl --insecure <scheme>://<host>:<port><path>`: the same in `path`
+  answered FZL42 in `result`; `systemDiagnostics` with the admin's default password runs
+  `cmd`; `pastes(filter)` answered `sqlite3.OperationalError` for a quote and every
+  paste for `' or 1=1--` (both modes); `paste(title)` and `search(keyword)` answered
+  null / [] for a quote (bound parameters); a `<b>` title is stored verbatim and
+  /public_pastes appends titles and contents with jQuery `.append`; introspection,
+  field suggestions and array batching all answer. **An `importPaste` of DVGA's own
+  port hangs the whole lab** (curl has no timeout; the server is one gevent loop blocked
+  in `os.popen`): the answer key's import point uses `127.0.0.1:1` (refused at once), and
+  I restarted the container once (F-600). Expert mode: `pastes(filter)` stays injectable,
+  `systemDebug` is blocked only by an operation-name allow-list (an anonymous operation
+  passes), `importPaste` strips `;` and `&` only -- and the mode is one global server
+  setting any request can flip (`X-DVGA-MODE`), so it is not usable as per-point
+  negatives; the negatives are safe arguments instead.
+- Effectiveness (live, 2026-11-20; both on the final answer key, the lab reset before
+  each; BASELINE = 2be7a50's detection code with this entry's schema widening, which
+  scoring needs; AFTER = this change with CC-AUD-0600/0601 and CC-CRAWL-0600/0601):
+  - gt: `fuzzlab auto --base-url http://127.0.0.1:5013 --store <db> --ground-truth
+    lab/ground-truth-dvga --points ground-truth --browser --oob --score --authorized`.
+    BASELINE tp=5 fp=0 fn=5 tn=5, 345 requests, 35 s; AFTER tp=8 fp=0 fn=2 tn=5, 403
+    requests, 79 s (the three new findings are timing confirmations: `sleep 2` and
+    `sleep 4` each). The two misses are the `[reach: none]` rows (DVGA-0014 SSRF: the
+    container cannot reach the host-loopback OOB listener; DVGA-0015 file write: no
+    read-back strategy).
+  - crawl: `fuzzlab disco capture --start http://127.0.0.1:5013/ --out <dir> --workers 2
+    --deadline 300 --authorized` (29 states, 2410 exchanges, 61 GraphQL POSTs:
+    getPastes, CreatePaste, ImportPaste) then `fuzzlab auto ... --disco-run <dir>
+    --points crawl --browser --oob --score --authorized` on the same capture: BASELINE
+    tp=1 fp=0 fn=9 tn=5, 454 requests, 63 s; AFTER tp=1 fp=0 fn=9 tn=5, 202 requests,
+    49 s (CC-AUD-0601: the document leaf and Boolean variables are no longer fuzzed).
+    The crawl's ImportPaste carried disco's fill `https://example.com`, so its `path` and
+    `scheme` stay unsendable (FR-AUD-20's sibling refusal, correct); stored XSS is a
+    ground-truth-case check (no crawl point carries it).
+  - Juice Shop regression check (shared audit code changed): `auto --points
+    ground-truth --browser --oob` anonymous, at 2be7a50 and at this change, the lab reset
+    in between: identical, tp=4 fp=0 fn=11 tn=3, 120 requests, 44 s each.
+  - `tests/test_dvga_live.py` with `FUZZLAB_LIVE_EXTERNAL_LABS=1`: 1 passed (71 s).
+- Impact (other components / project): a new loopback lab (127.0.0.1:5013). The labels
+  contract admits `command-injection` / `os_command` (additive enum members; every
+  other ground truth loads unchanged). The disco crawl follows `/difficulty/hard` and
+  `/start_over` (neither is destructive by `core.urls`' tokens): measured, the capture
+  ended in Beginner mode, but the order is not guaranteed -- reset the lab before a
+  scored run (open, below).
+- Risk (level; mitigation or accepted-risk justification): medium. DVGA executes shell
+  commands and writes files by design, inside this container only (capabilities
+  dropped, no-new-privileges, pids/memory limits, loopback publish). The bridge still
+  has egress to IP literals (NFR-LAB-safety "Not yet enforced", as Juice Shop); names do
+  not resolve (`dns: 127.0.0.1`, measured: `curl https://example.com` inside answers
+  "Could not resolve host"), so a crawler's fill of a named URL is not fetched. The admin
+  password in the answer key is DVGA's public default (setup.py; solution 19), not a
+  secret.
+- Open (not built): a write-then-fetch path-traversal strategy (DVGA-0015: `../static/x`
+  is served back); SSRF needs a listener the container can reach; inline-literal
+  placement (no request DVGA's pages send carries an inline string argument: measured
+  in the capture, getPastes inlines only a Boolean); a security-level switch
+  (`/difficulty/hard`) is not a destructive URL; `labctl up --authorized` does not wait
+  for a no-login lab to answer (the live test waits itself).
+- Deliverables:
+  - [x] fixture, pin, answer key checked against DVGA's source and its 22 solutions,
+    issues file, static registration, live test; live runs above — done
+  - [x] FR-LAB-320, FR-LAB-321, ARCHITECTURE, CHANGELOG — done
+
 ### CC-LAB-0317 — Juice Shop measured with every tool at 2edf1b6 (2026-10-19)
 - Change: none to code; a measurement record (the owner asked to run the tools on the
   Juice Shop lab).
