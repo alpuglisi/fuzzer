@@ -32,6 +32,72 @@ Newest first.
 - Effectiveness (assessed 2026-11-20, live): bWAPP with `--mode manual --categories
   path-traversal`: BWAPP-0045 and BWAPP-0046 confirmed, 10 requests, fp 0. The AFTER runs
   of all 11 external labs (CC-LAB-0360) are the regression check: no false positive.
+- Black-box rule (owner, 2026-11-20; checked at the merge with lane NODE): the phase uses no
+  lab-specific name, path or value. Its probes name `/etc` (the FHS directory every Linux
+  has); its control is the directory's bare name; `_ETC_ENTRIES` are base-system files.
+  Independent evidence (`ls -a /etc`, 2026-11-20): this container 21/25 names, `mariadb`
+  (Ubuntu) 21/25, `mysql` (Oracle Linux, RHEL family) 20/25, `mongo` (Ubuntu) 21/25, none
+  of them bWAPP; the threshold is 4. Not measured: an Alpine base (expected fewer names;
+  `passwd`, `group`, `hosts`, `hostname`, `shadow`, `fstab`, `os-release`, `profile` and
+  `motd` are in Alpine's `alpine-baselayout`, by its package listing, not measured here).
+  CC-LAB-0360's two other fixes are lab data and a fixture bootstrap, not detection logic.
+### CC-FUZZ-0611 — The NoSQL operator differential compares a page that echoes the submitted leaf (FR-FUZZ-612, BUG-0610) (2026-11-20)
+- Change: `fuzzlab/oracle/strategies.py`: `_JS_OBJECT_STRING` and
+  `NoSqlOperatorStrategy.confirm.same()` strips its reflected forms with the tokens'.
+- Impact (other components / project): a JSON-leaf NoSQL point whose page re-renders the
+  submitted value is now decided; no other strategy changes.
+- Risk (level; mitigation or accepted-risk justification): low. Soundness is unchanged:
+  a server that stringifies every object answers V and D alike (pinned by a test). The
+  pre-change review gate was not run (F-611).
+- Deliverables:
+  - [x] fix, tests (`tests/test_oracle_strategies_ssjs.py`), ERROR_LOG, BUG-0610, PA-0610 — done
+- Effectiveness (assessed 2026-11-20): NodeGoat NGOAT-0014 confirmed live (operator
+  differential, 7 rounds); secDevLabs Mongection with one registered account: tp=2 fp=0
+  fn=0 tn=2, 48 requests on both 2be7a50 and this change (no regression).
+
+### CC-FUZZ-0610 — Server-side JavaScript injection: a non-destructive evaluation marker and boolean differential (FR-FUZZ-610, FR-FUZZ-611) (2026-11-20)
+- Change: `fuzzlab/oracle/strategies.py` (appended at the end; `default_strategies` and
+  `_CATEGORY_TO_CLASS` gain one entry each): `SsjsEvaluationMarkerStrategy`,
+  `SsjsBooleanDifferentialStrategy`, `_SSJS_FAMILIES` and helpers; category
+  `server-side-javascript-injection`, class `ssjs`. `tests/test_oracle_comparable_controls.py`
+  classifies both (`CONTROL_READING`).
+- Measurements before design (live, 2026-11-20, CLAUDE.md item 8): NodeGoat's
+  contributions `eval` renders `Math.abs(-4817)/1000` as `4.817 %` (only for 0..30, all
+  three fields numbers); its allocations `$where` answers 500 (no allocations) for
+  `98765` and `98765+'||Math.abs(-3)==4&&'+98765`, 200 with all three users for the
+  `==3` twin, 500 for the unquoted and double-quoted families; six identical true-branch
+  requests listed the users in three different orders (so the families compare by
+  length, F-610). Juice Shop's crash (ERROR_LOG 2026-10-19) is an uncaught ReferenceError
+  in an in-process `$where`: hence every probe is valid JavaScript in every context, and
+  names nothing but `Math.abs` (a Node check runs each probe in four contexts:
+  `tests/test_oracle_strategies_ssjs.py::test_every_probe_is_valid_javascript_in_every_context_by_node`).
+- Impact (other components / project): AUD (`R-SSJS`, CC-AUD-0610) nominates the category
+  on every query, body, JSON and path point, so a run whose categories include it (an
+  automatic run without an answer key, or a key with `ssjs` positives) spends about 9
+  requests per point whose screens all fail, 1 more for the marker: NodeGoat's
+  ground-truth run went from 45 to 244 requests (PERF lane, take note). A run derived from
+  an answer key without `ssjs` positives (D14) never runs them. CORE (`runmode`,
+  CC-CORE-0605); LAB (the class in the labels schema, CC-LAB-0331).
+- Risk (level; mitigation or accepted-risk justification): medium for false positives,
+  mitigated: the differential runs in the shared engine (`ENGINE_BOUND` per family, the
+  noise test confirms nothing in 200 draws); the marker needs two results, each in the
+  answer to its own probe, with the expression's reflections stripped (a parsing and a
+  reflecting fake confirm nothing). Destructiveness: none by construction (see above).
+  The pre-change review gate was not run (F-611).
+- Deliverables:
+  - [x] strategies, registration, tests (21 in `tests/test_oracle_strategies_ssjs.py`) — done
+  - [x] live NodeGoat runs (CC-LAB-0331) and Juice Shop (CC-LAB-0332) — done
+- Effectiveness (assessed 2026-11-20): NodeGoat NGOAT-0001..0004 confirmed in both the
+  ground-truth and the crawl run, fp=0 on its negatives; Juice Shop's `$where` route
+  confirmed without a crash and 0 findings on its other 8 points.
+  `scripts/verify_change.py --base 2be7a50` on e19f6fc: 193 files, 5970 passed, 14
+  failed, 9 skipped, 156 xfailed. Root-caused, none from this change: 9
+  `tests/test_labgen_*::test_cli_check_passes_end_to_end*` failed because the container
+  had no `gitleaks` (the labgen check's secret-scanner gate; installed, the nine pass);
+  5 in `tests/test_navigation_aborts.py` fail identically on untouched 2be7a50 in this
+  container (Chromium 157 from Playwright 1.63, where the expectations were measured on
+  Chromium 141: a navigation to an empty answer does not raise). The final commit's
+  harness is in the lane report.
 
 ### CC-FUZZ-0117 — M6's navigations settle a failure on the error page's load (BUG-0561) (2026-10-23)
 - Change: none in `fuzzlab/tools/browserexec.py` or the oracle. The executor's navigations go through SP-01, which now waits for a failed navigation's error page to load, not only to commit, before it raises (CC-CRAWL-0065).

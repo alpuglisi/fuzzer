@@ -3022,6 +3022,22 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
   3. **A browser race is called fixed only after a measurement under each kind of host contention the harness meets (CPU and disk I/O), both arms in the same rounds, at a volume that can see the race's rate** (here at least 300 per arm), reported as counts per arm. (from BUG-0561)
   - Enforced by: tests/test_navigation_settle_load.py::test_a_failure_raises_only_after_its_error_page_has_loaded, tests/test_navigation_settle_load.py::test_an_error_page_that_never_loads_expires_within_the_budget_and_is_counted
 
+- **PA-0610** — Strengthens `PA-0133(2)` (from evaluation markers to every confirmer, and
+  from the input as sent to the input as rendered), after BUG-0610: the NoSQL operator
+  differential stripped the reflections of the strings it sent but not the echo of the
+  object it sent (`[object Object]`), so a login that re-renders the submitted name never
+  confirmed.
+  1. **A confirmer's normalisation covers every value it sends as the target renders it:**
+     a string in its reflected forms (`_reflection_forms`), and a non-string JSON value as
+     the server stringifies it (JavaScript's `String(object)`), each stripped from both
+     sides of a comparison.
+  2. **Every differential confirmer has a true-positive fixture whose page echoes the
+     submitted value**, beside the one that proves the normalisation keeps the
+     differential sound (a server that stringifies every object answers V and D alike).
+  3. **The sweep goes by what a confirmer sends, not by the failing page** (`PA-0002`):
+     every confirmer that sends a non-string value is listed with how it judges (BUG-0610
+     "Preventive action"). (from BUG-0610)
+  - Enforced by: tests/test_oracle_strategies_ssjs.py::test_nosql_confirms_a_login_that_echoes_the_submitted_leaf, tests/test_oracle_strategies_ssjs.py::test_nosql_still_refuses_a_server_that_stringifies_every_object
 - **PA-0640** — Strengthens `PA-0042` (verify live through fuzzlab's real scoring) from a newly mapped class to every external lab's answer key, and `PA-0311(1)` from negatives to the reach tags of positives, after BUG-0640: copy-n-paste, mongection and comment-killer positives were tagged `[reach: gt]` from hand-made requests (every field sent, accounts created by hand, a store URL known), and no scored run ever matched them; PA-0042 fired only when a class was first mapped and was enforced by nothing.
   1. **A reach tag states what a scored run measured, not what a hand-made request showed.** A `[reach: gt]` (or `crawl,gt`) positive in an external lab's answer key is backed by a recorded `fuzzlab auto --points ground-truth` run that matched it, in `docs/components/01-target-lab/external-lab-scores.json` (commit, command, counts, matched ids, every missed positive with its reason).
   2. **A miss of a gt-tagged positive is either fixed or declared `open: <cause>`** in that record, in the same change that records the run; a lab's fixture provides what its flaw needs from a fresh `up` (an account, a seed), since a run starts from a fresh lab.

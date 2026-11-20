@@ -1733,6 +1733,11 @@ class AccessControlIdorStrategy(ConfirmationStrategy):
                        {"probe_a": a.text[:120], "probe_b": b.text[:120]})
 
 
+#: How a JavaScript server renders an object it was sent (``String({...})``): the echo
+#: of a NoSQL operator leaf in a form value or a message (BUG-0610).
+_JS_OBJECT_STRING = "[object Object]"
+
+
 class NoSqlOperatorStrategy(ConfirmationStrategy):
     """NoSQL operator injection (FR-FUZZ-54): a JSON leaf that reaches a document
     query unchanged (MongoDB / Mongoose ``find({email: <leaf>})``) takes a JSON
@@ -1793,8 +1798,10 @@ class NoSqlOperatorStrategy(ConfirmationStrategy):
                                   location="body", content_type=jsonbody.ENCTYPE)
 
         def same(a: Probe, b: Probe) -> bool:
-            forms = sorted({f for t in sent for f in _reflection_forms(t)}, key=len,
-                           reverse=True)
+            # an operator leaf echoed back is JavaScript's String(object): it is the
+            # sent value's reflection as the B token's echo is (BUG-0610)
+            forms = sorted({f for t in [*sent, _JS_OBJECT_STRING]
+                            for f in _reflection_forms(t)}, key=len, reverse=True)
             return a.status == b.status and \
                 _strip_forms(a.text or "", forms) == _strip_forms(b.text or "", forms)
 
@@ -2986,7 +2993,8 @@ def default_strategies(browser: BrowserExecutor | None = None,
             PriceTrustDifferentialStrategy(),
             HttpHeaderInjectionCrlfStrategy(),
             PathTraversalFsPathReadStrategy(),
-            GreyboxConfirmationStrategy(coverage, dbfault)]
+            GreyboxConfirmationStrategy(coverage, dbfault),
+            SsjsEvaluationMarkerStrategy(), SsjsBooleanDifferentialStrategy()]
 
 
 # Reference-style category -> the oracle vuln_class we have a strategy for.
@@ -3016,8 +3024,184 @@ _CATEGORY_TO_CLASS = {
     "unrestricted-file-upload": "unrestricted_file_upload",
     "http-header-injection": "http_header_injection",
     "path-traversal": "path_traversal",
+    "server-side-javascript-injection": "ssjs",
 }
 
 
 def category_to_oracle_class(category: str) -> str | None:
     return _CATEGORY_TO_CLASS.get(category)
+
+
+# --- server-side JavaScript injection (FR-FUZZ-610..612, CC-FUZZ-0610) -----------------
+#: Every probe below is a valid JavaScript expression in an unquoted, a single-quoted
+#: and a double-quoted context alike (and plain text in a template literal), so a sink
+#: that evaluates it where it lands -- Juice Shop's in-process ``$where``, which kills
+#: Node on an uncaught ReferenceError or SyntaxError (ERROR_LOG 2026-10-19) -- never
+#: throws on one. No probe loops, sleeps, exits, allocates, requires a module or names
+#: anything but ``Math.abs``: a computed marker or a boolean, never a side effect.
+
+def _ssjs_number() -> str:
+    """A base value: a five-digit literal (a valid expression everywhere; in a quoted
+    context a numeric string, compared numerically by ``>`` / ``==``)."""
+    return str(secrets.randbelow(90000) + 10000)
+
+
+def _ssjs_pair() -> tuple[int, int]:
+    """``(k, j)``: two different two-digit numbers. ``Math.abs(-k)==j`` is false,
+    ``Math.abs(-k)==k`` true, and the two probes have the same length."""
+    k = secrets.randbelow(90) + 10
+    j = secrets.randbelow(89) + 10
+    return k, (j + 1 if j >= k else j)
+
+
+def _ssjs_keep(quote: str) -> Callable[[str], str]:
+    """V: the false condition. Unquoted: ``b||Math.abs(-k)==j``; quoted (``'``/``"``):
+    ``b+'||Math.abs(-k)==j&&'+b``, which closes the app's string, ORs the condition
+    and reopens it; unquoted it is a number plus a string plus a number."""
+    def keep(base: str) -> str:
+        k, j = _ssjs_pair()
+        cond = f"Math.abs(-{k})=={j}"
+        return f"{base}||{cond}" if not quote else f"{base}+{quote}||{cond}&&{quote}+{base}"
+    return keep
+
+
+def _ssjs_disc(quote: str) -> Callable[[str], str]:
+    """D: the same shape with the true condition ``Math.abs(-k)==k``."""
+    def disc(base: str) -> str:
+        k, _j = _ssjs_pair()
+        cond = f"Math.abs(-{k})=={k}"
+        return f"{base}||{cond}" if not quote else f"{base}+{quote}||{cond}&&{quote}+{base}"
+    return disc
+
+
+#: Tried in this order; the first to confirm wins. Unquoted first: in a quoted context
+#: its probes are inert strings. Compared by length (``exact=False``, `_similar`), not
+#: text: a ``$where`` that matches several documents lists them in the order their
+#: lookups finish -- NodeGoat's allocations page showed its three users in three
+#: different orders over six identical requests (measured 2026-11-20, CC-FUZZ-0610).
+_SSJS_FAMILIES = (
+    _Family("js-unquoted", base=_ssjs_number, keep=_ssjs_keep(""), disc=_ssjs_disc(""),
+            exact=False, strings=False),
+    _Family("js-single-quoted", base=_ssjs_number, keep=_ssjs_keep("'"),
+            disc=_ssjs_disc("'"), exact=False, strings=True),
+    _Family("js-double-quoted", base=_ssjs_number, keep=_ssjs_keep('"'),
+            disc=_ssjs_disc('"'), exact=False, strings=True),
+)
+
+
+class SsjsBooleanDifferentialStrategy(ConfirmationStrategy):
+    """Server-side JavaScript injection, boolean (FR-FUZZ-611): a JavaScript condition
+    the server evaluates -- a MongoDB ``$where`` built from the value (NodeGoat's
+    allocations ``threshold``, Juice Shop's product reviews) -- changes the answer.
+
+    Three families, each run by the bracketed, replicated engine
+    (`ConfirmationStrategy._differential`): base ``b`` (five digits); V adds
+    ``Math.abs(-k)==j`` (false), D ``Math.abs(-k)==k`` (true), joined with ``||``
+    unquoted, or as ``b+'||…&&'+b`` to leave and re-enter a single- or double-quoted
+    string. V and D have the same characters but the digits, the same length and the
+    same operators: only an evaluator of JavaScript's ``Math.abs`` tells them apart. A
+    SQL, template or shell sink errors (or stores the text) alike for both; a sink that
+    takes the value as data answers both like B.
+
+    Non-destructive by construction (CC-LAB-0317's open item): every probe is a valid
+    expression in all three contexts (see the section comment), so no family's probe
+    throws where another family's context holds.
+
+    **Bound:** P[confirm] <= ``ENGINE_BOUND`` per family for any probe-independent
+    response sequence. **Cost:** 3 requests per family whose screen fails (9 for a
+    candidate that confirms nothing); ``HARD_CAP`` and an inconclusive verdict as
+    `SqliBooleanStrategy`'s. Quoted families are skipped on a raw whole-body point."""
+    vuln_class = "ssjs"
+    mechanism = "js-boolean-differential"
+    category = "server-side-javascript-injection"
+    _FAMILIES = _SSJS_FAMILIES
+    HARD_CAP = 10 * len(_SSJS_FAMILIES)
+
+    def confirm(self, candidate, sender, rng=None):
+        rng = rng if rng is not None else _engine_rng()
+        spent, exhausted = 0, []
+        for family in self._FAMILIES:
+            if family.strings and candidate.content_type:
+                continue
+            if self.HARD_CAP - spent < FAMILY_COST:
+                exhausted.append(family.name)
+                continue
+            evidence, cost = self._differential(sender, candidate, family, rng=rng)
+            spent += cost
+            if evidence is not None:
+                evidence.pop("_d_texts")
+                evidence.pop("_b0_text")
+                evidence["requests"] = spent
+                return Verdict(True, self.vuln_class, self.mechanism, evidence)
+        if exhausted:
+            return Verdict(False, self.vuln_class, self.mechanism,
+                           {"cap_exhausted": True, "families_not_started": exhausted,
+                            "requests": spent}, inconclusive=True)
+        return None
+
+
+def _ssjs_shows(text: str, literal: str, result: str) -> bool:
+    """Does ``text`` show ``result`` (a decimal like ``4.817``, not inside a longer
+    number) once every reflected form of the probe's own ``literal`` is removed? An
+    echo of the expression is the sink reflecting input, never its value."""
+    rest = _strip_reflections(text or "", [literal])
+    return re.search(rf"(?<![\d.]){re.escape(result)}(?![\d])", rest) is not None
+
+
+class SsjsEvaluationMarkerStrategy(ConfirmationStrategy):
+    """Server-side JavaScript injection, evaluation marker (FR-FUZZ-610): the value is
+    run as JavaScript (``eval``, ``new Function``, ``vm``) and its result shown --
+    NodeGoat's contributions form ``eval``s each percentage and renders it.
+
+    Probe 1 is ``Math.abs(-n)/1000`` (n in 1001..9999, not a multiple of 10): its
+    result ``n/1000`` (``4.817``) must appear, not inside a longer number, once every
+    reflected form of the expression is removed; then probe 2, with a result absent from
+    response 1, must likewise appear in the response to the probe that computed it
+    (temporal attribution, PA-0090 / BUG-0117's sweep). A small decimal so an app that
+    range-checks the number (NodeGoat: 0..30 %) still shows it; ``Math.abs`` so a SQL,
+    template, Python, PHP or Ruby evaluator raises instead (a JVM scripting engine with
+    ``java.lang.Math`` -- Groovy -- would compute it too: still code evaluation). The
+    expression has no side effect and is valid in every JavaScript context.
+    1 request when unconfirmed, at most 2. Skipped on a raw whole-body point."""
+    vuln_class = "ssjs"
+    mechanism = "js-evaluation-marker"
+    category = "server-side-javascript-injection"
+    MAX_REQUESTS = 2
+
+    @staticmethod
+    def _draw() -> int:
+        while True:
+            n = secrets.randbelow(8999) + 1001
+            if n % 10:
+                return n
+
+    @staticmethod
+    def _value(n: int) -> str:
+        return f"Math.abs(-{n})/1000"
+
+    @staticmethod
+    def _result(n: int) -> str:
+        """JavaScript's (and Python's) shortest decimal for ``n/1000``: three places."""
+        return f"{n // 1000}.{n % 1000:03d}"
+
+    def confirm(self, candidate, sender):
+        if candidate.content_type:
+            return None
+        n1 = self._draw()
+        with trace.role("mutation"):
+            text1 = self._send(sender, candidate, self._value(n1)).text or ""
+        if not _ssjs_shows(text1, self._value(n1), self._result(n1)):
+            return None
+        for _ in range(32):                         # a result absent from response 1
+            n2 = self._draw()
+            if n2 != n1 and not _ssjs_shows(text1, self._value(n1), self._result(n2)):
+                break
+        else:
+            return None                             # a page full of such numbers
+        with trace.role("mutation"):
+            text2 = self._send(sender, candidate, self._value(n2)).text or ""
+        if _ssjs_shows(text2, self._value(n2), self._result(n2)):
+            return Verdict(True, self.vuln_class, self.mechanism,
+                           {"results": [self._result(n1), self._result(n2)],
+                            "payloads": [self._value(n1), self._value(n2)]})
+        return None

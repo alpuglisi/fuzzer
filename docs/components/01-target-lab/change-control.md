@@ -93,9 +93,108 @@ Component code: **LAB**. Entry format and required fields: see
     Testing 153.0.8010.12 with Playwright 1.63; the probes were measured on Chromium
     141.0.7390.37 (BUG-0559). Attributed to that browser drift, not reproduced on 141
     here; reported to the orchestrator, not fixed in this lane (navguard is a hot file).
+- Merge with lane NODE (78a24f2): `nodegoat` joins the record so PA-0640's guard covers
+  it, with lane NODE's recorded AFTER ground-truth run (CC-LAB-0331: tp=12 fp=0 fn=5 tn=7,
+  244 requests, 121 s; its crawl pass tp=12 fp=0, 282 requests), not re-run in this lane;
+  NGOAT-0008 is `open:` (the M6 store step's session, CC-LAB-0331's flag).
 - Effectiveness (assessed 2026-11-20): effective for the two fixed labs (copy-n-paste
   tp 0→2, mongection tp 0→2, fp 0, from a fresh `up`); the guard passes on the record and
   fails on BUG-0640's shape.
+### CC-LAB-0332 — Juice Shop's `$where` route confirmed by the server-side JavaScript strategy, without crashing it (2026-11-20)
+- Change: none to code; a measurement record for CC-LAB-0317's open item.
+- Results (a disposable instance: `FUZZLAB_EXT_PROJECT_SUFFIX=-ssjs JUICE_PORT=3300
+  ./labctl.sh up juice-shop`, torn down after):
+  - By hand: `/rest/products/<v>/reviews` with `98765` and `98765||Math.abs(-3)==4`
+    answered 30 bytes (no review), `98765||Math.abs(-3)==3` 5198 bytes (every review);
+    the quoted-family probes (`98765+'||Math.abs(-3)==3&&'+98765`, its `"` twin) and the
+    marker (`Math.abs(-4817)/1000`) answered 30 bytes: valid JavaScript there, no crash.
+  - `fuzzlab auto --base-url http://127.0.0.1:3300 --ground-truth <scratch key: the one
+    path point /rest/products/{id}/reviews, ssjs positive> --points ground-truth
+    --score --authorized`: tp=1 fp=0, `js-boolean-differential` family `js-unquoted`,
+    22 requests, 1 s.
+  - `fuzzlab auto ... --ground-truth lab/ground-truth-juice-shop --mode manual
+    --categories server-side-javascript-injection`: 8 points probed, 0 findings (no
+    false positive), 41 requests.
+  - The container's `RestartCount` stayed 0 through all three. The scratch key is not
+    committed (adding the route to Juice Shop's answer key is lane ACC's file).
+- Impact (other components / project): none; evidence for FR-FUZZ-611's non-destructive
+  claim.
+- Risk (level; mitigation or accepted-risk justification): none (a record).
+- Deliverables:
+  - [x] runs and this record — done
+- Effectiveness (assessed 2026-11-20): CC-LAB-0317's "a server-side JavaScript / `$where`
+  injection strategy" is closed for this route; SQLi probes of the same route still crash
+  Juice Shop (ERROR_LOG 2026-10-19), outside this change.
+
+### CC-LAB-0331 — The NodeGoat answer key, measured BASELINE and AFTER (FR-LAB-331) (2026-11-20)
+- Change: `lab/ground-truth-nodegoat/` (`labels.json`, `injection-points.json`,
+  `expectedresults.csv`; `.gitignore` tracks its CSV); `fuzzlab/labels/schemas/
+  labels.schema.json` (class `ssjs`). Every case checked against NodeGoat's source at
+  c5cb68a7 and measured live before it was written (the notes cite each measurement).
+  Six `/profile` reflected-XSS cases and the `website` negative were added after the first
+  crawl run found the six fields reflected raw (unlabelled, they scored as false
+  positives); checked by hand, then labelled.
+- Measurements (live, 2026-11-20):
+  - Commands (lab reset before each; scratch keyring `FUZZLAB_KEYRING_PATH`; identities
+    stored with upstream's published passwords): `fuzzlab auto --base-url
+    http://127.0.0.1:3091 --ground-truth lab/ground-truth-nodegoat --points ground-truth
+    --identity nodegoat-user --peer-identity nodegoat-peer --browser --score
+    --authorized`; the crawl pass: `fuzzlab crawl --start http://127.0.0.1:3091/dashboard
+    --engine playwright --identity nodegoat-user --max-depth 3 --workers 4` (13 pages,
+    5 s) then the same `auto` with `--spider-db <crawl.db> --points crawl`. BASELINE ran
+    the tree of 2be7a50 with only the labels-schema enum taking `ssjs` (data, so the key
+    loads); AFTER ran this change.
+  - Answer key: 24 cases, 17 positives, 7 negatives.
+  - BASELINE ground truth: tp=7 fp=0 fn=10 tn=7, 45 requests, 118 s. AFTER: tp=12 fp=0
+    fn=5 tn=7, 244 requests, 121 s (gains NGOAT-0001/0002/0003/0004/0014).
+  - BASELINE crawl: tp=8 fp=0 fn=9 tn=7, 51 requests, 89 s. AFTER: tp=12 fp=0 fn=5
+    tn=7, 282 requests, 94 s (gains NGOAT-0001..0004).
+  - NodeGoat survived every run (`RestartCount` 0, never restarted mid-run).
+  - Remaining false negatives: NGOAT-0005 (IDOR; `[reach: none]`: the page names the
+    account by first and last name, never the username `CrossAccountReplayStrategy`
+    reads); NGOAT-0008 (stored XSS through `/profile`: the M6 store step answered 302,
+    see Open); NGOAT-0009 (crawl only); NGOAT-0011, NGOAT-0016 (`[reach: none]`).
+- Impact (other components / project): FUZZ (the classes scored here); the static
+  ground-truth tests now include `nodegoat`.
+- Risk (level; mitigation or accepted-risk justification): low; data only.
+- Open (not built, flagged): `tools/browserexec.py`'s stored-XSS store step sends its
+  request through `context.request.fetch`, which bypasses the guarded route that adds
+  the session's storage headers, so a session carried by those headers is not on the
+  store request (measured: the store `POST /profile` answered 302 to `/login` while the
+  run's own probes there answered 200). A fix touches the M6 executor and SP-74's
+  session-reach checks: flagged for the orchestrator, not done here. The IDOR owner
+  marker (a display name instead of the username) is a FUZZ/SESS design question.
+- Deliverables:
+  - [x] answer key, live checks, BASELINE and AFTER runs — done
+- Effectiveness (assessed 2026-11-20): the AFTER numbers above.
+
+### CC-LAB-0330 — OWASP NodeGoat as a loopback-only external lab (FR-LAB-330) (2026-11-20)
+- Placement: lane NODE (item NODE), branch `ccr-e5c7c0c6-r9ladz-nodegoat` from 2be7a50.
+- Change: `fuzzlab/lab_fixtures/external.py`: `NODEGOAT_REPO`, `NODEGOAT_COMMIT`
+  (c5cb68a7), `NODEGOAT_TREE_SHA256`, `NODEGOAT_NODE12_IMAGE` (in `PINNED_IMAGES`),
+  `tree_sha256`, `nodegoat_checkout`, `fetch_nodegoat`, `npm_install(production=)`
+  (`--omit=dev`; the default unchanged for secDevLabs), the `LAB_META["nodegoat"]` entry
+  (port 3091, two accounts), `bootstrap_nodegoat`, `nodegoat_account_attributes`, the
+  `fetch` CLI branch; `lab/external/nodegoat/` (`Dockerfile`, `compose.yaml`).
+- Measurements before design (2026-11-20): the app re-seeds admin/user1/user2 at every
+  start; `/login` takes `userName`/`password` form fields with no CSRF token (csurf is
+  commented out upstream) and redirects to `/dashboard`; `/dashboard` 302s anonymously;
+  the dashboard links `/allocations/<own id>`; upstream's development config injects a
+  livereload `<script>` (so `NODE_ENV=production`).
+- Impact (other components / project): none outside LAB; `npm_install`'s new keyword is
+  additive. Lab port 3091 (`NODEGOAT_PORT`) is new: the merge should check it against the
+  other lanes' new labs.
+- Risk (level; mitigation or accepted-risk justification): low. Loopback-only publish
+  (the exposure check passed on every `up`/`reset`); MongoDB on an internal network;
+  capabilities dropped, read-only root, no-new-privileges. The app's bridge has egress
+  (its `/research` page fetches any URL): accepted as for Juice Shop (NFR-LAB-safety
+  "not yet enforced"). The pre-change review gate was not run before implementation
+  (F-611).
+- Deliverables:
+  - [x] fixture, fetch with tree hash, bootstrap with account values, static tests — done
+  - [x] live bring-up (`./labctl.sh up|reset|bootstrap nodegoat --authorized`) — done
+  - [ ] gated live test (`FUZZLAB_LIVE_EXTERNAL_LABS=1`) — todo (as the secDevLabs labs)
+- Effectiveness (assessed 2026-11-20): built, bootstrapped and scored live (CC-LAB-0331).
 
 ### CC-LAB-0317 — Juice Shop measured with every tool at 2edf1b6 (2026-10-19)
 - Change: none to code; a measurement record (the owner asked to run the tools on the

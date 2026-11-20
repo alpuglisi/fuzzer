@@ -235,5 +235,37 @@
    "SDLEC-0001"
   ],
   "missed": {}
+ },
+ "nodegoat": {
+  "commit": "6374526",
+  "command": "fuzzlab auto --store <db> --base-url http://127.0.0.1:3091 --ground-truth lab/ground-truth-nodegoat --points ground-truth --identity nodegoat-user --peer-identity nodegoat-peer --browser --score --authorized",
+  "tp": 12,
+  "fp": 0,
+  "fn": 5,
+  "tn": 7,
+  "requests": 244,
+  "wall_s": 121.0,
+  "matched": [
+   "NGOAT-0001",
+   "NGOAT-0002",
+   "NGOAT-0003",
+   "NGOAT-0004",
+   "NGOAT-0007",
+   "NGOAT-0014",
+   "NGOAT-0018",
+   "NGOAT-0019",
+   "NGOAT-0020",
+   "NGOAT-0021",
+   "NGOAT-0022",
+   "NGOAT-0023"
+  ],
+  "missed": {
+   "NGOAT-0005": "not reachable from ground-truth points: [reach: none - the page names the account by first and last name, never by its username, the owner marker CrossAccountReplayStrategy reads (FR-FUZZ-55); random ids answer 500, so the identity differential has]",
+   "NGOAT-0008": "open: the M6 stored-XSS store step (context.request.fetch) bypasses the guarded route that adds the session's storage headers, so the store POST /profile answered 302 to /login (CC-LAB-0331, flagged by lane NODE)",
+   "NGOAT-0009": "not reachable from ground-truth points: [reach: crawl]",
+   "NGOAT-0011": "not reachable from ground-truth points: [reach: none - marked 0.3.5 with sanitize:true escapes tags; upstream's bypass is a javascript: link the viewer must click, which the stored-XSS strategy does not do]",
+   "NGOAT-0016": "not reachable from ground-truth points: [reach: none - the fixture's front bridge has egress but fuzzlab's OOB listener is loopback-only, unreachable from the container (as Juice Shop's JUICE-0005)]"
+  },
+  "source": "lane NODE's recorded AFTER run (CC-LAB-0331), not re-run by lane ACC; its crawl pass: tp=12 fp=0 fn=5 tn=7, 282 requests, 94 s"
  }
 }

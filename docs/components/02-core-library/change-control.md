@@ -3,6 +3,17 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0605 — `ssjs` maps to its category (FR-CORE-605) (2026-11-20)
+- Change: `fuzzlab/core/runmode.py` (`_VULN_TO_CATEGORY["ssjs"]`).
+- Impact (other components / project): an answer key's `ssjs` positives select the
+  category (D14) and score its findings (LAB, FUZZ).
+- Risk (level; mitigation or accepted-risk justification): low. The pre-change review
+  gate was not run (F-611).
+- Deliverables:
+  - [x] mapping; covered by `tests/test_oracle_strategies_ssjs.py` and the external-lab
+    static tests (scoreable classes) — done
+- Effectiveness (assessed 2026-11-20): the NodeGoat runs derived and scored the category.
+
 ### CC-CORE-0076 — A secret in a URL is redacted wherever it sits: one walk over nested URLs, query strings, `;` pairs and path parameters (FR-CORE-537, BUG-0556) (2026-10-22)
 - Placement: pre-assigned to lane REDACTURL (item GAP-VALUES, audit Gap 5), base
   7393c90, with CC-AUD-0059 (the importer's callers). PA-0541: implemented first, no
