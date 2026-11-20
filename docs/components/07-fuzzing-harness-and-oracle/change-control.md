@@ -29,8 +29,11 @@ Newest first.
   animation-frame loop and a timer chain, the shadow run on the labs.
 - Deliverables:
   - [x] code, tests, SP-105, FR-FUZZ-650..652, ARCHITECTURE — done
-  - [ ] BEFORE/AFTER on the labs (tp/fp/fn/tn identical) — in progress
-- Effectiveness: pending (AFTER runs).
+  - [x] BEFORE/AFTER on the labs (tp/fp/fn/tn identical) — done (CC-LAB-0371)
+- Effectiveness (assessed 2026-11-20): met. On ten lab configurations tp/fp/fn/tn and
+  the matched case ids were identical BEFORE and AFTER; wall time 620.9 -> 198.7 s
+  (bWAPP gt), 842.0 -> 391.4 s (bWAPP crawl), 43.7 -> 24.6 s (Juice Shop gt), 28.4 ->
+  7.9 s (SSType gt), 28.5 -> 7.9 s (CopyNPaste crawl); requests unchanged (CC-LAB-0371).
 
 ### CC-FUZZ-0117 — M6's navigations settle a failure on the error page's load (BUG-0561) (2026-10-23)
 - Change: none in `fuzzlab/tools/browserexec.py` or the oracle. The executor's navigations go through SP-01, which now waits for a failed navigation's error page to load, not only to commit, before it raises (CC-CRAWL-0065).

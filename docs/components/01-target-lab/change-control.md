@@ -3,6 +3,57 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0371 — Lane PERF: BEFORE and AFTER on five external labs (2026-11-20)
+- Change: none to code; the measurement record of CC-FUZZ-0650 (FR-FUZZ-650).
+- How (this container, docker, sequentially, nothing else running beside a timed
+  run): each lab up with `lab/labctl.sh up <lab> --authorized`; spider databases made
+  once and reused by every run (`crawl --engine playwright --no-reveal --db ...`:
+  Juice Shop `--start http://127.0.0.1:3000/#/login --max-depth 0 --submit-spa-forms
+  login`; bWAPP `--start http://127.0.0.1:8092/bWAPP/portal.php --identity bwapp-bee
+  --follow-selector-forms bug`; SSType, CopyNPaste, Mongection from `/`, anonymous);
+  then `python scripts/measure_scan_perf.py --authorized --store <fresh> --lab <lab>
+  --points <gt|crawl> [--spider-db ...] -- --browser` (Juice Shop adds `--oob`;
+  bWAPP gt `--base-url http://127.0.0.1:8092`, bWAPP crawl `--base-url
+  http://127.0.0.1:8092/bWAPP/ ... --header-points User-Agent,Referer,bWAPP`).
+  BEFORE ran tree 2be7a50 (a separate worktree, F-650), AFTER the commit of
+  CC-FUZZ-0650. Labs with an identity ran as it (`juice-user`, `bwapp-bee`).
+- Results (tp/fp/fn/tn identical BEFORE and AFTER for every row, with the same
+  matched case ids and no false alarm; BEFORE / AFTER):
+
+    | lab, points | tp/fp/fn/tn | requests | requests per finding | wall s | M6 browser s |
+    |---|---|---|---|---|---|
+    | Juice Shop gt | 5/0/10/3 | 150 / 150 | 30.0 / 30.0 | 43.7 / 24.6 | 35.4 / 15.4 |
+    | Juice Shop crawl | 1/0/14/3 | 69 / 69 | 69.0 / 69.0 | 36.6 / 37.6 | 30.5 / 31.0 |
+    | bWAPP gt | 21/0/34/3 | 888 / 885 | 42.286 / 42.143 | 620.9 / 198.7 | 600.3 / 175.4 |
+    | bWAPP crawl | 46/0/9/3 | 11367 / 11367 | 247.109 / 247.109 | 842.0 / 391.4 | 659.3 / 195.2 |
+    | SSType gt | 1/0/1/2 | 22 / 22 | 22.0 / 22.0 | 28.4 / 7.9 | 28.2 / 7.8 |
+    | SSType crawl | 0/0/2/2 | 0 / 0 | None / None | 0.1 / 0.1 | 0.0 / 0.0 |
+    | CopyNPaste gt | 0/0/3/1 | 67 / 67 | None / None | 0.2 / 0.2 | 0.0 / 0.0 |
+    | CopyNPaste crawl | 0/0/3/1 | 23 / 23 | None / None | 28.5 / 7.9 | 28.4 / 7.7 |
+    | Mongection gt | 0/0/2/2 | 12 / 12 | None / None | 0.2 / 0.1 | 0.0 / 0.0 |
+    | Mongection crawl | 0/0/2/2 | 0 / 0 | None / None | 0.1 / 0.1 | 0.0 / 0.0 |
+
+  bWAPP gt's 888 / 885 requests is run-to-run drift of bWAPP's own answers, not the
+  change: the shadow run (same verdict code as BEFORE, the whole wait kept) sent 11 364
+  on bWAPP crawl against BEFORE's 11 367.
+- Profile (BEFORE, `phases`): the M6 browser was 81-99% of every run that used it:
+  each observation of a payload that does not fire waited `SETTLE_MS` (4 s), plus a
+  driver start (0.31 s) and the launch and navigation; HTTP sends 19 s (bWAPP gt) and
+  141 s (bWAPP crawl, 11 367 requests); fingerprint baseline, audit, session login and
+  store writes under 3 s each. AFTER, bWAPP crawl's remaining time is the browser
+  (195 s, 138 observations: driver start, launch, navigation, the 0.5 s quiet period)
+  and HTTP (154 s).
+- Juice Shop crawl gained nothing: every observation's page opened socket.io's
+  WebSocket, which keeps the whole window (FR-FUZZ-651(4)).
+- Not measured here: Gossip World (its login failed under the session manager while
+  the lab's own bootstrap logged in: `SessionAuthError` at `crawl --identity
+  sdl-gossip-user`), and the other five secDevLabs apps.
+- Deliverables:
+  - [x] BEFORE, shadow, AFTER runs; this record — done
+- Effectiveness (assessed 2026-11-20): met for the measured labs: no detection lost,
+  wall time down 68% (bWAPP gt), 54% (bWAPP crawl), 44% (Juice Shop gt), 72% (SSType
+  gt, CopyNPaste crawl).
+
 ### CC-LAB-0370 — Scan performance probe for the external labs (2026-11-20)
 - Change: `scripts/measure_scan_perf.py` (new; FR-LAB-370). Lane PERF's measurement
   tool: one `fuzzlab auto` run in-process against a running external lab, scored, with
