@@ -57,7 +57,9 @@ class PathTraversalClasspathResourceStrategy(ConfirmationStrategy):
     vuln_class = "path_traversal"
     mechanism = "classpath-resource-marker-differential"
     category = "path-traversal"
-    prg = True                                       # FR-FUZZ-49, as its OS-file sibling
+    # no PRG opt-in (FR-FUZZ-49): the opt-in set is a reviewed list
+    # (tests/test_prg_observation.py::PRG_STRATEGIES), and a resource read answers on its
+    # own request
 
     def confirm(self, candidate, sender):
         for name, marker in CLASSPATH_FILES:
