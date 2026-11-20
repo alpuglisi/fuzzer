@@ -3,6 +3,57 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0650 — The destructive rule refuses state switches: toggle/enable/activate, action-slot state verbs, fused verb-object compounds (FR-CORE-650, BUG-0680, SP-09) (2026-11-20)
+- Placement: lane CRAWLSAFE (item CRAWLSAFE), base d492b9d, branch
+  `ccr-e5c7c0c6-r9ladz-crawlsafe`. Touches SP-09's owner `fuzzlab/core/urls.py` only;
+  no caller changes (sweep below).
+- Change (`fuzzlab/core/urls.py`):
+  - `DESTRUCTIVE_TOKENS` gains `enable`, `activate`, `toggle`.
+  - New `ACTION_SLOTS` (`action op do cmd task mode method func`, the slots
+    `DESTRUCTIVE_PAIRS` already used) and `SLOT_VERBS` (`update upgrade toggle enable
+    activate resume stop switch`); `DESTRUCTIVE_PAIRS` holds every (slot, verb) pair.
+  - New `COMPOUND_STEMS` (`reset restart delete remove destroy toggle logout signout
+    uninstall purge`): `_destructive_tokens` refuses a token that starts with a stem
+    and goes on, unless the remainder is an inflection (`s d ed es ing er ers able al
+    ion`, with or without a doubled consonant). Reason string `"<stem> in <token>"`.
+  - SP-10 (`text_destructive_reason`) reads the same tokens, so an "Enable" button or a
+    `toggleHints` control name is refused as a text too (PA-0003).
+- Measurement (§7; corpus `tests/data/state_change_corpus/`, built by this lane's corpus
+  subagent from upstream sources by commit/branch and line: DVWA, bWAPP, WebGoat, XVWA,
+  Juice Shop, Hackazon, Gruyere, WordPress, Jenkins, Drupal, Grafana, Gitea, Spring,
+  phpMyAdmin, Security Shepherd, and crawlergo/wapiti/katana/ZAP default exclusions;
+  benign: 40 cited pages, 15 illustrative shapes, 147 SecLists paths; plus 505
+  generated-lab cell routes and ground-truth points). d492b9d → this change:
+  - cited state-changing GET links outside the labs refused 8/33 → 18/33;
+  - POST word evidence 7/24 → 15/24; tool default exclusions 4/4 → 4/4;
+  - the bug's lab links (Mutillidae, DVGA) 1/7 → 4/7 (the three toggles);
+  - benign cited/illustrative links refused 8/55 → 13/55 (documentation pages, a
+    render-only `/user/activate`); SecLists paths 2/147 → 13/147;
+  - lab cells and ground-truth points refused 0/505 → 0/505; test-fixture literals
+    82/2616 → 83/2616 (the new one: fuzzlab's own `/api/proxy/matchreplace/0/toggle`).
+  Shapes rejected by measurement (black-box rule): `difficulty`/`level`/`mode`/
+  `security` noun plus value (DVGA only; refused wapiti's `form.php?level=1` and other
+  benign links), `start over` (DVGA only), flag values (refused 58 ordinary test URLs),
+  bare `switch`/`resume`/`change` (refuse generated-lab POST cells), `lang`/`locale`/
+  `theme` (per-session, 3 sources but collides with ordinary pages).
+- Sweep (CLAUDE.md item 7, every caller of SP-09/SP-10; this lane's sweep subagent):
+  callers pass the full URL or text to the owner; see CC-CRAWL-0650 for the crawler's
+  consumers. No parallel link word list exists.
+- Impact: CRAWL (every crawl gate), AUD (static fetch), FUZZ (send gate `check_send_url`
+  refuses the new URLs unless explicit), SESS (login discovery hop check), PROXY (store
+  importer's `request_refusal`). bWAPP's `sqli_9.php?action=stop` moves from residual
+  to refused in `tests/test_destructive_routes_external_labs.py`.
+- Risk: low-medium. Over-refusal costs coverage only; measured 0/505 lab points lost.
+  A target whose content pages carry `enable`/`activate`/`toggle` or a fused verb is
+  skipped (accepted, as for `reset`). Residuals stated in FR-CORE-650.
+- Deliverables:
+  - [x] owner change — done
+  - [x] `tests/test_state_switch_urls.py` (corpus verdicts, pinned residuals and false
+    refusals, two-source guard with synthetic offender) — done
+  - [x] SHARED_PRIMITIVES SP-09 row, FR-CORE-650, BUG-0680, PA-0680/0681 — done
+- Effectiveness (assessed 2026-11-20): live crawls (CC-CRAWL-0650): Mutillidae toggle
+  requests received 100 → 0 (spider) and 91 → 0 (disco); DVGA unchanged (stated residual).
+
 ### CC-CORE-0076 — A secret in a URL is redacted wherever it sits: one walk over nested URLs, query strings, `;` pairs and path parameters (FR-CORE-537, BUG-0556) (2026-10-22)
 - Placement: pre-assigned to lane REDACTURL (item GAP-VALUES, audit Gap 5), base
   7393c90, with CC-AUD-0059 (the importer's callers). PA-0541: implemented first, no
