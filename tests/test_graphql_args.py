@@ -185,15 +185,36 @@ def test_a_rest_body_with_a_query_field_is_untouched():
     assert "R-SQLI-PARAM" in _fired(pt)
 
 
+def is_graphql_request(point) -> bool:
+    """A ground-truth point whose JSON body is a GraphQL request: its ``query`` parses
+    as an executable GraphQL document (the property, not the lab, BUG-0720)."""
+    from fuzzlab.tools.apiop import graphql_variable_types
+    body = getattr(point, "json_body", None)
+    doc = body.get("query") if isinstance(body, dict) else None
+    return isinstance(doc, str) and graphql_variable_types(
+        doc, body.get("operationName")) is not None
+
+
+def test_the_graphql_request_test_is_a_property_of_the_body():
+    gql = contract.InjectionPoint("/x", "POST", "variables.id", "body",
+                                  json_body={"query": "query Q($id: String) { a(id: $id) }",
+                                             "variables": {"id": "1"}})
+    rest = contract.InjectionPoint("/x", "POST", "query", "body",
+                                   json_body={"query": "shoes", "page": "1"})
+    assert is_graphql_request(gql) and not is_graphql_request(rest)
+
+
 def test_no_other_labs_ground_truth_point_has_a_graphql_context():
     """Nothing changes for a body that is not a GraphQL request: every ground-truth
-    point of every other lab (as the harness builds it) has no binding and is a data
-    point, so its rule outcomes are what they were."""
+    point of every lab whose body is not a GraphQL request (as the harness builds it)
+    has no binding and is a data point, so its rule outcomes are what they were.
+    GraphQL requests are told by their body, never by which lab carries them: a second
+    lab's GraphQL points broke a list that named one (BUG-0720)."""
     seen = 0
     for gt in sorted((REPO / "lab").glob("ground-truth*/injection-points.json")):
-        if gt.parent == DVGA_GT:
-            continue
         for p in contract.load_injection_points(gt.parent):
+            if is_graphql_request(p):
+                continue
             pt = _gt_point(p)
             assert graphql_context.bindings(pt) == (), (gt.parent.name, p.param)
             assert graphql_context.not_a_data_point(pt) is None, (gt.parent.name, p.param)

@@ -1,0 +1,31 @@
+# fuzzlab expected results (Benchmark-style) for OWASP RailsGoat at f5951f13 (external
+# lab fixture lab/external/railsgoat; HELD OUT: lab/HOLDOUT.md). Derived from labels.json;
+# the loader cross-checks the two. Single-location cases. Paths name the identity's own
+# user id (6, ken@metacorp.com, the railsgoat-user seed account).
+case_id,url,method,param,location,category,expected_vulnerable,primary_endpoint,primary_role,related_endpoints,flow_variant
+RGOAT-0001,/users/6,POST,user[id],body,sqli,true,/users/6,sink,,direct
+RGOAT-0002,/users/6,POST,user[first_name],body,sqli,false,/users/6,sink,,direct
+RGOAT-0003,/users/6,POST,user[email],body,sqli,false,/users/6,sink,,direct
+RGOAT-0004,/users/6,POST,user[first_name],body,xss-stored,true,/users/6,sink,,direct
+RGOAT-0005,/users/6,POST,user[last_name],body,xss-stored,false,/users/6,sink,,direct
+RGOAT-0006,/users/6,POST,user[admin],body,mass_assignment,true,/users/6,sink,,direct
+RGOAT-0007,/users,POST,user[admin],body,mass_assignment,true,/users,sink,,direct
+RGOAT-0008,/schedule.json,POST,schedule[user_id],body,mass_assignment,false,/schedule.json,sink,,direct
+RGOAT-0009,/upload,POST,benefits[upload],body,command-injection,true,/upload,sink,,direct
+RGOAT-0010,/upload,POST,benefits[backup],body,command-injection,false,/upload,sink,,direct
+RGOAT-0011,/download,GET,name,query,path_traversal,true,/download,sink,,direct
+RGOAT-0012,/download,GET,type,query,path_traversal,false,/download,sink,,direct
+RGOAT-0013,/dashboard/home,GET,font,query,xss-reflected,true,/dashboard/home,sink,,direct
+RGOAT-0014,/forgot_password,POST,email,body,xss-stored,true,/forgot_password,sink,,direct
+RGOAT-0015,/login,GET,lang,fragment,xss-dom,true,/login,sink,,direct
+RGOAT-0016,/login,GET,url,query,xss-reflected,false,/login,sink,,direct
+RGOAT-0017,/login,GET,url,query,open_redirect,false,/login,sink,,direct
+RGOAT-0018,/sessions,POST,url,body,open_redirect,true,/sessions,sink,,direct
+RGOAT-0019,/sessions,POST,email,body,sqli,false,/sessions,sink,,direct
+RGOAT-0020,/sessions,POST,email,body,xss-reflected,false,/sessions,sink,,direct
+RGOAT-0021,/users/6/messages,POST,message[message],body,xss-stored,false,/users/6/messages,sink,,direct
+RGOAT-0022,/users/{user_id}/work_info,GET,user_id,path,access_control,true,/users/{user_id}/work_info,sink,,direct
+RGOAT-0023,/users/{user_id}/retirement,GET,user_id,path,access_control,false,/users/{user_id}/retirement,sink,,direct
+RGOAT-0024,/admin/{admin_id}/get_user,GET,admin_id,path,access_control,true,/admin/{admin_id}/get_user,sink,,direct
+RGOAT-0025,/admin/1/analytics,GET,field,query,sqli,true,/admin/1/analytics,sink,,direct
+RGOAT-0026,/admin/1/analytics,GET,ip,query,sqli,false,/admin/1/analytics,sink,,direct

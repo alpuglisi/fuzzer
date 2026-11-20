@@ -255,6 +255,45 @@ NODEGOAT_REPO = "https://github.com/OWASP/NodeGoat"
 NODEGOAT_COMMIT = "c5cb68a7084e4ae7dcc60e6a98768720a81841e8"
 NODEGOAT_TREE_SHA256 = "78ac112b7bd5083bb065086c4642dcd8a3932a8d3052f9405503124c90a70fe3"
 
+#: VAmPI, the Vulnerable API (erev0s/VAmPI, MIT; held out, lab/HOLDOUT.md): upstream's own
+#: Docker Hub build, pinned by digest. Its /vampi tree is byte for byte VAMPI_COMMIT (the
+#: image was created 39 s after that merge, by upstream's docker-image workflow).
+VAMPI_IMAGE = ("docker.io/erev0s/vampi:latest@sha256:"
+               "0a5a224b6e14ae7da6a6ea265178ff71286ff903aec74adee98f660bb0e4ca12")
+VAMPI_COMMIT = "f16052dce83f05847133ec98f01c5193a41de7d8"
+PINNED_IMAGES = PINNED_IMAGES | {VAMPI_IMAGE}
+
+#: DVWS-node (snoopysecurity, MIT), a held-out lab (lab/HOLDOUT.md): Node 22 / Express
+#: REST, SOAP, XML-RPC and GraphQL on one port over MongoDB and MySQL. Checked out at
+#: this commit (its tracked files hashing to DVWS_NODE_TREE_SHA256), its locked npm
+#: packages (backend production set, frontend build set) installed on the host by
+#: ``npm ci``; the image builds its Svelte frontend and compiles bcrypt with no network.
+#: Upstream's Dockerfile says `node:22` (unpinned): pinned here, from Google's mirror.
+#: Its databases reuse SECDEVLABS_MONGO_IMAGE (upstream: mongo:4.0.4) and MYSQL_IMAGE
+#: (upstream: mysql:8).
+DVWS_NODE_REPO = "https://github.com/snoopysecurity/dvws-node"
+DVWS_NODE_COMMIT = "4221c04f132960a0ccca4bf5aa5f3a9f53172778"
+DVWS_NODE_TREE_SHA256 = "64de72b151f76eb598642bd7a0ed1e9f3413684ae725bda9f2e47a69216805f7"
+DVWS_NODE22_IMAGE = ("mirror.gcr.io/library/node:22-bookworm@sha256:"
+                     "e13726ca604184d7a91fcacab1fc09eefd642dc28e79ac34e85540dd93b78cfb")
+PINNED_IMAGES = PINNED_IMAGES | {DVWS_NODE22_IMAGE}
+#: OWASP RailsGoat (MIT), held out (lab/HOLDOUT.md): a Ruby on Rails 8 app. Checked out at
+#: this commit on the host (tracked files hashing to RAILSGOAT_TREE_SHA256); every gem is
+#: downloaded on the host and checked against its Gemfile.lock CHECKSUMS sha256
+#: (`fetch_railsgoat_gems`), and the bundler the lock names against rubygems.org's
+#: published sha256; the image installs them with no network. The base is the Ruby its
+#: .ruby-version and upstream's Dockerfile name (`ruby:3.4.1`), pinned here.
+RAILSGOAT_REPO = "https://github.com/OWASP/railsgoat"
+RAILSGOAT_COMMIT = "f5951f13089d85c979de09e7da3c8c0fb982f94a"
+RAILSGOAT_TREE_SHA256 = "fe89ec5d5dfec1075ae8bf1e72815e3def44d3d488c845b9ec4af184e1590e03"
+RAILSGOAT_RUBY_IMAGE = ("mirror.gcr.io/library/ruby:3.4.1@sha256:"
+                        "f78dc1bba60f85d40d6dc6d6722ca2cda0b5273fc179119badd0f7654d5d1d6e")
+RAILSGOAT_BUNDLER_GEM = ("bundler-4.0.4.gem",
+                         "d0f94b7ba176666896318e419f9a0cc55b698874bffec64cc33537611c61bd16")
+#: the lock's platforms the image (x86_64 glibc) can install
+RAILSGOAT_GEM_PLATFORMS = frozenset({"ruby", "x86_64-linux", "x86_64-linux-gnu"})
+PINNED_IMAGES = PINNED_IMAGES | {RAILSGOAT_RUBY_IMAGE}
+
 
 class ExternalLabError(RuntimeError):
     """A fixture operation failed; the message never carries a secret."""
@@ -322,8 +361,11 @@ LAB_META: dict[str, LabMeta] = {
     "secdevlabs-streaming": LabMeta("secdevlabs-streaming", "frontend", "SDL_STREAMING_PORT",
                                     3078, 80, "/", "/", None, "", False,
                                     fixed_ports=((8080, 8080),)),
+    # one account: the flaw (`$ne` in both login fields) answers an account, so a fresh
+    # lab (its database on tmpfs) needs one to be measurable (BUG-0640, FR-LAB-360)
     "secdevlabs-mongection": LabMeta("secdevlabs-mongection", "server", "SDL_MONGECTION_PORT",
-                                     3077, 10001, "/", "/", None, "", False),
+                                     3077, 10001, "/", "/", "sdl-mongection-user",
+                                     "fuzzlab_user@fuzzlab.lab", True),
     "secdevlabs-amarelo-designs": LabMeta("secdevlabs-amarelo-designs", "app",
                                           "SDL_AMARELO_PORT", 3076, 5000, "/", "/", None,
                                           "", False),
@@ -352,6 +394,21 @@ LAB_META: dict[str, LabMeta] = {
     "vulnerableapp": LabMeta("vulnerableapp", "app", "VAPP_PORT", 3095, 9090,
                              "/VulnerableApp/", "/VulnerableApp/allEndPointJson", None, "",
                              False),
+    # held out (lab/HOLDOUT.md): a JSON REST API with JWT bearer auth; two accounts of our
+    # own, each owning one book: `/books/v1/{book_title}` shows any logged-in caller
+    # another account's book secret
+    "vampi": LabMeta("vampi", "app", "VAMPI_PORT", 3101, 5000, "/", "/", "vampi-user",
+                     "fuzzlab_user", True, (("vampi-peer", "fuzzlab_peer"),)),
+    # held out (lab/HOLDOUT.md): REST, SOAP, XML-RPC and GraphQL on one port; two
+    # accounts of our own, registered by the bootstrap (a JWT from POST /api/v2/login)
+    "dvws-node": LabMeta("dvws-node", "web", "DVWS_PORT", 3102, 8080, "/", "/",
+                         "dvws-user", "fuzzlab_user", True, (("dvws-peer", "fuzzlab_peer"),)),
+    # held out (lab/HOLDOUT.md): two of upstream's seeded accounts (db/seeds.rb, re-seeded
+    # at every start; the app's own /tutorials/credentials page publishes their
+    # passwords): `/users/:user_id/work_info` shows any caller the user_id in the path
+    "railsgoat": LabMeta("railsgoat", "web", "RAILSGOAT_PORT", 3103, 3000, "/", "/login",
+                         "railsgoat-user", "ken@metacorp.com", False,
+                         (("railsgoat-peer", "mike@metacorp.com"),)),
 }
 
 
@@ -734,6 +791,125 @@ def fetch_nodegoat(*, root: Path = EXTERNAL_DIR, repo: str = NODEGOAT_REPO,
         shutil.rmtree(dest)
     shutil.copytree(src, dest, symlinks=True, ignore=shutil.ignore_patterns(".git"))
     npm_install(dest, timeout=timeout, production=True)
+    return dest
+
+
+def fetch_dvws_node(*, root: Path = EXTERNAL_DIR, repo: str = DVWS_NODE_REPO,
+                    commit: str = DVWS_NODE_COMMIT, tree: str = DVWS_NODE_TREE_SHA256,
+                    timeout: float = 900.0) -> Path:
+    """DVWS-node at ``commit`` (its tracked files hashing to ``tree``), copied into
+    ``dvws-node/.cache/app`` without its git directory, with the frontend's locked
+    build packages and the backend's production packages installed on the host
+    (`npm_install`: lockfile integrity, no install scripts). Nothing upstream runs on
+    the host: the image builds the frontend and compiles bcrypt offline."""
+    import shutil
+    src = checkout_pinned(root / "dvws-node" / ".cache" / "src", repo, commit,
+                          timeout=timeout, label="DVWS-node")
+    got = tree_sha256(src)
+    if got != tree:
+        raise ExternalLabError(f"DVWS-node checkout's files hash to {got}, not {tree}")
+    dest = root / "dvws-node" / ".cache" / "app"
+    if dest.exists():
+        shutil.rmtree(dest)
+    shutil.copytree(src, dest, symlinks=True, ignore=shutil.ignore_patterns(".git"))
+    npm_install(dest / "frontend", timeout=timeout)
+    npm_install(dest, timeout=timeout, production=True)
+    return dest
+
+
+_LOCK_CHECKSUM = re.compile(r"^  (\S+) \(([^)\s]+)\)(?: sha256=([0-9a-f]{64}))?\s*$")
+
+
+def gemfile_lock_checksums(text: str, platforms: Iterable[str] = RAILSGOAT_GEM_PLATFORMS
+                           ) -> dict[str, str]:
+    """``{gem file name: sha256}`` from a Gemfile.lock's CHECKSUMS section, for the gems
+    of ``platforms``. Fails closed: no section, or a selected gem without a sha256."""
+    lines = text.splitlines()
+    if "CHECKSUMS" not in lines:
+        raise ExternalLabError("Gemfile.lock has no CHECKSUMS section")
+    platforms = set(platforms)
+    pins: dict[str, str] = {}
+    for line in lines[lines.index("CHECKSUMS") + 1:]:
+        if not line.strip():
+            break
+        m = _LOCK_CHECKSUM.match(line)
+        if m is None:
+            raise ExternalLabError(f"unreadable CHECKSUMS line: {line.strip()[:80]!r}")
+        name, version, digest = m.groups()
+        platform = version.split("-", 1)[1] if "-" in version else "ruby"
+        if platform not in platforms:
+            continue
+        if digest is None:
+            raise ExternalLabError(f"{name} ({version}) has no sha256 in the lock")
+        pins[f"{name}-{version}.gem"] = digest
+    if not pins:
+        raise ExternalLabError("Gemfile.lock's CHECKSUMS names no gem for this platform")
+    return pins
+
+
+def fetch_rubygems(pins: Mapping[str, str], dest: Path, *, timeout: float = 600.0,
+                   get=_pypi_get, prune: bool = True) -> Path:
+    """Download each pinned gem (``{file name: sha256}``) from rubygems.org into ``dest``
+    on the host, so an image installs them offline (``bundle install --local``). The
+    bytes must hash to the pin; a cached file is re-hashed, never trusted; a mismatch
+    leaves nothing behind and raises. ``prune`` removes any other ``.gem`` there."""
+    from concurrent.futures import ThreadPoolExecutor
+    dest.mkdir(parents=True, exist_ok=True)
+    if prune:
+        for stale in dest.glob("*.gem"):
+            if stale.name not in pins:
+                stale.unlink()
+
+    def one(name: str) -> None:
+        path = dest / name
+        if path.is_file() and _sha256_file(path)[0] == pins[name]:
+            return
+        path.unlink(missing_ok=True)
+        try:
+            data = get(f"https://rubygems.org/gems/{name}", timeout)
+        except (OSError, ValueError) as exc:
+            raise ExternalLabError(f"{name}: download failed ({type(exc).__name__})") from None
+        if hashlib.sha256(data).hexdigest() != pins[name]:
+            raise ExternalLabError(f"{name}: sha256 differs from the pin")
+        tmp = dest / (name + ".part")
+        tmp.write_bytes(data)
+        tmp.replace(path)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        for fut in [pool.submit(one, n) for n in sorted(pins)]:
+            fut.result()
+    return dest
+
+
+def railsgoat_checkout(root: Path = EXTERNAL_DIR) -> Path:
+    """The pinned RailsGoat checkout (gitignored)."""
+    return root / "railsgoat" / ".cache" / "src"
+
+
+def fetch_railsgoat(*, root: Path = EXTERNAL_DIR, repo: str = RAILSGOAT_REPO,
+                    commit: str = RAILSGOAT_COMMIT, tree: str = RAILSGOAT_TREE_SHA256,
+                    bundler: tuple[str, str] = RAILSGOAT_BUNDLER_GEM,
+                    timeout: float = 900.0, get=_pypi_get) -> Path:
+    """RailsGoat at ``commit`` (its tracked files hashing to ``tree``), copied into
+    ``railsgoat/.cache/app`` without its git directory, with every gem its lock pins for
+    this platform in ``vendor/cache`` (`fetch_rubygems`, against the lock's CHECKSUMS)
+    and the lock's bundler in ``.cache/bundler``. The image builds from there offline."""
+    import shutil
+    src = checkout_pinned(railsgoat_checkout(root), repo, commit, timeout=timeout,
+                          label="RailsGoat")
+    got = tree_sha256(src)
+    if got != tree:
+        raise ExternalLabError(f"RailsGoat checkout's files hash to {got}, not {tree}")
+    pins = gemfile_lock_checksums((src / "Gemfile.lock").read_text("utf-8"))
+    gems = root / "railsgoat" / ".cache" / "gems"
+    fetch_rubygems(pins, gems, timeout=timeout, get=get)
+    fetch_rubygems(dict([bundler]), root / "railsgoat" / ".cache" / "bundler",
+                   timeout=timeout, get=get)
+    dest = root / "railsgoat" / ".cache" / "app"
+    if dest.exists():
+        shutil.rmtree(dest)
+    shutil.copytree(src, dest, symlinks=True, ignore=shutil.ignore_patterns(".git"))
+    shutil.copytree(gems, dest / "vendor" / "cache")
     return dest
 
 
@@ -1443,6 +1619,42 @@ def ecommerce_account_attributes(client: _LabClient, cred: ResolvedCredential
     return {"user_id": user_id}
 
 
+def _mongection_login(client: _LabClient, email: str, password: str) -> str:
+    return client.request("POST", "/login",
+                          json={"email": email, "password": password}).text or ""
+
+
+def bootstrap_secdevlabs_mongection(client: _LabClient, cred: ResolvedCredential, *,
+                                    deadline: float = 180.0,
+                                    clock: Callable[[], float] = time.monotonic,
+                                    sleep: Callable[[float], None] = time.sleep) -> list[str]:
+    """Register the account through the app's JSON ``/register`` when its JSON ``/login``
+    fails, and verify it by a positive differential: the password answers the welcome
+    page naming the account, a wrong one ``Bad Credentials``. A fresh lab has no
+    account, and its NoSQL injection (an operator in both login fields) answers one:
+    without it the ground truth's positives cannot be observed (BUG-0640)."""
+    meta = LAB_META["secdevlabs-mongection"]
+    wait_ready(client, meta.ready_path, deadline=deadline, clock=clock, sleep=sleep)
+    notes: list[str] = []
+    welcome = "Hello, Welcome Again!"
+    if welcome not in _mongection_login(client, cred.username, cred.password):
+        reg = client.request("POST", "/register", json={
+            "name": "fuzzlab", "email": cred.username, "password": cred.password})
+        if "Welcome to Mongection System" not in (reg.text or ""):
+            raise ExternalLabError(
+                f"mongection registration failed: HTTP {reg.status_code} "
+                f"{(reg.text or '')[:60]!r} (an account of that email with another "
+                f"password? run `./labctl.sh reset secdevlabs-mongection --authorized`)")
+        notes.append("account registered")
+    good = _mongection_login(client, cred.username, cred.password)
+    bad = _mongection_login(client, cred.username, cred.password + "-wrong")
+    if welcome not in good or cred.username not in good or "Bad Credentials" not in bad:
+        raise ExternalLabError("mongection login: the password does not answer the welcome "
+                               "page naming the account, or a wrong one is not refused")
+    notes.append("login verified")
+    return notes
+
+
 def _mutillidae_login(client: _LabClient, cred: ResolvedCredential) -> bool:
     """Mutillidae's own login form: a 302 to ``popUpNotificationCode=AU1`` is a
     success, a 200 a failure. The form page is read first: a login on a request with no
@@ -1597,15 +1809,275 @@ def nodegoat_account_attributes(client: _LabClient, cred: ResolvedCredential
     return {"user_id": ids.pop()}
 
 
+def _vampi_login(client: _LabClient, cred: ResolvedCredential) -> str | None:
+    """The ``auth_token`` of a JSON login, or None (VAmPI answers a failed login 200
+    with ``status: fail``)."""
+    r = client.request("POST", "/users/v1/login",
+                       json={"username": cred.username, "password": cred.password})
+    try:
+        token = r.json().get("auth_token") if r.status_code == 200 else None
+    except (ValueError, AttributeError):
+        return None
+    return token if isinstance(token, str) and token else None
+
+
+def _vampi_book(cred: ResolvedCredential) -> str:
+    """The title of the one book the bootstrap gives each account (titles are unique)."""
+    return f"{cred.username}-book"
+
+
+def bootstrap_vampi(client: _LabClient, cred: ResolvedCredential, *, deadline: float = 180.0,
+                    clock: Callable[[], float] = time.monotonic,
+                    sleep: Callable[[float], None] = time.sleep) -> list[str]:
+    """Create VAmPI's tables when they are missing (``/createdb`` drops and re-creates
+    them, so it is never called on a populated database), log in through the JSON
+    ``/users/v1/login`` -- registering the account (never as admin) through
+    ``/users/v1/register`` when the login fails -- give the account one book of its own,
+    and verify by a positive differential: ``/me`` answers 200 naming the account, not
+    an admin, with ``Authorization: Bearer <auth_token>`` and 401 without it."""
+    wait_ready(client, LAB_META["vampi"].ready_path, deadline=deadline, clock=clock,
+               sleep=sleep)
+    notes: list[str] = []
+    if client.request("GET", "/users/v1").status_code != 200:     # no tables yet
+        if client.request("GET", "/createdb").status_code != 200:
+            raise ExternalLabError("VAmPI /createdb failed")
+        notes.append("database created")
+    token = _vampi_login(client, cred)
+    if token is None:
+        reg = client.request("POST", "/users/v1/register", json={
+            "username": cred.username, "password": cred.password,
+            "email": f"{cred.username}@fuzzlab.lab"})
+        if reg.status_code != 200 or "Successfully registered" not in reg.text:
+            raise ExternalLabError(
+                f"VAmPI registration failed: HTTP {reg.status_code} (an account of that "
+                f"name with another password? run `./labctl.sh reset vampi --authorized`)")
+        notes.append("account registered")
+        token = _vampi_login(client, cred)
+        if token is None:
+            raise ExternalLabError("VAmPI login failed right after registration")
+    auth = {"Authorization": f"Bearer {token}"}
+    authed = client.request("GET", "/me", anonymous=True, headers=auth)
+    anon = client.request("GET", "/me", anonymous=True)
+    try:
+        data = authed.json().get("data") or {}
+    except (ValueError, AttributeError):
+        data = {}
+    # a positive differential: refused anonymously (a client error), 200 with the token
+    if authed.status_code != 200 or not 400 <= anon.status_code < 500 or \
+            data.get("username") != cred.username or data.get("admin") is not False:
+        raise ExternalLabError(f"VAmPI /me: {anon.status_code} anonymous, "
+                               f"{authed.status_code} with the token (want 4xx / 200 naming "
+                               f"the account, not an admin)")
+    notes.append("login verified")
+    title = _vampi_book(cred)
+    book = client.request("POST", "/books/v1", anonymous=True, headers=auth,
+                          json={"book_title": title, "secret": f"secret of {cred.username}"})
+    if book.status_code == 200:
+        notes.append("book added")
+    elif not (book.status_code == 400 and "Already exists" in book.text):
+        raise ExternalLabError(f"VAmPI could not add the account's book: HTTP "
+                               f"{book.status_code}")
+    return notes
+
+
+def vampi_account_attributes(client: _LabClient, cred: ResolvedCredential
+                             ) -> dict[str, str]:
+    """The account's ``username`` (``/users/v1/{username}/...`` names it) and the title
+    of its own book, which ``/books/v1/{book_title}`` answers to its owner with the
+    owner's username."""
+    token = _vampi_login(client, cred)
+    title = _vampi_book(cred)
+    if token is None:
+        raise ExternalLabError("VAmPI login failed")
+    r = client.request("GET", f"/books/v1/{title}", anonymous=True,
+                       headers={"Authorization": f"Bearer {token}"})
+    try:
+        owner = r.json().get("owner") if r.status_code == 200 else None
+    except (ValueError, AttributeError):
+        owner = None
+    if owner != cred.username:
+        raise ExternalLabError("VAmPI does not answer the account's own book to it")
+    return {"book_title": title, "username": cred.username}
+def _dvws_login(client: _LabClient, cred: ResolvedCredential) -> tuple[Any, str | None]:
+    """POST /api/v2/login (JSON); the answer's ``token`` is the Bearer JWT."""
+    r = client.request("POST", "/api/v2/login",
+                       json={"username": cred.username, "password": cred.password})
+    try:
+        token = r.json().get("token") if r.status_code == 200 else None
+    except (ValueError, AttributeError):
+        token = None
+    return r, token if isinstance(token, str) and token else None
+
+
+def bootstrap_dvws_node(client: _LabClient, cred: ResolvedCredential, *,
+                        deadline: float = 180.0, clock: Callable[[], float] = time.monotonic,
+                        sleep: Callable[[float], None] = time.sleep) -> list[str]:
+    """Log in through the JSON login, registering the account through
+    ``POST /api/v2/users`` (username and password only) when the login says it does not
+    exist (upstream's seed drops every account at each start), and verify it by a
+    positive differential: ``/api/v2/notes`` answers 200 with the Bearer token and 401
+    without it."""
+    meta = LAB_META["dvws-node"]
+    wait_ready(client, meta.ready_path, deadline=deadline, clock=clock, sleep=sleep)
+    notes: list[str] = []
+    r, token = _dvws_login(client, cred)
+    if r.status_code == 404:
+        reg = client.request("POST", "/api/v2/users",
+                             json={"username": cred.username, "password": cred.password})
+        if reg.status_code != 201:
+            raise ExternalLabError(f"DVWS-node registration of {cred.username!r} failed: "
+                                   f"HTTP {reg.status_code}")
+        notes.append("account registered")
+        r, token = _dvws_login(client, cred)
+    if token is None:
+        raise ExternalLabError(
+            f"DVWS-node login of {cred.username!r} failed: HTTP {r.status_code} (an account "
+            f"of that name with another password? restart the lab: its seed drops every "
+            f"account)")
+    authed = client.request("GET", "/api/v2/notes", headers={"Authorization": f"Bearer {token}"})
+    anon = client.request("GET", "/api/v2/notes", anonymous=True)
+    # a positive differential: refused anonymously (a client error), 200 with the token
+    if authed.status_code != 200 or not 400 <= anon.status_code < 500:
+        raise ExternalLabError(f"DVWS-node /api/v2/notes: {anon.status_code} anonymous, "
+                               f"{authed.status_code} with the token (want 4xx / 200)")
+    notes.append("login verified")
+    return notes
+
+
+def dvws_node_account_attributes(client: _LabClient, cred: ResolvedCredential
+                                 ) -> dict[str, str]:
+    """The account's ``note_id``: the numeric id of a private note of its own (created
+    once, named after the account), which ``/api/v2/notes/{noteId}`` hands any caller."""
+    _r, token = _dvws_login(client, cred)
+    if token is None:
+        raise ExternalLabError("DVWS-node login failed while reading the account's note")
+    auth = {"Authorization": f"Bearer {token}"}
+    name = f"fuzzlab-{cred.username}"
+    try:
+        mine = [n for n in client.request("GET", "/api/v2/notes", headers=auth).json()
+                if isinstance(n, dict) and n.get("name") == name]
+        if not mine:
+            mine = [client.request("POST", "/api/v2/notes", headers=auth,
+                                   json={"name": name, "body": "fuzzlab account note",
+                                         "type": "secret"}).json()]
+        note_id = mine[0].get("_id")
+    except (ValueError, AttributeError, TypeError):
+        note_id = None
+    if not isinstance(note_id, int):
+        raise ExternalLabError("DVWS-node named no numeric id for the account's note")
+    return {"note_id": str(note_id)}
+_RAILSGOAT_USER_LINK = re.compile(r'href="/users/(\d+)/')
+
+
+def _railsgoat_login(client: _LabClient, cred: ResolvedCredential) -> Any:
+    # upstream's ApplicationController has protect_from_forgery commented out: the
+    # form's authenticity_token is not needed
+    return client.request("POST", "/sessions",
+                          data={"email": cred.username, "password": cred.password})
+
+
+def bootstrap_railsgoat(client: _LabClient, cred: ResolvedCredential, *,
+                        deadline: float = 180.0, clock: Callable[[], float] = time.monotonic,
+                        sleep: Callable[[float], None] = time.sleep) -> list[str]:
+    """Log in through the app's own form (POST /sessions: email, password) and verify it
+    by a positive differential: the login redirects to ``/dashboard/home``, which answers
+    200 with the session cookie and redirects to the login page without it. The accounts
+    are upstream's seed (re-created at every start), never registered here."""
+    meta = LAB_META["railsgoat"]
+    wait_ready(client, meta.ready_path, deadline=deadline, clock=clock, sleep=sleep)
+    r = _railsgoat_login(client, cred)
+    if r.status_code != 302 or not r.headers.get("Location", "").endswith("/dashboard/home"):
+        raise ExternalLabError(
+            f"RailsGoat login of {cred.username!r} failed: HTTP {r.status_code} (the seeded "
+            f"accounts are re-created at every start with db/seeds.rb's passwords)")
+    authed = client.request("GET", "/dashboard/home")
+    anon = client.request("GET", "/dashboard/home", anonymous=True)
+    if authed.status_code != 200 or anon.status_code != 302:
+        raise ExternalLabError(f"RailsGoat /dashboard/home: {anon.status_code} anonymous, "
+                               f"{authed.status_code} logged in (want 302 / 200)")
+    return ["login verified"]
+
+
+def railsgoat_account_attributes(client: _LabClient, cred: ResolvedCredential
+                                 ) -> dict[str, str]:
+    """The account's ``user_id``: the one ``/users/<id>/`` its own dashboard links to."""
+    _railsgoat_login(client, cred)
+    ids = set(_RAILSGOAT_USER_LINK.findall(client.request("GET", "/dashboard/home").text
+                                           or ""))
+    if len(ids) != 1:
+        raise ExternalLabError("RailsGoat's dashboard names no single /users/<id>/ link")
+    return {"user_id": ids.pop()}
+
+
+_RAILSGOAT_CREDENTIAL_ROW = re.compile(
+    r"<tr>\s*<td[^>]*>\s*([^<\s]+@[^<\s]+)\s*</td>\s*<td[^>]*>\s*([^<]+?)\s*</td>")
+
+
+def railsgoat_published_credentials(client: _LabClient) -> dict[str, str]:
+    """``{email: password}`` of the seeded accounts, from the app's own
+    ``/tutorials/credentials`` table (upstream publishes them there, as NodeGoat's README
+    publishes its seed passwords)."""
+    r = client.request("GET", "/tutorials/credentials", anonymous=True)
+    if r.status_code != 200:
+        raise ExternalLabError(f"RailsGoat /tutorials/credentials: HTTP {r.status_code}")
+    return dict(_RAILSGOAT_CREDENTIAL_ROW.findall(r.text or ""))
+
+
+#: Labs whose accounts are the app's own seed (``may_generate_password=False``) and whose
+#: running app publishes their passwords: read from it into the keyring by
+#: `seed_published_credentials` (FR-LAB-425), so an unattended run (the held-out
+#: benchmark, a fresh keyring, no TTY) can bootstrap without a prompt.
+_PUBLISHED_CREDENTIALS = {"railsgoat": railsgoat_published_credentials}
+
+
+def seed_published_credentials(name: str, *, environ: Mapping[str, str] | None = None,
+                               host: str = "127.0.0.1", keyring_store: Any = None,
+                               session_factory: Callable[[], Any] | None = None,
+                               deadline: float = 180.0) -> list[str]:
+    """Store, for each of ``name``'s accounts the keyring has no credential for, the
+    password the running lab publishes for its default username. Returns the identities
+    stored. Refuses a lab that publishes none, and an account it does not list."""
+    meta = lab_meta(name)
+    reader = _PUBLISHED_CREDENTIALS.get(meta.name)
+    if reader is None:
+        raise ExternalLabError(f"{meta.name} publishes no seeded credentials")
+    if keyring_store is None:
+        from fuzzlab.core.credentials import CredentialStore
+        keyring_store = CredentialStore(allow_env=False)
+    client = _LabClient(base_url(meta, environ), session_factory=session_factory)
+    wait_ready(client, meta.ready_path, deadline=deadline)
+    published = None
+    stored = []
+    for account in meta.accounts():
+        if keyring_store.get(host, account.identity) is not None:
+            continue
+        if published is None:
+            published = reader(client)
+        pw = published.get(account.default_username)
+        if not pw:
+            raise ExternalLabError(f"{meta.name} publishes no password for "
+                                   f"{account.default_username!r}")
+        keyring_store.set(host, account.identity, account.default_username, pw)
+        stored.append(account.identity)
+    return stored
+
+
 _BOOTSTRAPS = {"bwapp": bootstrap_bwapp, "juice-shop": bootstrap_juice_shop,
                "mutillidae": bootstrap_mutillidae,
                "secdevlabs-gossip-world": bootstrap_secdevlabs_gossip_world,
                "secdevlabs-ecommerce-api": bootstrap_secdevlabs_ecommerce_api,
-               "nodegoat": bootstrap_nodegoat}
+               "secdevlabs-mongection": bootstrap_secdevlabs_mongection,
+               "nodegoat": bootstrap_nodegoat,
+               "vampi": bootstrap_vampi}
 #: Labs whose accounts have values of their own a ground truth names (`account_value`,
 #: FR-LAB-309): read after the verified login, stored with the credential.
 _ACCOUNT_ATTRIBUTES = {"secdevlabs-ecommerce-api": ecommerce_account_attributes,
-                       "nodegoat": nodegoat_account_attributes}
+                       "nodegoat": nodegoat_account_attributes,
+                       "vampi": vampi_account_attributes}
+_BOOTSTRAPS["dvws-node"] = bootstrap_dvws_node
+_ACCOUNT_ATTRIBUTES["dvws-node"] = dvws_node_account_attributes
+_BOOTSTRAPS["railsgoat"] = bootstrap_railsgoat
+_ACCOUNT_ATTRIBUTES["railsgoat"] = railsgoat_account_attributes
 
 
 def bootstrap(name: str, *, environ: Mapping[str, str] | None = None,
@@ -1672,6 +2144,11 @@ def _build_parser() -> argparse.ArgumentParser:
     s.add_argument("lab")
     s.add_argument("--engine", required=True, choices=["docker", "podman"])
     s.add_argument("--project", required=True)
+    s = sub.add_parser("seed-credentials", help="store the seeded accounts' passwords the "
+                                                "running lab publishes (sends traffic: needs "
+                                                "--authorized)")
+    s.add_argument("lab")
+    s.add_argument("--authorized", action="store_true")
     s = sub.add_parser("bootstrap", help="install / register the lab identity "
                                          "(sends traffic: needs --authorized)")
     s.add_argument("lab")
@@ -1703,6 +2180,16 @@ def main(argv: list[str] | None = None) -> int:
                       f"{NODEGOAT_TREE_SHA256[:12]}) and its verified packages: "
                       f"{fetch_nodegoat()}")
                 return 0
+            if meta.name == "dvws-node":
+                print(f"DVWS-node at {DVWS_NODE_COMMIT[:12]} (files sha256 "
+                      f"{DVWS_NODE_TREE_SHA256[:12]}) and its verified packages: "
+                      f"{fetch_dvws_node()}")
+                return 0
+            if meta.name == "railsgoat":
+                print(f"RailsGoat at {RAILSGOAT_COMMIT[:12]} (files sha256 "
+                      f"{RAILSGOAT_TREE_SHA256[:12]}) and its lock-verified gems: "
+                      f"{fetch_railsgoat()}")
+                return 0
             if meta.name == "security-crawl-maze":
                 print(f"crawl maze source at {CRAWL_MAZE_COMMIT[:12]}: {fetch_crawl_maze()}")
                 print(f"crawl maze wheels verified: {fetch_crawl_maze_wheels()}")
@@ -1725,6 +2212,15 @@ def main(argv: list[str] | None = None) -> int:
             for line in problems:
                 print(f"EXPOSED: {line}", file=sys.stderr)
             return 3 if problems else 0
+        if args.cmd == "seed-credentials":
+            if not args.authorized:
+                print("seed-credentials sends traffic to the lab: pass --authorized",
+                      file=sys.stderr)
+                return 2
+            stored = seed_published_credentials(meta.name)
+            print(f"{meta.name}: published credentials stored for "
+                  f"{', '.join(stored) or 'no account (all already in the keyring)'}")
+            return 0
         if args.cmd == "bootstrap":
             if not args.authorized:
                 print("bootstrap sends traffic to the lab: pass --authorized "

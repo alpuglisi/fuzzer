@@ -1,0 +1,267 @@
+{
+ "version": 1,
+ "target": "dvws_node_4221c04f",
+ "points": [
+  {
+   "url": "/api/v2/passphrase/{username}",
+   "method": "GET",
+   "param": "username",
+   "location": "path",
+   "rendering": "server-json"
+  },
+  {
+   "url": "/api/v2/passphrase",
+   "method": "POST",
+   "param": "passphrase",
+   "location": "body",
+   "rendering": "server",
+   "json_body": {
+    "passphrase": "fuzzlab-pass",
+    "reminder": "fuzzlab-reminder"
+   }
+  },
+  {
+   "url": "/api/v2/passphrase",
+   "method": "POST",
+   "param": "reminder",
+   "location": "body",
+   "rendering": "server",
+   "json_body": {
+    "passphrase": "fuzzlab-pass",
+    "reminder": "fuzzlab-reminder"
+   }
+  },
+  {
+   "url": "/api/v2/notesearch",
+   "method": "POST",
+   "param": "search",
+   "location": "body",
+   "rendering": "server-json",
+   "json_body": {
+    "search": "fuzzlab"
+   }
+  },
+  {
+   "url": "/api/v2/login",
+   "method": "POST",
+   "param": "username",
+   "location": "body",
+   "rendering": "server-json",
+   "json_body": {
+    "username": "fuzzlab",
+    "password": "fuzzlab"
+   }
+  },
+  {
+   "url": "/api/v2/sysinfo/{command}",
+   "method": "GET",
+   "param": "command",
+   "location": "path",
+   "rendering": "server-json"
+  },
+  {
+   "url": "/dvwsuserservice",
+   "method": "POST",
+   "param": "username",
+   "location": "body",
+   "rendering": "server"
+  },
+  {
+   "url": "/api/v2/notes/import/xml",
+   "method": "POST",
+   "param": "xml",
+   "location": "body",
+   "rendering": "server-json",
+   "json_body": {
+    "xml": "<notes><note><name>fuzzlab</name><body>fuzzlab</body><type>secret</type></note></notes>"
+   }
+  },
+  {
+   "url": "/xmlrpc",
+   "method": "POST",
+   "param": "body",
+   "location": "body",
+   "rendering": "server"
+  },
+  {
+   "url": "/api/v2/release/{release}",
+   "method": "GET",
+   "param": "release",
+   "location": "path",
+   "rendering": "server"
+  },
+  {
+   "url": "/api/v2/users/ldap-search",
+   "method": "GET",
+   "param": "user",
+   "location": "query",
+   "rendering": "server-json"
+  },
+  {
+   "url": "/api/v2/users/ldap-search",
+   "method": "POST",
+   "param": "user",
+   "location": "body",
+   "rendering": "server-json",
+   "json_body": {
+    "user": "fuzzlab"
+   }
+  },
+  {
+   "url": "/api/download",
+   "method": "POST",
+   "param": "filename",
+   "location": "body",
+   "rendering": "server",
+   "json_body": {
+    "filename": "fuzzlab.xml"
+   }
+  },
+  {
+   "url": "/api/v2/reports/monthly",
+   "method": "GET",
+   "param": "period",
+   "location": "query",
+   "rendering": "server-json"
+  },
+  {
+   "url": "/api/v2/greeter",
+   "method": "GET",
+   "param": "name",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/api/v2/export",
+   "method": "POST",
+   "param": "data",
+   "location": "body",
+   "rendering": "server",
+   "json_body": {
+    "data": "W10=",
+    "username": "test",
+    "password": "test"
+   }
+  },
+  {
+   "url": "/api/v2/notes/{noteId}",
+   "method": "GET",
+   "param": "noteId",
+   "location": "path",
+   "rendering": "server-json",
+   "account_value": "note_id"
+  },
+  {
+   "url": "/api/v2/users/notification-preferences",
+   "method": "PUT",
+   "param": "admin",
+   "location": "body",
+   "rendering": "server-json",
+   "json_body": {
+    "email": "fuzzlab@fuzzlab.test",
+    "weeklyDigest": false,
+    "admin": false
+   }
+  },
+  {
+   "url": "/api/v2/notes",
+   "method": "POST",
+   "param": "body",
+   "location": "body",
+   "rendering": "server-json",
+   "json_body": {
+    "name": "fuzzlab-public",
+    "body": "fuzzlab",
+    "type": "public"
+   }
+  },
+  {
+   "url": "/graphql",
+   "method": "POST",
+   "param": "variables.reminder",
+   "location": "body",
+   "rendering": "server-json",
+   "json_body": {
+    "query": "query GetPassphrase($reminder: String) { getPassphrase(reminder: $reminder) { passphrase reminder } }",
+    "variables": {
+     "reminder": "default"
+    }
+   }
+  },
+  {
+   "url": "/api/v2/support/tickets",
+   "method": "POST",
+   "param": "subject",
+   "location": "body",
+   "rendering": "server-json",
+   "json_body": {
+    "subject": "fuzzlab",
+    "message": "fuzzlab"
+   }
+  },
+  {
+   "url": "/api/v1/login",
+   "method": "POST",
+   "param": "username",
+   "location": "body",
+   "rendering": "server-json",
+   "json_body": {
+    "username": "fuzzlab"
+   }
+  },
+  {
+   "url": "/graphql",
+   "method": "POST",
+   "param": "variables.username",
+   "location": "body",
+   "rendering": "server-json",
+   "json_body": {
+    "query": "query UserSearch($username: String) { userSearchByUsername(username: $username) { id username admin } }",
+    "variables": {
+     "username": "admin"
+    }
+   }
+  },
+  {
+   "url": "/graphql",
+   "method": "POST",
+   "param": "variables.name",
+   "location": "body",
+   "rendering": "server-json",
+   "json_body": {
+    "query": "query ReadNote($name: String) { readNote(name: $name) { name body user } }",
+    "variables": {
+     "name": "fuzzlab-note"
+    }
+   }
+  },
+  {
+   "url": "/api/v2/users/profile/import/xml",
+   "method": "POST",
+   "param": "xml",
+   "location": "body",
+   "rendering": "server-json",
+   "json_body": {
+    "xml": "<userProfile><username>fuzzlab-nobody</username><bio>fuzzlab</bio></userProfile>"
+   }
+  },
+  {
+   "url": "/api/v2/reports/activity",
+   "method": "GET",
+   "param": "limit",
+   "location": "query",
+   "rendering": "server-json"
+  },
+  {
+   "url": "/api/v2/support/tickets",
+   "method": "POST",
+   "param": "message",
+   "location": "body",
+   "rendering": "server-json",
+   "json_body": {
+    "subject": "fuzzlab",
+    "message": "fuzzlab"
+   }
+  }
+ ]
+}

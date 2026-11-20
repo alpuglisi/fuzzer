@@ -34,6 +34,83 @@ Newest first.
   - [x] measurement at 300 visits per arm — CC-LAB-0440
 - Effectiveness: see CC-LAB-0440.
 
+### CC-CRAWL-0650 — A crawl never follows a state switch: measured live on Mutillidae, DVGA and bWAPP; SP-09's crawl consumers swept (FR-CRAWL-650, BUG-0680, SP-09, SP-120) (2026-11-20)
+- Placement: lane CRAWLSAFE (item CRAWLSAFE), base d492b9d. No crawler code changed:
+  the fix is in SP-09's owner (CC-CORE-0650); `fuzzlab/tools/spider.py` untouched.
+  Registers `formnav.settings_word` as SP-120 in `docs/SHARED_PRIMITIVES.md`.
+- Change: FR-CRAWL-650 and NFR-CRAWL-safe updated; SP-120 row.
+- Sweep (CLAUDE.md item 7; this lane's sweep subagent, every call site of
+  `destructive_reason`/`text_destructive_reason`/`check_send_url`/the token sets):
+  - Full URL to the owner, fixed by CC-CORE-0650 with no change: the spider's both
+    engines through `_destructive` → `spa.route_destructive_reason` (load gate,
+    redirect hops, landing, selector-form targets, routes, nav clicks, reveal targets,
+    page links), `spa.query_url_refusal` and `window_request_refusal`, navguard's route
+    (every navigation, redirect hop and subresource), the auditor's fetcher,
+    `formnav` actions, `store_adapter.request_refusal` (proxy captures, imports) and
+    `form_skip_reason`'s action, every probe sender (probesender, blind_sqli, greybox,
+    disco runner and explorer), disco's explorer URL checks, the session manager's
+    `_navigation_ok` and `browserlogin`.
+  - Path only (query dropped), pre-existing: `harness/auto._crawl_url_refusal`,
+    `header_points_from_store`, `header_point_estimate`, `spa.classify_route`. A
+    `?do=toggle-x` point is still refused at the send gate (`check_send_url`), so no
+    probe is sent; stated, not changed here.
+  - Texts (SP-10): the new words also refuse labels, control names and option values
+    ("Enable", `toggleHints`). The per-word impact probe (169 gate test files, rule
+    widened by a plugin) found no break for `toggle`, `enable`, `activate`; it found
+    breaks for `switch`, `restore` (generated-lab cells `/api/profiles/switch`,
+    `/api/trips/restore`), `mode`, `lang`, `theme`, `security`, which were therefore not
+    added as bare words.
+  - Parallel vocabulary: `formnav.SETTINGS_WORDS` (forms only) now SP-120. No other
+    link deny list exists (`lab/safety_matrix.yaml`, rules data, WAF rules have none);
+    the proxy repeater is an operator's manual send by design.
+- Measurement (live, §7; this lane's crawl subagent;
+  `scratchpad/crawl/run_crawls.sh <label> <code-tree>`, each lab recreated per run,
+  state read out of band; baseline = detached worktree of d492b9d, fixed = 2ca7cc8).
+  Commands: `fuzzlab crawl --start <url> --engine playwright --max-depth 2 --workers 4
+  --db X` (bWAPP: `--identity bwapp-bee --follow-selector-forms bug`, start
+  `/bWAPP/portal.php`); `fuzzlab disco capture --start <url> --out D --workers 2
+  --deadline 300 --authorized` (bWAPP: `--storage-state`). "Received" = the target's
+  access log (Mutillidae Apache log, bWAPP `docker logs`, DVGA a loopback request-log
+  forwarder; DVGA logs nothing itself). Baseline → fixed:
+  - Mutillidae spider: pages 271 (139 were 302s to https) → 345 (no 302s); toggle
+    requests received 100 → 0; sessions changed by the crawl 7/8 → 0/5.
+  - Mutillidae disco: toggle requests received 91 → 0; sessions changed 2/3 → 0/3.
+    States 105 → 25 at the 300 s deadline, which cut the fixed run short: the
+    baseline's https collapse made its exploration cheap and left time to harvest. Re-run
+    with `--deadline 900` (both stopped on `max_states`, neither on the deadline):
+    states 168 → 221, HTML docs 237 → 471, toggles received 75 → 0, crawl sessions
+    changed 2/3 → 0/3. Of the 329 distinct items the fixed rule refused that the base
+    rule did not (computed by running d492b9d's own `refusal`/`destructive_reason` over
+    a trace of the fixed run), 312 are `do=toggle-*` URLs, 16 are "Toggle …" links, and
+    1 is a popup notice paragraph; no page. No asset or non-toggle URL the baseline
+    loaded was refused in any lab (computed over both request logs).
+  - DVGA spider/disco: unchanged (16 pages; 29 states): `/difficulty/easy|hard` and
+    `/start_over` still received (stated residual, FR-CORE-650); the mode stays hard
+    for about half the disco crawl and `start_over` wipes pastes.
+  - bWAPP spider/disco: unchanged (167 pages; 8 states); DB unchanged. Disco submits
+    the security-level **form** (POST `security_level_set.php`, 10 times) and 471
+    requests run at level 1, both runs.
+  - The lane-reported "121 pages unresolved" could not be reproduced: at d492b9d the
+    Mutillidae identity fails at login (`SessionAuthError`; fixed on the Mutillidae
+    lane's branch), so all Mutillidae crawls here are anonymous.
+- Impact: CRAWL, AUD, FUZZ, SESS, PROXY through SP-09 (CC-CORE-0650); no interface
+  change.
+- Risk: medium. Stated open gaps, flagged to the orchestrator, not built here:
+  (1) DVGA `/difficulty/<level>` and `/start_over` still change state during a crawl:
+  no word rule meets the black-box rule, and the crawler has no operator-supplied
+  exclusion list (lab knowledge would belong in the fixture); (2) disco submits a
+  settings form (bWAPP's security level) -- SP-120 is not applied by disco's element
+  `refusal`, a disco change with coverage risk on every lab's forms; (3) navguard aborts
+  any subresource whose URL carries a rule word (`bootstrap-toggle.js` would be
+  aborted; none was lost in these crawls); (4) the spider persists destructive
+  refusals only as counts, not per class.
+- Deliverables:
+  - [x] sweep — done (above)
+  - [x] live baseline and fixed crawls of Mutillidae, DVGA, bWAPP — done
+  - [x] FR-CRAWL-650, NFR-CRAWL-safe, SP-120 — done
+- Effectiveness (assessed 2026-11-20): Mutillidae — effective (0 toggles received,
+  lab state unchanged, spider reach +74 pages, disco 168 → 221 states at 900 s); DVGA — not effective (residual);
+  bWAPP — no change (its switch is a POST form, gap 2).
 ### CC-CRAWL-0600 — The GraphQL reader names each variable's field argument and declared type (2026-11-20)
 - Placement: lane GQL (item GQL), base 2be7a50, pre-assigned CC-CRAWL-0600..0604. Not a
   change to `spider.py` or `navguard.py`.

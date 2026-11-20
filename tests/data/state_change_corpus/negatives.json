@@ -1,0 +1,2222 @@
+[
+ {
+  "url": "/dvwa/vulnerabilities/view_help.php?id=sqli&security=low&locale=en",
+  "words": [
+   "security",
+   "low",
+   "locale"
+  ],
+  "source": "https://github.com/digininja/DVWA/blob/502ac150ce37c20ca6e04cab7c5ca959f315f2d0/dvwa/includes/dvwaPage.inc.php#L539",
+  "note": "help popup; security/locale only select text",
+  "app": "dvwa",
+  "shape": "noun-value"
+ },
+ {
+  "url": "/dvwa/setup.php",
+  "words": [
+   "setup"
+  ],
+  "source": "https://github.com/digininja/DVWA/blob/502ac150ce37c20ca6e04cab7c5ca959f315f2d0/setup.php#L101",
+  "note": "GET renders the setup page; reset needs POST+token",
+  "app": "dvwa",
+  "shape": "verb"
+ },
+ {
+  "url": "/dvwa/security.php",
+  "words": [
+   "security"
+  ],
+  "source": "https://github.com/digininja/DVWA/blob/502ac150ce37c20ca6e04cab7c5ca959f315f2d0/security.php#L15",
+  "note": "GET renders the level form",
+  "app": "dvwa",
+  "shape": "noun-value"
+ },
+ {
+  "url": "/bWAPP/security_level_set.php",
+  "words": [
+   "security",
+   "level",
+   "set"
+  ],
+  "source": "https://github.com/raesene/bWAPP/blob/53bcfdd59c02dcfdbf79e218f0a99c54ff42d799/app/security_level_set.php#L23",
+  "note": "GET renders form; change is POST",
+  "app": "bwapp",
+  "shape": "noun-value"
+ },
+ {
+  "url": "/bWAPP/install.php",
+  "words": [
+   "install"
+  ],
+  "source": "https://github.com/raesene/bWAPP/blob/53bcfdd59c02dcfdbf79e218f0a99c54ff42d799/app/install.php#L19",
+  "note": "GET without install=yes only shows a link",
+  "app": "bwapp",
+  "shape": "verb"
+ },
+ {
+  "url": "/bWAPP/rlfi.php?language=lang_en.php",
+  "words": [
+   "language",
+   "lang",
+   "en"
+  ],
+  "source": "https://github.com/raesene/bWAPP/blob/53bcfdd59c02dcfdbf79e218f0a99c54ff42d799/app/rlfi.php#L26",
+  "note": "selects displayed language file (an injection point)",
+  "app": "bwapp",
+  "shape": "noun-value"
+ },
+ {
+  "url": "/index.php?page=content-security-policy.php",
+  "words": [
+   "page",
+   "content",
+   "security",
+   "policy"
+  ],
+  "source": "https://github.com/webpwnized/mutillidae/blob/126a1fdb4ff977f87e980d018f0def477afc3d5d/src/includes/main-menu.php#L83",
+  "note": "content page",
+  "app": "mutillidae",
+  "shape": "noun-value",
+  "lab": "mutillidae"
+ },
+ {
+  "url": "/index.php?page=view-user-privilege-level.php&iv=x",
+  "words": [
+   "privilege",
+   "level"
+  ],
+  "source": "https://github.com/webpwnized/mutillidae/blob/126a1fdb4ff977f87e980d018f0def477afc3d5d/src/includes/main-menu.php#L106",
+  "note": "content page (lab)",
+  "app": "mutillidae",
+  "shape": "noun-value",
+  "lab": "mutillidae"
+ },
+ {
+  "url": "/form.php?level=1",
+  "words": [
+   "level",
+   "1"
+  ],
+  "source": "https://github.com/wapiti-scanner/wapiti/blob/d0c6793fbf8c8982354bd05d65b9e6e84322a3a6/tests/integration/test_mod_permanentxss/php/src/index.php#L9",
+  "note": "level selects a page variant; must be crawled",
+  "app": "wapiti-fixture",
+  "shape": "noun-value"
+ },
+ {
+  "url": "/form.php?level=3",
+  "words": [
+   "level",
+   "3"
+  ],
+  "source": "https://github.com/wapiti-scanner/wapiti/blob/d0c6793fbf8c8982354bd05d65b9e6e84322a3a6/tests/integration/test_mod_permanentxss/php/src/index.php#L11",
+  "note": "same",
+  "app": "wapiti-fixture",
+  "shape": "noun-value"
+ },
+ {
+  "url": "/rest/user/security-question?email=x",
+  "words": [
+   "security",
+   "question"
+  ],
+  "source": "https://github.com/juice-shop/juice-shop/blob/c9f99228d9d56afb5f5ca7925376292f7fa44b13/server.ts#L638",
+  "note": "read-only",
+  "app": "juice-shop",
+  "shape": "noun-value"
+ },
+ {
+  "url": "/api/SecurityAnswers",
+  "words": [
+   "security",
+   "answers"
+  ],
+  "source": "https://github.com/juice-shop/juice-shop/blob/c9f99228d9d56afb5f5ca7925376292f7fa44b13/server.ts#L427",
+  "note": "read-only list",
+  "app": "juice-shop",
+  "shape": "noun-value"
+ },
+ {
+  "url": "/rest/2fa/status",
+  "words": [
+   "status"
+  ],
+  "source": "https://github.com/juice-shop/juice-shop/blob/c9f99228d9d56afb5f5ca7925376292f7fa44b13/server.ts#L495",
+  "note": "read-only",
+  "app": "juice-shop",
+  "shape": "noun-value"
+ },
+ {
+  "url": "/rest/languages",
+  "words": [
+   "languages"
+  ],
+  "source": "https://github.com/juice-shop/juice-shop/blob/c9f99228d9d56afb5f5ca7925376292f7fa44b13/server.ts#L661",
+  "note": "read-only",
+  "app": "juice-shop",
+  "shape": "noun-value"
+ },
+ {
+  "url": "/rest/admin/application-configuration",
+  "words": [
+   "admin",
+   "configuration"
+  ],
+  "source": "https://github.com/juice-shop/juice-shop/blob/c9f99228d9d56afb5f5ca7925376292f7fa44b13/server.ts#L646",
+  "note": "read-only config",
+  "app": "juice-shop",
+  "shape": "noun-value"
+ },
+ {
+  "url": "/rest/continue-code",
+  "words": [
+   "continue",
+   "code"
+  ],
+  "source": "https://github.com/juice-shop/juice-shop/blob/c9f99228d9d56afb5f5ca7925376292f7fa44b13/server.ts#L648",
+  "note": "read-only (returns code)",
+  "app": "juice-shop",
+  "shape": "verb"
+ },
+ {
+  "url": "/user/password/reset",
+  "words": [
+   "password",
+   "reset"
+  ],
+  "source": "https://github.com/grafana/grafana/blob/main/pkg/api/api.go#L252 (fetched 2026-11-20)",
+  "note": "GET renders SPA page; reset is POST",
+  "app": "grafana",
+  "shape": "verb"
+ },
+ {
+  "url": "/user/password/send-reset-email",
+  "words": [
+   "send",
+   "reset",
+   "email"
+  ],
+  "source": "https://github.com/grafana/grafana/blob/main/pkg/api/api.go#L251 (fetched 2026-11-20)",
+  "note": "GET renders form",
+  "app": "grafana",
+  "shape": "verb"
+ },
+ {
+  "url": "/api/user/preferences",
+  "words": [
+   "preferences"
+  ],
+  "source": "https://github.com/grafana/grafana/blob/main/pkg/api/api.go#L301 (fetched 2026-11-20)",
+  "note": "read-only",
+  "app": "grafana",
+  "shape": "noun-value"
+ },
+ {
+  "url": "/admin/config/development/maintenance",
+  "words": [
+   "maintenance"
+  ],
+  "source": "https://github.com/drupal/drupal/blob/11.x/core/modules/system/system.routing.yml#L59 (fetched 2026-11-20)",
+  "note": "settings form (change is POST)",
+  "app": "drupal",
+  "shape": "noun-value"
+ },
+ {
+  "url": "/admin/config/development/settings",
+  "words": [
+   "development",
+   "settings"
+  ],
+  "source": "https://github.com/drupal/drupal/blob/11.x/core/modules/system/system.routing.yml#L27 (fetched 2026-11-20)",
+  "note": "settings form",
+  "app": "drupal",
+  "shape": "noun-value"
+ },
+ {
+  "url": "/admin/appearance/settings/olivero",
+  "words": [
+   "appearance",
+   "settings",
+   "theme"
+  ],
+  "source": "https://github.com/drupal/drupal/blob/11.x/core/modules/system/system.routing.yml#L177 (fetched 2026-11-20)",
+  "note": "theme settings form",
+  "app": "drupal",
+  "shape": "noun-value"
+ },
+ {
+  "url": "/admin/appearance/uninstall",
+  "words": [
+   "uninstall"
+  ],
+  "source": "https://github.com/drupal/drupal/blob/11.x/core/modules/system/system.routing.yml#L134 (fetched 2026-11-20)",
+  "note": "confirm form only (ThemeUninstallConfirmForm)",
+  "app": "drupal",
+  "shape": "verb"
+ },
+ {
+  "url": "/admin/modules/uninstall",
+  "words": [
+   "uninstall"
+  ],
+  "source": "https://github.com/drupal/drupal/blob/11.x/core/modules/system/system.routing.yml#L216 (fetched 2026-11-20)",
+  "note": "list form only",
+  "app": "drupal",
+  "shape": "verb"
+ },
+ {
+  "url": "/index.php?route=/server/collations",
+  "words": [
+   "server",
+   "collations"
+  ],
+  "source": "https://github.com/phpmyadmin/phpmyadmin/blob/QA_5_2/libraries/routes.php#L147 (fetched 2026-11-20)",
+  "note": "read-only",
+  "app": "phpmyadmin",
+  "shape": "noun-value"
+ },
+ {
+  "url": "/owner/repo/stars",
+  "words": [
+   "stars"
+  ],
+  "source": "https://github.com/go-gitea/gitea/blob/main/routers/web/web.go#L1741 (fetched 2026-11-20)",
+  "note": "read-only",
+  "app": "gitea",
+  "shape": "noun-value"
+ },
+ {
+  "url": "/user/activate",
+  "words": [
+   "activate"
+  ],
+  "source": "https://github.com/go-gitea/gitea/blob/main/routers/web/web.go#L727 (fetched 2026-11-20)",
+  "note": "without ?code= renders the 'activate your account' page",
+  "app": "gitea",
+  "shape": "verb"
+ },
+ {
+  "url": "/.well-known/security.txt",
+  "words": [
+   "well",
+   "known",
+   "security",
+   "txt"
+  ],
+  "source": "https://www.rfc-editor.org/rfc/rfc9116 (RFC 9116 \u00a73)",
+  "note": "standard static file",
+  "app": "rfc9116",
+  "shape": "noun-value"
+ },
+ {
+  "url": "/security.txt",
+  "words": [
+   "security",
+   "txt"
+  ],
+  "source": "https://www.rfc-editor.org/rfc/rfc9116 (legacy location, \u00a73)",
+  "note": "static",
+  "app": "rfc9116",
+  "shape": "noun-value"
+ },
+ {
+  "url": "/en-US/docs/Web/API/DOMTokenList/toggle",
+  "words": [
+   "toggle"
+  ],
+  "source": "https://developer.mozilla.org/en-US/docs/Web/API/DOMTokenList/toggle",
+  "note": "docs page",
+  "app": "mdn",
+  "shape": "verb"
+ },
+ {
+  "url": "/en-US/docs/Web/HTTP/Headers/Content-Security-Policy",
+  "words": [
+   "security",
+   "policy"
+  ],
+  "source": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy",
+  "note": "docs page",
+  "app": "mdn",
+  "shape": "noun-value"
+ },
+ {
+  "url": "/en-US/docs/Web/HTML/Global_attributes/lang",
+  "words": [
+   "lang"
+  ],
+  "source": "https://developer.mozilla.org/en-US/docs/Web/HTML/Global_attributes/lang",
+  "note": "docs page",
+  "app": "mdn",
+  "shape": "noun-value"
+ },
+ {
+  "url": "/wiki/Toggle_switch",
+  "words": [
+   "toggle",
+   "switch"
+  ],
+  "source": "https://en.wikipedia.org/wiki/Toggle_switch",
+  "note": "article",
+  "app": "wikipedia",
+  "shape": "verb"
+ },
+ {
+  "url": "/wiki/Factory_reset",
+  "words": [
+   "factory",
+   "reset"
+  ],
+  "source": "https://en.wikipedia.org/wiki/Factory_reset",
+  "note": "article",
+  "app": "wikipedia",
+  "shape": "verb"
+ },
+ {
+  "url": "/wiki/Game_difficulty",
+  "words": [
+   "difficulty"
+  ],
+  "source": "https://en.wikipedia.org/wiki/Game_difficulty",
+  "note": "article",
+  "app": "wikipedia",
+  "shape": "noun-value"
+ },
+ {
+  "url": "/docs/5.3/customize/color-modes/",
+  "words": [
+   "color",
+   "modes"
+  ],
+  "source": "https://getbootstrap.com/docs/5.3/customize/color-modes/",
+  "note": "docs page",
+  "app": "bootstrap",
+  "shape": "noun-value"
+ },
+ {
+  "url": "/docs/5.3/forms/checks-radios/#switches",
+  "words": [
+   "switches"
+  ],
+  "source": "https://getbootstrap.com/docs/5.3/forms/checks-radios/",
+  "note": "docs page",
+  "app": "bootstrap",
+  "shape": "verb"
+ },
+ {
+  "url": "/3/library/debug.html",
+  "words": [
+   "debug"
+  ],
+  "source": "https://docs.python.org/3/library/debug.html",
+  "note": "docs page",
+  "app": "python-docs",
+  "shape": "noun-value"
+ },
+ {
+  "url": "/manual/en/function.error-reporting.php",
+  "words": [
+   "en"
+  ],
+  "source": "https://www.php.net/manual/en/function.error-reporting.php",
+  "note": "locale path segment",
+  "app": "php.net",
+  "shape": "noun-value"
+ },
+ {
+  "url": "/en/topics/i18n/translation/",
+  "words": [
+   "en"
+  ],
+  "source": "https://docs.djangoproject.com/en/5.0/topics/i18n/translation/ (set_language view is POST-only)",
+  "note": "docs; Django deliberately makes language switching POST",
+  "app": "django-docs",
+  "shape": "noun-value"
+ },
+ {
+  "url": "/products?level=2",
+  "words": [
+   "level"
+  ],
+  "source": "illustrative (task brief / author)",
+  "note": "content URL shape",
+  "app": "illustrative",
+  "shape": "mixed",
+  "illustrative": true
+ },
+ {
+  "url": "/recipes?difficulty=easy",
+  "words": [
+   "difficulty",
+   "easy"
+  ],
+  "source": "illustrative (task brief / author)",
+  "note": "content URL shape",
+  "app": "illustrative",
+  "shape": "mixed",
+  "illustrative": true
+ },
+ {
+  "url": "/blog/how-to-reset-your-router",
+  "words": [
+   "reset"
+  ],
+  "source": "illustrative (task brief / author)",
+  "note": "content URL shape",
+  "app": "illustrative",
+  "shape": "mixed",
+  "illustrative": true
+ },
+ {
+  "url": "/mode-d-emploi",
+  "words": [
+   "mode"
+  ],
+  "source": "illustrative (task brief / author)",
+  "note": "content URL shape",
+  "app": "illustrative",
+  "shape": "mixed",
+  "illustrative": true
+ },
+ {
+  "url": "/switches/cisco",
+  "words": [
+   "switches"
+  ],
+  "source": "illustrative (task brief / author)",
+  "note": "content URL shape",
+  "app": "illustrative",
+  "shape": "mixed",
+  "illustrative": true
+ },
+ {
+  "url": "/settings",
+  "words": [
+   "settings"
+  ],
+  "source": "illustrative (task brief / author)",
+  "note": "content URL shape",
+  "app": "illustrative",
+  "shape": "mixed",
+  "illustrative": true
+ },
+ {
+  "url": "/en/",
+  "words": [
+   "en"
+  ],
+  "source": "illustrative (task brief / author)",
+  "note": "content URL shape",
+  "app": "illustrative",
+  "shape": "mixed",
+  "illustrative": true
+ },
+ {
+  "url": "/?lang=en",
+  "words": [
+   "lang",
+   "en"
+  ],
+  "source": "illustrative (task brief / author)",
+  "note": "content URL shape",
+  "app": "illustrative",
+  "shape": "mixed",
+  "illustrative": true
+ },
+ {
+  "url": "/difficulty-rating",
+  "words": [
+   "difficulty"
+  ],
+  "source": "illustrative (task brief / author)",
+  "note": "content URL shape",
+  "app": "illustrative",
+  "shape": "mixed",
+  "illustrative": true
+ },
+ {
+  "url": "/docs/security",
+  "words": [
+   "security"
+  ],
+  "source": "illustrative (task brief / author)",
+  "note": "content URL shape",
+  "app": "illustrative",
+  "shape": "mixed",
+  "illustrative": true
+ },
+ {
+  "url": "/blog/start-over-after-layoff",
+  "words": [
+   "start",
+   "over"
+  ],
+  "source": "illustrative (task brief / author)",
+  "note": "content URL shape",
+  "app": "illustrative",
+  "shape": "mixed",
+  "illustrative": true
+ },
+ {
+  "url": "/courses?level=beginner",
+  "words": [
+   "level",
+   "beginner"
+  ],
+  "source": "illustrative (task brief / author)",
+  "note": "content URL shape",
+  "app": "illustrative",
+  "shape": "mixed",
+  "illustrative": true
+ },
+ {
+  "url": "/help/enable-javascript",
+  "words": [
+   "enable"
+  ],
+  "source": "illustrative (task brief / author)",
+  "note": "content URL shape",
+  "app": "illustrative",
+  "shape": "mixed",
+  "illustrative": true
+ },
+ {
+  "url": "/kb/how-to-activate-windows",
+  "words": [
+   "activate"
+  ],
+  "source": "illustrative (task brief / author)",
+  "note": "content URL shape",
+  "app": "illustrative",
+  "shape": "mixed",
+  "illustrative": true
+ },
+ {
+  "url": "/theme/dark-mode-guide",
+  "words": [
+   "theme",
+   "mode"
+  ],
+  "source": "illustrative (task brief / author)",
+  "note": "content URL shape",
+  "app": "illustrative",
+  "shape": "mixed",
+  "illustrative": true
+ },
+ {
+  "url": "/.well-known/enterprise-transport-security",
+  "words": [
+   "security"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/common.txt#L59 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/.well-known/security.txt",
+  "words": [
+   "security"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/common.txt#L89 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/Security",
+  "words": [
+   "security"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/common.txt#L333 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/Themes",
+  "words": [
+   "themes"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/common.txt#L359 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/_themes",
+  "words": [
+   "themes"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/common.txt#L443 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/activate",
+  "words": [
+   "activate"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/common.txt#L502 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/activation",
+  "words": [
+   "activation"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/common.txt#L503 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/app_themes",
+  "words": [
+   "themes"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/common.txt#L678 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/debug",
+  "words": [
+   "debug"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/common.txt#L1413 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/enable-cookies",
+  "words": [
+   "enable"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/common.txt#L1651 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/lang",
+  "words": [
+   "lang"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/common.txt#L2420 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/lang-en",
+  "words": [
+   "lang"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/common.txt#L2421 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/lang-fr",
+  "words": [
+   "lang"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/common.txt#L2422 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/language",
+  "words": [
+   "language"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/common.txt#L2424 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/level",
+  "words": [
+   "level"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/common.txt#L2458 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/locale",
+  "words": [
+   "locale"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/common.txt#L2513 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/mode",
+  "words": [
+   "mode"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/common.txt#L2728 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/off",
+  "words": [
+   "off"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/common.txt#L2906 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/on",
+  "words": [
+   "on"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/common.txt#L2921 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/preferences",
+  "words": [
+   "preferences"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/common.txt#L3247 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/restore",
+  "words": [
+   "restore"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/common.txt#L3570 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/security",
+  "words": [
+   "security"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/common.txt#L3703 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/security.txt",
+  "words": [
+   "security"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/common.txt#L3704 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/settings",
+  "words": [
+   "settings"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/common.txt#L3757 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/start",
+  "words": [
+   "start"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/common.txt#L3971 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/stop",
+  "words": [
+   "stop"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/common.txt#L3991 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/switch",
+  "words": [
+   "switch"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/common.txt#L4064 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/theme",
+  "words": [
+   "theme"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/common.txt#L4165 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/themes",
+  "words": [
+   "themes"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/common.txt#L4166 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/toggle",
+  "words": [
+   "toggle"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/common.txt#L4206 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/wp-settings",
+  "words": [
+   "settings"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/common.txt#L4624 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/language",
+  "words": [
+   "language"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L10 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/themes",
+  "words": [
+   "themes"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L24 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/lang",
+  "words": [
+   "lang"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L173 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/App_Themes",
+  "words": [
+   "themes"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L242 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/_themes",
+  "words": [
+   "themes"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L301 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/debug",
+  "words": [
+   "debug"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L433 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/Themes",
+  "words": [
+   "themes"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L445 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/theme",
+  "words": [
+   "theme"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L634 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/settings",
+  "words": [
+   "settings"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L787 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/security",
+  "words": [
+   "security"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L859 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/locale",
+  "words": [
+   "locale"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L1067 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/start",
+  "words": [
+   "start"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L1129 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/mode",
+  "words": [
+   "mode"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L1185 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/activate",
+  "words": [
+   "activate"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L1272 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/lang-en",
+  "words": [
+   "lang"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L1346 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/LANGUAGE",
+  "words": [
+   "language"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L1459 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/lang-fr",
+  "words": [
+   "lang"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L1509 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/app_themes",
+  "words": [
+   "themes"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L1605 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/THEMES",
+  "words": [
+   "themes"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L1651 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/enable-cookies",
+  "words": [
+   "enable"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L1977 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/Security",
+  "words": [
+   "security"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L2033 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/preferences",
+  "words": [
+   "preferences"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L2230 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/on",
+  "words": [
+   "on"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L2601 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/activation",
+  "words": [
+   "activation"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L2709 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/lang-es",
+  "words": [
+   "lang"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L2738 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/restore",
+  "words": [
+   "restore"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L3554 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/Settings",
+  "words": [
+   "settings"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L3607 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/Debug",
+  "words": [
+   "debug"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L3907 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/off",
+  "words": [
+   "off"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L4202 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/Activate",
+  "words": [
+   "activate"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L4255 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/_lang",
+  "words": [
+   "lang"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L4771 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/e107_themes",
+  "words": [
+   "themes"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L4820 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/lang-it",
+  "words": [
+   "lang"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L5295 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/switch",
+  "words": [
+   "switch"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L5819 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/wp-themes",
+  "words": [
+   "themes"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L5849 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/Language",
+  "words": [
+   "language"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L5905 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/acs-lang",
+  "words": [
+   "lang"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L5961 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/Lang",
+  "words": [
+   "lang"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L6277 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/themes_SAVED",
+  "words": [
+   "themes"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L6637 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/Theme",
+  "words": [
+   "theme"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L7332 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/lang-ru",
+  "words": [
+   "lang"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L7589 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/language_files",
+  "words": [
+   "language"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L7590 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/hints",
+  "words": [
+   "hints"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L8224 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/lang-br",
+  "words": [
+   "lang"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L8288 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/lang-ro",
+  "words": [
+   "lang"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L8289 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/set_language",
+  "words": [
+   "language"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L8467 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/stop",
+  "words": [
+   "stop"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L8500 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/lang-id",
+  "words": [
+   "lang"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L9199 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/_debug",
+  "words": [
+   "debug"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L9882 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/_theme",
+  "words": [
+   "theme"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L9897 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/lang-cs",
+  "words": [
+   "lang"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L10461 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/lang-de",
+  "words": [
+   "lang"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L10462 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/lang-sk",
+  "words": [
+   "lang"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L10463 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/Start",
+  "words": [
+   "start"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L11282 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/i-mode",
+  "words": [
+   "mode"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L11969 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/j_security_check",
+  "words": [
+   "security"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L12033 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/lang-da",
+  "words": [
+   "lang"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L12073 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/level",
+  "words": [
+   "level"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L12083 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/themes_c",
+  "words": [
+   "themes"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L12386 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/theme_backup",
+  "words": [
+   "theme"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L12648 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/StartHelp",
+  "words": [
+   "start"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L12774 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/security-roles",
+  "words": [
+   "security"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L13476 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/site-settings",
+  "words": [
+   "settings"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L13478 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/activate-user",
+  "words": [
+   "activate"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L13866 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/editEnable",
+  "words": [
+   "enable"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L14028 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/mode-quote",
+  "words": [
+   "mode"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L14165 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/mode-reply",
+  "words": [
+   "mode"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L14166 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/lang2",
+  "words": [
+   "lang"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L14483 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/byLanguage",
+  "words": [
+   "language"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L15705 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/Disable",
+  "words": [
+   "disable"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L15877 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/ManualThemes",
+  "words": [
+   "themes"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L16061 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/OnThisDay",
+  "words": [
+   "on"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L16128 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/Restore",
+  "words": [
+   "restore"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L16222 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/_language",
+  "words": [
+   "language"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L16454 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/activate-sim",
+  "words": [
+   "activate"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L16527 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/cgi-bin-debug",
+  "words": [
+   "debug"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L16970 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/security_images",
+  "words": [
+   "security"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L17594 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/lang-pl",
+  "words": [
+   "lang"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L18113 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/lang-pt",
+  "words": [
+   "lang"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L18114 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/level2",
+  "words": [
+   "level"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L18146 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/off-topic",
+  "words": [
+   "off"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L18513 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/public_security",
+  "words": [
+   "security"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L18829 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/whats-on",
+  "words": [
+   "on"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L19682 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/App_themes",
+  "words": [
+   "themes"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L20313 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/Enable-Cookies",
+  "words": [
+   "enable"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L20614 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/Jtoow-theme",
+  "words": [
+   "theme"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L20861 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/Mode-kleding",
+  "words": [
+   "mode"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L20990 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/OnTV",
+  "words": [
+   "on"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L21067 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/Preferences",
+  "words": [
+   "preferences"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L21154 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/RESTORE-online",
+  "words": [
+   "restore"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L21212 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/SiteSettings",
+  "words": [
+   "settings"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L21357 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/03-Theme",
+  "words": [
+   "theme"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L21504 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/_THEMES",
+  "words": [
+   "themes"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L21632 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/account-settings",
+  "words": [
+   "settings"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L21841 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/app_Themes",
+  "words": [
+   "themes"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L22177 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/haspiStart",
+  "words": [
+   "start"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L22488 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/logicToolStart",
+  "words": [
+   "start"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L22491 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/pdpStartMod1",
+  "words": [
+   "start"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L22494 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/startUpWB",
+  "words": [
+   "start"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L22500 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/deactivate",
+  "words": [
+   "deactivate"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L23531 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/activate_user",
+  "words": [
+   "activate"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L24285 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/iDebug",
+  "words": [
+   "debug"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L24858 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/lang-bg",
+  "words": [
+   "lang"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L25398 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/lang-nl",
+  "words": [
+   "lang"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L25399 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/level3",
+  "words": [
+   "level"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L25448 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/ThemeXP",
+  "words": [
+   "theme"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L25953 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/my-settings",
+  "words": [
+   "settings"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L26080 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/privacy-security",
+  "words": [
+   "security"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L26976 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/security2",
+  "words": [
+   "security"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L27606 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/start-download",
+  "words": [
+   "start"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L28022 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/a-level",
+  "words": [
+   "level"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L28093 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/nvq-level-1-2-3",
+  "words": [
+   "level"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L28103 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/theme5",
+  "words": [
+   "theme"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L28363 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/user_settings",
+  "words": [
+   "settings"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L28684 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/wordpress-themes",
+  "words": [
+   "themes"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L29177 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ },
+ {
+  "url": "/ViewData-Start",
+  "words": [
+   "start"
+  ],
+  "source": "https://github.com/danielmiessler/SecLists/blob/master/Discovery/Web-Content/raft-medium-directories.txt#L29852 (fetched 2026-11-20)",
+  "note": "wordlist path name (existence, not state evidence)",
+  "app": "seclists",
+  "shape": "wordlist",
+  "wordlist": true
+ }
+]

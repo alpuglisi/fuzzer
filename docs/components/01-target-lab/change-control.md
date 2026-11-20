@@ -62,6 +62,400 @@ Component code: **LAB**. Entry format and required fields: see
   - [x] BEFORE/AFTER on four configurations; SP-04 probe; this record — done
 - Effectiveness (assessed 2026-11-20): met: no detection changed on any configuration,
   wall time down 41-61%; goal metric (bWAPP gt wall) 621 -> 251 s.
+### CC-LAB-0362 — VulnerableApp's scored ground-truth run, re-run by lane ACC for the record (FR-LAB-362) (2026-11-20)
+- Change: `docs/components/01-target-lab/external-lab-scores.json` gains `vulnerableapp`
+  (PA-0640's guard covers every lab with a key; lane JAVA's CC-LAB-0350 records counts,
+  not the matched ids, so the run was repeated rather than the ids guessed).
+- Run: `fuzzlab auto --base-url http://127.0.0.1:3095 --ground-truth
+  lab/ground-truth-vulnerableapp --points ground-truth --browser --oob --score
+  --authorized`, the container restarted first, on the merged tree 7c6f8ca: tp=37 fp=0
+  fn=26 tn=42, 2480 requests, 2069 s -- CC-LAB-0350's AFTER counts. The same matched set
+  on da1a5d6's merge (2492 requests, 2073 s) before BBOX's strategy changes. 94fac7f
+  (CRAWLSAFE) changes no VulnerableApp point's `destructive_reason` /
+  `transaction_reason` (84 points compared under both versions: 0 differences).
+- Record: 21 gt-tagged misses are `open:` [tracked: CC-LAB-0350] (its "Open" list names
+  the measured causes); 5 are tagged unreachable. Headline (crawl, CC-LAB-0350): tp=0.
+- Impact (other components / project): the record only.
+- Risk (level; mitigation or accepted-risk justification): low; loopback lab.
+- Deliverables:
+  - [x] run, record entry; the guard passes (21 with the black-box guard) — done
+- Effectiveness (assessed 2026-11-20): as above.
+
+### CC-LAB-0361 — The scored-run guard's review follow-ups; bWAPP re-scored crawl-first on the fixed listing phase (FR-LAB-363, BUG-0641) (2026-11-20)
+- Change: `tests/test_external_lab_scored_runs.py` (an `open:` reason names its tracking
+  record; matched ids are positives; tn/fp agree with the key's negatives; each check
+  proven on a synthetic offender); `docs/components/01-target-lab/external-lab-scores.json`
+  (every `open:` reason carries `[tracked: CC-LAB-0360]` or `[tracked: CC-LAB-0331]`;
+  bWAPP's entry is its run on 83e79c7); FR-LAB-361's citation names
+  `globocom/secDevLabs@10be438` and the upstream path.
+- Reason: the orchestrator's review of 2275dcb (BUG-0641's report): its follow-ups.
+- bWAPP runs on 83e79c7 (the BUG-0641 fix), lab up via `labctl.sh up bwapp --authorized`:
+  - crawl: `fuzzlab crawl --start http://127.0.0.1:8092/bWAPP/portal.php --engine playwright
+    --identity bwapp-bee --follow-selector-forms bug --no-reveal --db <spider.db>` (the
+    live test's crawl): 106 s, 13 endpoints, 71 parameters imported.
+  - crawl-fed: `FUZZLAB_BUDGET_TOTAL=20000 fuzzlab auto --base-url
+    http://127.0.0.1:8092/bWAPP/ --spider-db <spider.db> --ground-truth lab/ground-truth-bwapp
+    --points crawl --identity bwapp-bee --browser --authorized`: AFTER (83e79c7) tp=41 fp=0
+    fn=14 tn=3, 1516 requests, 705 s; BEFORE (2be7a50's tree, same spider DB): tp=41 fp=0 fn=14 tn=3, 1513 requests, 704 s -- the same misses; the listing phase cannot change a crawl pass (see Found), and 83e79c7 also carries lane NODE's merged code.
+    Without the live test's `--header-points User-Agent,Referer,bWAPP`: with them the
+    plan needs at least 9768 requests (148 pages x 3 headers), measured at about one
+    exchange a second, roughly 3 h per run; so the 8 header-located positives are missed
+    by construction here.
+  - ground truth (the runbook's command): tp=22 fp=0 fn=33 tn=3, 887 requests, 637 s
+    (BWAPP-0046 confirmed by the fixed listing phase; same as 684fab9).
+- Found (flagged, not built): neither traversal case can be reached by a crawl:
+  `R-PATH-TRAVERSAL` (default_rules.json) fires only on `sink_context_in: fs_path_read`, a
+  value only a ground-truth case supplies, so a crawled `directory`/`page` parameter gets
+  SQLi and XSS candidates only (BWAPP-0045/0046 are `[reach: gt]`, consistent). A
+  black-box selection (from the value's shape, `audit/value_shape.py`'s file and path
+  classes) is an AUD design item.
+- Impact (other components / project): tests and the record only.
+- Risk (level; mitigation or accepted-risk justification): low.
+- Deliverables:
+  - [x] guard checks with offenders; record updated; citation — done
+  - [x] bWAPP crawl-fed and ground-truth runs on the fixed tree — done
+- Merge of the integration tip f6b4790 (lanes PHPX and GQL): `mutillidae` and `dvga` join
+  the record so PA-0640's guard covers them, each with its lane's recorded ground-truth run,
+  not re-run here: Mutillidae CC-LAB-0343 (tp=24 fp=0 fn=4 tn=11, 482 requests, 28 s;
+  crawl tp=6 fp=0 fn=22 tn=11), DVGA CC-LAB-0321 (tp=5 fp=0 fn=5 tn=5, 345 requests, 46 s;
+  crawl tp=1 fp=0). DVGA's matched ids are inferred as the positives CC-LAB-0321 does not
+  name as misses, equal to `tests/test_dvga_live.py`'s floor. Their gt-tagged misses are
+  `open:` with the tracking entry named.
+- Effectiveness (assessed 2026-11-20): the guard passes on the record (16 tests with the two
+  merged labs) and fails on each offender.
+
+### CC-LAB-0360 — The 11 external labs re-measured with scored runs; two labs made measurable; the runs recorded (BUG-0640, FR-LAB-360..362) (2026-11-20)
+- Change: `fuzzlab/lab_fixtures/external.py` (`LAB_META` mongection: identity
+  `sdl-mongection-user`; `bootstrap_secdevlabs_mongection`, `_mongection_login`);
+  `lab/ground-truth-secdevlabs-copy-n-paste/injection-points.json` (`json_body` on each
+  point; no case changed); `docs/components/01-target-lab/external-lab-scores.json` (new:
+  each lab's latest scored ground-truth run); `tests/test_external_labs_static.py`
+  (mongection bootstrap, copy-n-paste points); `tests/test_external_lab_scored_runs.py`
+  (new, PA-0640's guard).
+- Reason: lane ACC (owner's goal: detection accuracy on the existing 11 external labs).
+  Each lab was brought up (`lab/labctl.sh up <lab> --authorized`, docker 29, this
+  container) and scored at 2be7a50 with its recorded command; seven secDevLabs apps had
+  never been scored (their entries record manual checks only).
+- Commands (from the repo root; each with `--store <fresh db>`; `G=lab/ground-truth-`):
+  - bwapp: `fuzzlab auto --base-url http://127.0.0.1:8092 --ground-truth ${G}bwapp
+    --points ground-truth --identity bwapp-bee --browser --authorized`
+  - juice-shop: `... --base-url http://127.0.0.1:3000 --ground-truth ${G}juice-shop
+    --points ground-truth --identity juice-user --browser --oob --authorized`
+  - copy-n-paste 3071, sstype 3073, vinijr-blog 3075, amarelo-designs 3076, mongection
+    3077, comment-killer 3074: `... --base-url http://127.0.0.1:<port> --ground-truth
+    ${G}secdevlabs-<app> --points ground-truth --browser --authorized`
+  - gossip-world: `... 3072 ... --identity sdl-gossip-user --peer-identity
+    sdl-gossip-peer --browser --authorized`
+  - streaming: `... 3078 ... --browser --fuzz-json-writes --authorized` (CC-LAB-0314)
+  - ecommerce-api: `... 3079 ... --identity sdl-ecommerce-user --peer-identity
+    sdl-ecommerce-peer --auth-origin http://localhost:10005 --authorized` (CC-LAB-0316)
+- Results, BEFORE (2be7a50) → AFTER (684fab9), tp/fp/fn/tn, requests, wall s:
+
+  | lab | BEFORE | req | wall | AFTER | req | wall | recorded before |
+  | --- | --- | --- | --- | --- | --- | --- | --- |
+  | bwapp | 21/0/34/3 | 885 | 642 | 22/0/33/3 | 887 | 636 | tp=20 fp=0 tn=3 (runbook) |
+  | juice-shop | 5/0/10/3 | 150 | 50 | 5/0/10/3 | 150 | 46 | 5/0/10/3, 150, 57 s (CC-LAB-0317) |
+  | copy-n-paste | 0/0/3/1 | 67 | 0.5 | 2/0/1/1 | 25 | 2.5 | none |
+  | gossip-world | 0/0/4/2 (login failed) | 0 | 0.7 | same | 0 | 0.6 | none |
+  | sstype | 1/0/1/2 | 22 | 30 | 1/0/1/2 | 22 | 29 | none |
+  | vinijr-blog | 0/0/3/2 | 4 | 0.3 | 0/0/3/2 | 4 | 0.3 | none |
+  | amarelo-designs | 0/0/1/2 | 1 | 0.4 | 0/0/1/2 | 1 | 0.4 | none |
+  | mongection | 0/0/2/2 | 12 | 0.5 | 2/0/0/2 | 48 | 0.6 | none |
+  | comment-killer | 0/0/1/1 | 2 | 30 | 0/0/1/1 | 2 | 30 | none |
+  | streaming | 2/0/0/2 | 3 | 3.1 | 2/0/0/2 | 3 | 2.7 | 2/0/0/2, 3 (CC-LAB-0314) |
+  | ecommerce-api | 1/0/0/1 | 3 | 4.5 | 1/0/0/1 | 3 | 4.5 | 1/0/0/1 (CC-LAB-0316) |
+
+  Totals: tp 30 → 35, fp 0 → 0. No regression against any recorded number (bWAPP's
+  extra tp over the runbook is BWAPP-0056). Every fn and its reason is in the record
+  file; the reachable-tagged ones still open are listed below.
+- Measured (2026-11-20), each cited in BUG-0640 or the open list: copy-n-paste answers
+  `400 "All fields are required"` to a body missing `pass`, MariaDB 1064 with both;
+  mongection's `{"$ne": null}` login answers `Bad Credentials` with no account and logs in
+  once one exists; gossip-world's `/` redirects to `/login` with a valid session
+  (upstream `routes.py:73-75`), `/gossip` answers 200 with it; sstype renders
+  `{{961*977}}` as `938897` in `<h3>` and echoes it raw in `<title>`; bWAPP's
+  `directory_traversal_2.php` lists `/etc` (CC-FUZZ-0640); bWAPP's `sqli_1.php` echoes
+  `<zqxb..>` in `mysql_error()` for `x' AND <zqxb..>`, not for `'<zqxb..>`.
+- Open (reachable-tagged misses, not built; flagged to the orchestrator):
+  - gossip-world SDLGW-0001/0002/0003/0006: the session manager verifies a login at the
+    base URL and the app's root always redirects to `/login`; a fix is a change to
+    SP-61's stable-protected-resource choice (lane rule: flag a shared primitive).
+  - sstype SDLSST-0001: SP-25's echo disqualifier refuses an evaluation whose literal is
+    echoed elsewhere than a form control: BUG-0133's class one location further (a
+    shared-primitive change; recommended: judge the product outside every literal
+    occurrence, the two-sample attribution unchanged).
+  - amarelo SDLAD-0001: no cookie placement in the probe sender (a ground-truth cookie
+    point is skipped, misnamed "client-only/DOM").
+  - vinijr SDLVJ-0001..0003: points carry no XML body shape; the XXE strategies wrap their
+    entity in `<title>` or the root (CC-LAB-0307).
+  - comment-killer SDLCK-0001: no `source_url` (answer-key decision).
+  - bWAPP BWAPP-0057/0058: the reflected-XSS confirmer would need a quote prefix carried
+    through every break-out.
+  - copy-n-paste SDLCNP-0004 and Juice JUICE-0008: unchanged (register-then-login flow;
+    CSP).
+- Not done in this lane: the crawl-fed passes (spider/disco) of CC-LAB-0317 and the bWAPP
+  crawl pass (30 crawl-only positives); the scored runs are the ground-truth passes.
+- Impact (other components / project): FUZZ (CC-FUZZ-0640, the strategy); the lab
+  fixtures and one answer-key point file; a new record file read by a static test.
+- Risk (level; mitigation or accepted-risk justification): low. Loopback only; the
+  mongection bootstrap writes one account to the lab's tmpfs database; no case verdict,
+  id or count changed (PA-0044: the points' count and keys unchanged).
+- Deliverables:
+  - [x] all 11 labs up and scored BEFORE and AFTER (live, docker) — done
+  - [x] copy-n-paste points, mongection identity and bootstrap — done
+  - [x] record file, PA-0640 guard (proven on BUG-0640's shape) — done
+  - [x] BUG-0640, PA-0640, ERROR_LOG, F-640, F-641, F-642, FR-LAB-360..362,
+    ARCHITECTURE, CHANGELOG — done
+  - [x] `scripts/verify_change.py --base 2be7a50` on 5e1e7d1 (the code and records; later
+    commits change only docs): 143 files, 5512 passed, 5 failed, 5 skipped, 148 xfailed.
+    The 5 failures are `tests/test_navigation_aborts.py` (an aborted navigation does not
+    raise: "DID NOT RAISE"); the same 5 (and 3 more, from a missing `mitmproxy`, F-642)
+    fail on 2be7a50 in a clean worktree in this container. This container runs Chrome for
+    Testing 153.0.8010.12 with Playwright 1.63; the probes were measured on Chromium
+    141.0.7390.37 (BUG-0559). Attributed to that browser drift, not reproduced on 141
+    here; reported to the orchestrator, not fixed in this lane (navguard is a hot file).
+- Merge with lane NODE (78a24f2): `nodegoat` joins the record so PA-0640's guard covers
+  it, with lane NODE's recorded AFTER ground-truth run (CC-LAB-0331: tp=12 fp=0 fn=5 tn=7,
+  244 requests, 121 s; its crawl pass tp=12 fp=0, 282 requests), not re-run in this lane;
+  NGOAT-0008 is `open:` (the M6 store step's session, CC-LAB-0331's flag).
+- Effectiveness (assessed 2026-11-20): effective for the two fixed labs (copy-n-paste
+  tp 0→2, mongection tp 0→2, fp 0, from a fresh `up`); the guard passes on the record and
+  fails on BUG-0640's shape.
+### CC-LAB-0428 — At the merge of the integration tip (94fac7f): PA-0660's guard reads the held-out names, and `user_id` is cited (2026-11-20)
+- Change: `tests/test_blackbox_detection.py`: `lab_tokens` adds every name `lab/HOLDOUT.md`
+  lists (through `fuzzlab.lab_fixtures.heldout`, SP-140), so the bare product word of a
+  held-out lab whose answer key never spells it as a token (`dvws`) is lab-only vocabulary
+  too, without that file naming a held-out lab (rule 4);
+  `test_the_held_out_labs_names_are_lab_identifiers` pins it. `CITED` gains `user_id`
+  (WordPress core schema `wp_usermeta.user_id`; OWASP API Security Top 10 2023 API1 /
+  API3).
+- Reason: the orchestrator's integration tip brought PA-0660's guard (lane BBOX). With the
+  held-out keys feeding it, RailsGoat's key made `user_id` lab vocabulary, and
+  `fuzzlab/tools/fetcher.py:89` (`PRIVILEGED_FIELDS`, a generic mass-assignment hint list
+  since 87c140c, 2026-10-20, before any held-out lab) names it. Removing it would change
+  detection, which this lane does not do; the word is generic, so it is cited with an
+  independent source, the guard's documented path. This closes CC-LAB-0420's open
+  deliverable (the product names), in this form instead of editing `LAB_PRODUCT_NAMES`.
+- Impact: none on detection; the guard's lab vocabulary grows by the held-out names.
+- Risk: low.
+- Deliverables:
+  - [x] guard reads the list, citation, pin — done
+- Effectiveness (assessed 2026-11-20): the harness with `--base 94fac7f` on the merge
+  (see the CHANGELOG line of this merge).
+
+### CC-LAB-0427 — The VAmPI and DVWS-node bootstraps check a differential, not a classified 401 (BUG-0721) (2026-11-20)
+- Change: `fuzzlab/lab_fixtures/external.py` (`bootstrap_vampi`, `bootstrap_dvws_node`): the
+  login is verified when the request answers 200 with the token and a client error (4xx)
+  without it, instead of exactly 401; `tests/test_holdout_benchmark.py`: the DVWS
+  differential test covers anonymous 200, 302 and 500.
+- Reason: BUG-0721 — a literal 401 outside `core.comparability` fails FR-CORE-507's guard,
+  and an allowance row would name held-out labs in that test file (lab/HOLDOUT.md rule 4).
+- Impact: none on the labs (both answer 401 anonymously, a 4xx); the baseline
+  (CC-LAB-0426, at 2ab5955) is unaffected: only the bootstrap's acceptance test changed,
+  and both labs bootstrapped there.
+- Risk: low.
+- Deliverables:
+  - [x] fix, tests, BUG-0721 / PA-0721 / ERROR_LOG — done
+- Effectiveness (assessed 2026-11-20): `scripts/verify_change.py --base e14c925` on the
+  lane's tip (CHANGELOG commit after f23bc81): 93 files, 4252 passed, 0 failed, 8 skipped
+  (seven live-lab tests gated by FUZZLAB_LIVE_EXTERNAL_LABS, as at the base; one RailsGoat
+  lock check needing the pinned checkout cache, which passes in the main tree where the
+  cache exists), 29 xfailed.
+
+### CC-LAB-0426 — The held-out baseline at e14c925's detection code (holdout-scores.json) (2026-11-20)
+- Change: new `docs/components/01-target-lab/holdout-scores.json` and `.md`, written by
+  `scripts/holdout_score.py --authorized` (CC-LAB-0424) at fuzzlab commit 2ab5955, whose
+  detection code is identical to e14c925 (the table checks it: `detection_identical: true`).
+- Results (crawl runs only; requests = auto's sends + crawl-recorded + disco exchanges):
+  - vampi: tp 0, fp 0, fn 4, tn 5; 8 requests, 13 s. fuzzlab's login failed (a JSON API
+    with no form: `SessionAuthError`), so the crawl ran anonymously; the app's root is JSON
+    with no links and its OpenAPI document is not linked, so discovery found no endpoint
+    and auto audited no point. Every fn: "no candidate".
+  - dvws-node: tp 0, fp 0, fn 21, tn 11; 139 requests, 59 s. The browser login could not be
+    verified (an SPA keeping its JWT in localStorage: "no request the app made after the
+    login click answers differently without the credential", FR-SESS-5), so crawl and auto
+    ran anonymously: one parameter discovered (the login's), 20 fns "no candidate", one
+    "no candidate for the class" (the login's NoSQL injection).
+  - railsgoat: tp 1 (RGOAT-0013, reflected XSS), fp 3, fn 12, tn 13; 792 requests, 539 s;
+    logged in as its identity throughout. Ten fns had no candidate (the jQuery-sent
+    `_method=patch` updates, signup, upload, forgot-password, DOM fragment, the id-in-path
+    access-control pages), one had no candidate for its class (path traversal on
+    `/download`), and one candidate was not checked (open redirect on `/sessions`,
+    inconclusive). False alarms: access control on `/users/{id}/messages`,
+    `/users/{id}/messages/4` and `/users/{id}/pay` — **not adjudicated** (a real flaw the key
+    lacks, or a false positive): re-examining the key after seeing a benchmark result would
+    tune the measure, so it is left to the owner (lab/HOLDOUT.md rule 3).
+- Reproducibility: the same command run twice (f8c0169's script with only the request
+  count fixed, then 2ab5955): identical tp / fp / fn / tn and identical fn and fp lists on
+  every lab.
+- Recorded, not fixed (lab/HOLDOUT.md rule 3; for the owner): fuzzlab cannot log into a
+  JSON-API login or verify an SPA's localStorage bearer session; the crawler does not read
+  an unlinked OpenAPI document; jQuery-sent forms and multipart uploads were not
+  discovered as points; `GET /createdb`-style destructive GETs are not refused by name.
+- Risk: none (a measurement).
+- Deliverables:
+  - [x] baseline table, this record — done
+- Effectiveness (assessed 2026-11-20): the table is the benchmark's first point; later
+  detection changes are compared with it by re-running the script.
+
+### CC-LAB-0425 — Seeded-account labs read their published passwords into the keyring (FR-LAB-425) (2026-11-20)
+- Change: `fuzzlab/lab_fixtures/external.py`: `railsgoat_published_credentials` (the app's
+  own `/tutorials/credentials` table), `_PUBLISHED_CREDENTIALS`, `seed_published_credentials`
+  (stores, for each account the keyring lacks, the password the running lab publishes for
+  its default username; refuses a lab that publishes none or an account it does not list)
+  and the CLI `seed-credentials <lab> --authorized`; tests in
+  `tests/test_holdout_benchmark.py` (railsgoat section) against a fake page and keyring.
+- Reason: RailsGoat's accounts are its own seed (`may_generate_password=False`, as
+  NodeGoat's); the benchmark runs each lab with a fresh private keyring and no TTY, so the
+  bootstrap could neither find nor prompt for the password. NodeGoat's live test stores its
+  seed password from test code, which a held-out lab may not do (lab/HOLDOUT.md rule 4).
+- Impact: the benchmark resets the lab without traffic, seeds, then bootstraps. No
+  password is committed; the app publishes them.
+- Risk: low. Checked live 2026-11-20: seeding stored both accounts, a second run stored
+  none, and `labctl.sh bootstrap railsgoat --authorized` then logged both in from the
+  keyring.
+- Deliverables:
+  - [x] hook, CLI, tests, benchmark wiring — done
+- Effectiveness (assessed 2026-11-20): the baseline run (CC-LAB-0426) bootstrapped
+  RailsGoat unattended.
+
+### CC-LAB-0424 — `scripts/holdout_score.py`, the held-out benchmark (FR-LAB-424) (2026-11-20)
+- Change: new `scripts/holdout_score.py`; offline tests in `tests/test_holdout_benchmark.py`
+  (reach tag, pipeline progress, the row and markdown, refusals, a faked run using crawl
+  points only, the anonymous fallback).
+- What it does, per held-out lab (or `--lab`): `labctl.sh reset` (no traffic), the
+  published-credential seeding where a lab has one (CC-LAB-0425), `labctl.sh bootstrap
+  --authorized` into a keyring private to the run, `labctl.sh status`; discovery only:
+  `fuzzlab crawl --engine playwright` from the app's start page as the lab's identity
+  (anonymously if that login fails, recorded) and `fuzzlab disco capture` (anonymous);
+  `fuzzlab auto --points crawl --score --browser --oob --authorized` over both, with the
+  answer key for scoring only (`--ground-truth`) and the identity / peer identity (the run
+  repeated anonymously if the logged-in run fails, recorded); then `labctl.sh down`. The
+  confusion matrix is the run's own findings against the key; each fn carries its point,
+  class, reach tag and how far the pipeline got (no candidate / no candidate for the class /
+  candidate not checked / checked, not confirmed). Requests = probe requests
+  (`request_budget.used`) + pages / requests the crawl recorded + disco exchanges.
+  The table records the fuzzlab commit and whether detection code equals
+  `--detection-base` (default e14c925).
+- Reason: lab/HOLDOUT.md rule 2 — the only way a held-out lab is run; never a
+  ground-truth-point run; the same crawl configuration for every lab, derived only from
+  `LabMeta` (start page, identities, fixed second origins), nothing tuned per lab.
+- Decisions: `--score` is passed as the lane brief names it (it trains the advisory
+  classifier, never labels; the TP/FP matrix comes from `--ground-truth`); both discovery
+  tools run, since `crawl` is deprecated but carries the identity and `disco` is anonymous
+  only (it takes a storage-state file, which nothing in the run produces).
+- Risk: sends traffic to loopback labs only, only with `--authorized`.
+- Deliverables:
+  - [x] script, tests — done
+- Effectiveness (assessed 2026-11-20): produced the baseline (CC-LAB-0426).
+
+### CC-LAB-0423 — RailsGoat, a held-out Ruby on Rails lab (FR-LAB-423) (2026-11-20)
+- Change: `lab/external/railsgoat/` (compose, Dockerfile), `lab/ground-truth-railsgoat/`,
+  `fuzzlab/lab_fixtures/external.py` (`RAILSGOAT_*` pins, `gemfile_lock_checksums`,
+  `fetch_rubygems`, `fetch_railsgoat`, `bootstrap_railsgoat`,
+  `railsgoat_account_attributes`, `LAB_META["railsgoat"]`), `.gitignore`, fixture tests in
+  `tests/test_holdout_benchmark.py`. Built by a subagent (worktree, commit b33eac7),
+  reviewed and merged by the orchestrator (2c1694f; two shared tail lines of the
+  external.py merge restored by hand, F-722).
+- Pins: OWASP/railsgoat at f5951f13 (upstream HEAD 2026-11-20), tracked files sha256
+  fe89ec5d…; base `ruby:3.4.1` by digest (its `.ruby-version`); every gem downloaded on the
+  host and checked against the Gemfile.lock's own CHECKSUMS sha256 (171 for x86_64 glibc;
+  bundler 4.0.4 by rubygems.org's published sha256); the image installs offline
+  (`build.network: none`). Development mode, as upstream runs it (production needs
+  `uglifier`, absent from its Gemfile); sqlite on tmpfs, `db:setup` at every start.
+- Safety: 127.0.0.1:3103 (`RAILSGOAT_PORT`), own bridge, every capability dropped,
+  no-new-privileges, read-only root, uid 10001.
+- Accounts: upstream's seed `ken@metacorp.com` (`railsgoat-user`, user 6) and
+  `mike@metacorp.com` (`railsgoat-peer`, user 5); login `POST /sessions` (CSRF not
+  enforced upstream); `user_id` stored as an account value.
+- Answer key: 26 cases (13 positives: SQLi 2, stored XSS 2, mass assignment 2, access
+  control 2, command injection, path traversal, reflected XSS, DOM XSS, open redirect; 13
+  negatives), each checked live by the subagent (`[prov: ...]` names the source and the
+  check). Dropped: `Marshal.load` on `/password_resets` (a destructive word, and a success
+  rewrites a password); a pay negative refused as a transaction URL.
+- Risk: low. Orchestrator re-check: the lab built, came up loopback-only, and the
+  bootstrap logged both accounts in.
+- Deliverables:
+  - [x] fixture, key, tests — done
+- Effectiveness (assessed 2026-11-20): runs in the baseline (CC-LAB-0426).
+
+### CC-LAB-0422 — DVWS-node, a held-out Node REST / SOAP / GraphQL lab (FR-LAB-422) (2026-11-20)
+- Change: `lab/external/dvws-node/` (compose, Dockerfile, .dockerignore),
+  `lab/ground-truth-dvws-node/`, `fuzzlab/lab_fixtures/external.py` (`DVWS_NODE_*` pins,
+  `fetch_dvws_node`, `bootstrap_dvws_node`, `dvws_node_account_attributes`,
+  `LAB_META["dvws-node"]`), `.gitignore`, fixture tests in `tests/test_holdout_benchmark.py`.
+  Built by a subagent (commit d41ba3a), reviewed and merged by the orchestrator (6dfb4e0).
+- Pins: snoopysecurity/dvws-node at 4221c04f (HEAD 2026-11-20), tracked files sha256
+  64de72b1…; npm packages from both lockfiles by `npm ci --ignore-scripts` on the host;
+  base `node:22-bookworm` by digest (upstream: unpinned); MongoDB and MySQL reuse the
+  already-pinned `SECDEVLABS_MONGO_IMAGE` / `MYSQL_IMAGE`; the build runs with no network
+  (bcrypt compiled from source).
+- Safety: everything on 127.0.0.1:3102 (`DVWS_PORT`; no fixed ports: the frontend calls its
+  own origin), databases on an internal network on tmpfs, capabilities dropped (databases
+  get back CHOWN/SETUID/SETGID/DAC_OVERRIDE), outside DNS off in the web container.
+- Accounts: our own `dvws-user` / `dvws-peer`, registered by the bootstrap (upstream's seed
+  drops every account at each start), JSON login `POST /api/v2/login` → Bearer JWT;
+  `note_id` stored as an account value.
+- Answer key: 32 cases (21 positives over 16 classes incl. XXE over SOAP, xpath, LDAP,
+  SSTI, deserialization, SSRF over XML-RPC, `$where` as ssjs; 11 negatives incl. three
+  GraphQL), each checked live by the subagent; uncoverable points (WebSocket, multipart
+  YAML/upload, JWT kid/jku) listed in its report, not in the key. Upstream's CHALLENGES.md
+  `alg:none` item measured not to work at this commit (jsonwebtoken 9).
+- Found: BUG-0720 (a test guard, CC-AUD-0720).
+- Risk: low. Orchestrator re-check: built, loopback-only, both accounts bootstrapped, SSTI
+  `Hello 1337` reproduced.
+- Deliverables:
+  - [x] fixture, key, tests — done
+- Effectiveness (assessed 2026-11-20): runs in the baseline (CC-LAB-0426).
+
+### CC-LAB-0421 — VAmPI, a held-out Flask REST API lab (FR-LAB-421) (2026-11-20)
+- Change: `lab/external/vampi/compose.yaml`, `lab/ground-truth-vampi/`,
+  `fuzzlab/lab_fixtures/external.py` (`VAMPI_IMAGE`, `VAMPI_COMMIT`, `bootstrap_vampi`,
+  `vampi_account_attributes`, `LAB_META["vampi"]`), `.gitignore`, fixture tests in
+  `tests/test_holdout_benchmark.py`. Built by a subagent (commit c56e73b), reviewed and
+  merged by the orchestrator (da3ea85).
+- Pin: `erev0s/vampi` by digest 0a5a224b…, its `/vampi` tree byte-identical to upstream
+  f16052dc (the image was built 39 s after that commit); `vulnerable=1`,
+  `tokentimetolive=3600` (upstream's compose value).
+- Safety: 127.0.0.1:3101 (`VAMPI_PORT`), own bridge, read-only root, SQLite on tmpfs,
+  every capability dropped.
+- Accounts: our own `vampi-user` / `vampi-peer`; the bootstrap calls `/createdb` only on an
+  empty database (it drops every table), registers, verifies `/me` 200 / 401, gives each
+  account a book; `book_title` and `username` stored as account values.
+- Answer key: 9 cases (SQLi on `/users/v1/{username}`, BOLA on books, an unauthorized
+  password change, mass assignment of `admin` at registration; 5 negatives), each checked
+  live by the subagent; JWT weak key, enumeration, ReDoS, data exposure not scoreable.
+- Risk: low. Hazards for any crawl, recorded: `GET /createdb` drops the tables (no
+  destructive rule flags it), `/users/v1/_debug` lists every password.
+- Deliverables:
+  - [x] fixture, key, tests — done
+- Effectiveness (assessed 2026-11-20): orchestrator re-check live (loopback status 0; SQLi
+  boolean 200 / 404; BOLA anonymous 401); runs in the baseline (CC-LAB-0426).
+
+### CC-LAB-0420 — Held-out labs: the list, the rule and its guard; answer keys discovered from the layout (FR-LAB-420) (2026-11-20)
+- Change: new `lab/HOLDOUT.md` (the rule and the table of held-out labs);
+  `fuzzlab/lab_fixtures/heldout.py` (reads the table, fails closed; SP-140);
+  `tests/test_holdout_benchmark.py` (the one test file allowed to name a held-out lab:
+  `test_no_other_test_file_names_a_held_out_lab` over every text file under `tests/`, a
+  synthetic offender, malformed tables, each listed lab's fixture and key;
+  PA-0720's answer-key-loop guard); `tests/test_external_labs_static.py`: `GT_DIRS` is
+  discovered from `lab/ground-truth-<lab>/` beside `lab/external/<lab>/compose.yaml`
+  instead of a hand-written list.
+- Reason: owner directive — every lab so far also tuned detection, which flatters the
+  numbers; held-out labs, scored only by crawl runs, measure real-world detection. The
+  static tests must check held-out keys without naming them. PA-0660's black-box guard
+  (lane BLACKBOX, `tests/test_blackbox_detection.py`) reads `lab/ground-truth*/`, so it
+  sees the held-out keys' directory names, target ids (`erev0s_vampi_…`,
+  `dvws_node_…`, `owasp_railsgoat_…`), paths and parameters.
+- Impact: every structural answer-key test covers the held-out labs; nothing else names
+  them.
+- Risk: low.
+- Deliverables:
+  - [x] list, reader, guard, discovery — done
+  - [ ] at the BLACKBOX merge: add `vampi`, `dvws`, `railsgoat` to that guard's
+        `LAB_PRODUCT_NAMES` (the bare word `dvws` is not an answer-key token) — flagged
+- Effectiveness (assessed 2026-11-20): the guard passes on the tree and flags its
+  synthetic offender.
 
 ### CC-LAB-0353 — VulnerableApp moves to 127.0.0.1:3095; a static guard against shared lab ports (FR-LAB-352) (2026-11-20)
 - Change: `lab/external/vulnerableapp/compose.yaml` (`${VAPP_PORT:-3095}`),

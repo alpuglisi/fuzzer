@@ -6371,6 +6371,34 @@ lane) can submit a payload as
   targets (D10); bWAPP's page names carry class words, so NFR-LAB-no-leak does not hold
   for them and a model trained on runs against them would learn from the URL (recorded as
   not enforced under NFR-ML-no-leak; the training question is the operator's).
+- **FR-LAB-363** *(the scored-run record's checks; `CC-LAB-0361`, 2026-11-20, BUG-0641's
+  review).* Beyond FR-LAB-362, `tests/test_external_lab_scored_runs.py` requires every
+  `open:` reason to name the record that tracks it (`CC-<CODE>-NNNN` or `BUG-NNNN`), every
+  matched id to be a positive of the key, and tn/fp to agree with the key's negatives.
+- **FR-LAB-362** *(each external lab's scored ground-truth run is recorded; `CC-LAB-0360`,
+  2026-11-20, BUG-0640, PA-0640).* `docs/components/01-target-lab/external-lab-scores.json`
+  holds, per external lab with a ground truth, its latest scored `fuzzlab auto --points
+  ground-truth` run: commit, command, tp/fp/fn/tn, requests, wall time, the matched case
+  ids, and every missed positive with its reason (`open: <cause>` for a positive whose
+  tag says a ground-truth pass reaches it). `tests/test_external_lab_scored_runs.py`
+  checks the record against every answer key's reach tags; a lab added or changed
+  records its run (PA-0640(3)).
+- **FR-LAB-361** *(copy-n-paste's points send the page's JSON body; `CC-LAB-0360`,
+  2026-11-20, BUG-0640).* `lab/ground-truth-secdevlabs-copy-n-paste`'s points carry
+  `json_body` (FR-FUZZ-54): `{user, pass}` for `/login`, `{user, pass, passcheck}` for
+  `/register`, as the page posts them (`globocom/secDevLabs@10be438`
+  `owasp-top10-2021-apps/a3/copy-n-paste/app/views/form.html:123-150`) and the handler binds
+  them (`.../app/types/types.go:4-14`, same commit); a body missing a field answers `400 "All fields are
+  required"` before the query (measured 2026-11-20). No case changed.
+- **FR-LAB-360** *(mongection has an account from a fresh `up`; `CC-LAB-0360`, 2026-11-20,
+  BUG-0640).* `secdevlabs-mongection` has the identity `sdl-mongection-user`
+  (`fuzzlab_user@fuzzlab.lab`, generated password) and a bootstrap
+  (`bootstrap_secdevlabs_mongection`) that registers it through the JSON `/register` when
+  the JSON `/login` fails and verifies it by a positive differential (the password answers
+  the welcome page naming the account, a wrong one `Bad Credentials`). Its NoSQL injection
+  answers an account, and the database is tmpfs: without one the positives SDLMG-0001/0002
+  cannot be observed (measured 2026-11-20). `auto` needs no `--identity` for them.
+
 - **FR-LAB-370** *(scan performance probe; `CC-LAB-0370`, 2026-11-20).*
   `scripts/measure_scan_perf.py` runs `fuzzlab auto` in-process against one running
   external lab (`--lab`, `--points ground-truth|crawl`, a fresh `--store`, `--spider-db`
@@ -6520,6 +6548,51 @@ lane) can submit a payload as
   labs can run at once. Enforced by
   `tests/test_external_labs_static.py::test_no_two_external_labs_publish_the_same_host_port`
   (proven on a synthetic collision).
+- **FR-LAB-420** *(held-out labs; `CC-LAB-0420`, 2026-11-20).* `lab/HOLDOUT.md` lists the
+  held-out labs and the rule: no lane runs, measures, reads the answer key of, or tunes
+  detection against one; only the benchmark (FR-LAB-424) runs them, by crawl runs only;
+  findings that would need tuning are recorded, not fixed. Its table is read only through
+  `fuzzlab.lab_fixtures.heldout` (fail closed on a missing or malformed table). No test
+  file but `tests/test_holdout_benchmark.py` names a held-out lab (enforced by
+  `test_no_other_test_file_names_a_held_out_lab`, proven on a synthetic offender);
+  structural answer-key tests discover every key from the layout (`lab/ground-truth-<lab>/`
+  beside `lab/external/<lab>/compose.yaml`) and so check held-out keys unnamed.
+- **FR-LAB-421** *(VAmPI, held out; `CC-LAB-0421`, 2026-11-20).* `lab/external/vampi/`
+  runs `erev0s/vampi` pinned by digest (tree = upstream f16052dc) in vulnerable mode on
+  127.0.0.1:3101 (`VAMPI_PORT`), read-only, SQLite on tmpfs; two accounts of our own
+  (`vampi-user`, `vampi-peer`, JSON login, Bearer JWT; account values `book_title`,
+  `username`); answer key `lab/ground-truth-vampi/` (4 positives, 5 negatives).
+- **FR-LAB-422** *(DVWS-node, held out; `CC-LAB-0422`, 2026-11-20).* `lab/external/dvws-node/`
+  builds snoopysecurity/dvws-node at 4221c04f (tracked-file sha256 pinned, npm lockfile
+  integrity, offline build from a pinned Node 22 base) with MongoDB and MySQL on an internal
+  network, everything on 127.0.0.1:3102 (`DVWS_PORT`); two accounts of our own
+  (`dvws-user`, `dvws-peer`, JSON login, Bearer JWT; account value `note_id`); answer key
+  `lab/ground-truth-dvws-node/` (21 positives over REST, SOAP/XML, XML-RPC and GraphQL;
+  11 negatives).
+- **FR-LAB-423** *(RailsGoat, held out; `CC-LAB-0423`, 2026-11-20).* `lab/external/railsgoat/`
+  builds OWASP/railsgoat at f5951f13 (tracked-file sha256 pinned, every gem checked against
+  the Gemfile.lock CHECKSUMS sha256, offline build from a pinned Ruby 3.4.1 base) on
+  127.0.0.1:3103 (`RAILSGOAT_PORT`), read-only, sqlite on tmpfs re-seeded at every start;
+  upstream's seeded accounts (`railsgoat-user` ken, `railsgoat-peer` mike; form login;
+  account value `user_id`); answer key `lab/ground-truth-railsgoat/` (13 positives, 13
+  negatives).
+- **FR-LAB-424** *(the held-out benchmark; `CC-LAB-0424`, 2026-11-20).*
+  `scripts/holdout_score.py --authorized [--lab L]` runs each held-out lab fresh, discovers
+  by `fuzzlab crawl` (as the lab's identity, anonymous if that login fails) and `fuzzlab
+  disco capture`, runs `fuzzlab auto --points crawl --score` with the key for scoring only,
+  and writes one JSON and one markdown table: per lab tp / fp / fn / tn, precision, recall,
+  requests, wall time, which login each step used, the fuzzlab commit, whether detection
+  code equals `--detection-base`, and every fn with its point, class, reach tag and pipeline
+  progress. It never runs ground-truth points; its crawl configuration is the same for every
+  lab, derived only from `LabMeta`. The committed baseline is
+  `docs/components/01-target-lab/holdout-scores.json` (+ `.md`, CC-LAB-0426).
+- **FR-LAB-425** *(published seed credentials; `CC-LAB-0425`, 2026-11-20).* For a lab whose
+  accounts are its own seed and whose running app publishes their passwords
+  (`_PUBLISHED_CREDENTIALS`: RailsGoat's `/tutorials/credentials`),
+  `python -m fuzzlab.lab_fixtures.external seed-credentials <lab> --authorized` stores the
+  published password of each account the keyring lacks, so an unattended run can bootstrap
+  with no prompt; it refuses a lab that publishes none and an account the page does not
+  list. No password is committed.
 - **FR-LAB-306** *(secDevLabs apps, one external lab each; `CC-LAB-0303`, 2026-10-18).*
   `fuzzlab/lab_fixtures/external.py` checks globocom/secDevLabs out at commit `10be438`
   once (`secdevlabs_checkout`, gitignored, HEAD verified by the shared

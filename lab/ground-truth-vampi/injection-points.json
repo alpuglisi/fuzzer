@@ -1,0 +1,83 @@
+{
+ "version": 1,
+ "target": "erev0s_vampi_f16052dc",
+ "points": [
+  {
+   "url": "/users/v1/{username}",
+   "method": "GET",
+   "param": "username",
+   "location": "path",
+   "rendering": "server-json"
+  },
+  {
+   "url": "/books/v1/{book_title}",
+   "method": "GET",
+   "param": "book_title",
+   "location": "path",
+   "rendering": "server-json",
+   "account_value": "book_title"
+  },
+  {
+   "url": "/users/v1/{username}/password",
+   "method": "PUT",
+   "param": "username",
+   "location": "path",
+   "rendering": "server-json",
+   "account_value": "username"
+  },
+  {
+   "url": "/users/v1/register",
+   "method": "POST",
+   "param": "admin",
+   "location": "body",
+   "rendering": "server-json",
+   "json_body": {
+    "username": "name1",
+    "password": "pass1",
+    "email": "user@fuzzlab.lab",
+    "admin": false
+   }
+  },
+  {
+   "url": "/users/v1/login",
+   "method": "POST",
+   "param": "username",
+   "location": "body",
+   "rendering": "server-json",
+   "json_body": {
+    "username": "name1",
+    "password": "pass1"
+   }
+  },
+  {
+   "url": "/books/v1",
+   "method": "POST",
+   "param": "book_title",
+   "location": "body",
+   "rendering": "server-json",
+   "json_body": {
+    "book_title": "book99",
+    "secret": "pass1secret"
+   }
+  },
+  {
+   "url": "/users/v1/{username}/email",
+   "method": "PUT",
+   "param": "username",
+   "location": "path",
+   "rendering": "server-json",
+   "account_value": "username"
+  },
+  {
+   "url": "/users/v1/{username}/email",
+   "method": "PUT",
+   "param": "admin",
+   "location": "body",
+   "rendering": "server-json",
+   "json_body": {
+    "email": "mail3@fuzzlab.lab",
+    "admin": false
+   }
+  }
+ ]
+}

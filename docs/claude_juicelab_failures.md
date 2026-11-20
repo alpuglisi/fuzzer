@@ -2224,6 +2224,13 @@ Juice Shop lab is complete.
 - **Impact:** an overstated picture of real-world detection for about an hour; nothing lab-fitted was merged (GQL had not been merged).
 - **Cause:** I took the lanes' chosen headline (the oracle diagnostic) as the progress measure, and reviewed the GQL rules for correctness and safety but not for where their evidence came from.
 - **Status:** corrected: crawl runs are now the headline measure; GQL sent back to remove or independently justify the DVGA-derived words; every lane given the black-box rule; a black-box audit lane queued to sweep existing detection code and add the rule (PA) with a guard.
+
+### F-680 — I told the crawl subagent the fix caught `start over` after I had decided to drop it
+- **What:** on 2026-11-20 (lane CRAWLSAFE) my instruction to the live-crawl subagent said the working-tree fix catches "'start over'". I then removed that pair (it has one independent source, DVGA, so it fails the black-box rule) and did not correct the instruction.
+- **Evidence:** the subagent's report: "Your note said 'start over' is caught; … the underscore form is not"; `destructive_reason('/start_over')` is None at 2ca7cc8.
+- **Impact:** none on the measurement (the subagent measured the committed tree and reported the discrepancy); a stale claim reached a delegate.
+- **Cause:** I described an uncommitted, still-changing rule to a delegate instead of pointing it at a commit.
+- **Status:** corrected: the fixed crawl ran on commit 2ca7cc8 and the records state DVGA's `/start_over` as a residual.
 ### F-610 — I designed the server-side JavaScript differential to compare answers by text without measuring whether the true branch answers the same twice
 - **What:** lane NODE's first `SsjsBooleanDifferentialStrategy` ran its families with `exact=True` (status and text after stripping reflections). NodeGoat's `$where` true branch lists the matched users in the order their lookups finish, so two identical D requests differed and every round failed: NGOAT-0004 (`threshold`) was missed in the first AFTER run.
 - **Evidence:** the AFTER run's trace (screen passed: B 500, D 200, V 500; round 1 failed on "D same as the first D"); six identical true-branch requests by hand listed the three users in three orders (CC-FUZZ-0610).
@@ -2356,6 +2363,47 @@ Juice Shop lab is complete.
 - **Cause:** I generalised the design past what I had measured (§7: measure before design).
 - **Status:** fixed in CC-FUZZ-0633 (removed; only the measured file is probed).
 
+### F-720 — The VAmPI onboarding subagent showed generated lab passwords in its transcript and sent stray GETs through the proxy
+- **What:** lane HOLDOUT's VAmPI subagent (a) printed the first pair of generated lab passwords in a helper's output, and (b) ran `curl --noproxy *` unquoted, so the shell expanded `*` to scratchpad file names that curl then fetched as URLs through the agent proxy.
+- **Evidence:** the subagent's own report (hand-back of the VAmPI lane, 2026-11-20); the stored passwords were rotated (keyring entries deleted, lab re-bootstrapped from an empty database).
+- **Impact:** two loopback-lab passwords (since rotated, never committed) in a transcript; a handful of stray GETs to unrelated hosts, none to the lab, none carrying data.
+- **Cause:** unquoted shell glob; a debug print of a credential, against D12.
+- **Status:** remediated by the subagent (passwords rotated); no repository content affected.
+
+### F-721 — I dispatched three worktree subagents told they were based on f5db593 without checking; their worktrees started at 2be7a50
+- **What:** the HOLDOUT dispatch prompts said "an isolated git worktree … based on commit f5db593". The worktree isolation created all three from 2be7a50 (an older ancestor without lab/HOLDOUT.md). I did not verify the base the mechanism would use.
+- **Evidence:** each subagent's report (start HEAD 2be7a50; each ran `git reset --hard f5db593` on its new branch before editing); the merged branches' parent is f5db593 (`git log holdout-vampi holdout-dvws-node holdout-railsgoat`).
+- **Impact:** none on content (all three caught it); had one not, its lab would have been built against a tree without the guard and the discovery change, and the merge would have pulled unrelated older history.
+- **Cause:** I trusted the delegation mechanism's base instead of confirming it (MULTI_AGENT_ORCHESTRATION §4 asks sub-agents to confirm the mechanism; I did ask for `git rev-parse HEAD`, which is how it was caught).
+- **Status:** recorded; future dispatches state the base and require the agent to check it first.
+
+### F-722 — My resolution of the RailsGoat merge dropped DVWS-node's `return dest` and its fetch branch's `return 0`
+- **What:** resolving the external.py conflicts by concatenating both sides put the shared trailing lines (`return dest`, `return 0`) after the second side only, so `fetch_dvws_node` returned None and the DVWS `fetch` CLI branch fell through to the RailsGoat one.
+- **Evidence:** caught by my own read of the resolved regions before the merge commit (2c1694f carries the corrected lines).
+- **Impact:** none committed.
+- **Cause:** a mechanical conflict resolution; the shared context of two appended blocks belongs to both.
+- **Status:** fixed before commit.
+
+### F-723 — My first benchmark design gave up discovery when the lab's login failed; the first baseline run had to be stopped and repeated
+- **What:** `holdout_score.py` as first committed (75f4691) treated a failed logged-in crawl as "no crawl", so VAmPI was scored on a near-empty discovery and DVWS-node's run would have been the same. A black-box tester whose login fails still crawls anonymously.
+- **Evidence:** the first run's VAmPI log (`SessionAuthError` from the crawl, then auto over 0 points); fixed in f8c0169 (anonymous fallback for crawl and auto, recorded per row); the run was stopped and repeated with the fixed script.
+- **Impact:** one wasted benchmark run (~15 min).
+- **Cause:** I designed the runner for the success path only.
+- **Status:** fixed; the baseline (CC-LAB-0426) is from the fixed script.
+
+### F-724 — My benchmark counted requests from a table auto does not write; the first baseline table under-counted every lab
+- **What:** `holdout_score.score_store` summed `request_budget.used` for the run's sends; auto records them in `run_metrics.pipeline_requests`, so the first full run reported only crawl and disco traffic (railsgoat 328 instead of 792). I had not checked the source against a real store before writing it, and the offline test faked `score_store` away.
+- **Evidence:** the first baseline's `probe_requests: null` on every lab, against auto's own "requests: 464" line in the run log; fixed in 2ab5955 with a test reading a real store.
+- **Impact:** one extra benchmark run; the wrong table was never committed.
+- **Cause:** I wrote a metric reader from a schema name without measuring it.
+- **Status:** fixed; the committed baseline (CC-LAB-0426) counts what the run sent.
+
+### F-725 — My dispatch prompts told the onboarding subagents to verify with two named test files, not the harness
+- **What:** the HOLDOUT dispatch prompts said "`python -m pytest … tests/test_external_labs_static.py tests/test_holdout_benchmark.py`" as the verification step, against CLAUDE.md step 2 ("never a hand-picked list"). Their code tripped a whole-package guard (BUG-0721) that ran only in my final harness.
+- **Evidence:** the three dispatch prompts (this session, 2026-11-20); `scratchpad/verify/parallel.log` of 6ddac13 (1 failure).
+- **Impact:** one failed harness run and a fix commit, on the lane branch only.
+- **Cause:** I wrote a quick check as the verification step, and ran a subset myself after each merge instead of the harness.
+- **Status:** fixed (CC-LAB-0427); PA-0721.
 ### F-654 — My correction F-653 named the wrong cause too: I re-aimed the tests at a binary the product does not run
 - **What:** F-653 (and BUG-0651's "Correction") said the five `test_navigation_aborts` failures came from the tests running Playwright's headless shell instead of full Chrome, and my fix (931311b) pointed every test at full Chrome. The product launches the headless shell; on it SP-01's guarantee was really broken (BUG-0670, found by lane NAV), and my fix would have hidden that product defect behind a green suite.
 - **Evidence:** BUG-0670 / BUG-0671 (lane NAV, merged at 9cabe61): an empty-body error answer is a page on the headless shell and an error page on full Chrome; NAV's harness green with the product fixed and the tests on the product's binary.
@@ -2376,6 +2424,48 @@ Juice Shop lab is complete.
 - **Impact:** every stored-XSS case behind a login missed on every lab, recorded as negatives.
 - **Cause:** a rule written without a whole-package guard; reviews checked the spider only.
 - **Status:** fixed (CC-FUZZ-0680, PA-0690 guards).
+
+### F-640 — While diagnosing mongection's misses I registered a probe account on the live lab, changing the state the next run would measure
+- **What:** lane ACC (2026-11-20): to test whether mongection's NoSQL differential needs an account, I POSTed `/register` (`probe@lab.test`) to the running lab between the baseline and the AFTER runs.
+- **Evidence:** this session's commands; BUG-0640 "Description" (the measurement it produced).
+- **Impact:** none on a recorded number: the lab was brought down and up again (tmpfs database emptied) before the bootstrap's verification and every AFTER run; had it stayed, an AFTER run would have passed without the fix.
+- **Cause:** I measured on the shared lab instance instead of a throwaway one, as an earlier diagnosis step, without first noting that a later measurement depends on the lab's state.
+- **Status:** remediated (lab recreated; the AFTER runs started from a fresh `up`).
+
+### F-641 — Earlier work tagged five secDevLabs positives `[reach: gt]` from hand-made requests that no scored run could reproduce
+- **What:** CC-LAB-0303, CC-LAB-0309 and CC-LAB-0311/0313 recorded a manual live check per lab and tagged the positives reachable from ground-truth points; copy-n-paste's points lacked the JSON body its handler requires, mongection's fresh lab had no account for its flaw to answer (the check was made after accounts were created by hand), and comment-killer's case has no store URL, which CC-LAB-0313 itself states, beside its `[reach: gt]` tag.
+- **Evidence:** lane ACC's first scored runs at 2be7a50: copy-n-paste tp=0 fn=3, mongection tp=0 fn=2, comment-killer fn=1 (CC-LAB-0360); BUG-0640.
+- **Impact:** five guaranteed false negatives on a fresh lab, and answer keys that overstated what fuzzlab measured on three labs for a month.
+- **Cause:** a reach tag was inferred from "the sink is vulnerable" plus "the point names the parameter", and no scored run was recorded (PA-0042 was scoped to new class mappings and not enforced).
+- **Status:** fixed for copy-n-paste and mongection (CC-LAB-0360); comment-killer recorded `open:`; PA-0640 makes the record a checked file.
+
+### F-642 — I set up the container without the `disco` extra, and my first harness run counted three failures that came from the missing package
+- **What:** lane ACC installed fuzzlab with `.[browser,web,dev]`; `mitmproxy` (the `disco` extra) was absent, so the first `verify_change.py --base 2be7a50` run of 5e1e7d1 failed three `tests/test_browser_session_reach.py` disco tests ("mitmproxy unavailable") beside five `tests/test_navigation_aborts.py` failures.
+- **Evidence:** the run's `parallel.log` (5509 passed, 8 failed); the same 8 failed on 2be7a50 in a clean worktree; mitmproxy then installed and the harness re-run (CC-LAB-0360).
+- **Impact:** one wasted harness cycle; no result reported from it.
+- **Cause:** I installed the extras the runbook's Part B names, not every extra the suite's browser tests import under `FUZZLAB_REQUIRE_BROWSER=1`.
+- **Status:** remediated (mitmproxy installed, harness re-run).
+
+### F-643 — I shipped a directory-listing confirmer that matched English words anywhere against a control that dropped the probe's separators
+- **What:** CC-FUZZ-0640 (684fab9) confirmed path traversal on 4 of 25 `/etc` names found as tokens anywhere, seven of them common words, against a separator-free `etc` control, with the status unread; I measured only bWAPP's listing and called the names present "on every Linux base the labs run".
+- **Evidence:** BUG-0641: the reviewer's prose and error-page cases confirmed through the real oracle (reproduced 2026-11-20).
+- **Impact:** none merged (caught by the independent review); a false-positive path traversal on ordinary pages had it shipped.
+- **Cause:** I designed the signal from the one true positive I had, wrote no must-not-confirm fixture other than "always shows the names", and copied the file phase's control without checking PA-0117(1) for the new signal.
+- **Status:** fixed (CC-FUZZ-0641); PA-0641.
+
+### F-644 — After F-642 I still installed only the extras one failure had named, and the next harness run lost ten tests to a missing `labgen` extra
+- **What:** after F-642 I added `mitmproxy` alone. Lanes PHPX and GQL then merged in, so the harness on 5e9f067 (`--base 7a1ef32`) selected 202 files, ten of them php_laravel labgen tests: their `--check` gate failed closed ("requires scikit-learn", the `labgen` extra), and some also hit a 240 s `composer install` limit under the parallel pass.
+- **Evidence:** `verify5/parallel.log` (6283 passed, 15 failed); one test re-run alone on the same commit showed the scikit-learn message; every extra then installed and the harness re-run.
+- **Impact:** one more wasted harness cycle; nothing reported from it.
+- **Cause:** I fixed the instance (one package) instead of the class (every optional dependency group the suite imports); F-642's own lesson, not applied.
+- **Status:** remediated (every extra in `pyproject.toml` installed).
+
+### F-645 — Correction to F-644: installing every Python extra did not fix the nine labgen failures; `gitleaks` was missing too
+- **What:** F-644 said the labgen failures were remediated by installing every extra. The harness re-run on 5e9f067 (`verify6`) still failed nine `test_cli_check_passes_end_to_end*` tests: the labgen check's secret-scanner gate needs the `gitleaks` executable. Lane NODE's ERROR_LOG entry (2026-11-20) had already named it; I did not read it before setting up.
+- **Evidence:** `verify6/parallel.log` (6284 passed, 14 failed: 9 "'gitleaks' executable not found on PATH", 5 navigation aborts).
+- **Impact:** another harness cycle; F-644's status line overstated the fix.
+- **Cause:** as F-642/F-644: I set up from the failures in front of me, not from the environment record another lane had written.
+- **Status:** `apt-get install gitleaks` (8.16.0); the harness is re-run on the next merge.
 
 ### F-660 — Detection code built by earlier agent sessions spoke the labs' own names (found by the black-box audit)
 - **What:** the 2026-11-20 black-box audit (lane BBOX) found lab knowledge in detection logic written by this agent in earlier sessions: audit rules named twitch-clone's `channel_id`, netflix-clone's `account_id` (added after that lab's miss), expedia-clone's `sortBy`, booking-clone's `label`, twitch-clone's `thumbnail`; seven strategies sent one labgen cell's own claim, field, element or attribute names, and their docstrings called this a project convention ("hardcode the sink's own known field name"). Each was justified in its CC entry by that lab's recall rising and "no other ground truth uses X".

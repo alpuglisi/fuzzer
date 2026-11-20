@@ -1,0 +1,51 @@
+# VAmPI, the Vulnerable API (erev0s/VAmPI, MIT; held-out external lab, lab/HOLDOUT.md).
+# Lab-only. A Python / Flask (connexion 2) REST API with JWT bearer auth, built to
+# evaluate API security tools: it serves its own OpenAPI 3 description at
+# /openapi.json and a Swagger UI at /ui/. Its answer key is lab/ground-truth-vampi.
+#
+# Image: upstream's own Docker Hub build, pinned by digest. Its /vampi tree is byte for
+# byte upstream commit f16052dce83f05847133ec98f01c5193a41de7d8 (2026-04-07 20:02:39Z;
+# the image was created 39 s later by upstream's docker-image workflow), checked by
+# diffing the image's files against that commit.
+#
+# Mode: `vulnerable=1` (upstream's vulnerable switch, also the image default);
+# `tokentimetolive=3600` (upstream's own compose value; the image default is 60 s, too
+# short for a crawl that logs in once). The app runs Flask with debug=True, as upstream
+# ships it (the Werkzeug debugger answers an unhandled exception; reachable on loopback
+# only).
+#
+# Data: SQLite at /vampi/database/database.db, on a tmpfs: reset = restart the
+# container. The tables exist only after GET /createdb, which DROPS and re-creates them
+# (upstream's three seed users name1/name2/admin), so it also deletes every account
+# registered since; the bootstrap calls it only when the tables are missing.
+#
+# Safety: published on LOOPBACK ONLY (127.0.0.1), on its own bridge network, read-only
+# root filesystem, capabilities dropped.
+#
+# Run through lab/labctl.sh:  ./labctl.sh up vampi [--authorized]
+name: fuzzlab-vampi
+
+x-podman:
+  in_pod: false
+
+services:
+  app:
+    image: docker.io/erev0s/vampi:latest@sha256:0a5a224b6e14ae7da6a6ea265178ff71286ff903aec74adee98f660bb0e4ca12
+    networks: [vampi-net]
+    ports:
+      # Loopback only. Never bind 0.0.0.0.
+      - "127.0.0.1:${VAMPI_PORT:-3101}:5000"
+    environment:
+      vulnerable: "1"
+      tokentimetolive: "3600"
+      PYTHONDONTWRITEBYTECODE: "1"
+    read_only: true
+    # the SQLite file (the directory holds only an empty __init__.py nothing imports)
+    tmpfs: [/tmp, /vampi/database]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 128
+    mem_limit: 256m
+
+networks:
+  vampi-net: {}

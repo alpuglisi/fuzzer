@@ -37,20 +37,12 @@ from fuzzlab.procutil import run_bounded
 REPO = Path(__file__).resolve().parent.parent
 LAB = REPO / "lab"
 EXTERNAL = LAB / "external"
-GT_DIRS = {"bwapp": LAB / "ground-truth-bwapp", "juice-shop": LAB / "ground-truth-juice-shop",
-           "secdevlabs-copy-n-paste": LAB / "ground-truth-secdevlabs-copy-n-paste",
-           "secdevlabs-gossip-world": LAB / "ground-truth-secdevlabs-gossip-world",
-           "secdevlabs-sstype": LAB / "ground-truth-secdevlabs-sstype",
-           "secdevlabs-vinijr-blog": LAB / "ground-truth-secdevlabs-vinijr-blog",
-           "secdevlabs-amarelo-designs": LAB / "ground-truth-secdevlabs-amarelo-designs",
-           "secdevlabs-mongection": LAB / "ground-truth-secdevlabs-mongection",
-           "secdevlabs-comment-killer": LAB / "ground-truth-secdevlabs-comment-killer",
-           "secdevlabs-streaming": LAB / "ground-truth-secdevlabs-streaming",
-           "secdevlabs-ecommerce-api": LAB / "ground-truth-secdevlabs-ecommerce-api",
-           "dvga": LAB / "ground-truth-dvga",
-           "mutillidae": LAB / "ground-truth-mutillidae",
-           "nodegoat": LAB / "ground-truth-nodegoat",
-           "vulnerableapp": LAB / "ground-truth-vulnerableapp"}
+#: Every external lab's answer key, discovered from the layout (``lab/ground-truth-<lab>/``
+#: beside ``lab/external/<lab>/compose.yaml``), so a held-out lab's key is checked here
+#: without this file naming it (lab/HOLDOUT.md, FR-LAB-421).
+GT_DIRS = {d.name.removeprefix("ground-truth-"): d
+           for d in sorted(LAB.glob("ground-truth-*"))
+           if (EXTERNAL / d.name.removeprefix("ground-truth-") / "compose.yaml").is_file()}
 #: Labs scored by URL coverage, not an injection answer key: the lab serves its own
 #: expected set (the Crawl Maze: /fetch-expected-results, CC-LAB-0302).
 COVERAGE_LABS = {"security-crawl-maze"}
@@ -1431,6 +1423,67 @@ def test_a_lab_with_extra_accounts_bootstraps_and_stores_each_on_its_own_session
     assert stored["sdl-gossip-user"][1] != stored["sdl-gossip-peer"][1]
 
 
+
+# --- BUG-0640 (CC-LAB-0360, FR-LAB-360): a [reach: gt] positive the fixture lets a run observe
+
+def _mongection_routes(state):
+    def login(s, kw):
+        body = kw["json"]
+        if state["users"].get(body["email"]) == body["password"]:
+            return _Resp(200, text=f"<h1>Hello, Welcome Again!</h1><h3>{body['email']}</h3>")
+        return _Resp(200, text="Bad Credentials")
+
+    def register(s, kw):
+        body = kw["json"]
+        assert set(body) == {"name", "email", "password"}
+        if body["email"] in state["users"]:
+            return _Resp(200, text="User Already Exists")
+        state["users"][body["email"]] = body["password"]
+        return _Resp(200, text=f"<h1>Welcome to Mongection System</h1><h3>{body['email']}</h3>")
+
+    return {("GET", "/"): lambda s, kw: _Resp(200), ("POST", "/login"): login,
+            ("POST", "/register"): register}
+
+
+def test_mongection_bootstrap_creates_the_account_its_flaw_answers_then_is_idempotent():
+    """A fresh mongection (tmpfs database) has no account, and its NoSQL injection (an
+    operator in both login fields) answers one: measured 2026-11-20, `{"$ne": null}` in
+    both fields answered "Bad Credentials" until one account existed, then logged in."""
+    state = {"users": {}}
+    keyring = _Store()
+    res = _boot("secdevlabs-mongection", _mongection_routes(state), keyring, _Store(), [],
+                prompt=None)
+    assert res.credential_source == "generated" and res.stored
+    assert res.notes == ["account registered", "login verified"]
+    (host, ident, user, pw), = keyring.sets
+    assert (host, ident, user) == ("127.0.0.1", "sdl-mongection-user",
+                                   "fuzzlab_user@fuzzlab.lab")
+    assert state["users"] == {user: pw}
+    res2 = _boot("secdevlabs-mongection", _mongection_routes(state), _Store(_Cred(user, pw)),
+                 _Store(), [])
+    assert res2.notes == ["login verified"]
+
+
+def test_mongection_bootstrap_with_a_stale_password_says_reset_and_stores_nothing():
+    state = {"users": {"fuzzlab_user@fuzzlab.lab": "another"}}
+    keyring = _Store()
+    with pytest.raises(ext.ExternalLabError, match="reset secdevlabs-mongection"):
+        _boot("secdevlabs-mongection", _mongection_routes(state), keyring, _Store(), [],
+              prompt=None)
+    assert keyring.sets == []
+
+
+def test_copy_n_paste_points_send_the_json_body_its_page_and_handler_take():
+    """The page posts `application/json` (app/views/form.html:123-150) and the Go
+    handler binds every field (app/types/types.go:4-14); a body missing `pass` answers
+    "All fields are required" before the query (measured 2026-11-20), so a point
+    without `json_body` never reaches the sink."""
+    gt = contract.load(LAB / "ground-truth-secdevlabs-copy-n-paste")
+    want = {"/login": {"user", "pass"}, "/register": {"user", "pass", "passcheck"}}
+    assert gt.points
+    for p in gt.points:
+        assert p.location == "body" and p.json_body is not None, p
+        assert set(p.json_body) == want[p.url] and p.param in p.json_body
 # --- NodeGoat (CC-LAB-0330) ---------------------------------------------------------------
 
 def test_the_nodegoat_build_uses_only_pinned_bases_and_the_cached_app():
