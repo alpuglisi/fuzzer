@@ -193,7 +193,7 @@ def test_a_benchmark_run_uses_crawl_points_only(tmp_path, monkeypatch):
     row = m.Runner(lab, tmp_path, budget_total=10, timeout=10, disco_deadline=5,
                    log=lambda s: None).run()
     assert row["status"] == "ok" and row["fn"] == 1
-    autos = [a for a in calls if "auto" in a]
+    autos = [a for a in calls if a[3:4] == ["auto"]]
     assert len(autos) == 1
     auto = autos[0]
     assert auto[auto.index("--points") + 1] == "crawl"
@@ -202,6 +202,42 @@ def test_a_benchmark_run_uses_crawl_points_only(tmp_path, monkeypatch):
     assert not any(a[0].endswith("labctl.sh") and "--authorized" in a and "reset" in a
                    for a in calls)
     assert calls[-1][-2:] == ["down", lab]
+
+
+def test_a_failed_login_falls_back_to_an_anonymous_crawl_and_run(tmp_path, monkeypatch):
+    """A black-box tester whose login fails still crawls and tests anonymously; the row
+    says so (lab/HOLDOUT.md: the failed login is recorded, not fixed)."""
+    import types
+    m = _score_mod()
+    lab = next(x.name for x in heldout.held_out_labs()
+               if __import__("fuzzlab.lab_fixtures.external", fromlist=["x"]).LAB_META[
+                   x.name].identity)
+    calls = []
+
+    def fake_run(self, argv, *, timeout=None, cwd=None):
+        calls.append(argv)
+        rc = 1 if ("--identity" in argv and ("crawl" in argv or "auto" in argv)) else 0
+        if "auto" in argv and not rc:
+            Path(argv[argv.index("--store") + 1]).write_text("")
+        if "disco" in argv:
+            Path(argv[argv.index("--out") + 1]).mkdir()
+        return types.SimpleNamespace(returncode=rc, stdout="", stderr="")
+
+    from fuzzlab.harness.scoring import ScoreReport
+    from fuzzlab.labels import contract
+    gt = contract.GroundTruth(target="t", cases=[], points=[])
+    monkeypatch.setattr(m.Runner, "_run", fake_run)
+    monkeypatch.setattr(m, "score_store", lambda store, gt_dir: (gt, ScoreReport(), [], 0))
+    row = m.Runner(lab, tmp_path, budget_total=10, timeout=10, disco_deadline=5,
+                   log=lambda s: None).run()
+    assert row["status"] == "ok"
+    assert row["crawl_auth"].startswith("anonymous") and row["auto_auth"].startswith(
+        "anonymous")
+    crawls = [a for a in calls if a[3:4] == ["crawl"]]
+    autos = [a for a in calls if a[3:4] == ["auto"]]
+    assert ["--identity" in a for a in crawls] == [True, False]
+    assert ["--identity" in a for a in autos] == [True, False]
+    assert all(a[a.index("--points") + 1] == "crawl" for a in autos)
 
 
 # --- held-out lab fixture: vampi --------------------------------------------------------

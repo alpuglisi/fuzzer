@@ -57,7 +57,7 @@ DETECTION_PATHS = ("fuzzlab/audit", "fuzzlab/oracle", "fuzzlab/session", "fuzzla
                    "fuzzlab/harness", "fuzzlab/core/runmode.py", "fuzzlab/core/urls.py",
                    "fuzzlab/disco", "fuzzlab/mutation")
 FIELDS = ("lab", "status", "tp", "fp", "fn", "tn", "precision", "recall", "requests",
-          "wall_seconds")
+          "wall_seconds", "crawl_auth", "auto_auth")
 
 
 # --- pure parts (unit-tested offline) -------------------------------------------------
@@ -290,6 +290,13 @@ class Runner:
             spider = self.tmp / "spider.db"
             c = self.fuzzlab("crawl", "--start", start_url, "--engine", "playwright",
                              "--db", str(spider), *ident, *self.auth_origins())
+            crawl_auth = "identity" if ident else "anonymous"
+            if c.returncode != 0 and ident:
+                # a black-box tester whose login fails still crawls: anonymously, and the
+                # table says so (the failed login is a finding, recorded, not fixed)
+                crawl_auth = "anonymous (the logged-in crawl failed)"
+                c = self.fuzzlab("crawl", "--start", start_url, "--engine", "playwright",
+                                 "--db", str(spider), *self.auth_origins())
             disco = self.tmp / "disco"
             d = self.fuzzlab("disco", "capture", "--start", start_url, "--out", str(disco),
                              "--deadline", str(self.disco_deadline), "--authorized",
@@ -301,16 +308,28 @@ class Runner:
             if d.returncode == 0 and (disco / "capture.jsonl").is_file():
                 discovery += ["--disco-run", str(disco)]
             extra = {"crawl_rc": c.returncode, "disco_rc": d.returncode,
+                     "crawl_auth": crawl_auth,
                      "crawl_recorded": crawl_requests(spider) if c.returncode == 0 else None,
                      "disco_exchanges": disco_requests(disco) if d.returncode == 0 else None}
             if not discovery:
                 return error_row(self.lab, time.monotonic() - start,
                                  "both discovery runs failed", extra)
             store = self.tmp / "store.db"
-            a = self.fuzzlab("auto", "--base-url", self.base + self.meta.app_path,
-                             *discovery, "--store", str(store), "--ground-truth", str(gt_dir),
-                             "--points", "crawl", *ident, *peer, *self.auth_origins(),
-                             "--browser", "--oob", "--score", "--authorized")
+
+            def auto(*accounts: str):
+                if store.exists():
+                    store.unlink()                  # a fresh store: one run, one score
+                return self.fuzzlab("auto", "--base-url", self.base + self.meta.app_path,
+                                    *discovery, "--store", str(store), "--ground-truth",
+                                    str(gt_dir), "--points", "crawl", *accounts,
+                                    *self.auth_origins(), "--browser", "--oob", "--score",
+                                    "--authorized")
+            a = auto(*ident, *peer)
+            extra["auto_auth"] = "identity" if ident else "anonymous"
+            if a.returncode != 0 and ident:
+                extra["auto_auth"] = "anonymous (the logged-in run failed)"
+                extra["auto_identity_rc"] = a.returncode
+                a = auto()
             extra["auto_rc"] = a.returncode
             if not store.is_file():
                 return error_row(self.lab, time.monotonic() - start,
