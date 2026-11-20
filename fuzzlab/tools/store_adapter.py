@@ -620,11 +620,13 @@ def form_skip_reason(form: dict) -> str | None:
 
     A **POST selector** form (one ``<select>`` and buttons) is fuzzed since forms phase
     2 (FR-FUZZ-43) unless a control name carries a settings word
-    (`formnav.settings_word`), its select name is too short to judge, or the crawler
+    (`formnav.settings_word`), its options are all time zones or locale names
+    (`formnav.option_set_setting`, FR-CRAWL-680), its select name is too short to
+    judge, or the crawler
     saw it act as a settings form (``form["verdict"]``, FR-CRAWL-10). GET selector
     forms are not subject to that rule (GET is safe)."""
     from fuzzlab.core.urls import destructive_reason
-    from fuzzlab.tools.formnav import VERDICT_SETTINGS, settings_word
+    from fuzzlab.tools.formnav import VERDICT_SETTINGS, option_set_setting, settings_word
     if (form.get("enctype") or "").startswith("multipart/"):
         return "multipart form (not sent as multipart in phase 1)"
     if form["selector"] and form["method"] == "POST":
@@ -633,6 +635,9 @@ def form_skip_reason(form: dict) -> str | None:
             if word:
                 return f"POST selector with a settings control {name!r} ({word!r})"
         select = next((n for n, k in form["controls"] if k == "select"), "")
+        picked = option_set_setting(v for _n, v, _l in form.get("options") or [])
+        if picked:                                              # FR-CRAWL-680
+            return f"POST selector {select!r} picks a setting ({picked})"
         if len(select) < MIN_JUDGEABLE_SELECT_NAME:
             return f"POST selector named {select!r}: too short to tell it from a setting"
         if form.get("verdict") == VERDICT_SETTINGS:

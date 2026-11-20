@@ -3,6 +3,30 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0713 — A POST selector whose options pick a setting is not fuzzed; the settings words it checks are the cited set (FR-FUZZ-713, CC-CRAWL-0680, BUG-0731) (2026-11-20)
+- Placement: lane HEUR (item HEUR-B), base 82910aa; the component-07 half of
+  CC-CRAWL-0680.
+- Change: `fuzzlab/tools/store_adapter.py::form_skip_reason` calls
+  `formnav.option_set_setting` on a POST selector's option values (all IANA tz names or
+  locale names: skipped, "picks a setting"). The words it applies to control names come
+  from `formnav.settings_word`, whose set CC-CRAWL-0680 cited and changed (`sort`,
+  `per page`, `view`, `display`, `layout`, `skin`, `region`, `mode` out; `locale`,
+  `timezone`, `time zone` in). `body_refusal` (FR-AUD-22) reads the same set unchanged in
+  code.
+- Impact (other components / project): crawl-sourced runs now fuzz POST pickers and
+  captured JSON bodies keyed `sort` / `per_page` / `view` / `mode` (more points, more
+  traffic), and no longer fuzz ones keyed `locale` / `timezone` / `time_zone` or whose
+  options are time zones or locales. Ground-truth runs are unaffected (no form rows).
+  FR-FUZZ-43 amended in place; FR-FUZZ-713 added.
+- Risk (level; mitigation or accepted-risk justification): medium, as CC-CRAWL-0680:
+  more submissions of pickers no source calls a setting; a picker the crawler saw set a
+  cookie or self-redirect is still never fuzzed (FR-CRAWL-10).
+- Deliverables:
+  - [x] code and tests (`tests/test_formnav_settings_evidence.py`,
+    `tests/test_forms_phase2.py`) — done
+  - [x] FR-FUZZ-713; FR-FUZZ-43 amended — done
+- Effectiveness (assessed 2026-11-20, offline): as CC-CRAWL-0680; live effect pending
+  the lane's measurement.
 ### CC-FUZZ-0633 — Black-box review of CC-FUZZ-0630..0632 (owner directive, 2026-11-20)
 - Change: `fuzzlab/oracle/strategies_jvm.py` (the `WEB-INF/web.xml` probe removed;
   docstrings state the evidence and the jar-classpath limit); `fuzzlab/oracle/

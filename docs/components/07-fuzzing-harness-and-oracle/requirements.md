@@ -2375,6 +2375,13 @@ rewards) derives from it.
   and its macro line the same way (`TargetOutcome.points_source`, summary key
   `measures`: `detection` / `oracle-diagnostic` / `mixed`). Presentation only: no score
   is computed differently.
+- **FR-FUZZ-713** *(a POST selector whose options pick a setting is not fuzzed;
+  `CC-FUZZ-0713`, 2026-11-20, FR-CRAWL-680).* `store_adapter.form_skip_reason` skips a
+  POST selector whose every option value, at least two, is an IANA tz name or a locale
+  name (`formnav.option_set_setting`), whatever the select is called. The settings
+  words it applies to control names are FR-CRAWL-680's cited set: a POST picker named
+  `sort` or `per_page` is now fuzzed (read-only list modifiers; ORDER BY is an
+  injection point), one named `locale`, `timezone` or `time_zone` is not.
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
   finding must reproduce.
@@ -2757,7 +2764,8 @@ and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
     At most one re-login follows; the stopped points stay `pending` and are reported
     (`metrics["header_breaker"]`, `skipped_points`).
   - **POST selector forms** are fuzzed unless a control name carries a
-    `formnav.settings_word`, the select name has fewer than 3 characters, or the
+    `formnav.settings_word`, its options pick a setting (FR-FUZZ-713, amended in place
+    by CC-FUZZ-0713), the select name has fewer than 3 characters, or the
     crawler saw the picker act as a settings form (FR-CRAWL-10). GET selectors are not
     subject to that rule. A POST picker repeated at several actions is fuzzed once (the
     first crawled).

@@ -3,6 +3,112 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0680 — The settings words are each cited to a public source or removed; a picker's own option values (time zones, locale names) mark it a setting (FR-CRAWL-680, BUG-0731) (2026-11-20)
+- Placement: lane HEUR (item HEUR-B), base 82910aa, pre-assigned CC-CRAWL-0680,
+  FR-CRAWL-680, BUG-0731 (PA-0730 written by the lane). `formnav.py` and the importer's
+  POST-selector rule in `store_adapter.py`; not `spa.py`, `fetcher.py`, `spider.py`,
+  `navguard.py` (other lanes; see Impact).
+- Change:
+  - **Provenance established** (git history is squashed at 6f566c1, so the CC entries are
+    the source):
+    - `level`, `security`, `role`, `status`, `permission`, `permissions`, `admin`,
+      `enable`, `disable`, `active`, `lang`, `language`, `theme`, `mode`: forms phase 1
+      (CC-CRAWL-0013, reviewers A/B on the phase-1 draft), checked live on **bWAPP only**
+      (its `security_level` / `form_security_level` picker never submitted; six bug-picker
+      labels refused). No source was cited for any word.
+    - `sort`, `tz`, `currency`, `country`, `region`, `layout`, `skin`, `view`, `display`,
+      `default`, `notify`, `privacy`, `visibility` and the pair `per page`: forms phase 2
+      (CC-CRAWL-0014, "reviewer B-R4"), measured offline over bWAPP's 159 options, where
+      they refused **nothing new** -- i.e. no target evidence at all; reviewer intuition.
+    - Later observed (not evidence, PA-0660(3)): the Juice Shop disco import refused
+      captured bodies by `country` and `role` (CC-FUZZ-0090's effectiveness).
+  - **Each word now carries its source in a comment next to it** (`SETTINGS_WORDS`), and
+    `tests/test_formnav_settings_evidence.py::test_every_settings_word_sits_under_a_cited_comment`
+    fails on an uncited word (proven on a synthetic offender). Dispositions:
+    - **kept** -- `level` (Spring Boot Actuator `loggers`, a POST of `configuredLevel`;
+      GitLab Members API `access_level`; the security-level pickers of three independent
+      training apps: bWAPP `security_level`, DVWA's `security.php` select `security`
+      low/medium/high/impossible, Mutillidae's security level); `security` (the same
+      three apps; OWASP WSTG 4.2 WSTG-CONF); `role`, `permission`, `permissions`, `admin`
+      (OWASP Mass Assignment Cheat Sheet; OWASP API Security Top 10 2023 API5 BFLA;
+      GitHub REST "Add a repository collaborator" `permission`); `status`, `active`
+      (WordPress REST posts `status`; Drupal core node `status`; Django
+      `User.is_active`; GitHub REST webhooks `active`); `enable`, `disable` (GitHub REST
+      Actions enable/disable workflow; Jenkins `/job/<name>/enable|disable`); `lang`,
+      `language` (WHATWG HTML autofill `language` and the `lang` attribute, BCP 47;
+      RFC 9110 §12.5.4 Accept-Language; Django `set_language`; Shopify localization form
+      `language_code`); `theme` (Spring `ThemeChangeInterceptor` default parameter;
+      Bootstrap 5.3 colour modes); `tz` (RFC 6557, the IANA tz database); `currency`,
+      `country` (WHATWG autofill `transaction-currency`, `country`; ISO 4217 / 3166;
+      Shopify localization form `country_code`, cart `currency`); `default` (Shopify
+      Admin "set default address"; Stripe `default_payment_method`); `notify` (WordPress
+      `comments_notify` / `moderation_notify`; Jira REST `notifyUsers`); `privacy`,
+      `visibility` (YouTube Data API `privacyStatus`; Vimeo `privacy.view`; GitHub REST
+      and GitLab Projects `visibility`).
+    - **added** (safety-direction: refuses more) -- `locale` (Spring
+      `LocaleChangeInterceptor` default parameter; Rails I18n guide `params[:locale]`),
+      `timezone` (Django time-zone docs, "Selecting the current time zone"), the pair
+      `time zone` (Rails `time_zone_select`, `user[time_zone]`).
+    - **removed** -- `sort` and the pair `per page`: read-only list modifiers in every
+      source found (JSON:API 1.1 "Sorting", GitHub REST pagination and `sort`, WordPress
+      REST `orderby` / `per_page`), and ORDER BY is an injection point (OWASP
+      WSTG-INPV-05) the gate was hiding; `view`: a navigation parameter (Joomla
+      `view=article`), and as an SPA label it refused "View ..." menu items; `display`,
+      `layout`, `skin`, `region`, `mode`: no independent source names them a stored
+      setting.
+  - **Target data in place of names (new):** `formnav.option_set_setting(values)` -- a
+    select whose every option (at least two) is an IANA tz name (`Area/Location`, the
+    tzdata areas, `TZ_AREAS`) or a locale name the platform knows (CPython
+    `locale.locale_alias`, X.Org's `locale.alias`: ISO 639 / ISO 3166 codes) picks a
+    setting, whatever its name (`<select name=hl>` of `en-US`, `pt-BR`). Used by
+    `formnav.refusal` (navigation) and `store_adapter.form_skip_reason` (POST
+    selectors). Behaviour cannot replace the words before the first submission (the
+    submission is what the gate prevents); the existing cookie / self-redirect verdict
+    (FR-CRAWL-10) stays the behavioural layer after it.
+- Impact (other components / project):
+  - Every consumer of `formnav.settings_word` changes with the set (swept): navigation
+    (`refusal`, `option_refusal`); the importer's POST-selector rule
+    (`store_adapter.form_skip_reason`, FR-FUZZ-43, component 07); captured bodies
+    (`store_adapter.body_refusal`, FR-AUD-22, component 05: a JSON body with a `sort` /
+    `per_page` / `view` / `mode` key is now imported, one with `locale` / `timezone` /
+    `time_zone` refused); the SPA gates in `tools/spa.py` (`form_refusal` on route,
+    button and control names; `label_refusal` on reveal, menu, option and checkbox
+    labels: "View", "Sort", "Display", "Layout", "Mode" labels are now clickable, "Locale"
+    / "Timezone" ones refused). `spa.py` itself is unchanged (other lane's file).
+  - bWAPP (lab-visible, not evidence): with `--follow-selector-forms bug` the bug picker
+    now also submits the "A.I.M. - No-authentication Mode" option (refused by `mode`
+    before); the other five labels stay refused; `security_level` stays refused.
+    `tests/test_forms_phase2.py::test_bwapp_bug_picker_navigation` is updated.
+  - Contracts: `formnav` gains `option_set_setting` and `TZ_AREAS`; no store change.
+- Risk (level; mitigation or accepted-risk justification): medium. Removing words
+  submits more pickers. Mitigation: removals are only words whose public sources call
+  them read-only or navigation; a POST picker is still submitted only when the operator
+  names its select; a picker that sets a cookie or keeps redirecting to itself still
+  stops enumeration and is never fuzzed (FR-CRAWL-10); destructive and transaction
+  rules are unchanged. Accepted residual: a `mode`/`layout`/`skin`/`region`/`display`
+  picker that stores a preference server-side without a cookie or self-redirect is
+  submitted once per option on an operator-named POST select, or once per option on a
+  GET one. The locale-table rule can refuse a two-option picker whose values are both
+  short locale codes (`id`, `no`): coverage, not safety.
+- Deliverables:
+  - [x] `fuzzlab/tools/formnav.py` (cited words, removals, `option_set_setting`) — done
+  - [x] `fuzzlab/tools/store_adapter.py::form_skip_reason` uses `option_set_setting` — done
+  - [x] tests: new `tests/test_formnav_settings_evidence.py` (Django `set_language` and
+    time zone, Rails locale and `time_zone_select`, Spring theme, Shopify localization,
+    repository visibility, GitLab `access_level`, value-only tz and BCP 47 pickers,
+    navigation pickers including Joomla `view`, JSON:API `sort`, `per_page`; the
+    citation guard and its synthetic offender); `tests/test_forms_phase2.py` adjusted
+    (`per_page` now not a settings word; `time_zone` is; the bWAPP pin) — done
+  - [x] FR-CRAWL-680; BUG-0731 — done
+  - [ ] PA-0730, CHANGELOG, ERROR_LOG, failure record — the lane (drafted)
+  - [ ] the bWAPP selector crawl measurement (`--follow-selector-forms bug`) — the lane
+- Effectiveness (assessed 2026-11-20, offline): pytest on the edited tree (no network, no lab), 62 files in two runs: every
+  test file importing `formnav` / `store_adapter` / `spa` / `spider` or calling a
+  settings-word consumer, plus `tests/test_blackbox_detection.py` and
+  `tests/test_pa_enforcement.py` -- 14 files 1142 passed, 5 xfailed; 48 files 2363
+  passed, 4 skipped, 145 xfailed; 0 failed. Not the
+  `scripts/verify_change.py` harness (the lane runs it on the merged tree). Live effect on a
+  target: pending the lane's measurement.
 ### CC-CRAWL-0600 — The GraphQL reader names each variable's field argument and declared type (2026-11-20)
 - Placement: lane GQL (item GQL), base 2be7a50, pre-assigned CC-CRAWL-0600..0604. Not a
   change to `spider.py` or `navguard.py`.

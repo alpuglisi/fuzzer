@@ -52,6 +52,12 @@ fuzzer.
     governs navigation too, so a picker or option so named is no longer submitted.
     On bWAPP this refuses exactly the six option labels Phase 1 refused (measured over
     all 159 options of the local build).
+  - *(Amended in place, CC-CRAWL-0680, 2026-11-20.)* The word set is FR-CRAWL-680's:
+    each word cited to a public source; `sort`, `per page`, `view`, `display`,
+    `layout`, `skin`, `region`, `mode` removed; `locale`, `timezone`, `time zone`
+    added; a select whose options are all time zones or locale names is refused
+    whatever its name. On bWAPP the bug picker now also submits its
+    "No-authentication Mode" option.
 - **FR-CRAWL-9 (landings and forms recorded, CC-CRAWL-0013)** A redirect's landing URL
   is recorded with its query (redacted). Every form seen is recorded in
   `discovered_forms` (redacted).
@@ -1872,6 +1878,20 @@ fuzzer.
   after the drain and before the refusing route is added. Measured: a page whose main
   thread is blocked answers neither, on both binaries, and answers stopping its load,
   the drain timer and its close.
+- **FR-CRAWL-680** *(CC-CRAWL-0680, BUG-0731, PA-0660)* **A settings word is cited, and
+  a picker's own option values can mark it a setting.** `formnav.SETTINGS_WORDS` /
+  `SETTINGS_PAIRS` -- the one vocabulary of navigation's gate (`refusal`,
+  `option_refusal`), the importer's POST-selector rule (FR-FUZZ-43), the captured-body
+  rule (FR-AUD-22) and the SPA form and label gates -- hold only words a public
+  specification, vendor documentation or two independent apps name as a persistent
+  setting, each with its source in a comment next to it (checked by
+  `tests/test_formnav_settings_evidence.py`). A word is never kept or added because a
+  lab's result needs it. Read-only list modifiers (`sort`, `per_page`) and navigation
+  parameters (`view`) are not settings words. `formnav.option_set_setting` refuses a
+  select (in navigation and as a POST selector point) whose every option, at least
+  two, is an IANA tz name (`Area/Location` over the tzdata areas) or a locale name in
+  the platform's locale table (`locale.locale_alias`). After a submission the
+  behavioural verdict (FR-CRAWL-10) still applies.
 
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default
