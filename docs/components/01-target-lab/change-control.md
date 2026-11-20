@@ -3,6 +3,92 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0360 — The 11 external labs re-measured with scored runs; two labs made measurable; the runs recorded (BUG-0640, FR-LAB-360..362) (2026-11-20)
+- Change: `fuzzlab/lab_fixtures/external.py` (`LAB_META` mongection: identity
+  `sdl-mongection-user`; `bootstrap_secdevlabs_mongection`, `_mongection_login`);
+  `lab/ground-truth-secdevlabs-copy-n-paste/injection-points.json` (`json_body` on each
+  point; no case changed); `docs/components/01-target-lab/external-lab-scores.json` (new:
+  each lab's latest scored ground-truth run); `tests/test_external_labs_static.py`
+  (mongection bootstrap, copy-n-paste points); `tests/test_external_lab_scored_runs.py`
+  (new, PA-0640's guard).
+- Reason: lane ACC (owner's goal: detection accuracy on the existing 11 external labs).
+  Each lab was brought up (`lab/labctl.sh up <lab> --authorized`, docker 29, this
+  container) and scored at 2be7a50 with its recorded command; seven secDevLabs apps had
+  never been scored (their entries record manual checks only).
+- Commands (from the repo root; each with `--store <fresh db>`; `G=lab/ground-truth-`):
+  - bwapp: `fuzzlab auto --base-url http://127.0.0.1:8092 --ground-truth ${G}bwapp
+    --points ground-truth --identity bwapp-bee --browser --authorized`
+  - juice-shop: `... --base-url http://127.0.0.1:3000 --ground-truth ${G}juice-shop
+    --points ground-truth --identity juice-user --browser --oob --authorized`
+  - copy-n-paste 3071, sstype 3073, vinijr-blog 3075, amarelo-designs 3076, mongection
+    3077, comment-killer 3074: `... --base-url http://127.0.0.1:<port> --ground-truth
+    ${G}secdevlabs-<app> --points ground-truth --browser --authorized`
+  - gossip-world: `... 3072 ... --identity sdl-gossip-user --peer-identity
+    sdl-gossip-peer --browser --authorized`
+  - streaming: `... 3078 ... --browser --fuzz-json-writes --authorized` (CC-LAB-0314)
+  - ecommerce-api: `... 3079 ... --identity sdl-ecommerce-user --peer-identity
+    sdl-ecommerce-peer --auth-origin http://localhost:10005 --authorized` (CC-LAB-0316)
+- Results, BEFORE (2be7a50) → AFTER (684fab9), tp/fp/fn/tn, requests, wall s:
+
+  | lab | BEFORE | req | wall | AFTER | req | wall | recorded before |
+  | --- | --- | --- | --- | --- | --- | --- | --- |
+  | bwapp | 21/0/34/3 | 885 | 642 | 22/0/33/3 | 887 | 636 | tp=20 fp=0 tn=3 (runbook) |
+  | juice-shop | 5/0/10/3 | 150 | 50 | 5/0/10/3 | 150 | 46 | 5/0/10/3, 150, 57 s (CC-LAB-0317) |
+  | copy-n-paste | 0/0/3/1 | 67 | 0.5 | 2/0/1/1 | 25 | 2.5 | none |
+  | gossip-world | 0/0/4/2 (login failed) | 0 | 0.7 | same | 0 | 0.6 | none |
+  | sstype | 1/0/1/2 | 22 | 30 | 1/0/1/2 | 22 | 29 | none |
+  | vinijr-blog | 0/0/3/2 | 4 | 0.3 | 0/0/3/2 | 4 | 0.3 | none |
+  | amarelo-designs | 0/0/1/2 | 1 | 0.4 | 0/0/1/2 | 1 | 0.4 | none |
+  | mongection | 0/0/2/2 | 12 | 0.5 | 2/0/0/2 | 48 | 0.6 | none |
+  | comment-killer | 0/0/1/1 | 2 | 30 | 0/0/1/1 | 2 | 30 | none |
+  | streaming | 2/0/0/2 | 3 | 3.1 | 2/0/0/2 | 3 | 2.7 | 2/0/0/2, 3 (CC-LAB-0314) |
+  | ecommerce-api | 1/0/0/1 | 3 | 4.5 | 1/0/0/1 | 3 | 4.5 | 1/0/0/1 (CC-LAB-0316) |
+
+  Totals: tp 30 → 35, fp 0 → 0. No regression against any recorded number (bWAPP's
+  extra tp over the runbook is BWAPP-0056). Every fn and its reason is in the record
+  file; the reachable-tagged ones still open are listed below.
+- Measured (2026-11-20), each cited in BUG-0640 or the open list: copy-n-paste answers
+  `400 "All fields are required"` to a body missing `pass`, MariaDB 1064 with both;
+  mongection's `{"$ne": null}` login answers `Bad Credentials` with no account and logs in
+  once one exists; gossip-world's `/` redirects to `/login` with a valid session
+  (upstream `routes.py:73-75`), `/gossip` answers 200 with it; sstype renders
+  `{{961*977}}` as `938897` in `<h3>` and echoes it raw in `<title>`; bWAPP's
+  `directory_traversal_2.php` lists `/etc` (CC-FUZZ-0640); bWAPP's `sqli_1.php` echoes
+  `<zqxb..>` in `mysql_error()` for `x' AND <zqxb..>`, not for `'<zqxb..>`.
+- Open (reachable-tagged misses, not built; flagged to the orchestrator):
+  - gossip-world SDLGW-0001/0002/0003/0006: the session manager verifies a login at the
+    base URL and the app's root always redirects to `/login`; a fix is a change to
+    SP-61's stable-protected-resource choice (lane rule: flag a shared primitive).
+  - sstype SDLSST-0001: SP-25's echo disqualifier refuses an evaluation whose literal is
+    echoed elsewhere than a form control: BUG-0133's class one location further (a
+    shared-primitive change; recommended: judge the product outside every literal
+    occurrence, the two-sample attribution unchanged).
+  - amarelo SDLAD-0001: no cookie placement in the probe sender (a ground-truth cookie
+    point is skipped, misnamed "client-only/DOM").
+  - vinijr SDLVJ-0001..0003: points carry no XML body shape; the XXE strategies wrap their
+    entity in `<title>` or the root (CC-LAB-0307).
+  - comment-killer SDLCK-0001: no `source_url` (answer-key decision).
+  - bWAPP BWAPP-0057/0058: the reflected-XSS confirmer would need a quote prefix carried
+    through every break-out.
+  - copy-n-paste SDLCNP-0004 and Juice JUICE-0008: unchanged (register-then-login flow;
+    CSP).
+- Not done in this lane: the crawl-fed passes (spider/disco) of CC-LAB-0317 and the bWAPP
+  crawl pass (30 crawl-only positives); the scored runs are the ground-truth passes.
+- Impact (other components / project): FUZZ (CC-FUZZ-0640, the strategy); the lab
+  fixtures and one answer-key point file; a new record file read by a static test.
+- Risk (level; mitigation or accepted-risk justification): low. Loopback only; the
+  mongection bootstrap writes one account to the lab's tmpfs database; no case verdict,
+  id or count changed (PA-0044: the points' count and keys unchanged).
+- Deliverables:
+  - [x] all 11 labs up and scored BEFORE and AFTER (live, docker) — done
+  - [x] copy-n-paste points, mongection identity and bootstrap — done
+  - [x] record file, PA-0640 guard (proven on BUG-0640's shape) — done
+  - [x] BUG-0640, PA-0640, ERROR_LOG, F-640, F-641, FR-LAB-360..362, ARCHITECTURE,
+    CHANGELOG — done
+- Effectiveness (assessed 2026-11-20): effective for the two fixed labs (copy-n-paste
+  tp 0→2, mongection tp 0→2, fp 0, from a fresh `up`); the guard passes on the record and
+  fails on BUG-0640's shape.
+
 ### CC-LAB-0317 — Juice Shop measured with every tool at 2edf1b6 (2026-10-19)
 - Change: none to code; a measurement record (the owner asked to run the tools on the
   Juice Shop lab).

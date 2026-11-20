@@ -3,6 +3,36 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0640 — A traversal sink that lists a directory is confirmed (FR-FUZZ-640) (2026-11-20)
+- Change: `fuzzlab/oracle/strategies.py`: `PathTraversalFsPathReadStrategy._directory_listing`
+  (called when the `/etc/passwd` phase finds nothing), `_LISTING_PAYLOADS`, `_ETC_ENTRIES`,
+  `LISTING_MIN_ENTRIES`, `_etc_entries`; `tests/test_path_traversal_directory_listing.py`.
+- Reason: lane ACC's baseline (CC-LAB-0360): BWAPP-0046 (`directory_traversal_2.php`
+  `directory`, `[reach: gt]`) was probed and not confirmed: the sink lists a directory and
+  never shows file content.
+- Measured (bWAPP, 2026-11-20, logged in at level 0): `directory=../../../../etc`,
+  `../../../../../../../../etc` and `/etc` list `/etc` (`passwd`, `group`, `hosts`,
+  `hostname`, `shells`, `os-release`, ...); `zzqq_nonexist` answers "This directory
+  doesn't exist!"; `../../../../etc/passwd` an `opendir(...): Not a directory` warning;
+  `documents` the app's own PDFs. The control `etc` (no separator) lists nothing.
+- Impact (other components / project): the oracle only; one more confirmation path for
+  `path-traversal` candidates. Cost per unconfirmed path-traversal candidate: +2 requests
+  (7 instead of 5). Not a shared primitive (SHARED_PRIMITIVES unchanged); the strategy
+  registry and its comparable-control kind (`negative-control`) are unchanged.
+- Risk (level; mitigation or accepted-risk justification): low. A page that always shows
+  the names is refused by the control; an echoed path (`/etc/passwd`) or a sibling file
+  (`passwd.bak`) is not a name; a control that is not the application's answer gives no
+  verdict (FR-FUZZ-63, tested). Stated limit: a non-Linux `/etc` with fewer than 4 of the
+  listed names is not confirmed.
+- Deliverables:
+  - [x] code; tests (listing confirmed; always-shown names refused; fewer than 4 names;
+    request cost; file phase first; three non-comparable controls; whole-name matching)
+    — done
+  - [x] FR-FUZZ-640, CHANGELOG — done
+- Effectiveness (assessed 2026-11-20, live): bWAPP with `--mode manual --categories
+  path-traversal`: BWAPP-0045 and BWAPP-0046 confirmed, 10 requests, fp 0. The AFTER runs
+  of all 11 external labs (CC-LAB-0360) are the regression check: no false positive.
+
 ### CC-FUZZ-0117 — M6's navigations settle a failure on the error page's load (BUG-0561) (2026-10-23)
 - Change: none in `fuzzlab/tools/browserexec.py` or the oracle. The executor's navigations go through SP-01, which now waits for a failed navigation's error page to load, not only to commit, before it raises (CC-CRAWL-0065).
 - Impact (other components / project):

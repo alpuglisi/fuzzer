@@ -2210,3 +2210,17 @@ Juice Shop lab is complete.
 - **Cause:** I sized the wait to the symptom I had measured (being overtaken, which a commit cures), called it fixed on a volume and a load that could not see a race of about 1%, and wrote the rule's concrete clause from the fix instead of from the principle the rule stated.
 - **Status:** fixed by BUG-0561 / CC-CRAWL-0065 (lane NAVSETTLE); PA-0561 strengthens PA-0522 (landed means loaded; the order pinned by a deterministic test; a race measured under CPU and disk I/O contention at a volume that can see it).
 
+
+### F-640 — While diagnosing mongection's misses I registered a probe account on the live lab, changing the state the next run would measure
+- **What:** lane ACC (2026-11-20): to test whether mongection's NoSQL differential needs an account, I POSTed `/register` (`probe@lab.test`) to the running lab between the baseline and the AFTER runs.
+- **Evidence:** this session's commands; BUG-0640 "Description" (the measurement it produced).
+- **Impact:** none on a recorded number: the lab was brought down and up again (tmpfs database emptied) before the bootstrap's verification and every AFTER run; had it stayed, an AFTER run would have passed without the fix.
+- **Cause:** I measured on the shared lab instance instead of a throwaway one, as an earlier diagnosis step, without first noting that a later measurement depends on the lab's state.
+- **Status:** remediated (lab recreated; the AFTER runs started from a fresh `up`).
+
+### F-641 — Earlier work tagged five secDevLabs positives `[reach: gt]` from hand-made requests that no scored run could reproduce
+- **What:** CC-LAB-0303, CC-LAB-0309 and CC-LAB-0311/0313 recorded a manual live check per lab and tagged the positives reachable from ground-truth points; copy-n-paste's points lacked the JSON body its handler requires, mongection's fresh lab had no account for its flaw to answer (the check was made after accounts were created by hand), and comment-killer's case has no store URL, which CC-LAB-0313 itself states, beside its `[reach: gt]` tag.
+- **Evidence:** lane ACC's first scored runs at 2be7a50: copy-n-paste tp=0 fn=3, mongection tp=0 fn=2, comment-killer fn=1 (CC-LAB-0360); BUG-0640.
+- **Impact:** five guaranteed false negatives on a fresh lab, and answer keys that overstated what fuzzlab measured on three labs for a month.
+- **Cause:** a reach tag was inferred from "the sink is vulnerable" plus "the point names the parameter", and no scored run was recorded (PA-0042 was scoped to new class mappings and not enforced).
+- **Status:** fixed for copy-n-paste and mongection (CC-LAB-0360); comment-killer recorded `open:`; PA-0640 makes the record a checked file.

@@ -1,0 +1,239 @@
+{
+ "bwapp": {
+  "commit": "684fab9",
+  "command": "fuzzlab auto --store <db> --base-url http://127.0.0.1:8092 --ground-truth lab/ground-truth-bwapp --points ground-truth --identity bwapp-bee --browser --authorized",
+  "tp": 22,
+  "fp": 0,
+  "fn": 33,
+  "tn": 3,
+  "requests": 887,
+  "wall_s": 635.6,
+  "matched": [
+   "BWAPP-0001",
+   "BWAPP-0002",
+   "BWAPP-0003",
+   "BWAPP-0004",
+   "BWAPP-0005",
+   "BWAPP-0011",
+   "BWAPP-0012",
+   "BWAPP-0013",
+   "BWAPP-0014",
+   "BWAPP-0028",
+   "BWAPP-0029",
+   "BWAPP-0030",
+   "BWAPP-0031",
+   "BWAPP-0032",
+   "BWAPP-0042",
+   "BWAPP-0043",
+   "BWAPP-0044",
+   "BWAPP-0045",
+   "BWAPP-0046",
+   "BWAPP-0051",
+   "BWAPP-0052",
+   "BWAPP-0056"
+  ],
+  "missed": {
+   "BWAPP-0006": "not reachable from ground-truth points: [reach: crawl]",
+   "BWAPP-0007": "not reachable from ground-truth points: [reach: none - password fields are never fuzzed (FR-FUZZ-44)]",
+   "BWAPP-0008": "not reachable from ground-truth points: [reach: crawl]",
+   "BWAPP-0009": "not reachable from ground-truth points: [reach: crawl]",
+   "BWAPP-0010": "not reachable from ground-truth points: [reach: none - password fields are never fuzzed (FR-FUZZ-44)]",
+   "BWAPP-0015": "not reachable from ground-truth points: [reach: crawl]",
+   "BWAPP-0016": "not reachable from ground-truth points: [reach: crawl]",
+   "BWAPP-0017": "not reachable from ground-truth points: [reach: crawl]",
+   "BWAPP-0018": "not reachable from ground-truth points: [reach: crawl]",
+   "BWAPP-0019": "not reachable from ground-truth points: [reach: crawl]",
+   "BWAPP-0020": "not reachable from ground-truth points: [reach: crawl]",
+   "BWAPP-0021": "not reachable from ground-truth points: [reach: crawl]",
+   "BWAPP-0022": "not reachable from ground-truth points: [reach: crawl]",
+   "BWAPP-0023": "not reachable from ground-truth points: [reach: crawl]",
+   "BWAPP-0024": "not reachable from ground-truth points: [reach: crawl]",
+   "BWAPP-0025": "not reachable from ground-truth points: [reach: crawl]",
+   "BWAPP-0026": "not reachable from ground-truth points: [reach: crawl]",
+   "BWAPP-0027": "not reachable from ground-truth points: [reach: crawl]",
+   "BWAPP-0033": "not reachable from ground-truth points: [reach: crawl]",
+   "BWAPP-0034": "not reachable from ground-truth points: [reach: crawl]",
+   "BWAPP-0035": "not reachable from ground-truth points: [reach: crawl]",
+   "BWAPP-0036": "not reachable from ground-truth points: [reach: crawl]",
+   "BWAPP-0037": "not reachable from ground-truth points: [reach: crawl]",
+   "BWAPP-0038": "not reachable from ground-truth points: [reach: crawl]",
+   "BWAPP-0039": "not reachable from ground-truth points: [reach: crawl]",
+   "BWAPP-0040": "not reachable from ground-truth points: [reach: crawl]",
+   "BWAPP-0041": "not reachable from ground-truth points: [reach: crawl]",
+   "BWAPP-0047": "not reachable from ground-truth points: [reach: crawl]",
+   "BWAPP-0053": "not reachable from ground-truth points: [reach: crawl]",
+   "BWAPP-0054": "not reachable from ground-truth points: [reach: crawl]",
+   "BWAPP-0055": "not reachable from ground-truth points: [reach: crawl]",
+   "BWAPP-0057": "open: the query must break before mysql_error() echoes the input; measured: `x' AND <zqxb..>` echoes a tag, `'<zqxb..>` parses and echoes nothing. Needs a quote prefix carried through every reflected-XSS break-out (a confirmer redesign, not built)",
+   "BWAPP-0058": "open: as BWAPP-0057 (sqli_6.php, POST)"
+  }
+ },
+ "juice-shop": {
+  "commit": "684fab9",
+  "command": "fuzzlab auto --store <db> --base-url http://127.0.0.1:3000 --ground-truth lab/ground-truth-juice-shop --points ground-truth --identity juice-user --browser --oob --authorized",
+  "tp": 5,
+  "fp": 0,
+  "fn": 10,
+  "tn": 3,
+  "requests": 150,
+  "wall_s": 46.0,
+  "matched": [
+   "JUICE-0002",
+   "JUICE-0003",
+   "JUICE-0004",
+   "JUICE-0006",
+   "JUICE-0007"
+  ],
+  "missed": {
+   "JUICE-0001": "not reachable from ground-truth points: [reach: none - needs a crawled /redirect?to= example (the confirmer's seeded form, BUG-0124); today's crawler never records one: the links sit behind the side-nav reveal, whose navigation is queued and then a]",
+   "JUICE-0005": "not reachable from ground-truth points: [reach: none - the fixture's bridge network cannot reach fuzzlab's loopback-only OOB listener (design rev 2 3.3); point kept so the live test's strict pin sees the probe]",
+   "JUICE-0008": "open: not asserted -- the page CSP blocks the stored inline script (CC-LAB-0317)",
+   "JUICE-0009": "not reachable from ground-truth points: [reach: none - behind a CAPTCHA the crawler refuses by design (captcha_reason); no point]",
+   "JUICE-0010": "not reachable from ground-truth points: [reach: none - a multipart .xml upload; the XXE strategy sends a raw XML body (400 'File is not passed'); no point. Adds xxe to the run's ground-truth categories (stated)]",
+   "JUICE-0014": "not reachable from ground-truth points: [reach: none - the stored payload runs only in the product-details dialog, which opens on a click (product.component.ts:212-219), never on the page load the stored-XSS observer makes; the SPA never sends POST]",
+   "JUICE-0015": "not reachable from ground-truth points: [reach: none - POST /api/Users registers an account: the send gate refuses its captured body (tests/test_destructive_routes_external_labs.py, 'registers an account'), and a ground-truth point is exempt from t]",
+   "JUICE-0016": "not reachable from ground-truth points: [reach: none - R-XSS-HEADER fires on crawl-origin header points only (default_rules.json), so a ground-truth header point gets no xss candidate; the SPA sends this GET only on logout (navbar.component.ts:240-]",
+   "JUICE-0017": "not reachable from ground-truth points: [reach: none - POST /dataerasure files a data-erasure request and clears the token cookie (routes/dataErasure.ts:83-88); it is a destructive route the URL gate misses today (BUG-0301, strict xfails in tests/t]",
+   "JUICE-0018": "not reachable from ground-truth points: [reach: none - transaction_reason flags `order` in the URL (fuzzlab.core.urls), and the destructive-routes test lists it ('places a B2B order'); the SPA has no UI for it (Swagger /api-docs only); the value is]"
+  }
+ },
+ "secdevlabs-copy-n-paste": {
+  "commit": "684fab9",
+  "command": "fuzzlab auto --store <db> --base-url http://127.0.0.1:3071 --ground-truth lab/ground-truth-secdevlabs-copy-n-paste --points ground-truth --browser --authorized",
+  "tp": 2,
+  "fp": 0,
+  "fn": 1,
+  "tn": 1,
+  "requests": 25,
+  "wall_s": 2.5,
+  "matched": [
+   "SDLCNP-0001",
+   "SDLCNP-0002"
+  ],
+  "missed": {
+   "SDLCNP-0004": "open: needs a register-then-login flow (the login echoes the stored user into innerHTML); no mechanism drives it"
+  }
+ },
+ "secdevlabs-gossip-world": {
+  "commit": "684fab9",
+  "command": "fuzzlab auto --store <db> --base-url http://127.0.0.1:3072 --ground-truth lab/ground-truth-secdevlabs-gossip-world --points ground-truth --identity sdl-gossip-user --peer-identity sdl-gossip-peer --browser --authorized",
+  "tp": 0,
+  "fp": 0,
+  "fn": 4,
+  "tn": 2,
+  "requests": 0,
+  "wall_s": 0.6,
+  "matched": [],
+  "missed": {
+   "SDLGW-0001": "open: no session -- the session manager verifies a login at the base URL and gossip-world's `/` always redirects to /login (routes.py:73-75); a change to SP-61's protected-resource choice, flagged",
+   "SDLGW-0002": "open: no session (as SDLGW-0001)",
+   "SDLGW-0003": "open: no session (as SDLGW-0001)",
+   "SDLGW-0006": "open: no session (as SDLGW-0001)"
+  },
+  "error": "the run stopped at the login (SessionAuthError): see SDLGW-0001"
+ },
+ "secdevlabs-sstype": {
+  "commit": "684fab9",
+  "command": "fuzzlab auto --store <db> --base-url http://127.0.0.1:3073 --ground-truth lab/ground-truth-secdevlabs-sstype --points ground-truth --browser --authorized",
+  "tp": 1,
+  "fp": 0,
+  "fn": 1,
+  "tn": 2,
+  "requests": 22,
+  "wall_s": 29.1,
+  "matched": [
+   "SDLSST-0002"
+  ],
+  "missed": {
+   "SDLSST-0001": "open: evaluated (`{{961*977}}` -> 938897 in <h3>) but the raw expression is echoed in <title>, and SP-25's echo disqualifier refuses it (BUG-0133's class, one location further); flagged"
+  }
+ },
+ "secdevlabs-vinijr-blog": {
+  "commit": "684fab9",
+  "command": "fuzzlab auto --store <db> --base-url http://127.0.0.1:3075 --ground-truth lab/ground-truth-secdevlabs-vinijr-blog --points ground-truth --browser --authorized",
+  "tp": 0,
+  "fp": 0,
+  "fn": 3,
+  "tn": 2,
+  "requests": 4,
+  "wall_s": 0.3,
+  "matched": [],
+  "missed": {
+   "SDLVJ-0001": "open: contact.php parses a raw XML body; the point is form-encoded and the XXE strategies wrap their entity in <title> or the root, never the point's element (CC-LAB-0307)",
+   "SDLVJ-0002": "open: as SDLVJ-0001",
+   "SDLVJ-0003": "open: a form-encoded `name` never reaches the XML parser (points carry no XML body shape)"
+  }
+ },
+ "secdevlabs-amarelo-designs": {
+  "commit": "684fab9",
+  "command": "fuzzlab auto --store <db> --base-url http://127.0.0.1:3076 --ground-truth lab/ground-truth-secdevlabs-amarelo-designs --points ground-truth --browser --authorized",
+  "tp": 0,
+  "fp": 0,
+  "fn": 1,
+  "tn": 2,
+  "requests": 1,
+  "wall_s": 0.4,
+  "matched": [],
+  "missed": {
+   "SDLAD-0001": "open: a ground-truth cookie point is skipped: the probe sender has no cookie placement (auto.py files it as 'client-only/DOM')"
+  }
+ },
+ "secdevlabs-mongection": {
+  "commit": "684fab9",
+  "command": "fuzzlab auto --store <db> --base-url http://127.0.0.1:3077 --ground-truth lab/ground-truth-secdevlabs-mongection --points ground-truth --browser --authorized",
+  "tp": 2,
+  "fp": 0,
+  "fn": 0,
+  "tn": 2,
+  "requests": 48,
+  "wall_s": 0.6,
+  "matched": [
+   "SDLMG-0001",
+   "SDLMG-0002"
+  ],
+  "missed": {}
+ },
+ "secdevlabs-comment-killer": {
+  "commit": "684fab9",
+  "command": "fuzzlab auto --store <db> --base-url http://127.0.0.1:3074 --ground-truth lab/ground-truth-secdevlabs-comment-killer --points ground-truth --browser --authorized",
+  "tp": 0,
+  "fp": 0,
+  "fn": 1,
+  "tn": 1,
+  "requests": 2,
+  "wall_s": 30.3,
+  "matched": [],
+  "missed": {
+   "SDLCK-0001": "open: a stored case without source_url is never audited (CC-LAB-0313); making it auditable changes the case (answer-key decision, upstream PR #568)"
+  }
+ },
+ "secdevlabs-streaming": {
+  "commit": "684fab9",
+  "command": "fuzzlab auto --store <db> --base-url http://127.0.0.1:3078 --ground-truth lab/ground-truth-secdevlabs-streaming --points ground-truth --browser --fuzz-json-writes --authorized",
+  "tp": 2,
+  "fp": 0,
+  "fn": 0,
+  "tn": 2,
+  "requests": 3,
+  "wall_s": 2.7,
+  "matched": [
+   "SDLST-0001",
+   "SDLST-0002"
+  ],
+  "missed": {}
+ },
+ "secdevlabs-ecommerce-api": {
+  "commit": "684fab9",
+  "command": "fuzzlab auto --store <db> --base-url http://127.0.0.1:3079 --ground-truth lab/ground-truth-secdevlabs-ecommerce-api --points ground-truth --identity sdl-ecommerce-user --peer-identity sdl-ecommerce-peer --auth-origin http://localhost:10005 --authorized",
+  "tp": 1,
+  "fp": 0,
+  "fn": 0,
+  "tn": 1,
+  "requests": 3,
+  "wall_s": 4.5,
+  "matched": [
+   "SDLEC-0001"
+  ],
+  "missed": {}
+ }
+}

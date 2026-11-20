@@ -6371,6 +6371,28 @@ lane) can submit a payload as
   targets (D10); bWAPP's page names carry class words, so NFR-LAB-no-leak does not hold
   for them and a model trained on runs against them would learn from the URL (recorded as
   not enforced under NFR-ML-no-leak; the training question is the operator's).
+- **FR-LAB-362** *(each external lab's scored ground-truth run is recorded; `CC-LAB-0360`,
+  2026-11-20, BUG-0640, PA-0640).* `docs/components/01-target-lab/external-lab-scores.json`
+  holds, per external lab with a ground truth, its latest scored `fuzzlab auto --points
+  ground-truth` run: commit, command, tp/fp/fn/tn, requests, wall time, the matched case
+  ids, and every missed positive with its reason (`open: <cause>` for a positive whose
+  tag says a ground-truth pass reaches it). `tests/test_external_lab_scored_runs.py`
+  checks the record against every answer key's reach tags; a lab added or changed
+  records its run (PA-0640(3)).
+- **FR-LAB-361** *(copy-n-paste's points send the page's JSON body; `CC-LAB-0360`,
+  2026-11-20, BUG-0640).* `lab/ground-truth-secdevlabs-copy-n-paste`'s points carry
+  `json_body` (FR-FUZZ-54): `{user, pass}` for `/login`, `{user, pass, passcheck}` for
+  `/register`, as the page posts them (`app/views/form.html:123-150`) and the handler binds
+  them (`app/types/types.go:4-14`); a body missing a field answers `400 "All fields are
+  required"` before the query (measured 2026-11-20). No case changed.
+- **FR-LAB-360** *(mongection has an account from a fresh `up`; `CC-LAB-0360`, 2026-11-20,
+  BUG-0640).* `secdevlabs-mongection` has the identity `sdl-mongection-user`
+  (`fuzzlab_user@fuzzlab.lab`, generated password) and a bootstrap
+  (`bootstrap_secdevlabs_mongection`) that registers it through the JSON `/register` when
+  the JSON `/login` fails and verifies it by a positive differential (the password answers
+  the welcome page naming the account, a wrong one `Bad Credentials`). Its NoSQL injection
+  answers an account, and the database is tmpfs: without one the positives SDLMG-0001/0002
+  cannot be observed (measured 2026-11-20). `auto` needs no `--identity` for them.
 - **FR-LAB-309** *(per-account values; secDevLabs ecommerce-api; `CC-LAB-0315`,
   2026-10-19).* A lab bootstrap may read values of each account's own after its
   verified login (`_ACCOUNT_ATTRIBUTES`) and store them with the credential

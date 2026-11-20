@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-11-20 — target lab / external labs (gt-tagged secDevLabs positives no scored run could reach; BUG-0640)
+- **Symptom:** lane ACC's first scored ground-truth runs of the secDevLabs apps at 2be7a50: copy-n-paste tp=0 fn=3 (every probe answered `400 "All fields are required"`), mongection tp=0 fn=2 (every operator probe `Bad Credentials`), comment-killer's stored case never audited; all tagged `[reach: gt]`.
+- **Root cause:** reach tags were set from hand-made requests (all fields present, accounts created by hand, a store URL known), never from a scored run: copy-n-paste's points lacked the JSON body its handler requires, mongection's fresh tmpfs database has no account for its flaw to answer, comment-killer's case has no `source_url`.
+- **Remediation:** copy-n-paste points carry the page's JSON body; mongection gets an identity and a bootstrap (CC-LAB-0360, 684fab9); each lab's scored run is recorded in `docs/components/01-target-lab/external-lab-scores.json` and checked against its reach tags (PA-0640). Live: copy-n-paste tp 0→2, mongection tp 0→2, fp 0. SDLCK-0001 recorded open.
+- **Status:** Fixed (comment-killer open: an answer-key decision)
+
 ## 2026-10-23 — crawler / navguard (a navigation started before a failed load's error page had loaded was dropped; BUG-0561)
 - **Symptom:** the harness run of e69bd1e (F-281): `tests/test_disco_harvest.py::test_disco_harvest_and_restore_after_failed_loads[2]` failed in 19.1 s. Disco's `restore` returned "navigation": its `about:blank` `goto` timed out after 15 s and the page stayed on `chrome-error://chromewebdata/`. The RCA measured about 1% of restores under heavy disk I/O on every tree since BUG-0522's fix (7393c90 4/600, e69bd1e 9/840) and 0/1,320 under CPU load alone.
 - **Root cause:** `navguard._settle_failure` (SP-01, BUG-0522's fix) took a failed navigation as over when its error page committed. That page loads 15-25 ms later (p95 about 130 ms under I/O load), and a navigation Chromium started in between was sometimes dropped with no commit and no error, so Playwright waited out the whole `goto` timeout.

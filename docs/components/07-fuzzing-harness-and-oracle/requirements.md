@@ -2224,6 +2224,19 @@ rewards) derives from it.
     `tests/test_prg_observation.py::test_a_path_points_follow_up_that_would_re_send_the_payload_never_confirms`,
     `tests/test_prg_observation.py::test_a_path_points_follow_up_that_leaves_its_segment_still_confirms`,
     `tests/test_prg_observation.py::test_prg_rule` (`own-segment-never-refetched`)
+- **FR-FUZZ-640 (a traversal sink that lists a directory, `CC-FUZZ-0640`, 2026-11-20,
+  BUG-0640's lane)** `PathTraversalFsPathReadStrategy` (`path_traversal`, sink
+  `fs_path_read`) confirms a sink that lists a directory instead of reading a file: when
+  no `_TRAVERSAL_PAYLOADS` value shows `/etc/passwd` content, each `_LISTING_PAYLOADS`
+  value (`../../../../../../../../etc`, `/etc`) is sent, and the answer must show at least
+  `LISTING_MIN_ENTRIES` (4) well-known `/etc` entry names (`_etc_entries`: whole names,
+  never part of a path such as an echoed `/etc/passwd`, nor `passwd.bak`) that a compared
+  control naming `etc` with no separator does not show (FR-FUZZ-63: a control that is not
+  the application's answer gives no verdict). Evidence names the listed entries
+  (`variant: directory-listing`). Cost: +2 requests when nothing lists, +1 control on a
+  match; the file phase still runs first. Measured on bWAPP's `directory_traversal_2.php`
+  (2026-11-20): `../../../../etc` and `/etc` list `/etc`, an unknown name answers "This
+  directory doesn't exist!", a file an `opendir` warning; BWAPP-0046 is confirmed.
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
   finding must reproduce.
