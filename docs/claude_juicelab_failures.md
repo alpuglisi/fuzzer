@@ -2383,3 +2383,10 @@ Juice Shop lab is complete.
 - **Impact:** the labgen apps' recall overstated real detection: removing the lab names took twitch-clone 14 -> 11, netflix-clone 11 -> 9, booking-clone 3 -> 2 on ground-truth points. Other heuristics fitted to one lab or one framework remain (Angular Material selectors, bWAPP-measured settings words, the 8 `sink_context_in` rules that fire only from answer-key labels): listed open in the lane report.
 - **Status:** the named items fixed on the BBOX branch (CC-AUD-0660, CC-FUZZ-0660); PA-0660 and its guard added; the remaining items listed for the orchestrator.
 
+### F-753 — I wrote answer-key notes claiming live checks I had not yet run, and reach tags from an untested assumption
+- **What:** in lane NEWLABS2-CRAPI I drafted `lab/ground-truth-crapi/labels.json` with notes saying four cases (apply_coupon's boolean answers, the SSRF fetch, the order PUT's refund, forgot-password's error path) were "checked live" before I had sent those probes, and tagged the order cases `[reach: gt]` on the assumption that the transaction rule stops a crawled GET (it stops captured non-page requests only; page and path imports do not apply it). I also put `/shop/orders` URLs in the key, which the labels contract forbids (B9).
+- **Evidence:** this lane's transcript: the notes were written, then the probes run and three notes rewritten with the observed answers (the SSRF note's first wording described an internal-gateway fetch never made); `tests/test_external_labs_static.py::test_every_ground_truth_point_passes_the_destructive_and_transaction_rules[crapi]` failed on the first key; the first crawl imported `GET /workshop/api/shop/orders/all`.
+- **Impact:** none scored: every note was corrected to the observed answer and the order cases removed before the runs reported in CC-LAB-0438 (the first runs, `crawl1`/`gt1`, used the earlier key and are not reported as results).
+- **Cause:** writing the key ahead of the checks to save time, against PA-0311's order (check, then label).
+- **Status:** corrected in the same lane; rule for myself: a note's "checked live" is written from the probe's output, after it.
+

@@ -118,6 +118,27 @@ PINNED_IMAGES = frozenset({BUSYBOX_IMAGE, MUTILLIDAE_WWW_IMAGE, MUTILLIDAE_DATAB
                            SECDEVLABS_NODE13_IMAGE, SECDEVLABS_MAVEN_IMAGE,
                            SECDEVLABS_NGINX_IMAGE, NODEGOAT_NODE12_IMAGE, DVGA_IMAGE,
                            VULNERABLEAPP_IMAGE})
+#: OWASP crAPI v1.1.6 (CC-LAB-0435): upstream's own images, its `latest` of 2025-09-22
+#: (pushed hours after the v1.1.6 tag commit 700f03d1; upstream publishes no `1.1.6`
+#: tag), pinned by digest; Postgres 14 as upstream's compose names it, and the MongoDB
+#: 4.4 image already pinned for secDevLabs (the same digest).
+CRAPI_IDENTITY_IMAGE = ("docker.io/crapi/crapi-identity:latest@sha256:"
+                        "5d1db5b3ba8e02bc68711ec6fc4e35ed7cd8b87e63785ece9e7ff5b5e36c5260")
+CRAPI_COMMUNITY_IMAGE = ("docker.io/crapi/crapi-community:latest@sha256:"
+                         "8ba0c7eda86ae065a673f1fa554d0109a24f25c5a8d65097ae024e5ee715c54e")
+CRAPI_WORKSHOP_IMAGE = ("docker.io/crapi/crapi-workshop:latest@sha256:"
+                        "d4d2d94d35a31e211b04d5a771881f5ae13e358e8fa0804463ae3bace05dd815")
+CRAPI_WEB_IMAGE = ("docker.io/crapi/crapi-web:latest@sha256:"
+                   "b27d246c646bd33898e7d1d2095b6e7576c0993a7b81a73aa7386929493d7151")
+CRAPI_MAILHOG_IMAGE = ("docker.io/crapi/mailhog:latest@sha256:"
+                       "015c23f79d40c9dc1800cd0a458503b89aeda3b585a12c37d53829d6c7d61fdd")
+CRAPI_GATEWAY_IMAGE = ("docker.io/crapi/gateway-service:latest@sha256:"
+                       "97dade9daf0e758547b1686e2d3303c8c9b79838167f728a9211f0ee1f4622b0")
+CRAPI_POSTGRES_IMAGE = ("docker.io/library/postgres:14@sha256:"
+                        "c0e9c0e9bac7e4c1834b698217a03ee5c708de30d313c84a506972de0e24b059")
+PINNED_IMAGES = PINNED_IMAGES | {CRAPI_IDENTITY_IMAGE, CRAPI_COMMUNITY_IMAGE,
+                                 CRAPI_WORKSHOP_IMAGE, CRAPI_WEB_IMAGE, CRAPI_MAILHOG_IMAGE,
+                                 CRAPI_GATEWAY_IMAGE, CRAPI_POSTGRES_IMAGE}
 
 BWAPP_ZIP_URL = "https://sourceforge.net/projects/bwapp/files/bWAPP/bWAPP_latest.zip/download"
 BWAPP_ZIP_NAME = "bWAPP_latest.zip"
@@ -352,6 +373,13 @@ LAB_META: dict[str, LabMeta] = {
     "vulnerableapp": LabMeta("vulnerableapp", "app", "VAPP_PORT", 3095, 9090,
                              "/VulnerableApp/", "/VulnerableApp/allEndPointJson", None, "",
                              False),
+    # microservices behind one openresty origin; JWT bearer auth. Two accounts of our
+    # own, signed up by the bootstrap, each with a vehicle (its VIN and pincode arrive
+    # by mail): object-level authorization cases need a peer's vehicle, report and
+    # order (FR-LAB-436)
+    "crapi": LabMeta("crapi", "crapi-web", "CRAPI_PORT", 3101, 80, "/", "/health",
+                     "crapi-user", "fuzzlab-user@example.com", True,
+                     (("crapi-peer", "fuzzlab-peer@example.com"),)),
 }
 
 
@@ -1597,15 +1625,202 @@ def nodegoat_account_attributes(client: _LabClient, cred: ResolvedCredential
     return {"user_id": ids.pop()}
 
 
+# --- crAPI (CC-LAB-0436) -------------------------------------------------------------------
+
+#: The welcome mail's vehicle line (identity's MailBody, quoted-printable HTML): a 17-char
+#: VIN and a 4-digit pincode, each in its own <font> after its label.
+_CRAPI_VIN = re.compile(r"VIN:\s*(?:<[^>]*>\s*)*([A-Z0-9]{17})")
+_CRAPI_PINCODE = re.compile(r"Pincode:\s*(?:<[^>]*>\s*)*([0-9]{4})")
+#: One of upstream's two seeded mechanics (workshop's seed, `TRAC_JHN` / `TRAC_JME`).
+_CRAPI_MECHANIC = "TRAC_JHN"
+#: One of upstream's seeded coupons (community api/seed/seeder.go:32), claimed once per
+#: account so the account has an applied coupon: the premise of upstream's SQL-injection
+#: challenge 13 ("redeem a coupon that you have already claimed").
+_CRAPI_COUPON = ("TRAC075", 75)
+
+
+def _crapi_json(resp: Any) -> Any:
+    try:
+        return resp.json()
+    except ValueError:
+        return None
+
+
+def _crapi_token(client: _LabClient, email: str, password: str) -> str | None:
+    """A JWT from the identity service's JSON login, or None when it is refused."""
+    r = client.request("POST", "/identity/api/auth/login",
+                       json={"email": email, "password": password})
+    body = _crapi_json(r)
+    token = body.get("token") if r.status_code == 200 and isinstance(body, dict) else None
+    return token if isinstance(token, str) and token else None
+
+
+def _crapi_number(email: str) -> str:
+    """A stable 10-digit phone number per account (signup needs a unique one)."""
+    return "9" + str(int(hashlib.sha256(email.encode()).hexdigest(), 16))[-9:]
+
+
+def _crapi_welcome_vehicle(client: _LabClient, email: str) -> tuple[str, str] | None:
+    """The newest VIN and pincode mailed to ``email``, read through crapi-web's own
+    /mailhog/ proxy (mailhog's v2 search API; its UI is not published)."""
+    import quopri
+    r = client.request("GET", "/mailhog/api/v2/search",
+                       params={"kind": "to", "query": email, "limit": "50"})
+    body = _crapi_json(r)
+    items = body.get("items") if isinstance(body, dict) else None
+    for item in sorted(items or [], key=lambda m: str(m.get("Created", "")), reverse=True):
+        raw = str((item.get("Raw") or {}).get("Data") or "")
+        text = quopri.decodestring(raw.encode()).decode("utf-8", "replace")
+        vin, pin = _CRAPI_VIN.search(text), _CRAPI_PINCODE.search(text)
+        if vin and pin:
+            return vin.group(1), pin.group(1)
+    return None
+
+
+def _crapi_list(resp: Any, key: str) -> list[dict]:
+    body = _crapi_json(resp)
+    if isinstance(body, dict):
+        body = body.get(key)
+    return [x for x in body if isinstance(x, dict)] if isinstance(body, list) else []
+
+
+def _crapi_objects(client: _LabClient, auth: dict[str, str]) -> dict[str, Any]:
+    """The account's vehicle, mechanic report and order, as its own API lists them."""
+    vehicles = _crapi_list(client.request("GET", "/identity/api/v2/vehicle/vehicles",
+                                          headers=auth), "vehicles")
+    out: dict[str, Any] = {"vehicle": vehicles[0] if vehicles else None,
+                           "report": None, "order": None}
+    if out["vehicle"]:
+        vin = str(out["vehicle"].get("vin") or "")
+        reqs = _crapi_list(client.request(
+            "GET", f"/workshop/api/merchant/service_requests/{vin}", headers=auth),
+            "service_requests")
+        out["report"] = reqs[0] if reqs else None
+    orders = _crapi_list(client.request("GET", "/workshop/api/shop/orders/all",
+                                        headers=auth), "orders")
+    out["order"] = orders[0] if orders else None
+    return out
+
+
+def bootstrap_crapi(client: _LabClient, cred: ResolvedCredential, *,
+                    deadline: float = 180.0, clock: Callable[[], float] = time.monotonic,
+                    sleep: Callable[[float], None] = time.sleep) -> list[str]:
+    """Sign the account up through the identity API when its login fails, and verify the
+    login by a positive differential: the JWT's dashboard names the account's email, a
+    wrong password is refused (401). Then give the account the objects crAPI's
+    object-level cases need, through the app's own flows: the vehicle its welcome mail
+    names (VIN and pincode, read from mailhog), a mechanic report for it (contact
+    mechanic, whose `mechanic_api` is crapi-web's own receive_report URL, which nginx
+    rewrites to the workshop service), one shop order, and one claimed seeded coupon
+    (FR-LAB-436)."""
+    meta = LAB_META["crapi"]
+    wait_ready(client, meta.ready_path, deadline=deadline, clock=clock, sleep=sleep)
+    notes: list[str] = []
+    email = cred.username
+    token = _crapi_token(client, email, cred.password)
+    if token is None:
+        local = email.split("@", 1)[0]
+        reg = client.request("POST", "/identity/api/auth/signup", json={
+            "name": local.replace("-", " ").replace(".", " ").title(), "email": email,
+            "number": _crapi_number(email), "password": cred.password})
+        if reg.status_code != 200:
+            raise ExternalLabError(
+                f"crAPI signup failed: HTTP {reg.status_code} (an account of that email "
+                f"with another password? run `./labctl.sh reset crapi --authorized`)")
+        notes.append("account signed up")
+        token = _crapi_token(client, email, cred.password)
+    bad = client.request("POST", "/identity/api/auth/login",
+                         json={"email": email, "password": cred.password + "-wrong"})
+    auth = {"Authorization": f"Bearer {token}"} if token else {}
+    dash = client.request("GET", "/identity/api/v2/user/dashboard", headers=auth) \
+        if token else None
+    dash_body = _crapi_json(dash) if dash is not None else None
+    if token is None or bad.status_code != 401 or dash is None or \
+            dash.status_code != 200 or not isinstance(dash_body, dict) or \
+            dash_body.get("email") != email:
+        raise ExternalLabError(
+            f"crAPI login of {email!r}: a token {'issued' if token else 'refused'}, a wrong "
+            f"password HTTP {bad.status_code}, the dashboard "
+            f"{dash.status_code if dash is not None else '-'} (want a token naming the "
+            f"account / 401; run `./labctl.sh reset crapi --authorized`)")
+    notes.append("login verified")
+    objects = _crapi_objects(client, auth)
+    if objects["vehicle"] is None:
+        end = clock() + deadline
+        found = _crapi_welcome_vehicle(client, email)
+        while found is None and clock() < end:     # the mail is sent asynchronously
+            sleep(1.0)
+            found = _crapi_welcome_vehicle(client, email)
+        if found is None:
+            raise ExternalLabError(f"no crAPI vehicle mail for {email!r} in mailhog")
+        add = client.request("POST", "/identity/api/v2/vehicle/add_vehicle", headers=auth,
+                             json={"vin": found[0], "pincode": found[1]})
+        if add.status_code != 200:
+            raise ExternalLabError(f"crAPI add_vehicle: HTTP {add.status_code}")
+        notes.append("vehicle added")
+        objects = _crapi_objects(client, auth)
+    if objects["vehicle"] is None:
+        raise ExternalLabError("crAPI lists no vehicle after add_vehicle")
+    if objects["report"] is None:
+        r = client.request("POST", "/workshop/api/merchant/contact_mechanic", headers=auth,
+                           json={"mechanic_code": _CRAPI_MECHANIC,
+                                 "problem_details": "fuzzlab lab fixture",
+                                 "vin": objects["vehicle"].get("vin"),
+                                 "mechanic_api": client.url(
+                                     "/workshop/api/mechanic/receive_report"),
+                                 "repeat_request_if_failed": False,
+                                 "number_of_repeats": 1})
+        if r.status_code != 200:
+            raise ExternalLabError(f"crAPI contact_mechanic: HTTP {r.status_code}")
+        notes.append("mechanic report created")
+    if objects["order"] is None:
+        products = _crapi_list(client.request("GET", "/workshop/api/shop/products",
+                                              headers=auth), "products")
+        if not products:
+            raise ExternalLabError("crAPI lists no shop product")
+        r = client.request("POST", "/workshop/api/shop/orders", headers=auth,
+                           json={"product_id": products[-1].get("id"), "quantity": 1})
+        if r.status_code != 200:
+            raise ExternalLabError(f"crAPI order: HTTP {r.status_code}")
+        notes.append("order placed")
+    code, amount = _CRAPI_COUPON
+    claimed = client.request("POST", "/workshop/api/shop/apply_coupon", headers=auth,
+                             json={"coupon_code": code, "amount": amount})
+    if claimed.status_code == 200:
+        notes.append("coupon claimed")
+    elif claimed.status_code != 400 or "claimed" not in (claimed.text or ""):
+        raise ExternalLabError(f"crAPI apply_coupon: HTTP {claimed.status_code}")
+    return notes
+
+
+def crapi_account_attributes(client: _LabClient, cred: ResolvedCredential
+                             ) -> dict[str, str]:
+    """The account's own object ids, as its own API lists them (FR-LAB-436): its
+    vehicle's UUID and VIN, its mechanic report's id and its order's id."""
+    token = _crapi_token(client, cred.username, cred.password)
+    if token is None:
+        raise ExternalLabError("crAPI login refused while reading the account's values")
+    objects = _crapi_objects(client, {"Authorization": f"Bearer {token}"})
+    attrs = {"vehicle_id": (objects["vehicle"] or {}).get("uuid"),
+             "vin": (objects["vehicle"] or {}).get("vin"),
+             "report_id": (objects["report"] or {}).get("id"),
+             "order_id": (objects["order"] or {}).get("id")}
+    missing = sorted(k for k, v in attrs.items() if v in (None, ""))
+    if missing:
+        raise ExternalLabError(f"crAPI account has no {', '.join(missing)}")
+    return {k: str(v) for k, v in attrs.items()}
+
+
 _BOOTSTRAPS = {"bwapp": bootstrap_bwapp, "juice-shop": bootstrap_juice_shop,
                "mutillidae": bootstrap_mutillidae,
                "secdevlabs-gossip-world": bootstrap_secdevlabs_gossip_world,
                "secdevlabs-ecommerce-api": bootstrap_secdevlabs_ecommerce_api,
-               "nodegoat": bootstrap_nodegoat}
+               "nodegoat": bootstrap_nodegoat, "crapi": bootstrap_crapi}
 #: Labs whose accounts have values of their own a ground truth names (`account_value`,
 #: FR-LAB-309): read after the verified login, stored with the credential.
 _ACCOUNT_ATTRIBUTES = {"secdevlabs-ecommerce-api": ecommerce_account_attributes,
-                       "nodegoat": nodegoat_account_attributes}
+                       "nodegoat": nodegoat_account_attributes,
+                       "crapi": crapi_account_attributes}
 
 
 def bootstrap(name: str, *, environ: Mapping[str, str] | None = None,
