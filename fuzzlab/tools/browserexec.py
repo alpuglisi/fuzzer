@@ -46,6 +46,11 @@ def _store_plan(store) -> tuple[str | None, bytes | None]:
             store.location == "query" and method != "GET") or (
             store.location != "query" and method not in store_methods):
         return f"unplaceable store request {method} {store.location!r}", None
+    if store.location == "body" and store.entries:
+        # FR-FUZZ-692: a form write replays every captured sibling entry, in order, the
+        # payload in its own field's first occurrence; a field the entries lack is
+        # refused, never added (PA-0115)
+        return _form_store_body(store)
     if store.location != "json":
         return None, None
     from fuzzlab.core.jsonbody import JsonPlacementError, body_for
@@ -53,6 +58,24 @@ def _store_plan(store) -> tuple[str | None, bytes | None]:
         return None, body_for(store.param, store.value, store.entries)
     except JsonPlacementError as exc:
         return f"unplaceable store leaf: {exc}", None
+
+
+def _form_store_body(store) -> tuple[str | None, bytes | None]:
+    """``(refusal, body)`` of a form store step with sibling entries: the entries
+    URL-encoded in order, ``store.param``'s first occurrence holding the payload."""
+    from urllib.parse import urlencode
+    pairs, placed = [], False
+    for name, value in store.entries:
+        if not isinstance(name, str):
+            return "unplaceable store entries: a non-form entry name", None
+        if name == store.param and not placed:
+            pairs.append((name, store.value))
+            placed = True
+        else:
+            pairs.append((name, "" if value is None else str(value)))
+    if not placed:
+        return f"unplaceable store leaf: the entries have no field {store.param!r}", None
+    return None, urlencode(pairs).encode("utf-8")
 
 
 _QUOTED = re.compile(r"\"[^\"]*\"|'[^']*'")
@@ -625,10 +648,11 @@ class PlaywrightBrowserExecutor:
                             raise NotObserved(str(exc)) from None
                         headers = self._api_headers(carried, s.url)
                         if store_body is not None:
+                            ctype = ("application/json" if s.location == "json"
+                                     else "application/x-www-form-urlencoded")
                             resp = context.request.fetch(
                                 s.url, method=s.method.upper(), data=store_body,
-                                headers={**headers,
-                                         "Content-Type": "application/json"},
+                                headers={**headers, "Content-Type": ctype},
                                 max_redirects=0)
                         else:
                             extra = {"headers": headers} if headers else {}

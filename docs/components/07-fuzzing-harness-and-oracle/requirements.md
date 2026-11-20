@@ -2354,6 +2354,12 @@ rewards) derives from it.
   entry), decided by `StoredXssStrategy`; built only with a browser, refused as any
   crawl point and for a PUT/PATCH write without `--fuzz-json-writes`.
 
+- **FR-FUZZ-692 (a form store step replays its entries; CC-FUZZ-0692, 2026-11-20)** A
+  stored-XSS store step at location `body` that carries entries posts them all,
+  URL-encoded in order, the payload in the target field's first occurrence; entries that
+  lack the field are refused before any browser. Without entries it posts the field
+  alone, as before.
+
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
   finding must reproduce.

@@ -674,6 +674,17 @@ def _print_summary(args, counts, result, plugins=None) -> int:
               f"{counts.get('request_json', 0)} JSON and {counts.get('request_form', 0)} "
               f"form-encoded imported, {counts.get('request_refused', 0)} refused "
               f"(method, write, destructive, transaction, credential-change, settings)")
+    if counts and counts.get("graphql_schema_endpoint"):            # FR-FUZZ-690
+        print(f"  graphql schema: {counts['graphql_schema_endpoint']} endpoint(s) asked, "
+              f"{counts.get('graphql_schema_operation', 0)} operation(s) imported, "
+              f"{counts.get('graphql_schema_refused', 0)} refused, "
+              f"{counts.get('graphql_schema_skipped', 0)} skipped, "
+              f"{counts.get('graphql_schema_unreadable', 0)} unreadable, "
+              f"{counts.get('graphql_schema_send_failed', 0)} send failed, "
+              f"{counts.get('graphql_schema_not_ok', 0)} not 200")
+    if counts and (counts.get("store_render") or counts.get("store_render_skipped")):
+        print(f"  store->render pairs: {counts.get('store_render', 0)} stored point(s), "
+              f"{counts.get('store_render_skipped', 0)} skipped")     # FR-FUZZ-691
     print(f"  points audited: {result.points_audited}   "
           f"candidates: {result.candidates}   negatives: {result.negatives}")
     print(f"  findings (oracle-confirmed): {result.findings}")

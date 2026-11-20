@@ -3,6 +3,30 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0692 — A form store step with entries replays every captured field; the run prints the schema and pair counts (FR-FUZZ-692) (2026-11-20)
+- Placement: lane CRAWLCOV, on the integration tip da1a5d6 (lane XSSPLANT merged). Builds
+  on XSSPLANT's session route (SP-125): every M6 visit, a crawl-derived stored point's
+  included, already takes `SeamProbeSender.browser_session_route` through
+  `PlaywrightBrowserExecutor`, so nothing else moved.
+- Change: `fuzzlab/tools/browserexec.py`: `_store_plan` gives a form (`body`) store step
+  that carries entries a body (`_form_store_body`): the entries URL-encoded in order, the
+  payload in the target field's first occurrence; a step whose entries lack the field is
+  refused before any browser (PA-0115). The store fetch sends it as
+  `application/x-www-form-urlencoded`. A form step without entries (ground truth's) is
+  unchanged. `fuzzlab/harness/auto_cli.py::_print_summary` prints the GraphQL schema
+  counts and the store -> render counts (CC-LAB-0410's measurement found them only inside
+  the parameter total).
+- Measured: lane XSSPLANT's gap 2 (bWAPP stores an entry only when its submit field is
+  posted too); `tests/test_form_store_entries.py` pins it on real Chromium with an
+  invented guestbook that stores only with its submit field.
+- Impact (other components / project): crawl-derived stored points (FR-FUZZ-691) whose
+  write is a form; ground truth's form plant is unchanged (still the field alone:
+  XSSPLANT's gap 2 for ground truth stays open, stated).
+- Risk (level; mitigation or accepted-risk justification): low.
+- Deliverables:
+  - [x] executor, summary, tests — done
+  - [x] FR-FUZZ-692, CHANGELOG — done
+
 ### CC-FUZZ-0691 — Crawl-derived stored-XSS points (FR-FUZZ-691) (2026-11-20)
 - Placement: lane CRAWLCOV (part 5), base f6b4790.
 - Change: `fuzzlab/harness/auto.py`: `injection_points_from_store` builds a `stored`

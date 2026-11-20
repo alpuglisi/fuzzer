@@ -3,6 +3,35 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0410 — Crawl coverage measured: DVGA before/after GraphQL schema discovery and store -> render pairing (2026-11-20)
+- Placement: lane CRAWLCOV (item CRAWLCOV-MEAS2); measurement only, pre-assigned
+  CC-LAB-0410..0414.
+- Commands (from a detached worktree, `PYTHONPATH` = it; the lab reset before each run):
+  `fuzzlab disco capture --start http://127.0.0.1:5013/ --out <dir> --workers 2 --deadline
+  300 --authorized`, then `fuzzlab auto --base-url http://127.0.0.1:5013 --store <db>
+  --disco-run <dir> --ground-truth lab/ground-truth-dvga --points crawl --browser --oob
+  --score --authorized`.
+- Results (DVGA, crawl, headline):
+  - f6b4790 (baseline): tp=1 fp=0 fn=9 tn=5, 202 requests, 48 s (DVGA-0003);
+  - 9d14ee9 (CC-CRAWL-0670/0671): tp=2 fp=0 fn=8 tn=5, 762 requests, 100 s -- DVGA-0007
+    (`pastes(filter)`, SQL injection) found through the schema-built operation; the same
+    numbers on the baseline's own capture (the gain is the code, not capture variance).
+    Introspection answered 200: 11 operations imported, 0 refused, 8 skipped (7 with no
+    String/ID argument -- the two delete operations among them, never sent -- and one with
+    an input-object argument).
+  - ground truth (diagnostic, f6b4790): tp=5 fp=0 fn=5 tn=5, 345 requests.
+- Still missed, measured: DVGA-0005 (`systemDiagnostics(cmd)`) is a point, but the sink
+  runs only after a credential check (`admin`/`changeme` in the answer key) discovery
+  cannot pass; DVGA-0001/0002/0004/0014/0015 are points whose classes no generic rule
+  reaches (the ground-truth run misses 0001/0014/0015 too: audit rules, not discovery);
+  DVGA-0012/0013: every createPaste the explorer sent had `burn: true`, which the public
+  listing never shows, so the capture holds no render of a stored value (0 pairs for it;
+  one pair found: a GraphQL document rendered on `/audit`, no finding).
+- Cost: 3.8x requests (each schema operation's `operationName` leaf is also a point, as
+  for captured requests).
+- Deliverables:
+  - [x] runs, this record — done
+
 ### CC-LAB-0353 — VulnerableApp moves to 127.0.0.1:3095; a static guard against shared lab ports (FR-LAB-352) (2026-11-20)
 - Change: `lab/external/vulnerableapp/compose.yaml` (`${VAPP_PORT:-3095}`),
   `fuzzlab/lab_fixtures/external.py` (`LAB_META["vulnerableapp"].default_port = 3095`);

@@ -156,3 +156,27 @@ def test_a_subpath_base_joins_stored_endpoints_to_its_origin_only(tmp_path):
         sender = _Sender(_schema_answer())
         graphql_schema_discovery(st, run, sender, BASE + "/app/")
         assert [u for u, *_x in sender.sent] == [BASE + "/app/gq"]
+
+
+def test_the_run_summary_prints_the_schema_and_store_render_counts(capsys):
+    """CC-LAB-0410's measurement found the counts only in the parameter total."""
+    from types import SimpleNamespace
+
+    from fuzzlab.harness import auto_cli
+    from fuzzlab.harness.auto import PipelineResult
+    result = PipelineResult()
+    result.plan = SimpleNamespace(mode="automatic", scored=False, categories=[],
+                                  source="crawl")
+    result.metrics = {}
+    counts = {"graphql_schema_endpoint": 1, "graphql_schema_operation": 11,
+              "graphql_schema_skipped": 8, "store_render": 2, "store_render_skipped": 1,
+              "parameter": 3}
+    try:
+        auto_cli._print_summary(SimpleNamespace(score=False, rank=False, anomaly=False),
+                                counts, result)
+    except (AttributeError, TypeError):
+        pass                                      # later lines need a fuller result
+    out = capsys.readouterr().out
+    assert ("graphql schema: 1 endpoint(s) asked, 11 operation(s) imported, 0 refused, "
+            "8 skipped") in out
+    assert "store->render pairs: 2 stored point(s), 1 skipped" in out
