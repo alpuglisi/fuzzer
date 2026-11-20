@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 from urllib.parse import urlparse
 
 from fuzzlab.core.runmode import RunModeError
@@ -153,6 +154,12 @@ def build_parser() -> argparse.ArgumentParser:
                         f"{header_point_cost()} requests per page and name. Cookie, "
                         "Authorization, Host, framing, routing and method-override headers "
                         "are refused (FR-FUZZ-43).")
+    p.add_argument("--no-graphql-schema", action="store_true",
+                   help="In a discovery run (--points crawl), do not ask a GraphQL "
+                        "endpoint the app used for its schema. By default one "
+                        "introspection request per such endpoint (at most 4) adds the "
+                        "schema's operations with String/ID arguments as points "
+                        "(FR-CRAWL-671).")
     p.add_argument("--fuzz-json-writes", action="store_true",
                    help="Also import captured PUT/PATCH requests as JSON points (forms "
                         "phase 3) and probe the ground truth's PUT/PATCH points. Off by "
@@ -363,6 +370,54 @@ def _run(p, args, store, run_id: int, plugins, selected, ground_truth) -> int:
         recorder.close()
 
 
+def _crawl_points(args, ground_truth) -> bool:
+    """Whether this run's points come from discovery (``--points crawl``, or ``auto``
+    without a ground truth), as `harness.auto.plan_run` resolves it."""
+    return args.points == "crawl" or (args.points == "auto" and ground_truth is None)
+
+
+def graphql_schema_discovery(store, run_id: int, sender, base_url: str) -> dict[str, int]:
+    """GraphQL schema discovery (FR-CRAWL-671, CC-CRAWL-0670): for each GraphQL
+    endpoint the app itself sent a document to (`store_adapter.graphql_endpoints`), ONE
+    introspection request (`tools.gqlschema.introspection_body`, bounded, spec-based)
+    through the run's probe sender -- every gate of a probe applies (scope, destructive
+    URL, session) -- and its answer imported as captured requests
+    (`store_adapter.import_graphql_schema`). A send that fails or is refused, or an
+    answer that is not a 200, is counted (``graphql_schema_send_failed``,
+    ``graphql_schema_not_ok``) and imports nothing: no answer is never a schema."""
+    from urllib.parse import urlsplit
+
+    from fuzzlab.core import jsonbody
+    from fuzzlab.core.urls import canonical_origin
+    from fuzzlab.tools.gqlschema import introspection_body
+    from fuzzlab.tools.store_adapter import graphql_endpoints, import_graphql_schema
+    counts: dict[str, int] = {"graphql_schema_endpoint": 0, "graphql_schema_send_failed": 0,
+                              "graphql_schema_not_ok": 0}
+    parts = urlsplit(base_url)
+    base = f"{parts.scheme}://{parts.netloc}"
+    main = canonical_origin(base_url)
+    body = introspection_body()
+    entries = [((key,), value) for key, value in body.items()]
+    for stored, page in graphql_endpoints(store, run_id):
+        url = stored if "://" in stored else base + stored
+        counts["graphql_schema_endpoint"] += 1
+        try:
+            probe = sender.send(url, "query", body["query"], method="POST",
+                                location=jsonbody.LOCATION, entries=entries)
+        except (RuntimeError, ValueError, OSError) as exc:   # refused, unobserved, failed
+            counts["graphql_schema_send_failed"] += 1
+            print(f"graphql schema: no introspection answer from {stored}: "
+                  f"{type(exc).__name__}", file=sys.stderr)
+            continue
+        if getattr(probe, "status", None) != 200:
+            counts["graphql_schema_not_ok"] += 1
+            continue
+        for key, n in import_graphql_schema(store, run_id, url, probe.text, main=main,
+                                            page=page).items():
+            counts[key] = counts.get(key, 0) + n
+    return counts
+
+
 def _run_traced(p, args, store, run_id: int, plugins, selected, ground_truth) -> int:
     writes = getattr(args, "fuzz_json_writes", False)
     counts = import_spider(args.spider_db, store, run_id, fuzz_json_writes=writes,
@@ -381,6 +436,11 @@ def _run_traced(p, args, store, run_id: int, plugins, selected, ground_truth) ->
     sender = RequestsProbeSender() if no_login else \
         make_probe_sender(args.base_url, args.identity, **extra)
     account_values = _account_values(args) if args.identity else None
+    if _crawl_points(args, ground_truth) and not getattr(args, "no_graphql_schema", False):
+        # FR-CRAWL-671: one introspection request per GraphQL endpoint the app used
+        for key, n in graphql_schema_discovery(store, run_id, sender,
+                                               args.base_url).items():
+            counts[key] = counts.get(key, 0) + n
     peer = None
     if getattr(args, "peer_names", None):
         from fuzzlab.oracle.strategies import PeerAccounts

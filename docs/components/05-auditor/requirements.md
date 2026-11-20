@@ -775,6 +775,13 @@ budget where a vulnerability is plausible.
   for every query, body, JSON-leaf and path point (where `R-SQLI-PARAM` and `R-SSTI`
   apply): the value may reach `eval`, `new Function` or a `$where` whatever its name.
 
+- **FR-AUD-690 (a GraphQL schema answer as captured requests; CC-AUD-0690, 2026-11-20)**
+  `store_adapter.import_graphql_schema` imports each operation FR-CRAWL-670 builds from
+  an introspection answer as a captured POST JSON request to that endpoint, through
+  `captured_request` and `_store_request` (FR-AUD-22's refusals, redaction and
+  pinning unchanged), with the source page of the endpoint's captured request; nothing is
+  sent. `graphql_endpoints` names the endpoints (at most 4).
+
 ## 4. Non-functional requirements
 - **NFR-AUD-explainable** Every candidate is traceable to the rule evidence that
   produced it; a candidate with no evidence is a bug.

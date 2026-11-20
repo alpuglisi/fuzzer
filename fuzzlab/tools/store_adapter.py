@@ -1279,3 +1279,77 @@ def _to_float(value) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+# --- GraphQL schema discovery (FR-CRAWL-670/671, CC-CRAWL-0670) ---------------------
+#: The ``source`` counted for operations a schema answer gave (never a captured row).
+GRAPHQL_SCHEMA_SOURCE = "graphql-schema"
+#: At most this many GraphQL endpoints of one run are asked for their schema.
+MAX_SCHEMA_ENDPOINTS = 4
+
+
+def graphql_endpoints(store: Store, run_id: int) -> list[tuple[str, str | None]]:
+    """The run's GraphQL endpoints, in first-stored order: ``(stored endpoint URL, its
+    source page)`` of every POST JSON request row whose ``query`` entry is an
+    executable GraphQL document (`tools.apiop.graphql_operations`, the one GraphQL
+    reader). Evidence is the request the app itself sent, never a path name: an
+    endpoint is GraphQL because the app sent it a GraphQL document (GraphQL over HTTP),
+    whatever it is called. At most `MAX_SCHEMA_ENDPOINTS`."""
+    from fuzzlab.core import jsonbody
+    from fuzzlab.tools.apiop import graphql_operations
+    rows = store.conn.execute(
+        "SELECT e.url AS url, f.entries AS entries, f.source_page AS page "
+        "FROM form f JOIN endpoint e ON e.id = f.endpoint_id "
+        "WHERE f.run_id = ? AND e.method = 'POST' AND f.enctype = ? ORDER BY f.id",
+        (run_id, jsonbody.ENCTYPE)).fetchall()
+    out: dict[str, str | None] = {}
+    for row in rows:
+        url = row[0]
+        if url in out:
+            continue
+        entries = jsonbody.decode_entries(row[1]) if row[1] else None
+        document = next((v for p, v in entries or () if p == ("query",)), None)
+        if isinstance(document, str) and graphql_operations(document):
+            out[url] = row[2]
+            if len(out) >= MAX_SCHEMA_ENDPOINTS:
+                break
+    return list(out.items())
+
+
+def import_graphql_schema(store: Store, run_id: int, url: str, answer_text, *,
+                          main: str | None = None, page: str | None = None,
+                          kinds=("query", "mutation")) -> dict[str, int]:
+    """One introspection answer -> captured-request rows (FR-CRAWL-671): every operation
+    `tools.gqlschema.operations` builds from the schema is imported exactly as a
+    request the app sent would be -- `captured_request` (every FR-AUD-22 refusal: a
+    destructive or credential-change body, a settings field, a destructive entry, which
+    judges the document text and so a mutation's field name) then `_store_request`
+    (redaction, password and selector pinning). Nothing is sent here. ``url`` is the
+    endpoint's absolute URL; ``page`` the page that sent its captured request. Counts:
+    ``graphql_schema_operation`` (built), ``graphql_schema_refused`` (refused by the
+    import rules), ``graphql_schema_skipped`` (fields the builder could not fill),
+    ``graphql_schema_unreadable`` (1 when the answer held no readable schema)."""
+    from fuzzlab.tools.gqlschema import operations_with_skips, parse_schema
+    counts = {"graphql_schema_operation": 0, "graphql_schema_refused": 0,
+              "graphql_schema_skipped": 0, "graphql_schema_unreadable": 0}
+    schema = parse_schema(answer_text)
+    if schema is None:
+        counts["graphql_schema_unreadable"] = 1
+        return counts
+    ops, skipped = operations_with_skips(schema, kinds=kinds)
+    counts["graphql_schema_skipped"] = len(skipped)
+    bodies: dict = {}
+    work = {"request_json": 0, "request_form": 0, "parameter": 0}
+    for op in ops:
+        row = {"url": url, "method": "POST", "content_type": "application/json",
+               "body_json": json.dumps(op.body(), ensure_ascii=False), "page_url": page}
+        reason, kind, leaves = captured_request(row)
+        if reason is not None:
+            counts["graphql_schema_refused"] += 1
+            continue
+        counts["graphql_schema_operation"] += 1
+        _store_request(store, run_id, work, kind, "POST", url, leaves, main=main,
+                       page=page, bodies=bodies)
+    counts["parameter"] = work.get("parameter", 0)
+    store.conn.commit()
+    return counts

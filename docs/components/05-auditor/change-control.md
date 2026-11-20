@@ -3,6 +3,26 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0690 — A GraphQL schema answer imported as captured requests (FR-AUD-690) (2026-11-20)
+- Placement: lane CRAWLCOV (item CRAWLCOV-GQL), base f6b4790, pre-assigned
+  CC-AUD-0690..0694.
+- Change: `fuzzlab/tools/store_adapter.py`: `graphql_endpoints(store, run_id)` (POST JSON
+  request rows whose `query` entry is an executable GraphQL document, by SP-80's reader;
+  at most `MAX_SCHEMA_ENDPOINTS` = 4) and `import_graphql_schema(store, run_id, url,
+  answer_text, ...)`: each operation of `tools.gqlschema` goes through `captured_request`
+  and `_store_request` exactly as a captured request (every FR-AUD-22 refusal, redaction
+  and pinning); counted `graphql_schema_operation` / `_refused` / `_skipped` /
+  `_unreadable`.
+- Measured: `tests/test_graphql_schema_import.py` -- a destructive mutation (`deleteBook`)
+  is refused by the existing body rules; a field named like a secret (`code`) is pinned by
+  the existing redaction (found while writing the test).
+- Impact (other components / project): read by `auto` (CC-FUZZ-0690); point building
+  and the GraphQL argument rules (FR-AUD-600/601) are unchanged.
+- Risk (level; mitigation or accepted-risk justification): low; no new import rule.
+- Deliverables:
+  - [x] the two functions, `tests/test_graphql_schema_import.py` — done
+  - [x] FR-AUD-690, CHANGELOG — done
+
 ### CC-AUD-0620 — Rules for LDAP and XPath injection (FR-AUD-620) (2026-11-20)
 - Change: `fuzzlab/audit/rules_data/default_rules.json` (`R-LDAP-INJECTION`,
   `R-XPATH-INJECTION`: query, body and JSON points, references `ldap-injection` and

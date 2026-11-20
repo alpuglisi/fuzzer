@@ -1849,6 +1849,23 @@ fuzzer.
   definitions (`$a: [Int!]!` -> `("Int", 1)`; a name declared twice keeps its first);
   None as FR-CRAWL-600. Linear.
 
+- **FR-CRAWL-670 (a GraphQL schema's operations; CC-CRAWL-0670, 2026-11-20)**
+  `tools/gqlschema.py` builds one bounded introspection request (`introspection_body`)
+  and, from its answer (`parse_schema`, total and bounded), one request per root
+  query/mutation field taking a `String` or `ID` argument (not in a list):
+  `SchemaOperation` with its document, operation name (`Fuzzlab<Field>`), variables
+  (String/ID: the importer's text filler; a required Int/Float/Boolean/enum/String-list
+  argument a neutral value) and its target variables. A field with a required argument
+  it cannot fill, an invalid name, or one SP-80's reader cannot bind is skipped with its
+  reason. Nothing names a target: names come from the target's schema only.
+- **FR-CRAWL-671 (GraphQL schema discovery in a discovery run; CC-CRAWL-0670,
+  2026-11-20)** In `fuzzlab auto` with crawl points, each GraphQL endpoint the app sent
+  an executable document to (`store_adapter.graphql_endpoints`, at most 4) gets ONE
+  introspection request through the run's probe sender (every probe gate applies); a
+  200 answer's operations are imported as captured requests (FR-AUD-690). A refused or
+  failed send, a non-200 answer or an unreadable schema is counted and imports nothing.
+  `--no-graphql-schema` turns it off.
+
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default
   to not clicking them. *(Built CC-CRAWL-0011, BUG-0111:)* the one rule is

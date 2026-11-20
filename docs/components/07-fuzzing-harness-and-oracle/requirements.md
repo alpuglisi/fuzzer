@@ -2265,6 +2265,11 @@ rewards) derives from it.
   submitted leaf compares V with B; a server that stringifies every object still answers V
   and D alike and never confirms.
 
+- **FR-FUZZ-690 (GraphQL schema discovery in `auto`; CC-FUZZ-0690, 2026-11-20)** With
+  crawl points (`--points crawl`, or `auto` without a ground truth) and without
+  `--no-graphql-schema`, `fuzzlab auto` runs FR-CRAWL-671 after its imports, through the
+  run's own probe sender, before the pipeline.
+
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
   finding must reproduce.

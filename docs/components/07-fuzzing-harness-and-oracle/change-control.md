@@ -3,6 +3,23 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0690 — `auto` asks a GraphQL endpoint for its schema once in a discovery run (FR-FUZZ-690) (2026-11-20)
+- Placement: lane CRAWLCOV (item CRAWLCOV-GQL), base f6b4790, pre-assigned
+  CC-FUZZ-0690..0694.
+- Change: `fuzzlab/harness/auto_cli.py`: `graphql_schema_discovery(store, run_id,
+  sender, base_url)` runs after the imports and the sender's creation when the run's
+  points come from discovery (`_crawl_points`); one `sender.send` (POST, `json`
+  location, the introspection body as entries) per endpoint; failures are counted
+  (`graphql_schema_send_failed`, `graphql_schema_not_ok`), never a schema. New flag
+  `--no-graphql-schema`. The counts join the run's import counts.
+- Impact (other components / project): one request per GraphQL endpoint before the
+  pipeline; a ground-truth run is unchanged.
+- Risk (level; mitigation or accepted-risk justification): low; the send goes through
+  every probe gate (scope, destructive URL, session).
+- Deliverables:
+  - [x] the step, flag, tests (`tests/test_graphql_schema_import.py`) — done
+  - [x] FR-FUZZ-690, CHANGELOG — done
+
 ### CC-FUZZ-0622 — A front controller's page is part of a finding's URL and of a case's scoring key (FR-FUZZ-622, SP-90) (2026-11-20)
 - Change: `fuzzlab/oracle/oracle.py` (`finding_url` keeps `?<route>=<page>` of a router
   URL, from its query or a crawled point's sibling entries; `_front_controller_route`),

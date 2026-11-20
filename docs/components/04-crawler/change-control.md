@@ -3,6 +3,36 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0670 — GraphQL schema discovery: one bounded introspection request, its operations as points (FR-CRAWL-670/671) (2026-11-20)
+- Placement: lane CRAWLCOV (item CRAWLCOV-GQL), base f6b4790, pre-assigned
+  CC-CRAWL-0670..0679. Not a change to `spider.py` or `navguard.py`.
+- Change: new `fuzzlab/tools/gqlschema.py` (pure, no I/O): `INTROSPECTION_QUERY` (one
+  operation, one `__schema` selection, no descriptions, directives, subscriptions or
+  aliases, type references read to four levels: not DoS-shaped), `parse_schema` (total
+  and bounded: `MAX_RESPONSE_CHARS`, `MAX_TYPES`, `MAX_FIELDS_PER_TYPE`, `MAX_ARGS`,
+  `MAX_ENUM_VALUES`, `MAX_NAME_CHARS`) and `operations` / `operations_with_skips`
+  (FR-CRAWL-670): every root query/mutation field taking a String or ID argument becomes
+  one request whose String/ID variables are the targets, required other arguments filled
+  with neutral values, a depth-1 selection, every name a GraphQL Name or skipped; each
+  document round-trips through SP-80's reader (`tools.apiop`).
+  `fuzzlab auto` asks each GraphQL endpoint the app itself sent a document to (at most 4)
+  once, through the run's probe sender (FR-CRAWL-671; CC-FUZZ-0690), and imports the
+  answer as captured requests (CC-AUD-0690).
+- Measured (§7): the specification is the authority (GraphQL, October 2021: §4
+  Introspection, §3.5 built-in scalars, §2.1.9 Names); the black-box rule (PA-0660) is
+  met because no name of any target is in the code: an endpoint is GraphQL because the app
+  sent it a document, and operations come from the target's own schema. Effectiveness on
+  DVGA: see CC-LAB-0410.
+- Impact (other components / project): importer (CC-AUD-0690), `auto` (CC-FUZZ-0690);
+  the GraphQL reader is unchanged.
+- Risk (level; mitigation or accepted-risk justification): low-medium: one extra request
+  per GraphQL endpoint in a discovery run, and new operations are fuzzed; every
+  captured-request import refusal applies to them (a destructive mutation, a credential
+  change, a settings field), and `--no-graphql-schema` turns it off.
+- Deliverables:
+  - [x] `tools/gqlschema.py`, `tests/test_graphql_schema_discovery.py` (59) — done
+  - [x] FR-CRAWL-670/671, CHANGELOG — done
+
 ### CC-CRAWL-0600 — The GraphQL reader names each variable's field argument and declared type (2026-11-20)
 - Placement: lane GQL (item GQL), base 2be7a50, pre-assigned CC-CRAWL-0600..0604. Not a
   change to `spider.py` or `navguard.py`.
