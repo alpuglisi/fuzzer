@@ -44,9 +44,15 @@ Newest first.
   - Mutillidae spider: pages 271 (139 were 302s to https) → 345 (no 302s); toggle
     requests received 100 → 0; sessions changed by the crawl 7/8 → 0/5.
   - Mutillidae disco: toggle requests received 91 → 0; sessions changed 2/3 → 0/3.
-    States 105 → 25 at the 300 s deadline (harvest loaded 2 of 183 URLs); no asset or
-    non-toggle URL the baseline loaded was refused (computed over both request logs);
-    see Effectiveness.
+    States 105 → 25 at the 300 s deadline, which cut the fixed run short: the
+    baseline's https collapse made its exploration cheap and left time to harvest. Re-run
+    with `--deadline 900` (both stopped on `max_states`, neither on the deadline):
+    states 168 → 221, HTML docs 237 → 471, toggles received 75 → 0, crawl sessions
+    changed 2/3 → 0/3. Of the 329 distinct items the fixed rule refused that the base
+    rule did not (computed by running d492b9d's own `refusal`/`destructive_reason` over
+    a trace of the fixed run), 312 are `do=toggle-*` URLs, 16 are "Toggle …" links, and
+    1 is a popup notice paragraph; no page. No asset or non-toggle URL the baseline
+    loaded was refused in any lab (computed over both request logs).
   - DVGA spider/disco: unchanged (16 pages; 29 states): `/difficulty/easy|hard` and
     `/start_over` still received (stated residual, FR-CORE-650); the mode stays hard
     for about half the disco crawl and `start_over` wipes pastes.
@@ -72,7 +78,7 @@ Newest first.
   - [x] live baseline and fixed crawls of Mutillidae, DVGA, bWAPP — done
   - [x] FR-CRAWL-650, NFR-CRAWL-safe, SP-120 — done
 - Effectiveness (assessed 2026-11-20): Mutillidae — effective (0 toggles received,
-  lab state unchanged, spider reach +74 pages); DVGA — not effective (residual);
+  lab state unchanged, spider reach +74 pages, disco 168 → 221 states at 900 s); DVGA — not effective (residual);
   bWAPP — no change (its switch is a POST form, gap 2).
 
 ### CC-CRAWL-0065 — A failed navigation raises only after the browser's error page has loaded, not just committed (SP-01, BUG-0561) (2026-10-23)
