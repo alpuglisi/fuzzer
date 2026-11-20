@@ -1833,6 +1833,22 @@ fuzzer.
     `test_a_document_reads_as_chromium_decodes_it_under_every_whatwg_label`,
     `test_the_static_engine_reads_a_page_whatever_charset_it_names`.
 
+- **FR-CRAWL-600 (which field argument a GraphQL variable feeds; CC-CRAWL-0600,
+  2026-11-20, SP-80)** `tools/apiop.py::graphql_variable_bindings(text, operation_name)`
+  answers `{variable: [(field, argument, sibling arguments), ...]}` for the operation the
+  request selects (else every operation, at most `MAX_OPERATIONS`): every `arg: $var` in
+  a field's argument list, at any depth of the selection set, at the argument's top level
+  or inside an input-object or list value, an aliased field by its field name. Variable
+  definitions and directive arguments are not uses; a fragment's uses are not followed.
+  None for a text that is not an executable document (or over `MAX_GRAPHQL_TOKENS`). It
+  reads the same linear token scanner as `graphql_operations`, in time linear in the
+  document, and keeps at most `MAX_BINDINGS` bindings.
+- **FR-CRAWL-601 (a GraphQL variable's declared type; CC-CRAWL-0600, 2026-11-20,
+  SP-80)** `tools/apiop.py::graphql_variable_types(text, operation_name)` answers
+  `{variable: (named type, list depth)}` from the selected operation's variable
+  definitions (`$a: [Int!]!` -> `("Int", 1)`; a name declared twice keeps its first);
+  None as FR-CRAWL-600. Linear.
+
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default
   to not clicking them. *(Built CC-CRAWL-0011, BUG-0111:)* the one rule is

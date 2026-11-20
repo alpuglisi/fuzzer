@@ -3038,6 +3038,13 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
      every confirmer that sends a non-string value is listed with how it judges (BUG-0610
      "Preventive action"). (from BUG-0610)
   - Enforced by: tests/test_oracle_strategies_ssjs.py::test_nosql_confirms_a_login_that_echoes_the_submitted_leaf, tests/test_oracle_strategies_ssjs.py::test_nosql_still_refuses_a_server_that_stringifies_every_object
+
+- **PA-0620** — Strengthens `PA-0083` and `PA-0131`, after BUG-0620: a narrowed auth gate (a front controller's routed login) judged a crawled probe's bare URL, not the request its entries complete, and sent the login page's probes with the session. PA-0083 put the gate at the action and PA-0131 had it judge its whole input, but neither covered a request whose parts arrive separately, nor what narrowing a gate requires.
+  1. **A change that makes a safety gate refuse less judges the request as sent at every caller:** every part that can carry the decisive value (URL, sibling entries, body), checked by a test per caller.
+  2. **The narrowed rule refuses any input it cannot judge** (here: a router URL that names no route is the auth endpoint).
+  3. **It is measured live with the gate's own counter** on a run that exercises the narrowed shape. (from BUG-0620)
+  - Enforced by: tests/test_front_controller_routes.py::test_the_sender_judges_the_request_as_sent, tests/test_front_controller_routes.py::test_send_passes_the_requests_entries_to_the_gate, tests/test_front_controller_routes.py::test_a_router_url_that_names_no_route_is_the_auth_endpoint
+
 - **PA-0640** — Strengthens `PA-0042` (verify live through fuzzlab's real scoring) from a newly mapped class to every external lab's answer key, and `PA-0311(1)` from negatives to the reach tags of positives, after BUG-0640: copy-n-paste, mongection and comment-killer positives were tagged `[reach: gt]` from hand-made requests (every field sent, accounts created by hand, a store URL known), and no scored run ever matched them; PA-0042 fired only when a class was first mapped and was enforced by nothing.
   1. **A reach tag states what a scored run measured, not what a hand-made request showed.** A `[reach: gt]` (or `crawl,gt`) positive in an external lab's answer key is backed by a recorded `fuzzlab auto --points ground-truth` run that matched it, in `docs/components/01-target-lab/external-lab-scores.json` (commit, command, counts, matched ids, every missed positive with its reason).
   2. **A miss of a gt-tagged positive is either fixed or declared `open: <cause>`** in that record, in the same change that records the run; a lab's fixture provides what its flaw needs from a fresh `up` (an account, a seed), since a run starts from a fresh lab.

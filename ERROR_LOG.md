@@ -29,6 +29,13 @@ Format per entry:
 - **Root cause:** reach tags were set from hand-made requests (all fields present, accounts created by hand, a store URL known), never from a scored run: copy-n-paste's points lacked the JSON body its handler requires, mongection's fresh tmpfs database has no account for its flaw to answer, comment-killer's case has no `source_url`.
 - **Remediation:** copy-n-paste points carry the page's JSON body; mongection gets an identity and a bootstrap (CC-LAB-0360, 684fab9); each lab's scored run is recorded in `docs/components/01-target-lab/external-lab-scores.json` and checked against its reach tags (PA-0640). Live: copy-n-paste tp 0→2, mongection tp 0→2, fp 0. SDLCK-0001 recorded open.
 - **Status:** Fixed (comment-killer open: an answer-key decision)
+
+## 2026-11-20 — session / probe sender (a routed login's auth gate judged the URL, not the request; BUG-0620)
+- **Symptom:** orchestrator review of lane PHPX: with `/index.php?page=login.php` recorded, `is_auth_endpoint("/index.php")` was False, so a crawled login form (route in its sibling entries) would be probed with the run's session.
+- **Root cause:** CC-SESS-0611 narrowed the gate for routed logins against ground-truth URLs only; `SeamProbeSender._send` judges the URL before binding the entries, and a URL naming no route defaulted to "not an auth endpoint".
+- **Remediation:** the gate fails closed for a router URL naming no route; the sender judges the URL with its entries' route pairs (CC-SESS-0612; BUG-0620, PA-0620). Live: login-page probes anonymous (65 with a login point vs 34 without; crawl run 36), scores unchanged.
+- **Status:** Fixed
+
 ## 2026-11-20 — environment: lane NODE's container lacked the harness's tools; five navigation tests fail on its newer Chromium (fixed / open)
 - **Symptom:** `scripts/verify_change.py --base 2be7a50` on e19f6fc: 9 `tests/test_labgen_*::test_cli_check_passes_end_to_end*` failed (the labgen check's secret-scanner gate: `'gitleaks' executable not found on PATH`), and 5 in `tests/test_navigation_aborts.py` (`DID NOT RAISE playwright Error`, a `KeyError` on an error page's URL). Before that, `keyring`, `playwright` and `pytest-xdist` were not installed, and the first pip-installed Playwright looked for Chromium build 1255 where the preinstalled one is 1243.
 - **Root cause:** the container's image, not the code: no `gitleaks`, no project dependencies; the preinstalled Chromium is 157 (Playwright 1.63), where `navguard`'s error-page expectations were measured on Chromium 141. The five navigation failures reproduce on untouched 2be7a50 in this container.
@@ -40,6 +47,29 @@ Format per entry:
 - **Root cause:** the login page re-renders the submitted name; an operator leaf echoes as `[object Object]` in V and D, B's token as itself. The differential stripped the tokens' reflected forms only, so V never looked like B.
 - **Remediation:** `same()` also strips `[object Object]` (`_JS_OBJECT_STRING`, CC-FUZZ-0611); a server that stringifies every object still answers V and D alike (no confirmation). NGOAT-0014 confirmed live; Mongection unchanged (tp=2 fp=0).
 - **Status:** Fixed.
+## 2026-11-20 — environment (the lane's Docker daemon stopped during the review rework)
+- **Symptom:** a DVGA ground-truth re-run failed at once with "Connection refused" on 127.0.0.1:5013, and a readiness loop waited out its 30-minute limit; `docker ps` answered "Cannot connect to the Docker daemon".
+- **Root cause:** the `dockerd` started by hand at the beginning of the lane had exited; its log ends without an error at 08:20 (the last lines are only the DVGA container's refused DNS lookups, expected under `dns: 127.0.0.1`). Probably stopped along with the background job it was started from; not measured further.
+- **Remediation:** restarted `dockerd`, `labctl.sh reset dvga`, and re-ran with a bounded readiness wait.
+- **Status:** Environment (fixed outside the repo)
+
+## 2026-11-20 — environment / browser (five SP-01 tests fail on this container's Chromium 157, at 2be7a50 too)
+- **Symptom:** the GQL lane's harness run: `tests/test_navigation_aborts.py::test_a_failed_navigation_returns_after_its_own_error_page[1-3]`, `::test_a_navigation_overtaken_by_an_error_page_waits_for_it` and `::test_an_error_page_ends_the_previous_document` fail ("DID NOT RAISE Error"; a missing `_fetch_static` mark). The same five fail on 2be7a50 itself (84 passed, 5 failed), so the lane's change does not cause them.
+- **Root cause:** measured: the container's Chromium 157.0.8103.78 (Playwright 1.63.0) answers `page.goto` of a 404 with an empty body as a normal 404 response (`no raise 404`); the tests' fixture relies on an older Chromium turning that answer into a failed navigation onto its own error page (`chrome-error://`), which SP-01's settle path (BUG-0522/0561) and these tests pin.
+- **Remediation:** none in the lane: SP-01's owner is `fuzzlab/tools/navguard.py`, a hot file the lane may not edit. Flagged to the orchestrator: either pin the Chromium the suite is measured on or re-measure SP-01's error-page path on Chromium 157 (its fixture needs another way to make a navigation fail).
+- **Status:** Open
+
+## 2026-11-20 — target lab / DVGA (an import of DVGA's own port hung the lab)
+- **Symptom:** while measuring DVGA, a probe `importPaste(host: "localhost", port: 5013, ...)` never answered, and every later request to the lab hung.
+- **Root cause:** DVGA's `importPaste` runs `curl --insecure <url>` through `os.popen` with no timeout, inside a single gevent loop: a URL naming DVGA itself waits for an answer the blocked loop can never give.
+- **Remediation:** the container was restarted (F-600); the answer key's import point names `127.0.0.1:1` (refused at once) and FR-LAB-320 states the rule (CC-LAB-0320). Not a fuzzlab defect.
+- **Status:** Environment (lab behaviour; avoided by the answer key)
+
+## 2026-11-20 — environment (Python Playwright and mitmproxy missing in the lane's container)
+- **Symptom:** `fuzzlab auto --browser` refused ("--browser needs Playwright") and `fuzzlab disco capture` failed with `ServerDidNotListen` (its mitm child exited at once).
+- **Root cause:** the container had the Chromium build and Node Playwright 1.63.0 but not the Python `playwright` package nor `mitmproxy` (the `browser` / `disco` extras); a Debian-installed `pyparsing` blocked the mitmproxy install.
+- **Remediation:** `pip install playwright==1.63.0` (matching the pre-installed browsers) and `pip install --ignore-installed pyparsing "mitmproxy>=12,<13"` (12.3.1).
+- **Status:** Environment (fixed outside the repo)
 
 ## 2026-10-23 — crawler / navguard (a navigation started before a failed load's error page had loaded was dropped; BUG-0561)
 - **Symptom:** the harness run of e69bd1e (F-281): `tests/test_disco_harvest.py::test_disco_harvest_and_restore_after_failed_loads[2]` failed in 19.1 s. Disco's `restore` returned "navigation": its `about:blank` `goto` timed out after 15 s and the page stayed on `chrome-error://chromewebdata/`. The RCA measured about 1% of restores under heavy disk I/O on every tree since BUG-0522's fix (7393c90 4/600, e69bd1e 9/840) and 0/1,320 under CPU load alone.

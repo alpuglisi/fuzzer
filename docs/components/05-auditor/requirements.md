@@ -555,6 +555,8 @@ budget where a vulnerability is plausible.
   inside their line), and each complete line is decoded alone, never a partial read.
   A line that is not UTF-8 or not JSON is skipped and still numbered. For one run
   directory both paths give identical `(key, kind, scope, t, body)` and the same model.
+- **FR-AUD-620** *(LDAP and XPath injection rules; `CC-AUD-0620`, 2026-11-20).*
+  `R-LDAP-INJECTION` and `R-XPATH-INJECTION` nominate query, body and JSON points.
 - **FR-AUD-31** *(the importer keeps every request context; the engine writes it;
   `CC-AUD-0056`, 2026-10-21, BUG-0530, BUG-0544).* It supersedes FR-AUD-22's "the first
   one's leaf wins a name" and FR-FUZZ-43's link binding.
@@ -719,6 +721,21 @@ budget where a vulnerability is plausible.
   - *CC-AUD-0049:* each importer passes the crawl's code segments to
     `_import_path_templates` (`code=`): the spider DB's `script_segments` table, a disco
     run's `script_segments.json` (FR-CRAWL-28). Neither present: no code evidence.
+- **FR-AUD-601** *(a GraphQL request's document and non-string scalars are not data
+  points; `CC-AUD-0601`, 2026-11-20).* `audit.rules.matches` fires no rule on a point
+  `audit.graphql_context.not_a_data_point` names: the `query` leaf of a JSON body whose
+  `query` parses as an executable GraphQL document (FR-CRAWL-601), or a
+  `variables.<name>` leaf declared `Int`, `Float` or `Boolean` (not a list) in it
+  (GraphQL's input coercion of these never yields a string; measured on DVGA). The
+  evaluation is still recorded. A body whose `query` is no GraphQL document is
+  unaffected.
+- **FR-AUD-600** *(GraphQL variables judged by the argument they feed; `CC-AUD-0600`,
+  edited by `CC-AUD-0602`, 2026-11-20).* For a JSON-leaf point under `variables`,
+  `audit.graphql_context` reads the `(field, argument, siblings)` its variable feeds in
+  the request's own document (FR-CRAWL-600); `name_regex` matches the leaf's name or any
+  bound argument's name, so a GraphQL variable gets exactly the generic rules a JSON
+  string leaf of that name gets. No rule reads a field's or a sibling argument's name
+  (the lab-derived rules of CC-AUD-0600 were removed; black-box detection only).
 - **FR-AUD-25** *(an id-shaped path segment; `CC-AUD-0046`, 2026-10-19, FR-FUZZ-57).*
   `R-ACCESS-CONTROL-PATH` fires on a GET `path` point whose name is `id`, `uuid` or
   `guid`, ends in `_id`/`-id` (or `_uuid`/`-guid`…), or is camelCase `…Id`/`…Uuid`

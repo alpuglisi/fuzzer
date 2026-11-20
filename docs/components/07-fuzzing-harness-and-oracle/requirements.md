@@ -1638,6 +1638,18 @@ rewards) derives from it.
   point with its body carries the probe. A ground-truth point may carry `json_body`
   (the body its endpoint takes; `param` one of its leaves): `auto` then audits it as a
   JSON-leaf point with those siblings.
+- **FR-FUZZ-620 (LDAP filter injection, `CC-FUZZ-0620`, 2026-11-20)** A boolean
+  differential on the shared engine: ``b)(objectClass=u*`` (false) against
+  ``b)(objectClass=*`` (true); error signatures only corroborate. Class
+  `ldap_injection`, category `ldap-injection`.
+- **FR-FUZZ-621 (XPath injection, `CC-FUZZ-0621`)** A boolean differential on the
+  shared engine with `string-length()` tests, as a predicate (``b' or ... or 'v'='w``)
+  and as a union (``b'] | //*[... or 'v'='w``). Class `xpath_injection`, category
+  `xpath-injection`.
+- **FR-FUZZ-622 (a front controller's page in the finding URL, `CC-FUZZ-0622`, SP-90)**
+  `oracle.finding_url` keeps ``?<route>=<page>`` of a router URL (from its query or a
+  crawled point's siblings), unless the probed parameter is the route or the value is no
+  plain page name; `harness.scoring.case_key` keys a case by the same function.
 - **FR-FUZZ-55 (cross-account access control, `CC-FUZZ-0093`, 2026-10-19)**
   `fuzzlab auto --identity A --peer-identity B` (both accounts stored; checked before
   the store opens: another account, both usernames present, neither contains the other)

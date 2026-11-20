@@ -267,5 +267,73 @@
    "NGOAT-0016": "not reachable from ground-truth points: [reach: none - the fixture's front bridge has egress but fuzzlab's OOB listener is loopback-only, unreachable from the container (as Juice Shop's JUICE-0005)]"
   },
   "source": "lane NODE's recorded AFTER run (CC-LAB-0331), not re-run by lane ACC; its crawl pass: tp=12 fp=0 fn=5 tn=7, 282 requests, 94 s"
+ },
+ "mutillidae": {
+  "commit": "7a1ef32",
+  "command": "fuzzlab auto --store <db> --base-url http://127.0.0.1:3093 --ground-truth lab/ground-truth-mutillidae --points ground-truth --identity mutillidae-user --oob --authorized",
+  "tp": 24,
+  "fp": 0,
+  "fn": 4,
+  "tn": 11,
+  "requests": 482,
+  "wall_s": 28.2,
+  "matched": [
+   "MUTL-0001",
+   "MUTL-0002",
+   "MUTL-0003",
+   "MUTL-0006",
+   "MUTL-0007",
+   "MUTL-0010",
+   "MUTL-0011",
+   "MUTL-0013",
+   "MUTL-0017",
+   "MUTL-0020",
+   "MUTL-0023",
+   "MUTL-0024",
+   "MUTL-0026",
+   "MUTL-0028",
+   "MUTL-0029",
+   "MUTL-0030",
+   "MUTL-0031",
+   "MUTL-0032",
+   "MUTL-0034",
+   "MUTL-0035",
+   "MUTL-0036",
+   "MUTL-0037",
+   "MUTL-0038",
+   "MUTL-0039"
+  ],
+  "missed": {
+   "MUTL-0022": "open: an in-band file-read XXE needs a file-read strategy; the OOB canary cannot reach the host's loopback [tracked: CC-LAB-0343]",
+   "MUTL-0025": "open: reflected XSS inside a <script> string needs a </script> break-out [tracked: CC-LAB-0343]",
+   "MUTL-0027": "open: XSS in the meta-refresh content attribute [tracked: CC-LAB-0343]",
+   "MUTL-0033": "open: the page value in href/title attributes [tracked: CC-LAB-0343]"
+  },
+  "source": "lane PHPX's recorded AFTER run (CC-LAB-0343), not re-run by lane ACC; its crawl pass: tp=6 fp=0 fn=22 tn=11 (CC-LAB-0341/0342)"
+ },
+ "dvga": {
+  "commit": "f6b4790",
+  "command": "fuzzlab auto --store <db> --base-url http://127.0.0.1:5013 --ground-truth lab/ground-truth-dvga --points ground-truth --browser --oob --score --authorized",
+  "tp": 5,
+  "fp": 0,
+  "fn": 5,
+  "tn": 5,
+  "requests": 345,
+  "wall_s": 46.0,
+  "matched": [
+   "DVGA-0003",
+   "DVGA-0005",
+   "DVGA-0007",
+   "DVGA-0012",
+   "DVGA-0013"
+  ],
+  "missed": {
+   "DVGA-0001": "open: no generic signal [tracked: CC-LAB-0321]",
+   "DVGA-0002": "open: no generic signal [tracked: CC-LAB-0321]",
+   "DVGA-0004": "open: no generic signal [tracked: CC-LAB-0321]",
+   "DVGA-0014": "not reachable from ground-truth points: [reach: none - the canary must be reachable from inside the container: fuzzlab's OOB listener binds host loopback only, which DVGA's bridge network cannot reach (as JUICE's SSRF case); and `host` takes a host]",
+   "DVGA-0015": "not reachable from ground-truth points: [reach: none - a file write with no read-back route: the existing path-traversal strategies confirm a read (fs_path_read); a write-then-fetch strategy is not built]"
+  },
+  "source": "lane GQL's recorded gt run (CC-LAB-0321, 'oracle diagnostic'), not re-run by lane ACC; matched ids inferred as the positives it did not name as misses (the floor of tests/test_dvga_live.py); its crawl (headline): tp=1 fp=0 fn=9 tn=5, 202 requests, 50 s"
  }
 }

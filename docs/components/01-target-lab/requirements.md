@@ -6398,6 +6398,21 @@ lane) can submit a payload as
   the welcome page naming the account, a wrong one `Bad Credentials`). Its NoSQL injection
   answers an account, and the database is tmpfs: without one the positives SDLMG-0001/0002
   cannot be observed (measured 2026-11-20). `auto` needs no `--identity` for them.
+
+- **FR-LAB-340** *(OWASP Mutillidae II; `CC-LAB-0340`, 2026-11-20).* Mutillidae II
+  2.12.8 is an external lab (`lab/external/mutillidae/`): upstream's www, database and
+  directory images pinned by digest; the web tier on loopback only, the database and
+  directory unpublished on internal networks.
+- **FR-LAB-341** *(Mutillidae bootstrap; `CC-LAB-0341`).* Under `--authorized` the
+  bootstrap loads upstream's LDIF (fetched from a pinned commit, verified by sha256)
+  into the directory, builds the database when the app reports it offline, and
+  registers and verifies the lab's own account (`mutillidae-user`).
+- **FR-LAB-342** *(Mutillidae answer key; `CC-LAB-0342`).* `lab/ground-truth-mutillidae/`
+  scores level 0: LDAP and XPath injection with cross-class negatives, plus SQL injection,
+  reflected XSS, XXE, open redirect and file inclusion (`path_traversal`) as a regression
+  target. Level 5 is session state and is not part of the key.
+- **FR-LAB-343** *(the measurement; `CC-LAB-0343`).* Its BASELINE / AFTER numbers and
+  open gaps are recorded with the exact commands.
 - **FR-LAB-331** *(NodeGoat answer key; `CC-LAB-0331`, 2026-11-20).*
   `lab/ground-truth-nodegoat/` (target `owasp_nodegoat_c5cb68a7`, case ids `NGOAT-`):
   server-side JavaScript injection (`ssjs`) in `/contributions`' `preTax`, `roth` and
@@ -6431,6 +6446,24 @@ lane) can submit a payload as
   `bootstrap_nodegoat` verifies each login by a positive differential on `/dashboard`
   (200 with the session, 302 without) and stores its `user_id`, read from the
   dashboard's one `/allocations/<id>` link (FR-LAB-309).
+- **FR-LAB-321** *(command injection is a scoreable class; `CC-LAB-0320`,
+  2026-11-20).* The labels contract's `vuln_class` admits `command-injection` (the
+  oracle's own spelling, `CommandInjectionStrategy` / `CommandInjectionOobStrategy`)
+  and `sink_context` admits `os_command`; a ground truth may score command injection.
+- **FR-LAB-320** *(Damn Vulnerable GraphQL Application; `CC-LAB-0320`, 2026-11-20).*
+  `lab/external/dvga/` (`fuzzlab-dvga`) runs DVGA 2.1.2 (`docker.io/dolevf/dvga:latest`
+  pinned by digest, `DVGA_IMAGE`; the 2025-05-24 build) on 127.0.0.1 port `DVGA_PORT`,
+  default 5013, no login (no identity), capabilities dropped, names unresolvable
+  inside (`dns: 127.0.0.1`). Its database and difficulty mode are rebuilt on every start
+  (reset = restart). Answer key `lab/ground-truth-dvga/`: GraphQL requests as JSON-body
+  points naming one `variables.<name>` leaf (the app's own documents where its pages
+  send one); command injection (systemDebug, importPaste host/path/scheme,
+  systemDiagnostics), SQL injection (pastes filter), stored XSS (createPaste title and
+  content, rendered by /public_pastes), with safe arguments as negatives;
+  `[reach: none]` SSRF and file write; DVGA's GraphQL-implementation issues in
+  `graphql-issues.json`, unscored. An import point never names DVGA's own port (its
+  curl has no timeout and blocks the server's only loop). Live test:
+  `tests/test_dvga_live.py`.
 - **FR-LAB-309** *(per-account values; secDevLabs ecommerce-api; `CC-LAB-0315`,
   2026-10-19).* A lab bootstrap may read values of each account's own after its
   verified login (`_ACCOUNT_ATTRIBUTES`) and store them with the credential
