@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-11-20 — environment (lane PERF's container: packaging tests, navigation-abort tests, two external labs)
+- **Symptom:** `verify_change.py --base 2be7a50` on 48609d1: (a) the six packaging tests failed with `ModuleNotFoundError: No module named 'setuptools'`; (b) five `tests/test_navigation_aborts.py` tests failed (`DID NOT RAISE playwright Error`; `KeyError` on a `missing0` mark); (c) bringing up two secDevLabs labs at once failed (`git remote failed: remote origin already exists`; `cannot change to .../.cache/secdevlabs/src`); (d) Gossip World's `crawl --identity sdl-gossip-user` raised `SessionAuthError` while the lab's bootstrap logged in.
+- **Root cause:** (a) the venv made for the lane (Python 3.13) carries no setuptools; (b) not this lane's change: the same five fail on tree 2be7a50 in this container, whose only Chromium is build 1243 with Playwright 1.63; SP-01's error-page behaviour was measured on Playwright 1.56 / Chromium 141 (CC-CRAWL-0065), and Playwright 1.56 cannot drive build 1243 here (34 failures); (c) the secDevLabs labs share one source checkout, fetched without a lock; (d) not investigated (outside lane PERF).
+- **Remediation:** (a) `pip install setuptools wheel` in the venv: the packaging tests pass (harness of the next commit); (b), (c), (d) none in this lane: reported to the orchestrator (a fix to (b) is in `navguard.py`, a hot file and SP-01; (c) worked around by bringing the labs up one at a time).
+- **Status:** (a) Environment (fixed outside the repo); (b), (c), (d) Open (flagged)
+
 ## 2026-10-23 — crawler / navguard (a navigation started before a failed load's error page had loaded was dropped; BUG-0561)
 - **Symptom:** the harness run of e69bd1e (F-281): `tests/test_disco_harvest.py::test_disco_harvest_and_restore_after_failed_loads[2]` failed in 19.1 s. Disco's `restore` returned "navigation": its `about:blank` `goto` timed out after 15 s and the page stayed on `chrome-error://chromewebdata/`. The RCA measured about 1% of restores under heavy disk I/O on every tree since BUG-0522's fix (7393c90 4/600, e69bd1e 9/840) and 0/1,320 under CPU load alone.
 - **Root cause:** `navguard._settle_failure` (SP-01, BUG-0522's fix) took a failed navigation as over when its error page committed. That page loads 15-25 ms later (p95 about 130 ms under I/O load), and a navigation Chromium started in between was sometimes dropped with no commit and no error, so Playwright waited out the whole `goto` timeout.
