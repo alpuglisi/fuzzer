@@ -263,6 +263,21 @@ VAMPI_IMAGE = ("docker.io/erev0s/vampi:latest@sha256:"
 VAMPI_COMMIT = "f16052dce83f05847133ec98f01c5193a41de7d8"
 PINNED_IMAGES = PINNED_IMAGES | {VAMPI_IMAGE}
 
+#: DVWS-node (snoopysecurity, MIT), a held-out lab (lab/HOLDOUT.md): Node 22 / Express
+#: REST, SOAP, XML-RPC and GraphQL on one port over MongoDB and MySQL. Checked out at
+#: this commit (its tracked files hashing to DVWS_NODE_TREE_SHA256), its locked npm
+#: packages (backend production set, frontend build set) installed on the host by
+#: ``npm ci``; the image builds its Svelte frontend and compiles bcrypt with no network.
+#: Upstream's Dockerfile says `node:22` (unpinned): pinned here, from Google's mirror.
+#: Its databases reuse SECDEVLABS_MONGO_IMAGE (upstream: mongo:4.0.4) and MYSQL_IMAGE
+#: (upstream: mysql:8).
+DVWS_NODE_REPO = "https://github.com/snoopysecurity/dvws-node"
+DVWS_NODE_COMMIT = "4221c04f132960a0ccca4bf5aa5f3a9f53172778"
+DVWS_NODE_TREE_SHA256 = "64de72b151f76eb598642bd7a0ed1e9f3413684ae725bda9f2e47a69216805f7"
+DVWS_NODE22_IMAGE = ("mirror.gcr.io/library/node:22-bookworm@sha256:"
+                     "e13726ca604184d7a91fcacab1fc09eefd642dc28e79ac34e85540dd93b78cfb")
+PINNED_IMAGES = PINNED_IMAGES | {DVWS_NODE22_IMAGE}
+
 
 class ExternalLabError(RuntimeError):
     """A fixture operation failed; the message never carries a secret."""
@@ -365,6 +380,10 @@ LAB_META: dict[str, LabMeta] = {
     # another account's book secret
     "vampi": LabMeta("vampi", "app", "VAMPI_PORT", 3101, 5000, "/", "/", "vampi-user",
                      "fuzzlab_user", True, (("vampi-peer", "fuzzlab_peer"),)),
+    # held out (lab/HOLDOUT.md): REST, SOAP, XML-RPC and GraphQL on one port; two
+    # accounts of our own, registered by the bootstrap (a JWT from POST /api/v2/login)
+    "dvws-node": LabMeta("dvws-node", "web", "DVWS_PORT", 3102, 8080, "/", "/",
+                         "dvws-user", "fuzzlab_user", True, (("dvws-peer", "fuzzlab_peer"),)),
 }
 
 
@@ -746,6 +765,29 @@ def fetch_nodegoat(*, root: Path = EXTERNAL_DIR, repo: str = NODEGOAT_REPO,
     if dest.exists():
         shutil.rmtree(dest)
     shutil.copytree(src, dest, symlinks=True, ignore=shutil.ignore_patterns(".git"))
+    npm_install(dest, timeout=timeout, production=True)
+    return dest
+
+
+def fetch_dvws_node(*, root: Path = EXTERNAL_DIR, repo: str = DVWS_NODE_REPO,
+                    commit: str = DVWS_NODE_COMMIT, tree: str = DVWS_NODE_TREE_SHA256,
+                    timeout: float = 900.0) -> Path:
+    """DVWS-node at ``commit`` (its tracked files hashing to ``tree``), copied into
+    ``dvws-node/.cache/app`` without its git directory, with the frontend's locked
+    build packages and the backend's production packages installed on the host
+    (`npm_install`: lockfile integrity, no install scripts). Nothing upstream runs on
+    the host: the image builds the frontend and compiles bcrypt offline."""
+    import shutil
+    src = checkout_pinned(root / "dvws-node" / ".cache" / "src", repo, commit,
+                          timeout=timeout, label="DVWS-node")
+    got = tree_sha256(src)
+    if got != tree:
+        raise ExternalLabError(f"DVWS-node checkout's files hash to {got}, not {tree}")
+    dest = root / "dvws-node" / ".cache" / "app"
+    if dest.exists():
+        shutil.rmtree(dest)
+    shutil.copytree(src, dest, symlinks=True, ignore=shutil.ignore_patterns(".git"))
+    npm_install(dest / "frontend", timeout=timeout)
     npm_install(dest, timeout=timeout, production=True)
     return dest
 
@@ -1698,6 +1740,73 @@ def vampi_account_attributes(client: _LabClient, cred: ResolvedCredential
     if owner != cred.username:
         raise ExternalLabError("VAmPI does not answer the account's own book to it")
     return {"book_title": title, "username": cred.username}
+def _dvws_login(client: _LabClient, cred: ResolvedCredential) -> tuple[Any, str | None]:
+    """POST /api/v2/login (JSON); the answer's ``token`` is the Bearer JWT."""
+    r = client.request("POST", "/api/v2/login",
+                       json={"username": cred.username, "password": cred.password})
+    try:
+        token = r.json().get("token") if r.status_code == 200 else None
+    except (ValueError, AttributeError):
+        token = None
+    return r, token if isinstance(token, str) and token else None
+
+
+def bootstrap_dvws_node(client: _LabClient, cred: ResolvedCredential, *,
+                        deadline: float = 180.0, clock: Callable[[], float] = time.monotonic,
+                        sleep: Callable[[float], None] = time.sleep) -> list[str]:
+    """Log in through the JSON login, registering the account through
+    ``POST /api/v2/users`` (username and password only) when the login says it does not
+    exist (upstream's seed drops every account at each start), and verify it by a
+    positive differential: ``/api/v2/notes`` answers 200 with the Bearer token and 401
+    without it."""
+    meta = LAB_META["dvws-node"]
+    wait_ready(client, meta.ready_path, deadline=deadline, clock=clock, sleep=sleep)
+    notes: list[str] = []
+    r, token = _dvws_login(client, cred)
+    if r.status_code == 404:
+        reg = client.request("POST", "/api/v2/users",
+                             json={"username": cred.username, "password": cred.password})
+        if reg.status_code != 201:
+            raise ExternalLabError(f"DVWS-node registration of {cred.username!r} failed: "
+                                   f"HTTP {reg.status_code}")
+        notes.append("account registered")
+        r, token = _dvws_login(client, cred)
+    if token is None:
+        raise ExternalLabError(
+            f"DVWS-node login of {cred.username!r} failed: HTTP {r.status_code} (an account "
+            f"of that name with another password? restart the lab: its seed drops every "
+            f"account)")
+    authed = client.request("GET", "/api/v2/notes", headers={"Authorization": f"Bearer {token}"})
+    anon = client.request("GET", "/api/v2/notes", anonymous=True)
+    if authed.status_code != 200 or anon.status_code != 401:
+        raise ExternalLabError(f"DVWS-node /api/v2/notes: {anon.status_code} anonymous, "
+                               f"{authed.status_code} with the token (want 401 / 200)")
+    notes.append("login verified")
+    return notes
+
+
+def dvws_node_account_attributes(client: _LabClient, cred: ResolvedCredential
+                                 ) -> dict[str, str]:
+    """The account's ``note_id``: the numeric id of a private note of its own (created
+    once, named after the account), which ``/api/v2/notes/{noteId}`` hands any caller."""
+    _r, token = _dvws_login(client, cred)
+    if token is None:
+        raise ExternalLabError("DVWS-node login failed while reading the account's note")
+    auth = {"Authorization": f"Bearer {token}"}
+    name = f"fuzzlab-{cred.username}"
+    try:
+        mine = [n for n in client.request("GET", "/api/v2/notes", headers=auth).json()
+                if isinstance(n, dict) and n.get("name") == name]
+        if not mine:
+            mine = [client.request("POST", "/api/v2/notes", headers=auth,
+                                   json={"name": name, "body": "fuzzlab account note",
+                                         "type": "secret"}).json()]
+        note_id = mine[0].get("_id")
+    except (ValueError, AttributeError, TypeError):
+        note_id = None
+    if not isinstance(note_id, int):
+        raise ExternalLabError("DVWS-node named no numeric id for the account's note")
+    return {"note_id": str(note_id)}
 
 
 _BOOTSTRAPS = {"bwapp": bootstrap_bwapp, "juice-shop": bootstrap_juice_shop,
@@ -1711,6 +1820,8 @@ _BOOTSTRAPS = {"bwapp": bootstrap_bwapp, "juice-shop": bootstrap_juice_shop,
 _ACCOUNT_ATTRIBUTES = {"secdevlabs-ecommerce-api": ecommerce_account_attributes,
                        "nodegoat": nodegoat_account_attributes,
                        "vampi": vampi_account_attributes}
+_BOOTSTRAPS["dvws-node"] = bootstrap_dvws_node
+_ACCOUNT_ATTRIBUTES["dvws-node"] = dvws_node_account_attributes
 
 
 def bootstrap(name: str, *, environ: Mapping[str, str] | None = None,
@@ -1807,6 +1918,11 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"NodeGoat at {NODEGOAT_COMMIT[:12]} (files sha256 "
                       f"{NODEGOAT_TREE_SHA256[:12]}) and its verified packages: "
                       f"{fetch_nodegoat()}")
+                return 0
+            if meta.name == "dvws-node":
+                print(f"DVWS-node at {DVWS_NODE_COMMIT[:12]} (files sha256 "
+                      f"{DVWS_NODE_TREE_SHA256[:12]}) and its verified packages: "
+                      f"{fetch_dvws_node()}")
                 return 0
             if meta.name == "security-crawl-maze":
                 print(f"crawl maze source at {CRAWL_MAZE_COMMIT[:12]}: {fetch_crawl_maze()}")

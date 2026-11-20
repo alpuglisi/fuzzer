@@ -1,0 +1,101 @@
+# DVWS-node (snoopysecurity/dvws-node, MIT) at commit 4221c04f -- a HELD-OUT lab
+# (lab/HOLDOUT.md): nobody tunes detection against it; only the benchmark crawls it.
+# Lab-only. A Node 22 / Express app serving, on ONE port, a Svelte UI, a REST API
+# (/api/v1, /api/v2, described at /api-docs and /openAPI-spec.json), a SOAP service
+# (/dvwsuserservice, WSDL at ?wsdl), XML-RPC (/xmlrpc), GraphQL (/graphql) and a
+# WebSocket (/ws/notifications), over MongoDB and MySQL. Its vulnerabilities are the
+# ones its CHALLENGES.md documents (SQL/NoSQL/OS command/XPath/LDAP injection, XXE,
+# SSRF, deserialization, path traversal, JWT flaws, IDOR, ...).
+#
+# Built by ./Dockerfile from the source at the pinned commit, which
+# `labctl.sh up dvws-node` checks out into the gitignored .cache/app (its files hashed
+# against DVWS_NODE_TREE_SHA256) with its locked npm packages installed on the host;
+# the image builds with no network. Both databases are re-seeded by upstream's
+# scripts/seed-database.js at every app start and keep their data in tmpfs, so reset =
+# restart. Seeded accounts: admin, test, recovery-victim, session-victim (passwords
+# published in upstream's seed script and CHALLENGES.md); the bootstrap registers our own.
+#
+# Safety: the app is published on LOOPBACK ONLY (127.0.0.1); the databases are never
+# published and sit on an internal network. Capabilities dropped (the databases get
+# back only what their entrypoints need to chown and drop to their own user),
+# no-new-privileges, pids and memory limited. The app runs as `node` on 8080 inside.
+# Its SSRF sinks (XML-RPC dvws.CheckUptime, the JWT `jku` key fetch) run INSIDE this
+# container: names do not resolve (`dns` below); an IP literal still has egress (not
+# blocked, as DVGA, NFR-LAB-safety "Not yet enforced").
+#
+# Run through lab/labctl.sh:  ./labctl.sh up dvws-node [--authorized]
+name: fuzzlab-dvws-node
+
+x-podman:
+  in_pod: false
+
+services:
+  web:
+    build:
+      context: .
+      network: none
+    networks: [dvws-front, dvws-db]
+    dns: ["127.0.0.1"]
+    ports:
+      # Loopback only. Never bind 0.0.0.0.
+      - "127.0.0.1:${DVWS_PORT:-3102}:8080"
+    environment:
+      EXPRESS_JS_PORT: "8080"
+      MONGO_LOCAL_CONN_URL: mongodb://mongo:27017/node-dvws
+      SQL_LOCAL_CONN_URL: mysql
+      # names the published origin in the OpenAPI document's `servers` (upstream
+      # writes http://<DVWS_HOST>/api; its default, dvws.local, names port 80)
+      DVWS_HOST: "127.0.0.1:${DVWS_PORT:-3102}"
+    depends_on:
+      mongo:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+    restart: unless-stopped
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    mem_limit: 768m
+
+  mongo:
+    image: mirror.gcr.io/library/mongo:4.4@sha256:4be76f674fc4b27859816811b8baa3c51830eb1dbf4ca81a51e26b79edd662ef
+    networks: [dvws-db]
+    tmpfs: [/data/db, /data/configdb]
+    healthcheck:
+      test: ["CMD", "mongo", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 3s
+      timeout: 5s
+      retries: 60
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID, DAC_OVERRIDE]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    mem_limit: 512m
+
+  mysql:
+    # mysql:5.7 is published for amd64 only.
+    image: docker.io/library/mysql:5.7@sha256:4bc6bc963e6d8443453676cae56536f4b8156d78bae03c0145cbe47c2aad73bb
+    networks: [dvws-db]
+    tmpfs: [/var/lib/mysql, /var/run/mysqld]
+    environment:
+      # upstream's own published default (.env, docker-compose.yml); not a secret of
+      # ours (the database is reachable only on the internal network)
+      MYSQL_ROOT_PASSWORD: mysecretpassword
+      MYSQL_DATABASE: dvws_sqldb
+    healthcheck:
+      # TCP, not the socket: the image's init-time temporary server runs with
+      # --skip-networking, so only the final server answers (as bWAPP's)
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--protocol=tcp", "-uroot", "-pmysecretpassword", "--silent"]
+      interval: 3s
+      timeout: 5s
+      retries: 80
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID, DAC_OVERRIDE]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    mem_limit: 1g
+
+networks:
+  dvws-front: {}
+  dvws-db:
+    internal: true
