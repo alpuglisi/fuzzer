@@ -87,13 +87,18 @@ SECDEVLABS_MAVEN_IMAGE = ("mirror.gcr.io/library/maven:3.6.0-jdk-11-slim@sha256:
                           "4f0face24d2f79439a8fa394555b09be99c9ad537b9b19983fb8cc358818a42d")
 SECDEVLABS_NGINX_IMAGE = ("mirror.gcr.io/library/nginx:1.17.1-alpine@sha256:"
                           "17bd1698318e9c0f9ba2c5ed49f53d690684dab7fe3e8019b855c352528d57be")
+#: OWASP NodeGoat's upstream Dockerfile says `node:12-alpine` (unpinned): pinned here, from
+#: Google's Docker Hub mirror (CC-LAB-0330). Its database is SECDEVLABS_MONGO_IMAGE
+#: (upstream's compose says `mongo:4.4`).
+NODEGOAT_NODE12_IMAGE = ("mirror.gcr.io/library/node:12-alpine@sha256:"
+                         "d4b15b3d48f42059a15bd659be60afe21762aae9d6cbea6f124440895c27db68")
 PINNED_IMAGES = frozenset({BUSYBOX_IMAGE, PHP_IMAGE, MYSQL_IMAGE, JUICE_SHOP_IMAGE,
                            CRAWL_MAZE_PYTHON_IMAGE, SECDEVLABS_GOLANG_IMAGE,
                            SECDEVLABS_MARIADB_IMAGE, SECDEVLABS_PYTHON38_IMAGE,
                            SECDEVLABS_PYTHON312_IMAGE, SECDEVLABS_PHP_IMAGE,
                            SECDEVLABS_NODE20_IMAGE, SECDEVLABS_MONGO_IMAGE,
                            SECDEVLABS_NODE13_IMAGE, SECDEVLABS_MAVEN_IMAGE,
-                           SECDEVLABS_NGINX_IMAGE})
+                           SECDEVLABS_NGINX_IMAGE, NODEGOAT_NODE12_IMAGE})
 
 BWAPP_ZIP_URL = "https://sourceforge.net/projects/bwapp/files/bWAPP/bWAPP_latest.zip/download"
 BWAPP_ZIP_NAME = "bWAPP_latest.zip"
@@ -208,6 +213,16 @@ SECDEVLABS_PYPI = {
 }
 
 
+#: OWASP NodeGoat (Apache-2.0), CC-LAB-0330: a Node.js / Express / MongoDB app with
+#: server-side JavaScript injection (``eval`` of form inputs, a ``$where`` built from a
+#: query value). Checked out at this commit on the host; the checkout's tracked files
+#: must hash to NODEGOAT_TREE_SHA256 (`tree_sha256`); its production npm packages are
+#: installed on the host by ``npm ci`` against the lockfile; the image builds offline.
+NODEGOAT_REPO = "https://github.com/OWASP/NodeGoat"
+NODEGOAT_COMMIT = "c5cb68a7084e4ae7dcc60e6a98768720a81841e8"
+NODEGOAT_TREE_SHA256 = "78ac112b7bd5083bb065086c4642dcd8a3932a8d3052f9405503124c90a70fe3"
+
+
 class ExternalLabError(RuntimeError):
     """A fixture operation failed; the message never carries a secret."""
 
@@ -287,6 +302,11 @@ LAB_META: dict[str, LabMeta] = {
                                        3072, 10007, "/", "/login", "sdl-gossip-user",
                                        "fuzzlab_user", True,
                                        (("sdl-gossip-peer", "fuzzlab_peer"),)),
+    # two of upstream's seeded accounts (artifacts/db-reset.js, re-seeded at every start;
+    # their passwords are the ones NodeGoat's README publishes): `/allocations/:userId`
+    # shows any caller the allocations of the userId in the path (FR-LAB-330)
+    "nodegoat": LabMeta("nodegoat", "web", "NODEGOAT_PORT", 3091, 4000, "/", "/login",
+                        "nodegoat-user", "user1", False, (("nodegoat-peer", "user2"),)),
 }
 
 
@@ -550,11 +570,12 @@ def maven_offline(pomdir: Path, repo: Path, *, timeout: float = 900.0) -> None:
                                f"{(res.stderr or res.stdout or '').strip()[-200:]}")
 
 
-def npm_install(pkgdir: Path, *, timeout: float = 900.0) -> None:
+def npm_install(pkgdir: Path, *, timeout: float = 900.0, production: bool = False) -> None:
     """Install a Node package's locked dependencies with the host's npm (``npm ci``:
     exactly the lockfile, each package checked against its ``integrity`` hash; no
     install scripts), so its image needs no registry. Raises when npm is missing or
-    the install fails (an integrity mismatch fails it)."""
+    the install fails (an integrity mismatch fails it). ``production`` leaves the
+    development packages out (``--omit=dev``: NodeGoat's test tooling, CC-LAB-0330)."""
     import shutil
 
     from fuzzlab.procutil import run_bounded
@@ -562,7 +583,8 @@ def npm_install(pkgdir: Path, *, timeout: float = 900.0) -> None:
     if npm is None:
         raise ExternalLabError("npm is not installed on this host: needed to install the "
                                "app's locked packages (checked against its lockfile)")
-    res = run_bounded([npm, "ci", "--ignore-scripts", "--no-audit", "--no-fund"],
+    res = run_bounded([npm, "ci", "--ignore-scripts", "--no-audit", "--no-fund",
+                       *(["--omit=dev"] if production else [])],
                       timeout=timeout, cwd=str(pkgdir))
     if res.returncode != 0 or not (pkgdir / "node_modules").is_dir():
         raise ExternalLabError(f"npm ci failed: {(res.stderr or res.stdout or '').strip()[-200:]}")
@@ -592,6 +614,48 @@ def fetch_secdevlabs_app(lab: str, *, root: Path = EXTERNAL_DIR, repo: str = SEC
     if lab in SECDEVLABS_PYPI:
         fetch_pypi_dists(SECDEVLABS_PYPI[lab], root / lab / ".cache" / "dists",
                          timeout=timeout)
+    return dest
+
+
+def tree_sha256(checkout: Path, *, timeout: float = 120.0) -> str:
+    """One sha256 over a git checkout's tracked files: each path (sorted, bytes) with
+    the sha256 of its content. Independent of git's own object format, of the
+    checkout's file times and of the git version (CC-LAB-0330)."""
+    from fuzzlab.procutil import run_bounded
+    res = run_bounded(["git", "-C", str(checkout), "ls-files", "-z"], timeout=timeout,
+                      text=False)
+    if res.returncode != 0:
+        raise ExternalLabError("git ls-files failed on the checkout")
+    out = res.stdout if isinstance(res.stdout, bytes) else res.stdout.encode("utf-8")
+    digest = hashlib.sha256()
+    for name in sorted(n for n in out.split(b"\0") if n):
+        content = (checkout / os.fsdecode(name)).read_bytes()
+        digest.update(name + b"\0" + hashlib.sha256(content).hexdigest().encode() + b"\n")
+    return digest.hexdigest()
+
+
+def nodegoat_checkout(root: Path = EXTERNAL_DIR) -> Path:
+    """The pinned NodeGoat checkout (gitignored)."""
+    return root / "nodegoat" / ".cache" / "src"
+
+
+def fetch_nodegoat(*, root: Path = EXTERNAL_DIR, repo: str = NODEGOAT_REPO,
+                   commit: str = NODEGOAT_COMMIT, tree: str = NODEGOAT_TREE_SHA256,
+                   timeout: float = 900.0) -> Path:
+    """NodeGoat at ``commit`` (its tracked files hashing to ``tree``), copied into
+    ``nodegoat/.cache/app`` without its git directory, with its production packages
+    installed on the host (`npm_install`). The image builds from there offline."""
+    import shutil
+    src = checkout_pinned(nodegoat_checkout(root), repo, commit, timeout=timeout,
+                          label="NodeGoat")
+    got = tree_sha256(src)
+    if got != tree:
+        raise ExternalLabError(f"NodeGoat checkout's files hash to {got}, not {tree}")
+    dest = root / "nodegoat" / ".cache" / "app"
+    if dest.exists():
+        shutil.rmtree(dest)
+    shutil.copytree(src, dest, symlinks=True, ignore=shutil.ignore_patterns(".git"))
+    npm_install(dest, timeout=timeout, production=True)
     return dest
 
 
@@ -1301,12 +1365,57 @@ def ecommerce_account_attributes(client: _LabClient, cred: ResolvedCredential
     return {"user_id": user_id}
 
 
+_NODEGOAT_ALLOCATIONS_LINK = re.compile(r'href="/allocations/(\d+)"')
+
+
+def _nodegoat_login(client: _LabClient, cred: ResolvedCredential) -> Any:
+    return client.request("POST", "/login",
+                          data={"userName": cred.username, "password": cred.password})
+
+
+def bootstrap_nodegoat(client: _LabClient, cred: ResolvedCredential, *,
+                       deadline: float = 180.0, clock: Callable[[], float] = time.monotonic,
+                       sleep: Callable[[float], None] = time.sleep) -> list[str]:
+    """Log in through the app's own form (no CSRF token: upstream's csurf is commented
+    out) and verify it by a positive differential: the login redirects to
+    ``/dashboard``, which answers 200 with the session and redirects to ``/login``
+    without it. The accounts are upstream's seed (re-created at every start), never
+    registered here."""
+    meta = LAB_META["nodegoat"]
+    wait_ready(client, meta.ready_path, deadline=deadline, clock=clock, sleep=sleep)
+    r = _nodegoat_login(client, cred)
+    if r.status_code != 302 or not r.headers.get("Location", "").endswith("/dashboard"):
+        raise ExternalLabError(
+            f"NodeGoat login of {cred.username!r} failed: HTTP {r.status_code} (the seeded "
+            f"accounts are re-created at every start with the README's passwords)")
+    authed = client.request("GET", "/dashboard")
+    anon = client.request("GET", "/dashboard", anonymous=True)
+    if authed.status_code != 200 or anon.status_code != 302:
+        raise ExternalLabError(f"NodeGoat /dashboard: {anon.status_code} anonymous, "
+                               f"{authed.status_code} logged in (want 302 / 200)")
+    return ["login verified"]
+
+
+def nodegoat_account_attributes(client: _LabClient, cred: ResolvedCredential
+                                ) -> dict[str, str]:
+    """The account's ``user_id``: the one ``/allocations/<id>`` link its own dashboard
+    shows (FR-LAB-330)."""
+    _nodegoat_login(client, cred)
+    ids = set(_NODEGOAT_ALLOCATIONS_LINK.findall(client.request("GET", "/dashboard").text
+                                                 or ""))
+    if len(ids) != 1:
+        raise ExternalLabError("NodeGoat's dashboard names no single allocations link")
+    return {"user_id": ids.pop()}
+
+
 _BOOTSTRAPS = {"bwapp": bootstrap_bwapp, "juice-shop": bootstrap_juice_shop,
                "secdevlabs-gossip-world": bootstrap_secdevlabs_gossip_world,
-               "secdevlabs-ecommerce-api": bootstrap_secdevlabs_ecommerce_api}
+               "secdevlabs-ecommerce-api": bootstrap_secdevlabs_ecommerce_api,
+               "nodegoat": bootstrap_nodegoat}
 #: Labs whose accounts have values of their own a ground truth names (`account_value`,
 #: FR-LAB-309): read after the verified login, stored with the credential.
-_ACCOUNT_ATTRIBUTES = {"secdevlabs-ecommerce-api": ecommerce_account_attributes}
+_ACCOUNT_ATTRIBUTES = {"secdevlabs-ecommerce-api": ecommerce_account_attributes,
+                       "nodegoat": nodegoat_account_attributes}
 
 
 def bootstrap(name: str, *, environ: Mapping[str, str] | None = None,
@@ -1395,6 +1504,11 @@ def main(argv: list[str] | None = None) -> int:
             if meta.name in SECDEVLABS_APPS:
                 print(f"secDevLabs at {SECDEVLABS_COMMIT[:12]}, {meta.name}'s app and its "
                       f"verified dependencies: {fetch_secdevlabs_app(meta.name)}")
+                return 0
+            if meta.name == "nodegoat":
+                print(f"NodeGoat at {NODEGOAT_COMMIT[:12]} (files sha256 "
+                      f"{NODEGOAT_TREE_SHA256[:12]}) and its verified packages: "
+                      f"{fetch_nodegoat()}")
                 return 0
             if meta.name == "security-crawl-maze":
                 print(f"crawl maze source at {CRAWL_MAZE_COMMIT[:12]}: {fetch_crawl_maze()}")
