@@ -1,0 +1,944 @@
+[
+ {
+  "url": "/dvwa/security.php?phpids=on",
+  "words": [
+   "phpids",
+   "on"
+  ],
+  "source": "https://github.com/digininja/DVWA/blob/2.0.1/security.php#L78 (fetched 2026-11-20); handler L38-39",
+  "note": "enables PHPIDS app-wide",
+  "app": "dvwa",
+  "shape": "noun-value",
+  "scope": "global",
+  "method": "GET"
+ },
+ {
+  "url": "/dvwa/security.php?phpids=off",
+  "words": [
+   "phpids",
+   "off"
+  ],
+  "source": "https://github.com/digininja/DVWA/blob/2.0.1/security.php#L70 (fetched 2026-11-20)",
+  "note": "disables PHPIDS app-wide",
+  "app": "dvwa",
+  "shape": "noun-value",
+  "scope": "global",
+  "method": "GET"
+ },
+ {
+  "url": "/dvwa/security.php (POST security=low|medium|high|impossible)",
+  "words": [
+   "security",
+   "low"
+  ],
+  "source": "https://github.com/digininja/DVWA/blob/502ac150ce37c20ca6e04cab7c5ca959f315f2d0/security.php#L15; cookie set https://github.com/digininja/DVWA/blob/502ac150ce37c20ca6e04cab7c5ca959f315f2d0/dvwa/includes/dvwaPage.inc.php#L226",
+  "note": "sets global security level cookie; POST+CSRF token in current DVWA",
+  "app": "dvwa",
+  "shape": "noun-value",
+  "scope": "session",
+  "method": "POST"
+ },
+ {
+  "url": "/bWAPP/install.php?install=yes",
+  "words": [
+   "install",
+   "yes"
+  ],
+  "source": "https://github.com/raesene/bWAPP/blob/53bcfdd59c02dcfdbf79e218f0a99c54ff42d799/app/install.php#L19; handler L22",
+  "note": "creates/recreates the database",
+  "app": "bwapp",
+  "shape": "param-bool",
+  "scope": "global",
+  "method": "GET"
+ },
+ {
+  "url": "/bWAPP/reset.php",
+  "words": [
+   "reset"
+  ],
+  "source": "https://github.com/raesene/bWAPP/blob/53bcfdd59c02dcfdbf79e218f0a99c54ff42d799/app/reset.php#L99",
+  "note": "DROP DATABASE bWAPP on GET (BUG-0111)",
+  "app": "bwapp",
+  "shape": "verb",
+  "scope": "global",
+  "method": "GET"
+ },
+ {
+  "url": "/bWAPP/reset.php?secret=bWAPP",
+  "words": [
+   "reset",
+   "secret"
+  ],
+  "source": "https://github.com/raesene/bWAPP/blob/53bcfdd59c02dcfdbf79e218f0a99c54ff42d799/app/reset.php#L95",
+  "note": "full reset incl. users",
+  "app": "bwapp",
+  "shape": "verb",
+  "scope": "global",
+  "method": "GET"
+ },
+ {
+  "url": "/bWAPP/smgmt_admin_portal.php?admin=1",
+  "words": [
+   "admin",
+   "1"
+  ],
+  "source": "https://github.com/raesene/bWAPP/blob/53bcfdd59c02dcfdbf79e218f0a99c54ff42d799/app/smgmt_admin_portal.php#L30; cookie L85",
+  "note": "grants admin flag (sets admin cookie)",
+  "app": "bwapp",
+  "shape": "param-bool",
+  "scope": "session",
+  "method": "GET"
+ },
+ {
+  "url": "/bWAPP/sqli_9.php?action=stop",
+  "words": [
+   "action",
+   "stop"
+  ],
+  "source": "https://github.com/raesene/bWAPP/blob/53bcfdd59c02dcfdbf79e218f0a99c54ff42d799/app/sqli_9.php#L28",
+  "note": "sets $_SESSION[manual_interv]=0",
+  "app": "bwapp",
+  "shape": "slot-value",
+  "scope": "session",
+  "method": "GET"
+ },
+ {
+  "url": "/bWAPP/security_level_set.php (POST security_level=0..2)",
+  "words": [
+   "security",
+   "level"
+  ],
+  "source": "https://github.com/raesene/bWAPP/blob/53bcfdd59c02dcfdbf79e218f0a99c54ff42d799/app/security_level_set.php#L23; setcookie L63",
+  "note": "sets security level cookie; POST only",
+  "app": "bwapp",
+  "shape": "noun-value",
+  "scope": "session",
+  "method": "POST"
+ },
+ {
+  "url": "/WebGoat/service/restartlesson.mvc/SqlInjection",
+  "words": [
+   "restart",
+   "lesson"
+  ],
+  "source": "https://github.com/WebGoat/WebGoat/blob/4e98f1cbbf896fdd06edcc9930515ebe0ade7c69/src/main/java/org/owasp/webgoat/container/service/RestartLessonService.java#L35",
+  "note": "resets lesson progress",
+  "app": "webgoat",
+  "shape": "verb",
+  "scope": "data",
+  "method": "GET"
+ },
+ {
+  "url": "/WebGoat/service/enable-security.mvc",
+  "words": [
+   "enable",
+   "security"
+  ],
+  "source": "https://github.com/WebGoat/WebGoat/blob/4e98f1cbbf896fdd06edcc9930515ebe0ade7c69/src/main/java/org/owasp/webgoat/container/service/SessionService.java#L22; linked from lessons/xxe/html/XXE.html:224",
+  "note": "applies XXE 'security patch' (toggleSecurity; body currently stubbed)",
+  "app": "webgoat",
+  "shape": "verb",
+  "scope": "global",
+  "method": "GET"
+ },
+ {
+  "url": "/WebGoat/service/debug/labels.mvc?enabled=true",
+  "words": [
+   "debug",
+   "enabled",
+   "true"
+  ],
+  "source": "https://github.com/WebGoat/WebGoat/blob/4e98f1cbbf896fdd06edcc9930515ebe0ade7c69/src/main/java/org/owasp/webgoat/container/service/LabelDebugService.java#L48 (URL L24)",
+  "note": "turns label debugging on",
+  "app": "webgoat",
+  "shape": "param-bool",
+  "scope": "session",
+  "method": "GET"
+ },
+ {
+  "url": "/WebGoat/start.mvc?lang=en",
+  "words": [
+   "lang",
+   "en"
+  ],
+  "source": "https://github.com/WebGoat/WebGoat/blob/4e98f1cbbf896fdd06edcc9930515ebe0ade7c69/src/main/resources/webgoat/templates/main_new.html#L101; LocaleChangeInterceptor param 'lang' https://github.com/WebGoat/WebGoat/blob/4e98f1cbbf896fdd06edcc9930515ebe0ade7c69/src/main/java/org/owasp/webgoat/container/MvcConfiguration.java#L211",
+  "note": "switches session locale",
+  "app": "webgoat",
+  "shape": "noun-value",
+  "scope": "session",
+  "method": "GET"
+ },
+ {
+  "url": "/WebGoat/start.mvc?lang=de",
+  "words": [
+   "lang",
+   "de"
+  ],
+  "source": "https://github.com/WebGoat/WebGoat/blob/4e98f1cbbf896fdd06edcc9930515ebe0ade7c69/src/main/resources/webgoat/templates/main_new.html#L107; LocaleChangeInterceptor param 'lang' https://github.com/WebGoat/WebGoat/blob/4e98f1cbbf896fdd06edcc9930515ebe0ade7c69/src/main/java/org/owasp/webgoat/container/MvcConfiguration.java#L211",
+  "note": "switches session locale",
+  "app": "webgoat",
+  "shape": "noun-value",
+  "scope": "session",
+  "method": "GET"
+ },
+ {
+  "url": "/WebGoat/start.mvc?lang=fr",
+  "words": [
+   "lang",
+   "fr"
+  ],
+  "source": "https://github.com/WebGoat/WebGoat/blob/4e98f1cbbf896fdd06edcc9930515ebe0ade7c69/src/main/resources/webgoat/templates/main_new.html#L112; LocaleChangeInterceptor param 'lang' https://github.com/WebGoat/WebGoat/blob/4e98f1cbbf896fdd06edcc9930515ebe0ade7c69/src/main/java/org/owasp/webgoat/container/MvcConfiguration.java#L211",
+  "note": "switches session locale",
+  "app": "webgoat",
+  "shape": "noun-value",
+  "scope": "session",
+  "method": "GET"
+ },
+ {
+  "url": "/xvwa/setup/?action=do",
+  "words": [
+   "setup",
+   "action",
+   "do"
+  ],
+  "source": "https://github.com/s4n7h0/xvwa/blob/fb30fa517d288e618b521d252f61107ef6a24797/setup/home.php#L15; handler L39 (cleanup($conn))",
+  "note": "drops and recreates DB",
+  "app": "xvwa",
+  "shape": "slot-value",
+  "scope": "global",
+  "method": "GET"
+ },
+ {
+  "url": "/rest/user/change-password?current=a&new=b&repeat=b",
+  "words": [
+   "change",
+   "password"
+  ],
+  "source": "https://github.com/juice-shop/juice-shop/blob/c9f99228d9d56afb5f5ca7925376292f7fa44b13/server.ts#L636",
+  "note": "changes the user's password on GET",
+  "app": "juice-shop",
+  "shape": "verb",
+  "scope": "data",
+  "method": "GET"
+ },
+ {
+  "url": "/rest/saveLoginIp",
+  "words": [
+   "save",
+   "login",
+   "ip"
+  ],
+  "source": "https://github.com/juice-shop/juice-shop/blob/c9f99228d9d56afb5f5ca7925376292f7fa44b13/server.ts#L658; routes/saveLoginIp.ts:32 user.update",
+  "note": "writes lastLoginIp",
+  "app": "juice-shop",
+  "shape": "verb",
+  "scope": "data",
+  "method": "GET"
+ },
+ {
+  "url": "/install?force=1",
+  "words": [
+   "install",
+   "force",
+   "1"
+  ],
+  "source": "https://github.com/rapid7/hackazon/blob/4e8197ec908413859ad75ba185c934144d43877c/assets/views/installation.php#L43; classes/App/Controller/Install.php:19 setForceFreshInstall",
+  "note": "'Restart installation' - forces fresh install",
+  "app": "hackazon",
+  "shape": "param-bool",
+  "scope": "global",
+  "method": "GET"
+ },
+ {
+  "url": "/resetbutton/123",
+  "words": [
+   "reset",
+   "button"
+  ],
+  "source": "https://google-gruyere.appspot.com/part1 ('magic reset button ... wipe out all the data')",
+  "note": "wipes the instance's data",
+  "app": "gruyere",
+  "shape": "verb",
+  "scope": "global",
+  "method": "GET"
+ },
+ {
+  "url": "/123/saveprofile?action=update&is_admin=True",
+  "words": [
+   "save",
+   "profile",
+   "action",
+   "update",
+   "is",
+   "admin",
+   "true"
+  ],
+  "source": "https://google-gruyere.appspot.com/part3 (Elevation of Privilege)",
+  "note": "sets is_admin via GET",
+  "app": "gruyere",
+  "shape": "param-bool",
+  "scope": "data",
+  "method": "GET"
+ },
+ {
+  "url": "/123/deletesnippet?index=0",
+  "words": [
+   "delete",
+   "snippet"
+  ],
+  "source": "https://google-gruyere.appspot.com/part3 (CSRF)",
+  "note": "deletes a snippet",
+  "app": "gruyere",
+  "shape": "verb",
+  "scope": "data",
+  "method": "GET"
+ },
+ {
+  "url": "/wp-admin/plugins.php?action=activate&plugin=akismet%2Fakismet.php&_wpnonce=x",
+  "words": [
+   "action",
+   "activate",
+   "plugin"
+  ],
+  "source": "https://github.com/WordPress/WordPress/blob/master/wp-admin/includes/class-wp-plugins-list-table.php#L936 (fetched 2026-11-20)",
+  "note": "activates a plugin",
+  "app": "wordpress",
+  "shape": "slot-value",
+  "scope": "global",
+  "method": "GET"
+ },
+ {
+  "url": "/wp-admin/plugins.php?action=deactivate&plugin=akismet%2Fakismet.php&_wpnonce=x",
+  "words": [
+   "action",
+   "deactivate",
+   "plugin"
+  ],
+  "source": "https://github.com/WordPress/WordPress/blob/master/wp-admin/includes/class-wp-plugins-list-table.php#L911 (fetched 2026-11-20)",
+  "note": "deactivates a plugin",
+  "app": "wordpress",
+  "shape": "slot-value",
+  "scope": "global",
+  "method": "GET"
+ },
+ {
+  "url": "/wp-admin/plugins.php?action=resume&plugin=x&_wpnonce=x",
+  "words": [
+   "action",
+   "resume",
+   "plugin"
+  ],
+  "source": "https://github.com/WordPress/WordPress/blob/master/wp-admin/includes/class-wp-plugins-list-table.php#L1018 (fetched 2026-11-20)",
+  "note": "resumes a paused (errored) plugin",
+  "app": "wordpress",
+  "shape": "slot-value",
+  "scope": "global",
+  "method": "GET"
+ },
+ {
+  "url": "/wp-admin/plugins.php?action=enable-auto-update&plugin=x&_wpnonce=x",
+  "words": [
+   "action",
+   "enable",
+   "auto",
+   "update"
+  ],
+  "source": "https://github.com/WordPress/WordPress/blob/master/wp-admin/plugins.php#L472 (fetched 2026-11-20)",
+  "note": "turns on plugin auto-updates",
+  "app": "wordpress",
+  "shape": "slot-value",
+  "scope": "global",
+  "method": "GET"
+ },
+ {
+  "url": "/wp-admin/themes.php?action=disable-auto-update&stylesheet=x&_wpnonce=x",
+  "words": [
+   "action",
+   "disable",
+   "auto",
+   "update"
+  ],
+  "source": "https://github.com/WordPress/WordPress/blob/master/wp-admin/themes.php#L104 (fetched 2026-11-20)",
+  "note": "turns off theme auto-updates",
+  "app": "wordpress",
+  "shape": "slot-value",
+  "scope": "global",
+  "method": "GET"
+ },
+ {
+  "url": "/wp-admin/themes.php?action=activate&stylesheet=twentytwentyfour&_wpnonce=x",
+  "words": [
+   "action",
+   "activate",
+   "stylesheet"
+  ],
+  "source": "https://github.com/WordPress/WordPress/blob/master/wp-admin/includes/theme.php#L780 (fetched 2026-11-20)",
+  "note": "switches the site theme (nonce 'switch-theme_')",
+  "app": "wordpress",
+  "shape": "slot-value",
+  "scope": "global",
+  "method": "GET"
+ },
+ {
+  "url": "/quietDown",
+  "words": [
+   "quiet",
+   "down"
+  ],
+  "source": "https://github.com/jenkinsci/jenkins/blob/master/core/src/main/java/jenkins/model/Jenkins.java#L4191 (fetched 2026-11-20)",
+  "note": "stops scheduling builds",
+  "app": "jenkins",
+  "shape": "verb-pair",
+  "scope": "global",
+  "method": "POST"
+ },
+ {
+  "url": "/cancelQuietDown",
+  "words": [
+   "cancel",
+   "quiet",
+   "down"
+  ],
+  "source": "https://github.com/jenkinsci/jenkins/blob/master/core/src/main/java/jenkins/model/Jenkins.java#L4215 (fetched 2026-11-20)",
+  "note": "resumes scheduling",
+  "app": "jenkins",
+  "shape": "verb",
+  "scope": "global",
+  "method": "POST"
+ },
+ {
+  "url": "/safeRestart",
+  "words": [
+   "safe",
+   "restart"
+  ],
+  "source": "https://github.com/jenkinsci/jenkins/blob/master/core/src/main/java/jenkins/model/Jenkins.java#L4630 (fetched 2026-11-20)",
+  "note": "restarts Jenkins",
+  "app": "jenkins",
+  "shape": "verb",
+  "scope": "process",
+  "method": "POST"
+ },
+ {
+  "url": "/job/demo/7/toggleLogKeep",
+  "words": [
+   "toggle",
+   "log",
+   "keep"
+  ],
+  "source": "https://github.com/jenkinsci/jenkins/blob/master/core/src/main/java/hudson/model/Run.java#L2334 (fetched 2026-11-20)",
+  "note": "toggles keep-forever on a build",
+  "app": "jenkins",
+  "shape": "verb",
+  "scope": "data",
+  "method": "POST"
+ },
+ {
+  "url": "/job/demo/disable",
+  "words": [
+   "disable"
+  ],
+  "source": "https://github.com/jenkinsci/jenkins/blob/master/core/src/main/java/jenkins/model/ParameterizedJobMixIn.java#L578 (fetched 2026-11-20)",
+  "note": "disables a job",
+  "app": "jenkins",
+  "shape": "verb",
+  "scope": "global",
+  "method": "POST"
+ },
+ {
+  "url": "/job/demo/enable",
+  "words": [
+   "enable"
+  ],
+  "source": "https://github.com/jenkinsci/jenkins/blob/master/core/src/main/java/jenkins/model/ParameterizedJobMixIn.java#L586 (fetched 2026-11-20)",
+  "note": "enables a job",
+  "app": "jenkins",
+  "shape": "verb",
+  "scope": "global",
+  "method": "POST"
+ },
+ {
+  "url": "/admin/reports/status/run-cron?token=x",
+  "words": [
+   "run",
+   "cron"
+  ],
+  "source": "https://github.com/drupal/drupal/blob/11.x/core/modules/system/system.routing.yml#L67 (fetched 2026-11-20) (_csrf_token L74)",
+  "note": "runs cron on GET",
+  "app": "drupal",
+  "shape": "verb",
+  "scope": "global",
+  "method": "GET"
+ },
+ {
+  "url": "/cron/KEY",
+  "words": [
+   "cron"
+  ],
+  "source": "https://github.com/drupal/drupal/blob/11.x/core/modules/system/system.routing.yml#L2 (fetched 2026-11-20)",
+  "note": "runs cron on GET",
+  "app": "drupal",
+  "shape": "verb",
+  "scope": "global",
+  "method": "GET"
+ },
+ {
+  "url": "/profile/switch-org/2",
+  "words": [
+   "switch",
+   "org"
+  ],
+  "source": "https://github.com/grafana/grafana/blob/main/pkg/api/api.go#L99 (fetched 2026-11-20)",
+  "note": "changes the user's active org (ChangeActiveOrgAndRedirectToHome)",
+  "app": "grafana",
+  "shape": "verb",
+  "scope": "session",
+  "method": "GET"
+ },
+ {
+  "url": "/api/admin/users/7/disable",
+  "words": [
+   "admin",
+   "users",
+   "disable"
+  ],
+  "source": "https://github.com/grafana/grafana/blob/main/pkg/api/api.go#L579 (fetched 2026-11-20)",
+  "note": "disables a user",
+  "app": "grafana",
+  "shape": "verb",
+  "scope": "data",
+  "method": "POST"
+ },
+ {
+  "url": "/api/admin/users/7/enable",
+  "words": [
+   "admin",
+   "users",
+   "enable"
+  ],
+  "source": "https://github.com/grafana/grafana/blob/main/pkg/api/api.go#L580 (fetched 2026-11-20)",
+  "note": "enables a user",
+  "app": "grafana",
+  "shape": "verb",
+  "scope": "data",
+  "method": "POST"
+ },
+ {
+  "url": "/user/activate?code=x",
+  "words": [
+   "activate",
+   "code"
+  ],
+  "source": "https://github.com/go-gitea/gitea/blob/main/routers/web/web.go#L727 (fetched 2026-11-20)",
+  "note": "activates an account on GET",
+  "app": "gitea",
+  "shape": "verb",
+  "scope": "data",
+  "method": "GET"
+ },
+ {
+  "url": "/explore/repos?lang=de-DE",
+  "words": [
+   "lang",
+   "de"
+  ],
+  "source": "https://github.com/go-gitea/gitea/blob/main/modules/web/middleware/locale.go#L36 (fetched 2026-11-20) (SetLocaleCookie L61-62)",
+  "note": "any page: ?lang= sets the locale cookie",
+  "app": "gitea",
+  "shape": "noun-value",
+  "scope": "session",
+  "method": "GET"
+ },
+ {
+  "url": "/owner/repo/actions/enable?workflow=ci.yml",
+  "words": [
+   "actions",
+   "enable"
+  ],
+  "source": "https://github.com/go-gitea/gitea/blob/main/routers/web/web.go#L1545 (fetched 2026-11-20)",
+  "note": "enables a workflow",
+  "app": "gitea",
+  "shape": "verb",
+  "scope": "global",
+  "method": "POST"
+ },
+ {
+  "url": "/owner/repo/actions/disable?workflow=ci.yml",
+  "words": [
+   "actions",
+   "disable"
+  ],
+  "source": "https://github.com/go-gitea/gitea/blob/main/routers/web/web.go#L1544 (fetched 2026-11-20)",
+  "note": "disables a workflow",
+  "app": "gitea",
+  "shape": "verb",
+  "scope": "global",
+  "method": "POST"
+ },
+ {
+  "url": "/user/settings/security/two_factor/disable",
+  "words": [
+   "security",
+   "two",
+   "factor",
+   "disable"
+  ],
+  "source": "https://github.com/go-gitea/gitea/blob/main/routers/web/web.go#L637 (fetched 2026-11-20)",
+  "note": "disables 2FA",
+  "app": "gitea",
+  "shape": "verb",
+  "scope": "data",
+  "method": "POST"
+ },
+ {
+  "url": "/any/page?locale=fr",
+  "words": [
+   "locale",
+   "fr"
+  ],
+  "source": "https://github.com/spring-projects/spring-framework/blob/main/spring-webmvc/src/main/java/org/springframework/web/servlet/i18n/LocaleChangeInterceptor.java#L48 (fetched 2026-11-20) (setLocale L123; all methods unless httpMethods set)",
+  "note": "LocaleChangeInterceptor default param",
+  "app": "spring",
+  "shape": "noun-value",
+  "scope": "session",
+  "method": "GET"
+ },
+ {
+  "url": "/any/page?theme=dark",
+  "words": [
+   "theme",
+   "dark"
+  ],
+  "source": "https://github.com/spring-projects/spring-framework/blob/6.1.x/spring-webmvc/src/main/java/org/springframework/web/servlet/theme/ThemeChangeInterceptor.java#L42 (fetched 2026-11-20) (setThemeName L74)",
+  "note": "ThemeChangeInterceptor default param",
+  "app": "spring",
+  "shape": "noun-value",
+  "scope": "session",
+  "method": "GET"
+ },
+ {
+  "url": "/index.php?route=/themes/set",
+  "words": [
+   "themes",
+   "set"
+  ],
+  "source": "https://github.com/phpmyadmin/phpmyadmin/blob/QA_5_2/libraries/routes.php#L274 (fetched 2026-11-20)",
+  "note": "switches theme",
+  "app": "phpmyadmin",
+  "shape": "verb",
+  "scope": "session",
+  "method": "POST"
+ },
+ {
+  "url": "/index.php?route=/config/set",
+  "words": [
+   "config",
+   "set"
+  ],
+  "source": "https://github.com/phpmyadmin/phpmyadmin/blob/QA_5_2/libraries/routes.php#L53 (fetched 2026-11-20)",
+  "note": "writes a user config value",
+  "app": "phpmyadmin",
+  "shape": "verb",
+  "scope": "session",
+  "method": "POST"
+ },
+ {
+  "url": "/enableCheats",
+  "words": [
+   "enable",
+   "cheats"
+  ],
+  "source": "https://github.com/OWASP/SecurityShepherd/blob/68a11fafca527428b6bb773fb32b6275dc4ecd02/src/main/webapp/WEB-INF/web.xml#L399",
+  "note": "enables cheat sheets globally",
+  "app": "security-shepherd",
+  "shape": "verb",
+  "scope": "global",
+  "method": "POST"
+ },
+ {
+  "url": "/disableCheats",
+  "words": [
+   "disable",
+   "cheats"
+  ],
+  "source": "https://github.com/OWASP/SecurityShepherd/blob/68a11fafca527428b6bb773fb32b6275dc4ecd02/src/main/webapp/WEB-INF/web.xml#L408",
+  "note": "disables cheat sheets",
+  "app": "security-shepherd",
+  "shape": "verb",
+  "scope": "global",
+  "method": "POST"
+ },
+ {
+  "url": "/EnableScoreboard",
+  "words": [
+   "enable",
+   "scoreboard"
+  ],
+  "source": "https://github.com/OWASP/SecurityShepherd/blob/68a11fafca527428b6bb773fb32b6275dc4ecd02/src/main/webapp/WEB-INF/web.xml#L372",
+  "note": "enables the scoreboard",
+  "app": "security-shepherd",
+  "shape": "verb",
+  "scope": "global",
+  "method": "POST"
+ },
+ {
+  "url": "/enableFeedback",
+  "words": [
+   "enable",
+   "feedback"
+  ],
+  "source": "https://github.com/OWASP/SecurityShepherd/blob/68a11fafca527428b6bb773fb32b6275dc4ecd02/src/main/webapp/WEB-INF/web.xml#L705",
+  "note": "enables feedback",
+  "app": "security-shepherd",
+  "shape": "verb",
+  "scope": "global",
+  "method": "POST"
+ },
+ {
+  "url": "/setCtfMode",
+  "words": [
+   "set",
+   "ctf",
+   "mode"
+  ],
+  "source": "https://github.com/OWASP/SecurityShepherd/blob/68a11fafca527428b6bb773fb32b6275dc4ecd02/src/main/webapp/WEB-INF/web.xml#L462",
+  "note": "switches the game to CTF mode",
+  "app": "security-shepherd",
+  "shape": "noun-value",
+  "scope": "global",
+  "method": "POST"
+ },
+ {
+  "url": "/tournamentModeModules",
+  "words": [
+   "tournament",
+   "mode",
+   "modules"
+  ],
+  "source": "https://github.com/OWASP/SecurityShepherd/blob/68a11fafca527428b6bb773fb32b6275dc4ecd02/src/main/webapp/WEB-INF/web.xml#L309",
+  "note": "switches module layout to tournament mode",
+  "app": "security-shepherd",
+  "shape": "noun-value",
+  "scope": "global",
+  "method": "POST"
+ },
+ {
+  "url": "/openEveryModules",
+  "words": [
+   "open",
+   "every",
+   "modules"
+  ],
+  "source": "https://github.com/OWASP/SecurityShepherd/blob/68a11fafca527428b6bb773fb32b6275dc4ecd02/src/main/webapp/WEB-INF/web.xml#L300",
+  "note": "opens every module",
+  "app": "security-shepherd",
+  "shape": "verb",
+  "scope": "global",
+  "method": "POST"
+ },
+ {
+  "url": "/closeEveryModules",
+  "words": [
+   "close",
+   "every",
+   "modules"
+  ],
+  "source": "https://github.com/OWASP/SecurityShepherd/blob/68a11fafca527428b6bb773fb32b6275dc4ecd02/src/main/webapp/WEB-INF/web.xml#L318",
+  "note": "closes every module",
+  "app": "security-shepherd",
+  "shape": "verb",
+  "scope": "global",
+  "method": "POST"
+ },
+ {
+  "url": "/enableModuleBlock",
+  "words": [
+   "enable",
+   "module",
+   "block"
+  ],
+  "source": "https://github.com/OWASP/SecurityShepherd/blob/68a11fafca527428b6bb773fb32b6275dc4ecd02/src/main/webapp/WEB-INF/web.xml#L345",
+  "note": "enables module blocking",
+  "app": "security-shepherd",
+  "shape": "verb",
+  "scope": "global",
+  "method": "POST"
+ },
+ {
+  "url": "/logout",
+  "words": [
+   "logout",
+   "quit",
+   "exit"
+  ],
+  "source": "https://github.com/Qianlitp/crawlergo/blob/38b6364285b05eac18b4f9a23062f64ad35826f4/pkg/config/config.go#L96",
+  "note": "crawlergo DefaultIgnoreKeywords = [logout quit exit]",
+  "app": "crawlergo",
+  "shape": "verb",
+  "scope": "session",
+  "method": "GET",
+  "kind": "tool-default"
+ },
+ {
+  "url": "/logoff",
+  "words": [
+   "log out",
+   "sign out",
+   "log off",
+   "sign off",
+   "disconnect",
+   "deconnexion"
+  ],
+  "source": "https://github.com/wapiti-scanner/wapiti/blob/d0c6793fbf8c8982354bd05d65b9e6e84322a3a6/wapitiCore/parsers/html_parser.py#L40",
+  "note": "wapiti DISCONNECT_REGEX",
+  "app": "wapiti",
+  "shape": "verb-pair",
+  "scope": "session",
+  "method": "GET",
+  "kind": "tool-default"
+ },
+ {
+  "url": "/end-session",
+  "words": [
+   "logout",
+   "signout",
+   "exit",
+   "disconnect",
+   "terminate",
+   "end session",
+   "sign off",
+   "abmelden",
+   "cerrar sesion"
+  ],
+  "source": "https://github.com/projectdiscovery/katana/blob/0fc3a93f8c0c591042434f6826907fbff0e1007c/pkg/engine/headless/crawler/crawler.go#L838",
+  "note": "katana headless logoutPattern",
+  "app": "katana",
+  "shape": "verb",
+  "scope": "session",
+  "method": "GET",
+  "kind": "tool-default"
+ },
+ {
+  "url": "/sign-off",
+  "words": [
+   "logout",
+   "logoff",
+   "signout",
+   "signoff",
+   "log-out",
+   "sign-out",
+   "log-off",
+   "sign-off"
+  ],
+  "source": "https://github.com/zaproxy/zap-extensions/blob/70f5b3296f2594f54ad88154c505254122ebcc9b/addOns/commonlib/src/main/java/org/zaproxy/addon/commonlib/AuthConstants.java#L38; off by default: addOns/spider/.../SpiderParam.java:157 DEFAULT_LOGOUT_AVOIDANCE=false",
+  "note": "ZAP spider 'logout avoidance' (substring of escaped path+query)",
+  "app": "zap",
+  "shape": "verb",
+  "scope": "session",
+  "method": "GET",
+  "kind": "tool-default"
+ },
+ {
+  "url": "/index.php?do=toggle-security&page=home.php",
+  "words": [
+   "do",
+   "toggle",
+   "security"
+  ],
+  "source": "https://github.com/webpwnized/mutillidae/blob/126a1fdb4ff977f87e980d018f0def477afc3d5d/src/includes/header.php#L131; handler src/includes/process-commands.php",
+  "note": "flips global mode",
+  "app": "mutillidae",
+  "shape": "slot-value",
+  "scope": "global",
+  "method": "GET",
+  "lab": "mutillidae"
+ },
+ {
+  "url": "/index.php?do=toggle-enforce-ssl&page=home.php",
+  "words": [
+   "do",
+   "toggle",
+   "enforce",
+   "ssl"
+  ],
+  "source": "https://github.com/webpwnized/mutillidae/blob/126a1fdb4ff977f87e980d018f0def477afc3d5d/src/includes/header.php#L133; handler src/includes/process-commands.php",
+  "note": "flips global mode",
+  "app": "mutillidae",
+  "shape": "slot-value",
+  "scope": "global",
+  "method": "GET",
+  "lab": "mutillidae"
+ },
+ {
+  "url": "/index.php?do=toggle-hints&page=home.php",
+  "words": [
+   "do",
+   "toggle",
+   "hints"
+  ],
+  "source": "https://github.com/webpwnized/mutillidae/blob/126a1fdb4ff977f87e980d018f0def477afc3d5d/src/includes/header.php#L128; handler src/includes/process-commands.php",
+  "note": "flips global mode",
+  "app": "mutillidae",
+  "shape": "slot-value",
+  "scope": "global",
+  "method": "GET",
+  "lab": "mutillidae"
+ },
+ {
+  "url": "/set-up-database.php",
+  "words": [
+   "set",
+   "up",
+   "database"
+  ],
+  "source": "https://github.com/webpwnized/mutillidae/blob/126a1fdb4ff977f87e980d018f0def477afc3d5d/src/includes/header.php#L135",
+  "note": "rebuilds DB",
+  "app": "mutillidae",
+  "shape": "verb-pair",
+  "scope": "global",
+  "method": "GET",
+  "lab": "mutillidae"
+ },
+ {
+  "url": "/difficulty/hard",
+  "words": [
+   "difficulty",
+   "hard"
+  ],
+  "source": "https://github.com/dolevf/Damn-Vulnerable-GraphQL-Application/blob/a961308c02d1fb462b192681c336b0739e432da7/core/views.py#L441",
+  "note": "sets global difficulty",
+  "app": "dvga",
+  "shape": "noun-value",
+  "scope": "global",
+  "method": "GET",
+  "lab": "dvga"
+ },
+ {
+  "url": "/difficulty/easy",
+  "words": [
+   "difficulty",
+   "easy"
+  ],
+  "source": "https://github.com/dolevf/Damn-Vulnerable-GraphQL-Application/blob/a961308c02d1fb462b192681c336b0739e432da7/core/views.py#L441",
+  "note": "sets global difficulty",
+  "app": "dvga",
+  "shape": "noun-value",
+  "scope": "global",
+  "method": "GET",
+  "lab": "dvga"
+ },
+ {
+  "url": "/start_over",
+  "words": [
+   "start",
+   "over"
+  ],
+  "source": "https://github.com/dolevf/Damn-Vulnerable-GraphQL-Application/blob/a961308c02d1fb462b192681c336b0739e432da7/core/views.py#L431",
+  "note": "re-initialises the DB",
+  "app": "dvga",
+  "shape": "verb-pair",
+  "scope": "global",
+  "method": "GET",
+  "lab": "dvga"
+ }
+]

@@ -727,7 +727,9 @@ rewards) derives from it.
     "jwt_algorithm_confusion"`, `mechanism="alg-none-bypass"`): a
     two-probe differential over a header-carried Bearer token. Probe A
     (an unsigned `alg:none` token, a freshly-minted marker carried in
-    its `channel_id` claim — the literal field the real sink echoes)
+    ~~its `channel_id` claim — the literal field the real sink echoes~~
+    the RFC 7519 / OIDC standard claims `sub`, `name`, `preferred_username`
+    -- *superseded by FR-FUZZ-660*, 2026-11-20)
     must return 200 with the marker echoed back; probe B (the same
     marker, claiming `HS256` with a garbage signature) must return a
     real auth-rejection status (401/403 specifically, not merely
@@ -1280,7 +1282,8 @@ rewards) derives from it.
   - **Settle.** The sentinel wait lasts `SETTLE_MS` from the end of that load wait.
     Once `load` fires (recorded by `page.once("load")`), it lasts a full `SETTLE_MS`
     from `load`, capped at `timeout_ms` + `SETTLE_MS` after the commit, so a slow
-    page's sink is still seen. Only a Playwright error ends the wait early.
+    page's sink is still seen. Only a Playwright error ends the wait early (or the
+    hit). *(An early end on a "quiet" page, FR-FUZZ-650, was withdrawn: BUG-0650.)*
   - **Per probe.** A Playwright error or timeout of the context set-up, the plant or
     the observe navigation raises `NotObserved` (a subclass of `UnplaceableLocation`,
     in `oracle/browser.py`). So does a page that never reached `load` by the end of the
@@ -2315,7 +2318,63 @@ rewards) derives from it.
   - Enforced by: `tests/test_timing_payloads_carry_the_baseline.py` (discovery over every
     default strategy running `_confirm_timing`, proven on a synthetic offender),
     `tests/test_oracle_vectors.py::test_command_injection_confirms_past_a_filter_when_the_baseline_runs_a_command`.
+- **FR-FUZZ-680** *(the M6 browser carries the run's session; `CC-FUZZ-0680`, BUG-0690).*
+  In a run with an identity, every M6 browser visit (a stored-XSS plant and its observe
+  page, a DOM-XSS load) carries the session the run's probes carry: `fuzzlab auto` builds
+  `PlaywrightBrowserExecutor(session_route=sender.browser_session_route)` (FR-SESS-650),
+  and the executor adopts the route's session with the one adoption helper
+  (`browserauth.browser_session` / `context_options` / `apply_to_context`, FR-CRAWL-14)
+  before the driver starts. Its guard gets the session's scoped headers, its cookie scope
+  and its cookies (SP-74); an API plant (form or JSON) passes `checked_api_request` with
+  the session's cookies and cookie scope, adds the session's headers on its own origins
+  only, and is refused (not observed, never sent) on another origin than the session's
+  (FR-SESS-20). The visit is anonymous only where the sender's own gates send a probe
+  anonymously (an auth endpoint, an isolated path) or the run has no session
+  (`--no-login`). A login failure propagates as from the sender. `storage_headers` and a
+  session route are exclusive.
+- **FR-FUZZ-681** *(an unlanded plant is not observed; `CC-FUZZ-0680`, BUG-0690).* A form
+  or JSON plant whose answer SP-56 does not class as the application's own (a credentialed
+  login redirect or 401, a throttle, a gateway, a policy block; facts from SP-16's
+  `login_facts`) raises `NotObserved`: no verdict for that payload, never "did not fire"
+  (it would be a negative an ML stage trains on). The executor never decides a session
+  loss.
+- **FR-FUZZ-682** *(greybox carries its session whole or refuses; `CC-FUZZ-0681`,
+  BUG-0690 sweep).* `greybox_cli._cookie_for` reads every session header
+  (`SessionManager.session_headers`); the greybox sender carries a Cookie only, so a
+  session that carries any other header (a bearer; a browser login's Authorization beside
+  its cookie) or no cookie is refused (`SessionAuthError`, a usage error before any side
+  effect), never probed anonymously or with half of it.
 
+- **FR-FUZZ-660** *(strategies read only what a black-box target offers;
+  `CC-FUZZ-0660`, 2026-11-20, BUG-0661, PA-0660).* No confirmation strategy sends or
+  reads a field, claim, element, attribute or constant that only a lab supplied. Where a
+  strategy needs a name it takes it from the target (the captured request body's own
+  leaves, the response's own properties) or from a public standard, and it gives no
+  verdict when the target offers none (a stated miss, never a guess):
+  - `JwtAlgNoneConfusionStrategy` carries its marker in `STANDARD_CLAIMS` (RFC 7519
+    §4.1.2 `sub`; OIDC Core §5.1 `name`, `preferred_username`).
+  - `PredictableTokenSourceStrategy` reads every decimal JSON leaf of the response
+    and confirms a clock reading: an epoch count (s/ms/us/ns) near this host's time or
+    a nanosecond monotonic counter, each moving by no more than the measured window
+    around its two sends (an upper bound by causality).
+  - `MassAssignmentPrivilegedFieldStrategy` flips the response's own unsent
+    top-level `false` booleans and confirms one reading back `true`, with a
+    never-existing control property that must not come back.
+  - `PriceTrustDifferentialStrategy` varies the captured body's numeric leaves and
+    reads the response's leaf at the same path; no captured body, no verdict.
+  - `PriceIntegrityBypassStrategy` anchors its canary to a currency symbol or price
+    word within 40 characters, digit-bounded.
+  - `GoTemplateSstiStrategy` places a JSON point's expression in every string leaf
+    of the captured body; no captured body, no verdict.
+  - The XXE strategies reference the entity in the root element's text only.
+- **FR-FUZZ-661** *(the reported detection figure is a crawl run's; `CC-FUZZ-0661`,
+  2026-11-20, PA-0660).* `fuzzlab auto`'s score line names its points source: a crawl
+  run prints "detection score (crawl run, black-box)", a ground-truth-point run prints
+  "oracle diagnostic (ground-truth points: the answer key supplied the points; not a
+  detection figure)". The multi-target transfer summary labels each target's line
+  and its macro line the same way (`TargetOutcome.points_source`, summary key
+  `measures`: `detection` / `oracle-diagnostic` / `mixed`). Presentation only: no score
+  is computed differently.
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
   finding must reproduce.
@@ -2795,3 +2854,49 @@ and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
       it got a login page;
     - an unrecognised, short, low-entropy equal session id is accepted as distinct
       (FR-SESS-17).
+
+- **FR-FUZZ-650** *(SUPERSEDED by FR-FUZZ-653, `CC-FUZZ-0651`: withdrawn, it missed
+  late sinks, BUG-0650; kept for the record)* *(the M6 wait ends on a quiet page;
+  `CC-FUZZ-0650`, 2026-11-20).*
+  `PlaywrightBrowserExecutor._wait_for_token` ends the sentinel wait before `SETTLE_MS`
+  once `load` has fired and `pagequiet.PageQuiet.settled` reads the page quiet for
+  `QUIET_MS` (500 ms): no request SP-40's `Inflight` counts (its last start or end
+  restarts the period), and in **every** frame no timer due before the wait's
+  deadline, no interval, no animation frame, no idle callback and no running animation
+  (read from `TRACKER_JS`, an init script installed on the context before the first
+  navigation, which wraps the timer functions); and no WebSocket, EventSource or worker
+  on the page at all. A frame whose tracker cannot be read (with the Playwright error
+  class, or with no tracker) is not quiet: the wait runs as before. Before breaking,
+  the wait pumps Playwright's events once more, so a sentinel call the read raced is
+  kept. `EARLY_END = False` keeps the whole window and only records `settled_at` (the
+  measurement mode of `scripts/measure_scan_perf.py --shadow-quiet`). The verdicts are
+  unchanged: a hit is still executed=True, a page that never loaded still
+  `NotObserved`.
+- **FR-FUZZ-651** *(SUPERSEDED with FR-FUZZ-650 by FR-FUZZ-653)* *(FR-FUZZ-650's
+  residuals; `CC-FUZZ-0650`).* (1) A sink fed only by
+  a long-poll answered more than `netquiet.LONG_LIVED_MS` after it opened is not
+  waited for, as SP-40 decides for every settle. (2) A sink run by an event no tracker
+  sees (a media element's events with no request, a message from a cross-origin frame
+  that ran no tracked work) is not waited for after `QUIET_MS`. (3) A page's own script
+  can replace the wrapped timer functions or the tracker's reads; the tracker is
+  defined non-writable, and the labs are not adversarial. (4) A page with a WebSocket
+  (Juice Shop's socket.io), an interval or an endless animation keeps the whole
+  window: no saving there.
+- **FR-FUZZ-652** *(a held Playwright driver: measured, not built; `CC-FUZZ-0650`).*
+  Keeping one Playwright driver for a run would save its start (0.31 s per browser
+  observation on bWAPP), but a held sync driver leaves its event loop on the thread,
+  and every other sync Playwright use there then fails ("using Playwright Sync API
+  inside the asyncio loop", measured in `tests/test_browser_scope.py` and
+  `tests/test_confirm_trace.py`). The executor keeps a driver per probe.
+- **FR-FUZZ-653** *(the M6 observation window is never shortened; `CC-FUZZ-0651`,
+  BUG-0650, 2026-11-20).* The sentinel wait of `PlaywrightBrowserExecutor` ends only on
+  the hit, on its deadline (`SETTLE_MS` from `load`, capped as FR-FUZZ-48's settle
+  says) or on a Playwright error; never on a judgement that nothing else can run. A
+  page's script can be run again by events no tracker sees (an SVG animation's
+  `onend`/`onbegin`, `scheduler.postTask` with a delay, a MessageChannel or
+  `postMessage` chain, a meta refresh, a media element's events, a request answered
+  after SP-40's long-lived limit), measured by the independent verification of
+  CC-FUZZ-0650. A faster M6 keeps the whole window (more observations at once, or
+  less work outside the window), and each such sink stays a real-browser regression
+  test (`tests/test_m6_slow_sinks.py`).
+

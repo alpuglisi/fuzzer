@@ -3,6 +3,28 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0428 — At the merge of the integration tip (94fac7f): PA-0660's guard reads the held-out names, and `user_id` is cited (2026-11-20)
+- Change: `tests/test_blackbox_detection.py`: `lab_tokens` adds every name `lab/HOLDOUT.md`
+  lists (through `fuzzlab.lab_fixtures.heldout`, SP-140), so the bare product word of a
+  held-out lab whose answer key never spells it as a token (`dvws`) is lab-only vocabulary
+  too, without that file naming a held-out lab (rule 4);
+  `test_the_held_out_labs_names_are_lab_identifiers` pins it. `CITED` gains `user_id`
+  (WordPress core schema `wp_usermeta.user_id`; OWASP API Security Top 10 2023 API1 /
+  API3).
+- Reason: the orchestrator's integration tip brought PA-0660's guard (lane BBOX). With the
+  held-out keys feeding it, RailsGoat's key made `user_id` lab vocabulary, and
+  `fuzzlab/tools/fetcher.py:89` (`PRIVILEGED_FIELDS`, a generic mass-assignment hint list
+  since 87c140c, 2026-10-20, before any held-out lab) names it. Removing it would change
+  detection, which this lane does not do; the word is generic, so it is cited with an
+  independent source, the guard's documented path. This closes CC-LAB-0420's open
+  deliverable (the product names), in this form instead of editing `LAB_PRODUCT_NAMES`.
+- Impact: none on detection; the guard's lab vocabulary grows by the held-out names.
+- Risk: low.
+- Deliverables:
+  - [x] guard reads the list, citation, pin — done
+- Effectiveness (assessed 2026-11-20): the harness with `--base 94fac7f` on the merge
+  (see the CHANGELOG line of this merge).
+
 ### CC-LAB-0427 — The VAmPI and DVWS-node bootstraps check a differential, not a classified 401 (BUG-0721) (2026-11-20)
 - Change: `fuzzlab/lab_fixtures/external.py` (`bootstrap_vampi`, `bootstrap_dvws_node`): the
   login is verified when the request answers 200 with the token and a client error (4xx)
@@ -382,6 +404,123 @@ Component code: **LAB**. Entry format and required fields: see
     the point's own default value, which a ground-truth point does not carry; XXE LEVEL_1
     needs the app's `<book>` document (no XML template field exists for a point); SSRF
     LEVEL_2..4 need an internal host the container can reach; the crawler gaps above.
+### CC-LAB-0373 — Correction to CC-LAB-0371: the measured cut was withdrawn (2026-11-20)
+- Change: none to code; a correction (change-control is append-only).
+- CC-LAB-0371's AFTER column measured CC-FUZZ-0650's quiet-settle early end, withdrawn
+  by CC-FUZZ-0651 after it missed late XSS sinks the labs do not exercise (BUG-0650).
+  Its "no detection lost" covered the ten lab configurations only, with 2 positive
+  browser observations among the shadow run's 311: too few to see a miss (PA-0650(3)).
+  The branch's timing is CC-LAB-0371's BEFORE column again. CC-LAB-0370's probe and the
+  BEFORE profile stand: the M6 settle is still the measured cost, to be cut without
+  shortening the window (FR-FUZZ-653).
+- Deliverables:
+  - [x] this correction — done
+- Effectiveness: n/a (a record).
+
+### CC-LAB-0372 — Lane PERF: the cost of `R-SSJS` on two labs that do not need it (2026-11-20)
+- Change: none to code; a measurement on the merged tree 4cc25dd (lane NODE's
+  CC-FUZZ-0610 rule), asked by the orchestrator as a candidate for lane PERF's next cut.
+- How: `scripts/measure_scan_perf.py --authorized --lab <lab> --points ground-truth
+  -- --browser [--oob] --mode manual --categories <the categories automatic mode plans
+  for the lab>`, then the same with `server-side-javascript-injection` added. Juice
+  Shop: insecure-deserialization, open-redirect, path-traversal,
+  server-side-template-injection, sql-injection, ssrf, xss, xxe (with `--oob`);
+  bWAPP (`--base-url http://127.0.0.1:8092`): open-redirect, path-traversal,
+  sql-injection, xss. In automatic mode the rule runs only where the key labels a
+  `ssjs` case (NodeGoat), so neither lab pays it today.
+- Results (tp/fp/fn/tn identical with and without it: Juice Shop 5/0/10/3, bWAPP
+  21/0/34/3):
+  - Juice Shop: +8 candidates (30 -> 38), requests 150 -> 190 (+40, 5 per candidate),
+    wall 24.6 -> 24.2 s (within run-to-run noise).
+  - bWAPP: +48 candidates (102 -> 150), requests 888 -> 1285 (+397, +45%, about 8.3
+    per candidate), wall 195.7 -> 200.2 s.
+  - No finding and no false positive from it on either lab.
+- Candidate cut (not built): `R-SSJS` fires on every query, body, JSON and path point;
+  a value-shape or technology gate (a fingerprint or answer that names a JavaScript
+  server) would keep the cost off PHP apps like bWAPP. That is NODE's rule: a change
+  to it is lane NODE's or the orchestrator's decision.
+- Deliverables:
+  - [x] runs; this record — done
+- Effectiveness: n/a (a record).
+
+### CC-LAB-0371 — Lane PERF: BEFORE and AFTER on five external labs (2026-11-20)
+- Change: none to code; the measurement record of CC-FUZZ-0650 (FR-FUZZ-650).
+- How (this container, docker, sequentially, nothing else running beside a timed
+  run): each lab up with `lab/labctl.sh up <lab> --authorized`; spider databases made
+  once and reused by every run (`crawl --engine playwright --no-reveal --db ...`:
+  Juice Shop `--start http://127.0.0.1:3000/#/login --max-depth 0 --submit-spa-forms
+  login`; bWAPP `--start http://127.0.0.1:8092/bWAPP/portal.php --identity bwapp-bee
+  --follow-selector-forms bug`; SSType, CopyNPaste, Mongection from `/`, anonymous);
+  then `python scripts/measure_scan_perf.py --authorized --store <fresh> --lab <lab>
+  --points <gt|crawl> [--spider-db ...] -- --browser` (Juice Shop adds `--oob`;
+  bWAPP gt `--base-url http://127.0.0.1:8092`, bWAPP crawl `--base-url
+  http://127.0.0.1:8092/bWAPP/ ... --header-points User-Agent,Referer,bWAPP`).
+  BEFORE ran tree 2be7a50 (a separate worktree, F-650), AFTER the commit of
+  CC-FUZZ-0650. Labs with an identity ran as it (`juice-user`, `bwapp-bee`).
+- Results (tp/fp/fn/tn identical BEFORE and AFTER for every row, with the same
+  matched case ids and no false alarm; BEFORE / AFTER):
+
+    | lab, points | tp/fp/fn/tn | requests | requests per finding | wall s | M6 browser s |
+    |---|---|---|---|---|---|
+    | Juice Shop gt | 5/0/10/3 | 150 / 150 | 30.0 / 30.0 | 43.7 / 24.6 | 35.4 / 15.4 |
+    | Juice Shop crawl | 1/0/14/3 | 69 / 69 | 69.0 / 69.0 | 36.6 / 37.6 | 30.5 / 31.0 |
+    | bWAPP gt | 21/0/34/3 | 888 / 885 | 42.286 / 42.143 | 620.9 / 198.7 | 600.3 / 175.4 |
+    | bWAPP crawl | 46/0/9/3 | 11367 / 11367 | 247.109 / 247.109 | 842.0 / 391.4 | 659.3 / 195.2 |
+    | SSType gt | 1/0/1/2 | 22 / 22 | 22.0 / 22.0 | 28.4 / 7.9 | 28.2 / 7.8 |
+    | SSType crawl | 0/0/2/2 | 0 / 0 | None / None | 0.1 / 0.1 | 0.0 / 0.0 |
+    | CopyNPaste gt | 0/0/3/1 | 67 / 67 | None / None | 0.2 / 0.2 | 0.0 / 0.0 |
+    | CopyNPaste crawl | 0/0/3/1 | 23 / 23 | None / None | 28.5 / 7.9 | 28.4 / 7.7 |
+    | Mongection gt | 0/0/2/2 | 12 / 12 | None / None | 0.2 / 0.1 | 0.0 / 0.0 |
+    | Mongection crawl | 0/0/2/2 | 0 / 0 | None / None | 0.1 / 0.1 | 0.0 / 0.0 |
+
+  bWAPP gt's 888 / 885 requests is run-to-run drift of bWAPP's own answers, not the
+  change: the shadow run (same verdict code as BEFORE, the whole wait kept) sent 11 364
+  on bWAPP crawl against BEFORE's 11 367.
+- Profile (BEFORE, `phases`): the M6 browser was 81-99% of every run that used it:
+  each observation of a payload that does not fire waited `SETTLE_MS` (4 s), plus a
+  driver start (0.31 s) and the launch and navigation; HTTP sends 19 s (bWAPP gt) and
+  141 s (bWAPP crawl, 11 367 requests); fingerprint baseline, audit, session login and
+  store writes under 3 s each. AFTER, bWAPP crawl's remaining time is the browser
+  (195 s, 138 observations: driver start, launch, navigation, the 0.5 s quiet period)
+  and HTTP (154 s).
+- Juice Shop crawl gained nothing: every observation's page opened socket.io's
+  WebSocket, which keeps the whole window (FR-FUZZ-651(4)).
+- Not measured here: Gossip World (its login failed under the session manager while
+  the lab's own bootstrap logged in: `SessionAuthError` at `crawl --identity
+  sdl-gossip-user`), and the other five secDevLabs apps.
+- Deliverables:
+  - [x] BEFORE, shadow, AFTER runs; this record — done
+- Effectiveness (assessed 2026-11-20): met for the measured labs: no detection lost,
+  wall time down 68% (bWAPP gt), 54% (bWAPP crawl), 44% (Juice Shop gt), 72% (SSType
+  gt, CopyNPaste crawl).
+
+### CC-LAB-0370 — Scan performance probe for the external labs (2026-11-20)
+- Change: `scripts/measure_scan_perf.py` (new; FR-LAB-370). Lane PERF's measurement
+  tool: one `fuzzlab auto` run in-process against a running external lab, scored, with
+  per-phase wall-clock timers.
+- Reason: lane PERF must cut scan cost on the existing external labs without losing a
+  detection, and every optimisation must cite a measurement (MULTI_AGENT_ORCHESTRATION
+  §7). A cProfile of `auto` alone was misleading: it put 36 s of a 51 s Juice Shop run
+  under the Playwright driver's stop, which measured 0.09 s with explicit timers (the
+  greenlet dispatcher's work lands under the switch frame).
+- Measured with it (2026-11-20, docker, this container; BEFORE = tree 2be7a50):
+  - `--lab juice-shop --points ground-truth -- --browser --oob`: tp=5 fp=0 fn=10 tn=3
+    (as CC-LAB-0317), 150 requests, 30.0 per finding, 43.7 s; the M6 browser 35.4 s
+    over 9 observations.
+  - `--lab juice-shop --points crawl` (spider: `crawl --start .../#/login --max-depth 0
+    --submit-spa-forms login`) `-- --browser --oob`: tp=1 fp=0 fn=14 tn=3, 69
+    requests, 36.6 s; the browser 30.5 s over 6 observations.
+  - `--lab bwapp --points ground-truth --base-url http://127.0.0.1:8092 -- --browser`:
+    tp=21 fp=0 fn=34 tn=3, 888 requests, 42.3 per finding, 620.9 s; the browser 600.3 s
+    over 126 observations (driver start 0.31 s each, the session 4.4 s each: a payload
+    that does not fire waits out `SETTLE_MS`), HTTP 19.1 s.
+- Impact: none on a scan (a script; it wraps functions only for its own run).
+- Risk: low; lab only, `--authorized` required, loopback labs.
+- Deliverables:
+  - [x] script; first measurements (above) — done
+  - [ ] the remaining labs and the optimisations it motivates — in progress (lane PERF)
+- Effectiveness: pending (lane PERF's AFTER runs).
+
 ### CC-LAB-0343 — Mutillidae II measured: BASELINE and AFTER, gaps recorded (2026-11-20)
 - Change: none to code; the measurement record of lane PHPX (item PHPX).
 - Results (scored against `lab/ground-truth-mutillidae`, 39 cases, 28 positives, 11
@@ -474,6 +613,18 @@ Component code: **LAB**. Entry format and required fields: see
   The web tier's bridge has egress (as Juice Shop's; NFR-LAB-safety "not yet enforced").
 - Deliverables:
   - [x] fixture; exposure check passed live (`labctl.sh up|status`) — done
+### CC-LAB-0395 — Lane XSSPLANT's live before/after of the M6 plant's session on NodeGoat and bWAPP (BUG-0690) (2026-11-20)
+- Change: none to the labs; measurements only (pristine worktrees: BEFORE 78a24f2, AFTER 04c91ca; identities in a scratch keyring, nodegoat-user/peer, bwapp-bee).
+- Measurements (2026-11-20, `--identity --browser`, labs reset before each NodeGoat run):
+  - NodeGoat crawl (headline; `crawl --start /dashboard --engine playwright --identity nodegoat-user --max-depth 3`, then `auto --points crawl --browser --score`): BEFORE tp=12 fp=0 fn=5 tn=7 (285 requests), AFTER tp=12 fp=0 fn=5 tn=7 (282). Unchanged: crawl mode builds no plant step for a stored-XSS candidate (no store URL), so M6 never plants there (open gap).
+  - NodeGoat ground truth (oracle diagnostic): BEFORE tp=12 fp=0 fn=5 tn=7 (244); AFTER tp=13 fp=0 fn=4 tn=7 (247): NGOAT-0008 confirmed. Trace: BEFORE each of 6 plants `POST /profile` 302 (to `/login`), observe "200" (the login page, end of the redirect chain), not executed; AFTER plant 200, sentinel fired on `/dashboard`, executed.
+  - bWAPP (a second cookie-session target; uncommitted one-case key recasting BWAPP-0037's blog as stored, plant and observe `xss_stored_1.php`): BEFORE plant 302 (to `login.php`); AFTER plant 200 with the session. Not executed either way: the app stores only when the form's `entry_add` submitter is posted, and a `StoreStep` carries one field (open gap). Juice Shop: no answer-key row has a store URL, so no plant (not measurable here).
+  - fp stayed 0 in every run.
+- Impact (other components / project): FUZZ (CC-FUZZ-0680). Open gaps for the orchestrator: (1) crawl-mode stored-XSS planting (CRAWL/AUD/FUZZ); (2) a plant carries no sibling form entries; (3) the trace records the end of a redirect chain as the observe status.
+- Risk (level; mitigation or accepted-risk justification): none (measurement only, loopback labs).
+- Deliverables:
+  - [x] BEFORE/AFTER runs, per-visit plant evidence — done
+- Effectiveness (assessed 2026-11-20): as above; the session now reaches the plant on two independent cookie-session targets.
 
 ### CC-LAB-0332 — Juice Shop's `$where` route confirmed by the server-side JavaScript strategy, without crashing it (2026-11-20)
 - Change: none to code; a measurement record for CC-LAB-0317's open item.

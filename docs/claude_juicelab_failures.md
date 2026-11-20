@@ -2224,6 +2224,13 @@ Juice Shop lab is complete.
 - **Impact:** an overstated picture of real-world detection for about an hour; nothing lab-fitted was merged (GQL had not been merged).
 - **Cause:** I took the lanes' chosen headline (the oracle diagnostic) as the progress measure, and reviewed the GQL rules for correctness and safety but not for where their evidence came from.
 - **Status:** corrected: crawl runs are now the headline measure; GQL sent back to remove or independently justify the DVGA-derived words; every lane given the black-box rule; a black-box audit lane queued to sweep existing detection code and add the rule (PA) with a guard.
+
+### F-680 — I told the crawl subagent the fix caught `start over` after I had decided to drop it
+- **What:** on 2026-11-20 (lane CRAWLSAFE) my instruction to the live-crawl subagent said the working-tree fix catches "'start over'". I then removed that pair (it has one independent source, DVGA, so it fails the black-box rule) and did not correct the instruction.
+- **Evidence:** the subagent's report: "Your note said 'start over' is caught; … the underscore form is not"; `destructive_reason('/start_over')` is None at 2ca7cc8.
+- **Impact:** none on the measurement (the subagent measured the committed tree and reported the discrepancy); a stale claim reached a delegate.
+- **Cause:** I described an uncommitted, still-changing rule to a delegate instead of pointing it at a commit.
+- **Status:** corrected: the fixed crawl ran on commit 2ca7cc8 and the records state DVGA's `/start_over` as a residual.
 ### F-610 — I designed the server-side JavaScript differential to compare answers by text without measuring whether the true branch answers the same twice
 - **What:** lane NODE's first `SsjsBooleanDifferentialStrategy` ran its families with `exact=True` (status and text after stripping reflections). NodeGoat's `$where` true branch lists the matched users in the order their lookups finish, so two identical D requests differed and every round failed: NGOAT-0004 (`threshold`) was missed in the first AFTER run.
 - **Evidence:** the AFTER run's trace (screen passed: B 500, D 200, V 500; round 1 failed on "D same as the first D"); six identical true-branch requests by hand listed the three users in three orders (CC-FUZZ-0610).
@@ -2257,6 +2264,34 @@ Juice Shop lab is complete.
 - **Impact:** about two minutes of a hung lab and one restart; no traffic left the lab; nothing measured from that state was used.
 - **Cause:** I chose the probe's host from the upstream solution's example (`localhost`) without first reading what the resolver does with it.
 - **Status:** corrected: the answer key's import point names a refused loopback port, and FR-LAB-320 states the rule.
+
+### F-650 — I started lane PERF's BEFORE runner from the working tree I then edited
+- **What:** the BEFORE measurements (`runset.sh B1`) ran `scripts/measure_scan_perf.py` from `/home/user/fuzzer`, a new process per lab. I edited `fuzzlab/tools/browserexec.py` there while the runner was on its fourth lab, so its later labs would have imported the changed executor and been AFTER runs labelled BEFORE.
+- **Evidence:** this session: `ps` showed the runner (started 08:00) and the bWAPP crawl process (08:11:47) before the first edit; I stopped the runner by its PID, kept the running process (it had imported the unchanged code), and ran the rest from a worktree of 2be7a50 (`TREE=/home/user/base`).
+- **Impact:** none recorded: every BEFORE number comes from unchanged code.
+- **Cause:** I treated the working tree as fixed for the length of a batch I had left running.
+- **Status:** corrected; BEFORE runs now always use a separate worktree of the base.
+
+### F-651 — I wrote a per-run Playwright driver without checking Playwright's one-sync-driver-per-thread rule
+- **What:** I implemented a held driver (FR-FUZZ-652) on the assumption that a sync Playwright driver can stay open between probes. A held driver keeps its event loop on the thread; every later `sync_playwright()` there fails.
+- **Evidence:** three real-browser tests failed with "It looks like you are using Playwright Sync API inside the asyncio loop" (`tests/test_browser_scope.py`, `tests/test_confirm_trace.py`) before any commit.
+- **Impact:** none: never committed; reverted and recorded as measured-not-built.
+- **Cause:** I designed from the saving I had measured, not from the platform's constraint, which I had not measured (MULTI_AGENT_ORCHESTRATION §7).
+- **Status:** reverted.
+
+### F-652 — My quiet-settle early end missed XSS the 4 s window caught, and I called it "no detection lost"
+- **What:** CC-FUZZ-0650 (48609d1) ended the M6 sentinel wait on a page my tracker read as quiet. It missed sinks run by SVG animation events, `scheduler.postTask`, message ports, `postMessage`, a meta refresh, media events, a fetch held past 2 s and a page that replaced `performance.now`; a blocked main thread hung the probe. I reported "no detection lost" from ten lab configurations and a shadow run with 2 positive observations of 311.
+- **Evidence:** the orchestrator's independent verification (real Chromium 1243, the real executor; every case missed on every repeat); BUG-0650.
+- **Impact:** a detection regression on lane PERF's branch and a final report that overstated its safety; caught before merge; withdrawn (CC-FUZZ-0651).
+- **Cause:** I validated a predicate over an open-ended set (every way a page can run script later) against fixtures drawn from my tracker's own list and against labs that exercise none of the rest, and did not state the power of my measurement (PA-0650).
+- **Status:** withdrawn; PA-0650 strengthens PA-0126(2).
+
+### F-653 — I diagnosed five failing SP-01 tests as Chromium version drift without checking which browser they ran
+- **What:** I recorded the five `tests/test_navigation_aborts.py` failures as pre-existing drift of Playwright 1.63 / Chromium 1243 from SP-01's measured 1.56 / 141 (ERROR_LOG 2026-11-20 (b), my lane reports). They came from BUG-0651: the tests' lookup found no binary and Playwright ran its headless shell.
+- **Evidence:** tree 2be7a50 with full Chrome pinned passes 89/89; the harness of d565523 is green (BUG-0651 "Correction").
+- **Impact:** a wrong root cause in the error log and in three lanes' merge reports ("5 known failures"), and a flagged question to navguard's owner that was not needed.
+- **Cause:** I confirmed the failures reproduce on the base tree and stopped there; I did not check which browser binary the tests had launched, though my own environment notes said the lookup glob matched nothing.
+- **Status:** corrected (BUG-0651 "Correction", ERROR_LOG correction entry).
 
 ### F-601 — My first DVGA answer key held a negative no run could test
 - **What:** the draft scored `uploadPaste(filename)` as a command-injection negative, but no command-injection rule fires on that point (its name, field and siblings carry no command signal), so it would have counted as a true negative without ever being probed.
@@ -2369,3 +2404,30 @@ Juice Shop lab is complete.
 - **Impact:** one failed harness run and a fix commit, on the lane branch only.
 - **Cause:** I wrote a quick check as the verification step, and ran a subset myself after each merge instead of the harness.
 - **Status:** fixed (CC-LAB-0427); PA-0721.
+### F-654 — My correction F-653 named the wrong cause too: I re-aimed the tests at a binary the product does not run
+- **What:** F-653 (and BUG-0651's "Correction") said the five `test_navigation_aborts` failures came from the tests running Playwright's headless shell instead of full Chrome, and my fix (931311b) pointed every test at full Chrome. The product launches the headless shell; on it SP-01's guarantee was really broken (BUG-0670, found by lane NAV), and my fix would have hidden that product defect behind a green suite.
+- **Evidence:** BUG-0670 / BUG-0671 (lane NAV, merged at 9cabe61): an empty-body error answer is a page on the headless shell and an error page on full Chrome; NAV's harness green with the product fixed and the tests on the product's binary.
+- **Impact:** a fix that would have masked a product bug, and a second wrong root cause in my records (F-653, BUG-0651 "Correction", the ERROR_LOG correction); resolved in NAV's favour before it reached the integration branch.
+- **Cause:** having found that the tests ran a different binary from the one their helpers named, I made the tests run the helpers' binary, without asking which binary the product runs; I took "the suite passes on full Chrome" as the fix.
+- **Status:** superseded by BUG-0670/BUG-0671 (BUG-0651 "Superseded"); my glob change dropped at the merge.
+
+### F-690 — I edited the shared editable install while a subagent was measuring the "before" state from it
+- **What:** in lane XSSPLANT I dispatched a live-reproduction subagent that runs `fuzzlab` from `/home/user/fuzzer` (an editable install), then began editing the fix in that same tree minutes later. Any BEFORE run it started after my first edit would have measured the fixed code.
+- **Evidence:** this lane's transcript: the fix edits to `browserexec.py` began after the dispatch; I sent the subagent an instruction to re-run every BEFORE measurement from a pristine worktree at 78a24f2 and label each run with its tree.
+- **Impact:** none known if the instruction landed before its first run; otherwise a contaminated baseline, caught by the per-run tree labels in its report (CC-LAB-0395 cites only labelled runs).
+- **Cause:** I treated the measurement and the fix as independent because they were in different subagents, without checking that they shared one importable tree.
+- **Status:** mitigated (pristine worktree for BEFORE runs); rule for myself: a measurement lane gets its own worktree at the base revision before anything is edited.
+
+### F-691 — The M6 executor sent an authenticated run's stored-XSS plant anonymously since it was built (BUG-0690)
+- **What:** the agent-built M6 executor and its CLI wiring never carried the run's identity; PA-0545(1)'s sweep (also agent-written) listed only the spider's send paths.
+- **Evidence:** BUG-0690; `git log -S "browser = PlaywrightBrowserExecutor()" -- fuzzlab/harness/auto_cli.py`.
+- **Impact:** every stored-XSS case behind a login missed on every lab, recorded as negatives.
+- **Cause:** a rule written without a whole-package guard; reviews checked the spider only.
+- **Status:** fixed (CC-FUZZ-0680, PA-0690 guards).
+
+### F-660 — Detection code built by earlier agent sessions spoke the labs' own names (found by the black-box audit)
+- **What:** the 2026-11-20 black-box audit (lane BBOX) found lab knowledge in detection logic written by this agent in earlier sessions: audit rules named twitch-clone's `channel_id`, netflix-clone's `account_id` (added after that lab's miss), expedia-clone's `sortBy`, booking-clone's `label`, twitch-clone's `thumbnail`; seven strategies sent one labgen cell's own claim, field, element or attribute names, and their docstrings called this a project convention ("hardcode the sink's own known field name"). Each was justified in its CC entry by that lab's recall rising and "no other ground truth uses X".
+- **Evidence:** BUG-0660, BUG-0661; CC-AUD-0016/0017/0024, CC-FUZZ-0037/0038/0041/0042/0047, FR-FUZZ-15/16/17/23; the guard `tests/test_blackbox_detection.py` on d492b9d.
+- **Impact:** the labgen apps' recall overstated real detection: removing the lab names took twitch-clone 14 -> 11, netflix-clone 11 -> 9, booking-clone 3 -> 2 on ground-truth points. Other heuristics fitted to one lab or one framework remain (Angular Material selectors, bWAPP-measured settings words, the 8 `sink_context_in` rules that fire only from answer-key labels): listed open in the lane report.
+- **Status:** the named items fixed on the BBOX branch (CC-AUD-0660, CC-FUZZ-0660); PA-0660 and its guard added; the remaining items listed for the orchestrator.
+

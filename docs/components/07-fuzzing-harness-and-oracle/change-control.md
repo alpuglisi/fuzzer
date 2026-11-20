@@ -121,6 +121,57 @@ Newest first.
   In the lab run (CC-LAB-0350): VAPP-0051/0052 and VAPP-0066 newly
   confirmed; no path-traversal or SSRF negative confirmed. Juice Shop regression:
   CC-LAB-0352.
+### CC-FUZZ-0651 — The quiet-settle early end withdrawn: M6 keeps its whole window (BUG-0650) (2026-11-20)
+- Change: `fuzzlab/tools/browserexec.py` restored to its 2be7a50 text; `fuzzlab/tools/
+  pagequiet.py` and `tests/test_pagequiet.py` deleted; the fakes of
+  `tests/test_confirm_trace.py` and `tests/test_m6_navigation_failures.py` restored;
+  `scripts/measure_scan_perf.py` loses `--shadow-quiet`; new `tests/test_m6_window_guard.py`
+  (PA-0650(1), proven on a synthetic offender) and `tests/test_m6_slow_sinks.py` (the
+  verifier's late sinks, each detected by the whole window); SP-105 withdrawn;
+  FR-FUZZ-650/651 superseded by FR-FUZZ-653; BUG-0650, PA-0650, F-652.
+- Reason: independent verification found CC-FUZZ-0650 missed XSS the 4 s wait caught
+  (BUG-0650). The owner's decision, through the orchestrator: detection beats speed.
+- Impact: M6 is back to 2be7a50's timing (CC-LAB-0371's BEFORE column); CC-FUZZ-0650's
+  speed-up is gone. Nothing else changed.
+- Risk: none beyond 2be7a50's.
+- Deliverables:
+  - [x] withdrawal, guard and regression tests, records — done
+  - [ ] a speed-up that keeps the whole window (FR-FUZZ-653) — open
+- Effectiveness (assessed 2026-11-20): the window guard passes on the restored executor
+  and fails a synthetic early end; see `tests/test_m6_slow_sinks.py` for the late sinks.
+
+### CC-FUZZ-0650 — The M6 sentinel wait ends once the page has gone quiet (SP-105) (2026-11-20)
+- Change: `fuzzlab/tools/pagequiet.py` (new: `PageQuiet`, `TRACKER_JS`, `QUIET_MS`);
+  `fuzzlab/tools/browserexec.py` (`EARLY_END`; `_in_browser` installs `PageQuiet`
+  before the first navigation; `_wait_for_token(..., quiet=)` breaks once settled,
+  after one more event pump); `tests/test_pagequiet.py` (new); the fake Playwright
+  contexts of `tests/test_confirm_trace.py` and `tests/test_m6_navigation_failures.py`
+  gain `add_init_script`; SP-105; FR-FUZZ-650..652.
+- Reason (measured, `scripts/measure_scan_perf.py`, CC-LAB-0370): the M6 browser was
+  600 of 621 s on bWAPP's ground truth and 659 of 842 s on its crawl; each observation
+  of a payload that does not fire waited the whole `SETTLE_MS` (4 s). The shadow run
+  (`--browser-timeline --shadow-quiet`: the whole wait kept, the early end recorded)
+  over Juice Shop gt/crawl, SSType gt, CopyNPaste crawl and bWAPP gt: 173
+  observations, every hit before the would-be end (0 after), every settled negative
+  settled at 0.52-0.56 s; Juice Shop's pages with socket.io's WebSocket kept the
+  whole window (7 of 15 observations).
+- Not built (measured): keeping one Playwright driver per run (FR-FUZZ-652). A held
+  sync driver broke later sync Playwright use on the thread (3 real-browser tests).
+- Impact: M6 only. Verdicts unchanged by construction (a hit still confirms; a page
+  that never loaded is still `NotObserved`); trace spans (`waited`) record the shorter
+  wait. SP-40 unchanged (a consumer).
+- Risk: medium -- an early end could miss a sink a tracker cannot see (FR-FUZZ-651);
+  mitigated: fail closed on any unreadable frame, streams and workers keep the whole
+  window, real-browser tests for sinks run by a request's answer, an interval, an
+  animation-frame loop and a timer chain, the shadow run on the labs.
+- Deliverables:
+  - [x] code, tests, SP-105, FR-FUZZ-650..652, ARCHITECTURE — done
+  - [x] BEFORE/AFTER on the labs (tp/fp/fn/tn identical) — done (CC-LAB-0371)
+- Effectiveness (assessed 2026-11-20): met. On ten lab configurations tp/fp/fn/tn and
+  the matched case ids were identical BEFORE and AFTER; wall time 620.9 -> 198.7 s
+  (bWAPP gt), 842.0 -> 391.4 s (bWAPP crawl), 43.7 -> 24.6 s (Juice Shop gt), 28.4 ->
+  7.9 s (SSType gt), 28.5 -> 7.9 s (CopyNPaste crawl); requests unchanged (CC-LAB-0371).
+
 ### CC-FUZZ-0622 — A front controller's page is part of a finding's URL and of a case's scoring key (FR-FUZZ-622, SP-90) (2026-11-20)
 - Change: `fuzzlab/oracle/oracle.py` (`finding_url` keeps `?<route>=<page>` of a router
   URL, from its query or a crawled point's sibling entries; `_front_controller_route`),
@@ -182,6 +233,24 @@ Newest first.
     the MRO, so a `confirm` in a shared base is checked; the finding-URL builder
     (CC-FUZZ-0622) allowed in `tests/test_query_placement.py` (a record key, never
     sent) — done
+### CC-FUZZ-0681 — Greybox carries its session whole or refuses it (FR-FUZZ-682, BUG-0690 sweep) (2026-11-20)
+- Change: `fuzzlab/greybox/greybox_cli.py::_cookie_for` reads `SessionManager.session_headers` and raises `SessionAuthError` (the CLI's usage error, before any side effect) for a session carrying any header but `Cookie`, or no cookie; it returned `None` (an anonymous run) before.
+- Measurements before design (CLAUDE.md item 8): code read (subagent sweep, verified): `session_header` returns the Cookie line or else Authorization; `_cookie_for` kept only a `Cookie: ` prefix.
+- Impact (other components / project): SESS (reads `session_headers`, unchanged). A bearer-session greybox run now stops loudly instead of probing anonymously.
+- Risk (level; mitigation or accepted-risk justification): low; refusing is PA-0545(1)'s sanctioned disposition. Carrying a bearer in the greybox sender is not built (open gap).
+- Deliverables:
+  - [x] fix, `tests/test_greybox_session_carry.py` (4 tests) — done
+- Effectiveness (assessed 2026-11-20): the four tests pass; existing greybox session tests unchanged.
+
+### CC-FUZZ-0680 — The M6 browser executor carries the run's session; an unlanded plant is not observed (FR-FUZZ-680, FR-FUZZ-681, BUG-0690) (2026-11-20)
+- Change: `fuzzlab/tools/browserexec.py`: `PlaywrightBrowserExecutor(session_route=)`, `_scope`, `_visit_session` (the route's session via `browserauth.browser_session`, before the driver starts), `_carried` (headers, header and cookie scope, `held_session_cookies`), `_api_headers` (the session's headers on its origins; another origin refused, NotObserved), `_plant_landed` (SP-56 class of the plant's answer; not the application's → NotObserved); the context adopts `context_options(session)` and `apply_to_context`; `guard_page` gets `header_scope`, `cookie_scope`, `session_cookies`; the API plant passes `checked_api_request(session_cookies=, cookie_scope=)` (`SessionHostUnreached` → NotObserved). `fuzzlab/harness/auto_cli.py`: `PlaywrightBrowserExecutor(session_route=getattr(sender, "browser_session_route", None))`. Tests: `tests/test_m6_session.py` (34), `tests/test_browser_context_session.py` (3 guards); three fake-Playwright doubles answer 200 (`test_browser_scope.py`, `test_destructive_urls.py`, `test_confirm_trace.py`), and the status-less double's test expects NotObserved.
+- Measurements before design (CLAUDE.md item 8): lane NODE, NodeGoat live: the plant `POST /profile` 302 → `/login`, the run's probes to it 200 (78a24f2); this lane's real-browser fixture measures the pre-fix executor's plant and observe arriving without the cookie (`[('POST', '/profile', False), ('GET', '/dashboard', False)]`); Playwright's `context.request` shares the context's cookie jar (the fixture's plant carries the adopted cookie) and bypasses `route` (headers added explicitly). Live before/after in CC-LAB-0395.
+- Impact (other components / project): SESS (`browser_session_route`, CC-SESS-0650); CRAWL/AUD unchanged (same adoption helper). A run with `--identity --browser` now logs the browser in through the run's manager (no second login); auth-endpoint and isolated-path visits stay anonymous. Lane PERF's SP-105 sentinel-wait edit is in another function (`_wait_for_token`): no overlap expected at merge.
+- Risk (level; mitigation or accepted-risk justification): medium (a session now goes to the browser): every gate is applied (route `header_scope`/`cookie_scope`, SP-74 reach, the sender's auth-endpoint and isolation gates), guarded by tests. `_plant_landed` reads SP-16's login URL rule without the session's own `login_url` (an unusual login path's redirect is not recognised: a remaining false negative, not a false positive). A query-location (GET) plant's answer is not classed.
+- Deliverables:
+  - [x] fix, tests, guards, ERROR_LOG, BUG-0690, PA-0690, SP-125 — done
+  - [x] live re-runs (CC-LAB-0395) — see there
+- Effectiveness (assessed 2026-11-20): NodeGoat ground truth tp 12 -> 13 (NGOAT-0008), fp 0; NodeGoat crawl unchanged tp=12 fp=0 (crawl builds no plant step: open gap); bWAPP plant 302 -> 200 with the session (CC-LAB-0395). Harness counts in the lane report.
 
 ### CC-FUZZ-0611 — The NoSQL operator differential compares a page that echoes the submitted leaf (FR-FUZZ-612, BUG-0610) (2026-11-20)
 - Change: `fuzzlab/oracle/strategies.py`: `_JS_OBJECT_STRING` and
@@ -255,6 +324,35 @@ Newest first.
 - Deliverables:
   - [x] Recorded as affected by construction (the caller sweep, BUG-0670) — done
 - Effectiveness: pending (the lane's harness run, CC-CRAWL-0640).
+### CC-FUZZ-0661 — The score line names its points source: a crawl run is the detection figure, a ground-truth-point run an oracle diagnostic (PA-0660, FR-FUZZ-661) (2026-11-20)
+- Placement: lane BBOX, base d492b9d.
+- Change: `harness/auto_cli.py` `score_label` / `SCORE_LABELS` replace "score vs ground truth" with "detection score (crawl run, black-box) vs ground truth" or "oracle diagnostic (ground-truth points: the answer key supplied the points; not a detection figure) vs ground truth"; `--points` help says the same. `harness/multitarget.py`: `TargetOutcome.points_source` (from the run's metrics), each target line labelled, the macro line labelled by `transfer_summary(...)["measures"]` (`detection` / `oracle-diagnostic` / `mixed`). Docstrings of `auto.points_from_ground_truth`, `auto.run_auto` and `core/runmode.py` (CC-CORE-0630) no longer call a ground-truth-point run a detection benchmark.
+- Impact: presentation only; no score is computed differently (`tests/test_score_presentation.py::test_the_macro_math_is_unchanged_by_the_labels`). The four `tests/data/auto_summary` goldens (all ground-truth-point runs) carry the new label. `--points auto` still resolves to ground-truth when `--ground-truth` is given: changing the default is a behaviour change for the orchestrator to decide (listed in the lane report).
+- Risk: low.
+- Deliverables:
+  - [x] Labels and tests (`tests/test_score_presentation.py`, goldens) — done
+- Effectiveness (assessed 2026-11-20): F-284's "crawl runs are the headline measure" is now in the tool's own output.
+
+### CC-FUZZ-0660 — Seven strategies stop sending one lab cell's own names: they read the target or a public standard (BUG-0661, PA-0660, FR-FUZZ-660) (2026-11-20)
+- Placement: lane BBOX, base d492b9d; pre-assigned CC-FUZZ-0660..0669.
+- Change (`fuzzlab/oracle/strategies.py`):
+  - `JwtAlgNoneConfusionStrategy`: claims `channel_id`/`role: owner` (twitch-clone's `jwt_claims_response.go.j2`, CC-LAB-0180) -> `STANDARD_CLAIMS` = RFC 7519 §4.1.2 `sub`, OIDC Core 1.0 §5.1 `name`, `preferred_username`.
+  - `PredictableTokenSourceStrategy`: the `session_token` key and a nanosecond-only delta (CC-LAB-0181) -> any decimal JSON leaf read as a clock (`_clock_reading`): an epoch count in s/ms/us/ns within a day of this host's time, or a nanosecond monotonic counter (Java SE `System.nanoTime`, no epoch origin) moving by >= 10 us; each by no more than the window measured on this host's monotonic clock around the two sends (+1 s). Closes the earlier accepted false positive (a fixed 19-digit token confirmed at delta 0) and rejects a sequence counter.
+  - `MassAssignmentPrivilegedFieldStrategy`: `is_partner` / `display_name` / `bio` (CC-LAB-0182) -> the response's own unsent top-level `false` booleans flipped, with a `zq<hex>` control property that must not come back (OWASP API3:2023; OWASP Mass Assignment Cheat Sheet).
+  - `PriceTrustDifferentialStrategy`: `monthly_charge` / `plan_tier: standard` (CC-LAB-0188) -> the captured body's numeric leaves (at most 4), read back at the same path; no captured body, no verdict.
+  - `PriceIntegrityBypassStrategy`: booking-clone's `data-charged-amount` attribute and rate table (CC-FUZZ-0047, CC-LAB-0239) -> a currency symbol or price word (amount, price, total, cost, charge: WSTG-BUSL-01; PortSwigger "Excessive trust in client-side controls") within 40 characters before the digit-bounded canary.
+  - `GoTemplateSstiStrategy`: the JSON key `template` (CC-LAB-0196) -> every string leaf of the captured body; no captured body, no verdict.
+  - XXE wrappers: `<r><title>&xxe;</title></r>` (the labgen XXE sink's extracted element) removed; `<r>&xxe;</r>` only (W3C XML 1.0 §4.4; PortSwigger, XXE injection).
+  - Unused `_json_bool_field` / `_json_number_field` removed.
+- Measured (real boots of the labgen apps in this container, `tests/test_multitarget_category4.py`, `tests/test_labgen_go_live_boot.py`, `tests/test_labgen_spring_boot_*_live_boot.py`, ground-truth points = oracle diagnostic): twitch-clone 14/15 -> 11/15 (lost TWCH-0004 alg:none, TWCH-0010 price trust, TWCH-0012 Go-template SSTI JSON); netflix-clone multi-cell 11/11 -> 9/11 (lost NFLX-0005, NFLX-0008); weak-token (TWCH-0005 Go `UnixNano`, NFLX-0010 Java `nanoTime`), mass assignment (TWCH-0006, NFLX-0007) and XXE (NFLX-0002, by OOB) still confirm generically; the spring XXE in-band twin (it echoes only `<title>`) is an honest in-band miss and confirms out-of-band; the price-trust twins confirm when the test supplies the app's own captured body.
+- Impact: these strategies fire on black-box targets that use standard claims / clock tokens / any field names; ground-truth-only points with no captured body give no verdict (they were lab-fitted).
+- Risk: medium (detection loss on the diagnostic, accepted by the owner's black-box rule). Mass assignment now flips booleans the app reports; a legitimately user-settable boolean is indistinguishable, so the evidence names the property for review. The strategy writes to the target as before (lab-only, `--authorized`).
+- Deliverables:
+  - [x] Strategies generalised; unit tests updated and new non-lab cases (weak token: ms clock under any key, nanoTime counter, sequence counter rejected; JWT: standard claims only; price trust: any captured leaf, no body no verdict; price bypass: context anchor) — done
+  - [x] Live-boot tests assert the measured outcomes (honest misses stated) — done
+  - [x] The seed guard (`tests/test_request_contexts.py::test_the_seed_categories_are_the_strategies_that_read_the_original_value`) caught that `PriceTrustDifferentialStrategy` and `GoTemplateSstiStrategy` now read `candidate.base_entries`; both read it only on a whole-body JSON point (`content_type` is set for a whole-body point alone, `audit/engine.InjectionPoint.body_content_type`), which has no target slot, so neither sends the seed: recorded in `_SEED_EXEMPT` with that reason (found by the lane's first harness run) — done
+  - [ ] Open: `content_type` is set only from an answer key, so on crawl runs the JSON whole-body strategies (mass assignment, price trust, Go-template SSTI in JSON) never run: a crawl-captured JSON request should carry its content type (follow-up for the orchestrator; it touches the importer)
+- Effectiveness (assessed 2026-11-20): `tests/test_blackbox_detection.py` passes on `strategies.py`; harness counts in the CHANGELOG line.
 
 ### CC-FUZZ-0117 — M6's navigations settle a failure on the error page's load (BUG-0561) (2026-10-23)
 - Change: none in `fuzzlab/tools/browserexec.py` or the oracle. The executor's navigations go through SP-01, which now waits for a failed navigation's error page to load, not only to commit, before it raises (CC-CRAWL-0065).

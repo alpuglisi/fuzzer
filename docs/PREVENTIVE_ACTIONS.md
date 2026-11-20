@@ -3022,6 +3022,17 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
   3. **A browser race is called fixed only after a measurement under each kind of host contention the harness meets (CPU and disk I/O), both arms in the same rounds, at a volume that can see the race's rate** (here at least 300 per arm), reported as counts per arm. (from BUG-0561)
   - Enforced by: tests/test_navigation_settle_load.py::test_a_failure_raises_only_after_its_error_page_has_loaded, tests/test_navigation_settle_load.py::test_an_error_page_that_never_loads_expires_within_the_budget_and_is_counted
 
+- **PA-0680** — Strengthens `PA-0114` and `PA-0301` (related: `PA-0022`), after BUG-0680: the destructive rule (SP-09) missed state switches -- Mutillidae's `?do=toggle-*` and DVGA's `/difficulty/hard`, `/start_over` -- and two lab crawls changed the lab's global state (one collapsed). It listed `disable`/`deactivate` but not `enable`/`activate`. PA-0114's per-lab tables and PA-0301's spelling scan both check the rule against our own labs and our own words, so a class absent from both was never looked for; PA-0114(1)'s enumeration-before-crawl was not followed.
+  1. **A keyword safety rule is measured against an independent, cited corpus, not only our labs.** The destructive rule runs over `tests/data/state_change_corpus/` (state-changing GET links from apps we do not host, each with its upstream source and line, and benign links containing the same words). Every cited positive is refused or listed as a stated residual with its reason; a stale residual fails; the benign links it refuses are pinned, so a broadening that costs coverage is a decision.
+  2. **No word or shape rests on one target (the black-box rule, mechanised).** A word added to `DESTRUCTIVE_TOKENS` after the legacy list, and each new shape (action-slot verbs, fused compounds), is shown on at least two independent apps in the corpus, one of them not the lab it was found on. A lab-only word is a residual, never a rule.
+  3. **A word is added with its class.** When a word joins the rule, its opposites and siblings in the same action class are checked against the corpus in the same change (`disable` → `enable`; `deactivate` → `activate`).
+  4. **The coverage side is measured too:** no generated-lab cell or ground-truth point becomes refused by a new word (measured, and a test).
+  - Enforced by: tests/test_state_switch_urls.py::test_every_cited_state_changing_get_is_refused_or_a_stated_residual, tests/test_state_switch_urls.py::test_benign_links_refused_are_exactly_the_known_ones, tests/test_state_switch_urls.py::test_every_word_added_to_the_rule_is_shown_on_two_independent_apps, tests/test_state_switch_urls.py::test_the_two_source_guard_catches_a_synthetic_offender, tests/test_state_switch_urls.py::test_the_action_slot_shape_is_shown_on_two_independent_apps_with_get, tests/test_state_switch_urls.py::test_no_lab_injection_point_or_cell_is_refused_by_the_new_shapes
+
+- **PA-0681** — Strengthens `PA-0114(1)`, after BUG-0680: Mutillidae and DVGA were crawled before their state-changing endpoints were enumerated, so the first crawl was the test.
+  1. **A newly adopted lab's state switches (toggles, security/difficulty levels, mode switches, resets, setup/install pages) are enumerated from its source and judged by the destructive rule before its first crawl,** each refused or listed with a compensating control; the lane that adopts the lab does it before it measures anything.
+  2. **A first crawl of a new lab reads the lab's state before and after** (out of band) and reports any change as a safety defect, never as a measurement.
+  - Enforced by: none — the order of adoption steps across concurrent lanes is a process step the orchestrator checks at merge (`docs/MULTI_AGENT_ORCHESTRATION.md` §2); PA-0114's per-lab tables are the test once a lab's table exists.
 - **PA-0610** — Strengthens `PA-0133(2)` (from evaluation markers to every confirmer, and
   from the input as sent to the input as rendered), after BUG-0610: the NoSQL operator
   differential stripped the reflections of the strings it sent but not the echo of the
@@ -3070,3 +3081,67 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
   1. **A dispatch prompt that asks a sub-agent to verify names the harness** (`scripts/verify_change.py --base <its base>` on its committed branch), never a list of test files; a list may be added only as a quick pre-check, beside the harness.
   2. **The orchestrator runs the harness after each merge of delegated work**, not once at the end of the lane. (from BUG-0721)
   - Enforced by: none — a rule about prompts and orchestration order, which no repository test can see; the harness run recorded in each merge's change-control entry is the check
+- **PA-0650** — Strengthens `PA-0126(2)`, extends `PA-0551(2)` from discovery to
+  confirmation mechanisms, and strengthens `PA-0507(1)`, after BUG-0650: lane PERF's
+  quiet-settle early end (CC-FUZZ-0650) ended the M6 sentinel wait once a tracker saw no
+  pending timer, request or animation, and missed sinks run by SMIL animation events,
+  `scheduler.postTask`, message ports, `postMessage`, a meta refresh, media events and a
+  request held past SP-40's limit. PA-0126(2)'s one fixture (a timer sink) let a design
+  that tracks timers pass; the shadow run held 2 positives.
+  1. **A confirmation mechanism's observation window ends only on its evidence, its
+     deadline or an error**, never on a prediction that nothing more can happen (for M6:
+     the hit, `SETTLE_MS` from `load` within its cap, or a Playwright error).
+  2. **A change that shortens or skips part of an observation is tested against a
+     fixture built from the platform's ways of running work later**, not from the
+     change's own list (for a browser: timers, requests including long-held ones,
+     animation frames, SMIL and CSS animation events, the task-scheduling and
+     message-port APIs, `postMessage`, refresh navigation, media events, workers,
+     popups), each a real-browser test judged by the sentinel.
+  3. **A "no detection lost" claim states how many positive observations its evidence
+     holds**; a shadow or BEFORE/AFTER run with too few positives to see a miss is not
+     evidence that nothing is missed. (from BUG-0650)
+  - Enforced by: tests/test_m6_window_guard.py::test_the_wait_lasts_its_whole_window_without_a_hit, tests/test_m6_window_guard.py::test_the_guard_catches_an_early_end, tests/test_m6_window_guard.py::test_the_wait_takes_no_early_end_hook, tests/test_m6_slow_sinks.py::test_the_full_window_sees_a_late_sink, tests/test_m6_slow_sinks.py::test_the_fixture_really_is_late
+- **PA-0651** — *(SUPERSEDED by `PA-0671`, lane NAV, BUG-0671: a test launches the
+  product's binary and never chooses one by install path; rule (1) below, matching
+  every install layout, is withdrawn, and rule (2) is met by PA-0671's guard.)* Extends
+  `PA-0035` (probe the real operation) to how a test finds a pre-installed browser,
+  after BUG-0651: twelve lookups named `chrome-linux/chrome`, matched
+  nothing on a `chrome-linux64` image and silently fell back to Playwright's own lookup.
+  1. **A lookup of a pre-installed browser matches every layout the pinned Playwright
+     range installs** (`chromium-*/chrome-linux*/chrome`), never one spelled out.
+  2. **A lookup that finds nothing is a fall-back the code chose, not an accident:** a
+     helper that pins a binary says (by its result) whether it pinned one. (from BUG-0651)
+  - Enforced by: tests/test_browser_binary_choice.py::test_no_python_file_chooses_a_browser_binary_by_its_install_path, tests/test_browser_binary_choice.py::test_the_install_path_guard_catches_synthetic_offenders
+
+- **PA-0690** — Strengthens and supersedes the enforcement of `PA-0545(1)`, after BUG-0690:
+  in `fuzzlab auto --identity --browser` the M6 executor's browser context adopted no
+  session and the CLI built the executor with none, so a stored-XSS plant and its observe
+  page went out anonymously while every probe carried the identity (NodeGoat's profile
+  plant answered 302 to `/login`); and the greybox CLI ran a bearer session anonymously.
+  PA-0545(1) said every send path carries the identity or refuses, but it was enforced
+  only by the spider's own tests, and the SP-74 wiring guard reads only modules that
+  already adopt a session -- a send path that never adopts one was invisible to both.
+  1. **Every browser context fuzzlab opens adopts the session through the one adoption
+     helper, or is declared anonymous with its reason** (a login, a credential form
+     submitted without the session, a replay that takes no identity). A whole-package AST
+     guard lists every browser `new_context(...)` and fails on one that is neither.
+  2. **A component a run builds that sends to the target gets its session from the run's
+     own sender, never a second login and never none:** the M6 executor's route is the
+     sender's `browser_session_route` (SP-125), so its gates (auth endpoint, isolated
+     path) and its manager are the probes'. Every `PlaywrightBrowserExecutor` fuzzlab
+     builds passes ``session_route=``.
+  3. **A send path that can carry only part of a session refuses the rest loudly, before
+     any probe** (greybox: Cookie only; a bearer or an extra header is a usage error),
+     never carries the part it can and drops the rest.
+  4. **A step whose answer is not the application's own did not happen** (SP-56): a plant
+     answered with a login redirect, a throttle, a gateway or a block is not observed --
+     no verdict -- never a negative. (from BUG-0690)
+  - Enforced by: tests/test_browser_context_session.py::test_every_browser_context_adopts_the_session_or_is_declared_anonymous, tests/test_browser_context_session.py::test_every_m6_executor_fuzzlab_builds_gets_the_runs_session_route, tests/test_browser_context_session.py::test_the_guards_catch_synthetic_offenders, tests/test_greybox_session_carry.py::test_a_bearer_session_is_refused_never_run_anonymously, tests/test_greybox_session_carry.py::test_a_cookie_and_authorization_session_is_refused_never_half_carried, tests/test_m6_session.py::test_the_plant_and_the_observe_page_carry_the_runs_session, tests/test_m6_session.py::test_a_credentialed_plant_answered_by_a_login_redirect_is_not_observed, tests/test_m6_session.py::test_every_auto_cli_executor_is_built_with_a_session_route
+- **PA-0660** — **The black-box rule: detection logic contains no lab knowledge.** Strengthens and widens `PA-0124` (a classifier's outputs mapped in one table) from the mapping of one classifier to the vocabulary of every detection decision, after BUG-0660 (audit rules named parameters only one lab supplied: `channel_id`, `account_id`, `sortBy`, `label`, `thumbnail`) and BUG-0661 (seven strategies sent one labgen cell's own field, claim, element and attribute names). PA-0124 was too narrow (a name list satisfies it) and the class was never enforced (F-014 left it open; F-284's correction was a dispatch instruction, not a repository rule).
+  1. **No rule, strategy or heuristic depends on a name, path, parameter name, field, claim, element, attribute or value taken from a lab or its source.** Lab knowledge belongs only in fixtures, tests and answer keys (`lab/`, `tests/`). Where detection needs a name it takes it from the target (the captured request, the response) or from a public standard, and gives no verdict when the target offers none: a stated miss, never a guess.
+  2. **Any target behaviour a rule relies on is shown on at least two independent targets or a public corpus, and cited** in the code comment and the CC entry (an RFC, a published schema, OWASP, PortSwigger, SecLists, vendor documentation). Apps from one generator (the labgen apps) are one source, not several; twins are one target.
+  3. **A lab's recall is never the evidence for a detection word,** and "no other ground truth uses X" checks lab impact, not grounding. A strategy that confirms a lab only by speaking the lab's names is lab-fitted, however its review went; a docstring may not set a convention that does.
+  4. **Crawl (discovery) runs are the reported detection figure; ground-truth-point runs are an oracle diagnostic,** labelled as such wherever a score is shown (FR-FUZZ-661).
+  5. **The guard.** `tests/test_blackbox_detection.py` builds the lab-identifier set from every `lab/ground-truth*/` answer key (parameter names, path segments, target ids, directory names), every `lab/manifests/*.yaml` route and parameter, every `lab/external/` directory and the labs' product names; subtracts SecLists' `burp-parameter-names.txt` and `common.txt` (`tests/data/common_web_vocabulary/`) and a `CITED` table whose every entry names an independent source; and fails if any remaining token appears as a whole word in a rules-data file or a non-docstring string literal of a detection module. A new answer key enlarges the set by itself. Limit: a name that appears only inside a generated template, never in a key, is caught by points 1-3 and review, not by the guard. (from BUG-0660, BUG-0661)
+  - Enforced by: tests/test_blackbox_detection.py::test_detection_code_names_no_lab_identifier, tests/test_blackbox_detection.py::test_the_guard_catches_synthetic_offenders, tests/test_blackbox_detection.py::test_the_lab_identifier_set_reads_every_answer_key_and_manifest, tests/test_blackbox_detection.py::test_every_cited_word_names_an_independent_source
+

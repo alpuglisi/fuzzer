@@ -573,9 +573,12 @@ def test_real_boot_proves_the_jwt_alg_none_strategy_end_to_end() -> None:
                                        headers={param: value})
                 return Probe(resp.status, resp.body)
 
-        verdict = strategy.confirm(_cand(), _HarnessSender())
-        assert verdict is not None and verdict.confirmed, "strategy failed to confirm the real vulnerable twin"
-        assert verdict.vuln_class == "jwt_algorithm_confusion"
+        # BUG-0661 / PA-0660 (lane BBOX, measured here 2026-11-20): this twin
+        # reads and echoes only its own `channel_id` claim. The forged token now
+        # carries the marker in the standard claims a black-box target can be
+        # expected to read (RFC 7519 `sub`, OIDC `name`/`preferred_username`), so
+        # this twin is an honest miss: no verdict, never a guess.
+        assert strategy.confirm(_cand(), _HarnessSender()) is None
 
     with GoLiveBootHarness(emitter, [cells["LABGEN-GO-0008"]]) as harness:
         class _HarnessSender:
@@ -987,10 +990,15 @@ def test_real_boot_proves_the_price_integrity_strategy_generalizes_from_spring_b
     cells = {c.cell_id: c for c in manifest.cells}
 
     def _cand():
+        # The app's own request body, as a crawl of its client captures it
+        # (PA-0660, BUG-0661: the strategy varies the captured body's numeric
+        # leaves; lab knowledge stays here, in the fixture).
         return Candidate(url="http://h/subscriptions/purchase", param="body",
                          method="POST", location="body",
                          vuln_class="price_integrity_bypass",
-                         category="price-integrity-bypass", content_type="application/json")
+                         category="price-integrity-bypass", content_type="application/json",
+                         base_entries=((("plan_tier",), "standard"),
+                                       (("monthly_charge",), 15.49)))
 
     strategy = PriceTrustDifferentialStrategy()
 

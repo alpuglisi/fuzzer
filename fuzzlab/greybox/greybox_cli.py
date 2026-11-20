@@ -41,13 +41,22 @@ def _cookie_for(host: str, identity: str, base_url: str, auth_origins=()):
     if host not in scope:
         scope.append(host)
     mgr = SessionManager(store, scope_hosts=scope, auth_origins=list(auth_origins))
-    header = mgr.session_header(host, identity, base_url,     # SessionAuthError if wrong
-                                operator=True)
+    headers = mgr.session_headers(host, identity, base_url,   # SessionAuthError if wrong
+                                  operator=True)
     state = mgr.ensure(host, identity, base_url, operator=True)
     secure_only, origins = bool(state.secure_only), frozenset(state.origins)
-    if header.startswith("Cookie: "):
-        return header[len("Cookie: "):], secure_only, mgr.is_auth_endpoint, origins
-    return None, secure_only, mgr.is_auth_endpoint, origins
+    # BUG-0690 sweep (PA-0690): the greybox sender carries a session as a Cookie only;
+    # a session that is (or also is) another header -- a bearer, a browser login's
+    # Authorization beside the cookie its JS set -- is refused before any probe, never
+    # run anonymously or with half of it (PA-0545(1)). Names only, never a value.
+    other = sorted(name for name in headers if name.lower() != "cookie")
+    if other or not headers.get("Cookie"):
+        from fuzzlab.session.manager import SessionAuthError
+        raise SessionAuthError(
+            f"the greybox sender carries a session as a Cookie only; this session "
+            f"carries {', '.join(other) or 'no cookie'}: refused rather than probed "
+            f"without it (BUG-0690)")
+    return headers["Cookie"], secure_only, mgr.is_auth_endpoint, origins
 
 
 def build_parser() -> argparse.ArgumentParser:

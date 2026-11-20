@@ -38,6 +38,9 @@ class TargetOutcome:
     findings: int
     report: object | None = None            # a scoring.ScoreReport, or None (unscored)
     plugin_outcomes: list = field(default_factory=list)   # this run's `after_run` results
+    #: Where the run's points came from (``"crawl"`` or ``"ground-truth"``): only a
+    #: crawl run's score is a detection figure (PA-0660, CC-FUZZ-0660).
+    points_source: str = "crawl"
 
     @property
     def scored(self) -> bool:
@@ -45,7 +48,7 @@ class TargetOutcome:
 
     def as_dict(self) -> dict:
         d = {"name": self.name, "run_id": self.run_id, "findings": self.findings,
-             "scored": self.scored}
+             "scored": self.scored, "points_source": self.points_source}
         if self.report is not None:
             d.update(self.report.as_dict())
         return d
@@ -90,7 +93,9 @@ def run_targets(specs: list[TargetSpec], store, sender_for: SenderFor, *,
             raise
         outcomes.append(TargetOutcome(name=spec.name, run_id=run_id,
                                       findings=result.findings, report=result.report,
-                                      plugin_outcomes=result.plugin_outcomes))
+                                      plugin_outcomes=result.plugin_outcomes,
+                                      points_source=(result.metrics or {}).get(
+                                          "points_source", "crawl")))
     return outcomes
 
 
@@ -110,7 +115,24 @@ def transfer_summary(outcomes: list[TargetOutcome]) -> dict:
         # generalizes: finds real vulnerabilities (recall > 0) on >= 2 scored targets,
         # i.e. it isn't overfit to a single app.
         summary["generalizes"] = sum(1 for o in scored if o.report.recall > 0) >= 2
+        # What the macro figures measure (presentation only; the math is unchanged):
+        # a detection figure only when every scored run was a crawl run (PA-0660).
+        sources = {o.points_source for o in scored}
+        summary["measures"] = ("detection" if sources == {"crawl"} else
+                               "oracle-diagnostic" if sources == {"ground-truth"} else
+                               "mixed")
     return summary
+
+
+#: How each run's points source is labelled (PA-0660): a crawl run is the
+#: detection figure, a ground-truth-point run an oracle diagnostic.
+POINTS_LABELS = {"crawl": "crawl run: detection",
+                 "ground-truth": "ground-truth points: oracle diagnostic"}
+MEASURES_LABELS = {
+    "detection": "detection (crawl runs)",
+    "oracle-diagnostic": "oracle diagnostic (ground-truth points; not a detection figure)",
+    "mixed": "mixed points sources (not a detection figure)",
+}
 
 
 def format_transfer(summary: dict) -> str:
@@ -119,11 +141,12 @@ def format_transfer(summary: dict) -> str:
         if t["scored"]:
             lines.append(f"  {t['name']}: tp={t['tp']} fp={t['fp']} fn={t['fn']} "
                          f"precision={t['precision']} recall={t['recall']} "
-                         f"({t['findings']} finding(s))")
+                         f"({t['findings']} finding(s)) "
+                         f"[{POINTS_LABELS.get(t.get('points_source'), t.get('points_source'))}]")
         else:
             lines.append(f"  {t['name']}: {t['findings']} finding(s) (unscored)")
     if "macro_recall" in summary:
-        lines.append(f"  macro precision={summary['macro_precision']} "
+        lines.append(f"  {MEASURES_LABELS[summary.get('measures', 'mixed')]}: macro precision={summary['macro_precision']} "
                      f"recall={summary['macro_recall']}  "
                      f"generalizes={summary['generalizes']}")
     return "\n".join(lines)

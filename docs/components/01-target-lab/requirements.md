@@ -6371,6 +6371,19 @@ lane) can submit a payload as
   targets (D10); bWAPP's page names carry class words, so NFR-LAB-no-leak does not hold
   for them and a model trained on runs against them would learn from the URL (recorded as
   not enforced under NFR-ML-no-leak; the training question is the operator's).
+- **FR-LAB-370** *(scan performance probe; `CC-LAB-0370`, 2026-11-20).*
+  `scripts/measure_scan_perf.py` runs `fuzzlab auto` in-process against one running
+  external lab (`--lab`, `--points ground-truth|crawl`, a fresh `--store`, `--spider-db`
+  for crawl points, `--authorized` required; flags after `--` go to `auto`) and prints
+  one JSON document: tp/fp/fn/tn with the matched, missed and false-alarm case ids (the
+  live tests' scorer), the run's `run_metrics`, wall time, and wall-clock time per
+  phase (fingerprint baseline, audit, oracle confirmation, each strategy, the M6
+  browser executor split into driver start / session / driver stop, session login,
+  HTTP sends, `time.sleep`). `--browser-timeline` records each M6 observation's load,
+  hit, last network activity and timer activity (a timer-logging init script:
+  measurement only); `--cprofile OUT` adds a cProfile (CPU hot spots only: it
+  misattributes time across Playwright's greenlets). Lab only; nothing asserted.
+
 - **FR-LAB-340** *(OWASP Mutillidae II; `CC-LAB-0340`, 2026-11-20).* Mutillidae II
   2.12.8 is an external lab (`lab/external/mutillidae/`): upstream's www, database and
   directory images pinned by digest; the web tier on loopback only, the database and
