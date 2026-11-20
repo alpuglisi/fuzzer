@@ -16,8 +16,11 @@ Component code: **LAB**. Entry format and required fields: see
 - Risk: low.
 - Deliverables:
   - [x] fix, tests, BUG-0721 / PA-0721 / ERROR_LOG — done
-- Effectiveness (assessed 2026-11-20): the harness re-run on this commit (see the lane's
-  final record).
+- Effectiveness (assessed 2026-11-20): `scripts/verify_change.py --base e14c925` on the
+  lane's tip (CHANGELOG commit after f23bc81): 93 files, 4252 passed, 0 failed, 8 skipped
+  (seven live-lab tests gated by FUZZLAB_LIVE_EXTERNAL_LABS, as at the base; one RailsGoat
+  lock check needing the pinned checkout cache, which passes in the main tree where the
+  cache exists), 29 xfailed.
 
 ### CC-LAB-0426 — The held-out baseline at e14c925's detection code (holdout-scores.json) (2026-11-20)
 - Change: new `docs/components/01-target-lab/holdout-scores.json` and `.md`, written by
