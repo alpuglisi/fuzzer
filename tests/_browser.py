@@ -55,7 +55,7 @@ def launch_browser_or_skip(pw):
     """Launch real headless Chromium — a pre-installed build if present (the pinned
     Playwright may expect one that isn't installed), else Playwright's own — and
     skip/fail only if no build actually launches (PA-0035: probe the real operation)."""
-    candidates = sorted(glob.glob("/opt/pw-browsers/chromium-*/chrome-linux/chrome"))[-1:]
+    candidates = sorted(glob.glob("/opt/pw-browsers/chromium-*/chrome-linux*/chrome"))[-1:]
     candidates.append(None)
     errors = []
     for exe in candidates:

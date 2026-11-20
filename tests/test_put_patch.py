@@ -201,7 +201,7 @@ def test_stored_xss_through_a_json_put_is_confirmed_on_a_real_browser(monkeypatc
         import playwright.sync_api  # noqa: F401
     except ImportError as exc:
         skip_or_fail(f"playwright unavailable: {exc}")
-    exe = sorted(glob.glob("/opt/pw-browsers/chromium-*/chrome-linux/chrome"))[-1:]
+    exe = sorted(glob.glob("/opt/pw-browsers/chromium-*/chrome-linux*/chrome"))[-1:]
     if exe:
         monkeypatch.setenv("PLAYWRIGHT_CHROMIUM_EXECUTABLE", exe[0])
     from fuzzlab.oracle.probe import Candidate

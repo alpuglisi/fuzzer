@@ -3058,4 +3058,12 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
      holds**; a shadow or BEFORE/AFTER run with too few positives to see a miss is not
      evidence that nothing is missed. (from BUG-0650)
   - Enforced by: tests/test_m6_window_guard.py::test_the_wait_lasts_its_whole_window_without_a_hit, tests/test_m6_window_guard.py::test_the_guard_catches_an_early_end, tests/test_m6_window_guard.py::test_the_wait_takes_no_early_end_hook, tests/test_m6_slow_sinks.py::test_the_full_window_sees_a_late_sink, tests/test_m6_slow_sinks.py::test_the_fixture_really_is_late
+- **PA-0651** — Extends `PA-0035` (probe the real operation) to how a test finds a
+  pre-installed browser, after BUG-0651: twelve lookups named `chrome-linux/chrome`, matched
+  nothing on a `chrome-linux64` image and silently fell back to Playwright's own lookup.
+  1. **A lookup of a pre-installed browser matches every layout the pinned Playwright
+     range installs** (`chromium-*/chrome-linux*/chrome`), never one spelled out.
+  2. **A lookup that finds nothing is a fall-back the code chose, not an accident:** a
+     helper that pins a binary says (by its result) whether it pinned one. (from BUG-0651)
+  - Enforced by: tests/test_chromium_glob_guard.py::test_no_chromium_lookup_names_one_layout_only, tests/test_chromium_glob_guard.py::test_the_guard_catches_a_synthetic_offender
 

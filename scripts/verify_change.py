@@ -711,7 +711,7 @@ class Runner:
 
 
 def chromium_executable() -> str | None:
-    cands = sorted(Path("/opt/pw-browsers").glob("chromium-*/chrome-linux/chrome"))
+    cands = sorted(Path("/opt/pw-browsers").glob("chromium-*/chrome-linux*/chrome"))
     return str(cands[-1]) if cands else None
 
 

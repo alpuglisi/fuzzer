@@ -763,7 +763,7 @@ def _chromium_or_skip(monkeypatch):
         import playwright.sync_api  # noqa: F401
     except ImportError as exc:
         skip_or_fail(f"playwright unavailable: {exc}")
-    exe = sorted(glob.glob("/opt/pw-browsers/chromium-*/chrome-linux/chrome"))[-1:]
+    exe = sorted(glob.glob("/opt/pw-browsers/chromium-*/chrome-linux*/chrome"))[-1:]
     if exe:
         monkeypatch.setenv("PLAYWRIGHT_CHROMIUM_EXECUTABLE", exe[0])
 

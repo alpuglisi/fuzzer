@@ -595,7 +595,7 @@ def _disco_capture(tmp_path, site, cookies, origins=()):
             skip_or_fail(f"{mod} unavailable: {exc}")
     import glob
     import os
-    exe = sorted(glob.glob("/opt/pw-browsers/chromium-*/chrome-linux/chrome"))[-1:]
+    exe = sorted(glob.glob("/opt/pw-browsers/chromium-*/chrome-linux*/chrome"))[-1:]
     if exe:
         os.environ.setdefault("PLAYWRIGHT_CHROMIUM_EXECUTABLE", exe[0])
     from playwright.sync_api import Error as PlaywrightError

@@ -5,6 +5,7 @@ Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
 ## 2026-11-20
+- **What:** every pre-installed Chromium lookup (eleven test helpers and `scripts/verify_change.py`) globs `chrome-linux*/chrome`, so a `chrome-linux64` build is found; a guard keeps it so (BUG-0651, PA-0651). **Why:** on such an image the lookup matched nothing and the pin was silently skipped.
 - **What:** withdrew lane PERF's quiet-settle early end of the M6 browser wait (CC-FUZZ-0651; BUG-0650, PA-0650; SP-105 withdrawn, FR-FUZZ-650/651 superseded by FR-FUZZ-653; CC-LAB-0373 corrects CC-LAB-0371). **Why:** independent verification found it missed XSS sinks run by events its tracker did not watch (SVG animation events, `scheduler.postTask`, message ports, meta refresh, media, a slow fetch); the full window catches them, now pinned by real-browser regression tests.
 - **What:** measured what lane NODE's `R-SSJS` rule costs on two labs that have no server-side JavaScript case (CC-LAB-0372): +40 requests on Juice Shop's ground truth and +397 (+45%) on bWAPP's, with no finding or false positive. **Why:** the orchestrator asked for it as a candidate for lane PERF's next cut.
 - **What:** lane PERF's BEFORE/AFTER record on Juice Shop, bWAPP, SSType, CopyNPaste and Mongection (CC-LAB-0371): tp/fp/fn/tn identical on all ten configurations; bWAPP gt 621 -> 199 s, bWAPP crawl 842 -> 391 s. **Why:** the hard constraint of FR-FUZZ-650's change is no detection lost.

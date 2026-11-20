@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-11-20 — tests / harness: no pre-installed Chromium lookup matched a `chrome-linux64` build (fixed, BUG-0651/PA-0651)
+- **Symptom:** in lane PERF's container the browser tests' `PLAYWRIGHT_CHROMIUM_EXECUTABLE` pin was never set: `/opt/pw-browsers/chromium-*/chrome-linux/chrome` matched nothing (the binary is `chromium-1243/chrome-linux64/chrome`).
+- **Root cause:** the lookup hard-coded Playwright's older install layout, in twelve copies; a miss fell through silently to Playwright's own lookup.
+- **Remediation:** every lookup globs `chrome-linux*/chrome`; a whole-package guard (`tests/test_chromium_glob_guard.py`).
+- **Status:** Fixed
+
 ## 2026-11-20 — FUZZ: the M6 quiet-settle early end missed late sinks (fixed by withdrawal, BUG-0650/PA-0650)
 - **Symptom:** the orchestrator's independent verification of lane PERF (real Chromium, the real executor): XSS sinks run by an SVG animation's `onend`/`onbegin`, `scheduler.postTask` with a delay, a MessageChannel or `postMessage` chain, a meta refresh, a video's `timeupdate`, a fetch answered after 2.8-3.2 s, or a page that replaced `performance.now` were reported "not executed"; the 4 s wait caught each. A blocked main thread hung the probe.
 - **Root cause:** CC-FUZZ-0650's `PageQuiet` ended the wait when its tracker saw no pending timer, request or animation; the platform runs a page's script again by many sources it did not watch, and it was validated only on the sources it watched and on labs with 2 positive observations.

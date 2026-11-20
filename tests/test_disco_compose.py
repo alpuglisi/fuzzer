@@ -252,7 +252,7 @@ def explored(tmp_path_factory):
                    "/settings.html": SETTINGS, "/forms.html": FORMS})
     try:
         with pytest.MonkeyPatch.context() as mp:
-            exe = sorted(glob.glob("/opt/pw-browsers/chromium-*/chrome-linux/chrome"))[-1:]
+            exe = sorted(glob.glob("/opt/pw-browsers/chromium-*/chrome-linux*/chrome"))[-1:]
             if exe:
                 mp.setenv("PLAYWRIGHT_CHROMIUM_EXECUTABLE", exe[0])
             mp.setattr(compose, "MAX_DELEGATED", 3)
@@ -372,7 +372,7 @@ def widget_run(tmp_path_factory):
     app = _Server({"/": WIDGET})
     try:
         with pytest.MonkeyPatch.context() as mp:
-            exe = sorted(glob.glob("/opt/pw-browsers/chromium-*/chrome-linux/chrome"))[-1:]
+            exe = sorted(glob.glob("/opt/pw-browsers/chromium-*/chrome-linux*/chrome"))[-1:]
             if exe:
                 mp.setenv("PLAYWRIGHT_CHROMIUM_EXECUTABLE", exe[0])
             ex = Explorer(app.url + "/", scope_urls=[app.url + "/"], proxy=None,
