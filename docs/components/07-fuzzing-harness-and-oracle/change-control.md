@@ -29,6 +29,8 @@ Newest first.
 - Deliverables:
   - [x] Strategies generalised; unit tests updated and new non-lab cases (weak token: ms clock under any key, nanoTime counter, sequence counter rejected; JWT: standard claims only; price trust: any captured leaf, no body no verdict; price bypass: context anchor) — done
   - [x] Live-boot tests assert the measured outcomes (honest misses stated) — done
+  - [x] The seed guard (`tests/test_request_contexts.py::test_the_seed_categories_are_the_strategies_that_read_the_original_value`) caught that `PriceTrustDifferentialStrategy` and `GoTemplateSstiStrategy` now read `candidate.base_entries`; both read it only on a whole-body JSON point (`content_type` is set for a whole-body point alone, `audit/engine.InjectionPoint.body_content_type`), which has no target slot, so neither sends the seed: recorded in `_SEED_EXEMPT` with that reason (found by the lane's first harness run) — done
+  - [ ] Open: `content_type` is set only from an answer key, so on crawl runs the JSON whole-body strategies (mass assignment, price trust, Go-template SSTI in JSON) never run: a crawl-captured JSON request should carry its content type (follow-up for the orchestrator; it touches the importer)
 - Effectiveness (assessed 2026-11-20): `tests/test_blackbox_detection.py` passes on `strategies.py`; harness counts in the CHANGELOG line.
 
 ### CC-FUZZ-0117 — M6's navigations settle a failure on the error page's load (BUG-0561) (2026-10-23)
