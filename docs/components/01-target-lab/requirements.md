@@ -6371,6 +6371,84 @@ lane) can submit a payload as
   targets (D10); bWAPP's page names carry class words, so NFR-LAB-no-leak does not hold
   for them and a model trained on runs against them would learn from the URL (recorded as
   not enforced under NFR-ML-no-leak; the training question is the operator's).
+- **FR-LAB-370** *(scan performance probe; `CC-LAB-0370`, 2026-11-20).*
+  `scripts/measure_scan_perf.py` runs `fuzzlab auto` in-process against one running
+  external lab (`--lab`, `--points ground-truth|crawl`, a fresh `--store`, `--spider-db`
+  for crawl points, `--authorized` required; flags after `--` go to `auto`) and prints
+  one JSON document: tp/fp/fn/tn with the matched, missed and false-alarm case ids (the
+  live tests' scorer), the run's `run_metrics`, wall time, and wall-clock time per
+  phase (fingerprint baseline, audit, oracle confirmation, each strategy, the M6
+  browser executor split into driver start / session / driver stop, session login,
+  HTTP sends, `time.sleep`). `--browser-timeline` records each M6 observation's load,
+  hit, last network activity and timer activity (a timer-logging init script:
+  measurement only); `--cprofile OUT` adds a cProfile (CPU hot spots only: it
+  misattributes time across Playwright's greenlets). Lab only; nothing asserted.
+
+- **FR-LAB-340** *(OWASP Mutillidae II; `CC-LAB-0340`, 2026-11-20).* Mutillidae II
+  2.12.8 is an external lab (`lab/external/mutillidae/`): upstream's www, database and
+  directory images pinned by digest; the web tier on loopback only, the database and
+  directory unpublished on internal networks.
+- **FR-LAB-341** *(Mutillidae bootstrap; `CC-LAB-0341`).* Under `--authorized` the
+  bootstrap loads upstream's LDIF (fetched from a pinned commit, verified by sha256)
+  into the directory, builds the database when the app reports it offline, and
+  registers and verifies the lab's own account (`mutillidae-user`).
+- **FR-LAB-342** *(Mutillidae answer key; `CC-LAB-0342`).* `lab/ground-truth-mutillidae/`
+  scores level 0: LDAP and XPath injection with cross-class negatives, plus SQL injection,
+  reflected XSS, XXE, open redirect and file inclusion (`path_traversal`) as a regression
+  target. Level 5 is session state and is not part of the key.
+- **FR-LAB-343** *(the measurement; `CC-LAB-0343`).* Its BASELINE / AFTER numbers and
+  open gaps are recorded with the exact commands.
+- **FR-LAB-331** *(NodeGoat answer key; `CC-LAB-0331`, 2026-11-20).*
+  `lab/ground-truth-nodegoat/` (target `owasp_nodegoat_c5cb68a7`, case ids `NGOAT-`):
+  server-side JavaScript injection (`ssjs`) in `/contributions`' `preTax`, `roth` and
+  `afterTax` (each passed to `eval()` and rendered; the points carry the form's JSON
+  siblings) and in `/allocations/2`'s `threshold` (a MongoDB `$where` built inside a
+  single-quoted string; upstream files it as NoSQL injection); open redirect in `/learn`'s
+  `url`; NoSQL operator injection in `/login`'s JSON `userName` (not an upstream tutorial
+  case, checked live); stored XSS in `/profile`'s `lastName` (observed on `/dashboard`)
+  and reflected XSS in seven `/profile` fields; IDOR in `/allocations/{userId}`
+  (`account_value: user_id`), stored XSS in `/memos`' `memo` and SSRF in `/research`'s
+  `symbol`, each `[reach: none]` with its reason. Negatives: the path `userId`
+  (parseInt'ed), `/login`'s `password` (compared in JavaScript), `/profile`'s `lastName`,
+  `/memos`' `memo` and `/research`'s `symbol` for `ssjs`, `memo` and the ignored
+  `website` for reflected XSS. Every case was checked against upstream's source at the
+  pinned commit and measured live (2026-11-20).
+- **FR-LAB-330** *(OWASP NodeGoat as an external lab; `CC-LAB-0330`, 2026-11-20).*
+  `nodegoat` (Node.js 12 / Express / MongoDB 4.4) on 127.0.0.1:3091 (`NODEGOAT_PORT`):
+  `fetch_nodegoat` checks OWASP/NodeGoat out at `c5cb68a7` (`checkout_pinned`), refuses a
+  checkout whose tracked files do not hash to `NODEGOAT_TREE_SHA256` (`tree_sha256`: one
+  sha256 over each tracked path and its content's sha256), copies it without `.git` into
+  the gitignored `.cache/app` and installs its production packages on the host
+  (`npm_install(production=True)`: `npm ci --omit=dev --ignore-scripts` against the
+  lockfile's integrity hashes); the image builds offline from the pinned
+  `node:12-alpine` (`NODEGOAT_NODE12_IMAGE`). MongoDB (`SECDEVLABS_MONGO_IMAGE`, tmpfs)
+  is unpublished on an internal network; the app's front bridge has egress (its SSRF
+  sink can reach out; not blocked, as Juice Shop's). `NODE_ENV=production` (upstream's
+  development config injects a livereload script). The app re-seeds its database at
+  every start (upstream's `artifacts/db-reset.js`), so its two identities are upstream's
+  seeded accounts: `nodegoat-user` (`user1`) and `nodegoat-peer` (`user2`), whose
+  published passwords the operator stores (`may_generate_password` False, as bWAPP's);
+  `bootstrap_nodegoat` verifies each login by a positive differential on `/dashboard`
+  (200 with the session, 302 without) and stores its `user_id`, read from the
+  dashboard's one `/allocations/<id>` link (FR-LAB-309).
+- **FR-LAB-321** *(command injection is a scoreable class; `CC-LAB-0320`,
+  2026-11-20).* The labels contract's `vuln_class` admits `command-injection` (the
+  oracle's own spelling, `CommandInjectionStrategy` / `CommandInjectionOobStrategy`)
+  and `sink_context` admits `os_command`; a ground truth may score command injection.
+- **FR-LAB-320** *(Damn Vulnerable GraphQL Application; `CC-LAB-0320`, 2026-11-20).*
+  `lab/external/dvga/` (`fuzzlab-dvga`) runs DVGA 2.1.2 (`docker.io/dolevf/dvga:latest`
+  pinned by digest, `DVGA_IMAGE`; the 2025-05-24 build) on 127.0.0.1 port `DVGA_PORT`,
+  default 5013, no login (no identity), capabilities dropped, names unresolvable
+  inside (`dns: 127.0.0.1`). Its database and difficulty mode are rebuilt on every start
+  (reset = restart). Answer key `lab/ground-truth-dvga/`: GraphQL requests as JSON-body
+  points naming one `variables.<name>` leaf (the app's own documents where its pages
+  send one); command injection (systemDebug, importPaste host/path/scheme,
+  systemDiagnostics), SQL injection (pastes filter), stored XSS (createPaste title and
+  content, rendered by /public_pastes), with safe arguments as negatives;
+  `[reach: none]` SSRF and file write; DVGA's GraphQL-implementation issues in
+  `graphql-issues.json`, unscored. An import point never names DVGA's own port (its
+  curl has no timeout and blocks the server's only loop). Live test:
+  `tests/test_dvga_live.py`.
 - **FR-LAB-309** *(per-account values; secDevLabs ecommerce-api; `CC-LAB-0315`,
   2026-10-19).* A lab bootstrap may read values of each account's own after its
   verified login (`_ACCOUNT_ATTRIBUTES`) and store them with the credential
@@ -6408,6 +6486,37 @@ lane) can submit a payload as
   client, so no cookie is shared) and stores each under its own identity, reporting
   them as `BootstrapResult.peers`. `secdevlabs-gossip-world` has a second account,
   `sdl-gossip-peer` (`fuzzlab_peer`), for `fuzzlab auto --peer-identity` (FR-FUZZ-55).
+- **FR-LAB-350** *(SasanLabs OWASP VulnerableApp, a Java / Spring Boot external lab;
+  `CC-LAB-0350`, 2026-11-20).* `lab/external/vulnerableapp/` runs
+  `sasanlabs/owasp-vulnerableapp:2.2.115` pinned by digest (`VULNERABLEAPP_IMAGE`; upstream
+  commit 821b347) on 127.0.0.1:3095 (`VAPP_PORT`; CC-LAB-0353), read-only root, every capability
+  dropped, its working-directory writes on tmpfs, no login (no bootstrap identity). Its
+  ground truth `lab/ground-truth-vulnerableapp/` (cases `VAPP-NNNN`) is derived from the
+  app's own scanner metadata (`/VulnerableApp/allEndPointJson`, `/scanner/dast`): each
+  level's UNSECURE / SECURE variant is the verdict, the SECURE levels the negatives, for
+  the classes fuzzlab scores (SQL injection error / union / blind, reflected and stored
+  XSS, command injection, path traversal, SSRF, open redirect, XXE). Where upstream's
+  own source contradicts its variant the case says so and follows the source (two
+  error-based SQLi levels that cannot be broken out of); where no request can reach a
+  positive (a same-directory file name, a redirect the browser keeps on the origin, an
+  entity-expansion bomb) it is `[reach: none - <measured reason>]`. Cases found live
+  beyond upstream's list are tagged so (the String answers are content-negotiated:
+  `text/html` for a browser, so a reflected SQL error is a reflected XSS). Every case
+  was checked live at bring-up (`[prov: ...]` names the source and the check).
+- **FR-LAB-351** *(command injection is a scoreable class; `CC-LAB-0351`, 2026-11-20).*
+  The labels schema's `vuln_class` enum holds `command-injection` (spelled as
+  `CommandInjectionStrategy.vuln_class` records it, so a finding's scoring key matches
+  the case) and `sink_context` holds `os_command` (the spelling lane GQL uses too). Additive: every existing ground truth
+  loads unchanged; `scoreable_classes()` (the static guard) admits it because a default
+  strategy records it and `R-COMMAND-INJECTION` rules its category. First used by
+  `lab/ground-truth-vulnerableapp/`.
+- **FR-LAB-352** *(no two external labs share a published host port; `CC-LAB-0353`,
+  2026-11-20).* Every external lab's default host ports (its `LabMeta` port and fixed
+  ports, and every loopback publish its compose file names) are distinct from every other
+  external lab's, and each compose file's port default is its `LabMeta` port, so any two
+  labs can run at once. Enforced by
+  `tests/test_external_labs_static.py::test_no_two_external_labs_publish_the_same_host_port`
+  (proven on a synthetic collision).
 - **FR-LAB-306** *(secDevLabs apps, one external lab each; `CC-LAB-0303`, 2026-10-18).*
   `fuzzlab/lab_fixtures/external.py` checks globocom/secDevLabs out at commit `10be438`
   once (`secdevlabs_checkout`, gitignored, HEAD verified by the shared

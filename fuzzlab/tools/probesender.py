@@ -419,6 +419,32 @@ def _follow_up_record(target: str, outcome: str, attempts, *, status: int | None
             "attempts": list(attempts)}
 
 
+def _as_sent(url: str, entries) -> list[str]:
+    """The URLs whose page a request to ``url`` with sibling ``entries`` may reach
+    (BUG-0620): ``url`` with each route pair (`session.detect._ROUTE_PARAMS`) the entries
+    carry appended, and ``url`` itself unless those pairs give it the route its own
+    query lacks (then the bare URL is not what is sent). No route anywhere: ``[url]``,
+    which the auth-endpoint check judges fail closed. Entries that are not
+    ``(name, value)`` string pairs are ignored."""
+    from urllib.parse import parse_qsl, urlencode, urlsplit
+
+    # Evidence for the router/route names read here (owner directive 2026-11-20, black
+    # box; the lists themselves are `session.detect`'s, BUG-0122, reviewed by lane BBOX):
+    # `route` -- OpenCart upload/system/library/url.php:93 (`index.php?route=` + route;
+    # its login route `account/login`) and phpMyAdmin src/Url.php:327; `r` -- the Yii 2
+    # routing guide (`/index.php?r=post%2Fview&id=100`). `page` is shown on Mutillidae
+    # only, `action`/`p`/`view` are uncited (CC-FUZZ-0622, CC-SESS-0611/0612).
+    from fuzzlab.session.detect import _ROUTE_PARAMS
+    routed = [url + ("&" if "?" in url else "?") + urlencode([tuple(pair)])
+              for pair in entries or ()
+              if isinstance(pair, (tuple, list)) and len(pair) == 2
+              and isinstance(pair[0], str) and isinstance(pair[1], str)
+              and pair[0].lower() in _ROUTE_PARAMS]
+    own = any(k.lower() in _ROUTE_PARAMS
+              for k, _v in parse_qsl(urlsplit(url).query, keep_blank_values=True))
+    return ([url] if own or not routed else []) + routed
+
+
 class SeamProbeSender(_ExplicitAllowance):
     """Authenticated: routes through the core HTTP seam + session manager.
 
@@ -769,7 +795,12 @@ class SeamProbeSender(_ExplicitAllowance):
         self.header_stop_reason = (f"session bound to a probed header ({culprit[0]} on "
                                    f"{urlsplit(culprit[1]).path or '/'})")
 
-    def _identity_for(self, url: str) -> str:
+    def _identity_for(self, url: str, entries=None) -> str:
+        """The identity a request to ``url`` goes out as. ``entries``: the request's
+        sibling entries (a crawled point's query or form fields), which may carry a front
+        controller's route that its URL lacks (``/index.php`` + ``page=login.php``):
+        the auth-endpoint check judges the request as sent, the URL with each such route
+        pair too (BUG-0620, CC-SESS-0612)."""
         if self._manager is None or self._identity == "anonymous":
             return self._identity
         if not self._ensured:
@@ -785,10 +816,32 @@ class SeamProbeSender(_ExplicitAllowance):
                 self._manager.ensure(urlparse(url).hostname or "", self._identity,
                                      _directory(url))
             self._ensured = True
-        if self._manager.is_auth_endpoint(url):
+        if any(self._manager.is_auth_endpoint(u) for u in _as_sent(url, entries)):
             self.auth_endpoint_anonymous_sends += 1
             return "anonymous"
         return self._identity
+
+    def browser_session_route(self, urls) -> tuple | None:
+        """The session an M6 browser visit of ``urls`` (its plant and observe URLs)
+        carries (FR-SESS-650, BUG-0690): ``(manager, identity, base_url)`` -- this
+        sender's own session manager and identity, the ones every probe of the run
+        carries -- or None when the visit goes anonymous, decided by this sender's own
+        gates on every URL of the visit, as a probe's send is: an auth endpoint is never
+        sent the run's session (`_identity_for`, BUG-0112), nor an isolated path
+        (FR-FUZZ-44: a browser visit has no isolated copy). One browser context carries
+        one session, so one gated URL sends the whole visit anonymously. A sender with
+        no manager or an anonymous identity: None."""
+        if self._manager is None or self._identity == "anonymous":
+            return None
+        urls = [u for u in urls if u]
+        for url in urls:
+            if self._identity_for(url) == "anonymous":      # ensures the session first
+                return None
+        with self._iso_lock:
+            isolated = self._isolated_keys
+        if any(url_key(u) in isolated for u in urls):
+            return None
+        return self._manager, self._identity, self._base_url
 
     #: Makes PRG follow-ups (FR-FUZZ-49).
     prg_capable = True
@@ -907,7 +960,7 @@ class SeamProbeSender(_ExplicitAllowance):
               prg, own) -> Probe:
         """The probe's routing and network, after `send`'s gates. ``own`` is the probe's
         own URL (a path point's template), which a PRG follow-up is resolved against."""
-        identity = self._identity_for(url)
+        identity = self._identity_for(url, entries)
         with self._iso_lock:
             self._counts["send_ordinal"] += 1
         client, copy = self._client, None

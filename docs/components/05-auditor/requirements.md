@@ -38,7 +38,8 @@ budget where a vulnerability is plausible.
   `R-COMMAND-INJECTION` already use. Rule-generation only — confirmation is
   `fuzzlab.oracle`'s job (`FR-FUZZ-18`).
 - **FR-AUD-8** *(`CC-AUD-0017`, 2026-09-23; regex widened by
-  `CC-AUD-0024`, 2026-09-23).* A candidate is generated for the
+  `CC-AUD-0024`, 2026-09-23; **name list superseded by FR-AUD-660**, 2026-11-20 --
+  the names below came from two labgen apps and now match by shape only).* A candidate is generated for the
   `access-control` category: `R-ACCESS-CONTROL`
   (`fuzzlab/audit/rules_data/default_rules.json`) matches a `GET`/`query`
   parameter whose name looks like an object identifier (`channel_id`,
@@ -555,6 +556,8 @@ budget where a vulnerability is plausible.
   inside their line), and each complete line is decoded alone, never a partial read.
   A line that is not UTF-8 or not JSON is skipped and still numbered. For one run
   directory both paths give identical `(key, kind, scope, t, body)` and the same model.
+- **FR-AUD-620** *(LDAP and XPath injection rules; `CC-AUD-0620`, 2026-11-20).*
+  `R-LDAP-INJECTION` and `R-XPATH-INJECTION` nominate query, body and JSON points.
 - **FR-AUD-31** *(the importer keeps every request context; the engine writes it;
   `CC-AUD-0056`, 2026-10-21, BUG-0530, BUG-0544).* It supersedes FR-AUD-22's "the first
   one's leaf wins a name" and FR-FUZZ-43's link binding.
@@ -719,6 +722,21 @@ budget where a vulnerability is plausible.
   - *CC-AUD-0049:* each importer passes the crawl's code segments to
     `_import_path_templates` (`code=`): the spider DB's `script_segments` table, a disco
     run's `script_segments.json` (FR-CRAWL-28). Neither present: no code evidence.
+- **FR-AUD-601** *(a GraphQL request's document and non-string scalars are not data
+  points; `CC-AUD-0601`, 2026-11-20).* `audit.rules.matches` fires no rule on a point
+  `audit.graphql_context.not_a_data_point` names: the `query` leaf of a JSON body whose
+  `query` parses as an executable GraphQL document (FR-CRAWL-601), or a
+  `variables.<name>` leaf declared `Int`, `Float` or `Boolean` (not a list) in it
+  (GraphQL's input coercion of these never yields a string; measured on DVGA). The
+  evaluation is still recorded. A body whose `query` is no GraphQL document is
+  unaffected.
+- **FR-AUD-600** *(GraphQL variables judged by the argument they feed; `CC-AUD-0600`,
+  edited by `CC-AUD-0602`, 2026-11-20).* For a JSON-leaf point under `variables`,
+  `audit.graphql_context` reads the `(field, argument, siblings)` its variable feeds in
+  the request's own document (FR-CRAWL-600); `name_regex` matches the leaf's name or any
+  bound argument's name, so a GraphQL variable gets exactly the generic rules a JSON
+  string leaf of that name gets. No rule reads a field's or a sibling argument's name
+  (the lab-derived rules of CC-AUD-0600 were removed; black-box detection only).
 - **FR-AUD-25** *(an id-shaped path segment; `CC-AUD-0046`, 2026-10-19, FR-FUZZ-57).*
   `R-ACCESS-CONTROL-PATH` fires on a GET `path` point whose name is `id`, `uuid` or
   `guid`, ends in `_id`/`-id` (or `_uuid`/`-guid`…), or is camelCase `…Id`/`…Uuid`
@@ -753,6 +771,23 @@ budget where a vulnerability is plausible.
     field is (`_import_forms`); a hidden or unseen one stays pinned (FR-AUD-22).
   - Malformed `actions.jsonl` lines are counted `quarantined`, with the capture's own.
 
+- **FR-AUD-610** *(a server-side JavaScript injection rule; `CC-AUD-0610`, 2026-11-20).*
+  `R-SSJS` (`default_rules.json`) nominates category `server-side-javascript-injection`
+  for every query, body, JSON-leaf and path point (where `R-SQLI-PARAM` and `R-SSTI`
+  apply): the value may reach `eval`, `new Function` or a `$where` whatever its name.
+
+- **FR-AUD-660** *(the black-box rule for audit rules; `CC-AUD-0660`, 2026-11-20,
+  BUG-0660, PA-0660).* No rule's predicate names a parameter, path or value that only a
+  lab supplied; a word a rule relies on is justified by a public source or two
+  independent targets. Concretely: `R-ACCESS-CONTROL` matches a GET query parameter by
+  the object-identifier shape `R-ACCESS-CONTROL-PATH` uses (`id`/`uuid`/`guid`, a
+  `_`/`-` suffix of one, camelCase `…Id`/`…Uuid`; OWASP API Security Top 10 2023 API1,
+  OWASP WSTG-ATHZ-04), never a list of app names; `R-SPEL-INJECTION` nominates by
+  location alone (query, body, json), as `R-SSTI` does; `R-SSRF` has no `thumbnail`;
+  `R-CSV-FORMULA-INJECTION` has no `label`; `R-JWT-ALG-NONE` matches the
+  `Authorization` header only (RFC 6750, RFC 7235); `value_shape.FILE_EXTENSIONS` has
+  no `lang`. Enforced for every rules-data file and every detection module by
+  `tests/test_blackbox_detection.py`.
 ## 4. Non-functional requirements
 - **NFR-AUD-explainable** Every candidate is traceable to the rule evidence that
   produced it; a candidate with no evidence is a bug.

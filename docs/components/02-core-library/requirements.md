@@ -1115,6 +1115,9 @@ plugin registry. It is the layer that makes the store the integration bus.
     (2 s, `_summary_clock`): its stat key can miss a commit inside the WAL's old extent
     within one coarse mtime tick.
   - Enforced by: `tests/test_core_store_read_only.py::test_the_read_only_opener_never_creates_writes_or_migrates`, `tests/test_core_store_read_only.py::test_the_read_only_opener_pins_a_private_cache`, `tests/test_core_store_read_only.py::test_whether_a_file_is_sqlite_is_asked_of_sqlite_never_read_raw`, `tests/test_core_store_read_only.py::test_every_read_only_open_goes_through_the_opener`, `tests/test_core_store_read_only.py::test_the_read_only_open_guard_catches_synthetic_offenders`, `tests/test_web_store_locks.py::test_no_web_process_module_opens_a_store_file_except_through_sqlite`, `tests/test_web_store_locks.py::test_the_store_file_guard_catches_synthetic_offenders`, `tests/test_web_store_locks.py::test_the_store_open_audit_catches_synthetic_offenders`, `tests/test_web_store_locks.py::test_a_projects_listing_never_drops_the_in_process_proxys_store_locks`, `tests/test_web_store_locks.py::test_a_projects_listing_never_drops_a_request_readers_locks`, `tests/test_web_store_locks.py::test_opening_a_project_never_drops_a_held_connections_locks`, `tests/test_web_sitetree.py::test_the_project_listing_never_serves_a_summary_older_than_its_bound`
+- **FR-CORE-610** *(the `ldap_injection` / `xpath_injection` classes; `CC-CORE-0610`,
+  2026-11-20).* Mapped to `ldap-injection` / `xpath-injection`; the labels schema has the
+  classes and the `ldap` / `xpath` sink contexts.
 - **FR-CORE-509** *(the seam keeps its connections, per identity and session generation;
   `CC-CORE-0075`, 2026-10-21, BUG-0549).*
   - `core.http.PooledTransport` is `HttpClient`'s default transport. It keeps one
@@ -1210,6 +1213,11 @@ plugin registry. It is the layer that makes the store the integration bus.
   - `core.evidence.method_key(method)`: upper-case, `GET` when missing -- the one
     method normalisation for joins (PA-0076(2)), moved from `ml.dataset` (which
     re-exports it) so the web UI shares it without the ML package.
+
+- **FR-CORE-605** *(the `ssjs` class; `CC-CORE-0605`, 2026-11-20).* `core.runmode`
+  maps the ground-truth class `ssjs` to category `server-side-javascript-injection`
+  (`_VULN_TO_CATEGORY`), so a run derives the category from an answer key's positives
+  (D14) and scores its findings.
 
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers

@@ -3,6 +3,75 @@
 Component code: **SESS**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SESS-0612 — The routed-login gate judges the request as sent, and fails closed (BUG-0620) (2026-11-20)
+- Change: `fuzzlab/session/manager.py` (`_same_routed_page` fails closed: a router URL
+  naming no route is the auth endpoint; `_names_a_route`), `fuzzlab/tools/probesender.py`
+  (`_identity_for(url, entries)`, `_as_sent`; `_send` passes its entries).
+- Reason: BUG-0620 (orchestrator review round 1): a crawled login form's URL is
+  `/index.php`, its route in its entries, so CC-SESS-0611's rule sent it with the session.
+- Callers (what each passes): `SeamProbeSender._send` -- the point URL plus its entries
+  (now judged together); `fetch` -- the page URL and the route URL; `_prg_session_gate`
+  -- the follow-up's full target; `SessionManager` health walk -- full candidate URLs;
+  greybox `run.py:189` -- its request URL. A bare router URL from any of them fails
+  closed. A routed logout (`index.php?do=logout`) is refused by SP-09 before any send,
+  and is an auth endpoint by the fail-closed rule.
+- Impact: measured live on Mutillidae: the ground-truth run is unchanged (tp=24 fp=0 fn=4
+  tn=11, 482 requests), 34 probes anonymous (the bare `/index.php` `page` point, before
+  0); with a login-page point added, 65 anonymous (its 31 probes); the crawl run
+  unchanged (tp=6 fp=0 fn=22 tn=11, 970 requests), 36 anonymous.
+- Risk: low; it only adds refusals to CC-SESS-0611.
+- Deliverables:
+  - [x] code; `tests/test_front_controller_routes.py` (gate, per-entry shapes, AST pin
+    of `_send`); BUG-0620, PA-0620, ERROR_LOG — done
+  - [x] `_as_sent` allowed in `tests/test_query_placement.py` (a decision input, never
+    sent) — done
+
+### CC-SESS-0611 — A front controller's auth endpoint is its routed page only (2026-11-20)
+- Change: `fuzzlab/session/manager.py` (`is_auth_endpoint` with `_same_routed_page`).
+- Reason: measured on Mutillidae: with the login at `/index.php?page=login.php`, the
+  path-only comparison made every page an auth endpoint, so every probe of the run went
+  without the session (465 of 465, "auth-endpoint probes sent without the session").
+- Impact: only a recorded endpoint whose last segment is a router and whose query names a
+  route: a URL then matches when it carries every query pair of it (`detect.
+  _same_login_url`'s rule). Every other endpoint is compared by path as before (test).
+- Risk: medium -- the NFR-FUZZ-safe gate is narrowed for that shape; **flagged to the
+  orchestrator**. A probe of the login page itself, with any extra parameters, is still
+  sent without the session.
+- Deliverables:
+  - [x] code; `tests/test_front_controller_routes.py` — done
+- Note: no FR-SESS range was pre-assigned to this lane; FR-SESS-3 is amended in place.
+
+### CC-SESS-0610 — Login discovery tries the base page's own login links (2026-11-20)
+- Change: `fuzzlab/session/manager.py` (`_discover_login_form` appends
+  `_linked_login_urls` after its fixed candidates; `MAX_LINKED_LOGIN_PAGES = 3`).
+- Reason: measured on Mutillidae: the login form is only at `index.php?page=login.php`,
+  linked from the home page; `/login.php` served directly dies before its form. The
+  BASELINE run aborted ("no login form found").
+- Impact: at most 3 more GETs at login discovery, only when no fixed candidate had a form:
+  same-origin links (SP-39 extraction, SP-05 origin) that `detect.looks_like_login_url`
+  (SP-16) accepts, each through `_navigate` (every hop authorised).
+- Risk: low.
+- Deliverables:
+  - [x] code; `tests/test_front_controller_routes.py` — done
+### CC-SESS-0640 — The browser login's route search goes on past a login route that fails to load (BUG-0670 sweep) (2026-11-20)
+- Placement: lane NAV (item NAV), base d492b9d; SP-01's caller sweep (CLAUDE.md item 7).
+- Change: `fuzzlab/session/browserlogin.py::_drive` -- each candidate login route is navigated in its own `try`; a `PlaywrightError` ends that route's failed load through `navguard.end_failed_load` (PA-0522(2)), notes `"<host>: a login route did not load"` in the refusals the final error names, and the search goes on to the next route. Before, one route's failed load raised out of the loop and ended the login.
+- Impact (other components / project): since BUG-0670 an empty 4xx/5xx answer is a failed navigation on every binary (CC-CRAWL-0640), so a stale login link answering an empty 404 would have hidden the next route on the headless shell as it already did on the full browser; now it does not. A login that finds no form still raises `BrowserLoginError` (its text now names the routes that did not load, by host). No contract, store or traffic change: the next route was going to be requested anyway had the first loaded.
+- Risk (level; mitigation or accepted-risk justification): low. The cancellation check runs before every route as before; a route that fails costs its own navigation timeout at most, as a route that loaded without a form already did.
+- Deliverables:
+  - [x] `_drive`'s per-route catch — done
+  - [x] `tests/test_browser_login_route_fails.py` (real Chromium: `/` links an empty-404 `/signin` before `/login`; the login posts at `/login`) — done; fails on the base with `BrowserLoginError: ... net::ERR_FAILED at .../signin`
+  - [x] SP-01's failed navigations of this module otherwise unchanged by construction (base URL: a failed load still fails the login, now on both binaries) — done
+- Effectiveness: pending (the harness run of the lane's tree is cited in CC-CRAWL-0640).
+### CC-SESS-0650 — The run's sender decides the session a browser visit carries (FR-SESS-650, BUG-0690) (2026-11-20)
+- Change: `fuzzlab/tools/probesender.py::SeamProbeSender.browser_session_route(urls)` (SP-125): `(manager, identity, base_url)` or None when the sender has no manager or an anonymous identity, or any URL is an auth endpoint (`_identity_for`) or an isolated path.
+- Measurements before design (CLAUDE.md item 8): see CC-FUZZ-0680 (NodeGoat plant 302 → `/login`).
+- Impact (other components / project): FUZZ's M6 executor reads it (CC-FUZZ-0680). No session is created: the browser adopts the run manager's current state.
+- Risk (level; mitigation or accepted-risk justification): low; it reuses the sender's own gates. An isolated path has no browser copy and goes anonymous (as the sender's fallback does).
+- Deliverables:
+  - [x] method, tests (`tests/test_m6_session.py` gate tests) — done
+- Effectiveness (assessed 2026-11-20): gate tests pass (auth endpoint, isolated path, anonymous/managerless).
+
 ### CC-SESS-0031 — The browser login's failed navigations settle on the error page's load (BUG-0561) (2026-10-23)
 - Change: none in `fuzzlab/session/`. `session.browserlogin`'s navigations go through SP-01 (`navguard.navigate`), which now waits for a failed navigation's error page to load, not only to commit, before it raises (CC-CRAWL-0065).
 - Impact (other components / project): a login navigation that fails with a network error (an empty error answer) raises about 30 ms later at p50 (p95 about 45 ms more), inside the same 3 s budget as before; the next login navigation is no longer dropped by Chromium when it starts before that error page's load. No interface or store change.

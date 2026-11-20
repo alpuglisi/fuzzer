@@ -46,7 +46,11 @@ GT_DIRS = {"bwapp": LAB / "ground-truth-bwapp", "juice-shop": LAB / "ground-trut
            "secdevlabs-mongection": LAB / "ground-truth-secdevlabs-mongection",
            "secdevlabs-comment-killer": LAB / "ground-truth-secdevlabs-comment-killer",
            "secdevlabs-streaming": LAB / "ground-truth-secdevlabs-streaming",
-           "secdevlabs-ecommerce-api": LAB / "ground-truth-secdevlabs-ecommerce-api"}
+           "secdevlabs-ecommerce-api": LAB / "ground-truth-secdevlabs-ecommerce-api",
+           "dvga": LAB / "ground-truth-dvga",
+           "mutillidae": LAB / "ground-truth-mutillidae",
+           "nodegoat": LAB / "ground-truth-nodegoat",
+           "vulnerableapp": LAB / "ground-truth-vulnerableapp"}
 #: Labs scored by URL coverage, not an injection answer key: the lab serves its own
 #: expected set (the Crawl Maze: /fetch-expected-results, CC-LAB-0302).
 COVERAGE_LABS = {"security-crawl-maze"}
@@ -1426,3 +1430,176 @@ def test_a_lab_with_extra_accounts_bootstraps_and_stores_each_on_its_own_session
     assert seen[0][1] is not seen[1][1]                    # one session per account
     assert stored["sdl-gossip-user"][1] != stored["sdl-gossip-peer"][1]
 
+
+# --- NodeGoat (CC-LAB-0330) ---------------------------------------------------------------
+
+def test_the_nodegoat_build_uses_only_pinned_bases_and_the_cached_app():
+    text = (EXTERNAL / "nodegoat" / "Dockerfile").read_text("utf-8")
+    froms = [ln.split()[1] for ln in text.splitlines() if ln.startswith("FROM ")]
+    assert froms == [ext.NODEGOAT_NODE12_IMAGE]
+    assert [ln.split()[1] for ln in text.splitlines() if ln.startswith("COPY ")] == \
+        [".cache/app"]
+    code = [ln for ln in text.splitlines() if ln and not ln.startswith("#")]
+    assert not any(ln.startswith("RUN ") or "npm" in ln for ln in code)   # fetches nothing
+    doc = yaml.safe_load((EXTERNAL / "nodegoat" / "compose.yaml").read_text("utf-8"))
+    assert doc["services"]["mongo"]["image"] == ext.SECDEVLABS_MONGO_IMAGE
+    assert doc["networks"]["nodegoat-db"]["internal"] is True
+    assert doc["services"]["mongo"]["networks"] == ["nodegoat-db"]
+    assert "ports" not in doc["services"]["mongo"]
+    # production config: upstream's development config injects a livereload <script>
+    assert doc["services"]["web"]["environment"]["NODE_ENV"] == "production"
+
+
+def _git_repo(path: Path, files: dict[str, bytes]) -> str:
+    path.mkdir(parents=True)
+    for name, data in files.items():
+        (path / name).parent.mkdir(parents=True, exist_ok=True)
+        (path / name).write_bytes(data)
+    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+    for args in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "x"]):
+        subprocess.run(["git", "-C", str(path), *args], check=True, env=env,
+                       capture_output=True)
+    return subprocess.run(["git", "-C", str(path), "rev-parse", "HEAD"], check=True,
+                          capture_output=True, text=True).stdout.strip()
+
+
+def test_tree_sha256_hashes_tracked_paths_and_contents_only(tmp_path):
+    files = {"package.json": b"{}", "app/a.js": b"x", "b c.txt": b"y"}
+    _git_repo(tmp_path / "r", files)
+    digest = hashlib.sha256()
+    for name in sorted(n.encode() for n in files):
+        digest.update(name + b"\0" + hashlib.sha256(files[name.decode()]).hexdigest().encode()
+                      + b"\n")
+    assert ext.tree_sha256(tmp_path / "r") == digest.hexdigest()
+    (tmp_path / "r" / "untracked.js").write_bytes(b"z")          # not in the hash
+    assert ext.tree_sha256(tmp_path / "r") == digest.hexdigest()
+    (tmp_path / "r" / "app/a.js").write_bytes(b"changed")         # a changed file is
+    assert ext.tree_sha256(tmp_path / "r") != digest.hexdigest()
+
+
+def test_nodegoat_is_fetched_at_the_pinned_tree_with_production_packages(tmp_path, monkeypatch):
+    """The checkout must hash to the pinned tree, is copied without its .git, and its
+    packages are installed with ``--omit=dev``; a tree that hashes otherwise is refused
+    before anything is installed."""
+    src = tmp_path / "upstream"
+    commit = _git_repo(src, {"package.json": b"{}", "server.js": b"//"})
+    installs = []
+    monkeypatch.setattr(ext, "npm_install",
+                        lambda d, timeout, production=False: installs.append((d, production)))
+    root = tmp_path / "external"
+    tree = ext.tree_sha256(src)
+    with pytest.raises(ext.ExternalLabError, match="hash to"):
+        ext.fetch_nodegoat(root=root, repo=str(src), commit=commit, tree="0" * 64)
+    assert installs == []
+    dest = ext.fetch_nodegoat(root=root, repo=str(src), commit=commit, tree=tree)
+    assert (dest / "server.js").is_file() and not (dest / ".git").exists()
+    assert installs == [(dest, True)]
+
+
+def test_npm_install_production_omits_dev_packages(tmp_path, monkeypatch):
+    seen = []
+
+    def fake_run(argv, timeout, cwd):
+        seen.append(argv)
+        (Path(cwd) / "node_modules").mkdir(exist_ok=True)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+    import fuzzlab.procutil as pu
+    monkeypatch.setattr(pu, "run_bounded", fake_run)
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/npm")
+    ext.npm_install(tmp_path, production=True)
+    ext.npm_install(tmp_path)
+    assert "--omit=dev" in seen[0] and "--omit=dev" not in seen[1]
+
+
+def test_the_nodegoat_bootstrap_verifies_by_differential_and_stores_the_user_id():
+    """Login through the form (no CSRF token upstream); /dashboard 200 with the session,
+    302 without; the account's user_id is the dashboard's one allocations link."""
+    from types import SimpleNamespace as NS
+    users = {"user1": ("User1_123", "2")}
+    state = {"who": None}
+
+    class Resp:
+        def __init__(self, status, text="", location=""):
+            self.status_code, self.text, self.headers = status, text, {"Location": location}
+
+        def close(self):
+            pass
+
+    class Client:
+        origin = "http://127.0.0.1:3091"
+
+        def request(self, method, path, *, anonymous=False, data=None, **kw):
+            if method == "GET" and path == "/login":
+                return Resp(200, "login")
+            if method == "POST" and path == "/login":
+                ok = users.get(data["userName"], ("", ""))[0] == data["password"]
+                state["who"] = data["userName"] if ok else None
+                return Resp(302, location="/dashboard") if ok else Resp(200, "Invalid")
+            if path == "/dashboard":
+                if anonymous or state["who"] is None:
+                    return Resp(302, location="/login")
+                uid = users[state["who"]][1]
+                return Resp(200, f'<a href="/allocations/{uid}">Allocations</a>')
+            raise AssertionError((method, path))
+    good = NS(username="user1", password="User1_123")
+    assert ext.bootstrap_nodegoat(Client(), good, deadline=1, sleep=lambda s: None) == \
+        ["login verified"]
+    assert ext.nodegoat_account_attributes(Client(), good) == {"user_id": "2"}
+    with pytest.raises(ext.ExternalLabError, match="login of 'user1' failed"):
+        ext.bootstrap_nodegoat(Client(), NS(username="user1", password="x"), deadline=1,
+                               sleep=lambda s: None)
+    meta = ext.LAB_META["nodegoat"]
+    assert [a.identity for a in meta.accounts()] == ["nodegoat-user", "nodegoat-peer"]
+    assert not meta.may_generate_password            # upstream's seeded accounts
+
+
+
+# --- published host ports: no two external labs share one (CC-LAB-0353) ------------------
+
+_PORT_DEFAULT = re.compile(r"127\.0\.0\.1:(?:\$\{(\w+):-(\d+)\}|(\d+)):\d+")
+
+
+def lab_host_ports(meta, compose_text: str) -> set[int]:
+    """Every host port a lab publishes by default: its `LabMeta` port and fixed ports,
+    and every loopback publish its compose file names (a `${VAR:-port}` default or a
+    literal port)."""
+    ports = {meta.default_port, *(host for host, _container in meta.fixed_ports)}
+    for var, default, literal in _PORT_DEFAULT.findall(compose_text):
+        ports.add(int(default or literal))
+    return ports
+
+
+def port_collisions(ports_by_lab: dict[str, set[int]]) -> list[str]:
+    seen: dict[int, str] = {}
+    out = []
+    for lab in sorted(ports_by_lab):
+        for port in sorted(ports_by_lab[lab]):
+            if port in seen:
+                out.append(f"{port}: {seen[port]} and {lab}")
+            else:
+                seen[port] = lab
+    return out
+
+
+def test_no_two_external_labs_publish_the_same_host_port():
+    """Two labs on one default port cannot run together, and the second `up` fails
+    (lane PHPX's Mutillidae and VulnerableApp both took 3093 before the merge)."""
+    labs = ext.discover_labs()
+    ports = {name: lab_host_ports(ext.LAB_META[name], compose.read_text(encoding="utf-8"))
+             for name, compose in labs.items()}
+    assert port_collisions(ports) == []
+    for name, compose in labs.items():           # the compose default is LabMeta's port
+        text = compose.read_text(encoding="utf-8")
+        meta = ext.LAB_META[name]
+        assert f"${{{meta.port_env}:-{meta.default_port}}}" in text, name
+
+
+def test_the_port_guard_flags_a_synthetic_collision():
+    from dataclasses import replace
+    a = ext.LAB_META["juice-shop"]
+    b = replace(a, name="other", default_port=3091, fixed_ports=((3000, 80),))
+    ports = {"juice-shop": lab_host_ports(a, '"127.0.0.1:${JUICE_PORT:-3000}:3000"'),
+             "other": lab_host_ports(b, '"127.0.0.1:${X:-3091}:80"\n"127.0.0.1:8080:8080"')}
+    assert ports["other"] == {3091, 3000, 8080}
+    assert port_collisions(ports) == ["3000: juice-shop and other"]

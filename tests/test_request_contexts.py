@@ -522,6 +522,13 @@ _SEED_FIELDS = frozenset({"base_entries", "base_value", "redirect_seed"})
 _SEED_EXEMPT = {
     "DomXssStrategy": "passes the siblings to the browser's binder, which replaces the "
                       "target's slot with the payload",
+    # BUG-0661 / PA-0660: both read the captured body only on a whole-body JSON point
+    # (`content_type` is set for a whole-body point alone), which has no target slot:
+    # every leaf they send back is in the context's entries, none is the seed.
+    "PriceTrustDifferentialStrategy": "varies the captured body's numeric leaves on a "
+                                      "whole-body point, which has no target slot",
+    "GoTemplateSstiStrategy": "places its expression in a whole-body point's string "
+                              "leaves; a whole-body point has no target slot",
 }
 
 

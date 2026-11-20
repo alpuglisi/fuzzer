@@ -18,7 +18,6 @@ to any other host.
 from __future__ import annotations
 
 import base64
-import glob
 import hashlib
 import json
 import socket
@@ -423,9 +422,6 @@ def chromium_or_skip(monkeypatch):
         import playwright.sync_api  # noqa: F401
     except ImportError as exc:
         skip_or_fail(f"playwright unavailable: {exc}")
-    exe = sorted(glob.glob("/opt/pw-browsers/chromium-*/chrome-linux/chrome"))[-1:]
-    if exe:
-        monkeypatch.setenv("PLAYWRIGHT_CHROMIUM_EXECUTABLE", exe[0])
 
 
 def run_crawl(spider):

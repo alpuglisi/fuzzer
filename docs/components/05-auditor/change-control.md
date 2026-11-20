@@ -3,6 +3,134 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0620 — Rules for LDAP and XPath injection (FR-AUD-620) (2026-11-20)
+- Change: `fuzzlab/audit/rules_data/default_rules.json` (`R-LDAP-INJECTION`,
+  `R-XPATH-INJECTION`: query, body and JSON points, references `ldap-injection` and
+  `xpath-injection`).
+- Reason: a category with no rule gets no candidate (CC-FUZZ-0620, CC-FUZZ-0621).
+- Impact: a run whose categories include them nominates every query/body/JSON point;
+  a ground-truth run selects them only for a key with such cases.
+- Risk: low.
+- Deliverables:
+  - [x] rules; `tests/test_ldap_xpath.py::test_both_classes_are_wired_end_to_end` — done
+
+### CC-AUD-0610 — `R-SSJS`: server-side JavaScript injection on every value point (FR-AUD-610) (2026-11-20)
+- Change: `fuzzlab/audit/rules_data/default_rules.json` (appended rule `R-SSJS`, category
+  `server-side-javascript-injection`, locations query, body, json, path).
+- Impact (other components / project): FUZZ's two new strategies (CC-FUZZ-0610) get
+  candidates; more requests on runs that include the category (see CC-FUZZ-0610).
+- Risk (level; mitigation or accepted-risk justification): low (a nomination; the
+  strategies decide). The pre-change review gate was not run (F-611).
+- Deliverables:
+  - [x] rule; `tests/test_oracle_strategies_ssjs.py::test_the_category_is_ruled_mapped_and_registered` — done
+- Effectiveness (assessed 2026-11-20): NodeGoat's `ssjs` positives were nominated in
+  both passes (CC-LAB-0331).
+### CC-AUD-0602 — The DVGA-derived GraphQL command-injection rules are removed (black-box detection only) (2026-11-20)
+- Placement: lane GQL (item GQL), review round 1, base 2be7a50, pre-assigned
+  CC-AUD-0600..0609.
+- Change: `R-COMMAND-INJECTION-GRAPHQL-FIELD` and `R-COMMAND-INJECTION-GRAPHQL-SIBLING`
+  removed from `default_rules.json`, with their `when` keys (`graphql_field_regex`,
+  `graphql_sibling_regex`) and `graphql_context.field_names` / `sibling_names`. Kept:
+  the variable-binding reader, a variable judged by its argument's name as well as its
+  own under the generic rules (FR-AUD-600 as edited), and the document / Int-Float-
+  Boolean skip (FR-AUD-601): both come from the GraphQL grammar and spec, not from a
+  target.
+- Reason: the owner's directive (relayed by the orchestrator's review, 2026-11-20): no
+  rule may depend on names, paths, parameters or values taken from a lab; a behaviour a
+  rule relies on must be shown on two independent targets or a public corpus. The field
+  regex's words came from DVGA's own field names (CC-AUD-0600 said so; F-602).
+- Effectiveness (live, 2026-11-20): DVGA gt back to tp=5 fp=0 fn=5 tn=5, 345 requests,
+  46 s (the 2be7a50 baseline's numbers): systemDebug(arg), importPaste(path, scheme)
+  are misses again -- their argument names carry no generic command signal. Crawl: see
+  CC-LAB-0321 (the headline measure).
+- Impact (other components / project): none outside GraphQL requests.
+- Risk (level; mitigation or accepted-risk justification): low (a removal).
+- Deliverables:
+  - [x] rules and predicates removed; tests assert no rule reads a GraphQL field
+    (`tests/test_graphql_args.py::test_no_rule_names_a_field_argument_or_value_of_any_target`)
+    — done
+  - [x] FR-AUD-600 edited in place, CHANGELOG, F-602 — done
+
+### CC-AUD-0601 — A GraphQL request's document and its non-string scalar variables are not data points (2026-11-20)
+- Placement: lane GQL (item GQL), base 2be7a50, pre-assigned CC-AUD-0600..0609.
+- Change: `fuzzlab/audit/graphql_context.py::not_a_data_point` (FR-AUD-601), checked
+  first by `audit.rules.matches`: no rule fires on the `query` leaf of a JSON body whose
+  `query` parses as an executable GraphQL document (the operation itself), nor on a
+  `variables.<name>` leaf declared `Int`, `Float` or `Boolean` (not a list) in that
+  document (`tools.apiop.graphql_variable_types`, CC-CRAWL-0600). The evaluation is
+  still recorded, as not fired.
+- Measured (DVGA, 2026-11-20): a payload in place of the document is a GraphQL syntax
+  error; a string in an `Int` variable answered "could not convert string to float", a
+  string in a `Boolean` variable was coerced to true (graphql-core 2), so neither string
+  reaches a resolver -- GraphQL's input coercion of these scalars never yields a string.
+  ID, String, enums and custom scalars stay points.
+- Effectiveness: DVGA crawl run on the same disco capture: 454 -> 202 requests (63 ->
+  49 s), the same findings (CC-LAB-0320). A body whose `query` is no GraphQL document
+  (a REST search `{"query": "shoes"}`) is untouched (test); every other lab's
+  ground-truth point is untouched (sweep test).
+- Impact (other components / project): fewer probes on GraphQL requests only.
+- Risk (level; mitigation or accepted-risk justification): low. A custom scalar that is
+  string-backed but named like a built-in is not possible (the built-in names are
+  reserved by the GraphQL spec).
+- Deliverables:
+  - [x] `not_a_data_point`, the check in `matches`, tests
+    (`tests/test_graphql_args.py`) — done
+  - [x] FR-AUD-601, CHANGELOG — done
+
+### CC-AUD-0600 — GraphQL variables are judged by the field argument they feed; two command-injection rules for GraphQL (2026-11-20)
+- Placement: lane GQL (item GQL), base 2be7a50, pre-assigned CC-AUD-0600..0609.
+- Change: `fuzzlab/audit/graphql_context.py` (new): for a JSON-leaf point under
+  `variables`, the `(field, argument, sibling arguments)` its variable feeds in the
+  request's own document (`tools.apiop.graphql_variable_bindings`, CC-CRAWL-0600).
+  `fuzzlab/audit/rules.py`: `name_regex` also matches the bound argument's name (a
+  superset: the leaf name still matches); two new `when` keys,
+  `graphql_field_regex` (the field) and `graphql_sibling_regex` (another argument of
+  the same field call, whole-name), validated like `name_regex` (`_REGEX_KEYS`).
+  `fuzzlab/audit/rules_data/default_rules.json`: `R-COMMAND-INJECTION-GRAPHQL-FIELD`
+  (a field named like a system, debug, diagnostic, exec, shell, ping or command
+  operation) and `R-COMMAND-INJECTION-GRAPHQL-SIBLING` (an argument called next to a
+  `cmd`/`host`/`ip`/`domain`-named one: one resolver call's inputs).
+- Why (measured, DVGA 2026-11-20, BASELINE run): the only command-injection gate was a
+  parameter-name regex; DVGA's `systemDebug(arg)`, `importPaste(path)` and
+  `importPaste(scheme)` reach a shell and got no command-injection candidate (3 FNs).
+- Effectiveness: DVGA gt run tp=5 -> 8, fp=0 kept (the two cmdi negatives,
+  `systemDiagnostics` username and password, are now checked and stay negative);
+  Juice Shop unchanged (CC-LAB-0320). The field regex's words come from DVGA's own field
+  names (systemDebug, systemDiagnostics) and common admin-endpoint naming: no second
+  GraphQL target has been measured yet.
+- Impact (other components / project): only points that are bound GraphQL variables
+  can change outcome (the sweep test checks every other lab's points have no binding).
+- Risk (level; mitigation or accepted-risk justification): low-medium. More timing
+  probes on GraphQL fields with such names; a timing confirmation needs a delay that
+  scales with the requested sleep, so a false confirmation stays unlikely.
+- Deliverables:
+  - [x] context module, rule predicates and rules, tests (`tests/test_graphql_args.py`)
+    — done
+  - [x] FR-AUD-600, CHANGELOG — done
+### CC-AUD-0670 — The auditor's browser fetch treats an empty 4xx/5xx answer as a failed load on every binary (BUG-0670) (2026-11-20)
+- Change: none in `fuzzlab/tools/fetcher.py`. `ContentFetcher.fetch` navigates through SP-01; since CC-CRAWL-0640 the guard fails a top-level navigation whose answer is an empty 400-599, so `fetch` takes its failure path (`end_failed_load`, then the static fetch) on the headless shell as it already did on the full Chromium.
+- Impact (other components / project): on the headless shell (the default binary) such a fetch now returns the static fetch's status, content type and (empty) body, with no XHR list, instead of an empty rendered document; one more GET of that URL (the static fallback), as on the full browser. No interface change.
+- Risk (level; mitigation or accepted-risk justification): low; the full browser's behaviour, which the auditor was built and measured on.
+- Deliverables:
+  - [x] Recorded as affected by construction; `tests/test_navigation_aborts.py::test_the_auditors_load_after_failed_loads_is_rendered` passes on both binaries — done
+- Effectiveness: pending (the lane's harness run, CC-CRAWL-0640).
+### CC-AUD-0660 — Lab-fitted audit rule words generalised or removed: the black-box rule (BUG-0660, PA-0660, FR-AUD-660) (2026-11-20)
+- Placement: lane BBOX (item BBOX), base d492b9d; pre-assigned CC-AUD-0660..0669.
+- Change (`fuzzlab/audit/rules_data/default_rules.json`, `fuzzlab/audit/value_shape.py`):
+  - `R-ACCESS-CONTROL`: `channel_id|resource_id|object_id|item_id|record_id|owner_id|account_id` -> the object-identifier shape of `R-ACCESS-CONTROL-PATH` (`^(id|uuid|guid)$|[_-](id|uuid|guid)$|(?-i:[a-z](Id|ID|Uuid|UUID))$`). Evidence of the old list: CC-AUD-0017 (twitch-clone `channel_id`) and CC-AUD-0024 (netflix-clone `account_id`, added after that lab's miss); the other four names appear in no target. Source of the new shape: OWASP API Security Top 10 2023 API1 (BOLA), OWASP WSTG-ATHZ-04 (IDOR).
+  - `R-SPEL-INJECTION`: `sort|sortby|filter|order|expr|expression` (grounded only in expedia-clone's `sortBy`, FR-FUZZ-15; `sortby` was dead) -> location-only (`query`, `body`, `json`), as `R-SSTI`. The SpEL strategy decides; it sends 1 request per candidate (2 only when the first shows the evaluated canary).
+  - `R-SSRF`: `thumbnail` removed (an echo of twitch-clone's `/api/clips/thumbnail`, CC-AUD-0016); `image` stays (OWASP SSRF Prevention Cheat Sheet; PortSwigger Web Security Academy, SSRF).
+  - `R-CSV-FORMULA-INJECTION`: `label` removed (booking-clone's export parameter, FR-FUZZ-17).
+  - `R-JWT-ALG-NONE`: header names `authorization` only (RFC 6750, RFC 7235); `jwt` had no source.
+  - `value_shape.FILE_EXTENSIONS`: `lang` removed (bWAPP's `lang_en.php`; not a web file extension).
+- Impact: crawl runs nominate access-control on every id-shaped GET query parameter and SpEL on every query/body/json point (about +1 request per such point). Measured on the labgen live boots (ground-truth points, oracle diagnostic): booking-clone 3/3 -> 2/3 (BKNG-0002, `label`, an honest miss); `channel_id`, `account_id`, `sortBy`, `thumbnail_url` still nominated by shape. Expedia tp=1 unchanged.
+- Risk: low. Wider nomination costs requests, never safety (every send still passes SP-09). A lab case the old words reached is an honest miss.
+- Deliverables:
+  - [x] Rules generalised; `tests/test_audit_rule_words_generic.py` (52 cases: non-lab names nominated or not by each rule) — done (sub-agent in a worktree, verified by the lane: diff read, tests re-run)
+  - [x] `tests/test_blackbox_detection.py` (PA-0660's guard) passes on the rules data — done
+  - [x] Booking multitarget tests assert the honest 2/3 and `missed == ["BKNG-0002"]` — done
+- Effectiveness (assessed 2026-11-20): see the lane's harness run in the CHANGELOG line; crawl-run effect on the external labs not measured in this lane (open, listed in the lane report).
+
 ### CC-AUD-0061 — The auditor's browser fetch settles a failed load on the error page's load (BUG-0561) (2026-10-23)
 - Change: none in `fuzzlab/tools/fetcher.py`. `ContentFetcher.fetch` navigates through SP-01 and ends a failed load with `end_failed_load`; SP-01 now waits for the failed navigation's error page to load before it raises (CC-CRAWL-0065). `end_failed_load`'s decision is unchanged (the settled commit is still recorded).
 - Impact (other components / project): a fetch that fails with a network error returns about 30 ms later at p50; the next fetch's navigation is no longer dropped when it would start before that error page's load. No interface or store change.

@@ -41,9 +41,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Ground-truth dir (enables D14 categories + scoring)")
     p.add_argument("--mode", choices=["automatic", "manual"], default="automatic")
     p.add_argument("--points", choices=["auto", "crawl", "ground-truth"], default="auto",
-                   help="Where injection points come from: ground-truth (detection "
-                        "benchmark), crawl (discovery run), or auto (default: "
-                        "ground-truth if --ground-truth is given, else crawl)")
+                   help="Where injection points come from: crawl (discovery run: "
+                        "the reported detection figure), ground-truth (the answer key "
+                        "hands over the points: an oracle diagnostic only, never the "
+                        "detection figure; PA-0660), or auto (default: ground-truth if "
+                        "--ground-truth is given, else crawl)")
     p.add_argument("--categories", default=None,
                    help="Comma-separated categories (manual, or D15 fail-safe)")
     p.add_argument("--identity", default=None,
@@ -393,7 +395,11 @@ def _run_traced(p, args, store, run_id: int, plugins, selected, ground_truth) ->
     browser = None
     if args.browser:
         from fuzzlab.tools.browserexec import PlaywrightBrowserExecutor
-        browser = PlaywrightBrowserExecutor()
+        # FR-FUZZ-680 (BUG-0690): the browser's visits carry the run's session -- the
+        # sender's own, through its gates -- never a session of their own, never none
+        # while the probes carry one (``--no-login``: the plain sender has no route)
+        browser = PlaywrightBrowserExecutor(
+            session_route=getattr(sender, "browser_session_route", None))
     oob = None
     if args.oob:
         from fuzzlab.oracle.oob import OobListener
@@ -575,6 +581,21 @@ def _print_earlier(label: str, verb: str, r: dict, metric: str, key: str,
     print(line + "  (advisory — never labels)")
 
 
+#: The score line names what was measured (PA-0660, CC-FUZZ-0660): only a crawl
+#: (discovery) run is a detection figure; a run on the answer key's own points
+#: measures the confirmation oracle alone.
+SCORE_LABELS = {
+    "crawl": "detection score (crawl run, black-box) vs ground truth",
+    "ground-truth": ("oracle diagnostic (ground-truth points: the answer key supplied "
+                     "the points; not a detection figure) vs ground truth"),
+}
+
+
+def score_label(points_source: str) -> str:
+    return SCORE_LABELS.get(points_source,
+                            f"score vs ground truth (points from {points_source})")
+
+
 def _print_summary(args, counts, result, plugins=None) -> int:
     """Print the run summary; returns the exit code (1 when a post-run stage or the
     budget prioritizer failed, or a requested ML stage did not run)."""
@@ -616,7 +637,8 @@ def _print_summary(args, counts, result, plugins=None) -> int:
     _print_budget(m)
     if result.report is not None:
         r = result.report
-        print(f"  score vs ground truth: tp={r.tp} fp={r.fp} fn={r.fn} tn={r.tn}")
+        print(f"  {score_label(m.get('points_source', 'crawl'))}: "
+              f"tp={r.tp} fp={r.fp} fn={r.fn} tn={r.tn}")
     else:
         print("  unscored (no ground truth / D15 fail-safe)")
     if m.get("requests") is not None:

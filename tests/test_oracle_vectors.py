@@ -158,9 +158,30 @@ def test_price_integrity_bypass_canary_cannot_collide_with_the_real_rate_table()
         sender = EchoExactlyWhatItReceivedSender()
         strategy.confirm(_cand("price-integrity-bypass"), sender)
         assert sender.last_value is not None
-        assert sender.last_value not in PriceIntegrityBypassStrategy._RATE_TABLE_AMOUNTS
         whole, _, frac = sender.last_value.partition(".")
         assert len(frac) == 3, sender.last_value
+
+
+def test_price_integrity_bypass_needs_a_price_context_not_a_bare_reflection():
+    """PA-0660 / BUG-0661: the anchor is a currency symbol or price word before the
+    canary, never one app's own attribute name -- a plain reflection of the value
+    elsewhere on the page is not a charged amount."""
+    class Echo:
+        def __init__(self, template):
+            self.template = template
+
+        def send(self, url, param, value, timing=False, method="POST", location="body"):
+            return Probe(200, self.template.format(v=value), headers={})
+
+    priced = ['<td class="total">Total: {v}</td>', '{{"order":{{"amount":{v}}}}}',
+              "<p>You were charged \u20ac{v} today</p>", '<span data-price="{v}"></span>']
+    for template in priced:
+        v = PriceIntegrityBypassStrategy().confirm(_cand("price-integrity-bypass"), Echo(template))
+        assert v is not None and v.confirmed, template
+    plain = ["<p>You searched for {v}</p>", '<input value="{v}">', "Total: 1{v}"]
+    for template in plain:
+        assert PriceIntegrityBypassStrategy().confirm(
+            _cand("price-integrity-bypass"), Echo(template)) is None, template
 
 
 # --- CSV formula injection (CWE-1236) -----------------------------------------
@@ -334,3 +355,50 @@ def test_new_categories_map_to_oracle_classes():
     assert category_to_oracle_class("file-inclusion") == "file-inclusion"
     assert category_to_oracle_class("command-injection") == "command-injection"
     assert category_to_oracle_class("unknown-thing") is None
+
+
+class _PingShellSender:
+    """`sh -c "ping -c 2 " + value` as measured on VulnerableApp (BUG-0630): a value that
+    leaves ping a host costs ~1 s; a shell command substitution or separator that runs
+    `sleep d` adds d; a payload with no host left makes ping fail at once."""
+
+    def __init__(self, blocked=()):
+        self.sent, self.blocked = [], blocked
+
+    def send(self, url, param, value, timing=False, method="GET", location="query"):
+        import re
+        self.sent.append(value)
+        if any(b in value for b in self.blocked):
+            return Probe(200, '{"content":""}', elapsed=0.003, headers={})
+        m = re.search(r"(?:\$\(|`|\|\||;|&&?|\|)\s*sleep (\d+)", value)
+        host_left = bool(re.match(r"[0-9A-Za-z.]+", value))
+        ping = 1.02 if host_left else 0.002
+        sleep = int(m.group(1)) if m else 0
+        return Probe(200, '{"content":"PING"}', elapsed=ping + sleep, headers={})
+
+
+def test_command_injection_payloads_keep_the_baselines_own_value():
+    """BUG-0630: each payload starts with the value the baseline sent, so the command
+    the baseline ran (ping, ~1 s) runs again and the added latency is the sleep's."""
+    from fuzzlab.oracle.strategies import cmdi_timing_payloads
+    assert all(p.startswith("1") for p in cmdi_timing_payloads(None))
+    assert all(p.startswith("10.0.0.1") for p in cmdi_timing_payloads("10.0.0.1"))
+    assert len(set(cmdi_timing_payloads(None))) == len(cmdi_timing_payloads(None))
+
+
+def test_command_injection_confirms_past_a_filter_when_the_baseline_runs_a_command():
+    """BUG-0630, measured shape: `;` and `&` are refused (VulnerableApp LEVEL_3 checks the
+    raw URL for %3B and %26); `||` / `$(...)` still run sleep after a ~1 s ping. Before
+    the fix the payloads dropped the host, measured ~1 s short and never confirmed."""
+    sender = _PingShellSender(blocked=(";", "&"))
+    v = CommandInjectionStrategy().confirm(_cand("command-injection"), sender)
+    assert v is not None and v.confirmed, sender.sent
+    assert v.evidence["measured"]["2"] > 2.5 and v.evidence["measured"]["4"] > 4.5
+
+
+def test_command_injection_still_refuses_a_ping_without_a_shell():
+    """A secure level: the value is one argument to ping, never a shell (LEVEL_7)."""
+    class NoShell:
+        def send(self, url, param, value, timing=False, method="GET", location="query"):
+            return Probe(200, '{"content":"ping: unknown host"}', elapsed=0.01, headers={})
+    assert CommandInjectionStrategy().confirm(_cand("command-injection"), NoShell()) is None

@@ -1842,6 +1842,45 @@ fuzzer.
   are no longer requested and the lab's state is unchanged by a crawl. Stated gap:
   DVGA's `/difficulty/<level>` and `/start_over` are not refused by a word rule that
   meets the black-box rule; the crawler has no operator-supplied exclusion list yet.
+- **FR-CRAWL-600 (which field argument a GraphQL variable feeds; CC-CRAWL-0600,
+  2026-11-20, SP-80)** `tools/apiop.py::graphql_variable_bindings(text, operation_name)`
+  answers `{variable: [(field, argument, sibling arguments), ...]}` for the operation the
+  request selects (else every operation, at most `MAX_OPERATIONS`): every `arg: $var` in
+  a field's argument list, at any depth of the selection set, at the argument's top level
+  or inside an input-object or list value, an aliased field by its field name. Variable
+  definitions and directive arguments are not uses; a fragment's uses are not followed.
+  None for a text that is not an executable document (or over `MAX_GRAPHQL_TOKENS`). It
+  reads the same linear token scanner as `graphql_operations`, in time linear in the
+  document, and keeps at most `MAX_BINDINGS` bindings.
+- **FR-CRAWL-601 (a GraphQL variable's declared type; CC-CRAWL-0600, 2026-11-20,
+  SP-80)** `tools/apiop.py::graphql_variable_types(text, operation_name)` answers
+  `{variable: (named type, list depth)}` from the selected operation's variable
+  definitions (`$a: [Int!]!` -> `("Int", 1)`; a name declared twice keeps its first);
+  None as FR-CRAWL-600. Linear.
+- **FR-CRAWL-640** *(CC-CRAWL-0640, BUG-0670)* **An empty HTTP error answer fails a
+  guarded main-frame navigation onto the browser's error page, on every Chromium
+  binary.** When the answer a guarded top-level navigation gets -- after its checked
+  redirect chain, the landing included -- is HTTP 400-599 with an empty body, the route
+  handler aborts it with `navguard.ERROR_ANSWER_ABORT` (`"failed"`, `net::ERR_FAILED`)
+  after its observer has seen the answer, so the browser commits its own error page and
+  SP-01 settles on it (committed, then loaded) before `goto`'s error is raised. This is
+  what the full Chromium does itself for such an answer
+  (`net::ERR_HTTP_RESPONSE_CODE_FAILURE`; measured on 141 and 153.0.8010.12), and what
+  the headless shell 157.0.8103.78 -- the product's default binary -- no longer does
+  (it loads the answer as an empty page). Any other answer is given as it was: a frame's
+  empty 404 (a page on both binaries, measured), a status outside 400-599, a body of one
+  byte or more, a subresource. Measured: `tests/test_chromium_navigation_outcomes.py`
+  (the raw-browser facts per binary); pinned: `tests/test_navigation_error_answer.py`
+  (unit, and real Chromium on both binaries).
+
+- **FR-CRAWL-641** *(CC-CRAWL-0641, BUG-0672)* **Releasing a guarded context never
+  hangs.** Every call of `navguard.close_pages` / `release` that the page's renderer
+  must answer -- the freeze, the refusing route -- is bounded by
+  `navguard.RELEASE_CALL_MS` through `navguard._bounded`; an expiry is counted
+  (`release_expiries()`) and logged, and a page that did not answer its freeze is closed
+  after the drain and before the refusing route is added. Measured: a page whose main
+  thread is blocked answers neither, on both binaries, and answers stopping its load,
+  the drain timer and its close.
 
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive and state-switching actions (delete/logout/reset;
@@ -1932,6 +1971,10 @@ fuzzer.
     error, and waited out its whole timeout: disco's restore `about:blank`, the
     spider's window exits and pre-seed blank (BUG-0561, about 1% of restores under
     disk I/O load).
+    *(CC-CRAWL-0640, BUG-0670:)* the error-page path holds on every binary: an empty
+    HTTP error answer is made a failure by the guard itself (FR-CRAWL-640), so it never
+    depends on whether the binary fails it (the full Chromium) or loads it (the
+    headless shell 157).
   - `networkidle` is waited for (`wait_for_state`) only after a completed load. The
     body text is read without waiting for a body.
   - A page whose load did not complete is read without a second request (review Q2).

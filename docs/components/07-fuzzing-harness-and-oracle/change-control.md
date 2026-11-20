@@ -3,6 +3,357 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0633 — Black-box review of CC-FUZZ-0630..0632 (owner directive, 2026-11-20)
+- Change: `fuzzlab/oracle/strategies_jvm.py` (the `WEB-INF/web.xml` probe removed;
+  docstrings state the evidence and the jar-classpath limit); `fuzzlab/oracle/
+  strategies_filters.py` (docstring: evidence); `tests/test_oracle_strategies_jvm.py`
+  (the web.xml test replaced: only the classpath root's file is probed);
+  `tests/test_oracle_strategies_filters.py::test_browser_resolve_agrees_with_chromium`
+  (new, real Chromium). FR-FUZZ-630..632 restated in place.
+- Reason: the owner's directive relayed by the orchestrator (2026-11-20): detection is
+  designed for a black-box target; no rule depends on a lab's names, paths, parameters,
+  levels or values; a target behaviour a rule relies on is shown on two independent
+  targets or a cited public corpus; crawl runs are the headline measure.
+- Review, change by change (no detection code names a VulnerableApp path, parameter,
+  level or value; its measurements stay only in docstrings and records):
+  - **Classpath traversal (FR-FUZZ-630).** Relies on a directory classpath resolving `..`
+    below its root and Spring Boot's root `application.properties`. Shown on two targets:
+    VulnerableApp and a standalone JDK 11 program (`/scripts/pt/../../application.properties`
+    read; `../../../etc/passwd` null); Spring Boot reference (Externalized Configuration:
+    loaded from "the classpath root"). The same JDK measurement showed a **jar classpath
+    does not resolve `..`**: a stated limit (false negatives only). The `WEB-INF/web.xml`
+    variant had no evidence: no public corpus lists it (PayloadsAllTheThings' Directory
+    Traversal does not), and the file sits above `WEB-INF/classes`, where a resource read
+    cannot go: removed (F-634). The marker's keys are Spring Boot's own documented
+    properties.
+  - **`file:` SSRF (FR-FUZZ-631).** Relies on a URL fetcher taking `file:`. Shown on JDK 11
+    `URL.openStream` and CPython `urllib.request.urlopen` (both spellings read, the bare
+    path refused); PayloadsAllTheThings, Server Side Request Forgery, "File":
+    `file:///etc/passwd`.
+  - **Open-redirect filter bypass (FR-FUZZ-632).** Relies on how a browser reads a
+    `Location`. Shown on a synthetic loopback server independent of any lab: Chromium 157
+    and `browser_resolve` agree on 10 of 10 shapes (now a test); the spellings are
+    PayloadsAllTheThings' (Open Redirect: `//`, `\/\/`, `@`).
+  - **Timing payloads keep the baseline's value (BUG-0630).** A property of the
+    differential, no target behaviour; enforced by discovery over every timing strategy.
+- Impact: the classpath strategy sends at most 4 probes, not 8. The lab runs of
+  CC-LAB-0350 used the pre-review strategy; the web.xml probes it sent matched nothing on
+  VulnerableApp (no such file is reachable), so its verdicts are unchanged and only its
+  request count was 4 per unconfirmed path-traversal candidate higher.
+- Risk: low; one unmeasured probe removed.
+- Deliverables:
+  - [x] review, removal, evidence test, requirements restated — done
+- Effectiveness (assessed 2026-11-20): the strategy and filter tests pass, the Chromium
+  test included (`FUZZLAB_REQUIRE_BROWSER=1`).
+
+### CC-FUZZ-0632 — An open redirect past a prefix filter, judged as a browser lands (FR-FUZZ-632) (2026-11-20)
+- Change: `fuzzlab/oracle/strategies_filters.py` (new: `browser_resolve`,
+  `OpenRedirectFilterBypassStrategy`, a subclass of `OpenRedirectStrategy` overriding
+  `_lands_on` and `confirm`); `fuzzlab/oracle/strategies.py` (`_follow_on_strategies()`
+  appended to `default_strategies()` before the greybox layer: registry only);
+  `tests/test_oracle_strategies_filters.py`; `tests/test_oracle_comparable_controls.py`
+  (its `CONTROL_READING` row: positive).
+- Reason / measurement (§7): VulnerableApp Http3xxStatusCodeBasedInjection LEVEL_2..6
+  refuse targets starting with `http`, `https`, `www` (and `//` from LEVEL_3), or prefix
+  their own origin (LEVEL_6). The baseline confirmed LEVEL_1, 9 and 10 only. Chromium 157
+  (`page.on("request")`, 8 spellings x 6 levels): `/\host/cb` and `\/host/cb` leave the
+  origin at LEVEL_2..5, `//host/cb` at LEVEL_2, `@host/cb` at LEVEL_6; nothing at LEVEL_7
+  or LEVEL_8. Run directly against levels 1..12 the strategy confirms exactly 1..6, 9, 10.
+- Impact: every lab whose ground truth has an open-redirect positive runs up to three
+  more probes per open-redirect candidate the plain canary did not confirm (no new
+  candidates). The OOB listener is not used. `OpenRedirectStrategy` is unchanged.
+- Risk: low. A confirmation needs the redirect target, read as a browser reads it, to
+  land on the canary host at `/cb`; LEVEL_7's own-origin shape, an allowlist, a body echo
+  and a redirect elsewhere carrying the canary are pinned not to confirm.
+- Deliverables:
+  - [x] strategy, tests, FR-FUZZ-632 — done
+- Effectiveness (assessed 2026-11-20): in the lab run (`fuzzlab auto --base-url http://127.0.0.1:3093 --ground-truth lab/ground-truth-vulnerableapp --points ground-truth --browser --oob --score --authorized` on a freshly restarted container, scored against the final key; CC-LAB-0350) open
+  redirect LEVEL_2..6 newly confirmed (VAPP-0072..0076); LEVEL_7, 8, 11, 12 not; fp=0.
+  Juice Shop regression: CC-LAB-0352.
+
+### CC-FUZZ-0631 — Command-injection timing payloads keep the baseline's value (BUG-0630, FR-FUZZ-633) (2026-11-20)
+- Change: `fuzzlab/oracle/strategies.py` (`_CMDI_BASELINE`, `cmdi_timing_payloads`;
+  `CommandInjectionStrategy.confirm` uses it on both branches);
+  `tests/test_timing_payloads_carry_the_baseline.py` (new discovery guard, PA-0630);
+  `tests/test_oracle_vectors.py` (a ping-shaped fake; three tests);
+  `tests/test_forms_phase2.py::test_ground_truth_cmdi_probes_are_unchanged` (its expected
+  list is derived from `cmdi_timing_payloads(None)`: the forms-phase-2 intent kept, the
+  BUG-0630 change made visible). BUG-0630, ERROR_LOG, PA-0630.
+- Impact: a point with no base value now sends `1; sleep 2`, `1| sleep 2`, ...
+  `1$(sleep 2)`, `` 1`sleep 2` `` (7 templates, the duplicate `1; sleep` folded) instead of
+  the bare 8: one request fewer per template pass. A point with a base value is unchanged.
+  No other lab's ground truth has a command-injection positive (FR-LAB-351), so no other
+  score can change; SQLi timing already prefixed its baseline value (PA-0002 sweep).
+- Risk: low; false negatives fixed, the detection threshold untouched.
+- Deliverables:
+  - [x] fix, guard proven on the pre-fix tree (it fails `CommandInjectionStrategy`
+    there), bug protocol — done
+- Effectiveness (assessed 2026-11-20): live, run directly: LEVEL_3/4 confirm via
+  `1|| sleep {d}` (3.03 s / 5.04 s against a 1.02 s baseline), LEVEL_5 via
+  `1$(sleep {d})`; LEVEL_6..8 do not. In the lab run (CC-LAB-0350): VAPP-0045..0047 newly confirmed; VAPP-0048..0050 negative; fp=0.
+
+### CC-FUZZ-0630 — JVM read sinks: classpath traversal and an in-band `file:` SSRF (FR-FUZZ-630/631) (2026-11-20)
+- Change: `fuzzlab/oracle/strategies_jvm.py` (new: `PathTraversalClasspathResourceStrategy`,
+  `SsrfFileSchemeStrategy`); `fuzzlab/oracle/strategies.py` (registered through
+  `_follow_on_strategies()`, after their category's own); `tests/
+  test_oracle_strategies_jvm.py`; `tests/test_oracle_comparable_controls.py` (two
+  negative-control rows: their sends checked by the M9 send guard);
+  `tests/test_external_labs_live.py::test_vulnerableapp_jvm_read_strategies_confirm_its_levels`.
+- Reason / measurement (§7): VulnerableApp's PathTraversal reads
+  `getClass().getResourceAsStream("/scripts/PathTraversal/" + value)`: LEVEL_1 answers
+  `{"content":null}` for `../../../../etc/passwd` (what `PathTraversalFsPathReadStrategy`
+  needs) and the classpath root's `application.properties` for
+  `../../application.properties`. Its SSRFVulnerability LEVEL_1 answers `/etc/passwd` for
+  `file:///etc/passwd`; the OOB SSRF strategies' callback is on the host's loopback, which
+  the container cannot reach (its 127.0.0.1 is its own). Baseline: no path-traversal and
+  no SSRF finding.
+- Impact: every lab whose ground truth has a path-traversal or SSRF positive runs at
+  most 8 more probes (4 after CC-FUZZ-0633; +1 control per marker seen) per path-traversal candidate and 2 (+1)
+  per SSRF candidate the earlier strategies did not confirm. Juice Shop has one of each:
+  regression run in CC-LAB-0352.
+- Risk: low. Each confirms on a file-content marker absent from a compared control with
+  no read primitive (no `..`; no `file:`), the BUG-0117 rule; "always shows the marker"
+  and "reflects the request" fixtures pinned.
+- Deliverables:
+  - [x] strategies, unit tests, live test (gated), FR-FUZZ-630/631 — done
+- Effectiveness (assessed 2026-11-20): run directly: PathTraversal LEVEL_1/2 confirm
+  (depth 2), LEVEL_3/7/8/13/14/15 do not; SSRF LEVEL_1 confirms, LEVEL_2..5 do not.
+  In the lab run (CC-LAB-0350): VAPP-0051/0052 and VAPP-0066 newly
+  confirmed; no path-traversal or SSRF negative confirmed. Juice Shop regression:
+  CC-LAB-0352.
+### CC-FUZZ-0651 — The quiet-settle early end withdrawn: M6 keeps its whole window (BUG-0650) (2026-11-20)
+- Change: `fuzzlab/tools/browserexec.py` restored to its 2be7a50 text; `fuzzlab/tools/
+  pagequiet.py` and `tests/test_pagequiet.py` deleted; the fakes of
+  `tests/test_confirm_trace.py` and `tests/test_m6_navigation_failures.py` restored;
+  `scripts/measure_scan_perf.py` loses `--shadow-quiet`; new `tests/test_m6_window_guard.py`
+  (PA-0650(1), proven on a synthetic offender) and `tests/test_m6_slow_sinks.py` (the
+  verifier's late sinks, each detected by the whole window); SP-105 withdrawn;
+  FR-FUZZ-650/651 superseded by FR-FUZZ-653; BUG-0650, PA-0650, F-652.
+- Reason: independent verification found CC-FUZZ-0650 missed XSS the 4 s wait caught
+  (BUG-0650). The owner's decision, through the orchestrator: detection beats speed.
+- Impact: M6 is back to 2be7a50's timing (CC-LAB-0371's BEFORE column); CC-FUZZ-0650's
+  speed-up is gone. Nothing else changed.
+- Risk: none beyond 2be7a50's.
+- Deliverables:
+  - [x] withdrawal, guard and regression tests, records — done
+  - [ ] a speed-up that keeps the whole window (FR-FUZZ-653) — open
+- Effectiveness (assessed 2026-11-20): the window guard passes on the restored executor
+  and fails a synthetic early end; see `tests/test_m6_slow_sinks.py` for the late sinks.
+
+### CC-FUZZ-0650 — The M6 sentinel wait ends once the page has gone quiet (SP-105) (2026-11-20)
+- Change: `fuzzlab/tools/pagequiet.py` (new: `PageQuiet`, `TRACKER_JS`, `QUIET_MS`);
+  `fuzzlab/tools/browserexec.py` (`EARLY_END`; `_in_browser` installs `PageQuiet`
+  before the first navigation; `_wait_for_token(..., quiet=)` breaks once settled,
+  after one more event pump); `tests/test_pagequiet.py` (new); the fake Playwright
+  contexts of `tests/test_confirm_trace.py` and `tests/test_m6_navigation_failures.py`
+  gain `add_init_script`; SP-105; FR-FUZZ-650..652.
+- Reason (measured, `scripts/measure_scan_perf.py`, CC-LAB-0370): the M6 browser was
+  600 of 621 s on bWAPP's ground truth and 659 of 842 s on its crawl; each observation
+  of a payload that does not fire waited the whole `SETTLE_MS` (4 s). The shadow run
+  (`--browser-timeline --shadow-quiet`: the whole wait kept, the early end recorded)
+  over Juice Shop gt/crawl, SSType gt, CopyNPaste crawl and bWAPP gt: 173
+  observations, every hit before the would-be end (0 after), every settled negative
+  settled at 0.52-0.56 s; Juice Shop's pages with socket.io's WebSocket kept the
+  whole window (7 of 15 observations).
+- Not built (measured): keeping one Playwright driver per run (FR-FUZZ-652). A held
+  sync driver broke later sync Playwright use on the thread (3 real-browser tests).
+- Impact: M6 only. Verdicts unchanged by construction (a hit still confirms; a page
+  that never loaded is still `NotObserved`); trace spans (`waited`) record the shorter
+  wait. SP-40 unchanged (a consumer).
+- Risk: medium -- an early end could miss a sink a tracker cannot see (FR-FUZZ-651);
+  mitigated: fail closed on any unreadable frame, streams and workers keep the whole
+  window, real-browser tests for sinks run by a request's answer, an interval, an
+  animation-frame loop and a timer chain, the shadow run on the labs.
+- Deliverables:
+  - [x] code, tests, SP-105, FR-FUZZ-650..652, ARCHITECTURE — done
+  - [x] BEFORE/AFTER on the labs (tp/fp/fn/tn identical) — done (CC-LAB-0371)
+- Effectiveness (assessed 2026-11-20): met. On ten lab configurations tp/fp/fn/tn and
+  the matched case ids were identical BEFORE and AFTER; wall time 620.9 -> 198.7 s
+  (bWAPP gt), 842.0 -> 391.4 s (bWAPP crawl), 43.7 -> 24.6 s (Juice Shop gt), 28.4 ->
+  7.9 s (SSType gt), 28.5 -> 7.9 s (CopyNPaste crawl); requests unchanged (CC-LAB-0371).
+
+### CC-FUZZ-0622 — A front controller's page is part of a finding's URL and of a case's scoring key (FR-FUZZ-622, SP-90) (2026-11-20)
+- Change: `fuzzlab/oracle/oracle.py` (`finding_url` keeps `?<route>=<page>` of a router
+  URL, from its query or a crawled point's sibling entries; `_front_controller_route`),
+  `fuzzlab/harness/scoring.py` (`case_key`: a case's URL through `finding_url`).
+- Reason: measured on Mutillidae: every page is `/index.php?page=X`; findings were all
+  recorded at `/index.php`, so user-info.php's SQL injection and user-info-xpath.php's
+  negative were one key, and no routed case could match (the anonymous BASELINE's 5 fp).
+  The SPA hash route already had this treatment (forms phase 3).
+- Impact: only a URL whose last segment is a router (`index`, `default`, `main`, as
+  `session.detect` reads a query-routed login) with a route parameter (`page`, `action`,
+  ...) whose value is a plain page name; never when the probed parameter is the route.
+  Every case of every earlier answer key keeps its key (guard test). The web site tree
+  is unchanged (its `path_key` drops the query).
+- Risk: medium -- a shared convention (PA-0003): **flagged to the orchestrator** before
+  merge. Readers swept: `harness.integration`/`scoring`, `web.sitetree` (calls
+  `finding_url`, then `path_key`), the plugin `on_finding` payload and the trace event.
+- Deliverables:
+  - [x] code; `tests/test_front_controller_routes.py`; SP-90 — done
+- Effectiveness: CC-LAB-0343 (scored AFTER run; Juice Shop unchanged).
+
+### CC-FUZZ-0621 — XPath injection: strategy (FR-FUZZ-621) (2026-11-20)
+- Change: `fuzzlab/oracle/ldap_xpath.py` (`XPathInjectionStrategy`, families
+  `string-predicate` and `string-union` on the shared differential engine), registered in
+  `default_strategies()` and `_CATEGORY_TO_CLASS` (`xpath-injection` -> `xpath_injection`).
+- Reason: lane PHPX: no strategy tested XPath injection.
+- Measured (Mutillidae user-info-xpath.php, live, before the design): the page
+  echoes the query; `' or string-length('abcd')=4 or 'a'='b` and `=5` both select nothing
+  (the document's elements are `<Account>`, the query's `//Employee`), the union
+  `'] | //*[string-length('abcd')=4 or 'a'='b` selects every node (153 655 bytes vs
+  85 724 for `=5`, the base 85 640), for both parameters; MariaDB answers both XPath
+  probes with a syntax error. A direct run of the strategy on the real page: confirmed
+  (string-union) on both parameters at level 0, no verdict at level 5; no verdict on the
+  SQL, LDAP and command pages; SQL's boolean probe gives none on the XPath page.
+- Impact: up to 42 requests per candidate (6 when both screens fail), only where the
+  `xpath-injection` category is active.
+- Risk: low; read-only queries.
+- Deliverables:
+  - [x] code; `tests/test_ldap_xpath.py` — done
+
+### CC-FUZZ-0620 — LDAP filter injection: strategy (FR-FUZZ-620) (2026-11-20)
+- Change: `fuzzlab/oracle/ldap_xpath.py` (new module: `LdapFilterInjectionStrategy`,
+  family `or-presence`, error signatures as corroboration only), registered in
+  `default_strategies()` and `_CATEGORY_TO_CLASS` (`ldap-injection` -> `ldap_injection`).
+- Reason: lane PHPX: no strategy tested LDAP injection.
+- Measured (Mutillidae conference-room-lookup.php, live, logged in, before the design):
+  filter `(|(cn=2F204)(cn=<v>))`; `zqx1` and `zqx1)(objectClass=zqx2` list 2F204 only,
+  `zqx1)(objectClass=*` and `*` list all nine entries, `zqx1)(` prints "ldap_search():
+  Search: Bad search filter", SQL's grammar probes list 2F204 only; repeated requests are
+  byte-identical; at level 5 every probe lists 2F204 only (encodeForLDAP). A direct run of
+  the strategy: confirmed at level 0, no verdict at level 5 and on the SQL, XPath and
+  command pages (the direct-run script and its output are in the lane's session record).
+- Impact: up to 21 requests per candidate (3 when the screen fails), only where the
+  `ldap-injection` category is active.
+- Risk: low; search filters only.
+- Deliverables:
+  - [x] code; `tests/test_ldap_xpath.py` — done
+  - [x] both strategies classified in `tests/test_oracle_comparable_controls.py`'s
+    `CONTROL_READING` (differential); its send guard now reads every strategy class in
+    the MRO, so a `confirm` in a shared base is checked; the finding-URL builder
+    (CC-FUZZ-0622) allowed in `tests/test_query_placement.py` (a record key, never
+    sent) — done
+### CC-FUZZ-0681 — Greybox carries its session whole or refuses it (FR-FUZZ-682, BUG-0690 sweep) (2026-11-20)
+- Change: `fuzzlab/greybox/greybox_cli.py::_cookie_for` reads `SessionManager.session_headers` and raises `SessionAuthError` (the CLI's usage error, before any side effect) for a session carrying any header but `Cookie`, or no cookie; it returned `None` (an anonymous run) before.
+- Measurements before design (CLAUDE.md item 8): code read (subagent sweep, verified): `session_header` returns the Cookie line or else Authorization; `_cookie_for` kept only a `Cookie: ` prefix.
+- Impact (other components / project): SESS (reads `session_headers`, unchanged). A bearer-session greybox run now stops loudly instead of probing anonymously.
+- Risk (level; mitigation or accepted-risk justification): low; refusing is PA-0545(1)'s sanctioned disposition. Carrying a bearer in the greybox sender is not built (open gap).
+- Deliverables:
+  - [x] fix, `tests/test_greybox_session_carry.py` (4 tests) — done
+- Effectiveness (assessed 2026-11-20): the four tests pass; existing greybox session tests unchanged.
+
+### CC-FUZZ-0680 — The M6 browser executor carries the run's session; an unlanded plant is not observed (FR-FUZZ-680, FR-FUZZ-681, BUG-0690) (2026-11-20)
+- Change: `fuzzlab/tools/browserexec.py`: `PlaywrightBrowserExecutor(session_route=)`, `_scope`, `_visit_session` (the route's session via `browserauth.browser_session`, before the driver starts), `_carried` (headers, header and cookie scope, `held_session_cookies`), `_api_headers` (the session's headers on its origins; another origin refused, NotObserved), `_plant_landed` (SP-56 class of the plant's answer; not the application's → NotObserved); the context adopts `context_options(session)` and `apply_to_context`; `guard_page` gets `header_scope`, `cookie_scope`, `session_cookies`; the API plant passes `checked_api_request(session_cookies=, cookie_scope=)` (`SessionHostUnreached` → NotObserved). `fuzzlab/harness/auto_cli.py`: `PlaywrightBrowserExecutor(session_route=getattr(sender, "browser_session_route", None))`. Tests: `tests/test_m6_session.py` (34), `tests/test_browser_context_session.py` (3 guards); three fake-Playwright doubles answer 200 (`test_browser_scope.py`, `test_destructive_urls.py`, `test_confirm_trace.py`), and the status-less double's test expects NotObserved.
+- Measurements before design (CLAUDE.md item 8): lane NODE, NodeGoat live: the plant `POST /profile` 302 → `/login`, the run's probes to it 200 (78a24f2); this lane's real-browser fixture measures the pre-fix executor's plant and observe arriving without the cookie (`[('POST', '/profile', False), ('GET', '/dashboard', False)]`); Playwright's `context.request` shares the context's cookie jar (the fixture's plant carries the adopted cookie) and bypasses `route` (headers added explicitly). Live before/after in CC-LAB-0395.
+- Impact (other components / project): SESS (`browser_session_route`, CC-SESS-0650); CRAWL/AUD unchanged (same adoption helper). A run with `--identity --browser` now logs the browser in through the run's manager (no second login); auth-endpoint and isolated-path visits stay anonymous. Lane PERF's SP-105 sentinel-wait edit is in another function (`_wait_for_token`): no overlap expected at merge.
+- Risk (level; mitigation or accepted-risk justification): medium (a session now goes to the browser): every gate is applied (route `header_scope`/`cookie_scope`, SP-74 reach, the sender's auth-endpoint and isolation gates), guarded by tests. `_plant_landed` reads SP-16's login URL rule without the session's own `login_url` (an unusual login path's redirect is not recognised: a remaining false negative, not a false positive). A query-location (GET) plant's answer is not classed.
+- Deliverables:
+  - [x] fix, tests, guards, ERROR_LOG, BUG-0690, PA-0690, SP-125 — done
+  - [x] live re-runs (CC-LAB-0395) — see there
+- Effectiveness (assessed 2026-11-20): NodeGoat ground truth tp 12 -> 13 (NGOAT-0008), fp 0; NodeGoat crawl unchanged tp=12 fp=0 (crawl builds no plant step: open gap); bWAPP plant 302 -> 200 with the session (CC-LAB-0395). Harness counts in the lane report.
+
+### CC-FUZZ-0611 — The NoSQL operator differential compares a page that echoes the submitted leaf (FR-FUZZ-612, BUG-0610) (2026-11-20)
+- Change: `fuzzlab/oracle/strategies.py`: `_JS_OBJECT_STRING` and
+  `NoSqlOperatorStrategy.confirm.same()` strips its reflected forms with the tokens'.
+- Impact (other components / project): a JSON-leaf NoSQL point whose page re-renders the
+  submitted value is now decided; no other strategy changes.
+- Risk (level; mitigation or accepted-risk justification): low. Soundness is unchanged:
+  a server that stringifies every object answers V and D alike (pinned by a test). The
+  pre-change review gate was not run (F-611).
+- Deliverables:
+  - [x] fix, tests (`tests/test_oracle_strategies_ssjs.py`), ERROR_LOG, BUG-0610, PA-0610 — done
+- Effectiveness (assessed 2026-11-20): NodeGoat NGOAT-0014 confirmed live (operator
+  differential, 7 rounds); secDevLabs Mongection with one registered account: tp=2 fp=0
+  fn=0 tn=2, 48 requests on both 2be7a50 and this change (no regression).
+
+### CC-FUZZ-0610 — Server-side JavaScript injection: a non-destructive evaluation marker and boolean differential (FR-FUZZ-610, FR-FUZZ-611) (2026-11-20)
+- Change: `fuzzlab/oracle/strategies.py` (appended at the end; `default_strategies` and
+  `_CATEGORY_TO_CLASS` gain one entry each): `SsjsEvaluationMarkerStrategy`,
+  `SsjsBooleanDifferentialStrategy`, `_SSJS_FAMILIES` and helpers; category
+  `server-side-javascript-injection`, class `ssjs`. `tests/test_oracle_comparable_controls.py`
+  classifies both (`CONTROL_READING`).
+- Measurements before design (live, 2026-11-20, CLAUDE.md item 8): NodeGoat's
+  contributions `eval` renders `Math.abs(-4817)/1000` as `4.817 %` (only for 0..30, all
+  three fields numbers); its allocations `$where` answers 500 (no allocations) for
+  `98765` and `98765+'||Math.abs(-3)==4&&'+98765`, 200 with all three users for the
+  `==3` twin, 500 for the unquoted and double-quoted families; six identical true-branch
+  requests listed the users in three different orders (so the families compare by
+  length, F-610). Juice Shop's crash (ERROR_LOG 2026-10-19) is an uncaught ReferenceError
+  in an in-process `$where`: hence every probe is valid JavaScript in every context, and
+  names nothing but `Math.abs` (a Node check runs each probe in four contexts:
+  `tests/test_oracle_strategies_ssjs.py::test_every_probe_is_valid_javascript_in_every_context_by_node`).
+- Impact (other components / project): AUD (`R-SSJS`, CC-AUD-0610) nominates the category
+  on every query, body, JSON and path point, so a run whose categories include it (an
+  automatic run without an answer key, or a key with `ssjs` positives) spends about 9
+  requests per point whose screens all fail, 1 more for the marker: NodeGoat's
+  ground-truth run went from 45 to 244 requests (PERF lane, take note). A run derived from
+  an answer key without `ssjs` positives (D14) never runs them. CORE (`runmode`,
+  CC-CORE-0605); LAB (the class in the labels schema, CC-LAB-0331).
+- Risk (level; mitigation or accepted-risk justification): medium for false positives,
+  mitigated: the differential runs in the shared engine (`ENGINE_BOUND` per family, the
+  noise test confirms nothing in 200 draws); the marker needs two results, each in the
+  answer to its own probe, with the expression's reflections stripped (a parsing and a
+  reflecting fake confirm nothing). Destructiveness: none by construction (see above).
+  The pre-change review gate was not run (F-611).
+- Deliverables:
+  - [x] strategies, registration, tests (21 in `tests/test_oracle_strategies_ssjs.py`) — done
+  - [x] live NodeGoat runs (CC-LAB-0331) and Juice Shop (CC-LAB-0332) — done
+- Effectiveness (assessed 2026-11-20): NodeGoat NGOAT-0001..0004 confirmed in both the
+  ground-truth and the crawl run, fp=0 on its negatives; Juice Shop's `$where` route
+  confirmed without a crash and 0 findings on its other 8 points.
+  `scripts/verify_change.py --base 2be7a50` on e19f6fc: 193 files, 5970 passed, 14
+  failed, 9 skipped, 156 xfailed. Root-caused, none from this change: 9
+  `tests/test_labgen_*::test_cli_check_passes_end_to_end*` failed because the container
+  had no `gitleaks` (the labgen check's secret-scanner gate; installed, the nine pass);
+  5 in `tests/test_navigation_aborts.py` fail identically on untouched 2be7a50 in this
+  container (Chromium 157 from Playwright 1.63, where the expectations were measured on
+  Chromium 141: a navigation to an empty answer does not raise). The final commit's
+  harness is in the lane report.
+### CC-FUZZ-0671 — M6 returns on a page whose main thread is blocked (BUG-0672) (2026-11-20)
+- Change: none in `fuzzlab/tools/browserexec.py`; its teardown (`navguard.release`) is bounded by CC-CRAWL-0641.
+- Impact (other components / project): `PlaywrightBrowserExecutor.run` on such a page returns within its timeout, the settle and `RELEASE_CALL_MS` (measured 7.3 s at `timeout_ms=5000`) instead of never. Its verdict there is its existing rule ("loaded, no hit": `executed=False`); whether a page whose main thread blocked should be no verdict instead is an open question for M6's owner, not changed here.
+- Risk (level; mitigation or accepted-risk justification): low.
+- Deliverables:
+  - [x] `tests/test_release_blocked_page.py::test_the_m6_executor_returns_on_a_page_that_blocks_its_main_thread` — done
+- Effectiveness: pending.
+
+### CC-FUZZ-0670 — M6's navigation of an empty 4xx/5xx answer is a failed load on every binary (BUG-0670) (2026-11-20)
+- Change: none in `fuzzlab/tools/browserexec.py`. Its store and observe navigations go through SP-01; since CC-CRAWL-0640 an empty 400-599 top-level answer raises on the headless shell as on the full browser.
+- Impact (other components / project): such a target is `NotObserved` (no verdict) on both binaries; on the headless shell it was a negative (`executed=False`) read from an empty page. No interface change.
+- Risk (level; mitigation or accepted-risk justification): low; the change removes a binary-dependent negative.
+- Deliverables:
+  - [x] Recorded as affected by construction (the caller sweep, BUG-0670) — done
+- Effectiveness: pending (the lane's harness run, CC-CRAWL-0640).
+### CC-FUZZ-0661 — The score line names its points source: a crawl run is the detection figure, a ground-truth-point run an oracle diagnostic (PA-0660, FR-FUZZ-661) (2026-11-20)
+- Placement: lane BBOX, base d492b9d.
+- Change: `harness/auto_cli.py` `score_label` / `SCORE_LABELS` replace "score vs ground truth" with "detection score (crawl run, black-box) vs ground truth" or "oracle diagnostic (ground-truth points: the answer key supplied the points; not a detection figure) vs ground truth"; `--points` help says the same. `harness/multitarget.py`: `TargetOutcome.points_source` (from the run's metrics), each target line labelled, the macro line labelled by `transfer_summary(...)["measures"]` (`detection` / `oracle-diagnostic` / `mixed`). Docstrings of `auto.points_from_ground_truth`, `auto.run_auto` and `core/runmode.py` (CC-CORE-0630) no longer call a ground-truth-point run a detection benchmark.
+- Impact: presentation only; no score is computed differently (`tests/test_score_presentation.py::test_the_macro_math_is_unchanged_by_the_labels`). The four `tests/data/auto_summary` goldens (all ground-truth-point runs) carry the new label. `--points auto` still resolves to ground-truth when `--ground-truth` is given: changing the default is a behaviour change for the orchestrator to decide (listed in the lane report).
+- Risk: low.
+- Deliverables:
+  - [x] Labels and tests (`tests/test_score_presentation.py`, goldens) — done
+- Effectiveness (assessed 2026-11-20): F-284's "crawl runs are the headline measure" is now in the tool's own output.
+
+### CC-FUZZ-0660 — Seven strategies stop sending one lab cell's own names: they read the target or a public standard (BUG-0661, PA-0660, FR-FUZZ-660) (2026-11-20)
+- Placement: lane BBOX, base d492b9d; pre-assigned CC-FUZZ-0660..0669.
+- Change (`fuzzlab/oracle/strategies.py`):
+  - `JwtAlgNoneConfusionStrategy`: claims `channel_id`/`role: owner` (twitch-clone's `jwt_claims_response.go.j2`, CC-LAB-0180) -> `STANDARD_CLAIMS` = RFC 7519 §4.1.2 `sub`, OIDC Core 1.0 §5.1 `name`, `preferred_username`.
+  - `PredictableTokenSourceStrategy`: the `session_token` key and a nanosecond-only delta (CC-LAB-0181) -> any decimal JSON leaf read as a clock (`_clock_reading`): an epoch count in s/ms/us/ns within a day of this host's time, or a nanosecond monotonic counter (Java SE `System.nanoTime`, no epoch origin) moving by >= 10 us; each by no more than the window measured on this host's monotonic clock around the two sends (+1 s). Closes the earlier accepted false positive (a fixed 19-digit token confirmed at delta 0) and rejects a sequence counter.
+  - `MassAssignmentPrivilegedFieldStrategy`: `is_partner` / `display_name` / `bio` (CC-LAB-0182) -> the response's own unsent top-level `false` booleans flipped, with a `zq<hex>` control property that must not come back (OWASP API3:2023; OWASP Mass Assignment Cheat Sheet).
+  - `PriceTrustDifferentialStrategy`: `monthly_charge` / `plan_tier: standard` (CC-LAB-0188) -> the captured body's numeric leaves (at most 4), read back at the same path; no captured body, no verdict.
+  - `PriceIntegrityBypassStrategy`: booking-clone's `data-charged-amount` attribute and rate table (CC-FUZZ-0047, CC-LAB-0239) -> a currency symbol or price word (amount, price, total, cost, charge: WSTG-BUSL-01; PortSwigger "Excessive trust in client-side controls") within 40 characters before the digit-bounded canary.
+  - `GoTemplateSstiStrategy`: the JSON key `template` (CC-LAB-0196) -> every string leaf of the captured body; no captured body, no verdict.
+  - XXE wrappers: `<r><title>&xxe;</title></r>` (the labgen XXE sink's extracted element) removed; `<r>&xxe;</r>` only (W3C XML 1.0 §4.4; PortSwigger, XXE injection).
+  - Unused `_json_bool_field` / `_json_number_field` removed.
+- Measured (real boots of the labgen apps in this container, `tests/test_multitarget_category4.py`, `tests/test_labgen_go_live_boot.py`, `tests/test_labgen_spring_boot_*_live_boot.py`, ground-truth points = oracle diagnostic): twitch-clone 14/15 -> 11/15 (lost TWCH-0004 alg:none, TWCH-0010 price trust, TWCH-0012 Go-template SSTI JSON); netflix-clone multi-cell 11/11 -> 9/11 (lost NFLX-0005, NFLX-0008); weak-token (TWCH-0005 Go `UnixNano`, NFLX-0010 Java `nanoTime`), mass assignment (TWCH-0006, NFLX-0007) and XXE (NFLX-0002, by OOB) still confirm generically; the spring XXE in-band twin (it echoes only `<title>`) is an honest in-band miss and confirms out-of-band; the price-trust twins confirm when the test supplies the app's own captured body.
+- Impact: these strategies fire on black-box targets that use standard claims / clock tokens / any field names; ground-truth-only points with no captured body give no verdict (they were lab-fitted).
+- Risk: medium (detection loss on the diagnostic, accepted by the owner's black-box rule). Mass assignment now flips booleans the app reports; a legitimately user-settable boolean is indistinguishable, so the evidence names the property for review. The strategy writes to the target as before (lab-only, `--authorized`).
+- Deliverables:
+  - [x] Strategies generalised; unit tests updated and new non-lab cases (weak token: ms clock under any key, nanoTime counter, sequence counter rejected; JWT: standard claims only; price trust: any captured leaf, no body no verdict; price bypass: context anchor) — done
+  - [x] Live-boot tests assert the measured outcomes (honest misses stated) — done
+  - [x] The seed guard (`tests/test_request_contexts.py::test_the_seed_categories_are_the_strategies_that_read_the_original_value`) caught that `PriceTrustDifferentialStrategy` and `GoTemplateSstiStrategy` now read `candidate.base_entries`; both read it only on a whole-body JSON point (`content_type` is set for a whole-body point alone, `audit/engine.InjectionPoint.body_content_type`), which has no target slot, so neither sends the seed: recorded in `_SEED_EXEMPT` with that reason (found by the lane's first harness run) — done
+  - [ ] Open: `content_type` is set only from an answer key, so on crawl runs the JSON whole-body strategies (mass assignment, price trust, Go-template SSTI in JSON) never run: a crawl-captured JSON request should carry its content type (follow-up for the orchestrator; it touches the importer)
+- Effectiveness (assessed 2026-11-20): `tests/test_blackbox_detection.py` passes on `strategies.py`; harness counts in the CHANGELOG line.
+
 ### CC-FUZZ-0117 — M6's navigations settle a failure on the error page's load (BUG-0561) (2026-10-23)
 - Change: none in `fuzzlab/tools/browserexec.py` or the oracle. The executor's navigations go through SP-01, which now waits for a failed navigation's error page to load, not only to commit, before it raises (CC-CRAWL-0065).
 - Impact (other components / project):

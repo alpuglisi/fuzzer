@@ -53,6 +53,35 @@ Newest first.
   - [x] SHARED_PRIMITIVES SP-09 row, FR-CORE-650, BUG-0680, PA-0680/0681 — done
 - Effectiveness (assessed 2026-11-20): live crawls (CC-CRAWL-0650): Mutillidae toggle
   requests received 100 → 0 (spider) and 91 → 0 (disco); DVGA unchanged (stated residual).
+### CC-CORE-0610 — The `ldap_injection` and `xpath_injection` classes (FR-CORE-610) (2026-11-20)
+- Change: `fuzzlab/core/runmode.py` (`_VULN_TO_CATEGORY`), `fuzzlab/labels/schemas/
+  labels.schema.json` (vuln classes `ldap_injection`, `xpath_injection`; sink contexts
+  `ldap`, `xpath`).
+- Reason: the classes' underscore spelling (labels) and hyphenated categories differ
+  (PA-0047); verified live through a scored run (PA-0042: CC-LAB-0343, MUTL-0006/0007/0013
+  matched).
+- Risk: low; additive enum values.
+- Deliverables:
+  - [x] code; `tests/test_ldap_xpath.py::test_both_classes_are_wired_end_to_end` — done
+
+### CC-CORE-0605 — `ssjs` maps to its category (FR-CORE-605) (2026-11-20)
+- Change: `fuzzlab/core/runmode.py` (`_VULN_TO_CATEGORY["ssjs"]`).
+- Impact (other components / project): an answer key's `ssjs` positives select the
+  category (D14) and score its findings (LAB, FUZZ).
+- Risk (level; mitigation or accepted-risk justification): low. The pre-change review
+  gate was not run (F-611).
+- Deliverables:
+  - [x] mapping; covered by `tests/test_oracle_strategies_ssjs.py` and the external-lab
+    static tests (scoreable classes) — done
+- Effectiveness (assessed 2026-11-20): the NodeGoat runs derived and scored the category.
+### CC-CORE-0630 — `runmode` no longer calls a ground-truth-point run a detection benchmark (PA-0660, CC-FUZZ-0661) (2026-11-20)
+- Placement: lane BBOX, base d492b9d.
+- Change: `core/runmode.py` module docstring only: an automatic run with ground truth is scored; on crawl points it is the detection figure, on the answer key's own points (`--points ground-truth`) only an oracle diagnostic.
+- Impact: none at run time.
+- Risk: none.
+- Deliverables:
+  - [x] Docstring — done
+- Effectiveness (assessed 2026-11-20): n/a (documentation).
 
 ### CC-CORE-0076 — A secret in a URL is redacted wherever it sits: one walk over nested URLs, query strings, `;` pairs and path parameters (FR-CORE-537, BUG-0556) (2026-10-22)
 - Placement: pre-assigned to lane REDACTURL (item GAP-VALUES, audit Gap 5), base

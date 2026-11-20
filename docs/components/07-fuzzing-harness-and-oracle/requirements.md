@@ -727,7 +727,9 @@ rewards) derives from it.
     "jwt_algorithm_confusion"`, `mechanism="alg-none-bypass"`): a
     two-probe differential over a header-carried Bearer token. Probe A
     (an unsigned `alg:none` token, a freshly-minted marker carried in
-    its `channel_id` claim — the literal field the real sink echoes)
+    ~~its `channel_id` claim — the literal field the real sink echoes~~
+    the RFC 7519 / OIDC standard claims `sub`, `name`, `preferred_username`
+    -- *superseded by FR-FUZZ-660*, 2026-11-20)
     must return 200 with the marker echoed back; probe B (the same
     marker, claiming `HS256` with a garbage signature) must return a
     real auth-rejection status (401/403 specifically, not merely
@@ -1280,7 +1282,8 @@ rewards) derives from it.
   - **Settle.** The sentinel wait lasts `SETTLE_MS` from the end of that load wait.
     Once `load` fires (recorded by `page.once("load")`), it lasts a full `SETTLE_MS`
     from `load`, capped at `timeout_ms` + `SETTLE_MS` after the commit, so a slow
-    page's sink is still seen. Only a Playwright error ends the wait early.
+    page's sink is still seen. Only a Playwright error ends the wait early (or the
+    hit). *(An early end on a "quiet" page, FR-FUZZ-650, was withdrawn: BUG-0650.)*
   - **Per probe.** A Playwright error or timeout of the context set-up, the plant or
     the observe navigation raises `NotObserved` (a subclass of `UnplaceableLocation`,
     in `oracle/browser.py`). So does a page that never reached `load` by the end of the
@@ -1638,6 +1641,18 @@ rewards) derives from it.
   point with its body carries the probe. A ground-truth point may carry `json_body`
   (the body its endpoint takes; `param` one of its leaves): `auto` then audits it as a
   JSON-leaf point with those siblings.
+- **FR-FUZZ-620 (LDAP filter injection, `CC-FUZZ-0620`, 2026-11-20)** A boolean
+  differential on the shared engine: ``b)(objectClass=u*`` (false) against
+  ``b)(objectClass=*`` (true); error signatures only corroborate. Class
+  `ldap_injection`, category `ldap-injection`.
+- **FR-FUZZ-621 (XPath injection, `CC-FUZZ-0621`)** A boolean differential on the
+  shared engine with `string-length()` tests, as a predicate (``b' or ... or 'v'='w``)
+  and as a union (``b'] | //*[... or 'v'='w``). Class `xpath_injection`, category
+  `xpath-injection`.
+- **FR-FUZZ-622 (a front controller's page in the finding URL, `CC-FUZZ-0622`, SP-90)**
+  `oracle.finding_url` keeps ``?<route>=<page>`` of a router URL (from its query or a
+  crawled point's siblings), unless the probed parameter is the route or the value is no
+  plain page name; `harness.scoring.case_key` keys a case by the same function.
 - **FR-FUZZ-55 (cross-account access control, `CC-FUZZ-0093`, 2026-10-19)**
   `fuzzlab auto --identity A --peer-identity B` (both accounts stored; checked before
   the store opens: another account, both usernames present, neither contains the other)
@@ -2224,6 +2239,142 @@ rewards) derives from it.
     `tests/test_prg_observation.py::test_a_path_points_follow_up_that_would_re_send_the_payload_never_confirms`,
     `tests/test_prg_observation.py::test_a_path_points_follow_up_that_leaves_its_segment_still_confirms`,
     `tests/test_prg_observation.py::test_prg_rule` (`own-segment-never-refetched`)
+- **FR-FUZZ-610** *(server-side JavaScript injection, evaluation marker; `CC-FUZZ-0610`,
+  2026-11-20).* `SsjsEvaluationMarkerStrategy` (category
+  `server-side-javascript-injection`, class `ssjs`, mechanism `js-evaluation-marker`)
+  sends `Math.abs(-n)/1000` (n in 1001..9999, not a multiple of 10); its result `n/1000`
+  must appear, not inside a longer number, once every reflected form of the expression is
+  stripped, and a second result absent from the first answer must appear in the answer to
+  the probe that computed it. A small decimal so a range-checking app still shows it;
+  `Math.abs` so SQL, template, Python, PHP and Ruby evaluators raise. 1 request
+  unconfirmed, 2 at most; skipped on a raw whole-body point.
+- **FR-FUZZ-611** *(server-side JavaScript injection, boolean differential;
+  `CC-FUZZ-0610`).* `SsjsBooleanDifferentialStrategy` (mechanism
+  `js-boolean-differential`) runs three families through the shared bracketed,
+  replicated engine (`_differential`, `ENGINE_BOUND` per family): base a five-digit
+  number; V `Math.abs(-k)==j` (false) and D `Math.abs(-k)==k` (true), joined with `||`
+  unquoted or as `b+'||…&&'+b` / `b+"||…&&"+b` to leave and re-enter a quoted string.
+  Compared by length (`exact=False`): a `$where` lists matched documents in callback
+  order (measured on NodeGoat). **Non-destructive by construction:** every probe of both
+  strategies is a valid JavaScript expression in an unquoted, a single-quoted and a
+  double-quoted context alike and names nothing but `Math.abs` (no loop, sleep, exit,
+  module or side effect), so an in-process `$where` that dies on an uncaught
+  ReferenceError or SyntaxError (Juice Shop) is never sent one; measured live on NodeGoat
+  and Juice Shop (both survived). Cost: 3 requests per failed family screen, `HARD_CAP`
+  30 with an inconclusive verdict as `SqliBooleanStrategy`'s.
+- **FR-FUZZ-612** *(a NoSQL operator leaf's echo; `CC-FUZZ-0611`, BUG-0610).*
+  `NoSqlOperatorStrategy`'s comparison strips `[object Object]` (JavaScript's rendering of
+  an object it was sent) with the tokens' reflected forms, so a page that re-renders the
+  submitted leaf compares V with B; a server that stringifies every object still answers V
+  and D alike and never confirms.
+- **FR-FUZZ-630 (a classpath-confined read is a path traversal, `CC-FUZZ-0630`,
+  2026-11-20)** `PathTraversalClasspathResourceStrategy` (`fuzzlab/oracle/
+  strategies_jvm.py`, category `path-traversal`, class `path_traversal`), after
+  `PathTraversalFsPathReadStrategy`: `../` * 1..4 + `application.properties` (the file
+  Spring Boot loads from the classpath root), confirmed when a Spring-defined key and `=`
+  is in the answer and absent from a compared control naming the file with no traversal.
+  At most 4 mutations and one control. Black-box (owner directive, 2026-11-20): the
+  behaviour is measured on two independent targets (VulnerableApp's resource read and a
+  standalone JDK 11 `getResourceAsStream`: `..` resolves inside a directory classpath,
+  never above its root). Stated limit: a jar classpath does not resolve `..` (measured),
+  so a packaged fat jar's read is a false negative.
+  - Enforced by: `tests/test_oracle_strategies_jvm.py` (confirms at depth; misses for the
+    OS-file strategy; a file served without traversal, a reflected payload and a confined
+    directory are not confirmed; only the root's file is probed; the marker's false-match
+    set), `tests/test_external_labs_live.py::test_vulnerableapp_jvm_read_strategies_confirm_its_levels`
+    (live, gated).
+- **FR-FUZZ-631 (an in-band SSRF through the `file:` scheme, `CC-FUZZ-0630`,
+  2026-11-20)** `SsrfFileSchemeStrategy` (category and class `ssrf`), after the OOB SSRF
+  strategies: `file:///etc/passwd` then `file:/etc/passwd`, confirmed when the passwd
+  marker comes back and is absent from a compared control sending the bare path. Needs
+  no OOB listener, so it decides where the target cannot reach the scanner's loopback
+  callback (a container). Black-box evidence: JDK 11 `URL.openStream` and CPython
+  `urllib.request.urlopen` both read both spellings and refuse the bare path (measured);
+  PayloadsAllTheThings lists `file:///etc/passwd` as an SSRF payload; VulnerableApp's
+  unfiltered SSRF level reads it, its filtered levels refuse it.
+  - Enforced by: `tests/test_oracle_strategies_jvm.py` (confirmed; refused; a page
+    always showing passwd text and a page reflecting the URL are not confirmed,
+    PA-0090(2)), the live test above.
+
+- **FR-FUZZ-632 (an open redirect past a prefix filter, `CC-FUZZ-0632`, 2026-11-20)**
+  `OpenRedirectFilterBypassStrategy` (`fuzzlab/oracle/strategies_filters.py`, class
+  `open_redirect`), after `OpenRedirectStrategy`: when the plain canary did not land, the
+  canary as `//host/cb`, `/\host/cb` and `@host/cb` (at most three probes), each judged by
+  where a browser lands (`browser_resolve`: C0 and space trimmed, tab and newline removed,
+  `\` read as `/` before the query after a special scheme, then `urljoin`), never a prefix
+  test. Black-box evidence: the spellings are PayloadsAllTheThings' (Open Redirect);
+  `browser_resolve` agrees with Chromium 157 on 10 of 10 `Location` shapes from a
+  synthetic loopback server independent of any lab (enforced below); on VulnerableApp the
+  filtered levels confirm and its own-origin and allowlisted levels do not.
+  - Enforced by: `tests/test_oracle_strategies_filters.py` (the resolver against the
+    measured readings; a prefix filter passed with a backslash; an app-prefixed origin
+    passed with userinfo; an own-origin-plus-slash shape, an allowlist, a body echo and a
+    redirect elsewhere carrying the canary are not confirmed;
+    `test_browser_resolve_agrees_with_chromium`, real Chromium).
+- **FR-FUZZ-633 (timing payloads carry the baseline's value, `CC-FUZZ-0631`,
+  2026-11-20, BUG-0630)** Every timing mutation is the value its baseline sent followed by
+  the part under test: `cmdi_timing_payloads(base)` prefixes each command-injection
+  template with the point's base value, or with `_CMDI_BASELINE` (`1`) when it has none.
+  - Enforced by: `tests/test_timing_payloads_carry_the_baseline.py` (discovery over every
+    default strategy running `_confirm_timing`, proven on a synthetic offender),
+    `tests/test_oracle_vectors.py::test_command_injection_confirms_past_a_filter_when_the_baseline_runs_a_command`.
+- **FR-FUZZ-680** *(the M6 browser carries the run's session; `CC-FUZZ-0680`, BUG-0690).*
+  In a run with an identity, every M6 browser visit (a stored-XSS plant and its observe
+  page, a DOM-XSS load) carries the session the run's probes carry: `fuzzlab auto` builds
+  `PlaywrightBrowserExecutor(session_route=sender.browser_session_route)` (FR-SESS-650),
+  and the executor adopts the route's session with the one adoption helper
+  (`browserauth.browser_session` / `context_options` / `apply_to_context`, FR-CRAWL-14)
+  before the driver starts. Its guard gets the session's scoped headers, its cookie scope
+  and its cookies (SP-74); an API plant (form or JSON) passes `checked_api_request` with
+  the session's cookies and cookie scope, adds the session's headers on its own origins
+  only, and is refused (not observed, never sent) on another origin than the session's
+  (FR-SESS-20). The visit is anonymous only where the sender's own gates send a probe
+  anonymously (an auth endpoint, an isolated path) or the run has no session
+  (`--no-login`). A login failure propagates as from the sender. `storage_headers` and a
+  session route are exclusive.
+- **FR-FUZZ-681** *(an unlanded plant is not observed; `CC-FUZZ-0680`, BUG-0690).* A form
+  or JSON plant whose answer SP-56 does not class as the application's own (a credentialed
+  login redirect or 401, a throttle, a gateway, a policy block; facts from SP-16's
+  `login_facts`) raises `NotObserved`: no verdict for that payload, never "did not fire"
+  (it would be a negative an ML stage trains on). The executor never decides a session
+  loss.
+- **FR-FUZZ-682** *(greybox carries its session whole or refuses; `CC-FUZZ-0681`,
+  BUG-0690 sweep).* `greybox_cli._cookie_for` reads every session header
+  (`SessionManager.session_headers`); the greybox sender carries a Cookie only, so a
+  session that carries any other header (a bearer; a browser login's Authorization beside
+  its cookie) or no cookie is refused (`SessionAuthError`, a usage error before any side
+  effect), never probed anonymously or with half of it.
+
+- **FR-FUZZ-660** *(strategies read only what a black-box target offers;
+  `CC-FUZZ-0660`, 2026-11-20, BUG-0661, PA-0660).* No confirmation strategy sends or
+  reads a field, claim, element, attribute or constant that only a lab supplied. Where a
+  strategy needs a name it takes it from the target (the captured request body's own
+  leaves, the response's own properties) or from a public standard, and it gives no
+  verdict when the target offers none (a stated miss, never a guess):
+  - `JwtAlgNoneConfusionStrategy` carries its marker in `STANDARD_CLAIMS` (RFC 7519
+    §4.1.2 `sub`; OIDC Core §5.1 `name`, `preferred_username`).
+  - `PredictableTokenSourceStrategy` reads every decimal JSON leaf of the response
+    and confirms a clock reading: an epoch count (s/ms/us/ns) near this host's time or
+    a nanosecond monotonic counter, each moving by no more than the measured window
+    around its two sends (an upper bound by causality).
+  - `MassAssignmentPrivilegedFieldStrategy` flips the response's own unsent
+    top-level `false` booleans and confirms one reading back `true`, with a
+    never-existing control property that must not come back.
+  - `PriceTrustDifferentialStrategy` varies the captured body's numeric leaves and
+    reads the response's leaf at the same path; no captured body, no verdict.
+  - `PriceIntegrityBypassStrategy` anchors its canary to a currency symbol or price
+    word within 40 characters, digit-bounded.
+  - `GoTemplateSstiStrategy` places a JSON point's expression in every string leaf
+    of the captured body; no captured body, no verdict.
+  - The XXE strategies reference the entity in the root element's text only.
+- **FR-FUZZ-661** *(the reported detection figure is a crawl run's; `CC-FUZZ-0661`,
+  2026-11-20, PA-0660).* `fuzzlab auto`'s score line names its points source: a crawl
+  run prints "detection score (crawl run, black-box)", a ground-truth-point run prints
+  "oracle diagnostic (ground-truth points: the answer key supplied the points; not a
+  detection figure)". The multi-target transfer summary labels each target's line
+  and its macro line the same way (`TargetOutcome.points_source`, summary key
+  `measures`: `detection` / `oracle-diagnostic` / `mixed`). Presentation only: no score
+  is computed differently.
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
   finding must reproduce.
@@ -2703,3 +2854,49 @@ and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
       it got a login page;
     - an unrecognised, short, low-entropy equal session id is accepted as distinct
       (FR-SESS-17).
+
+- **FR-FUZZ-650** *(SUPERSEDED by FR-FUZZ-653, `CC-FUZZ-0651`: withdrawn, it missed
+  late sinks, BUG-0650; kept for the record)* *(the M6 wait ends on a quiet page;
+  `CC-FUZZ-0650`, 2026-11-20).*
+  `PlaywrightBrowserExecutor._wait_for_token` ends the sentinel wait before `SETTLE_MS`
+  once `load` has fired and `pagequiet.PageQuiet.settled` reads the page quiet for
+  `QUIET_MS` (500 ms): no request SP-40's `Inflight` counts (its last start or end
+  restarts the period), and in **every** frame no timer due before the wait's
+  deadline, no interval, no animation frame, no idle callback and no running animation
+  (read from `TRACKER_JS`, an init script installed on the context before the first
+  navigation, which wraps the timer functions); and no WebSocket, EventSource or worker
+  on the page at all. A frame whose tracker cannot be read (with the Playwright error
+  class, or with no tracker) is not quiet: the wait runs as before. Before breaking,
+  the wait pumps Playwright's events once more, so a sentinel call the read raced is
+  kept. `EARLY_END = False` keeps the whole window and only records `settled_at` (the
+  measurement mode of `scripts/measure_scan_perf.py --shadow-quiet`). The verdicts are
+  unchanged: a hit is still executed=True, a page that never loaded still
+  `NotObserved`.
+- **FR-FUZZ-651** *(SUPERSEDED with FR-FUZZ-650 by FR-FUZZ-653)* *(FR-FUZZ-650's
+  residuals; `CC-FUZZ-0650`).* (1) A sink fed only by
+  a long-poll answered more than `netquiet.LONG_LIVED_MS` after it opened is not
+  waited for, as SP-40 decides for every settle. (2) A sink run by an event no tracker
+  sees (a media element's events with no request, a message from a cross-origin frame
+  that ran no tracked work) is not waited for after `QUIET_MS`. (3) A page's own script
+  can replace the wrapped timer functions or the tracker's reads; the tracker is
+  defined non-writable, and the labs are not adversarial. (4) A page with a WebSocket
+  (Juice Shop's socket.io), an interval or an endless animation keeps the whole
+  window: no saving there.
+- **FR-FUZZ-652** *(a held Playwright driver: measured, not built; `CC-FUZZ-0650`).*
+  Keeping one Playwright driver for a run would save its start (0.31 s per browser
+  observation on bWAPP), but a held sync driver leaves its event loop on the thread,
+  and every other sync Playwright use there then fails ("using Playwright Sync API
+  inside the asyncio loop", measured in `tests/test_browser_scope.py` and
+  `tests/test_confirm_trace.py`). The executor keeps a driver per probe.
+- **FR-FUZZ-653** *(the M6 observation window is never shortened; `CC-FUZZ-0651`,
+  BUG-0650, 2026-11-20).* The sentinel wait of `PlaywrightBrowserExecutor` ends only on
+  the hit, on its deadline (`SETTLE_MS` from `load`, capped as FR-FUZZ-48's settle
+  says) or on a Playwright error; never on a judgement that nothing else can run. A
+  page's script can be run again by events no tracker sees (an SVG animation's
+  `onend`/`onbegin`, `scheduler.postTask` with a delay, a MessageChannel or
+  `postMessage` chain, a meta refresh, a media element's events, a request answered
+  after SP-40's long-lived limit), measured by the independent verification of
+  CC-FUZZ-0650. A faster M6 keeps the whole window (more observations at once, or
+  less work outside the window), and each such sink stays a real-browser regression
+  test (`tests/test_m6_slow_sinks.py`).
+

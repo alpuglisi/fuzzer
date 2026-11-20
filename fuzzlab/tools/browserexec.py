@@ -347,10 +347,19 @@ class PlaywrightBrowserExecutor:
     """Drive a headless browser to confirm stored/DOM XSS. Lab-only, loopback targets."""
 
     def __init__(self, headless: bool = True, timeout_ms: int = 8000,
-                 storage_headers: dict | None = None):
+                 storage_headers: dict | None = None, session_route=None):
         self._headless = headless
         self._timeout = timeout_ms
         self._headers = storage_headers or {}
+        #: FR-FUZZ-680 (BUG-0690): ``session_route(urls)`` -> ``(manager, identity,
+        #: base_url)`` or None -- the run's sender's own decision of the session a visit
+        #: of ``urls`` carries (`SeamProbeSender.browser_session_route`: the run's
+        #: session, or anonymous past its auth-endpoint and isolation gates). None: every
+        #: visit is anonymous (no identity, ``--no-login``)
+        if session_route is not None and self._headers:
+            raise ValueError("a session route carries its own headers (scoped); "
+                             "storage_headers is for a session-less executor")
+        self._session_route = session_route
         #: why this run has no browser (BUG-0126), once launches have failed
         self._unavailable: str | None = None
         self._failures = 0                             # launch failures in a row
@@ -413,6 +422,11 @@ class PlaywrightBrowserExecutor:
                     if visit is not None:
                         visit.refused_placement("store", request, refusal)
                     raise UnplaceableLocation(refusal)
+            # FR-FUZZ-680 (BUG-0690): the session the visit carries -- the run's, through
+            # its sender's gates -- ensured before the driver starts (a browser login,
+            # FR-SESS-19, runs on its own thread); a login failure propagates as it
+            # does from the sender's own sends, never an anonymous visit
+            session = self._visit_session(request)
             from playwright.sync_api import Error as PlaywrightError
             from playwright.sync_api import sync_playwright
 
@@ -430,7 +444,8 @@ class PlaywrightBrowserExecutor:
             entered = True
             # a result, or the probe's own no-verdict (NotObserved / a launch failure),
             # or a defect: the driver's stop below never replaces any of them (Z2)
-            obs = self._in_browser(pw, request, token, PlaywrightError, visit)
+            obs = self._in_browser(pw, request, token, PlaywrightError, visit,
+                                   session=session)
             if visit is not None:
                 visit.end_returned(obs)
             return obs
@@ -446,18 +461,97 @@ class PlaywrightBrowserExecutor:
                 if visit is not None:
                     visit.emit()                       # contained (FR-FUZZ-62)
 
-    def _in_browser(self, pw, request: ExecRequest, token: str,
-                    error, visit: _VisitTrace | None = None) -> ExecObservation:
-        from fuzzlab.core.urls import in_origin_scope, origin_scope, url_key
-        from fuzzlab.tools.navguard import (browser_launch_args, checked_api_request,
-                                            chromium_launch_kwargs, guard_page,
-                                            load_state_reached, navigate, release)
-        # The browser reaches only the observe and store origins (BUG-0123).
+    @staticmethod
+    def _scope(request: ExecRequest):
+        """``(scope_urls, in_scope)``: the browser reaches only the observe and store
+        origins (BUG-0123)."""
+        from fuzzlab.core.urls import in_origin_scope, origin_scope
         scope_urls = [request.url] + ([request.store.url] if request.store else [])
         origins = origin_scope(*scope_urls)
 
         def in_scope(url):
             return in_origin_scope(url, origins)
+        return scope_urls, in_scope
+
+    def _visit_session(self, request: ExecRequest):
+        """The `browserauth.BrowserSession` a visit of ``request`` carries, or None
+        (anonymous): the run's session when the session route (the run's sender) gives
+        it for every URL the visit sends to -- the plant's and the observe page's --
+        shaped by the one adoption helper every authenticated context uses
+        (`browserauth.browser_session`, FR-CRAWL-14; its storage state filtered to the
+        visit's scope). FR-FUZZ-680, BUG-0690."""
+        if self._session_route is None:
+            return None
+        scope_urls, in_scope = self._scope(request)
+        route = self._session_route(scope_urls)
+        if route is None:
+            return None
+        manager, identity, base_url = route
+        from fuzzlab.tools import browserauth
+        return browserauth.browser_session(manager, identity, base_url or request.url,
+                                           in_scope=in_scope, scope_urls=scope_urls)
+
+    def _carried(self, session, held_session_cookies) -> dict:
+        """What the visit's guard and its API plant apply: a session's scoped headers,
+        its cookie scope and its cookies as the context holds them (SP-74's input,
+        `held_session_cookies`, the credential ones), or the session-less executor's
+        storage headers (in scope, as before)."""
+        if session is None:
+            return {"headers": dict(self._headers) or None, "header_scope": None,
+                    "cookie_scope": None, "session_cookies": None}
+        cookies = held_session_cookies(session.cookies, session.storage_state,
+                                       {name for name, _value in session.checked_cookies})
+        return {"headers": dict(session.headers) or None,
+                "header_scope": session.header_scope,
+                "cookie_scope": session.cookie_scope,
+                "session_cookies": cookies or None}
+
+    @staticmethod
+    def _api_headers(carried: dict, url: str) -> dict:
+        """The headers an API plant to ``url`` adds: the session's on its own origins
+        only (``header_scope``), as the guarded route adds them to a navigation. An API
+        plant to an in-scope URL on another origin than the session's is refused before
+        it is sent: the context's jar is port-agnostic, so it would carry the session
+        there (FR-SESS-20) -- not observed, never planted anonymously in its place."""
+        scope = carried["cookie_scope"]
+        if scope is not None and not scope(url):
+            raise NotObserved("the store URL is on another origin than the run's "
+                              "session: not planted (FR-SESS-20)")
+        if carried["headers"] and (carried["header_scope"] is None
+                                   or carried["header_scope"](url)):
+            return dict(carried["headers"])
+        return {}
+
+    @staticmethod
+    def _plant_landed(url: str, resp, session) -> None:
+        """A plant whose answer is not the application's own (SP-56: an auth failure
+        -- the run's session answered with a login redirect or a 401 --, a throttle, a
+        gateway or a policy block) stored nothing to observe: this payload is not
+        observed (no verdict), never "did not fire" (FR-FUZZ-681, BUG-0690). The facts
+        are SP-16's, the class SP-56's; the session's loss is the session layer's to
+        decide, never this executor's."""
+        from fuzzlab.core.comparability import APPLICATION, response_class
+        from fuzzlab.session.detect import login_facts
+        status = getattr(resp, "status", None)
+        headers = dict(getattr(resp, "headers", None) or {})
+        facts = login_facts(url, headers)
+        cls, why = response_class(status, headers, complete=True,
+                                  credentialed=session is not None,
+                                  credential_submission=facts.credential_submission,
+                                  redirect_to_login=facts.redirect_to_login)
+        if cls != APPLICATION:
+            raise NotObserved(f"the plant was not stored: {why}")
+
+    def _in_browser(self, pw, request: ExecRequest, token: str,
+                    error, visit: _VisitTrace | None = None, *,
+                    session=None) -> ExecObservation:
+        from fuzzlab.core.urls import url_key
+        from fuzzlab.tools import browserauth
+        from fuzzlab.tools.navguard import (browser_launch_args, checked_api_request,
+                                            chromium_launch_kwargs, guard_page,
+                                            SessionHostUnreached, held_session_cookies,
+                                            load_state_reached, navigate, release)
+        scope_urls, in_scope = self._scope(request)
         launch = chromium_launch_kwargs(browser_launch_args(scope_urls),
                                         headless=self._headless)       # BUG-0126
         try:
@@ -471,7 +565,9 @@ class PlaywrightBrowserExecutor:
         hits: set = set()
         load_ms = min(self.LOAD_WAIT_MS, self._timeout)
         try:
-            context = browser.new_context(service_workers="block")   # BUG-0111
+            # BUG-0111; FR-FUZZ-680: a session's browser login state adopted the one way
+            context = browser.new_context(service_workers="block",
+                                          **browserauth.context_options(session))
             # the sentinel is a binding: every document of the page calls back here,
             # so a hit survives the page navigating afterwards (reviewer B)
             context.expose_binding(SENTINEL, (lambda _source, t: hits.add(str(t)))
@@ -485,14 +581,26 @@ class PlaywrightBrowserExecutor:
             if request.store is not None:
                 allowed.add(url_key(request.store.url))
             # storage headers go through the guarded route only, in scope, never
-            # set_extra_http_headers (FR-CRAWL-14's mechanism, CC-FUZZ-0076)
+            # set_extra_http_headers (FR-CRAWL-14's mechanism, CC-FUZZ-0076); the run's
+            # session (FR-FUZZ-680) the auditor's way: its headers on its own origins
+            # (`header_scope`), its jar withheld elsewhere (`cookie_scope`, FR-SESS-20)
+            # and nothing sent to a host its cookies do not reach (SP-74)
+            carried = self._carried(session, held_session_cookies)
             if visit is None:
                 guard_page(context, allow=frozenset(allowed), in_scope=in_scope,
-                           headers=dict(self._headers) or None)
+                           headers=carried["headers"],
+                           header_scope=carried["header_scope"],
+                           cookie_scope=carried["cookie_scope"],
+                           session_cookies=carried["session_cookies"])
             else:                                         # + recording-only refusals
                 guard_page(context, frozenset(allowed), visit.on_abort,
                            in_scope=in_scope, on_out_of_scope=visit.on_out_of_scope,
-                           headers=dict(self._headers) or None)
+                           headers=carried["headers"],
+                           header_scope=carried["header_scope"],
+                           cookie_scope=carried["cookie_scope"],
+                           session_cookies=carried["session_cookies"])
+            if session is not None:
+                browserauth.apply_to_context(context, session.cookies)
             # a dialog is dismissed and never counted: the payloads call the
             # sentinel, and an app's own alert/confirm is not the probe's doing
             # (BUG-0129)
@@ -503,19 +611,30 @@ class PlaywrightBrowserExecutor:
                 _refusal, store_body = _store_plan(s)
                 started = visit.started() if visit is not None else None
                 try:
-                    if store_body is not None:
-                        # API requests bypass `route`: scope-check, never redirect
-                        checked_api_request(in_scope, s.url)
-                        resp = context.request.fetch(
-                            s.url, method=s.method.upper(), data=store_body,
-                            headers={"Content-Type": "application/json"},
-                            max_redirects=0)
-                    elif s.location == "body":
-                        # API requests bypass `route`: scope-check, never redirect
-                        checked_api_request(in_scope, s.url)
-                        resp = context.request.fetch(s.url, method=s.method.upper(),
-                                                     form={s.param: s.value},
-                                                     max_redirects=0)
+                    if store_body is not None or s.location == "body":
+                        # API requests bypass `route`: scope-check, never redirect; the
+                        # session's reach and its headers applied here as the route
+                        # applies them (FR-FUZZ-680): the context's own jar carries
+                        # its cookies
+                        try:
+                            checked_api_request(
+                                in_scope, s.url,
+                                session_cookies=carried["session_cookies"],
+                                cookie_scope=carried["cookie_scope"])
+                        except SessionHostUnreached as exc:  # SP-74: never sent
+                            raise NotObserved(str(exc)) from None
+                        headers = self._api_headers(carried, s.url)
+                        if store_body is not None:
+                            resp = context.request.fetch(
+                                s.url, method=s.method.upper(), data=store_body,
+                                headers={**headers,
+                                         "Content-Type": "application/json"},
+                                max_redirects=0)
+                        else:
+                            extra = {"headers": headers} if headers else {}
+                            resp = context.request.fetch(
+                                s.url, method=s.method.upper(),
+                                form={s.param: s.value}, max_redirects=0, **extra)
                     else:
                         # the commit, then a bounded load, as the observe navigation
                         # (BUG-0137 review A-N3; the one helper since BUG-0138)
@@ -530,6 +649,8 @@ class PlaywrightBrowserExecutor:
                     raise
                 if visit is not None:
                     visit.store_done(started, s, getattr(resp, "status", None))
+                if store_body is not None or s.location == "body":
+                    self._plant_landed(s.url, resp, session)      # FR-FUZZ-681
 
             target = request.url
             if request.param is not None and request.value is not None:

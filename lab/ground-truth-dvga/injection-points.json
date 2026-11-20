@@ -1,0 +1,197 @@
+{
+ "version": 1,
+ "target": "dvga_2_1_2_040aa33c",
+ "points": [
+  {
+   "url": "/graphql",
+   "method": "POST",
+   "param": "variables.arg",
+   "location": "body",
+   "rendering": "server-json",
+   "json_body": {
+    "query": "query SystemDebug($arg: String) { systemDebug(arg: $arg) }",
+    "variables": {
+     "arg": "aux"
+    }
+   }
+  },
+  {
+   "url": "/graphql",
+   "method": "POST",
+   "param": "variables.host",
+   "location": "body",
+   "rendering": "server-json",
+   "json_body": {
+    "query": "mutation ImportPaste ($host: String!, $port: Int!, $path: String!, $scheme: String!) {\n  importPaste(host: $host, port: $port, path: $path, scheme: $scheme) {\n    result\n  }\n}",
+    "variables": {
+     "host": "127.0.0.1",
+     "port": 1,
+     "path": "/",
+     "scheme": "http"
+    }
+   }
+  },
+  {
+   "url": "/graphql",
+   "method": "POST",
+   "param": "variables.path",
+   "location": "body",
+   "rendering": "server-json",
+   "json_body": {
+    "query": "mutation ImportPaste ($host: String!, $port: Int!, $path: String!, $scheme: String!) {\n  importPaste(host: $host, port: $port, path: $path, scheme: $scheme) {\n    result\n  }\n}",
+    "variables": {
+     "host": "127.0.0.1",
+     "port": 1,
+     "path": "/",
+     "scheme": "http"
+    }
+   }
+  },
+  {
+   "url": "/graphql",
+   "method": "POST",
+   "param": "variables.scheme",
+   "location": "body",
+   "rendering": "server-json",
+   "json_body": {
+    "query": "mutation ImportPaste ($host: String!, $port: Int!, $path: String!, $scheme: String!) {\n  importPaste(host: $host, port: $port, path: $path, scheme: $scheme) {\n    result\n  }\n}",
+    "variables": {
+     "host": "127.0.0.1",
+     "port": 1,
+     "path": "/",
+     "scheme": "http"
+    }
+   }
+  },
+  {
+   "url": "/graphql",
+   "method": "POST",
+   "param": "variables.cmd",
+   "location": "body",
+   "rendering": "server-json",
+   "json_body": {
+    "query": "query SystemDiagnostics($username: String, $password: String, $cmd: String) { systemDiagnostics(username: $username, password: $password, cmd: $cmd) }",
+    "variables": {
+     "username": "admin",
+     "password": "changeme",
+     "cmd": "whoami"
+    }
+   }
+  },
+  {
+   "url": "/graphql",
+   "method": "POST",
+   "param": "variables.username",
+   "location": "body",
+   "rendering": "server-json",
+   "json_body": {
+    "query": "query SystemDiagnostics($username: String, $password: String, $cmd: String) { systemDiagnostics(username: $username, password: $password, cmd: $cmd) }",
+    "variables": {
+     "username": "admin",
+     "password": "changeme",
+     "cmd": "whoami"
+    }
+   }
+  },
+  {
+   "url": "/graphql",
+   "method": "POST",
+   "param": "variables.password",
+   "location": "body",
+   "rendering": "server-json",
+   "json_body": {
+    "query": "query SystemDiagnostics($username: String, $password: String, $cmd: String) { systemDiagnostics(username: $username, password: $password, cmd: $cmd) }",
+    "variables": {
+     "username": "admin",
+     "password": "changeme",
+     "cmd": "whoami"
+    }
+   }
+  },
+  {
+   "url": "/graphql",
+   "method": "POST",
+   "param": "variables.filter",
+   "location": "body",
+   "rendering": "server-json",
+   "json_body": {
+    "query": "query PasteFilter($filter: String) { pastes(filter: $filter) { id title } }",
+    "variables": {
+     "filter": "fuzzlab"
+    }
+   }
+  },
+  {
+   "url": "/graphql",
+   "method": "POST",
+   "param": "variables.pasteTitle",
+   "location": "body",
+   "rendering": "server-json",
+   "json_body": {
+    "query": "query PasteByTitle($pasteTitle: String) { paste(title: $pasteTitle) { id title } }",
+    "variables": {
+     "pasteTitle": "fuzzlab"
+    }
+   }
+  },
+  {
+   "url": "/graphql",
+   "method": "POST",
+   "param": "variables.keyword",
+   "location": "body",
+   "rendering": "server-json",
+   "json_body": {
+    "query": "query Search($keyword: String) { search(keyword: $keyword) { ... on PasteObject { id title } } }",
+    "variables": {
+     "keyword": "fuzzlab"
+    }
+   }
+  },
+  {
+   "url": "/graphql",
+   "method": "POST",
+   "param": "variables.title",
+   "location": "body",
+   "rendering": "server-json",
+   "json_body": {
+    "query": "mutation CreatePaste ($title: String!, $content: String!, $public: Boolean!, $burn: Boolean!) {\n  createPaste(title:$title, content:$content, public:$public, burn: $burn) {\n    paste {\n      id\n      content\n      title\n      burn\n    }\n  }\n}",
+    "variables": {
+     "title": "fuzzlab",
+     "content": "hello",
+     "public": true,
+     "burn": false
+    }
+   }
+  },
+  {
+   "url": "/graphql",
+   "method": "POST",
+   "param": "variables.content",
+   "location": "body",
+   "rendering": "server-json",
+   "json_body": {
+    "query": "mutation CreatePaste ($title: String!, $content: String!, $public: Boolean!, $burn: Boolean!) {\n  createPaste(title:$title, content:$content, public:$public, burn: $burn) {\n    paste {\n      id\n      content\n      title\n      burn\n    }\n  }\n}",
+    "variables": {
+     "title": "fuzzlab",
+     "content": "hello",
+     "public": true,
+     "burn": false
+    }
+   }
+  },
+  {
+   "url": "/graphql",
+   "method": "POST",
+   "param": "variables.filename",
+   "location": "body",
+   "rendering": "server-json",
+   "json_body": {
+    "query": "mutation UploadPaste ($filename: String!, $content: String!) {\n  uploadPaste(filename: $filename, content:$content) {\n    result\n  }\n}",
+    "variables": {
+     "filename": "fuzzlab.txt",
+     "content": "hello"
+    }
+   }
+  }
+ ]
+}

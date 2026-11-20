@@ -88,16 +88,17 @@ def test_booking_target_spec_runs_for_real_and_scores(tmp_path) -> None:
             outcome = outcomes[0]
             # Real target, real ground truth -> a real, scored report (D14: automatic
             # mode + ground truth is always scored, regardless of tp count).
-            # `open_redirect` (`CC-CORE-0021`/`FR-CORE-11`, BKNG-0001),
-            # `price_integrity_bypass` (`CC-FUZZ-0029`, BKNG-0003), and
-            # `csv_formula_injection` (`CC-FUZZ-0030`, BKNG-0002) all
-            # genuinely detect now -- Booking.com's own full ground truth,
-            # zero false negatives.
+            # `open_redirect` (`CC-CORE-0021`/`FR-CORE-11`, BKNG-0001) and
+            # `price_integrity_bypass` (`CC-FUZZ-0029`, BKNG-0003) detect.
+            # `csv_formula_injection` (BKNG-0002) is an honest false negative
+            # since BUG-0660: its parameter is named `label`, a word only this
+            # lab justified, so R-CSV-FORMULA-INJECTION no longer nominates it.
             assert outcome.scored is True
             assert outcome.report is not None
-            assert outcome.report.tp == 3 and outcome.report.fn == 0
+            assert outcome.report.tp == 2 and outcome.report.fn == 1
+            assert outcome.report.missed == ["BKNG-0002"]
             assert outcome.report.fp == 0
-            assert outcome.report.recall == 1.0
+            assert outcome.report.recall == 2 / 3
 
             summary = transfer_summary(outcomes)
             assert summary["targets"] == 1

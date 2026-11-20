@@ -10,6 +10,7 @@ writes scores/uncertainty, never labels (oracle/advisory split).
 from __future__ import annotations
 
 import json
+import re
 
 from fuzzlab.core import jsonbody, trace
 from fuzzlab.core.forms import FormEntries
@@ -46,7 +47,49 @@ def finding_url(candidate: Candidate) -> str:
     hash route the two are identical, so ground-truth findings are unchanged."""
     if candidate.location == "fragment":
         return to_route_path(candidate.url)
-    return to_path(candidate.url)
+    return to_path(candidate.url) + _front_controller_route(
+        candidate.url, candidate.param, getattr(candidate, "base_entries", None))
+
+
+#: FR-FUZZ-622: a front controller's route value kept in a finding URL has this shape
+#: (a page or action name); any other value is not kept, so nothing else of the query
+#: is ever recorded.
+_ROUTE_VALUE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$")
+
+
+def _front_controller_route(url: str, param: str, entries=None) -> str:
+    """``?<name>=<value>`` of a front controller's routing parameter (FR-FUZZ-622, SP-90):
+    the URL's last path segment is a router (``index.php``) and its query names the
+    page (``page=user-info.php``) -- the router and route names `session.detect` reads a
+    query-routed login with. One query-routed page is one finding URL, not every page
+    at ``/index.php`` (as a SPA's hash route above). ``""`` when there is no route, when
+    the probed parameter is the route itself (its value is the payload), or when the
+    value is not a plain page name (`_ROUTE_VALUE`). A crawled point carries its query
+    as sibling ``entries`` (forms phase 2) rather than in its URL: they are read when the
+    URL's own query names no route."""
+    from urllib.parse import parse_qsl, quote, urlsplit
+
+    # Evidence for the router/route names read here (owner directive 2026-11-20, black
+    # box; the lists themselves are `session.detect`'s, BUG-0122, reviewed by lane BBOX):
+    # `route` -- OpenCart upload/system/library/url.php:93 (`index.php?route=` + route;
+    # its login route `account/login`) and phpMyAdmin src/Url.php:327; `r` -- the Yii 2
+    # routing guide (`/index.php?r=post%2Fview&id=100`). `page` is shown on Mutillidae
+    # only, `action`/`p`/`view` are uncited (CC-FUZZ-0622, CC-SESS-0611/0612).
+    from fuzzlab.session.detect import _ROUTE_PARAMS, _ROUTER_SEGMENTS
+    parts = urlsplit(url or "")
+    segments = [s for s in parts.path.split("/") if s]
+    if not segments or segments[-1].lower().rsplit(".", 1)[0] not in _ROUTER_SEGMENTS:
+        return ""
+    pairs = parse_qsl(parts.query, keep_blank_values=True)
+    if not any(k.lower() in _ROUTE_PARAMS for k, _v in pairs):
+        pairs = [(k, v) for k, v in (entries or ()) if isinstance(k, str)
+                 and isinstance(v, str)]
+    for key, value in pairs:
+        if key.lower() in _ROUTE_PARAMS:
+            if key == param or not _ROUTE_VALUE.match(value):
+                return ""
+            return f"?{key}={quote(value, safe='./-_')}"
+    return ""
 
 
 def _decides(strategy, candidate: Candidate) -> bool:
