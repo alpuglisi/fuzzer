@@ -18,6 +18,20 @@ Format per entry:
 
 ---
 
+## 2026-11-20 / FUZZ (oracle, command injection) — BUG-0630, PA-0630
+- **Symptom:** on SasanLabs VulnerableApp (CC-LAB-0350), `fuzzlab auto` confirmed
+  CommandInjection LEVEL_1/2 but never LEVEL_3..5, which curl showed injectable
+  (`127.0.0.1$(sleep 2)`: 3.02 s; `127.0.0.1|sleep 4`: 4.0 s). The run's trace: baseline
+  samples 1.02 s, payloads 2.01 s or 3 ms.
+- **Root cause:** with no base value, `CommandInjectionStrategy` timed a baseline of `1`
+  (the app pings it: ~1 s) but sent bare templates (`$(sleep 2)`), which leave ping no
+  host: the baseline's work was missing from the payload and the added latency measured
+  ~1 s, under the 1.5 s floor.
+- **Remediation:** every timing payload is the baseline's own value plus a template
+  (`cmdi_timing_payloads`, CC-FUZZ-0631); a discovery guard checks every timing strategy
+  for it (PA-0630). Live: LEVEL_3..5 confirm, LEVEL_6..8 (SECURE) do not.
+- **Status:** Fixed.
+
 ## 2026-10-23 — crawler / navguard (a navigation started before a failed load's error page had loaded was dropped; BUG-0561)
 - **Symptom:** the harness run of e69bd1e (F-281): `tests/test_disco_harvest.py::test_disco_harvest_and_restore_after_failed_loads[2]` failed in 19.1 s. Disco's `restore` returned "navigation": its `about:blank` `goto` timed out after 15 s and the page stayed on `chrome-error://chromewebdata/`. The RCA measured about 1% of restores under heavy disk I/O on every tree since BUG-0522's fix (7393c90 4/600, e69bd1e 9/840) and 0/1,320 under CPU load alone.
 - **Root cause:** `navguard._settle_failure` (SP-01, BUG-0522's fix) took a failed navigation as over when its error page committed. That page loads 15-25 ms later (p95 about 130 ms under I/O load), and a navigation Chromium started in between was sometimes dropped with no commit and no error, so Playwright waited out the whole `goto` timeout.

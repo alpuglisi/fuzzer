@@ -2224,6 +2224,32 @@ rewards) derives from it.
     `tests/test_prg_observation.py::test_a_path_points_follow_up_that_would_re_send_the_payload_never_confirms`,
     `tests/test_prg_observation.py::test_a_path_points_follow_up_that_leaves_its_segment_still_confirms`,
     `tests/test_prg_observation.py::test_prg_rule` (`own-segment-never-refetched`)
+- **FR-FUZZ-630 (a classpath-confined read is a path traversal, `CC-FUZZ-0630`,
+  2026-11-20)** `PathTraversalClasspathResourceStrategy` (`fuzzlab/oracle/
+  strategies_jvm.py`, category `path-traversal`, class `path_traversal`), after
+  `PathTraversalFsPathReadStrategy`: `../` * 1..4 + a file every Spring Boot jar
+  (`application.properties`) or servlet webapp (`WEB-INF/web.xml`) carries at its root,
+  confirmed when that file's own marker (a Spring-defined key and `=`; a Java EE /
+  Jakarta `<web-app xmlns=...>`) is in the answer and absent from a compared control
+  naming the file with no traversal. At most 8 mutations and one control per marker
+  seen. Measured before it was written (VulnerableApp PathTraversal LEVEL_1:
+  `/etc/passwd` unreachable, `../../application.properties` read).
+  - Enforced by: `tests/test_oracle_strategies_jvm.py` (confirms at depth; misses for the
+    OS-file strategy; a file served without traversal, a reflected payload and a confined
+    directory are not confirmed; the marker's false-match set),
+    `tests/test_external_labs_live.py::test_vulnerableapp_jvm_read_strategies_confirm_its_levels`
+    (live, gated).
+- **FR-FUZZ-631 (an in-band SSRF through the `file:` scheme, `CC-FUZZ-0630`,
+  2026-11-20)** `SsrfFileSchemeStrategy` (category and class `ssrf`), after the OOB SSRF
+  strategies: `file:///etc/passwd` then `file:/etc/passwd`, confirmed when the passwd
+  marker comes back and is absent from a compared control sending the bare path. Needs
+  no OOB listener, so it decides where the target cannot reach the scanner's loopback
+  callback (a container). Measured on VulnerableApp SSRFVulnerability LEVEL_1 (read) and
+  LEVEL_2..5 (refused).
+  - Enforced by: `tests/test_oracle_strategies_jvm.py` (confirmed; refused; a page
+    always showing passwd text and a page reflecting the URL are not confirmed,
+    PA-0090(2)), the live test above.
+
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
   finding must reproduce.

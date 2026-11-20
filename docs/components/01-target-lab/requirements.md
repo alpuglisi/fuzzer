@@ -6408,6 +6408,23 @@ lane) can submit a payload as
   client, so no cookie is shared) and stores each under its own identity, reporting
   them as `BootstrapResult.peers`. `secdevlabs-gossip-world` has a second account,
   `sdl-gossip-peer` (`fuzzlab_peer`), for `fuzzlab auto --peer-identity` (FR-FUZZ-55).
+- **FR-LAB-350** *(SasanLabs OWASP VulnerableApp, a Java / Spring Boot external lab;
+  `CC-LAB-0350`, 2026-11-20).* `lab/external/vulnerableapp/` runs
+  `sasanlabs/owasp-vulnerableapp:2.2.115` pinned by digest (`VULNERABLEAPP_IMAGE`; upstream
+  commit 821b347) on 127.0.0.1:3093 (`VAPP_PORT`), read-only root, every capability
+  dropped, its working-directory writes on tmpfs, no login (no bootstrap identity). Its
+  ground truth `lab/ground-truth-vulnerableapp/` (cases `VAPP-NNNN`) is derived from the
+  app's own scanner metadata (`/VulnerableApp/allEndPointJson`, `/scanner/dast`): each
+  level's UNSECURE / SECURE variant is the verdict, the SECURE levels the negatives, for
+  the classes fuzzlab scores (SQL injection error / union / blind, reflected and stored
+  XSS, command injection, path traversal, SSRF, open redirect, XXE). Where upstream's
+  own source contradicts its variant the case says so and follows the source (two
+  error-based SQLi levels that cannot be broken out of); where no request can reach a
+  positive (a same-directory file name, a redirect the browser keeps on the origin, an
+  entity-expansion bomb) it is `[reach: none - <measured reason>]`. Cases found live
+  beyond upstream's list are tagged so (the String answers are content-negotiated:
+  `text/html` for a browser, so a reflected SQL error is a reflected XSS). Every case
+  was checked live at bring-up (`[prov: ...]` names the source and the check).
 - **FR-LAB-306** *(secDevLabs apps, one external lab each; `CC-LAB-0303`, 2026-10-18).*
   `fuzzlab/lab_fixtures/external.py` checks globocom/secDevLabs out at commit `10be438`
   once (`secdevlabs_checkout`, gitignored, HEAD verified by the shared
