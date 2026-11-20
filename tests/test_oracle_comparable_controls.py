@@ -524,15 +524,18 @@ def test_a_timing_baseline_that_timed_out_is_inconclusive_never_a_negative(kind)
 
 
 class _Timeouts:
-    """A `requests` session for the real `RequestsProbeSender`: the benign value answers
-    at once, every other value raises ``exc``."""
+    """A `requests` session for the real `RequestsProbeSender`: the benign value and
+    every structural control (FR-FUZZ-711) answer at once, every other value raises
+    ``exc``."""
     cookies = None
 
     def __init__(self, exc):
         self.exc = exc
 
     def request(self, method, url, **kw):
-        if _query_value(url, kw, "pattern") == RegexDosStrategy.benign_probe:
+        from fuzzlab.oracle.strategies import _REDOS_CONTROLS
+        if _query_value(url, kw, "pattern") in {RegexDosStrategy.benign_probe,
+                                                 *_REDOS_CONTROLS.values()}:
             return types.SimpleNamespace(status_code=200, text="results", headers={})
         raise self.exc
 

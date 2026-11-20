@@ -386,3 +386,47 @@ def test_both_twins_still_highlight_an_ordinary_term_correctly_in_real_node(emit
         content = emitter.render(_cell(manifest, cell_id))[0].content
         outcome = _run_rendered_handler_in_real_node(content, "mesh")
         assert "<mark>mesh</mark>" in outcome["response"], cell_id
+
+
+class _RealNodeSender:
+    """FR-FUZZ-711 (CC-FUZZ-0711): a sender whose every answer is the rendered handler
+    run in a real Node.js subprocess, its latency the in-process `hrtime` of exactly
+    the handler call -- so `RegexDosStrategy`'s thresholds (derived from the benign
+    baseline, the structural controls and their measured jitter) meet real V8 regex
+    timing, not a fixed fake number."""
+
+    def __init__(self, content: bytes):
+        self.content = content
+        self.sent: list[str] = []
+
+    def send(self, url, param, value, timing=False, method="GET", location="query"):
+        from fuzzlab.oracle.probe import Probe
+        self.sent.append(value)
+        outcome = _run_rendered_handler_in_real_node(self.content, value)
+        return Probe(200, outcome["response"] or "", elapsed=outcome["elapsedMs"] / 1000.0)
+
+
+def _redos_candidate():
+    from fuzzlab.oracle import Candidate
+    return Candidate(url="http://h/api/search", param="q", vuln_class="redos",
+                     category="regular-expression")
+
+
+@pytest.mark.skipif(not node_available(), reason="node CLI not available on this build host (PA-0005 pattern)")
+def test_regex_dos_strategy_confirms_the_vulnerable_twin_in_real_node(emitter, manifest) -> None:
+    """The data-driven thresholds still confirm the labgen vulnerable cell: two evil
+    templates each slower than every benign and control answer, in every re-send."""
+    from fuzzlab.oracle.strategies import RegexDosStrategy
+    sender = _RealNodeSender(emitter.render(_cell(manifest, "LABGEN-RD-0001"))[0].content)
+    verdict = RegexDosStrategy().confirm(_redos_candidate(), sender)
+    assert verdict is not None and verdict.confirmed, sender.sent
+    for row in verdict.evidence["confirming_templates"]:
+        assert min(row["elapsed"]) > max(row["control_elapsed"]), row
+        assert len(row["elapsed"]) == RegexDosStrategy.rounds
+
+
+@pytest.mark.skipif(not node_available(), reason="node CLI not available on this build host (PA-0005 pattern)")
+def test_regex_dos_strategy_never_confirms_the_secure_twin_in_real_node(emitter, manifest) -> None:
+    from fuzzlab.oracle.strategies import RegexDosStrategy
+    sender = _RealNodeSender(emitter.render(_cell(manifest, "LABGEN-RD-0002"))[0].content)
+    assert RegexDosStrategy().confirm(_redos_candidate(), sender) is None

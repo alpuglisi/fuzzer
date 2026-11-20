@@ -213,10 +213,11 @@ rewards) derives from it.
     instead escalates across `_REDOS_TEMPLATES` (several independent,
     single-nesting-level classic catastrophic-backtracking shapes) and
     confirms when **at least two** independently clear a robust-baseline
-    threshold (`Baseline.exceeds`, `floor`/`k` overridden per-strategy to
+    threshold (~~`Baseline.exceeds`, `floor`/`k` overridden per-strategy to
     this mechanism's own bounded, tens-to-low-hundreds-of-milliseconds
-    probe magnitude) — substituting "two independent evil shapes" for
-    "two requested durations."
+    probe magnitude~~ — *the threshold is superseded by FR-FUZZ-711*,
+    2026-11-20: structural controls and a jitter-derived margin) —
+    substituting "two independent evil shapes" for "two requested durations."
   - Stated limitation: this can only detect ReDoS when the target's own
     content already contains a run of the character class a template
     targets — inherently probabilistic against an arbitrary black-box
@@ -2388,6 +2389,19 @@ rewards) derives from it.
   baseline endpoint file implies (`coverage.document_root`), else every non-excluded
   file. The former `/var/www/html` default and `<root>/<last path segment or
   index.php>` mapping are withdrawn.
+- **FR-FUZZ-711** *(the ReDoS threshold is the target's own; `CC-FUZZ-0711`,
+  2026-11-20, BUG-0733).* `RegexDosStrategy` sends each evil template beside its
+  structural control (`_REDOS_CONTROLS`: the same pattern minus the nested or
+  ambiguous quantifier, linear-time; PA-0117(1), PA-0630(1)) in `rounds` (3)
+  alternating-order rounds, after `baseline_samples` (5) benign samples. A template
+  counts only when **every** evil sample exceeds the slowest non-evil answer measured
+  so far (baseline and every control) by that pool's own jitter: its spread, or
+  `k` (4) robust sigmas, at least the client's measurement resolution
+  (`resolution_floor`, 5 ms, from a measured loopback distribution, not a target
+  figure). Two templates confirm (unchanged). Shapes cited to OWASP "Regular
+  expression Denial of Service - ReDoS", CWE-1333 and Davis et al. (ESEC/FSE 2018).
+  A target slow for every pattern of the shape (a compile or error path), a single
+  slow reading, or a uniformly 0-40 ms jittery endpoint never confirms (tested).
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
   finding must reproduce.

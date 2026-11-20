@@ -3,6 +3,65 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0711 — ReDoS threshold from the target's own answers: structural controls, repeats, measured jitter (BUG-0733, FR-FUZZ-711) (2026-11-20)
+- Change: `fuzzlab/oracle/strategies.py` (`_REDOS_CONTROLS` added beside
+  `_REDOS_TEMPLATES`; `RegexDosStrategy`'s threshold and `confirm` rewritten locally:
+  `baseline_samples` 3 -> 5, `rounds = 3`, `resolution_floor = 0.005`, `_margin`; the
+  fixed `floor = 0.02` removed; docstring restated); `tests/test_oracle_redos.py` (five
+  new tests); `tests/test_labgen_redos.py` (two new real-Node strategy tests);
+  `tests/test_oracle_comparable_controls.py::_Timeouts` (the controls answer, so the
+  read-timeout pin still isolates the evil templates);
+  `docs/architecture/oracle-confirmation.md` (ReDoS bullet). FR-FUZZ-711 (FR-FUZZ-12's
+  threshold superseded in place).
+- Provenance: CC-FUZZ-0025 / CC-LAB-0076 (2026-09-22) set `floor = 0.02 s`, `k = 4`,
+  3 samples "to fit this mechanism's own bounded probe magnitude", calibrated on the
+  `node_express` `regex_highlight_match` cells (`LABGEN-RD-0001/0002`: ~55-70 ms vulnerable,
+  <1 ms secure); the class docstring: "observed at low-single-digit milliseconds in this
+  project's own calibration". No control of the probe's own shape existed.
+- Mechanism (as specified): (1) a per-template **structural control** -- the same group,
+  class and `$` anchor minus the nested or ambiguous quantifier (`(a+)+$` -> `(a+)$`,
+  `(a|a)*$` -> `(a)*$`, `(a|aa)+$` -> `(a)+$`, `([a-zA-Z]+)*$` -> `([a-zA-Z])*$`,
+  `(\d+)+$` -> `(\d)+$`), linear-time on a backtracking engine: PA-0117(1)/PA-0630(1);
+  (2) the evil template must exceed **both** the benign baseline and its control -- every
+  evil sample above the slowest non-evil answer measured so far; (3) **re-sent** in 3
+  alternating-order rounds, every round above; (4) the margin is the non-evil pool's own
+  spread or 4 robust sigmas, at least a 5 ms client-resolution floor (measured below, an
+  instrument figure, not a target's). Two templates still confirm. Sources: OWASP
+  "Regular expression Denial of Service - ReDoS" (Evil Regexes `(a+)+`, `([a-zA-Z]+)*`,
+  `(a|aa)+`); CWE-1333 "Inefficient Regular Expression Complexity"; J. Davis et al.,
+  "The Impact of Regular Expression Denial of Service (ReDoS) in Practice", ESEC/FSE 2018
+  (nested quantifiers, quantified overlapping alternation); R. Cox, "Regular Expression
+  Matching Can Be Simple And Fast" (2007) on backtracking blowup.
+- Impact (other components / project): FUZZ only. Requests per ReDoS candidate: a
+  non-vulnerable endpoint 5 + 5 x 2 = 15 (was 3 + 5 = 8); a vulnerable one confirming on
+  its first two templates 5 + 2 x 6 = 17 (was 3 + 2 = 5). Labs with ReDoS points:
+  meadowmart MMART-0003 (positive) / MMART-0004 (secure twin), labgen manifest
+  `lab/manifests/redos_node_sample.yaml` (`LABGEN-RD-0001/0002`).
+- Risk (level; mitigation or accepted-risk justification): low-medium -- a stricter rule
+  (false negatives on a target whose evil latency is under its own jitter spread, or
+  slow only once); false positives from jitter, from a slow regex compile/error path or
+  from one slow reading are removed (tested).
+- Deliverables:
+  - [x] controls, threshold, tests (fake and real Node) — done
+  - [x] BUG-0733; FR-FUZZ-711; architecture doc — done
+- Measured (2026-11-20, this host):
+  - Client resolution: loopback HTTP (`requests` to a local `http.server`), 500 GETs:
+    min 0.84 ms, p50 1.46 ms, p90 2.44 ms, p99 6.24 ms, max 8.24 ms; spread of a random
+    5-sample window p50 0.94 ms, p99 6.96 ms.
+  - Real Node (`tests/test_labgen_redos.py`'s in-process `hrtime` runner), per term x3,
+    `LABGEN-RD-0001`: benign 0.11-0.13 ms; `(a+)+$` 51-83 ms vs control `(a+)$` 0.11-0.16;
+    `(a|a)*$` 83-151 vs `(a)*$` 0.10; `([a-zA-Z]+)*$` 51-84 vs 0.21-0.26; `(a|aa)+$`
+    0.9-1.3 (not catastrophic on this content); `(\d+)+$` 0.1. `LABGEN-RD-0002` (escaped):
+    every term 0.11-0.21 ms.
+  - The strategy over the real Node runner, 5 runs: the vulnerable cell confirmed every
+    run on `(a+)+$` and `(a|a)*$` (evil 49-107 ms against a 5.2-5.4 ms threshold, max
+    control 0.2 ms, 17 probes); the secure cell never confirmed (15 probes).
+  - Monte-Carlo of the decision rule (non-vulnerable, every answer i.i.d.), 5 baseline
+    samples x 3 rounds: uniform 0-40 ms 0/200 000; exponential (mean 10 ms) 0/300 000;
+    log-normal 0/300 000; Pareto(1.5) 5/300 000. With the former 3 samples x 1 round,
+    uniform 0-40 ms: 0.63 %.
+- Effectiveness (assessed pending): the lane's measurement on meadowmart (MMART-0003/0004).
+
 ### CC-FUZZ-0710 — Grey-box endpoint file read from the coverage, no assumed document root (BUG-0732, FR-FUZZ-710, SP-145) (2026-11-20)
 - Change: `fuzzlab/greybox/coverage.py` (new `endpoint_file`, `document_root`, with
   `_url_segments`, `_segments_of`, `_pick`); `fuzzlab/greybox/run.py` (`_endpoint_file`

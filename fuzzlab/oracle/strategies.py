@@ -78,6 +78,24 @@ _REDOS_TEMPLATES = [
     r"(\d+)+$",
 ]
 
+#: Each template's structural control (FR-FUZZ-711, BUG-0733): the same group, the same
+#: character class and the same `$` anchor, minus the nested or ambiguous quantifier
+#: that makes the template catastrophic -- the probe minus what it tests (PA-0117(1),
+#: PA-0630(1)). A backtracking engine runs each control in linear time per start
+#: position, so anything the target does with *a* regex of this shape and length
+#: (compiling it, scanning its content, an error path) is on both sides, and only the
+#: ambiguity is not. Shapes: OWASP, "Regular expression Denial of Service - ReDoS"
+#: ("Evil Regexes": `(a+)+`, `([a-zA-Z]+)*`, `(a|aa)+`, `(a|a?)+`); CWE-1333; Davis et
+#: al., "The Impact of Regular Expression Denial of Service (ReDoS) in Practice"
+#: (ESEC/FSE 2018: nested quantifiers and quantified overlapping alternation).
+_REDOS_CONTROLS = {
+    r"(a+)+$": r"(a+)$",
+    r"(a|a)*$": r"(a)*$",
+    r"(a|aa)+$": r"(a)+$",
+    r"([a-zA-Z]+)*$": r"([a-zA-Z])*$",
+    r"(\d+)+$": r"(\d)+$",
+}
+
 # Command-injection timing templates (shell separators; {d} = delay seconds).
 _CMDI_TIMING_TEMPLATES = [
     "; sleep {d}",
@@ -1411,11 +1429,13 @@ class RegexDosStrategy(ConfirmationStrategy):
     CI-safe bound on ordinary lab content -- see
     ``docs/architecture/oracle-confirmation.md``'s M1 ReDoS section for the
     calibration numbers. Confirmation requires **at least two** independent
-    templates to each measure latency far above baseline
-    (``floor``/``k``, overridden below to fit this mechanism's
-    deliberately bounded, tens-to-low-hundreds-of-milliseconds probe
-    magnitude, never the multi-second scale ``_confirm_timing``'s own
-    ``floor=1.5`` assumes) -- the ReDoS analogue of "two escalating
+    templates to each measure latency above every non-evil answer -- the
+    benign baseline and each template's structural control
+    (`_REDOS_CONTROLS`: the same pattern minus its nested or ambiguous
+    quantifier) -- by that pool's own measured jitter, in **every** one of
+    ``rounds`` re-sends (FR-FUZZ-711; the fixed ``floor=0.02 s``/``k=4``
+    of CC-FUZZ-0025 was calibrated on this project's own lab cells and is
+    withdrawn, BUG-0733) -- the ReDoS analogue of "two escalating
     delays," substituting "two independent evil shapes" for "two requested
     durations" since no requested duration exists here.
 
@@ -1436,32 +1456,66 @@ class RegexDosStrategy(ConfirmationStrategy):
     mechanism = "differential-timing"
     category = "regular-expression"
 
-    # Overridden from the base class's SQLi/cmdi-tuned defaults: this
-    # mechanism's probes are deliberately bounded to tens/low-hundreds of
-    # milliseconds (never multi-second), so floor/k must be small enough to
-    # actually fire at that scale while still clearing ordinary request
-    # jitter (observed at low-single-digit milliseconds in this project's
-    # own calibration, see the class docstring above).
-    baseline_samples = 3
+    # FR-FUZZ-711 (BUG-0733, CC-FUZZ-0711): the threshold comes from the target's own
+    # answers, not from a figure calibrated on one lab's cells (the former fixed
+    # floor=0.02 s / k=4 over 3 samples). Every template is sent in `rounds` rounds
+    # beside its structural control (`_REDOS_CONTROLS`), in alternating order, and
+    # confirms only when **every** one of its samples clears the slowest non-evil answer
+    # measured so far (the benign baseline samples and every control) by that pool's
+    # own jitter: its spread (max - min) or `k` robust sigmas, whichever is larger.
+    # `resolution_floor` is the client's measurement resolution, never a target
+    # figure: loopback HTTP on the build host measured p50 1.46 ms, p99 6.24 ms,
+    # max 8.24 ms over 500 requests (CC-FUZZ-0711 "Measured"), so a gap under 5 ms is
+    # not read as a difference whatever the pool's spread.
+    baseline_samples = 5
+    rounds = 3
     k = 4.0
-    floor = 0.02            # seconds (20ms) above baseline required
+    resolution_floor = 0.005   # seconds
     min_confirming_templates = 2
     benign_probe = "ordinary-search-term"
+
+    @classmethod
+    def _margin(cls, pool: list[float]) -> float:
+        """The jitter a sample must clear above the slowest non-evil answer: the pool's
+        spread or ``k`` robust sigmas, at least the client's resolution."""
+        sigma = build_baseline(pool).robust_sigma()
+        return max(cls.resolution_floor, max(pool) - min(pool), cls.k * sigma)
 
     def confirm(self, candidate, sender):
         # FR-FUZZ-63: each sample an application answer, or no verdict (a fast refusal
         # lowers the threshold; a connect timeout is no latency, M7)
-        base = build_baseline([
-            self._compared(sender, candidate, self.benign_probe, role="baseline",
-                           timing=True).elapsed
-            for _ in range(self.baseline_samples)
-        ])
+        pool = [self._compared(sender, candidate, self.benign_probe, role="baseline",
+                               timing=True).elapsed
+                for _ in range(self.baseline_samples)]
+        base = build_baseline(pool)
         confirming = []
         for template in _REDOS_TEMPLATES:
-            with trace.role("mutation"):              # FR-FUZZ-60
-                probe = self._send(sender, candidate, template, timing=True)
-            if base.exceeds(probe.elapsed, k=self.k, floor=self.floor):
-                confirming.append({"template": template, "elapsed": round(probe.elapsed, 4)})
+            control = _REDOS_CONTROLS[template]
+            evil_samples: list[float] = []
+            control_samples: list[float] = []
+            for r in range(self.rounds):
+                # alternate the order, so a warm-up or caching effect lands on each side
+                order = ("control", "evil") if r % 2 == 0 else ("evil", "control")
+                evil_elapsed = 0.0
+                for side in order:
+                    if side == "control":
+                        c = self._compared(sender, candidate, control, role="control",
+                                           timing=True).elapsed
+                        control_samples.append(c)
+                        pool.append(c)
+                    else:
+                        with trace.role("mutation"):          # FR-FUZZ-60
+                            evil_elapsed = self._send(sender, candidate, template,
+                                                      timing=True).elapsed
+                evil_samples.append(evil_elapsed)
+                if evil_elapsed < max(pool) + self._margin(pool):
+                    break                    # not above every non-evil answer: next shape
+            else:
+                confirming.append({
+                    "template": template, "control": control,
+                    "elapsed": [round(e, 4) for e in evil_samples],
+                    "control_elapsed": [round(c, 4) for c in control_samples],
+                    "threshold": round(max(pool) + self._margin(pool), 4)})
                 if len(confirming) >= self.min_confirming_templates:
                     return Verdict(True, self.vuln_class, self.mechanism,
                                    {"baseline_median": round(base.median, 4),
