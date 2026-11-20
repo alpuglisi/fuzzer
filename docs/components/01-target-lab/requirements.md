@@ -6547,6 +6547,33 @@ lane) can submit a payload as
   `tests/test_dvwa_lab.py` with the verdict of the gate that stops each; the residuals
   name their compensating control (the level is a client cookie whose default is low;
   the bootstrap restores a changed seeded password).
+- **FR-LAB-435** *(OWASP crAPI, a microservices API lab; `CC-LAB-0435`, 2026-11-20).*
+  `lab/external/crapi/` runs crAPI v1.1.6 from upstream's own images pinned by digest
+  (`CRAPI_*_IMAGE`; the `latest` build of the v1.1.6 release day) without the LLM chatbot
+  (it needs an API key). Only crapi-web publishes, on 127.0.0.1:3101 (`CRAPI_PORT`);
+  every backend, database, mailhog and the dealership gateway sit only on an internal
+  network with no egress; capabilities dropped and limits set per service; databases on
+  tmpfs (reset = restart). Mail (the signup VIN / pincode, OTPs) is read through
+  crapi-web's own `/mailhog/` proxy.
+- **FR-LAB-436** *(crAPI's two accounts and their objects; `CC-LAB-0436`, 2026-11-20).*
+  `bootstrap_crapi` signs up and verifies `crapi-user` and `crapi-peer` (generated
+  passwords, keyring) through the identity API, then gives each, through the app's own
+  flows, the vehicle its welcome mail names, a mechanic report, a shop order and one
+  claimed seeded coupon; `crapi_account_attributes` stores `vehicle_id`, `vin`,
+  `report_id` and `order_id`, which the answer key's points name (`account_value`).
+  Idempotent.
+- **FR-LAB-437** *(crAPI's state switches judged before its first crawl; `CC-LAB-0437`,
+  2026-11-20).* `tests/test_crapi_crawl_safety.py` holds every crAPI route that changes
+  state (from upstream's source), the gate that must stop it and the gate's computed
+  verdict, residuals pinned with their compensating control, and requires every non-GET
+  point of the answer key to be a row (PA-0114, PA-0681).
+- **FR-LAB-438** *(crAPI's answer key; `CC-LAB-0438`, 2026-11-20).*
+  `lab/ground-truth-crapi/` (cases `CRAPI-NNNN`) is built from upstream's challenge list,
+  its solutions and its source at 700f03d1 (file:line cited), every case checked live,
+  negatives on their error paths: object-level authorization with the account's own
+  values, NoSQL and SQL injection, SSRF and JWT signature bypass (the last two
+  `[reach: none]` with the measured reason). No case names a transaction URL (the
+  `/shop/orders` cases are recorded in CC-LAB-0438, not labelled).
 - **FR-LAB-306** *(secDevLabs apps, one external lab each; `CC-LAB-0303`, 2026-10-18).*
   `fuzzlab/lab_fixtures/external.py` checks globocom/secDevLabs out at commit `10be438`
   once (`secdevlabs_checkout`, gitignored, HEAD verified by the shared

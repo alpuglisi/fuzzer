@@ -1,0 +1,119 @@
+{
+ "version": 1,
+ "target": "owasp_crapi_700f03d1",
+ "points": [
+  {
+   "url": "/identity/api/v2/vehicle/{vehicleId}/location",
+   "method": "GET",
+   "param": "vehicleId",
+   "location": "path",
+   "rendering": "server-json",
+   "account_value": "vehicle_id"
+  },
+  {
+   "url": "/workshop/api/mechanic/mechanic_report",
+   "method": "GET",
+   "param": "report_id",
+   "location": "query",
+   "rendering": "server-json",
+   "account_value": "report_id"
+  },
+  {
+   "url": "/workshop/api/merchant/service_requests/{vin}",
+   "method": "GET",
+   "param": "vin",
+   "location": "path",
+   "rendering": "server-json",
+   "account_value": "vin"
+  },
+  {
+   "url": "/community/api/v2/coupon/validate-coupon",
+   "method": "POST",
+   "param": "coupon_code",
+   "location": "body",
+   "rendering": "server-json",
+   "json_body": {
+    "coupon_code": "TRAC065"
+   }
+  },
+  {
+   "url": "/workshop/api/shop/apply_coupon",
+   "method": "POST",
+   "param": "coupon_code",
+   "location": "body",
+   "rendering": "server-json",
+   "json_body": {
+    "coupon_code": "TRAC065",
+    "amount": 65
+   }
+  },
+  {
+   "url": "/workshop/api/merchant/contact_mechanic",
+   "method": "POST",
+   "param": "mechanic_api",
+   "location": "body",
+   "rendering": "server-json",
+   "json_body": {
+    "mechanic_code": "TRAC_JHN",
+    "problem_details": "fuzzlab",
+    "vin": "0000000000000000",
+    "mechanic_api": "http://127.0.0.1:3101/workshop/api/mechanic/receive_report",
+    "repeat_request_if_failed": false,
+    "number_of_repeats": 1
+   }
+  },
+  {
+   "url": "/identity/api/v2/user/dashboard",
+   "method": "GET",
+   "param": "Authorization",
+   "location": "header",
+   "rendering": "server-json"
+  },
+  {
+   "url": "/identity/api/auth/login",
+   "method": "POST",
+   "param": "email",
+   "location": "body",
+   "rendering": "server-json",
+   "json_body": {
+    "email": "nobody@example.com",
+    "password": "fuzzlab-pass"
+   }
+  },
+  {
+   "url": "/identity/api/auth/forget-password",
+   "method": "POST",
+   "param": "email",
+   "location": "body",
+   "rendering": "server-json",
+   "json_body": {
+    "email": "nobody@example.com"
+   }
+  },
+  {
+   "url": "/workshop/api/shop/products",
+   "method": "GET",
+   "param": "limit",
+   "location": "query",
+   "rendering": "server-json"
+  },
+  {
+   "url": "/community/api/v2/community/posts/recent",
+   "method": "GET",
+   "param": "limit",
+   "location": "query",
+   "rendering": "server-json"
+  },
+  {
+   "url": "/community/api/v2/community/posts",
+   "method": "POST",
+   "param": "title",
+   "location": "body",
+   "rendering": "server-json",
+   "json_body": {
+    "title": "fuzzlab",
+    "content": "fuzzlab"
+   }
+  }
+ ]
+}

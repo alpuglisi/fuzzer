@@ -18,6 +18,21 @@ Format per entry:
 
 ---
 
+## 2026-11-20 — Crawler / browser guard (lane NEWLABS2-CRAPI): disco lost a bearer-token session on a same-origin redirect (BUG-0754)
+- **Symptom:** the first crawl of OWASP crAPI (`fuzzlab disco capture --storage-state`)
+  ended its authenticated exploration after 0 actions: "the session was lost (an auth
+  failure (401) ...)". The 401 answered the second hop of the SPA's
+  `GET /workshop/api/mechanic` (a Django APPEND_SLASH 301 to `.../mechanic/`), sent
+  without the page's `Authorization` bearer.
+- **Root cause:** `navguard`'s redirect hop walk builds each hop's headers from the
+  session manager only and drops the page request's own headers, where Chromium keeps
+  them on a same-origin hop (measured: plain Playwright `fetch` with the header ends 200).
+  BUG-0754.
+- **Remediation:** none in this lane (`fuzzlab/tools/navguard.py` belongs to another
+  lane); PA-0754 states the contract; flagged to the orchestrator. The crAPI crawl
+  record (CC-LAB-0438) names the limitation.
+- **Status:** Open
+
 ## 2026-11-20 — Cloud container (JAVA lane): gitleaks and Python Playwright missing; five navigation tests fail on this container's Chromium at the base tree too (environment)
 - **Symptom:** `scripts/verify_change.py --base 2be7a50` on f78ae08: 16 failures. Eight
   `test_cli_check_passes_end_to_end*` (`secret scanner: 'gitleaks' executable not found`,

@@ -1,0 +1,272 @@
+# OWASP crAPI v1.1.6 ("completely ridiculous API"; Apache-2.0; external lab fixture,
+# CC-LAB-0435 / FR-LAB-435). Lab-only. A vehicle-owner portal built as microservices to
+# teach the OWASP API Security Top 10: identity (Java / Spring Boot, Postgres, JWT),
+# community (Go, MongoDB), workshop (Python / Django, Postgres), mailhog (crAPI's fork:
+# the signup and vehicle mails), the "dealership" gateway, and crapi-web (openresty
+# serving the React SPA and proxying /identity, /community, /workshop and /mailhog).
+# Its weaknesses: object-level and function-level authorization (vehicle location,
+# mechanic reports, orders, videos), mass assignment, excessive data exposure, SSRF
+# (the contact-mechanic `mechanic_api`), NoSQL and SQL injection (coupons), JWT. The
+# answer key is lab/ground-truth-crapi/.
+#
+# Images: upstream publishes no `1.1.6` tag; its `latest` of 2025-09-22 (pushed 18:02-
+# 18:31 UTC, hours after the v1.1.6 tag commit 700f03d1 of 14:58 UTC) is what this pins,
+# by digest (tag kept for readability; the digest is what resolves). Upstream's
+# deploy/docker/docker-compose.yml at that tag is the source of every environment value
+# below, including crAPI's public default secrets (JWT_SECRET=crapi, the DB password,
+# the workshop SECRET_KEY): lab-only, never real credentials.
+#
+# Not run: the optional LLM chatbot (crapi-chatbot + chromadb) -- it needs an OpenAI API
+# key. crapi-web's nginx still names a chatbot upstream (its config must resolve), so
+# CHATBOT_SERVICE points at 127.0.0.1:1: /chatbot/ answers 502.
+#
+# Safety: crapi-web is published on LOOPBACK ONLY (127.0.0.1:${CRAPI_PORT:-3101}); no
+# other service publishes anything (upstream's mailhog UI on 8025 is not published: the
+# fixture reads mail through crapi-web's own /mailhog/ proxy). Every service but
+# crapi-web sits only on `crapi-int`, an internal network with no egress, so the
+# workshop's SSRF (contact_mechanic fetches any `mechanic_api` URL) and the identity's
+# gateway calls reach only this project's containers; crapi-web is also on `crapi-front`
+# (needed to publish) with name resolution off (`dns`). The gateway runs as its upstream
+# name, api.mypremiumdealership.com, as a network alias on the internal network only.
+# Databases on tmpfs: reset = restart (`./labctl.sh reset crapi`). Capabilities, pids
+# and memory limited per service as measured (CC-LAB-0435).
+#
+# Run through lab/labctl.sh:  ./labctl.sh up crapi [--authorized]
+name: fuzzlab-crapi
+
+x-podman:
+  in_pod: false
+
+x-hardening: &hardening
+  security_opt: ["no-new-privileges:true"]
+
+services:
+  crapi-identity:
+    image: docker.io/crapi/crapi-identity:latest@sha256:5d1db5b3ba8e02bc68711ec6fc4e35ed7cd8b87e63785ece9e7ff5b5e36c5260
+    environment:
+      LOG_LEVEL: INFO
+      DB_NAME: crapi
+      DB_USER: admin
+      DB_PASSWORD: crapisecretpassword
+      DB_HOST: postgresdb
+      DB_PORT: "5432"
+      SERVER_PORT: "8080"
+      ENABLE_SHELL_INJECTION: "false"
+      JWT_SECRET: crapi
+      MAILHOG_HOST: mailhog
+      MAILHOG_PORT: "1025"
+      MAILHOG_DOMAIN: example.com
+      SMTP_HOST: smtp.example.com
+      SMTP_PORT: "587"
+      SMTP_EMAIL: user@example.com
+      SMTP_PASS: xxxxxxxxxxxxxx
+      SMTP_FROM: no-reply@example.com
+      SMTP_AUTH: "true"
+      SMTP_STARTTLS: "true"
+      JWT_EXPIRATION: "604800000"
+      ENABLE_LOG4J: "false"
+      API_GATEWAY_URL: https://api.mypremiumdealership.com
+      TLS_ENABLED: "false"
+    networks: [crapi-int]
+    depends_on:
+      postgresdb: {condition: service_healthy}
+      mongodb: {condition: service_healthy}
+      mailhog: {condition: service_healthy}
+    healthcheck:
+      test: /app/health.sh
+      interval: 10s
+      timeout: 15s
+      retries: 30
+    <<: *hardening
+    cap_drop: [ALL]
+    pids_limit: 256
+    mem_limit: 512m
+    cpus: 1.0
+
+  crapi-community:
+    image: docker.io/crapi/crapi-community:latest@sha256:8ba0c7eda86ae065a673f1fa554d0109a24f25c5a8d65097ae024e5ee715c54e
+    environment:
+      LOG_LEVEL: INFO
+      IDENTITY_SERVICE: crapi-identity:8080
+      DB_NAME: crapi
+      DB_USER: admin
+      DB_PASSWORD: crapisecretpassword
+      DB_HOST: postgresdb
+      DB_PORT: "5432"
+      SERVER_PORT: "8087"
+      MONGO_DB_HOST: mongodb
+      MONGO_DB_PORT: "27017"
+      MONGO_DB_USER: admin
+      MONGO_DB_PASSWORD: crapisecretpassword
+      MONGO_DB_NAME: crapi
+      TLS_ENABLED: "false"
+    networks: [crapi-int]
+    depends_on:
+      postgresdb: {condition: service_healthy}
+      mongodb: {condition: service_healthy}
+      crapi-identity: {condition: service_healthy}
+    healthcheck:
+      test: /app/health.sh
+      interval: 10s
+      timeout: 15s
+      retries: 30
+    <<: *hardening
+    cap_drop: [ALL]
+    pids_limit: 128
+    mem_limit: 192m
+    cpus: 0.5
+
+  crapi-workshop:
+    image: docker.io/crapi/crapi-workshop:latest@sha256:d4d2d94d35a31e211b04d5a771881f5ae13e358e8fa0804463ae3bace05dd815
+    environment:
+      LOG_LEVEL: INFO
+      IDENTITY_SERVICE: crapi-identity:8080
+      DB_NAME: crapi
+      DB_USER: admin
+      DB_PASSWORD: crapisecretpassword
+      DB_HOST: postgresdb
+      DB_PORT: "5432"
+      SERVER_PORT: "8000"
+      MONGO_DB_HOST: mongodb
+      MONGO_DB_PORT: "27017"
+      MONGO_DB_USER: admin
+      MONGO_DB_PASSWORD: crapisecretpassword
+      MONGO_DB_NAME: crapi
+      SECRET_KEY: crapi
+      API_GATEWAY_URL: https://api.mypremiumdealership.com
+      TLS_ENABLED: "false"
+      FILES_LIMIT: "1000"
+    networks: [crapi-int]
+    depends_on:
+      postgresdb: {condition: service_healthy}
+      mongodb: {condition: service_healthy}
+      crapi-identity: {condition: service_healthy}
+      crapi-community: {condition: service_healthy}
+    healthcheck:
+      test: /app/health.sh
+      interval: 10s
+      timeout: 15s
+      retries: 30
+    <<: *hardening
+    cap_drop: [ALL]
+    pids_limit: 128
+    mem_limit: 256m
+    cpus: 0.5
+
+  crapi-web:
+    image: docker.io/crapi/crapi-web:latest@sha256:b27d246c646bd33898e7d1d2095b6e7576c0993a7b81a73aa7386929493d7151
+    ports:
+      # Loopback only. Never bind 0.0.0.0. (Upstream also publishes 443, 8443, 30080
+      # and 30443; with TLS off one plain-HTTP port is enough.)
+      - "127.0.0.1:${CRAPI_PORT:-3101}:80"
+    environment:
+      COMMUNITY_SERVICE: crapi-community:8087
+      IDENTITY_SERVICE: crapi-identity:8080
+      WORKSHOP_SERVICE: crapi-workshop:8000
+      # the chatbot is not run (it needs an OpenAI key): a refusing address
+      CHATBOT_SERVICE: 127.0.0.1:1
+      MAILHOG_WEB_SERVICE: mailhog:8025
+      TLS_ENABLED: "false"
+    networks: [crapi-front, crapi-int]
+    dns: ["127.0.0.1"]
+    depends_on:
+      crapi-community: {condition: service_healthy}
+      crapi-identity: {condition: service_healthy}
+      crapi-workshop: {condition: service_healthy}
+    healthcheck:
+      test: curl -fsS 0.0.0.0:80/health
+      interval: 10s
+      timeout: 15s
+      retries: 30
+    <<: *hardening
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID, NET_BIND_SERVICE, DAC_OVERRIDE]
+    pids_limit: 128
+    mem_limit: 128m
+    cpus: 0.5
+
+  postgresdb:
+    image: docker.io/library/postgres:14@sha256:c0e9c0e9bac7e4c1834b698217a03ee5c708de30d313c84a506972de0e24b059
+    command: ["postgres", "-c", "max_connections=500"]
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: crapisecretpassword
+      POSTGRES_DB: crapi
+    networks: [crapi-int]
+    tmpfs: [/var/lib/postgresql/data, /var/run/postgresql]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d crapi"]
+      interval: 5s
+      timeout: 15s
+      retries: 30
+    <<: *hardening
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID, DAC_OVERRIDE, FOWNER]
+    pids_limit: 512
+    mem_limit: 384m
+    cpus: 0.5
+
+  mongodb:
+    image: mirror.gcr.io/library/mongo:4.4@sha256:4be76f674fc4b27859816811b8baa3c51830eb1dbf4ca81a51e26b79edd662ef
+    # a fixed WiredTiger cache: sized from the host's RAM it filled upstream's 128M
+    # limit (measured 367 MiB of 384 MiB at idle with the default, CC-LAB-0435)
+    command: ["mongod", "--wiredTigerCacheSizeGB", "0.25"]
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: crapisecretpassword
+    networks: [crapi-int]
+    tmpfs: [/data/db, /data/configdb]
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongo localhost:27017/test --quiet
+      interval: 5s
+      timeout: 15s
+      retries: 30
+      start_period: 10s
+    <<: *hardening
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID, DAC_OVERRIDE]
+    pids_limit: 256
+    mem_limit: 768m
+    cpus: 0.5
+
+  mailhog:
+    image: docker.io/crapi/mailhog:latest@sha256:015c23f79d40c9dc1800cd0a458503b89aeda3b585a12c37d53829d6c7d61fdd
+    user: root
+    environment:
+      MH_MONGO_URI: admin:crapisecretpassword@mongodb:27017
+      MH_STORAGE: mongodb
+    networks: [crapi-int]
+    depends_on:
+      mongodb: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "8025"]
+      interval: 5s
+      timeout: 15s
+      retries: 30
+    <<: *hardening
+    cap_drop: [ALL]
+    pids_limit: 128
+    mem_limit: 128m
+    cpus: 0.3
+
+  gateway:
+    image: docker.io/crapi/gateway-service:latest@sha256:97dade9daf0e758547b1686e2d3303c8c9b79838167f728a9211f0ee1f4622b0
+    networks:
+      crapi-int:
+        aliases: [api.mypremiumdealership.com]
+    healthcheck:
+      test: bash -c 'echo -n "GET / HTTP/1.1\n\n" > /dev/tcp/127.0.0.1/443'
+      interval: 5s
+      timeout: 15s
+      retries: 30
+    <<: *hardening
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    pids_limit: 64
+    mem_limit: 64m
+    cpus: 0.1
+
+networks:
+  crapi-front: {}
+  crapi-int:
+    internal: true

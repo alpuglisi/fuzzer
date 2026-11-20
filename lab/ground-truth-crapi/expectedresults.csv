@@ -1,0 +1,18 @@
+# fuzzlab expected results (Benchmark-style) for OWASP crAPI v1.1.6 at 700f03d1 (external
+# lab fixture lab/external/crapi), CC-LAB-0438. Derived from labels.json; the loader
+# cross-checks the two. Single-location cases.
+case_id,url,method,param,location,category,expected_vulnerable,primary_endpoint,primary_role,related_endpoints,flow_variant
+CRAPI-0001,/identity/api/v2/vehicle/{vehicleId}/location,GET,vehicleId,path,access_control,true,/identity/api/v2/vehicle/{vehicleId}/location,sink,,direct
+CRAPI-0002,/workshop/api/mechanic/mechanic_report,GET,report_id,query,access_control,true,/workshop/api/mechanic/mechanic_report,sink,,direct
+CRAPI-0003,/workshop/api/merchant/service_requests/{vin},GET,vin,path,access_control,true,/workshop/api/merchant/service_requests/{vin},sink,,direct
+CRAPI-0004,/community/api/v2/coupon/validate-coupon,POST,coupon_code,body,nosqli,true,/community/api/v2/coupon/validate-coupon,sink,,direct
+CRAPI-0005,/workshop/api/shop/apply_coupon,POST,coupon_code,body,sqli,true,/workshop/api/shop/apply_coupon,sink,,direct
+CRAPI-0006,/workshop/api/merchant/contact_mechanic,POST,mechanic_api,body,ssrf,true,/workshop/api/merchant/contact_mechanic,sink,,direct
+CRAPI-0007,/identity/api/v2/user/dashboard,GET,Authorization,header,jwt_algorithm_confusion,true,/identity/api/v2/user/dashboard,sink,,direct
+CRAPI-0008,/identity/api/auth/login,POST,email,body,sqli,false,/identity/api/auth/login,sink,,direct
+CRAPI-0009,/identity/api/auth/login,POST,email,body,nosqli,false,/identity/api/auth/login,sink,,direct
+CRAPI-0010,/identity/api/auth/forget-password,POST,email,body,sqli,false,/identity/api/auth/forget-password,sink,,direct
+CRAPI-0011,/workshop/api/shop/products,GET,limit,query,sqli,false,/workshop/api/shop/products,sink,,direct
+CRAPI-0012,/community/api/v2/community/posts/recent,GET,limit,query,sqli,false,/community/api/v2/community/posts/recent,sink,,direct
+CRAPI-0013,/community/api/v2/coupon/validate-coupon,POST,coupon_code,body,sqli,false,/community/api/v2/coupon/validate-coupon,sink,,direct
+CRAPI-0014,/community/api/v2/community/posts,POST,title,body,nosqli,false,/community/api/v2/community/posts,sink,,direct

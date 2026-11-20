@@ -3,6 +3,186 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0438 — crAPI answer key, checked live; crawl (headline) and ground-truth runs (FR-LAB-438) (2026-11-20)
+- Placement: lane NEWLABS2-CRAPI (item NEWLABS2-CRAPI), base 82910aa, pre-assigned
+  CC-LAB-0435..0439 / FR-LAB-435..439 (this entry: CC-LAB-0438, FR-LAB-438).
+- Change: `lab/ground-truth-crapi/` (labels.json, injection-points.json,
+  expectedresults.csv; 14 cases CRAPI-0001..0014: 7 positives, 7 negatives; 12 points);
+  `.gitignore` (its CSV tracked, PA-0038); `tests/test_external_labs_static.py` (`GT_DIRS`
+  gains `crapi`, one dict entry).
+- Source: upstream's `docs/challenges.md` and `docs/challengeSolutions.md` and its source
+  at the v1.1.6 tag (700f03d1), each case citing file:line; every case checked live on
+  the running lab before any scoring (PA-0311), the negatives on their error paths too.
+  Positives: BOLA on the vehicle location (path `vehicleId`, challenge 1), the mechanic
+  report (`report_id`, challenge 2) and `service_requests/{vin}` (no auth at all; found
+  in the source), each with the account's own value (`account_value`); NoSQL operator
+  injection in `validate-coupon` (challenge 12); SQL injection in `apply_coupon`
+  (challenge 13; its premise, an already-claimed coupon, is set by the bootstrap); SSRF
+  in `contact_mechanic.mechanic_api` (challenge 11, `[reach: none]`: the workshop sits
+  on an internal network, the oracle's callback listener is on the host); JWT signature
+  bypass on the dashboard (challenge 15, `[reach: none]`: measured, an unsigned
+  `alg:none` token whose `sub` is the peer's email answers the peer's dashboard, but the
+  strategy's fresh marker `sub` names no account and is never echoed). Negatives: SQL
+  injection on the login and forgot-password `email`, the products and recent-posts
+  `limit`, the validate-coupon `coupon_code` (MongoDB); NoSQL injection on the login
+  `email` (JPA, an object is refused) and the new-post `title` (an insert).
+- Not labelled, and why: every `/workshop/api/shop/orders...` case (the order BOLA of
+  challenge 14 -- measured: `GET /orders/<A's id>` answers A's email to the peer and to no
+  token --, the `PUT` status mass assignment of challenge 8 -- measured: `returned`
+  refunds the order, 165 -> 175 --, and the orders `limit` negative): the labels contract
+  never names a transaction URL (`test_every_ground_truth_point_passes_the_destructive_
+  and_transaction_rules`, B9), and `orders` is one. Classes the schema cannot hold:
+  DELETE (the BFLA video delete, challenge 7), rate limiting (challenges 3 and 6),
+  excessive data exposure (challenges 4 and 5), the LLM chatbot (16-18, not run).
+- Effectiveness (live, 2026-11-20, the lab reset and re-bootstrapped before each run;
+  CPU shared with the concurrent DVWA lane's lab and test runs):
+  - **crawl (headline, run `crawl2`):** `fuzzlab disco capture --start
+    http://127.0.0.1:3101/dashboard --out <dir> --storage-state <state> --workers 2
+    --deadline 600 --authorized` (27 s: 16 states, **0 actions**, 278 exchanges; the
+    storage state is the browser login fuzzlab's own session manager performed for
+    `crapi-user`), then `fuzzlab crawl --start http://127.0.0.1:3101/dashboard --engine
+    playwright --max-depth 3 --workers 2 --identity crapi-user --submit-spa-forms` (54 s),
+    then `fuzzlab auto --base-url http://127.0.0.1:3101 --store <db> --spider-db <db>
+    --disco-run <dir> --ground-truth lab/ground-truth-crapi --points crawl --identity
+    crapi-user --peer-identity crapi-peer --browser --oob --score --authorized`:
+    **tp=0 fp=0 fn=7 tn=7, 174 requests, 9 s.** The lab's state read out of band before
+    and after both crawls (PA-0681(2): every account's login, email, credit, vehicles,
+    orders; post, product and mail counts): unchanged.
+  - **ground-truth (oracle diagnostic, run `gt2`):** `fuzzlab auto --base-url
+    http://127.0.0.1:3101 --store <db> --ground-truth lab/ground-truth-crapi --points
+    ground-truth --identity crapi-user --peer-identity crapi-peer --browser --oob --score
+    --authorized`: **tp=4 fp=0 fn=3 tn=7, 280 requests, 22 s.** Confirmed: CRAPI-0001 and
+    0002 (cross-account replay, the peer got A's view twice), 0004 (operator differential,
+    7 rounds), 0005 (boolean differential, string grammar). Misses: CRAPI-0003 (no
+    access-control candidate: `R-ACCESS-CONTROL-PATH` selects id-shaped names and the
+    point is named `vin`), 0006 and 0007 (`[reach: none]`, reasons above). fp=0 on all
+    seven negatives.
+  - Each crawl false negative: CRAPI-0001 (vehicle location) never requested -- disco took
+    no action (BUG-0754: its session ended at the first same-origin 301; and its 16
+    states were all "unrestorable") and the spider's session ended at its first reveal
+    (it treats the SPA's `chat_history` localStorage entry changing as the session
+    invalidated); CRAPI-0002 and 0003 captured only with the value `null` (the
+    service-report and vehicle-service pages were loaded bare, without the query their
+    flows put there), so the cross-account replay has no value of A's to replay;
+    CRAPI-0004 (validate-coupon) and 0005 (apply_coupon) never sent (no form was
+    submitted); CRAPI-0006 and 0007 `[reach: none]`.
+- Impact (other components / project): answer key and records only; no detection code
+  changed (no generic gap here met PA-0660's two-target bar inside this lane's files).
+- Risk (level; mitigation or accepted-risk justification): low.
+- Deliverables:
+  - [x] key, live checks, static registration, both runs — done
+  - [x] FR-LAB-438, CHANGELOG, ARCHITECTURE — done
+- Open (gaps, not built here; owners named): navguard's hop drops page-set headers
+  (BUG-0754, `navguard.py`); disco's "unrestorable" states on this SPA (not root-caused
+  here: `disco/explore.py`); the spider's session re-adoption keyed on a non-credential
+  localStorage entry (`spider.py`); disco's element rule reads destructive words only,
+  never transaction words (`Buy`, CC-LAB-0437); `R-ACCESS-CONTROL(-PATH)` select by an
+  id-shaped name, so a ground-truth point named `vin` gets no access-control candidate
+  (the crawl names the segment `{id}`; `rules_data`); the JWT strategy's marker-as-`sub`
+  cannot confirm an app that looks `sub` up as an account (a probe re-signing the
+  session's own claims unsigned would, shown on crAPI and on Juice Shop's "unsigned JWT"
+  challenge: two targets, but not built in this lane's budget); SSRF needs a listener the
+  lab's internal network can reach; a `--fuzz-json-writes` run would reach the order PUT.
+
+### CC-LAB-0437 — crAPI's state switches enumerated and judged before its first crawl (FR-LAB-437) (2026-11-20)
+- Placement: lane NEWLABS2-CRAPI; pre-assigned CC-LAB-0437 / FR-LAB-437.
+- Change: `tests/test_crapi_crawl_safety.py` (new): 37 rows, each a crAPI route that
+  changes state (from its source at 700f03d1, file:line), the gate that must stop it
+  (`visit` SP-09, `request`, `body` incl. SP-120's settings words and the
+  credential-change rule, `spa-form`, `disco-click`, `disco-form`) and the gate's
+  computed verdict; a residual pinned to None with its compensating control; and a check
+  that every non-GET point of the answer key is a row (PA-0114(1)).
+- Coverage (base rule at 82910aa, and the CRAWLSAFE branch's SP-09 at 94fac7f9
+  computed by loading its `core/urls.py`: identical verdicts on every row -- crAPI has no
+  `enable`/`toggle`/action-slot route):
+  refused -- reset-password (URL `reset`; its SPA form by route and by two password
+  controls), reset-test-users (URL), the OTP password reset (two password controls; the
+  `Reset Password` button), signup (body `signup`; two password controls), the email and
+  phone change confirmations (credential-change `change`), DELETE video and admin video
+  (method), PUT video and PUT order (no `--fuzz-json-writes`), POST orders and
+  return_order (transaction `order`), the video upload (file input), the coupon form
+  on the legacy spider (one-time-code), Logout and Delete Video (disco's label rule);
+  residual -- check-otp's body (needs the mailed OTP), forget-password (mails a code),
+  the first step of email/phone change (needs the mailed token), convert_video (shell
+  injection off), lockUser (ADMIN role), add_vehicle (a filler VIN matches nothing),
+  disco's `Buy` button (spends the run's own account's credit: disco reads no transaction
+  word -- a gap in `disco/explore.py`, flagged), apply_coupon, new-coupon, products,
+  contact_mechanic, receive_report (a GET that creates a row), a login attempt,
+  validate-coupon (read-only) and new posts.
+- Measured: neither crawl changed the lab's state (CC-LAB-0438: before/after read).
+- Impact: test only. Risk: low.
+- Deliverables:
+  - [x] table and coverage test; run — done
+
+### CC-LAB-0436 — crAPI bootstrap: two accounts of our own, each with a vehicle, a report, an order and a claimed coupon (FR-LAB-436) (2026-11-20)
+- Placement: lane NEWLABS2-CRAPI; pre-assigned CC-LAB-0436 / FR-LAB-436.
+- Change: `fuzzlab/lab_fixtures/external.py` -- `LAB_META["crapi"]` (`crapi-user`
+  `fuzzlab-user@example.com` and peer `crapi-peer` `fuzzlab-peer@example.com`, passwords
+  generated and kept in the keyring), `bootstrap_crapi` and `crapi_account_attributes`
+  in `_BOOTSTRAPS` / `_ACCOUNT_ATTRIBUTES`, helpers `_crapi_*`; `tests/test_crapi_fixture.py`
+  (new; a fake of crAPI's API).
+- Flow (each account on its own client, through the app's own API): log in, else sign up
+  (`/identity/api/auth/signup`, a stable 10-digit number per email) and log in; verify
+  by a positive differential (the JWT's dashboard names the email; a wrong password gets no token);
+  read the welcome mail through crapi-web's `/mailhog/` proxy (mailhog's v2 search),
+  decode its quoted-printable body for the VIN and pincode, `add_vehicle`; `contact_mechanic`
+  with crapi-web's own receive_report URL (a report); one order of a listed product; and
+  claim seeded coupon TRAC075 once. Stored values: `vehicle_id`, `vin`, `report_id`,
+  `order_id`. Idempotent (measured: a second bootstrap logs in and adds nothing).
+- Measured live (2026-11-20): `./labctl.sh reset crapi --authorized` signs up and stores
+  both accounts with every value, in 1 m 44 s (first boot) to 2.5 min (under the DVWA
+  lane's load); fuzzlab's own session manager logs in to crAPI unaided (`fuzzlab session
+  print`: a bearer), and its browser login's storage state carries the SPA's token.
+- Review fix (same lane, before merge): the first commit's mailhog query used
+  `params=` and its login check compared a literal 401; `verify_change.py` failed the two
+  whole-package guards (`test_query_placement`, the one query owner `core.urls.with_query`;
+  `test_core_comparability`, SP-56's classified statuses). Now the query is built by
+  `with_query` and the wrong-password leg checks that no token is issued; re-run live.
+- Impact: none for other labs (new dict entries). Risk: low; loopback only.
+- Deliverables:
+  - [x] bootstrap, attributes, unit tests, live run — done
+
+### CC-LAB-0435 — OWASP crAPI v1.1.6 as a loopback-only external lab (FR-LAB-435) (2026-11-20)
+- Placement: lane NEWLABS2-CRAPI; pre-assigned CC-LAB-0435 / FR-LAB-435.
+- Change: `lab/external/crapi/compose.yaml` (new); `fuzzlab/lab_fixtures/external.py`
+  (`CRAPI_*_IMAGE` constants added to `PINNED_IMAGES` in a separate statement;
+  `LAB_META["crapi"]` on 127.0.0.1:3101, `CRAPI_PORT`).
+- Feasibility (measured 2026-11-20, 4 cores / 15 GB shared with the DVWA lane): the
+  stack (8 containers: identity, community, workshop, web, postgres, mongo, mailhog,
+  gateway) is healthy 67 s after `up` on the first boot (images already pulled; the pull
+  of all eight took about 1 min); idle memory about 1.2 GB (identity 250 MiB, mongo
+  370 MiB of which its journal on tmpfs, postgres 106 MiB, workshop 102 MiB, the rest
+  under 5 MiB each), CPU under 1 % idle. The optional LLM chatbot (crapi-chatbot +
+  chromadb) is not run: it needs an OpenAI API key; crapi-web's nginx still names its
+  upstream, so `CHATBOT_SERVICE=127.0.0.1:1` (/chatbot/ answers 502).
+- Pin: upstream publishes no `1.1.6` image tag; its `latest` of 2025-09-22 (pushed
+  18:02-18:31 UTC, hours after the v1.1.6 tag commit 700f03d1 at 14:58 UTC) is pinned by
+  digest: crapi-identity `sha256:5d1db5b3...`, crapi-community `sha256:8ba0c7ed...`,
+  crapi-workshop `sha256:d4d2d94d...`, crapi-web `sha256:b27d246c...`, crapi/mailhog
+  `sha256:015c23f7...`, crapi/gateway-service `sha256:97dade9d...`; postgres:14
+  `sha256:c0e9c0e9...` (upstream's compose names `postgres:14`); mongo:4.4 the digest
+  already pinned for secDevLabs (`sha256:4be76f67...`).
+- Safety: only crapi-web publishes (127.0.0.1:3101 -> 80; upstream's 8888/8443/30080/
+  30443 and mailhog's 8025 are not published -- the fixture reads mail through
+  crapi-web's own `/mailhog/` proxy, so no 3102 is needed). Every other service is only
+  on `crapi-int`, an `internal: true` network (no egress): the workshop's SSRF and the
+  identity's gateway calls reach only this project; the gateway runs under upstream's
+  name `api.mypremiumdealership.com` as a network alias there. crapi-web is also on
+  `crapi-front` (to publish) with `dns: 127.0.0.1`. Every service: `cap_drop: [ALL]`
+  (crapi-web adds CHOWN/SETUID/SETGID/NET_BIND_SERVICE/DAC_OVERRIDE for openresty;
+  postgres CHOWN/SETUID/SETGID/DAC_OVERRIDE/FOWNER; mongo CHOWN/SETUID/SETGID/
+  DAC_OVERRIDE; the gateway NET_BIND_SERVICE for 443), no-new-privileges, pids, memory
+  and CPU limits (measured: all healthy). Databases on tmpfs: reset = restart. mongo's
+  WiredTiger cache fixed at 0.25 GB (with its default it filled upstream's limit: 367 of
+  384 MiB at idle). crAPI's public default secrets (`JWT_SECRET=crapi`, the DB password,
+  the workshop `SECRET_KEY`) are kept as upstream ships them: lab-only, not credentials.
+  `labctl.sh up crapi` passes the pre-flight and the exposure check; 3101 is used by no
+  other lab (the port guard passes).
+- Impact: a new loopback lab. Risk: medium (an app vulnerable by design, contained:
+  loopback publish, internal network for every backend, no capabilities).
+- Deliverables:
+  - [x] compose, pins, meta; brought up and measured — done
+  - [x] FR-LAB-435, ARCHITECTURE, CHANGELOG — done
 ### CC-LAB-0434 — DVWA lane: the change-control review gate, run after implementation; two test nits (2026-11-20)
 - Change: `tests/test_dvwa_live.py` uses `sys.executable` (was `os.sys.executable`);
   `tests/test_dvwa_lab.py::test_the_dvwa_level_survives_a_crawled_level_change` renamed
