@@ -18,6 +18,14 @@ Format per entry:
 
 ---
 
+## 2026-11-20 — core / crawler (the destructive rule missed state toggles; two lab crawls changed the lab's state; BUG-0680)
+- **Symptom:** the lab-expansion lanes' crawls fetched Mutillidae's `index.php?do=toggle-security`, `?do=toggle-enforce-ssl`, `?do=toggle-hints` (after the SSL toggle the session went to https and 121 pages stayed unresolved) and DVGA's `/difficulty/hard` and `/start_over` (global mode flipped, state reset).
+- **Root cause:** SP-09 (`core.urls.destructive_reason`) was grown one lab spelling at a time and only checked against our own labs; it had no state-switch class (`disable` listed, `enable` not; action slots knew only `update`/`upgrade`).
+- **Remediation:** `enable`/`activate`/`toggle`, action-slot state verbs and fused verb-object compounds are refused, measured against a cited independent corpus (cited GET state changes refused 8/33 → 18/33, lab cells/points refused 0/505 → 0/505); DVGA's two links are stated residuals (no second independent source). CC-CORE-0650, CC-CRAWL-0650; BUG-0680, PA-0680, PA-0681.
+- **Status:** Fixed (Mutillidae toggles); DVGA `/difficulty/<level>`, `/start_over` open as stated residuals
+
+---
+
 ## 2026-10-23 — crawler / navguard (a navigation started before a failed load's error page had loaded was dropped; BUG-0561)
 - **Symptom:** the harness run of e69bd1e (F-281): `tests/test_disco_harvest.py::test_disco_harvest_and_restore_after_failed_loads[2]` failed in 19.1 s. Disco's `restore` returned "navigation": its `about:blank` `goto` timed out after 15 s and the page stayed on `chrome-error://chromewebdata/`. The RCA measured about 1% of restores under heavy disk I/O on every tree since BUG-0522's fix (7393c90 4/600, e69bd1e 9/840) and 0/1,320 under CPU load alone.
 - **Root cause:** `navguard._settle_failure` (SP-01, BUG-0522's fix) took a failed navigation as over when its error page committed. That page loads 15-25 ms later (p95 about 130 ms under I/O load), and a navigation Chromium started in between was sometimes dropped with no commit and no error, so Playwright waited out the whole `goto` timeout.
