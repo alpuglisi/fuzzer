@@ -3,6 +3,15 @@
 Component code: **SESS**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SESS-0650 — The run's sender decides the session a browser visit carries (FR-SESS-650, BUG-0690) (2026-11-20)
+- Change: `fuzzlab/tools/probesender.py::SeamProbeSender.browser_session_route(urls)` (SP-125): `(manager, identity, base_url)` or None when the sender has no manager or an anonymous identity, or any URL is an auth endpoint (`_identity_for`) or an isolated path.
+- Measurements before design (CLAUDE.md item 8): see CC-FUZZ-0680 (NodeGoat plant 302 → `/login`).
+- Impact (other components / project): FUZZ's M6 executor reads it (CC-FUZZ-0680). No session is created: the browser adopts the run manager's current state.
+- Risk (level; mitigation or accepted-risk justification): low; it reuses the sender's own gates. An isolated path has no browser copy and goes anonymous (as the sender's fallback does).
+- Deliverables:
+  - [x] method, tests (`tests/test_m6_session.py` gate tests) — done
+- Effectiveness (assessed 2026-11-20): gate tests pass (auth endpoint, isolated path, anonymous/managerless).
+
 ### CC-SESS-0031 — The browser login's failed navigations settle on the error page's load (BUG-0561) (2026-10-23)
 - Change: none in `fuzzlab/session/`. `session.browserlogin`'s navigations go through SP-01 (`navguard.navigate`), which now waits for a failed navigation's error page to load, not only to commit, before it raises (CC-CRAWL-0065).
 - Impact (other components / project): a login navigation that fails with a network error (an empty error answer) raises about 30 ms later at p50 (p95 about 45 ms more), inside the same 3 s budget as before; the next login navigation is no longer dropped by Chromium when it starts before that error page's load. No interface or store change.

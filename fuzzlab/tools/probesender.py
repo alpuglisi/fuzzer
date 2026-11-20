@@ -790,6 +790,28 @@ class SeamProbeSender(_ExplicitAllowance):
             return "anonymous"
         return self._identity
 
+    def browser_session_route(self, urls) -> tuple | None:
+        """The session an M6 browser visit of ``urls`` (its plant and observe URLs)
+        carries (FR-SESS-650, BUG-0690): ``(manager, identity, base_url)`` -- this
+        sender's own session manager and identity, the ones every probe of the run
+        carries -- or None when the visit goes anonymous, decided by this sender's own
+        gates on every URL of the visit, as a probe's send is: an auth endpoint is never
+        sent the run's session (`_identity_for`, BUG-0112), nor an isolated path
+        (FR-FUZZ-44: a browser visit has no isolated copy). One browser context carries
+        one session, so one gated URL sends the whole visit anonymously. A sender with
+        no manager or an anonymous identity: None."""
+        if self._manager is None or self._identity == "anonymous":
+            return None
+        urls = [u for u in urls if u]
+        for url in urls:
+            if self._identity_for(url) == "anonymous":      # ensures the session first
+                return None
+        with self._iso_lock:
+            isolated = self._isolated_keys
+        if any(url_key(u) in isolated for u in urls):
+            return None
+        return self._manager, self._identity, self._base_url
+
     #: Makes PRG follow-ups (FR-FUZZ-49).
     prg_capable = True
     #: Makes the binder's page fetch (FR-FUZZ-67).
