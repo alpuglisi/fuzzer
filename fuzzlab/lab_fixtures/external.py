@@ -92,6 +92,10 @@ SECDEVLABS_NGINX_IMAGE = ("mirror.gcr.io/library/nginx:1.17.1-alpine@sha256:"
 #: (upstream's compose says `mongo:4.4`).
 NODEGOAT_NODE12_IMAGE = ("mirror.gcr.io/library/node:12-alpine@sha256:"
                          "d4b15b3d48f42059a15bd659be60afe21762aae9d6cbea6f124440895c27db68")
+#: SasanLabs OWASP VulnerableApp 2.2.115 (Spring Boot, Java 17; CC-LAB-0350), built by
+#: upstream from commit 821b347 (2026-11-19): pinned by the digest its tag resolved to.
+VULNERABLEAPP_IMAGE = ("docker.io/sasanlabs/owasp-vulnerableapp:2.2.115@sha256:"
+                       "160bdbdf0490e27a5904d496c4a13b5e1541957dc4df5d05c611b1caec3b0193")
 #: OWASP Mutillidae II (CC-LAB-0340): upstream's own published images
 #: (webpwnized/mutillidae-docker), the app 2.12.8 on PHP 8.5 / Apache, MariaDB 13 and
 #: OpenLDAP 2.4, pinned by digest.
@@ -112,7 +116,8 @@ PINNED_IMAGES = frozenset({BUSYBOX_IMAGE, MUTILLIDAE_WWW_IMAGE, MUTILLIDAE_DATAB
                            SECDEVLABS_PYTHON312_IMAGE, SECDEVLABS_PHP_IMAGE,
                            SECDEVLABS_NODE20_IMAGE, SECDEVLABS_MONGO_IMAGE,
                            SECDEVLABS_NODE13_IMAGE, SECDEVLABS_MAVEN_IMAGE,
-                           SECDEVLABS_NGINX_IMAGE, NODEGOAT_NODE12_IMAGE, DVGA_IMAGE})
+                           SECDEVLABS_NGINX_IMAGE, NODEGOAT_NODE12_IMAGE, DVGA_IMAGE,
+                           VULNERABLEAPP_IMAGE})
 
 BWAPP_ZIP_URL = "https://sourceforge.net/projects/bwapp/files/bWAPP/bWAPP_latest.zip/download"
 BWAPP_ZIP_NAME = "bWAPP_latest.zip"
@@ -342,6 +347,11 @@ LAB_META: dict[str, LabMeta] = {
                         "nodegoat-user", "user1", False, (("nodegoat-peer", "user2"),)),
     # GraphQL over one endpoint (FR-LAB-320); no account: its resolvers take no session
     "dvga": LabMeta("dvga", "app", "DVGA_PORT", 5013, 5013, "/", "/", None, "", False),
+    # a Spring Boot app under the /VulnerableApp context path; no login (CC-LAB-0350);
+    # 3095, not 3093, which lane PHPX's Mutillidae publishes (CC-LAB-0353)
+    "vulnerableapp": LabMeta("vulnerableapp", "app", "VAPP_PORT", 3095, 9090,
+                             "/VulnerableApp/", "/VulnerableApp/allEndPointJson", None, "",
+                             False),
 }
 
 

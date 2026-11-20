@@ -6,7 +6,6 @@ deny-list, and nothing ever excluded the session's auth endpoints from fuzzing.
 """
 
 import ast
-import glob
 import os
 import sqlite3
 import threading
@@ -200,9 +199,6 @@ def _chromium_or_skip(monkeypatch):
         import playwright.sync_api  # noqa: F401
     except ImportError as exc:
         skip_or_fail(f"playwright unavailable: {exc}")
-    exe = sorted(glob.glob("/opt/pw-browsers/chromium-*/chrome-linux/chrome"))[-1:]
-    if exe:
-        monkeypatch.setenv("PLAYWRIGHT_CHROMIUM_EXECUTABLE", exe[0])
 
 
 def test_rendered_crawl_sends_no_destructive_request_at_all(tmp_path, monkeypatch):
@@ -544,7 +540,7 @@ def test_the_m6_browser_aborts_destructive_subresources_but_loads_its_targets(mo
             pass
 
     class Context:
-        request = types.SimpleNamespace(fetch=lambda *a, **k: None)
+        request = types.SimpleNamespace(fetch=lambda *a, **k: types.SimpleNamespace(status=200, headers={}))
 
         def add_init_script(self, s):
             pass
