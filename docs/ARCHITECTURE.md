@@ -1794,8 +1794,7 @@ tracked in the requirements files, not here.
   timing, M2 error signature, M3 boolean/response differential, M4 SSTI
   evaluation marker, M5 reflected-canary-in-context, M6 browser execution
   (stored/DOM XSS via an injected `BrowserExecutor` — `oracle/browser.py`,
-  `tools/browserexec.py`; its sentinel wait ends early on a page with nothing
-  left pending, `tools/pagequiet.py`, SP-105), M7 file-content marker (LFI/traversal), M8 out-of-band
+  `tools/browserexec.py`), M7 file-content marker (LFI/traversal), M8 out-of-band
   callback (blind command injection, via an injected, already-started
   `OobListener` — `oracle/oob.py`, a loopback-only local canary tracker;
   default-off, wired through `fuzzlab auto --oob`), M9 redirect-target control,

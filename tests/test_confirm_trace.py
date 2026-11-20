@@ -533,9 +533,6 @@ def _fake_pw(monkeypatch, *, launch_error=None, enter_error=None):
         def expose_binding(self, name, fn):
             pass
 
-        def add_init_script(self, script):        # SP-105's quiet tracker
-            pass
-
         def route(self, pattern, handler):
             pass
 

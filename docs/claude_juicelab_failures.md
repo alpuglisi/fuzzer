@@ -2252,3 +2252,10 @@ Juice Shop lab is complete.
 - **Cause:** I designed from the saving I had measured, not from the platform's constraint, which I had not measured (MULTI_AGENT_ORCHESTRATION §7).
 - **Status:** reverted.
 
+### F-652 — My quiet-settle early end missed XSS the 4 s window caught, and I called it "no detection lost"
+- **What:** CC-FUZZ-0650 (48609d1) ended the M6 sentinel wait on a page my tracker read as quiet. It missed sinks run by SVG animation events, `scheduler.postTask`, message ports, `postMessage`, a meta refresh, media events, a fetch held past 2 s and a page that replaced `performance.now`; a blocked main thread hung the probe. I reported "no detection lost" from ten lab configurations and a shadow run with 2 positive observations of 311.
+- **Evidence:** the orchestrator's independent verification (real Chromium 1243, the real executor; every case missed on every repeat); BUG-0650.
+- **Impact:** a detection regression on lane PERF's branch and a final report that overstated its safety; caught before merge; withdrawn (CC-FUZZ-0651).
+- **Cause:** I validated a predicate over an open-ended set (every way a page can run script later) against fixtures drawn from my tracker's own list and against labs that exercise none of the rest, and did not state the power of my measurement (PA-0650).
+- **Status:** withdrawn; PA-0650 strengthens PA-0126(2).
+

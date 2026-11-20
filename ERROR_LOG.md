@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-11-20 — FUZZ: the M6 quiet-settle early end missed late sinks (fixed by withdrawal, BUG-0650/PA-0650)
+- **Symptom:** the orchestrator's independent verification of lane PERF (real Chromium, the real executor): XSS sinks run by an SVG animation's `onend`/`onbegin`, `scheduler.postTask` with a delay, a MessageChannel or `postMessage` chain, a meta refresh, a video's `timeupdate`, a fetch answered after 2.8-3.2 s, or a page that replaced `performance.now` were reported "not executed"; the 4 s wait caught each. A blocked main thread hung the probe.
+- **Root cause:** CC-FUZZ-0650's `PageQuiet` ended the wait when its tracker saw no pending timer, request or animation; the platform runs a page's script again by many sources it did not watch, and it was validated only on the sources it watched and on labs with 2 positive observations.
+- **Remediation:** the early end withdrawn (CC-FUZZ-0651): `browserexec.py` restored, `pagequiet.py` deleted, SP-105 withdrawn; the verifier's cases are regression tests; PA-0650.
+- **Status:** Fixed (never merged into the integration branch)
+
 ## 2026-11-20 — environment (lane PERF's container: packaging tests, navigation-abort tests, two external labs)
 - **Symptom:** `verify_change.py --base 2be7a50` on 48609d1: (a) the six packaging tests failed with `ModuleNotFoundError: No module named 'setuptools'`; (b) five `tests/test_navigation_aborts.py` tests failed (`DID NOT RAISE playwright Error`; `KeyError` on a `missing0` mark); (c) bringing up two secDevLabs labs at once failed (`git remote failed: remote origin already exists`; `cannot change to .../.cache/secdevlabs/src`); (d) Gossip World's `crawl --identity sdl-gossip-user` raised `SessionAuthError` while the lab's bootstrap logged in.
 - **Root cause:** (a) the venv made for the lane (Python 3.13) carries no setuptools; (b) not this lane's change: the same five fail on tree 2be7a50 in this container, whose only Chromium is build 1243 with Playwright 1.63; SP-01's error-page behaviour was measured on Playwright 1.56 / Chromium 141 (CC-CRAWL-0065), and Playwright 1.56 cannot drive build 1243 here (34 failures); (c) the secDevLabs labs share one source checkout, fetched without a lock; (d) not investigated (outside lane PERF).

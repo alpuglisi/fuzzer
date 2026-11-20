@@ -3,6 +3,19 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0373 — Correction to CC-LAB-0371: the measured cut was withdrawn (2026-11-20)
+- Change: none to code; a correction (change-control is append-only).
+- CC-LAB-0371's AFTER column measured CC-FUZZ-0650's quiet-settle early end, withdrawn
+  by CC-FUZZ-0651 after it missed late XSS sinks the labs do not exercise (BUG-0650).
+  Its "no detection lost" covered the ten lab configurations only, with 2 positive
+  browser observations among the shadow run's 311: too few to see a miss (PA-0650(3)).
+  The branch's timing is CC-LAB-0371's BEFORE column again. CC-LAB-0370's probe and the
+  BEFORE profile stand: the M6 settle is still the measured cost, to be cut without
+  shortening the window (FR-FUZZ-653).
+- Deliverables:
+  - [x] this correction — done
+- Effectiveness: n/a (a record).
+
 ### CC-LAB-0372 — Lane PERF: the cost of `R-SSJS` on two labs that do not need it (2026-11-20)
 - Change: none to code; a measurement on the merged tree 4cc25dd (lane NODE's
   CC-FUZZ-0610 rule), asked by the orchestrator as a candidate for lane PERF's next cut.

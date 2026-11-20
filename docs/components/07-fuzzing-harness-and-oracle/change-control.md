@@ -3,6 +3,25 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0651 — The quiet-settle early end withdrawn: M6 keeps its whole window (BUG-0650) (2026-11-20)
+- Change: `fuzzlab/tools/browserexec.py` restored to its 2be7a50 text; `fuzzlab/tools/
+  pagequiet.py` and `tests/test_pagequiet.py` deleted; the fakes of
+  `tests/test_confirm_trace.py` and `tests/test_m6_navigation_failures.py` restored;
+  `scripts/measure_scan_perf.py` loses `--shadow-quiet`; new `tests/test_m6_window_guard.py`
+  (PA-0650(1), proven on a synthetic offender) and `tests/test_m6_slow_sinks.py` (the
+  verifier's late sinks, each detected by the whole window); SP-105 withdrawn;
+  FR-FUZZ-650/651 superseded by FR-FUZZ-653; BUG-0650, PA-0650, F-652.
+- Reason: independent verification found CC-FUZZ-0650 missed XSS the 4 s wait caught
+  (BUG-0650). The owner's decision, through the orchestrator: detection beats speed.
+- Impact: M6 is back to 2be7a50's timing (CC-LAB-0371's BEFORE column); CC-FUZZ-0650's
+  speed-up is gone. Nothing else changed.
+- Risk: none beyond 2be7a50's.
+- Deliverables:
+  - [x] withdrawal, guard and regression tests, records — done
+  - [ ] a speed-up that keeps the whole window (FR-FUZZ-653) — open
+- Effectiveness (assessed 2026-11-20): the window guard passes on the restored executor
+  and fails a synthetic early end; see `tests/test_m6_slow_sinks.py` for the late sinks.
+
 ### CC-FUZZ-0650 — The M6 sentinel wait ends once the page has gone quiet (SP-105) (2026-11-20)
 - Change: `fuzzlab/tools/pagequiet.py` (new: `PageQuiet`, `TRACKER_JS`, `QUIET_MS`);
   `fuzzlab/tools/browserexec.py` (`EARLY_END`; `_in_browser` installs `PageQuiet`

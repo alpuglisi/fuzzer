@@ -1280,8 +1280,8 @@ rewards) derives from it.
   - **Settle.** The sentinel wait lasts `SETTLE_MS` from the end of that load wait.
     Once `load` fires (recorded by `page.once("load")`), it lasts a full `SETTLE_MS`
     from `load`, capped at `timeout_ms` + `SETTLE_MS` after the commit, so a slow
-    page's sink is still seen. Only a Playwright error, the hit, or a page that has
-    gone quiet ends the wait early *(FR-FUZZ-650, SP-105)*.
+    page's sink is still seen. Only a Playwright error ends the wait early (or the
+    hit). *(An early end on a "quiet" page, FR-FUZZ-650, was withdrawn: BUG-0650.)*
   - **Per probe.** A Playwright error or timeout of the context set-up, the plant or
     the observe navigation raises `NotObserved` (a subclass of `UnplaceableLocation`,
     in `oracle/browser.py`). So does a page that never reached `load` by the end of the
@@ -2734,7 +2734,9 @@ and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
     - an unrecognised, short, low-entropy equal session id is accepted as distinct
       (FR-SESS-17).
 
-- **FR-FUZZ-650** *(the M6 wait ends on a quiet page; `CC-FUZZ-0650`, 2026-11-20).*
+- **FR-FUZZ-650** *(SUPERSEDED by FR-FUZZ-653, `CC-FUZZ-0651`: withdrawn, it missed
+  late sinks, BUG-0650; kept for the record)* *(the M6 wait ends on a quiet page;
+  `CC-FUZZ-0650`, 2026-11-20).*
   `PlaywrightBrowserExecutor._wait_for_token` ends the sentinel wait before `SETTLE_MS`
   once `load` has fired and `pagequiet.PageQuiet.settled` reads the page quiet for
   `QUIET_MS` (500 ms): no request SP-40's `Inflight` counts (its last start or end
@@ -2749,7 +2751,8 @@ and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
   measurement mode of `scripts/measure_scan_perf.py --shadow-quiet`). The verdicts are
   unchanged: a hit is still executed=True, a page that never loaded still
   `NotObserved`.
-- **FR-FUZZ-651** *(FR-FUZZ-650's residuals; `CC-FUZZ-0650`).* (1) A sink fed only by
+- **FR-FUZZ-651** *(SUPERSEDED with FR-FUZZ-650 by FR-FUZZ-653)* *(FR-FUZZ-650's
+  residuals; `CC-FUZZ-0650`).* (1) A sink fed only by
   a long-poll answered more than `netquiet.LONG_LIVED_MS` after it opened is not
   waited for, as SP-40 decides for every settle. (2) A sink run by an event no tracker
   sees (a media element's events with no request, a message from a cross-origin frame
@@ -2764,4 +2767,15 @@ and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
   and every other sync Playwright use there then fails ("using Playwright Sync API
   inside the asyncio loop", measured in `tests/test_browser_scope.py` and
   `tests/test_confirm_trace.py`). The executor keeps a driver per probe.
+- **FR-FUZZ-653** *(the M6 observation window is never shortened; `CC-FUZZ-0651`,
+  BUG-0650, 2026-11-20).* The sentinel wait of `PlaywrightBrowserExecutor` ends only on
+  the hit, on its deadline (`SETTLE_MS` from `load`, capped as FR-FUZZ-48's settle
+  says) or on a Playwright error; never on a judgement that nothing else can run. A
+  page's script can be run again by events no tracker sees (an SVG animation's
+  `onend`/`onbegin`, `scheduler.postTask` with a delay, a MessageChannel or
+  `postMessage` chain, a meta refresh, a media element's events, a request answered
+  after SP-40's long-lived limit), measured by the independent verification of
+  CC-FUZZ-0650. A faster M6 keeps the whole window (more observations at once, or
+  less work outside the window), and each such sink stays a real-browser regression
+  test (`tests/test_m6_slow_sinks.py`).
 

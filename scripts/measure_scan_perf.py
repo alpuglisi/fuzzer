@@ -227,18 +227,11 @@ class BrowserTimeline:
             def _wait_for_token(self, page, *a, **kw):
                 if tl._cur is not None:
                     tl._cur["wait0"] = time.time()
-                    mono0 = time.monotonic()
                 try:
                     return original(self, page, *a, **kw)
                 finally:
                     if tl._cur is not None:
                         tl._cur["wait1"] = time.time()
-                        quiet = kw.get("quiet")       # SP-105 (absent before it)
-                        if quiet is not None:
-                            tl._cur["quiet"] = {
-                                "settled": None if quiet.settled_at is None else
-                                round(quiet.settled_at - mono0, 3),
-                                "last_reason": quiet.reason}
                         try:
                             tl._cur["timers"] = page.evaluate(
                                 "window.__fl_timer_log ? window.__fl_timer_log() : null")
@@ -272,7 +265,7 @@ class BrowserTimeline:
                 "open_at_end": len(rec.get("open") or {}), "ws": rec.get("ws", 0),
                 "last_timer_fire": rel(max(fires) if fires else None),
                 "timers_pending_at_end": timers.get("live"),
-                "intervals": len(intervals), "quiet": rec.get("quiet"),
+                "intervals": len(intervals),
                 "max_timer_delay_ms": max([e[2] for e in timers.get("log", [])
                                            if e[0] == "set"] or [0])}
 
@@ -327,9 +320,6 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--browser-timeline", action="store_true",
                    help="record each M6 observation's load / hit / network / timer "
                         "times (adds a timer-logging init script: measurement only)")
-    p.add_argument("--shadow-quiet", action="store_true",
-                   help="keep the whole M6 wait (EARLY_END off) and record when the "
-                        "quiet rule would have ended it (with --browser-timeline)")
     p.add_argument("--cprofile", metavar="OUT", help="also write a cProfile to OUT")
     p.add_argument("--authorized", action="store_true",
                    help="required: the lab is yours and running on loopback (D11)")
@@ -348,9 +338,6 @@ def main(argv: list[str] | None = None) -> int:
     for module, attr, phase in PHASES:
         timers.wrap(module, attr, phase)
     timers.wrap_strategies()
-    if args.shadow_quiet:
-        from fuzzlab.tools.browserexec import PlaywrightBrowserExecutor
-        PlaywrightBrowserExecutor.EARLY_END = False
     timeline = BrowserTimeline() if args.browser_timeline else None
     if timeline is not None:
         timeline.install()
