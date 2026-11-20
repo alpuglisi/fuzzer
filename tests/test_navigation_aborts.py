@@ -16,7 +16,6 @@ recorded.
 
 from __future__ import annotations
 
-import glob
 import json
 import sqlite3
 import threading
@@ -212,9 +211,6 @@ def _chromium_or_skip(monkeypatch):
         import playwright.sync_api  # noqa: F401
     except ImportError as exc:
         skip_or_fail(f"playwright unavailable: {exc}")
-    exe = sorted(glob.glob("/opt/pw-browsers/chromium-*/chrome-linux*/chrome"))[-1:]
-    if exe:
-        monkeypatch.setenv("PLAYWRIGHT_CHROMIUM_EXECUTABLE", exe[0])
 
 
 def _crawl(tmp_path, monkeypatch, build, hook=None, timeout_ms=8000):

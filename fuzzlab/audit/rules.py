@@ -16,6 +16,9 @@ changes. The predicate is a small, safe condition language:
 - ``value_shape_in``: [ip, hostname, filename, path, url] — the point's example value
   has one of these shapes (`fuzzlab.audit.value_shape`; forms phase 2, FR-AUD-20)
 - ``origin_in``: [crawl, ground-truth] — where the point came from (FR-AUD-20)
+A GraphQL variable's ``name_regex`` is matched against its leaf name and against the
+name of every field argument it feeds (``$h`` in ``importPaste(host: $h)`` is judged as
+``host`` too; FR-AUD-600).
 
 Present conditions are ANDed; a rule with no conditions (and no ``always``) never
 fires. Categories align with the `references/` catalogs and the oracle's classes.
@@ -55,6 +58,8 @@ ORIGINS = ("crawl", "ground-truth")
 #: truth's (`labels.schema.json`, `manifest.schema.json`) and the crawler's ``json``
 #: (forms phase 3 merge, reviewer A: a typo must never silently widen a rule).
 LOCATIONS = ("query", "body", "header", "cookie", "json", "fragment", "path")
+#: The ``when`` keys whose value is a regex (checked to compile at load).
+_REGEX_KEYS = ("name_regex",)
 _LIST_KEYS = ("location_in", "location_not_in", "method_in", "sink_context_in",
               "value_shape_in", "origin_in")
 
@@ -86,11 +91,12 @@ def validate_rule(rule) -> None:
         bad = sorted(set(when.get(key, [])) - set(allowed))
         if bad:
             raise RuleError(f"{rule.id}: {key} has unknown value(s) {bad}")
-    if "name_regex" in when:
-        try:
-            re.compile(when["name_regex"])
-        except (re.error, TypeError) as exc:
-            raise RuleError(f"{rule.id}: name_regex does not compile: {exc}") from exc
+    for key in _REGEX_KEYS:
+        if key in when:
+            try:
+                re.compile(when[key])
+            except (re.error, TypeError) as exc:
+                raise RuleError(f"{rule.id}: {key} does not compile: {exc}") from exc
 
 
 def load_rules(path: str | Path | None = None) -> list[Rule]:
@@ -130,7 +136,10 @@ def rule_name(point) -> str:
 
 def matches(rule: Rule, point) -> bool:
     """Evaluate a rule's ``when`` predicate against an injection point."""
+    from fuzzlab.audit import graphql_context
     when = rule.when
+    if graphql_context.not_a_data_point(point) is not None:
+        return False                        # FR-AUD-601
     if when.get("always"):
         return True
     checks: list[bool] = []
@@ -143,7 +152,9 @@ def matches(rule: Rule, point) -> bool:
     if "sink_context_in" in when:
         checks.append((point.sink_context or "") in when["sink_context_in"])
     if "name_regex" in when:
-        checks.append(bool(re.search(when["name_regex"], rule_name(point), re.I)))
+        names = (rule_name(point), *graphql_context.argument_names(point))
+        checks.append(any(re.search(when["name_regex"], n, re.I) for n in names))
+
     if "value_shape_in" in when:
         shapes = getattr(point, "value_shapes", None) or ()
         checks.append(bool(set(shapes) & set(when["value_shape_in"])))

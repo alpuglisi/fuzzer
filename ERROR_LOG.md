@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-11-20 — superseded: the navigation-abort failures were a product defect on the headless shell (BUG-0670, BUG-0671)
+- **Symptom:** as below: five `tests/test_navigation_aborts.py` failures; my two entries below gave the cause first as Chromium drift, then as the tests running the headless shell.
+- **Root cause:** lane NAV (BUG-0670, BUG-0671): the product runs Playwright's headless shell, on which an empty-body 4xx/5xx loads as a page instead of an error page (SP-01 broken there); the tests' path glob had run full Chrome before Playwright's layout changed.
+- **Remediation:** NAV's navguard fix and binary-choice guard (merged at 9cabe61); my glob change (931311b, BUG-0651) dropped at that merge.
+- **Status:** Fixed (supersedes the two entries below on this question)
+
 ## 2026-11-20 — correction: the five "known" navigation-abort failures were BUG-0651, not Chromium drift
 - **Symptom:** five `tests/test_navigation_aborts.py` tests failed in every harness run of lanes NODE, PHPX and PERF in this container; the entry below ("environment ... (b)") blamed Playwright 1.63 / Chromium 1243.
 - **Root cause:** BUG-0651: the tests' Chromium lookup matched nothing, so Playwright ran its headless shell instead of the full Chrome build, where the error-page behaviour differs. Measured: tree 2be7a50 with the full Chrome pinned passes 89/89.
@@ -59,6 +65,52 @@ Format per entry:
 - **Root cause:** the login page re-renders the submitted name; an operator leaf echoes as `[object Object]` in V and D, B's token as itself. The differential stripped the tokens' reflected forms only, so V never looked like B.
 - **Remediation:** `same()` also strips `[object Object]` (`_JS_OBJECT_STRING`, CC-FUZZ-0611); a server that stringifies every object still answers V and D alike (no confirmation). NGOAT-0014 confirmed live; Mongection unchanged (tp=2 fp=0).
 - **Status:** Fixed.
+## 2026-11-20 — environment (the lane's Docker daemon stopped during the review rework)
+- **Symptom:** a DVGA ground-truth re-run failed at once with "Connection refused" on 127.0.0.1:5013, and a readiness loop waited out its 30-minute limit; `docker ps` answered "Cannot connect to the Docker daemon".
+- **Root cause:** the `dockerd` started by hand at the beginning of the lane had exited; its log ends without an error at 08:20 (the last lines are only the DVGA container's refused DNS lookups, expected under `dns: 127.0.0.1`). Probably stopped along with the background job it was started from; not measured further.
+- **Remediation:** restarted `dockerd`, `labctl.sh reset dvga`, and re-ran with a bounded readiness wait.
+- **Status:** Environment (fixed outside the repo)
+
+## 2026-11-20 — environment / browser (five SP-01 tests fail on this container's Chromium 157, at 2be7a50 too)
+- **Symptom:** the GQL lane's harness run: `tests/test_navigation_aborts.py::test_a_failed_navigation_returns_after_its_own_error_page[1-3]`, `::test_a_navigation_overtaken_by_an_error_page_waits_for_it` and `::test_an_error_page_ends_the_previous_document` fail ("DID NOT RAISE Error"; a missing `_fetch_static` mark). The same five fail on 2be7a50 itself (84 passed, 5 failed), so the lane's change does not cause them.
+- **Root cause:** measured: the container's Chromium 157.0.8103.78 (Playwright 1.63.0) answers `page.goto` of a 404 with an empty body as a normal 404 response (`no raise 404`); the tests' fixture relies on an older Chromium turning that answer into a failed navigation onto its own error page (`chrome-error://`), which SP-01's settle path (BUG-0522/0561) and these tests pin.
+- **Remediation:** none in the lane: SP-01's owner is `fuzzlab/tools/navguard.py`, a hot file the lane may not edit. Flagged to the orchestrator: either pin the Chromium the suite is measured on or re-measure SP-01's error-page path on Chromium 157 (its fixture needs another way to make a navigation fail).
+- **Status:** Open
+
+## 2026-11-20 — target lab / DVGA (an import of DVGA's own port hung the lab)
+- **Symptom:** while measuring DVGA, a probe `importPaste(host: "localhost", port: 5013, ...)` never answered, and every later request to the lab hung.
+- **Root cause:** DVGA's `importPaste` runs `curl --insecure <url>` through `os.popen` with no timeout, inside a single gevent loop: a URL naming DVGA itself waits for an answer the blocked loop can never give.
+- **Remediation:** the container was restarted (F-600); the answer key's import point names `127.0.0.1:1` (refused at once) and FR-LAB-320 states the rule (CC-LAB-0320). Not a fuzzlab defect.
+- **Status:** Environment (lab behaviour; avoided by the answer key)
+
+## 2026-11-20 — environment (Python Playwright and mitmproxy missing in the lane's container)
+- **Symptom:** `fuzzlab auto --browser` refused ("--browser needs Playwright") and `fuzzlab disco capture` failed with `ServerDidNotListen` (its mitm child exited at once).
+- **Root cause:** the container had the Chromium build and Node Playwright 1.63.0 but not the Python `playwright` package nor `mitmproxy` (the `browser` / `disco` extras); a Debian-installed `pyparsing` blocked the mitmproxy install.
+- **Remediation:** `pip install playwright==1.63.0` (matching the pre-installed browsers) and `pip install --ignore-installed pyparsing "mitmproxy>=12,<13"` (12.3.1).
+- **Status:** Environment (fixed outside the repo)
+## 2026-11-20 — crawler / navguard (releasing a guarded context hung forever on a page whose main thread was blocked; BUG-0672)
+- **Symptom:** an independent verifier on Chromium 1243: `PlaywrightBrowserExecutor.run` never returned on a page whose script blocks after load; it hung in `navguard.release()` (reproduced: killed after 90 s at d492b9d).
+- **Root cause:** `close_pages`' freeze (`Emulation.setScriptExecutionDisabled`) and `release`'s refusing route are answered by the page's renderer, which a blocked main thread never frees, and Playwright's sync calls take no deadline (measured on both binaries; stop, timer and close are answered).
+- **Remediation:** both calls bounded by `RELEASE_CALL_MS` through `navguard._bounded`, every expiry counted (`release_expiries()`) and logged; a page that did not answer is closed before the route is added (CC-CRAWL-0641; BUG-0672, PA-0672). The executor returns in 7.3 s.
+- **Status:** Fixed
+
+## 2026-11-20 — fetcher / spider (a caller's unbounded read of a rendered page hangs on a blocked main thread; BUG-0673)
+- **Symptom:** the same page hangs `ContentFetcher.fetch` at `page.content()` and `LocalSpider._fetch_rendered` at `page.title()`, before teardown (killed after 60 s).
+- **Root cause:** renderer-bound reads with no bound (BUG-0672's class, outside teardown).
+- **Remediation:** none yet; flagged to the orchestrator for its own item (the means: `navguard._bounded`, SP-115).
+- **Status:** Open
+
+## 2026-11-20 — crawler / navguard (an empty HTTP error answer was a page on the headless shell, a failure on the full browser; BUG-0670)
+- **Symptom:** five `tests/test_navigation_aborts.py` cases failed "DID NOT RAISE" since the container moved to Playwright 1.63 / build 1243; a guarded navigation to an empty-bodied 404 returned a page instead of raising onto the browser's error page.
+- **Root cause:** the headless shell 157.0.8103.78 (Playwright's default, so the product's) loads an empty 400-599 answer as a page; the full Chromium (153.0.8010.12, and 141 as measured before) fails it with `ERR_HTTP_RESPONSE_CODE_FAILURE`. navguard fulfilled the answer as fetched, so SP-01's premise belonged to the binary, and it had been measured on the full browser only (BUG-0671).
+- **Remediation:** the guard aborts such a main-frame navigation with `ERROR_ANSWER_ABORT` (`"failed"`) after its observer saw the answer: one outcome on every binary, SP-01 settling on the error page (CC-CRAWL-0640; BUG-0670, PA-0670); the browser login's route search survives a route's failed load (CC-SESS-0640).
+- **Status:** Fixed
+
+## 2026-11-20 — test harness (every browser test ran another binary than the product, chosen by a path glob that stopped matching; BUG-0671)
+- **Symptom:** the same five failures appeared with no product change; the base passes them with `PLAYWRIGHT_CHROMIUM_EXECUTABLE` set to the full Chromium.
+- **Root cause:** `scripts/verify_change.py` and eleven test helpers set the binary from `/opt/pw-browsers/chromium-*/chrome-linux/chrome` (the full browser, not the product's default); build 1243's layout is `chrome-linux64/`, so the glob matched nothing and the suite moved to the headless shell silently.
+- **Remediation:** no binary chosen by install path anywhere (a guard over `fuzzlab/`, `scripts/`, `tests/`); tests run the product's binary; a fact that differs is measured on each binary by name (BUG-0671, PA-0671).
+- **Status:** Fixed
 
 ## 2026-10-23 — crawler / navguard (a navigation started before a failed load's error page had loaded was dropped; BUG-0561)
 - **Symptom:** the harness run of e69bd1e (F-281): `tests/test_disco_harvest.py::test_disco_harvest_and_restore_after_failed_loads[2]` failed in 19.1 s. Disco's `restore` returned "navigation": its `about:blank` `goto` timed out after 15 s and the page stayed on `chrome-error://chromewebdata/`. The RCA measured about 1% of restores under heavy disk I/O on every tree since BUG-0522's fix (7393c90 4/600, e69bd1e 9/840) and 0/1,320 under CPU load alone.

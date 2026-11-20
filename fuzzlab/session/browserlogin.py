@@ -494,7 +494,7 @@ def _drive(destination_ok, base_url: str, auth_origins, cred, forms,
 
     from fuzzlab.tools import spa
     from fuzzlab.tools.navguard import (browser_launch_args, chromium_launch_kwargs,
-                                        guard_page, navigate, release)
+                                        end_failed_load, guard_page, navigate, release)
     cancelled = cancelled if cancelled is not None else threading.Event()
     gate = LoginGate(destination_ok, base_url, auth_origins, forms=forms,
                      cancelled=cancelled)
@@ -534,7 +534,15 @@ def _drive(destination_ok, base_url: str, auth_origins, cred, forms,
             if picked is None:
                 for url in _login_routes(page, gate, base_url):
                     _alive(cancelled)
-                    navigate(page, url, timeout_ms=timeout_ms)
+                    try:
+                        navigate(page, url, timeout_ms=timeout_ms)
+                    except PlaywrightError as exc:
+                        # BUG-0670 sweep (CC-SESS-0640): a login route that fails to
+                        # load (an empty 404, now an error page on every binary) is
+                        # one candidate gone, never the end of the search
+                        end_failed_load(page, exc, timeout_ms=timeout_ms)
+                        refusals.append(f"{_host(url)}: a login route did not load")
+                        continue
                     _settle(page, inflight, SETTLE_MS, cancelled)
                     picked = _pick_form(page, base_url, refusals, timeout_ms)
                     if picked is not None:

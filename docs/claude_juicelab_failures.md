@@ -2251,6 +2251,13 @@ Juice Shop lab is complete.
 - **Impact:** a safety regression on the pushed branch for crawled front-controller logins (not merged; not observed sending in a run).
 - **Cause:** I tested the narrowed rule on ground-truth URLs only and gave it a fail-open default; I swept the finding URL's readers but not the gate's callers.
 - **Status:** fixed (CC-SESS-0612); PA-0620.
+### F-600 — While measuring DVGA I sent an import of the lab's own port, which hung the whole lab
+- **What:** my first probe of `importPaste` named `localhost:5013`, DVGA itself. Its resolver runs curl with no timeout inside the server's only loop, so the request and every later one hung; I had to stop my probe and restart the container.
+- **Evidence:** ERROR_LOG 2026-11-20 (DVGA); CC-LAB-0320 "Measured".
+- **Impact:** about two minutes of a hung lab and one restart; no traffic left the lab; nothing measured from that state was used.
+- **Cause:** I chose the probe's host from the upstream solution's example (`localhost`) without first reading what the resolver does with it.
+- **Status:** corrected: the answer key's import point names a refused loopback port, and FR-LAB-320 states the rule.
+
 ### F-650 — I started lane PERF's BEFORE runner from the working tree I then edited
 - **What:** the BEFORE measurements (`runset.sh B1`) ran `scripts/measure_scan_perf.py` from `/home/user/fuzzer`, a new process per lab. I edited `fuzzlab/tools/browserexec.py` there while the runner was on its fourth lab, so its later labs would have imported the changed executor and been AFTER runs labelled BEFORE.
 - **Evidence:** this session: `ps` showed the runner (started 08:00) and the bWAPP crawl process (08:11:47) before the first edit; I stopped the runner by its PID, kept the running process (it had imported the unchanged code), and ran the rest from a worktree of 2be7a50 (`TREE=/home/user/base`).
@@ -2278,4 +2285,47 @@ Juice Shop lab is complete.
 - **Impact:** a wrong root cause in the error log and in three lanes' merge reports ("5 known failures"), and a flagged question to navguard's owner that was not needed.
 - **Cause:** I confirmed the failures reproduce on the base tree and stopped there; I did not check which browser binary the tests had launched, though my own environment notes said the lookup glob matched nothing.
 - **Status:** corrected (BUG-0651 "Correction", ERROR_LOG correction entry).
+
+### F-601 — My first DVGA answer key held a negative no run could test
+- **What:** the draft scored `uploadPaste(filename)` as a command-injection negative, but no command-injection rule fires on that point (its name, field and siblings carry no command signal), so it would have counted as a true negative without ever being probed.
+- **Evidence:** `tests/test_external_labs_live.py::_assert_pass` requires a checked candidate for every gt-tagged case; designing `tests/test_dvga_live.py` on it showed the gap before any commit.
+- **Impact:** none committed; it would have inflated tn by one.
+- **Cause:** I chose negatives by what the sink does, not by whether the run's rules reach the point.
+- **Status:** corrected before the first commit: the negative is `systemDiagnostics(password)`, which a rule reaches and which never reaches a shell.
+
+### F-602 — I built two detection rules from DVGA's own field names
+- **What:** CC-AUD-0600's `R-COMMAND-INJECTION-GRAPHQL-FIELD` matched field names (`system|debug|diagnos|...`) chosen from DVGA's `systemDebug` / `systemDiagnostics`, and its sibling rule was justified by DVGA's `importPaste` alone; the lane reported tp 5 -> 8 from them.
+- **Evidence:** CC-AUD-0600 ("the field regex's words come from DVGA's own field names ... no second GraphQL target has been measured"); the orchestrator's review of 7ea2018 (owner directive: black-box detection only).
+- **Impact:** a lab-fitted detection gain reported as an improvement; never merged. Removed in CC-AUD-0602; DVGA gt is back to the baseline's tp=5.
+- **Cause:** I tuned a heuristic to the lab I was measuring and treated a disclosure of that as sufficient, instead of requiring evidence from an independent target.
+- **Status:** corrected (CC-AUD-0602).
+
+
+### F-670 — SP-01's error-page path and its tests were measured on the full Chromium while the product launches the headless shell, and nothing said which binary a measurement was on
+- **What:** BUG-0522's and BUG-0561's measurements and SP-01's real-browser tests ran with `PLAYWRIGHT_CHROMIUM_EXECUTABLE` set by a path glob (`/opt/pw-browsers/chromium-*/chrome-linux/chrome`, in `scripts/verify_change.py` and eleven test helpers) to the **full** Chromium; the product, with no operator setting, launches Playwright's default, the **headless shell**. The records say "measured on Chromium 141" without naming the binary. When the install layout became `chrome-linux64/` (build 1243) the globs matched nothing and the suite moved to the headless shell 157.0.8103.78 silently, which loads an empty-bodied 404 as a page: five `tests/test_navigation_aborts.py` cases failed "DID NOT RAISE" and were carried as "known failures" by every lane.
+- **Evidence:** BUG-0670 and BUG-0671; `tests/test_chromium_navigation_outcomes.py` (the empty-404 cell: shell "page", full "error page"); the base passes those five on the full binary (`PLAYWRIGHT_CHROMIUM_EXECUTABLE=/opt/pw-browsers/chromium`, 89 passed) and fails them on the default.
+- **Impact:** on the default binary a guarded crawl or audit took an empty 4xx/5xx for a rendered page (the outcome of one target depended on the binary); SP-01's error-page path was untested on the product's binary; five red tests normalised as "known" across lanes.
+- **Cause:** a test-side binary choice that differed from the product's, made by a path glob that fails open (no match = another binary, no word), and measurement records that named a version but not the binary.
+- **Status:** fixed by CC-CRAWL-0640 (BUG-0670: one outcome on every binary) and BUG-0671 (no binary chosen by install path; facts that differ are measured on each binary by name), PA-0670, PA-0671.
+
+### F-671 — I first applied BUG-0670's abort to frame navigations too, before measuring what a frame does
+- **What:** my first cut of the fix aborted every navigation request (main frame and iframes) whose answer was an empty 4xx/5xx. The measurement lane I had dispatched then showed that both binaries load an iframe's empty 404 as a page (the full browser's error-page rule is a main-frame rule), so the cut would have changed frames on the full browser and 141 as well, and the caller sweep found two consumers it would have misled (the spider's window `blocked` evidence, disco's FR-CRAWL-41 answer sign).
+- **Evidence:** `tests/test_chromium_navigation_outcomes.py` `FRAME_404 = {"shell": "page", "full": "page"}`; the sweep's R1; the working-tree diff before commit.
+- **Impact:** none shipped: corrected before the first commit; it cost one review cycle.
+- **Cause:** I wrote the fix's scope from the shape of the main-frame measurement instead of waiting for the frame cell (MULTI_AGENT_ORCHESTRATION §7, measure before design).
+- **Status:** fixed before commit: the abort is main-frame only, pinned by `tests/test_navigation_error_answer.py::test_an_iframes_empty_error_answer_is_given_as_it_is`.
+
+### F-672 — BUG-0504's freeze was made mandatory in teardown without measuring a page that cannot answer it, and PA-0128 called quiescing safe
+- **What:** the BUG-0504 fix made `close_pages` freeze every page (`Emulation.setScriptExecutionDisabled`) before the drain, and `release` add a route, both unbounded sync calls answered by the page's renderer. A page whose main thread is blocked never answers them, so every guarded teardown with such a page open hung forever (BUG-0672); PA-0128(1) had stated that quiescing first is the remedy for unboundable calls without noticing that the quiescing call is one.
+- **Evidence:** BUG-0672 (both binaries: the freeze and `context.route` never return on a blocked page); the M6 executor killed after 90 s at d492b9d; the verifier's report relayed 2026-11-20.
+- **Impact:** a run against a target with a runaway script never finished; found by an independent verifier, not by the suite.
+- **Cause:** the teardown was tested against work in flight, not against a page that cannot respond, and a liveness rule was written from the order of calls rather than from what each call waits on.
+- **Status:** fixed by CC-CRAWL-0641 (PA-0672); the callers' reads of such a page remain open (BUG-0673).
+
+### F-654 — My correction F-653 named the wrong cause too: I re-aimed the tests at a binary the product does not run
+- **What:** F-653 (and BUG-0651's "Correction") said the five `test_navigation_aborts` failures came from the tests running Playwright's headless shell instead of full Chrome, and my fix (931311b) pointed every test at full Chrome. The product launches the headless shell; on it SP-01's guarantee was really broken (BUG-0670, found by lane NAV), and my fix would have hidden that product defect behind a green suite.
+- **Evidence:** BUG-0670 / BUG-0671 (lane NAV, merged at 9cabe61): an empty-body error answer is a page on the headless shell and an error page on full Chrome; NAV's harness green with the product fixed and the tests on the product's binary.
+- **Impact:** a fix that would have masked a product bug, and a second wrong root cause in my records (F-653, BUG-0651 "Correction", the ERROR_LOG correction); resolved in NAV's favour before it reached the integration branch.
+- **Cause:** having found that the tests ran a different binary from the one their helpers named, I made the tests run the helpers' binary, without asking which binary the product runs; I took "the suite passes on full Chrome" as the fix.
+- **Status:** superseded by BUG-0670/BUG-0671 (BUG-0651 "Superseded"); my glob change dropped at the merge.
 

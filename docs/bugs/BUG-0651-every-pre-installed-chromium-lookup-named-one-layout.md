@@ -67,3 +67,26 @@ chrome-linux64/chrome`, `tests/test_navigation_aborts.py` passes 89 of 89; the h
 d565523 (this fix merged with 7a1ef32) is 114 files, 4568 passed, 0 failed. Severity is
 medium, not low: the fall-back changed which browser five SP-01 tests measured.
 
+## Superseded (2026-11-20, merging the integration tip 9cabe61)
+Superseded by lane NAV's BUG-0670 and BUG-0671 (PA-0670, PA-0671), which found the same
+lookup and measured further. The root cause above and the "Correction" are both
+incomplete:
+- **The tests' binary choice was wrong, in either direction.** The product, with no
+  operator setting, launches Playwright's default binary, the **headless shell**. The
+  globs pointed the suite at the **full** Chromium, a binary the product does not run;
+  this fix (931311b) re-aimed them there. BUG-0671: a test launches the product's binary
+  and measures a binary difference on each binary by name, never chooses one by install
+  path (guard: `tests/test_browser_binary_choice.py`).
+- **The product was broken on its default binary.** On the headless shell an empty-body
+  4xx/5xx answer loads as a normal page instead of failing onto an error page, so SP-01's
+  guarantee did not hold where the product runs (BUG-0670). The five
+  `test_navigation_aborts` failures were that product defect showing through, not only a
+  test artefact; pointing the tests at full Chrome would have hidden it. NAV fixed the
+  product (`navguard` aborts a guarded top-level empty-error answer, so both binaries show
+  the error page).
+- Resolved at the merge in NAV's favour: 931311b's glob change in the eleven test helpers
+  and `scripts/verify_change.py` is dropped (NAV's versions kept),
+  `tests/test_chromium_glob_guard.py` is deleted (NAV's guard flags any install path),
+  `tests/test_m6_slow_sinks.py` launches the product's binary, PA-0651 is marked
+  superseded by PA-0671.
+

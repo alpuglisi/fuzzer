@@ -238,8 +238,6 @@ def _require_playwright():
 @pytest.fixture(scope="module")
 def explored(tmp_path_factory):
     """One exploration of the app, with small delegated bounds (3 per read, 2 trials)."""
-    import glob
-
     _require_playwright()
     from playwright.sync_api import Error as PlaywrightError
 
@@ -252,9 +250,6 @@ def explored(tmp_path_factory):
                    "/settings.html": SETTINGS, "/forms.html": FORMS})
     try:
         with pytest.MonkeyPatch.context() as mp:
-            exe = sorted(glob.glob("/opt/pw-browsers/chromium-*/chrome-linux*/chrome"))[-1:]
-            if exe:
-                mp.setenv("PLAYWRIGHT_CHROMIUM_EXECUTABLE", exe[0])
             mp.setattr(compose, "MAX_DELEGATED", 3)
             mp.setattr(compose, "MAX_DELEGATED_TRIALS", 2)
             ex = Explorer(app.url + "/", scope_urls=[app.url + "/", peer.url + "/"],
@@ -362,8 +357,6 @@ def test_what_was_not_read_is_counted_never_claimed(explored):
 def widget_run(tmp_path_factory):
     """One exploration of `WIDGET` (review round 1): quiet waits never settle under the
     100 ms poll, so each lasts ``max_quiet_ms``."""
-    import glob
-
     _require_playwright()
     from playwright.sync_api import Error as PlaywrightError
 
@@ -371,10 +364,7 @@ def widget_run(tmp_path_factory):
     out = tmp_path_factory.mktemp("widget")
     app = _Server({"/": WIDGET})
     try:
-        with pytest.MonkeyPatch.context() as mp:
-            exe = sorted(glob.glob("/opt/pw-browsers/chromium-*/chrome-linux*/chrome"))[-1:]
-            if exe:
-                mp.setenv("PLAYWRIGHT_CHROMIUM_EXECUTABLE", exe[0])
+        with pytest.MonkeyPatch.context():
             ex = Explorer(app.url + "/", scope_urls=[app.url + "/"], proxy=None,
                           actions_log=out / "actions.jsonl",
                           options=ExploreOptions(idle_ms=150, max_quiet_ms=700,

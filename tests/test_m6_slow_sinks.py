@@ -16,7 +16,6 @@ Under ``FUZZLAB_REQUIRE_BROWSER=1`` these fail rather than skip.
 from __future__ import annotations
 
 import base64
-import glob
 import importlib
 import threading
 import time
@@ -71,7 +70,7 @@ _CASES = {
         "+location.pathname.replace(/meta-refresh$/,'refreshed')"
         "+location.hash.replace(/\"/g,'%22')+'\">');</script>"),
     # 6. a media element event: a muted, autoplayed 1 s video's ``ended``. Measured in
-    #    this Chromium (playwright 1.63, chromium-1243, headless): an ``<audio>`` -- muted
+    #    this Chromium (Playwright 1.63, its Chromium build 1243, headless): an ``<audio>`` -- muted
     #    or not, ``autoplay`` or a script ``play()`` -- never starts (``play()`` rejects
     #    with NotAllowedError, ``paused`` stays true at readyState 4), so its ``ended`` /
     #    ``timeupdate`` never fire; a muted ``<video autoplay>`` plays and ``ended``
@@ -164,11 +163,8 @@ def _chromium_or_skip(monkeypatch):
         importlib.import_module("playwright.sync_api")
     except ImportError as exc:
         skip_or_fail(f"playwright unavailable: {exc}")
-    # the pre-installed build: ``chrome-linux`` (as tests/test_browser_scope.py
-    # globs) or ``chrome-linux64`` (this image's chromium-1243)
-    exe = sorted(glob.glob("/opt/pw-browsers/chromium-*/chrome-linux*/chrome"))[-1:]
-    if exe:
-        monkeypatch.setenv("PLAYWRIGHT_CHROMIUM_EXECUTABLE", exe[0])
+    # the product's binary (the operator's PLAYWRIGHT_CHROMIUM_EXECUTABLE, else
+    # Playwright's default), never one chosen by install path (BUG-0671, PA-0671)
 
 
 @pytest.fixture
