@@ -59,6 +59,11 @@ Newest first.
 - Risk: low; search filters only.
 - Deliverables:
   - [x] code; `tests/test_ldap_xpath.py` — done
+  - [x] both strategies classified in `tests/test_oracle_comparable_controls.py`'s
+    `CONTROL_READING` (differential); its send guard now reads every strategy class in
+    the MRO, so a `confirm` in a shared base is checked; the finding-URL builder
+    (CC-FUZZ-0622) allowed in `tests/test_query_placement.py` (a record key, never
+    sent) — done
 
 ### CC-FUZZ-0117 — M6's navigations settle a failure on the error page's load (BUG-0561) (2026-10-23)
 - Change: none in `fuzzlab/tools/browserexec.py` or the oracle. The executor's navigations go through SP-01, which now waits for a failed navigation's error page to load, not only to commit, before it raises (CC-CRAWL-0065).
