@@ -82,6 +82,8 @@ on_host_results*.txt
 !lab/ground-truth-vulnerableapp/*.csv
 !lab/ground-truth-vampi/*.csv
 !lab/ground-truth-dvws-node/*.csv
+# held out (lab/HOLDOUT.md)
+!lab/ground-truth-railsgoat/*.csv
 # CC-LAB-0300: bWAPP is CC BY-NC-ND and is never committed -- its downloaded zip lives
 # in a local cache, and no extracted tree or archive may enter the repo
 lab/external/**/.cache/
