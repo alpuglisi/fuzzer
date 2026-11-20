@@ -30,41 +30,20 @@ import logging
 from typing import Callable
 from urllib.parse import urljoin, urlsplit
 
-from fuzzlab.core.forms import FormEntries
-from fuzzlab.core.redaction import name_tokens
+# SP-120's vocabulary and decision live in `core.forms` since CC-CORE-0663 (disco reads
+# them too, and may not import this module, D70); re-exported for every caller here.
+from fuzzlab.core.forms import (  # noqa: F401
+    SETTINGS_PAIRS,
+    SETTINGS_WORDS,
+    FormEntries,
+    settings_word,
+)
 from fuzzlab.core.urls import destructive_reason, text_destructive_reason, url_key
 
-#: A select or control named with one of these words configures something. Shared by
-#: navigation (`refusal`, `option_refusal`) and the importer's POST-selector rule
-#: (forms phase 2, FR-CRAWL-10 / FR-FUZZ-43). ``t`` is deliberately absent: a lone
-#: ``t`` token comes from contractions ("Don't").
-SETTINGS_WORDS = frozenset({
-    "level", "security", "role", "status", "permission", "permissions", "admin",
-    "enable", "disable", "active", "lang", "language", "theme", "mode",
-    # forms phase 2 (reviewer B-R4)
-    "sort", "tz", "currency", "country", "region", "layout", "skin", "view", "display",
-    "default", "notify", "privacy", "visibility",
-})
-#: Adjacent tokens that together are a settings word (``per_page`` tokenises to
-#: ``per``, ``page``; ``page`` alone must not count: it is a common content parameter).
-SETTINGS_PAIRS = frozenset({("per", "page")})
 #: This many self-redirects in a row, before any real navigation: a settings form.
 MAX_SELF_REDIRECTS = 5
 #: At most this many options of one form are submitted.
 MAX_OPTIONS = 500
-
-
-def settings_word(text: str) -> str | None:
-    """The settings word (or pair, as ``per_page``) in a control name, option value
-    or label, matched by whole token; None when there is none."""
-    toks = [t.lower() for t in name_tokens(text or "")]
-    for tok in toks:
-        if tok in SETTINGS_WORDS:
-            return tok
-    for pair in zip(toks, toks[1:]):
-        if pair in SETTINGS_PAIRS:
-            return "_".join(pair)
-    return None
 
 
 def signature(record: dict) -> tuple:

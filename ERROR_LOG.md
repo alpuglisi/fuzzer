@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-11-20 — disco/forms (CC-CRAWL-0673 broke two disco tests; lane CRAWLCOV)
+- **Symptom:** `verify_change.py --base 94fac7f` on 32d2ccc: 6023 passed, 2 failed -- disco imported `tools.formnav` (D70 guard) and the e2e toolbar's `Theme` button was no longer acted on.
+- **Root cause:** CC-CRAWL-0673 imported SP-120 from its legacy-crawler owner and judged the submitter's label too, so a search box sharing a container with a `Theme` button was refused; I had run only its unit tests, not disco's guards and e2e, before pushing.
+- **Remediation:** SP-120's owner moves to `core.forms` (re-exported by `formnav`, CC-CORE-0663); the explorer judges filled controls only. Both tests green. No new PA: the existing guards caught it pre-merge (F-701).
+- **Status:** Fixed.
+
 ## 2026-11-20 — crawl/disco (store->render restated SP-41's write methods; lane CRAWLCOV)
 - **Symptom:** `verify_change.py --base da55f88` on 9d14ee9: 5582 passed, 1 failed -- `tests/test_put_patch.py::test_the_write_opt_in_methods_are_defined_once`.
 - **Root cause:** `disco/storerender.py` wrote its own `{"POST", "PUT", "PATCH"}` set instead of reading SP-41's owner (`store_adapter.WRITE_METHODS`).

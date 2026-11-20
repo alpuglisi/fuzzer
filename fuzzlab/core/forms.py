@@ -413,3 +413,34 @@ def _selector_options(form) -> list[list[str]]:
             out.append([select.get("name") or "", option_value(opt),
                         " ".join(opt.get_text().split())])
     return out
+
+
+# --- SP-120: the settings vocabulary (moved from tools.formnav, CC-CORE-0663) ----------
+#: A select or control named with one of these words configures something. Shared by
+#: navigation (`refusal`, `option_refusal`) and the importer's POST-selector rule
+#: (forms phase 2, FR-CRAWL-10 / FR-FUZZ-43). ``t`` is deliberately absent: a lone
+#: ``t`` token comes from contractions ("Don't").
+SETTINGS_WORDS = frozenset({
+    "level", "security", "role", "status", "permission", "permissions", "admin",
+    "enable", "disable", "active", "lang", "language", "theme", "mode",
+    # forms phase 2 (reviewer B-R4)
+    "sort", "tz", "currency", "country", "region", "layout", "skin", "view", "display",
+    "default", "notify", "privacy", "visibility",
+})
+#: Adjacent tokens that together are a settings word (``per_page`` tokenises to
+#: ``per``, ``page``; ``page`` alone must not count: it is a common content parameter).
+SETTINGS_PAIRS = frozenset({("per", "page")})
+
+
+def settings_word(text: str) -> str | None:
+    """The settings word (or pair, as ``per_page``) in a control name, option value
+    or label, matched by whole token; None when there is none."""
+    from fuzzlab.core.redaction import name_tokens
+    toks = [t.lower() for t in name_tokens(text or "")]
+    for tok in toks:
+        if tok in SETTINGS_WORDS:
+            return tok
+    for pair in zip(toks, toks[1:]):
+        if pair in SETTINGS_PAIRS:
+            return "_".join(pair)
+    return None

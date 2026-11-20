@@ -1234,6 +1234,10 @@ plugin registry. It is the layer that makes the store the integration bus.
   characters (else `ValueError`); `exclusion_reason(url, exclusions)` names the first one
   found in the URL's path and query, or None. The host is never matched.
 
+- **FR-CORE-663 (the settings vocabulary in `core.forms`; CC-CORE-0663, 2026-11-20,
+  SP-120)** `core.forms.settings_word` (with `SETTINGS_WORDS`, `SETTINGS_PAIRS`) is the one
+  settings-word decision; `tools.formnav` re-exports it.
+
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers
   never block the writer (WAL).

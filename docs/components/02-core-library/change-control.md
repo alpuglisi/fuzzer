@@ -3,6 +3,25 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0663 — SP-120's owner moves to `core.forms` (disco may not import `tools.formnav`) (FR-CORE-663) (2026-11-20)
+- Placement: lane CRAWLCOV, fixing CC-CRAWL-0673's two harness failures on 32d2ccc.
+- Change: `settings_word`, `SETTINGS_WORDS` and `SETTINGS_PAIRS` move verbatim from
+  `fuzzlab/tools/formnav.py` to `fuzzlab/core/forms.py`; `formnav` re-exports all three,
+  so every caller (formnav's gates, `store_adapter`, `spa`) is unchanged.
+  `disco.explore.form_refusal` reads the owner in `core.forms`, and judges the filled
+  controls only (never the submitter's label).
+- Measured: `verify_change.py --base 94fac7f` on 32d2ccc: 6023 passed, 2 failed --
+  `tests/test_disco_isolation.py::test_no_disco_module_imports_the_legacy_spider` (D70:
+  disco imports no legacy crawler module) and `tests/test_disco_e2e.py::
+  test_a_search_box_is_submitted_by_enter_and_chrome_is_acted_on_once` (the toolbar's
+  `Theme` button, a search box's apparent submitter, was refused). After: both green
+  (disco e2e 14 passed in real Chromium; the guards and forms suites 496 passed).
+- Impact (other components / project): none for callers (re-export).
+- Risk (level; mitigation or accepted-risk justification): low.
+- Deliverables:
+  - [x] move, re-export, SP-120 row (owner path) — done
+  - [x] FR-CORE-663, ERROR_LOG, CHANGELOG — done
+
 ### CC-CORE-0662 — `compile_exclusions` / `exclusion_reason`: operator URL exclusions (FR-CORE-662) (2026-11-20)
 - Placement: lane CRAWLCOV (item CRAWLCOV-EXCLUDE), base 94fac7f.
 - Change: `fuzzlab/core/urls.py`: `compile_exclusions(patterns)` (at most

@@ -2396,3 +2396,10 @@ Juice Shop lab is complete.
 - **Impact:** the labgen apps' recall overstated real detection: removing the lab names took twitch-clone 14 -> 11, netflix-clone 11 -> 9, booking-clone 3 -> 2 on ground-truth points. Other heuristics fitted to one lab or one framework remain (Angular Material selectors, bWAPP-measured settings words, the 8 `sink_context_in` rules that fire only from answer-key labels): listed open in the lane report.
 - **Status:** the named items fixed on the BBOX branch (CC-AUD-0660, CC-FUZZ-0660); PA-0660 and its guard added; the remaining items listed for the orchestrator.
 
+### F-701 — My disco settings-form refusal imported the legacy crawler and refused a toolbar button
+- **What:** cc134fb imported `formnav.settings_word` into disco (forbidden by D70) and judged the submitter's label, so the e2e app's `Theme` button was refused; I pushed it after unit tests only.
+- **Evidence:** ERROR_LOG 2026-11-20 (disco/forms); harness on 32d2ccc (2 failures).
+- **Impact:** a red lane tip until the follow-up; nothing merged.
+- **Cause:** I did not read disco's isolation guard or run its e2e suite before pushing a disco change.
+- **Status:** corrected (CC-CORE-0663).
+
