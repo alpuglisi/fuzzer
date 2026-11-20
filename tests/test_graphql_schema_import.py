@@ -163,19 +163,18 @@ def test_the_run_summary_prints_the_schema_and_store_render_counts(capsys):
     from types import SimpleNamespace
 
     from fuzzlab.harness import auto_cli
-    from fuzzlab.harness.auto import PipelineResult
-    result = PipelineResult()
-    result.plan = SimpleNamespace(mode="automatic", scored=False, categories=[],
-                                  source="crawl")
-    result.metrics = {}
+    result = SimpleNamespace(
+        plan=SimpleNamespace(mode="automatic", scored=False, categories=[], source="crawl"),
+        metrics={}, points_audited=0, candidates=0, negatives=0, findings=0, report=None,
+        plugin_outcomes=[], inconclusive=[])
     counts = {"graphql_schema_endpoint": 1, "graphql_schema_operation": 11,
               "graphql_schema_skipped": 8, "store_render": 2, "store_render_skipped": 1,
               "parameter": 3}
     try:
         auto_cli._print_summary(SimpleNamespace(score=False, rank=False, anomaly=False),
                                 counts, result)
-    except (AttributeError, TypeError):
-        pass                                      # later lines need a fuller result
+    except (AttributeError, TypeError, KeyError):
+        pass                       # lines after the counts read more of a real result
     out = capsys.readouterr().out
     assert ("graphql schema: 1 endpoint(s) asked, 11 operation(s) imported, 0 refused, "
             "8 skipped") in out
