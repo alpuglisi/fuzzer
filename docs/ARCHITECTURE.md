@@ -183,6 +183,12 @@ tracked in the requirements files, not here.
   (`ssjs`: `eval` and a `$where`), confirmed by two non-destructive strategies
   (FR-FUZZ-610/611, rule `R-SSJS` FR-AUD-610) whose every probe is valid JavaScript in
   any quoting context, so an in-process `$where` (Juice Shop's) is never crashed.
+  OWASP Mutillidae II 2.12.8 (FR-LAB-340..343,
+  CC-LAB-0340..0343) is the first PHP front controller (`index.php?page=...`) and the first
+  with a directory (OpenLDAP): upstream's three images by digest, its LDIF loaded by the
+  bootstrap, ground truth `lab/ground-truth-mutillidae/` with the LDAP and XPath
+  injection classes (`fuzzlab/oracle/ldap_xpath.py`, FR-FUZZ-620/621); a routed page is
+  part of a finding's URL and scoring key (FR-FUZZ-622, SP-90).
   `secdevlabs-ecommerce-api` the first with per-account values, FR-LAB-309). SasanLabs
   OWASP VulnerableApp 2.2.115 (`vulnerableapp`, FR-LAB-350, CC-LAB-0350) is the first
   Java / Spring Boot external lab: a pinned upstream image (no build), its answer key

@@ -2940,6 +2940,9 @@ def default_strategies(browser: BrowserExecutor | None = None,
     xss): with neither ``coverage`` nor ``dbfault`` injected it no-ops, same as the
     others.
     """
+    # FR-FUZZ-620/621: LDAP and XPath injection live in their own module, which
+    # builds on this one (imported here, not at the top, for that reason)
+    from fuzzlab.oracle.ldap_xpath import LdapFilterInjectionStrategy, XPathInjectionStrategy
     return [SqliErrorStrategy(), SqliBooleanStrategy(), SqliEvaluationMarkerStrategy(),
             SqliTimingStrategy(), NoSqlOperatorStrategy(),
             ReflectedXssStrategy(), DomXssStrategy(browser), StoredXssStrategy(browser),
@@ -2960,6 +2963,7 @@ def default_strategies(browser: BrowserExecutor | None = None,
             HttpHeaderInjectionCrlfStrategy(),
             PathTraversalFsPathReadStrategy(),
             *_follow_on_strategies(),
+            LdapFilterInjectionStrategy(), XPathInjectionStrategy(),
             GreyboxConfirmationStrategy(coverage, dbfault),
             SsjsEvaluationMarkerStrategy(), SsjsBooleanDifferentialStrategy()]
 
@@ -3002,6 +3006,8 @@ _CATEGORY_TO_CLASS = {
     "unrestricted-file-upload": "unrestricted_file_upload",
     "http-header-injection": "http_header_injection",
     "path-traversal": "path_traversal",
+    "ldap-injection": "ldap_injection",            # FR-FUZZ-620
+    "xpath-injection": "xpath_injection",          # FR-FUZZ-621
     "server-side-javascript-injection": "ssjs",
 }
 

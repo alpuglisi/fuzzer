@@ -758,6 +758,9 @@ CONTROL_READING = {
                                          "browser resolves it, is the evidence; layer 1"),
     "GreyboxConfirmationStrategy": ("positive", "coverage through `send_correlated`; "
                                     "layer 1"),
+    # FR-FUZZ-620/621 (CC-FUZZ-0620/0621): the shared engine, from a common base
+    "LdapFilterInjectionStrategy": ("differential", "the shared engine's B0, V, B, D"),
+    "XPathInjectionStrategy": ("differential", "the shared engine's B0, V, B, D"),
     "SsjsEvaluationMarkerStrategy": ("positive", "two evaluated results; an absence "
                                      "disqualifies"),
     "SsjsBooleanDifferentialStrategy": ("differential", "B0, V and B are controls; D "
@@ -840,7 +843,13 @@ def _reader_sources():
     for strategy in S.default_strategies():
         kind, _why = CONTROL_READING[type(strategy).__name__]
         if kind in CONTROL_READERS:
-            yield type(strategy).__name__, inspect.getsource(type(strategy))
+            # every strategy class it inherits from too: a confirm in a shared base
+            # (`ldap_xpath._QueryLanguageDifferential`) is the reader's own code
+            for cls in type(strategy).__mro__:
+                if issubclass(cls, S.ConfirmationStrategy) and \
+                        cls is not S.ConfirmationStrategy:
+                    yield f"{type(strategy).__name__} ({cls.__name__})", \
+                        inspect.getsource(cls)
             for engine in CONTROL_READERS[kind]:
                 yield f"{type(strategy).__name__} via {engine}", inspect.getsource(
                     getattr(S.ConfirmationStrategy, engine))

@@ -147,6 +147,12 @@ _VULN_TO_CATEGORY = {
     # (`fuzzlab/oracle/strategies.py`) before assuming either already had
     # an entry, per `BUG-0045`'s own lesson.
     "path_traversal": "path-traversal",
+    # `ldap_injection` / `xpath_injection` (CC-CORE-0610, FR-CORE-610): the same
+    # underscore/hyphen pairing, `R-LDAP-INJECTION`/`LdapFilterInjectionStrategy` and
+    # `R-XPATH-INJECTION`/`XPathInjectionStrategy`, verified live against Mutillidae II
+    # (CC-LAB-0340) through a scored `fuzzlab auto` run (PA-0042, PA-0047).
+    "ldap_injection": "ldap-injection",
+    "xpath_injection": "xpath-injection",
 }
 
 

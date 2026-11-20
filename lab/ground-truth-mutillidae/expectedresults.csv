@@ -1,0 +1,44 @@
+# fuzzlab expected results (Benchmark-style) for OWASP Mutillidae II 2.12.8 at security
+# level 0 (external lab fixture lab/external/mutillidae), CC-LAB-0342. Derived from
+# labels.json; the loader cross-checks the two. Single-location cases. URLs are query-routed
+# (index.php?page=...); a ground-truth-points run uses the origin as its base.
+case_id,url,method,param,location,category,expected_vulnerable,primary_endpoint,primary_role,related_endpoints,flow_variant
+MUTL-0001,/index.php?page=user-info.php&user-info-php-submit-button=View+Account+Details,GET,username,query,sqli,true,/index.php?page=user-info.php&user-info-php-submit-button=View+Account+Details,sink,,direct
+MUTL-0002,/index.php?page=user-info.php&user-info-php-submit-button=View+Account+Details,GET,password,query,sqli,true,/index.php?page=user-info.php&user-info-php-submit-button=View+Account+Details,sink,,direct
+MUTL-0003,/index.php?page=user-info.php&user-info-php-submit-button=View+Account+Details,GET,username,query,xss-reflected,true,/index.php?page=user-info.php&user-info-php-submit-button=View+Account+Details,sink,,direct
+MUTL-0004,/index.php?page=user-info.php&user-info-php-submit-button=View+Account+Details,GET,username,query,ldap_injection,false,/index.php?page=user-info.php&user-info-php-submit-button=View+Account+Details,sink,,direct
+MUTL-0005,/index.php?page=user-info.php&user-info-php-submit-button=View+Account+Details,GET,username,query,xpath_injection,false,/index.php?page=user-info.php&user-info-php-submit-button=View+Account+Details,sink,,direct
+MUTL-0006,/index.php?page=user-info-xpath.php&user-info-php-submit-button=View+Account+Details,GET,username,query,xpath_injection,true,/index.php?page=user-info-xpath.php&user-info-php-submit-button=View+Account+Details,sink,,direct
+MUTL-0007,/index.php?page=user-info-xpath.php&user-info-php-submit-button=View+Account+Details,GET,password,query,xpath_injection,true,/index.php?page=user-info-xpath.php&user-info-php-submit-button=View+Account+Details,sink,,direct
+MUTL-0008,/index.php?page=user-info-xpath.php&user-info-php-submit-button=View+Account+Details,GET,username,query,sqli,false,/index.php?page=user-info-xpath.php&user-info-php-submit-button=View+Account+Details,sink,,direct
+MUTL-0009,/index.php?page=user-info-xpath.php&user-info-php-submit-button=View+Account+Details,GET,password,query,sqli,false,/index.php?page=user-info-xpath.php&user-info-php-submit-button=View+Account+Details,sink,,direct
+MUTL-0010,/index.php?page=user-info-xpath.php&user-info-php-submit-button=View+Account+Details,GET,username,query,xss-reflected,true,/index.php?page=user-info-xpath.php&user-info-php-submit-button=View+Account+Details,sink,,direct
+MUTL-0011,/index.php?page=user-info-xpath.php&user-info-php-submit-button=View+Account+Details,GET,password,query,xss-reflected,true,/index.php?page=user-info-xpath.php&user-info-php-submit-button=View+Account+Details,sink,,direct
+MUTL-0012,/index.php?page=user-info-xpath.php&user-info-php-submit-button=View+Account+Details,GET,username,query,ldap_injection,false,/index.php?page=user-info-xpath.php&user-info-php-submit-button=View+Account+Details,sink,,direct
+MUTL-0013,/index.php?page=conference-room-lookup.php,POST,default_room_common_name,body,ldap_injection,true,/index.php?page=conference-room-lookup.php,sink,,direct
+MUTL-0014,/index.php?page=conference-room-lookup.php,POST,default_room_common_name,body,sqli,false,/index.php?page=conference-room-lookup.php,sink,,direct
+MUTL-0015,/index.php?page=conference-room-lookup.php,POST,default_room_common_name,body,xpath_injection,false,/index.php?page=conference-room-lookup.php,sink,,direct
+MUTL-0016,/index.php?page=conference-room-lookup.php,POST,default_room_common_name,body,xss-reflected,false,/index.php?page=conference-room-lookup.php,sink,,direct
+MUTL-0017,/index.php?page=dns-lookup.php,POST,target_host,body,xss-reflected,true,/index.php?page=dns-lookup.php,sink,,direct
+MUTL-0018,/index.php?page=dns-lookup.php,POST,target_host,body,ldap_injection,false,/index.php?page=dns-lookup.php,sink,,direct
+MUTL-0019,/index.php?page=dns-lookup.php,POST,target_host,body,sqli,false,/index.php?page=dns-lookup.php,sink,,direct
+MUTL-0020,/index.php?page=echo.php,POST,message,body,xss-reflected,true,/index.php?page=echo.php,sink,,direct
+MUTL-0021,/index.php?page=echo.php,POST,message,body,xpath_injection,false,/index.php?page=echo.php,sink,,direct
+MUTL-0022,/index.php?page=xml-validator.php&xml-validator-php-submit-button=Validate+XML,POST,xml,body,xxe,true,/index.php?page=xml-validator.php&xml-validator-php-submit-button=Validate+XML,sink,,direct
+MUTL-0023,/index.php?page=xml-validator.php&xml-validator-php-submit-button=Validate+XML,POST,xml,body,xss-reflected,true,/index.php?page=xml-validator.php&xml-validator-php-submit-button=Validate+XML,sink,,direct
+MUTL-0024,/index.php?page=pen-test-tool-lookup.php&pen-test-tool-lookup-php-submit-button=Lookup+Tool,POST,ToolID,body,sqli,true,/index.php?page=pen-test-tool-lookup.php&pen-test-tool-lookup-php-submit-button=Lookup+Tool,sink,,direct
+MUTL-0025,/index.php?page=pen-test-tool-lookup.php&pen-test-tool-lookup-php-submit-button=Lookup+Tool,POST,ToolID,body,xss-reflected,true,/index.php?page=pen-test-tool-lookup.php&pen-test-tool-lookup-php-submit-button=Lookup+Tool,sink,,direct
+MUTL-0026,/index.php?page=redirectandlog.php,GET,forwardurl,query,open_redirect,true,/index.php?page=redirectandlog.php,sink,,direct
+MUTL-0027,/index.php?page=redirectandlog.php,GET,forwardurl,query,xss-reflected,true,/index.php?page=redirectandlog.php,sink,,direct
+MUTL-0028,/index.php?page=user-poll.php&user-poll-php-submit-button=Submit+Vote,GET,choice,query,sqli,true,/index.php?page=user-poll.php&user-poll-php-submit-button=Submit+Vote,sink,,direct
+MUTL-0029,/index.php?page=user-poll.php&user-poll-php-submit-button=Submit+Vote,GET,choice,query,xss-reflected,true,/index.php?page=user-poll.php&user-poll-php-submit-button=Submit+Vote,sink,,direct
+MUTL-0030,/index.php?page=user-poll.php&user-poll-php-submit-button=Submit+Vote,GET,initials,query,xss-reflected,true,/index.php?page=user-poll.php&user-poll-php-submit-button=Submit+Vote,sink,,direct
+MUTL-0031,/index.php?page=document-viewer.php,GET,PathToDocument,query,xss-reflected,true,/index.php?page=document-viewer.php,sink,,direct
+MUTL-0032,/index.php,GET,page,query,path_traversal,true,/index.php,sink,,direct
+MUTL-0033,/index.php,GET,page,query,xss-reflected,true,/index.php,sink,,direct
+MUTL-0034,/hints-page-wrapper.php,GET,level1HintIncludeFile,query,sqli,true,/hints-page-wrapper.php,sink,,direct
+MUTL-0035,/hints-page-wrapper.php,GET,level1HintIncludeFile,query,xss-reflected,true,/hints-page-wrapper.php,sink,,direct
+MUTL-0036,/includes/pop-up-help-context-generator.php,GET,pagename,query,sqli,true,/includes/pop-up-help-context-generator.php,sink,,direct
+MUTL-0037,/includes/pop-up-help-context-generator.php,GET,pagename,query,xss-reflected,true,/includes/pop-up-help-context-generator.php,sink,,direct
+MUTL-0038,/index.php?page=view-account-profile.php,GET,uid,query,sqli,true,/index.php?page=view-account-profile.php,sink,,direct
+MUTL-0039,/index.php?page=edit-account-profile.php,GET,uid,query,sqli,true,/index.php?page=edit-account-profile.php,sink,,direct

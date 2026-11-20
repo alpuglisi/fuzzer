@@ -1,0 +1,64 @@
+# OWASP Mutillidae II (webpwnized, GPL-3.0; external lab fixture, CC-LAB-0340 / FR-LAB-340).
+# Lab-only. A deliberately vulnerable PHP app over MariaDB and OpenLDAP: SQL, LDAP and
+# XPath injection, XSS, OS command injection, file inclusion, XXE, open redirect and
+# header injection, each page switchable between security level 0 (insecure) and 5
+# (secure).
+#
+# Upstream's own published images (webpwnized/mutillidae-docker, its
+# .build/docker-compose.yml), pinned by digest; upstream's phpMyAdmin and phpLDAPadmin
+# containers are left out (not needed, and two more web tiers to expose).
+#
+# Safety: the web tier is published on LOOPBACK ONLY (127.0.0.1). The database and the
+# directory are never published and sit on internal networks (no egress); the web tier
+# reaches them by the service names upstream's code uses (`database`, `directory`).
+# Capabilities dropped. Mutillidae runs OS commands for its users (dns-lookup.php):
+# never expose this stack.
+#
+# Run through lab/labctl.sh:  ./labctl.sh up mutillidae [--authorized]
+#                             ./labctl.sh reset mutillidae [--authorized]
+# Port 3093 by default; MUTILLIDAE_PORT overrides. `--authorized` builds the database
+# (set-up-database.php) and loads the directory (Mutillidae's own LDIF).
+name: fuzzlab-mutillidae
+
+x-podman:
+  in_pod: false
+
+services:
+  www:
+    image: docker.io/webpwnized/mutillidae:www@sha256:90d0cc2279e22592f993680775aff8da743a01191c73d2fabbf766f7ebde56b7
+    depends_on: [database, directory]
+    networks: [mutillidae-front, mutillidae-data, mutillidae-ldap]
+    ports:
+      # Loopback only. Never bind 0.0.0.0.
+      - "127.0.0.1:${MUTILLIDAE_PORT:-3093}:80"
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE, SETUID, SETGID, CHOWN, DAC_OVERRIDE]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    mem_limit: 768m
+
+  database:
+    image: docker.io/webpwnized/mutillidae:database@sha256:5569286c0d4bc3436f28e91c2c029613910c02cd440ccd9e39dc11dddee9e6ec
+    networks: [mutillidae-data]
+    tmpfs: [/var/lib/mysql]
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID, DAC_OVERRIDE]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    mem_limit: 768m
+
+  directory:
+    image: docker.io/webpwnized/mutillidae:ldap@sha256:bc98847a4cc53fff691b68e2e5b9358f00c3a2ef4ae4985e899ef8a7cf3116cf
+    networks: [mutillidae-ldap]
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID, DAC_OVERRIDE, FOWNER, KILL, NET_BIND_SERVICE]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    mem_limit: 512m
+
+networks:
+  mutillidae-front: {}
+  mutillidae-data:
+    internal: true
+  mutillidae-ldap:
+    internal: true
