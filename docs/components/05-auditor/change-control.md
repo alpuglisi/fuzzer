@@ -3,6 +3,15 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0730 — Captured-body settings refusal follows the grounded settings words (FR-AUD-730, BUG-0731) (2026-11-20)
+- Placement: lane HEUR (item HEUR-B), base 82910aa; pre-assigned CC-AUD-0730..0734.
+- Change: none in this component's code. `store_adapter.body_refusal` (FR-AUD-22) calls `formnav.settings_word` on every key, and that word set changed in CC-CRAWL-0680 (BUG-0731): each word now cites at least two independent sources; `sort`, `per page`, `view`, `display`, `layout`, `skin`, `region` and `mode` were removed (no independent source calls them a stored setting; JSON:API, GitHub REST and WordPress REST treat `sort` / `per_page` as read-only list modifiers); `locale`, `timezone` and the pair `time zone` were added (Spring `LocaleChangeInterceptor`, Rails I18n guide, Django time-zone docs, Rails `time_zone_select`).
+- Impact (other components / project): a captured JSON or form body whose keys include `sort`, `per_page`, `view`, `mode`, `display`, `layout`, `skin` or `region` (and no other refusal) is now imported and its leaves fuzzed, so a sort / order key (an ORDER BY injection point, OWASP WSTG-INPV-05) is no longer hidden. A body keyed `locale`, `timezone` or `time_zone` is now refused. Measured on bWAPP, Juice Shop, Mutillidae and secDevLabs crawl runs (CHANGELOG line of lane HEUR).
+- Risk (level; mitigation or accepted-risk justification): low. Importing a body sends nothing by itself; every fuzzed send still passes SP-09 and the destructive / transaction / credential rules. Accepted residual: a body that stores a `mode`-like preference is now fuzzed (it changes a lab preference, never a credential).
+- Deliverables:
+  - [x] FR-AUD-22 amended in place, FR-AUD-730 added — done
+  - [x] `tests/test_formnav_settings_evidence.py` and `tests/test_forms_phase2.py` cover the word set `body_refusal` reads — done (HEUR-B sub-agent, verified by the lane: diff read, harness run)
+- Effectiveness (assessed 2026-11-20): see the lane's crawl-run table (CHANGELOG, lane HEUR).
 ### CC-AUD-0620 — Rules for LDAP and XPath injection (FR-AUD-620) (2026-11-20)
 - Change: `fuzzlab/audit/rules_data/default_rules.json` (`R-LDAP-INJECTION`,
   `R-XPATH-INJECTION`: query, body and JSON points, references `ldap-injection` and

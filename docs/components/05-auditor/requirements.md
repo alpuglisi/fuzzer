@@ -424,6 +424,11 @@ budget where a vulnerability is plausible.
   - **Stated gaps:** a protocol-relative example (`//host/x`, shape `path`) gets no
     rule and no seed; an allowlist keyed on a query string is not matched (the seed
     drops the query).
+- **FR-AUD-730** *(grounded settings words for captured bodies; `CC-AUD-0730`, 2026-11-20,
+  BUG-0731).* The settings-word refusal of FR-AUD-22 uses `formnav.settings_word` only,
+  whose every word cites at least two independent public sources (FR-CRAWL-680); no
+  word is kept because one lab measured it. A captured body keyed by a read-only list
+  modifier (`sort`, `per_page`) is imported and fuzzed like any other body.
 - **FR-AUD-22** *(captured requests and JSON leaves; `CC-AUD-0035`, 2026-10-14, forms
   phase 3, lane J).*
   - **Source.** `store_adapter.import_spider` reads the spider table
@@ -443,7 +448,7 @@ budget where a vulnerability is plausible.
     (`store_adapter.credential_change_rule`, the one rule crawled forms use: two or
     more password fields, a password field named with a change word — new, confirm,
     repeat, current, old …, or an account-management token in the URL path); a body
-    with a settings word (`formnav.settings_word`) on any key; a destructive name or
+    with a settings word (`formnav.settings_word`, the cited word set of FR-CRAWL-680 / FR-AUD-730) on any key; a destructive name or
     value (`entries_refusal`, run with `credential_names=True` over the non-password
     leaves — every credential-named leaf is a password field, so that half is a second
     check; each name and value is judged as a text, `core.urls.text_destructive_reason`,
