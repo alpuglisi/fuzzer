@@ -2224,3 +2224,10 @@ Juice Shop lab is complete.
 - **Impact:** five guaranteed false negatives on a fresh lab, and answer keys that overstated what fuzzlab measured on three labs for a month.
 - **Cause:** a reach tag was inferred from "the sink is vulnerable" plus "the point names the parameter", and no scored run was recorded (PA-0042 was scoped to new class mappings and not enforced).
 - **Status:** fixed for copy-n-paste and mongection (CC-LAB-0360); comment-killer recorded `open:`; PA-0640 makes the record a checked file.
+
+### F-642 — I set up the container without the `disco` extra, and my first harness run counted three failures that came from the missing package
+- **What:** lane ACC installed fuzzlab with `.[browser,web,dev]`; `mitmproxy` (the `disco` extra) was absent, so the first `verify_change.py --base 2be7a50` run of 5e1e7d1 failed three `tests/test_browser_session_reach.py` disco tests ("mitmproxy unavailable") beside five `tests/test_navigation_aborts.py` failures.
+- **Evidence:** the run's `parallel.log` (5509 passed, 8 failed); the same 8 failed on 2be7a50 in a clean worktree; mitmproxy then installed and the harness re-run (CC-LAB-0360).
+- **Impact:** one wasted harness cycle; no result reported from it.
+- **Cause:** I installed the extras the runbook's Part B names, not every extra the suite's browser tests import under `FUZZLAB_REQUIRE_BROWSER=1`.
+- **Status:** remediated (mitmproxy installed, harness re-run).

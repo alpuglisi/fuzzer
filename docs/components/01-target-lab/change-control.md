@@ -83,8 +83,16 @@ Component code: **LAB**. Entry format and required fields: see
   - [x] all 11 labs up and scored BEFORE and AFTER (live, docker) — done
   - [x] copy-n-paste points, mongection identity and bootstrap — done
   - [x] record file, PA-0640 guard (proven on BUG-0640's shape) — done
-  - [x] BUG-0640, PA-0640, ERROR_LOG, F-640, F-641, FR-LAB-360..362, ARCHITECTURE,
-    CHANGELOG — done
+  - [x] BUG-0640, PA-0640, ERROR_LOG, F-640, F-641, F-642, FR-LAB-360..362,
+    ARCHITECTURE, CHANGELOG — done
+  - [x] `scripts/verify_change.py --base 2be7a50` on 5e1e7d1 (the code and records; later
+    commits change only docs): 143 files, 5512 passed, 5 failed, 5 skipped, 148 xfailed.
+    The 5 failures are `tests/test_navigation_aborts.py` (an aborted navigation does not
+    raise: "DID NOT RAISE"); the same 5 (and 3 more, from a missing `mitmproxy`, F-642)
+    fail on 2be7a50 in a clean worktree in this container. This container runs Chrome for
+    Testing 153.0.8010.12 with Playwright 1.63; the probes were measured on Chromium
+    141.0.7390.37 (BUG-0559). Attributed to that browser drift, not reproduced on 141
+    here; reported to the orchestrator, not fixed in this lane (navguard is a hot file).
 - Effectiveness (assessed 2026-11-20): effective for the two fixed labs (copy-n-paste
   tp 0→2, mongection tp 0→2, fp 0, from a fresh `up`); the guard passes on the record and
   fails on BUG-0640's shape.
