@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-11-20 — environment / browser (five SP-01 tests fail on this container's Chromium 157, at 2be7a50 too)
+- **Symptom:** the GQL lane's harness run: `tests/test_navigation_aborts.py::test_a_failed_navigation_returns_after_its_own_error_page[1-3]`, `::test_a_navigation_overtaken_by_an_error_page_waits_for_it` and `::test_an_error_page_ends_the_previous_document` fail ("DID NOT RAISE Error"; a missing `_fetch_static` mark). The same five fail on 2be7a50 itself (84 passed, 5 failed), so the lane's change does not cause them.
+- **Root cause:** measured: the container's Chromium 157.0.8103.78 (Playwright 1.63.0) answers `page.goto` of a 404 with an empty body as a normal 404 response (`no raise 404`); the tests' fixture relies on an older Chromium turning that answer into a failed navigation onto its own error page (`chrome-error://`), which SP-01's settle path (BUG-0522/0561) and these tests pin.
+- **Remediation:** none in the lane: SP-01's owner is `fuzzlab/tools/navguard.py`, a hot file the lane may not edit. Flagged to the orchestrator: either pin the Chromium the suite is measured on or re-measure SP-01's error-page path on Chromium 157 (its fixture needs another way to make a navigation fail).
+- **Status:** Open
+
 ## 2026-11-20 — target lab / DVGA (an import of DVGA's own port hung the lab)
 - **Symptom:** while measuring DVGA, a probe `importPaste(host: "localhost", port: 5013, ...)` never answered, and every later request to the lab hung.
 - **Root cause:** DVGA's `importPaste` runs `curl --insecure <url>` through `os.popen` with no timeout, inside a single gevent loop: a URL naming DVGA itself waits for an answer the blocked loop can never give.
