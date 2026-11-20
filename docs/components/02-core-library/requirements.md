@@ -1195,6 +1195,11 @@ plugin registry. It is the layer that makes the store the integration bus.
     method normalisation for joins (PA-0076(2)), moved from `ml.dataset` (which
     re-exports it) so the web UI shares it without the ML package.
 
+- **FR-CORE-605** *(the `ssjs` class; `CC-CORE-0605`, 2026-11-20).* `core.runmode`
+  maps the ground-truth class `ssjs` to category `server-side-javascript-injection`
+  (`_VULN_TO_CATEGORY`), so a run derives the category from an answer key's positives
+  (D14) and scores its findings.
+
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers
   never block the writer (WAL).

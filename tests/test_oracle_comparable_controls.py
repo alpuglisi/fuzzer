@@ -755,6 +755,10 @@ CONTROL_READING = {
     # FR-FUZZ-620/621 (CC-FUZZ-0620/0621): the shared engine, from a common base
     "LdapFilterInjectionStrategy": ("differential", "the shared engine's B0, V, B, D"),
     "XPathInjectionStrategy": ("differential", "the shared engine's B0, V, B, D"),
+    "SsjsEvaluationMarkerStrategy": ("positive", "two evaluated results; an absence "
+                                     "disqualifies"),
+    "SsjsBooleanDifferentialStrategy": ("differential", "B0, V and B are controls; D "
+                                        "admits policy"),
 }
 #: The kinds whose sends the guard checks, and the shared engines each one runs.
 CONTROL_READERS = {"negative-control": (), "differential": ("_differential",),

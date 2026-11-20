@@ -755,6 +755,11 @@ budget where a vulnerability is plausible.
     field is (`_import_forms`); a hidden or unseen one stays pinned (FR-AUD-22).
   - Malformed `actions.jsonl` lines are counted `quarantined`, with the capture's own.
 
+- **FR-AUD-610** *(a server-side JavaScript injection rule; `CC-AUD-0610`, 2026-11-20).*
+  `R-SSJS` (`default_rules.json`) nominates category `server-side-javascript-injection`
+  for every query, body, JSON-leaf and path point (where `R-SQLI-PARAM` and `R-SSTI`
+  apply): the value may reach `eval`, `new Function` or a `$where` whatever its name.
+
 ## 4. Non-functional requirements
 - **NFR-AUD-explainable** Every candidate is traceable to the rule evidence that
   produced it; a candidate with no evidence is a bug.
