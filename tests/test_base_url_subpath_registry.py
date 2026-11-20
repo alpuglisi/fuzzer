@@ -330,6 +330,9 @@ REGISTRY = {
     # reaches an origin.
     "fuzzlab.core.runtarget:origin_of":
         Covered(f"{_ME}::test_a_subpath_base_reduces_to_its_origin_never_its_path"),
+    "fuzzlab.harness.auto_cli:graphql_schema_discovery":
+        Covered("tests/test_graphql_schema_import.py::"
+                "test_a_subpath_base_joins_stored_endpoints_to_its_origin_only"),
     "fuzzlab.harness.auto_cli:_auth_origins":
         Covered(f"{_ME}::test_auth_origins_are_scoped_by_a_subpath_bases_host"),
     "fuzzlab.session.manager:SessionManager._check_base":

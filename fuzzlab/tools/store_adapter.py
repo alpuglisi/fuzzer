@@ -1342,16 +1342,17 @@ def graphql_endpoints(store: Store, run_id: int) -> list[tuple[str, str | None]]
     endpoint is GraphQL because the app sent it a GraphQL document (GraphQL over HTTP),
     whatever it is called. At most `MAX_SCHEMA_ENDPOINTS`."""
     from fuzzlab.core import jsonbody
+    from fuzzlab.core.forms import form_enctypes
     from fuzzlab.tools.apiop import graphql_operations
+    enctypes = form_enctypes(store.conn, run_id)
     rows = store.conn.execute(
-        "SELECT e.url AS url, f.entries AS entries, f.source_page AS page "
+        "SELECT e.url AS url, f.entries AS entries, f.source_page AS page, f.id AS id "
         "FROM form f JOIN endpoint e ON e.id = f.endpoint_id "
-        "WHERE f.run_id = ? AND e.method = 'POST' AND f.enctype = ? ORDER BY f.id",
-        (run_id, jsonbody.ENCTYPE)).fetchall()
+        "WHERE f.run_id = ? AND e.method = 'POST' ORDER BY f.id", (run_id,)).fetchall()
     out: dict[str, str | None] = {}
     for row in rows:
         url = row[0]
-        if url in out:
+        if url in out or enctypes.get(int(row[3])) != jsonbody.ENCTYPE:
             continue
         entries = jsonbody.decode_entries(row[1]) if row[1] else None
         document = next((v for p, v in entries or () if p == ("query",)), None)

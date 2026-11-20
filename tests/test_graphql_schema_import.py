@@ -144,3 +144,15 @@ def test_import_is_pure_on_the_answer(tmp_path):
                                        kinds=("query",))
         assert counts["graphql_schema_operation"] == 2
         assert counts["graphql_schema_refused"] == 0
+
+
+def test_a_subpath_base_joins_stored_endpoints_to_its_origin_only(tmp_path):
+    """A base URL under a sub-path (``/app/``): a stored endpoint path is absolute
+    (``/app/gq``), so it joins the base's origin, never its path (BUG-0113)."""
+    st = Store(tmp_path / "sp.db")
+    run = st.start_run("auto", "localhost")
+    with st:
+        _capture(st, run, BASE + "/app/gq", {"query": "{ a }"})
+        sender = _Sender(_schema_answer())
+        graphql_schema_discovery(st, run, sender, BASE + "/app/")
+        assert [u for u, *_x in sender.sent] == [BASE + "/app/gq"]

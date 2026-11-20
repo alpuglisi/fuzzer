@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-11-20 — crawl/import (lane CRAWLCOV's 0ae302d failed three whole-package guards; F-700)
+- **Symptom:** `scripts/verify_change.py --base f6b4790` on 0ae302d: 5442 passed, 8 failed -- 5 the known base failures of `tests/test_navigation_aborts.py` (lane NAV's fix), 3 new: `test_forms_phase2.py::test_only_core_forms_reads_form_enctype`, `test_cli_taxonomy.py::...[auto]`, `test_base_url_subpath_registry.py::test_every_base_url_function_is_registered`.
+- **Root cause:** the GraphQL schema step read `form.enctype` in its own SQL, added an `auto` flag without classifying it, and added a function taking `base_url` without registering its sub-path test; I pushed before the harness ran (the guards caught all three before any merge).
+- **Remediation:** `core.forms.form_enctypes` is the reader (CC-CORE-0660); `no_graphql_schema` classified; `graphql_schema_discovery` registered with `test_a_subpath_base_joins_stored_endpoints_to_its_origin_only`. No BUG/PA: the existing guards are the enforcement and they worked pre-merge.
+- **Status:** Fixed.
+
 ## 2026-11-20 — session / probe sender (a routed login's auth gate judged the URL, not the request; BUG-0620)
 - **Symptom:** orchestrator review of lane PHPX: with `/index.php?page=login.php` recorded, `is_auth_endpoint("/index.php")` was False, so a crawled login form (route in its sibling entries) would be probed with the run's session.
 - **Root cause:** CC-SESS-0611 narrowed the gate for routed logins against ground-truth URLs only; `SeamProbeSender._send` judges the URL before binding the entries, and a URL naming no route defaulted to "not an auth endpoint".

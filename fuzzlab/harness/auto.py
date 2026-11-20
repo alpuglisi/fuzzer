@@ -380,7 +380,7 @@ def injection_points_from_store(store, run_id: int, base_url: str,
     rows = store.conn.execute(
         "SELECT e.url AS path, e.method AS method, p.name AS name, p.location AS location, "
         "p.example AS example, f.entries AS entries, f.source_page AS source_page, "
-        "f.fresh AS fresh, f.enctype AS enctype, we.url AS write_path, "
+        "f.fresh AS fresh, f.id AS form_id, we.url AS write_path, "
         "we.method AS write_method "
         "FROM parameter p JOIN endpoint e ON p.endpoint_id = e.id "
         "LEFT JOIN form f ON f.id = p.form_id "
@@ -393,6 +393,8 @@ def injection_points_from_store(store, run_id: int, base_url: str,
     shapes_by_name: dict[str, set[str]] = {}
     for r in rows:
         shapes_by_name.setdefault(r["name"], set()).update(_shapes(r["example"]))
+    from fuzzlab.core.forms import form_enctypes
+    enctypes = form_enctypes(store.conn, run_id)        # the one reader (FR-FUZZ-691)
     points: list[InjectionPoint] = []
     # SP-57 (FR-FUZZ-66, BUG-0530): two rows are one point only when their request
     # contexts and seeds are equal -- never by (path, method, name), which merged a
@@ -413,7 +415,8 @@ def injection_points_from_store(store, run_id: int, base_url: str,
             continue
         location = r["location"] or "query"
         if location == STORED_LOCATION:
-            point, why = _stored_point(r, url, base, browser_available)
+            point, why = _stored_point(r, url, base, browser_available,
+                                       enctypes)
             if point is None:
                 if skipped is not None:
                     skipped.append((path, method, r["name"], why))
@@ -490,7 +493,7 @@ def injection_points_from_store(store, run_id: int, base_url: str,
     return points
 
 
-def _stored_point(r, url: str, base: str, browser_available: bool):
+def _stored_point(r, url: str, base: str, browser_available: bool, enctypes: dict):
     """``(point, None)`` for a crawl-derived stored-XSS parameter (FR-FUZZ-691,
     FR-AUD-691), or ``(None, why)``: its endpoint (``url``) is the page that renders the
     value, its form row the write that stores it (the write's endpoint, method, encoding
@@ -514,7 +517,7 @@ def _stored_point(r, url: str, base: str, browser_available: bool):
     store_method = (r["write_method"] or "POST").upper()
     if store_method in WRITE_METHODS:
         return None, f"stored XSS through {store_method}: probed only with --fuzz-json-writes"
-    if r["enctype"] == jsonbody.ENCTYPE:
+    if enctypes.get(r["form_id"]) == jsonbody.ENCTYPE:
         raw = jsonbody.decode_entries(r["entries"])
         store_location = jsonbody.LOCATION
     else:

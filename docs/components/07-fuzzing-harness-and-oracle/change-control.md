@@ -3,6 +3,26 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0691 — Crawl-derived stored-XSS points (FR-FUZZ-691) (2026-11-20)
+- Placement: lane CRAWLCOV (part 5), base f6b4790.
+- Change: `fuzzlab/harness/auto.py`: `injection_points_from_store` builds a `stored`
+  parameter as a stored-XSS point (`_stored_point`), as ground truth's are: GET at the
+  render page, `store_url` / `store_method` / `store_location` / `store_entries` from the
+  write's endpoint and form row (its full sibling entries, so a form that needs its
+  submit field gets it), `decided_by` `StoredXssStrategy`, browser only; refused for a
+  destructive or other-origin store URL, a PUT/PATCH write without `--fuzz-json-writes`,
+  a credential name, an entry naming a host outside the lab. Encoding read through
+  `core.forms.form_enctypes`. `fuzzlab/harness/auto_cli.py`: `--no-graphql-schema` is
+  classified (`cli_taxonomy`), `graphql_schema_discovery` is in the sub-path registry
+  with its test.
+- Impact (other components / project): crawl runs now plant stored XSS where a disco
+  capture shows the store and the render (lane XSSPLANT's gap 1 for disco runs).
+- Risk (level; mitigation or accepted-risk justification): low-medium: each pair costs
+  browser confirmations.
+- Deliverables:
+  - [x] point builder, tests — done
+  - [x] FR-FUZZ-691, CHANGELOG — done
+
 ### CC-FUZZ-0690 — `auto` asks a GraphQL endpoint for its schema once in a discovery run (FR-FUZZ-690) (2026-11-20)
 - Placement: lane CRAWLCOV (item CRAWLCOV-GQL), base f6b4790, pre-assigned
   CC-FUZZ-0690..0694.

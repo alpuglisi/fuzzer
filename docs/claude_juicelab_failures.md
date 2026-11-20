@@ -2272,3 +2272,10 @@ Juice Shop lab is complete.
 - **Cause:** I tuned a heuristic to the lab I was measuring and treated a disclosure of that as sufficient, instead of requiring evidence from an independent target.
 - **Status:** corrected (CC-AUD-0602).
 
+### F-700 — I pushed lane CRAWLCOV's GraphQL commit before the harness had run, and it failed three guards
+- **What:** 0ae302d read `form.enctype` outside `core/forms.py`, left the new `--no-graphql-schema` unclassified, and left `graphql_schema_discovery(base_url)` out of the sub-path registry; I pushed it (stop hook asked to push) while `verify_change.py` was still running, and pushed the untested part-5 WIP f996ab6 the same way.
+- **Evidence:** ERROR_LOG 2026-11-20 (CRAWLCOV); the harness summary of 0ae302d (3 new failures of 8).
+- **Impact:** a red lane tip for about an hour; nothing merged.
+- **Cause:** I wrote the step without first reading which whole-package guards cover the store, the CLI and base URLs, and treated "commit and push" as more urgent than "verify".
+- **Status:** corrected in the follow-up commit (CC-CORE-0660, CC-FUZZ-0691).
+

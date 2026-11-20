@@ -1200,6 +1200,10 @@ plugin registry. It is the layer that makes the store the integration bus.
   (`_VULN_TO_CATEGORY`), so a run derives the category from an answer key's positives
   (D14) and scores its findings.
 
+- **FR-CORE-660 (form encodings by row; CC-CORE-0660, 2026-11-20)**
+  `core.forms.form_enctypes(conn, run_id)` returns every `form` row's enctype by id; with
+  `first_link_set` it is the only store reader of `form.enctype`.
+
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers
   never block the writer (WAL).

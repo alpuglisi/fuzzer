@@ -1866,6 +1866,13 @@ fuzzer.
   failed send, a non-200 answer or an unreadable schema is counted and imports nothing.
   `--no-graphql-schema` turns it off.
 
+- **FR-CRAWL-672 (store -> render pairs from a capture; CC-CRAWL-0671, 2026-11-20)**
+  `disco/storerender.py::store_render_pairs` names, from a disco capture's records,
+  each (write, written leaf, render page) the traffic shows: the render is a later
+  answered exchange whose response holds the leaf's value and which is not a write
+  sending it; its page is the exchange's own URL for an HTML document, else its
+  same-origin `Referer`; a value any earlier response held is no evidence. Pure, bounded.
+
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default
   to not clicking them. *(Built CC-CRAWL-0011, BUG-0111:)* the one rule is

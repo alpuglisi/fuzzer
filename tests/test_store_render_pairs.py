@@ -135,5 +135,8 @@ def test_a_pinned_leaf_never_becomes_a_stored_point(tmp_path):
                  body=json.dumps({"password": VALUE, "note": "x"}), referer="/sign")
     st, run_id, counts = _imported(tmp_path, [write, _html_render()])
     with st:
+        # the capture blanks a password when it is written, so no pair forms at all;
+        # never a stored point either way
         assert counts["store_render"] == 0
-        assert counts["store_render_skipped"] == 1
+        points = injection_points_from_store(st, run_id, BASE, browser_available=True)
+        assert not [p for p in points if p.store_url]

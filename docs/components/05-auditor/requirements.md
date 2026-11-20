@@ -782,6 +782,12 @@ budget where a vulnerability is plausible.
   pinning unchanged), with the source page of the endpoint's captured request; nothing is
   sent. `graphql_endpoints` names the endpoints (at most 4).
 
+- **FR-AUD-691 (store -> render pairs as `stored` parameters; CC-AUD-0691, 2026-11-20)**
+  `import_disco` imports each FR-CRAWL-672 pair whose write it stored, and whose leaf is
+  a point of that write, as a parameter (location `stored`) of the render page's GET
+  endpoint whose `form_id` is the write's form row. A render page holding a value the
+  strongest URL redactor changes is never stored.
+
 ## 4. Non-functional requirements
 - **NFR-AUD-explainable** Every candidate is traceable to the rule evidence that
   produced it; a candidate with no evidence is a bug.

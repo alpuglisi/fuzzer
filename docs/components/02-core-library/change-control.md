@@ -3,6 +3,19 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0660 — `core.forms.form_enctypes`: the second store reader of `form.enctype` (FR-CORE-660) (2026-11-20)
+- Placement: lane CRAWLCOV, base f6b4790.
+- Change: `fuzzlab/core/forms.py::form_enctypes(conn, run_id)` -> `{form id: enctype}`;
+  read by `store_adapter.graphql_endpoints` and `harness.auto` (stored points), which had
+  read the column in their own SQL in 0ae302d/f996ab6 and failed
+  `tests/test_forms_phase2.py::test_only_core_forms_reads_form_enctype` (ERROR_LOG
+  2026-11-20, F-700).
+- Impact (other components / project): none beyond those readers.
+- Risk (level; mitigation or accepted-risk justification): low.
+- Deliverables:
+  - [x] the reader; guard green — done
+  - [x] FR-CORE-660, CHANGELOG — done
+
 ### CC-CORE-0610 — The `ldap_injection` and `xpath_injection` classes (FR-CORE-610) (2026-11-20)
 - Change: `fuzzlab/core/runmode.py` (`_VULN_TO_CATEGORY`), `fuzzlab/labels/schemas/
   labels.schema.json` (vuln classes `ldap_injection`, `xpath_injection`; sink contexts

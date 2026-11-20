@@ -3,6 +3,26 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0691 — A capture's store -> render pairs imported as `stored` parameters (FR-AUD-691) (2026-11-20)
+- Placement: lane CRAWLCOV (part 5), base f6b4790.
+- Change: `fuzzlab/tools/store_adapter.py`: `import_disco` keeps each stored captured
+  request's ids (`_store_request` now returns `(endpoint id, form id, location)`), then
+  `_import_store_renders`: for each FR-CRAWL-672 pair whose write was stored and whose
+  leaf is a point of it, an endpoint for the render page (GET, source `stored-render`)
+  with a parameter named as the leaf, location `stored` (`STORED_LOCATION`), whose
+  `form_id` is the write's own form row. A render page the strongest URL redactor would
+  change is never stored (`_source_page`). Counted `store_render` / `store_render_skipped`.
+  No migration: the pairing is expressed in existing tables.
+  `graphql_endpoints` reads `form.enctype` through `core.forms.form_enctypes` (the
+  guard's one reader; CC-CORE-0660).
+- Impact (other components / project): point building (CC-FUZZ-0691); the web site tree
+  shows a `stored` row as any parameter.
+- Risk (level; mitigation or accepted-risk justification): low; every write rule already
+  applied when the write was stored.
+- Deliverables:
+  - [x] import, tests (`tests/test_store_render_pairs.py`) — done
+  - [x] FR-AUD-691, CHANGELOG — done
+
 ### CC-AUD-0690 — A GraphQL schema answer imported as captured requests (FR-AUD-690) (2026-11-20)
 - Placement: lane CRAWLCOV (item CRAWLCOV-GQL), base f6b4790, pre-assigned
   CC-AUD-0690..0694.

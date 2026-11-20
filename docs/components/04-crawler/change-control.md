@@ -3,6 +3,27 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0671 — Store -> render pairs from a disco capture's own evidence (FR-CRAWL-672) (2026-11-20)
+- Placement: lane CRAWLCOV (part 5), base f6b4790. Not a change to `spider.py`.
+- Change: new `fuzzlab/disco/storerender.py` (pure): `store_render_pairs(records)` over a
+  capture's records in time order: a write (answered POST/PUT/PATCH, JSON or form body)
+  and each usable string leaf (at least `MIN_VALUE_CHARS`, a letter); a LATER answered
+  exchange whose response holds the value, not itself a write sending it; its page (an
+  HTML GET document's own URL, else its same-origin `Referer`); and no response holding
+  the value before the first write that sends it. Bounded (`MAX_VALUES`, `MAX_PAIRS`,
+  `MAX_RENDERS_PER_LEAF`, `MAX_BODY_CHARS`); total on hostile records.
+- Measured (§7): the rule reads the application's own traffic only: no name, path or
+  value of any target (PA-0660). A value several leaves share pairs every one of them:
+  `StoredXssStrategy` confirms only by executing its own payload in the render page, so
+  a wrong pair costs a confirmation, never a finding (PA-0546(2)). Effectiveness on DVGA:
+  see CC-LAB-0410. Spider runs are not paired yet (the spider records no response
+  bodies, and `spider.py` is held for lane CRAWLSAFE).
+- Impact (other components / project): read by the disco importer (CC-AUD-0691).
+- Risk (level; mitigation or accepted-risk justification): low; pure.
+- Deliverables:
+  - [x] module, `tests/test_store_render_pairs.py` — done
+  - [x] FR-CRAWL-672, CHANGELOG — done
+
 ### CC-CRAWL-0670 — GraphQL schema discovery: one bounded introspection request, its operations as points (FR-CRAWL-670/671) (2026-11-20)
 - Placement: lane CRAWLCOV (item CRAWLCOV-GQL), base f6b4790, pre-assigned
   CC-CRAWL-0670..0679. Not a change to `spider.py` or `navguard.py`.

@@ -2270,6 +2270,12 @@ rewards) derives from it.
   `--no-graphql-schema`, `fuzzlab auto` runs FR-CRAWL-671 after its imports, through the
   run's own probe sender, before the pipeline.
 
+- **FR-FUZZ-691 (crawl-derived stored-XSS points; CC-FUZZ-0691, 2026-11-20)** A
+  `stored` parameter (FR-AUD-691) is a stored-XSS point: GET at its endpoint (the render
+  page), its store step the form row's write (endpoint, method, encoding, every sibling
+  entry), decided by `StoredXssStrategy`; built only with a browser, refused as any
+  crawl point and for a PUT/PATCH write without `--fuzz-json-writes`.
+
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
   finding must reproduce.

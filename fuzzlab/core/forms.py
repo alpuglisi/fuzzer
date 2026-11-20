@@ -111,6 +111,14 @@ def is_link_set(row) -> bool:
     return row["enctype"] is LINK_SET_ENCTYPE
 
 
+def form_enctypes(conn, run_id: int) -> dict[int, str | None]:
+    """``{form id: enctype}`` of a run's store ``form`` rows: the other store reader of
+    ``form.enctype`` (FR-CRAWL-671, FR-FUZZ-691; with `first_link_set`, kept here by
+    the guard test). A link set's enctype is `LINK_SET_ENCTYPE`."""
+    return {int(r[0]): r[1] for r in conn.execute(
+        "SELECT f.id, f.enctype FROM form f WHERE f.run_id = ?", (run_id,)).fetchall()}
+
+
 def first_link_set(conn, run_id: int, path: str, accept=None) -> list[tuple[str, str]] | None:
     """The first crawled link query recorded for ``GET path`` in a run (already
     redacted by the importer) that can be sent as it is stored, or None: never one
