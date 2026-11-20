@@ -18,6 +18,54 @@ Format per entry:
 
 ---
 
+## 2026-11-20 — Oracle: the IDOR neighbour rule confirmed public id-keyed objects (BUG-0735, PA-0730)
+- **Symptom:** after CC-FUZZ-0712 (sub-agent branch, caught in the lane's review before
+  merge), a public page keyed by a numeric id (`?id=41` / `?id=42`) satisfied every
+  check of `AccessControlIdorStrategy`; with R-ACCESS-CONTROL nominating every id-shaped
+  GET parameter, each such page of a crawl run would have been an access-control finding.
+- **Root cause:** the old fixed ids had acted as an unnamed control (they named no real
+  object, so a real catalogue answered 404); replacing them removed it, and the strategy
+  had no control for its vulnerability's premise (the object is protected).
+- **Remediation:** the neighbour must also be refused to the same request sent with no
+  session (`PeerAccounts.anonymous`, built for every logged-in `fuzzlab auto` run); no
+  such sender is no verdict (CC-FUZZ-0714, FR-FUZZ-714).
+- **Status:** Fixed (before merge).
+
+## 2026-11-20 — Oracle: IDOR sent two fixed synthetic ids and required each echoed (BUG-0734, PA-0730)
+- **Symptom:** `50172` / `88190475` name no object on a real app; only id-echoing labgen
+  cells (and public echo pages) confirmed.
+- **Root cause:** the acceptance path (ground-truth points, no captured value) led the
+  strategy to invent ids and to prove keyed-ness by the lab template's echo.
+- **Remediation:** the captured id (`Candidate.base_entries`) twice (must replicate) and
+  its numeric neighbour (OWASP WSTG-ATHZ-04, API1:2023); no captured or no numeric id is
+  no verdict (CC-FUZZ-0712, FR-FUZZ-712). Ground-truth-run oracle diagnostic: twitch-clone
+  11 -> 9, netflix-clone multi-cell 9/11 -> 8/11.
+- **Status:** Fixed.
+
+## 2026-11-20 — Oracle: the ReDoS threshold was calibrated on the labs' own cells (BUG-0733, PA-0730)
+- **Symptom:** a fixed 20 ms floor, k=4, 3 baseline samples, one sample per template and
+  no control of the template's shape: a 0-40 ms jittery endpoint confirmed 0.63 % of the
+  time (Monte-Carlo), and a target slow for any regex-shaped input confirmed.
+- **Root cause:** the threshold came from the labgen ReDoS cells, and the differential had
+  no control of the probe's type minus what it tests.
+- **Remediation:** per-template structural controls (the pattern minus its nested /
+  ambiguous quantifier), 3 alternating rounds, a margin from the pool's own spread or 4
+  robust sigmas, a 5 ms measured client-resolution floor (CC-FUZZ-0711, FR-FUZZ-711).
+- **Status:** Fixed.
+
+## 2026-11-20 — Grey-box: a URL was mapped to `/var/www/html/<last segment>` (BUG-0732, PA-0730)
+- **Symptom:** on an app not installed flat at `/var/www/html` the endpoint was never
+  sink-covered and the coverage filter dropped every line; `/admin/login.php` read as the
+  root's `login.php`.
+- **Root cause:** the lab image's document root and flat layout were encoded in
+  `greybox/run.py::_endpoint_file` and `oracle/strategies.py::_greybox_sink_file` (two
+  copies, no owner).
+- **Remediation:** one owner, `greybox.coverage.endpoint_file` (the covered file ending
+  with the URL's whole segments, RFC 3875 SCRIPT_NAME / PATH_INFO; no verdict when none
+  maps); the root derived from the coverage; no default root (CC-FUZZ-0710, FR-FUZZ-710,
+  SP-145).
+- **Status:** Fixed. Open: `fuzzlab/mutation/` keeps the same default (component MUT).
+
 ## 2026-11-20 — Crawler / importer: the settings words were one lab's measurement plus reviewer intuition (BUG-0731, PA-0730)
 - **Symptom:** the shared settings-word list (`formnav.SETTINGS_WORDS`) refused read-only
   `sort` / `per_page` pickers and captured bodies (ORDER BY points never fuzzed) and
