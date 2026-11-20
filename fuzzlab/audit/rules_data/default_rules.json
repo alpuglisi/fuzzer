@@ -54,21 +54,21 @@
       "id": "R-SPEL-INJECTION",
       "category": "spel-injection",
       "transaction_type": "Expression Language Injection",
-      "when": { "location_not_in": ["fragment"], "name_regex": "sort|sortby|filter|order|expr|expression" },
+      "when": { "location_in": ["query", "body", "json"], "location_not_in": ["fragment"] },
       "reference": "spel-injection"
     },
     {
       "id": "R-SSRF",
       "category": "ssrf",
       "transaction_type": "Server-Side Request Forgery",
-      "when": { "location_not_in": ["fragment"], "name_regex": "url|uri|link|src|source|target|endpoint|fetch|proxy|webhook|image|thumbnail|avatar" },
+      "when": { "location_not_in": ["fragment"], "name_regex": "url|uri|link|src|source|target|endpoint|fetch|proxy|webhook|image|avatar" },
       "reference": "ssrf"
     },
     {
       "id": "R-ACCESS-CONTROL",
       "category": "access-control",
       "transaction_type": "Broken Object-Level Authorization",
-      "when": { "method_in": ["GET"], "location_in": ["query"], "name_regex": "channel_id|resource_id|object_id|item_id|record_id|owner_id|account_id" },
+      "when": { "method_in": ["GET"], "location_in": ["query"], "name_regex": "^(id|uuid|guid)$|[_-](id|uuid|guid)$|(?-i:[a-z](Id|ID|Uuid|UUID))$" },
       "reference": "access-control"
     },
     {
@@ -96,7 +96,7 @@
       "id": "R-JWT-ALG-NONE",
       "category": "jwt-algorithm-confusion",
       "transaction_type": "JWT Algorithm Confusion",
-      "when": { "location_in": ["header"], "name_regex": "authorization|jwt" },
+      "when": { "location_in": ["header"], "name_regex": "authorization" },
       "reference": "jwt-algorithm-confusion"
     },
     {
@@ -131,7 +131,7 @@
       "id": "R-CSV-FORMULA-INJECTION",
       "category": "csv-formula-injection",
       "transaction_type": "CSV Formula Injection",
-      "when": { "location_not_in": ["fragment"], "name_regex": "label|name|comment|note|description|title", "method_in": ["GET"] },
+      "when": { "location_not_in": ["fragment"], "name_regex": "name|comment|note|description|title", "method_in": ["GET"] },
       "reference": "csv-formula-injection"
     },
     {

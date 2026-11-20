@@ -151,6 +151,7 @@ def test_registered_in_default_strategies():
 
 
 def test_r_access_control_rule_matches_a_channel_id_query_get_point():
+    # By the generic identifier shape (`_id$`, BUG-0660), not by the name itself.
     class _Point:
         location = "query"
         method = "GET"
