@@ -3,6 +3,42 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0321 — DVGA re-measured after the lab-derived rules' removal; crawl is the headline (2026-11-20)
+- Placement: lane GQL (item GQL), review round 1; pre-assigned CC-LAB-0320..0324.
+- Change: `lab/ground-truth-dvga/` -- DVGA-0006 and DVGA-0011 (`systemDiagnostics`
+  username and password) become SQL injection negatives: as command-injection negatives
+  no generic rule reaches them once CC-AUD-0602 removed the GraphQL field rule, so they
+  would have counted as true negatives without a probe (F-601's class). Both are
+  compared in Python only and never reach SQL or a shell. `tests/test_dvga_live.py`:
+  floor DVGA-0003/0005/0007/0012/0013; stated misses DVGA-0001/0002/0004 (no generic
+  signal) and 0014/0015 (`[reach: none]`); every negative and floor case must get a
+  checked candidate.
+- Effectiveness (live, 2026-11-20, the lab reset before each run):
+  - **crawl (headline):** a fresh `fuzzlab disco capture --start http://127.0.0.1:5013/
+    --out <dir> --workers 2 --deadline 300 --authorized` (29 states, 2378 exchanges, 61
+    GraphQL POSTs; ended in Beginner mode, checked), then `fuzzlab auto --base-url
+    http://127.0.0.1:5013 --store <db> --disco-run <dir> --ground-truth
+    lab/ground-truth-dvga --points crawl --browser --oob --score --authorized` on it:
+    2be7a50 tp=1 fp=0 fn=9 tn=5, 454 requests, 66 s; this change tp=1 fp=0 fn=9 tn=5,
+    202 requests, 50 s (FR-AUD-601). The one finding is importPaste `host` (generic name
+    rule).
+  - gt (oracle diagnostic): tp=5 fp=0 fn=5 tn=5, 345 requests, 46 s -- the 2be7a50
+    baseline's numbers.
+- What blocks DVGA's crawl (measured in the capture): 4 of the 10 positives
+  (`systemDebug`, `systemDiagnostics`, `pastes(filter)`) are operations no page sends
+  -- reachable only by schema discovery (introspection answers in Beginner mode); the
+  import form is filled with `https://example.com`, so `path`/`scheme` are refused as
+  unsendable (FR-AUD-20, correct); stored XSS is planted only from ground-truth cases
+  (no crawl-derived store/render pairing); the upload page's file input is never
+  driven. Generic next steps, not built: introspection-driven operation discovery
+  (String/ID arguments only, mutations behind the destructive rules), and pairing a
+  captured store request with the page whose GraphQL read returns the stored value.
+- Impact (other components / project): answer key only.
+- Risk (level; mitigation or accepted-risk justification): low.
+- Deliverables:
+  - [x] answer key, live test updated; runs above — done
+  - [x] CHANGELOG — done
+
 ### CC-LAB-0320 — The Damn Vulnerable GraphQL Application (DVGA) as an external lab; command injection scoreable (2026-11-20)
 - Placement: lane GQL (item GQL), base 2be7a50, pre-assigned CC-LAB-0320..0324 /
   FR-LAB-320..324 (this entry uses CC-LAB-0320, FR-LAB-320 and FR-LAB-321).

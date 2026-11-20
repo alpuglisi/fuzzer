@@ -5,6 +5,7 @@ Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
 ## 2026-11-20
+- **What:** review round 1 of lane GQL: the two DVGA-derived GraphQL command-injection rules are removed (CC-AUD-0602, F-602; owner directive: detection is black-box only), keeping the spec-based GraphQL reader and skips; DVGA re-measured with crawl as the headline (CC-LAB-0321). **Why:** a rule may not depend on a lab's names; measured: crawl tp=1 fp=0 at 454 -> 202 requests vs 2be7a50 (same findings), gt back to the baseline tp=5.
 - **What:** the Damn Vulnerable GraphQL Application is an external lab (`dvga`, image pinned by digest, loopback only; CC-LAB-0320, FR-LAB-320/321) with an answer key of GraphQL variables as JSON-leaf points (10 positives, 5 negatives) and an unscored list of its GraphQL-implementation issues; command injection becomes a scoreable class; the auditor judges a GraphQL variable by the field argument it feeds, with two command-injection rules for GraphQL fields and sibling arguments, and no longer fuzzes a GraphQL document leaf or an Int/Float/Boolean variable (CC-AUD-0600/0601, CC-CRAWL-0600, FR-AUD-600/601, FR-CRAWL-600/601, SP-80). **Why:** onboarding GraphQL as a scanned technology; measured on the live lab, gt tp 5 -> 8 at fp=0 (345 -> 403 requests) and a crawl run 454 -> 202 requests with the same findings; Juice Shop unchanged.
 
 ## 2026-10-23
