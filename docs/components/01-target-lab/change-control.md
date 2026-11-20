@@ -132,6 +132,8 @@ Component code: **LAB**. Entry format and required fields: see
     2be7a50 worktree in this container (ERROR_LOG 2026-11-20). PA-0038: the three key
     files are tracked; `tests/test_external_labs_static.py` run alone: 275 passed; the
     gated live test (`FUZZLAB_LIVE_EXTERNAL_LABS=1 ... -k vulnerableapp`): 1 passed.
+    After the black-box review (CC-FUZZ-0633), on 4c92820: 194 files, 5962 passed, the
+    same 5 failed, 10 skipped, 156 xfailed.
   - Open (measured, not built here): stored XSS on a same-URL store and render (the
     reflected strategy confirms first and the oracle stops: VAPP-0034..0039); blind SQLi
     LEVEL_1 (`{ "isCarPresent": true}` vs `false}`: 23 vs 24 bytes, the boolean
