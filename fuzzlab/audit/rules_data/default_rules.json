@@ -19,6 +19,24 @@
       "reference": "sql-injection"
     },
     {
+      "id": "R-SQLI-JSON-BODY",
+      "category": "sql-injection",
+      "transaction_type": "SQL Injection",
+      "when": {
+        "location_in": [
+          "body"
+        ],
+        "content_type_in": [
+          "json"
+        ],
+        "origin_in": [
+          "ground-truth"
+        ]
+      },
+      "reference": "sql-injection",
+      "basis": "FR-AUD-701: an answer key's own whole-JSON-body point (rendering server-json, FR-FUZZ-19) keeps the SQL strategies' JSON-aware families; a crawled whole body is the app's own object, which a scalar SQL fragment replaces, so it draws only the whole-body rules"
+    },
+    {
       "id": "R-NOSQLI-JSON",
       "category": "nosql-injection",
       "transaction_type": "NoSQL Injection",

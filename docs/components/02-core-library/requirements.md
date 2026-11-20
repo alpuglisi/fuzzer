@@ -1211,14 +1211,17 @@ plugin registry. It is the layer that makes the store the integration bus.
   and default session cookie names (`connect.sid`, `koa.sess`, `sails.sid`,
   `PHPSESSID`, `JSESSIONID`, ...), each cited; `None` when none or two disagree.
 - **FR-CORE-672** *(a captured request's whole body; `CC-CORE-0672`, 2026-11-20).* The
-  importer keeps a captured JSON or XML request's own media type as its `form` row's
-  `enctype` and adds one whole-body parameter (`store_adapter.WHOLE_BODY`, `body`,
-  location `body`), except for a body with a password leaf; an XML request (now
-  accepted, `request_xml`) stores no entries -- its body is never read or stored.
+  importer keeps a captured JSON request's own media type (parameters dropped) as its
+  `form` row's `enctype` and adds one whole-body parameter (`store_adapter.WHOLE_BODY`,
+  `body`, location `body`), except for a body with a password leaf.
   `core.forms.whole_body_media` reads those types; the crawl point builder gives that
-  point `body_content_type` and, for JSON, every leaf as `base_entries`. The spider's
-  capture boundary (`redact_captured_body`) still records no XML body: an XML request
-  reaches the store only from a disco capture (stated).
+  point `body_content_type` and every leaf as `base_entries`. A captured **XML** request
+  is refused: no XML redactor exists, so the body is never read and the body gate cannot
+  judge it (it cannot tell a write from a read -- bWAPP's `xxe-2.php` and `sqli_8-2.php`
+  update a user's secret from an XML body); fail closed (PA-0112). The spider's capture
+  boundary records no XML body either. An XML request therefore never reaches a crawl
+  point today (stated; `R-XXE-XML-BODY` fires on any XML whole-body point a later
+  importer or an answer key gives).
 
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers

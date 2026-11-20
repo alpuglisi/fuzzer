@@ -234,26 +234,26 @@ def test_a_body_with_a_password_leaf_gets_no_whole_body_point(tmp_path):
         assert "body" not in _params(store, run)
 
 
-def test_a_captured_xml_request_is_a_whole_body_point_and_its_body_is_never_stored(tmp_path):
-    from fuzzlab.harness.auto import injection_points_from_store
+def test_a_captured_xml_request_is_refused_and_its_body_never_stored(tmp_path):
+    """FR-CORE-672: the body gate cannot judge an XML body it never reads (it cannot
+    tell a write from a read), so an XML request is refused, fail closed."""
     from tests.test_json_points import BASE as JB
     from tests.test_json_points import _all_text
     doc = "<contact><name>secret-name-1234</name></contact>"
     store, run, counts = _import(tmp_path, [_req(JB + "contact.php", json.dumps(doc),
                                                  content_type="text/xml")])
     with store:
-        pts = injection_points_from_store(store, run, JB, skipped=[])
         text = _all_text(store)
-    assert [(p.param, p.location, p.body_content_type, p.base_entries) for p in pts] == \
-        [("body", "body", "text/xml", None)]
-    assert counts["request_xml"] == 1 and "secret-name-1234" not in text
+        n = store.conn.execute("SELECT COUNT(*) FROM parameter WHERE run_id=?",
+                               (run,)).fetchone()[0]
+    assert counts["request_refused"] == 1 and n == 0 and "secret-name-1234" not in text
 
 
-def test_a_captured_xml_request_on_a_destructive_url_is_refused(tmp_path):
-    from tests.test_json_points import BASE as JB
-    _store, _run, counts = _import(tmp_path, [_req(JB + "logout", json.dumps("<a/>"),
-                                                   content_type="application/xml")])
-    assert counts["request_refused"] == 1 and counts["request_xml"] == 0
+def test_an_answer_keys_whole_json_body_keeps_sql_injection_a_crawled_one_does_not():
+    gt = _whole("application/json")
+    gt.origin = "ground-truth"
+    assert "R-SQLI-JSON-BODY" in _ids(gt)
+    assert "sql-injection" not in _cats(_whole("application/json"))
 
 
 # --- FR-AUD-706: R-SSJS on the target's own evidence ---------------------------------

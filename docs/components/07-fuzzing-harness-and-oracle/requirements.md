@@ -2301,7 +2301,7 @@ rewards) derives from it.
   crawl; `CC-FUZZ-0700`, 2026-11-20).* The pipeline reads
   `core.fingerprint.server_language` from its baseline probe, records it in the
   `target` row's fingerprint JSON (`server_language`) and passes it to `evaluate`
-  (FR-AUD-706). A crawl run's points include a captured JSON/XML request's whole-body
+  (FR-AUD-706). A crawl run's points include a captured JSON request's whole-body
   point (FR-CORE-672); the greybox point reader skips it (it cannot place a raw body);
   a whole-body candidate whose leaves need a fresh binding is inconclusive before any
   send, as a JSON-leaf point is (BUG-0544 B4).

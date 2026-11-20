@@ -295,7 +295,7 @@ def import_disco(run_dir: str | Path, store: Store, run_id: int, *,
     from fuzzlab.tools.observe import observe_disco
     observe_disco(run_dir, read.records)   # FR-AUD-28: what the capture observed
     counts = {"page": 0, "endpoint": 0, "parameter": 0, "quarantined": read.quarantined}
-    for key in ("request", "request_json", "request_form", "request_xml", "request_refused"):
+    for key in ("request", "request_json", "request_form", "request_refused"):
         counts.setdefault(key, 0)
     seen_pages: set[tuple[str, str]] = set()
     link_sets: dict[tuple[int, str], int] = {}       # FR-AUD-31
@@ -772,7 +772,7 @@ def _body_kind(content_type) -> str | None:
 
 
 #: The parameter name of a captured request's **whole body** (FR-CORE-672): one per
-#: JSON or XML request, location ``body``, its `form` row's ``enctype`` the captured
+#: JSON request (an XML request is refused), location ``body``, its `form` row's ``enctype`` the captured
 #: request's own media type -- the point the whole-body strategies (mass assignment,
 #: price trust, a JSON template, Jackson typing, XXE) send to.
 WHOLE_BODY = "body"
@@ -876,7 +876,7 @@ def _import_requests(src, store: Store, run_id: int, counts: dict, *,
         rows = src.execute("SELECT * FROM discovered_requests ORDER BY id").fetchall()
     except sqlite3.Error:
         return                                   # a spider DB from before FR-CRAWL-13
-    for key in ("request", "request_json", "request_form", "request_xml", "request_refused"):
+    for key in ("request", "request_json", "request_form", "request_refused"):
         counts.setdefault(key, 0)
     bodies: dict = {}                                # identical stored bodies are one
     for row in rows:
@@ -908,10 +908,14 @@ def captured_request(row: dict, *, fuzz_json_writes: bool = False):
     if reason is not None:
         return reason, kind, None
     if kind == "xml":
-        # FR-CORE-672: an XML body is never read or stored (no XML redactor exists):
-        # the request is kept as its endpoint, method and media type -- a whole-body
-        # point whose strategies send their own document. Refused on its URL alone.
-        return body_refusal(url, []), kind, []
+        # FR-CORE-672: an XML body is refused. No XML redactor exists, so the body is
+        # never read, and the body gate (`body_refusal`: settings fields, credential
+        # and destructive entries) cannot judge a body it does not read -- it cannot
+        # tell a write from a read (bWAPP's xxe-2.php / sqli_8-2.php UPDATE a user's
+        # secret from an XML body; tests/test_destructive_routes_external_labs.py).
+        # Fail closed (PA-0112): stated, counted as refused.
+        return ("an XML body (the body gate cannot judge a body it never reads)",
+                kind, None)
     try:
         leaves = _captured_leaves(kind, jsonbody.loads(row.get("body_json") or ""))
     except (ValueError, TypeError, RecursionError):
@@ -954,11 +958,10 @@ def _store_request(store, run_id, counts, kind, method, url, leaves, *,
     row's replay recipe (FR-FUZZ-67): the page that sent it, and the leaves redaction
     blanked (never a password, sent empty by policy).
 
-    A JSON or XML request also gets its whole-body parameter (`WHOLE_BODY`, location
+    A JSON request also gets its whole-body parameter (`WHOLE_BODY`, location
     ``body``; none when the body has a password leaf) and its `form` row keeps the
     captured media type as ``enctype`` (FR-CORE-672): the point builder gives that point
-    its ``body_content_type``. An XML request stores no entries (its body is never
-    stored)."""
+    its ``body_content_type``. An XML request is refused before it gets here."""
     from fuzzlab.core import jsonbody
     from fuzzlab.core.redaction import is_credential_name, is_sensitive_name
     passwords, entries, points, fresh = [], [], [], []

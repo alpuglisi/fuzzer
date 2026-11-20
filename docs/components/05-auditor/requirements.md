@@ -804,7 +804,9 @@ budget where a vulnerability is plausible.
   (`R-SQLI-PARAM`, `R-XSS-REFLECT`, `R-SPEL-INJECTION`, `R-LDAP-INJECTION`,
   `R-XPATH-INJECTION`, `R-SSJS`) require `none`: a field strategy never sends its probe
   as a whole body. `R-SSTI` takes `none` and `json` (the Go-template strategy's JSON
-  body). Each rule's `basis` cites its sources.
+  body). Each rule's `basis` cites its sources. `R-SQLI-JSON-BODY` keeps the SQL
+  strategies' JSON-aware families on an answer key's own whole-JSON-body point
+  (`origin_in: ground-truth`, FR-FUZZ-19) only.
 - **FR-AUD-702** *(name rules match whole tokens; `CC-AUD-0700`, 2026-11-20, BUG-0710,
   PA-0710; supersedes the substring semantics of FR-AUD-22's `name_regex`).*
   `name_token_regex` must fullmatch one whole token of the name

@@ -150,8 +150,11 @@ def test_a_bandit_run_confirms_a_json_body_point(tmp_path):
     from fuzzlab.scheduler import ThompsonBandit, arm_priors
     bandit = ThompsonBandit(rng=random.Random(0), priors=arm_priors(default_strategies()),
                             cost_normalized=True, backoff=True)
+    # an answer key's whole-JSON-body point (FR-AUD-701: `R-SQLI-JSON-BODY`; a crawled
+    # whole body draws only the whole-body rules)
     point = InjectionPoint(url=f"{BASE}/api/items", param="body", method="POST",
-                           location="body", body_content_type="application/json")
+                           location="body", body_content_type="application/json",
+                           origin="ground-truth")
     sender = _JsonSqlSender()
     plan = RunPlan(mode="manual", categories=["sql-injection"], scored=False,
                    source="manual")

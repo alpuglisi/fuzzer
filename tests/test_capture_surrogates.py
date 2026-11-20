@@ -230,7 +230,7 @@ def test_the_spider_import_refuses_and_counts_a_captured_lone_surrogate(store, t
         params = {n for n, in st.conn.execute("SELECT name FROM parameter")}
     assert (counts["request"], counts["request_json"], counts["request_refused"]) == \
         (3, 1, 2)
-    assert params == {"comment"}
+    assert params == {"comment", "body"}         # + the whole body (FR-CORE-672)
     assert len(events) == 3
     assert ["k\udc00", "json"] in json.loads(
         next(b for b, in events if "/b" in json.loads(b)["url"]))["params"]
@@ -258,7 +258,7 @@ def test_the_disco_import_refuses_and_counts_a_lone_surrogate_instead_of_failing
         params = {n for n, in st.conn.execute("SELECT name FROM parameter")}
     assert (counts["request"], counts["request_json"], counts["request_refused"]) == \
         (2, 1, 1)
-    assert params == {"comment"}
+    assert params == {"comment", "body"}         # + the whole body (FR-CORE-672)
 
 
 # --- the PA-0002 sweep's pins (BUG-0554) ------------------------------------------------

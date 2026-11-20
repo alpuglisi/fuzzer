@@ -1803,7 +1803,7 @@ tracked in the requirements files, not here.
   black-box target (lane RULESEL): name rules match whole tokens (FR-AUD-702, SP-137);
   every class with a whole-body or sink-only strategy also has a crawl-observable rule --
   a captured request's content type (`content_type_in`; the importer's whole-body point
-  per captured JSON/XML request, FR-CORE-672, SP-135), a value shape, a token endpoint
+  per captured JSON request -- an XML one is refused, its body unjudgeable --, FR-CORE-672, SP-135), a value shape, a token endpoint
   path or a price leaf of the target's own body (FR-AUD-700..705); and `R-SSJS` fires
   only when the baseline answer names a JavaScript server (`target` fact
   `server_language`, FR-AUD-706, FR-CORE-671, SP-136). The legacy `tools/blind_sqli_fuzzer.py`
