@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-11-20 — correction: the five "known" navigation-abort failures were BUG-0651, not Chromium drift
+- **Symptom:** five `tests/test_navigation_aborts.py` tests failed in every harness run of lanes NODE, PHPX and PERF in this container; the entry below ("environment ... (b)") blamed Playwright 1.63 / Chromium 1243.
+- **Root cause:** BUG-0651: the tests' Chromium lookup matched nothing, so Playwright ran its headless shell instead of the full Chrome build, where the error-page behaviour differs. Measured: tree 2be7a50 with the full Chrome pinned passes 89/89.
+- **Remediation:** the lookup fixed (BUG-0651, PA-0651); the harness of d565523: 114 files, 4568 passed, 0 failed.
+- **Status:** Fixed (supersedes the "(b)" root cause and status of the environment entry below)
+
 ## 2026-11-20 — tests / harness: no pre-installed Chromium lookup matched a `chrome-linux64` build (fixed, BUG-0651/PA-0651)
 - **Symptom:** in lane PERF's container the browser tests' `PLAYWRIGHT_CHROMIUM_EXECUTABLE` pin was never set: `/opt/pw-browsers/chromium-*/chrome-linux/chrome` matched nothing (the binary is `chromium-1243/chrome-linux64/chrome`).
 - **Root cause:** the lookup hard-coded Playwright's older install layout, in twelve copies; a miss fell through silently to Playwright's own lookup.

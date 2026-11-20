@@ -52,3 +52,18 @@ for the real operation). No prior PA failed here.
 PA-0651: a lookup of a pre-installed browser matches every layout the pinned Playwright
 range installs, enforced by a whole-package guard proven on a synthetic offender. PA-0002
 sweep: done (twelve sites, all fixed; none in `fuzzlab/`).
+
+## Correction (2026-11-20, after the merge harness of d565523)
+"What it caused to fail: nothing visible" was wrong. With no binary pinned, Playwright
+launched its own headless shell (`chromium_headless_shell-1243`), not the full Chrome
+build, and five `tests/test_navigation_aborts.py` tests fail there
+(`test_a_failed_navigation_returns_after_its_own_error_page[1-3]`,
+`test_a_navigation_overtaken_by_an_error_page_waits_for_it`,
+`test_an_error_page_ends_the_previous_document`). Lanes NODE, PHPX and PERF reported them
+as "known failures" from a newer Chromium; ERROR_LOG 2026-11-20 (b) put them down to
+Playwright 1.63 / Chromium 1243 against SP-01's 1.56 / 141 measurement. Measured: on tree
+2be7a50, unchanged, with `PLAYWRIGHT_CHROMIUM_EXECUTABLE=/opt/pw-browsers/chromium-1243/
+chrome-linux64/chrome`, `tests/test_navigation_aborts.py` passes 89 of 89; the harness of
+d565523 (this fix merged with 7a1ef32) is 114 files, 4568 passed, 0 failed. Severity is
+medium, not low: the fall-back changed which browser five SP-01 tests measured.
+

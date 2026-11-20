@@ -2272,3 +2272,10 @@ Juice Shop lab is complete.
 - **Cause:** I validated a predicate over an open-ended set (every way a page can run script later) against fixtures drawn from my tracker's own list and against labs that exercise none of the rest, and did not state the power of my measurement (PA-0650).
 - **Status:** withdrawn; PA-0650 strengthens PA-0126(2).
 
+### F-653 — I diagnosed five failing SP-01 tests as Chromium version drift without checking which browser they ran
+- **What:** I recorded the five `tests/test_navigation_aborts.py` failures as pre-existing drift of Playwright 1.63 / Chromium 1243 from SP-01's measured 1.56 / 141 (ERROR_LOG 2026-11-20 (b), my lane reports). They came from BUG-0651: the tests' lookup found no binary and Playwright ran its headless shell.
+- **Evidence:** tree 2be7a50 with full Chrome pinned passes 89/89; the harness of d565523 is green (BUG-0651 "Correction").
+- **Impact:** a wrong root cause in the error log and in three lanes' merge reports ("5 known failures"), and a flagged question to navguard's owner that was not needed.
+- **Cause:** I confirmed the failures reproduce on the base tree and stopped there; I did not check which browser binary the tests had launched, though my own environment notes said the lookup glob matched nothing.
+- **Status:** corrected (BUG-0651 "Correction", ERROR_LOG correction entry).
+
