@@ -106,7 +106,13 @@ Component code: **LAB**. Entry format and required fields: see
     key checked live — done
   - [x] baseline and after runs (CC-FUZZ-0630..0632) — done
   - [x] FR-LAB-350, ARCHITECTURE external labs, CHANGELOG — done
-- Effectiveness (assessed 2026-11-20): `fuzzlab auto --base-url http://127.0.0.1:3093 --ground-truth lab/ground-truth-vulnerableapp --points ground-truth --browser --oob --score --authorized` on a freshly restarted container, scored against the final key:
+- Effectiveness (assessed 2026-11-20). **Headline (crawl-based discovery, the owner's
+  measure since 2026-11-20): tp=0 fp=0 fn=63 tn=42 before and after** (commands below):
+  fuzzlab's spider finds no level parameter on this SPA, so discovery reaches none of
+  the cases. The ground-truth-point runs below are an oracle diagnostic only. Lab
+  knowledge (the app's scanner metadata, its level numbers and parameter names) is used
+  only in this fixture and the answer key, never in detection (CC-FUZZ-0633). Diagnostic:
+  `fuzzlab auto --base-url http://127.0.0.1:3093 --ground-truth lab/ground-truth-vulnerableapp --points ground-truth --browser --oob --score --authorized` on a freshly restarted container, scored against the final key:
   - BASELINE (detection code of 2658271): tp=26 fp=0 fn=37 tn=42, 2402 requests, 2162 s
     (its own printout, under the key before VAPP-0003/0004 became negatives, said
     tp=26 fp=0 fn=39 tn=40).

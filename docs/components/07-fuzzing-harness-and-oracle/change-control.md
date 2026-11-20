@@ -3,6 +3,49 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0633 — Black-box review of CC-FUZZ-0630..0632 (owner directive, 2026-11-20)
+- Change: `fuzzlab/oracle/strategies_jvm.py` (the `WEB-INF/web.xml` probe removed;
+  docstrings state the evidence and the jar-classpath limit); `fuzzlab/oracle/
+  strategies_filters.py` (docstring: evidence); `tests/test_oracle_strategies_jvm.py`
+  (the web.xml test replaced: only the classpath root's file is probed);
+  `tests/test_oracle_strategies_filters.py::test_browser_resolve_agrees_with_chromium`
+  (new, real Chromium). FR-FUZZ-630..632 restated in place.
+- Reason: the owner's directive relayed by the orchestrator (2026-11-20): detection is
+  designed for a black-box target; no rule depends on a lab's names, paths, parameters,
+  levels or values; a target behaviour a rule relies on is shown on two independent
+  targets or a cited public corpus; crawl runs are the headline measure.
+- Review, change by change (no detection code names a VulnerableApp path, parameter,
+  level or value; its measurements stay only in docstrings and records):
+  - **Classpath traversal (FR-FUZZ-630).** Relies on a directory classpath resolving `..`
+    below its root and Spring Boot's root `application.properties`. Shown on two targets:
+    VulnerableApp and a standalone JDK 11 program (`/scripts/pt/../../application.properties`
+    read; `../../../etc/passwd` null); Spring Boot reference (Externalized Configuration:
+    loaded from "the classpath root"). The same JDK measurement showed a **jar classpath
+    does not resolve `..`**: a stated limit (false negatives only). The `WEB-INF/web.xml`
+    variant had no evidence: no public corpus lists it (PayloadsAllTheThings' Directory
+    Traversal does not), and the file sits above `WEB-INF/classes`, where a resource read
+    cannot go: removed (F-634). The marker's keys are Spring Boot's own documented
+    properties.
+  - **`file:` SSRF (FR-FUZZ-631).** Relies on a URL fetcher taking `file:`. Shown on JDK 11
+    `URL.openStream` and CPython `urllib.request.urlopen` (both spellings read, the bare
+    path refused); PayloadsAllTheThings, Server Side Request Forgery, "File":
+    `file:///etc/passwd`.
+  - **Open-redirect filter bypass (FR-FUZZ-632).** Relies on how a browser reads a
+    `Location`. Shown on a synthetic loopback server independent of any lab: Chromium 157
+    and `browser_resolve` agree on 10 of 10 shapes (now a test); the spellings are
+    PayloadsAllTheThings' (Open Redirect: `//`, `\/\/`, `@`).
+  - **Timing payloads keep the baseline's value (BUG-0630).** A property of the
+    differential, no target behaviour; enforced by discovery over every timing strategy.
+- Impact: the classpath strategy sends at most 4 probes, not 8. The lab runs of
+  CC-LAB-0350 used the pre-review strategy; the web.xml probes it sent matched nothing on
+  VulnerableApp (no such file is reachable), so its verdicts are unchanged and only its
+  request count was 4 per unconfirmed path-traversal candidate higher.
+- Risk: low; one unmeasured probe removed.
+- Deliverables:
+  - [x] review, removal, evidence test, requirements restated — done
+- Effectiveness (assessed 2026-11-20): the strategy and filter tests pass, the Chromium
+  test included (`FUZZLAB_REQUIRE_BROWSER=1`).
+
 ### CC-FUZZ-0632 — An open redirect past a prefix filter, judged as a browser lands (FR-FUZZ-632) (2026-11-20)
 - Change: `fuzzlab/oracle/strategies_filters.py` (new: `browser_resolve`,
   `OpenRedirectFilterBypassStrategy`, a subclass of `OpenRedirectStrategy` overriding
@@ -65,7 +108,7 @@ Newest first.
   the container cannot reach (its 127.0.0.1 is its own). Baseline: no path-traversal and
   no SSRF finding.
 - Impact: every lab whose ground truth has a path-traversal or SSRF positive runs at
-  most 8 more probes (+1 control per marker seen) per path-traversal candidate and 2 (+1)
+  most 8 more probes (4 after CC-FUZZ-0633; +1 control per marker seen) per path-traversal candidate and 2 (+1)
   per SSRF candidate the earlier strategies did not confirm. Juice Shop has one of each:
   regression run in CC-LAB-0352.
 - Risk: low. Each confirms on a file-content marker absent from a compared control with

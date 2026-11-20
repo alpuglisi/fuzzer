@@ -91,13 +91,14 @@ def test_a_confined_read_answers_nothing_outside_its_directory():
     assert PathTraversalClasspathResourceStrategy().confirm(_pt(), _Sender(answer)) is None
 
 
-def test_a_servlet_descriptor_is_reached_too():
-    xml = ('<web-app xmlns="https://jakarta.ee/xml/ns/jakartaee" version="5.0">'
-           '<servlet/></web-app>')
-    sender = _Sender(_classpath_read(base="/WEB-INF/classes/static/",
-                                     files={"/WEB-INF/web.xml": xml}))
-    v = PathTraversalClasspathResourceStrategy().confirm(_pt(), sender)
-    assert v and v.evidence["file"] == "WEB-INF/web.xml" and v.evidence["depth"] == 3
+def test_only_the_classpath_roots_own_file_is_probed():
+    """A servlet `WEB-INF/web.xml` sits above the classpath root (`WEB-INF/classes`),
+    where a resource read cannot go (measured on JDK 11), so it is never probed; a jar
+    classpath does not resolve `..` at all (measured): a false negative, not a probe."""
+    sender = _Sender(lambda v: '{"content":null}')
+    PathTraversalClasspathResourceStrategy().confirm(_pt(), sender)
+    assert all(v.endswith("application.properties") for v in sender.sent)
+    assert [name for name, _ in CLASSPATH_FILES] == ["application.properties"]
 
 
 def test_the_properties_marker_needs_a_spring_key_and_an_equals_sign():

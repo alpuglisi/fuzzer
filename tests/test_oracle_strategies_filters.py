@@ -93,3 +93,59 @@ def test_a_redirect_to_another_host_carrying_the_canary_is_not_a_landing():
 def test_it_runs_after_the_plain_canary():
     names = [type(s).__name__ for s in S.default_strategies()]
     assert names.index("OpenRedirectFilterBypassStrategy") > names.index("OpenRedirectStrategy")
+
+
+def test_browser_resolve_agrees_with_chromium():
+    """The evidence for `browser_resolve` (owner directive: a behaviour relied on is shown
+    on a target independent of the lab): a synthetic loopback server answers each shape as
+    a `Location`, and Chromium's next request's host must be the one predicted."""
+    import http.server
+    import threading
+    from urllib.parse import quote, unquote, urlsplit
+
+    from tests._browser import launch_browser_or_skip, require_modules
+    require_modules(module_level=False)
+    from playwright.sync_api import sync_playwright
+
+    shapes = ["//evil.example/cb", "/\\evil.example/cb", "\\/evil.example/cb",
+              "/\t/evil.example/cb", "\\\\evil.example/cb", "ORIGIN@evil.example/cb",
+              "ORIGIN/@evil.example/cb", "ORIGIN//\\evil.example/cb",
+              "http:\\\\evil.example\\cb", "/cb?next=\\\\evil.example"]
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path.startswith("/r/"):
+                self.send_response(302)
+                self.send_header("Location", unquote(self.path[3:]).replace("ORIGIN", origin))
+            else:
+                self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    origin = f"http://127.0.0.1:{srv.server_port}"
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        with sync_playwright() as pw:
+            browser = launch_browser_or_skip(pw)
+            try:
+                page = browser.new_page()
+                seen: list[str] = []
+                page.on("request", lambda r: seen.append(r.url))
+                for shape in shapes:
+                    seen.clear()
+                    url = f"{origin}/r/" + quote(shape, safe="")
+                    try:
+                        page.goto(url, timeout=5000)
+                    except Exception:  # noqa: BLE001 - evil.example never resolves
+                        pass
+                    chrome = urlsplit(seen[1]).hostname if len(seen) > 1 else None
+                    ours = urlsplit(browser_resolve(url, shape.replace("ORIGIN", origin))
+                                    ).hostname
+                    assert chrome == ours, (shape, chrome, ours)
+            finally:
+                browser.close()
+    finally:
+        srv.shutdown()

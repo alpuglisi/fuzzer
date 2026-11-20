@@ -1,19 +1,25 @@
-"""Confirmation strategies for read sinks typical of JVM web stacks (CC-FUZZ-0630,
-FR-FUZZ-630/631), measured on SasanLabs OWASP VulnerableApp 2.2.115 (Spring Boot,
-Java 17; CC-LAB-0350) before they were written:
+"""Confirmation strategies for read sinks of JVM web stacks (CC-FUZZ-0630,
+FR-FUZZ-630/631). Black-box: nothing here names a lab's paths, parameters or values;
+each target behaviour relied on is measured on two independent targets or cited
+(CC-FUZZ-0630's evidence):
 
-* **Classpath resource traversal.** A Java handler that reads
-  ``getClass().getResourceAsStream(BASE + value)`` resolves ``..`` inside the classpath,
-  never above it: ``/etc/passwd`` (what `PathTraversalFsPathReadStrategy` looks for) is
-  out of reach, while the classpath root's own ``application.properties`` (a Spring Boot
-  app) or a servlet container's ``WEB-INF/web.xml`` is not. Measured: VulnerableApp's
-  PathTraversal LEVEL_1 answers ``{"content":null,"isValid":false}`` for
-  ``../../../../etc/passwd`` and the file's text (``server.port=9090...``) for
-  ``../../application.properties``.
-* **A URL fetcher that takes ``file:``.** ``new URL(value).openStream()`` reads local
-  files; a fetch that cannot reach the scanner's loopback callback (a container: its
-  127.0.0.1 is its own) still proves the read in-band. Measured: SSRFVulnerability
-  LEVEL_1 answers ``/etc/passwd`` for ``file:///etc/passwd``; LEVEL_2..5 refuse it.
+* **Classpath resource traversal.** A handler that reads
+  ``getClass().getResourceAsStream(BASE + value)`` resolves ``..`` inside a *directory*
+  classpath, never above its root (so ``/etc/passwd``, what
+  `PathTraversalFsPathReadStrategy` looks for, is out of reach), while the root's own
+  ``application.properties`` is not. Measured on (1) SasanLabs VulnerableApp 2.2.115
+  (a Jib image: a directory classpath) and (2) a standalone JDK 11 program
+  (``/scripts/pt/../../application.properties`` read; ``../../../etc/passwd`` null);
+  Spring Boot loads ``application.properties`` from "the classpath root" (Spring Boot
+  reference, Externalized Configuration). **Limit (measured on JDK 11):** inside a jar
+  classpath (a packaged fat jar) the class loader does not resolve ``..``, so such a
+  read is out of this strategy's reach: a false negative, never a false positive.
+* **A URL fetcher that takes ``file:``.** Measured on JDK 11 (``new URL(u).openStream()``)
+  and CPython 3.13 (``urllib.request.urlopen``): ``file:///etc/passwd`` and
+  ``file:/etc/passwd`` read the file, a bare ``/etc/passwd`` is refused (the control);
+  listed as an SSRF payload by PayloadsAllTheThings (Server Side Request Forgery, "File").
+  It proves the read in-band, so it decides where the target cannot reach the scanner's
+  loopback callback.
 
 Each confirms on a file-content marker present for the payload and absent from a
 compared control carrying the same file name without the read primitive (no ``..``; no
@@ -28,28 +34,24 @@ from fuzzlab.core import trace
 from fuzzlab.oracle.probe import Verdict
 from fuzzlab.oracle.strategies import (_PASSWD_MARKER, _observed, ConfirmationStrategy)
 
-#: A Spring Boot ``application.properties`` read back: a key Spring itself defines,
-#: then ``=``. The handler may join lines with no separator (VulnerableApp does), so
-#: the marker is not line-anchored; a dotted Spring key followed by ``=`` is not text a
-#: page carries by chance.
+#: A Spring Boot ``application.properties`` read back: a key from Spring Boot's own
+#: "Common Application Properties" list, then ``=``. A handler that reads line by line
+#: may join the lines with no separator, so the marker is not line-anchored; a dotted
+#: Spring key followed by ``=`` is not text a page carries by chance.
 _SPRING_PROPERTIES_MARKER = re.compile(
     r"(?<![\w.])(?:server\.(?:port|servlet\.context-path)|spring\.(?:application\.name|"
     r"datasource\.[\w.-]+|profiles\.active|jpa\.[\w.-]+|h2\.console\.[\w.-]+))\s*=")
-#: A servlet deployment descriptor read back.
-_WEB_XML_MARKER = re.compile(r"<web-app\b[^>]*xmlns=\"(?:http://xmlns\.jcp\.org/xml/ns/"
-                             r"javaee|http://java\.sun\.com/xml/ns/javaee|"
-                             r"https://jakarta\.ee/xml/ns/jakartaee)\"")
-
-#: (classpath-root file, marker): what a classpath resource read can reach.
-CLASSPATH_FILES = (("application.properties", _SPRING_PROPERTIES_MARKER),
-                   ("WEB-INF/web.xml", _WEB_XML_MARKER))
+#: (classpath-root file, marker): what a classpath resource read can reach. One entry:
+#: a servlet ``WEB-INF/web.xml`` sits above ``WEB-INF/classes`` (the classpath root),
+#: where such a read cannot go (measured), so it is not probed.
+CLASSPATH_FILES = (("application.properties", _SPRING_PROPERTIES_MARKER),)
 #: How many directories up a resource base may sit below the classpath root.
 CLASSPATH_DEPTHS = (1, 2, 3, 4)
 
 
 class PathTraversalClasspathResourceStrategy(ConfirmationStrategy):
-    """M7 for a classpath-confined read (FR-FUZZ-630): ``../`` * depth + a file every
-    Spring Boot jar (or servlet webapp) carries at its root, confirmed when that file's
+    """M7 for a classpath-confined read (FR-FUZZ-630): ``../`` * depth + the file a
+    Spring Boot application carries at its classpath root, confirmed when that file's
     own marker is in the answer and absent from a compared control naming the same file
     with no traversal. Runs after `PathTraversalFsPathReadStrategy` (the OS-file read):
     at most ``len(CLASSPATH_FILES) * len(CLASSPATH_DEPTHS)`` mutations, plus one control

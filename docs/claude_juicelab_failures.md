@@ -2238,3 +2238,10 @@ Juice Shop lab is complete.
 - **Impact:** a failed harness run and a re-run; on the lane branch only, never merged.
 - **Cause:** I copied a class attribute without checking which guard owns it, and ran only the oracle tests I picked before committing, not the harness.
 - **Status:** fixed (no opt-in; the reviewed set unchanged).
+
+### F-634 — I added a `WEB-INF/web.xml` probe to the classpath strategy with no measurement or source behind it
+- **What:** `PathTraversalClasspathResourceStrategy` (CC-FUZZ-0630, 4cb11db) also probed `../`*d + `WEB-INF/web.xml`, "for a servlet webapp", by analogy. Nothing measured it, no public corpus I cited lists it, and a later JDK 11 measurement showed that a resource read cannot go above the classpath root, while `web.xml` sits above `WEB-INF/classes`: the probe could never succeed as designed. Found when the owner's black-box directive made me check each relied-on behaviour.
+- **Evidence:** `git show 4cb11db -- fuzzlab/oracle/strategies_jvm.py` (`_WEB_XML_MARKER`, the second `CLASSPATH_FILES` entry); CC-FUZZ-0633 (the JDK measurement and the citation check).
+- **Impact:** up to 4 wasted requests per unconfirmed path-traversal candidate in this lane's runs; no false finding.
+- **Cause:** I generalised the design past what I had measured (§7: measure before design).
+- **Status:** fixed in CC-FUZZ-0633 (removed; only the measured file is probed).

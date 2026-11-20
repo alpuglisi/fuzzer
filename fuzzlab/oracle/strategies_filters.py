@@ -1,15 +1,20 @@
-"""Filter-bypass variants of an existing confirmation (CC-FUZZ-0632, FR-FUZZ-632),
-measured on SasanLabs OWASP VulnerableApp 2.2.115 (CC-LAB-0350) before it was written.
+"""Filter-bypass variants of an existing confirmation (CC-FUZZ-0632, FR-FUZZ-632).
+Black-box: the probes are generic spellings of one canary, and the judgement is how a
+browser reads the redirect target; nothing names a lab's paths, parameters or values.
 
 **Open redirect past a prefix filter.** An app that refuses a target starting with
-``http``, ``https``, ``www`` or ``//`` (VulnerableApp Http3xxStatusCodeBasedInjection
-LEVEL_2..5), or that prefixes its own origin with no ``/`` after it (LEVEL_6), still
-redirects off-site: a browser reads ``\\`` as ``/`` after a special scheme and drops
-tabs and newlines (the WHATWG URL parser), and reads ``http://own@host/`` as a login to
-``host``. Measured in Chromium 157 (``page.on("request")``): ``/\\host/cb`` and
-``\\/host/cb`` leave the origin at LEVEL_2..5, ``//host/cb`` at LEVEL_2, ``@host/cb`` at
-LEVEL_6; none at LEVEL_7 (``scheme://own/`` + the value) or LEVEL_8 (an allowlist).
-`OpenRedirectStrategy`'s plain canary (``https://host/cb``) lands at none of LEVEL_2..6.
+``http``, ``https``, ``www`` or ``//``, or that prefixes its own origin with no ``/``
+after it, can still redirect off-site, because a browser drops tabs and newlines, reads
+``\\`` as ``/`` after a special scheme, and reads ``http://own@host/`` as a login to
+``host``. Evidence (CC-FUZZ-0632):
+
+* the spellings are a public corpus's: PayloadsAllTheThings, Open Redirect ("//"
+  to bypass "http", "\\/\\/" to bypass "//", the "@" character);
+* `browser_resolve` agrees with Chromium 157 on 10 of 10 ``Location`` shapes served by a
+  synthetic loopback server independent of any lab
+  (`tests/test_oracle_strategies_filters.py::test_browser_resolve_agrees_with_chromium`);
+* on a lab: SasanLabs VulnerableApp 2.2.115's five filtered redirect levels confirm,
+  its own-origin and allowlisted levels do not (CC-LAB-0350).
 """
 
 from __future__ import annotations
