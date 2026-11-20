@@ -28,12 +28,12 @@ import time
 import uuid
 from dataclasses import dataclass
 from typing import Callable, Iterable, Sequence
-from urllib.parse import urlparse
 
 from fuzzlab.core.store import MetricLogger
 from fuzzlab.core.urls import canonical_origin
 from fuzzlab.greybox.confirm import greybox_confirms
-from fuzzlab.greybox.coverage import (CoverageFrontier, app_lines, encode_coverage)
+from fuzzlab.greybox.coverage import (CoverageFrontier, app_lines, document_root,
+                                       encode_coverage, endpoint_file)
 from fuzzlab.greybox.recorder import record_attempt_signals
 from fuzzlab.greybox.reward import GreyboxSignal, shaped_reward
 from fuzzlab.mutation.catalog import record_variant, refuse_destructive
@@ -42,7 +42,10 @@ from fuzzlab.mutation.semantics import SemanticsValidator
 from fuzzlab.oracle.probe import Probe, UnplaceableLocation
 from fuzzlab.session.manager import OUT_OF_ORIGIN
 
-DEFAULT_APP_ROOT = "/var/www/html"
+#: No assumed document root (FR-FUZZ-710, BUG-0732): each point's root is read from its
+#: own baseline's coverage (`coverage.document_root` of the file `coverage.endpoint_file`
+#: maps its URL to, SP-145). ``--app-root`` remains an operator override.
+DEFAULT_APP_ROOT: str | None = None
 _SQL_ERR = re.compile(
     r"SQL syntax|mysqli|SQLSTATE|you have an error|unclosed quotation|"
     r"mysqli_sql_exception|Warning.*mysql", re.I)
@@ -239,13 +242,6 @@ class RequestsCorrelatingSender:
         return probe, cid
 
 
-def _endpoint_file(url: str, app_root: str) -> str:
-    """Map a point URL to the app file that serves it (…/login.php)."""
-    path = urlparse(url).path or "/"
-    base = path.rsplit("/", 1)[-1] or "index.php"
-    return app_root.rstrip("/") + "/" + base
-
-
 def _screening(spec: ProbeSpec, probe: Probe, baseline: Probe | None) -> float:
     """Coarse black-box hit signal in [0, 1] (the Phase 2 tier carried forward)."""
     text = probe.text or ""
@@ -356,7 +352,7 @@ def _record_coverage_metric(logger: MetricLogger, step: int, frontier: CoverageF
 def run_greybox(*, base_url: str, store, run_id: int,
                 points: Sequence[GreyboxPoint], sender,
                 coverage_source, dbfault_source, lab_control=None,
-                reset_between: bool = False, app_root: str = DEFAULT_APP_ROOT,
+                reset_between: bool = False, app_root: str | None = DEFAULT_APP_ROOT,
                 probes: Iterable[ProbeSpec] = DEFAULT_PROBES,
                 settle: float = 0.0, logger=None,
                 mutation_variants: bool = False, max_mutation_variants: int = 2,
@@ -375,7 +371,11 @@ def run_greybox(*, base_url: str, store, run_id: int,
     ``max_mutation_variants`` per attack probe.
     """
     probes = tuple(probes)
-    include = (app_root.rstrip("/") + "/",)
+    # An operator's --app-root is the coverage filter for every point; otherwise each
+    # point's filter is the root its baseline's endpoint file implies (SP-145), and a
+    # point whose URL maps to no covered file (a front controller) keeps every
+    # non-excluded file and is never sink-covered (FR-FUZZ-710)
+    fixed_include = (app_root.rstrip("/") + "/",) if app_root else None
     frontier = CoverageFrontier()          # run-wide exploration total only (a metric)
     coverage_metrics = MetricLogger(store, run_id, source="coverage")  # B0 coverage emitter
     summary = {"points": len(points), "attempts": 0, "db_faults": 0,
@@ -402,6 +402,7 @@ def run_greybox(*, base_url: str, store, run_id: int,
                 max_variants=max_mutation_variants)
         baseline_probe: Probe | None = None
         baseline_cov: set[tuple[str, int]] = set()
+        include = fixed_include
         for spec in ordered:
             if refuse_destructive(spec.value, allow_destructive):
                 # the send-time gate (BUG-0082): it used to apply only when recording
@@ -416,7 +417,12 @@ def run_greybox(*, base_url: str, store, run_id: int,
                 continue
             if settle:
                 time.sleep(settle)
-            cov = app_lines(coverage_source.lines_for(cid), include_prefixes=include)
+            raw = coverage_source.lines_for(cid)
+            if include is None and spec.kind == "baseline":
+                sink_file = endpoint_file(pt.url, app_lines(raw))
+                root = document_root(pt.url, sink_file) if sink_file else None
+                include = (root,) if root else None
+            cov = app_lines(raw, include_prefixes=include)
             cov_lines = {(f, ln) for f, lns in cov.items() for ln in lns}
             frontier.observe(cov)          # accumulate the run-wide exploration total
             fault = dbfault_source.fault_for(cid)
@@ -428,7 +434,8 @@ def run_greybox(*, base_url: str, store, run_id: int,
             else:
                 new_lines = len(cov_lines - baseline_cov)   # attack vs its own baseline
             screening = _screening(spec, probe, baseline_probe)
-            sink_covered = _endpoint_file(pt.url, app_root) in cov
+            sink_covered = endpoint_file(pt.url, cov, root=include[0] if include else None) \
+                is not None
             signal = GreyboxSignal(screening=screening, novel_lines=new_lines,
                                    db_fault=fault.faulted, sink_covered=sink_covered)
             reward = shaped_reward(signal)

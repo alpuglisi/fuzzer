@@ -28,7 +28,7 @@ from fuzzlab.oracle.browser import (
     StoreStep,
 )
 from fuzzlab.greybox.confirm import greybox_confirms, m10_evidence
-from fuzzlab.greybox.coverage import CoverageSource, app_lines
+from fuzzlab.greybox.coverage import CoverageSource, app_lines, endpoint_file
 from fuzzlab.greybox.dbfault import DbFaultSource
 from fuzzlab.greybox.reward import GreyboxSignal
 from fuzzlab.oracle.context import (locate_reflection, split_form_control_values,
@@ -77,6 +77,24 @@ _REDOS_TEMPLATES = [
     r"([a-zA-Z]+)*$",
     r"(\d+)+$",
 ]
+
+#: Each template's structural control (FR-FUZZ-711, BUG-0733): the same group, the same
+#: character class and the same `$` anchor, minus the nested or ambiguous quantifier
+#: that makes the template catastrophic -- the probe minus what it tests (PA-0117(1),
+#: PA-0630(1)). A backtracking engine runs each control in linear time per start
+#: position, so anything the target does with *a* regex of this shape and length
+#: (compiling it, scanning its content, an error path) is on both sides, and only the
+#: ambiguity is not. Shapes: OWASP, "Regular expression Denial of Service - ReDoS"
+#: ("Evil Regexes": `(a+)+`, `([a-zA-Z]+)*`, `(a|aa)+`, `(a|a?)+`); CWE-1333; Davis et
+#: al., "The Impact of Regular Expression Denial of Service (ReDoS) in Practice"
+#: (ESEC/FSE 2018: nested quantifiers and quantified overlapping alternation).
+_REDOS_CONTROLS = {
+    r"(a+)+$": r"(a+)$",
+    r"(a|a)*$": r"(a)*$",
+    r"(a|aa)+$": r"(a)+$",
+    r"([a-zA-Z]+)*$": r"([a-zA-Z])*$",
+    r"(\d+)+$": r"(\d)+$",
+}
 
 # Command-injection timing templates (shell separators; {d} = delay seconds).
 _CMDI_TIMING_TEMPLATES = [
@@ -1411,11 +1429,13 @@ class RegexDosStrategy(ConfirmationStrategy):
     CI-safe bound on ordinary lab content -- see
     ``docs/architecture/oracle-confirmation.md``'s M1 ReDoS section for the
     calibration numbers. Confirmation requires **at least two** independent
-    templates to each measure latency far above baseline
-    (``floor``/``k``, overridden below to fit this mechanism's
-    deliberately bounded, tens-to-low-hundreds-of-milliseconds probe
-    magnitude, never the multi-second scale ``_confirm_timing``'s own
-    ``floor=1.5`` assumes) -- the ReDoS analogue of "two escalating
+    templates to each measure latency above every non-evil answer -- the
+    benign baseline and each template's structural control
+    (`_REDOS_CONTROLS`: the same pattern minus its nested or ambiguous
+    quantifier) -- by that pool's own measured jitter, in **every** one of
+    ``rounds`` re-sends (FR-FUZZ-711; the fixed ``floor=0.02 s``/``k=4``
+    of CC-FUZZ-0025 was calibrated on this project's own lab cells and is
+    withdrawn, BUG-0733) -- the ReDoS analogue of "two escalating
     delays," substituting "two independent evil shapes" for "two requested
     durations" since no requested duration exists here.
 
@@ -1436,32 +1456,66 @@ class RegexDosStrategy(ConfirmationStrategy):
     mechanism = "differential-timing"
     category = "regular-expression"
 
-    # Overridden from the base class's SQLi/cmdi-tuned defaults: this
-    # mechanism's probes are deliberately bounded to tens/low-hundreds of
-    # milliseconds (never multi-second), so floor/k must be small enough to
-    # actually fire at that scale while still clearing ordinary request
-    # jitter (observed at low-single-digit milliseconds in this project's
-    # own calibration, see the class docstring above).
-    baseline_samples = 3
+    # FR-FUZZ-711 (BUG-0733, CC-FUZZ-0711): the threshold comes from the target's own
+    # answers, not from a figure calibrated on one lab's cells (the former fixed
+    # floor=0.02 s / k=4 over 3 samples). Every template is sent in `rounds` rounds
+    # beside its structural control (`_REDOS_CONTROLS`), in alternating order, and
+    # confirms only when **every** one of its samples clears the slowest non-evil answer
+    # measured so far (the benign baseline samples and every control) by that pool's
+    # own jitter: its spread (max - min) or `k` robust sigmas, whichever is larger.
+    # `resolution_floor` is the client's measurement resolution, never a target
+    # figure: loopback HTTP on the build host measured p50 1.46 ms, p99 6.24 ms,
+    # max 8.24 ms over 500 requests (CC-FUZZ-0711 "Measured"), so a gap under 5 ms is
+    # not read as a difference whatever the pool's spread.
+    baseline_samples = 5
+    rounds = 3
     k = 4.0
-    floor = 0.02            # seconds (20ms) above baseline required
+    resolution_floor = 0.005   # seconds
     min_confirming_templates = 2
     benign_probe = "ordinary-search-term"
+
+    @classmethod
+    def _margin(cls, pool: list[float]) -> float:
+        """The jitter a sample must clear above the slowest non-evil answer: the pool's
+        spread or ``k`` robust sigmas, at least the client's resolution."""
+        sigma = build_baseline(pool).robust_sigma()
+        return max(cls.resolution_floor, max(pool) - min(pool), cls.k * sigma)
 
     def confirm(self, candidate, sender):
         # FR-FUZZ-63: each sample an application answer, or no verdict (a fast refusal
         # lowers the threshold; a connect timeout is no latency, M7)
-        base = build_baseline([
-            self._compared(sender, candidate, self.benign_probe, role="baseline",
-                           timing=True).elapsed
-            for _ in range(self.baseline_samples)
-        ])
+        pool = [self._compared(sender, candidate, self.benign_probe, role="baseline",
+                               timing=True).elapsed
+                for _ in range(self.baseline_samples)]
+        base = build_baseline(pool)
         confirming = []
         for template in _REDOS_TEMPLATES:
-            with trace.role("mutation"):              # FR-FUZZ-60
-                probe = self._send(sender, candidate, template, timing=True)
-            if base.exceeds(probe.elapsed, k=self.k, floor=self.floor):
-                confirming.append({"template": template, "elapsed": round(probe.elapsed, 4)})
+            control = _REDOS_CONTROLS[template]
+            evil_samples: list[float] = []
+            control_samples: list[float] = []
+            for r in range(self.rounds):
+                # alternate the order, so a warm-up or caching effect lands on each side
+                order = ("control", "evil") if r % 2 == 0 else ("evil", "control")
+                evil_elapsed = 0.0
+                for side in order:
+                    if side == "control":
+                        c = self._compared(sender, candidate, control, role="control",
+                                           timing=True).elapsed
+                        control_samples.append(c)
+                        pool.append(c)
+                    else:
+                        with trace.role("mutation"):          # FR-FUZZ-60
+                            evil_elapsed = self._send(sender, candidate, template,
+                                                      timing=True).elapsed
+                evil_samples.append(evil_elapsed)
+                if evil_elapsed < max(pool) + self._margin(pool):
+                    break                    # not above every non-evil answer: next shape
+            else:
+                confirming.append({
+                    "template": template, "control": control,
+                    "elapsed": [round(e, 4) for e in evil_samples],
+                    "control_elapsed": [round(c, 4) for c in control_samples],
+                    "threshold": round(max(pool) + self._margin(pool), 4)})
                 if len(confirming) >= self.min_confirming_templates:
                     return Verdict(True, self.vuln_class, self.mechanism,
                                    {"baseline_median": round(base.median, 4),
@@ -1639,32 +1693,41 @@ class SsrfOobStrategy(ConfirmationStrategy):
 
 class AccessControlIdorStrategy(ConfirmationStrategy):
     """Confirms broken object-level authorization (IDOR/BOLA, CWE-639/862) by a
-    differential: does the target return distinct, successful, id-keyed data for
-    two arbitrary, unrelated id values with nothing rejecting either?
+    differential over the target's **own** object id and its neighbour: does the
+    target hand back another object's data when the id it gave us is incremented or
+    decremented, with nothing rejecting it?
 
-    Sends two unrelated id values and requires, for *both* legs: HTTP 200; a
-    non-empty body that echoes the requested id value back (proving the
-    response is actually keyed by what was sent, not a canned page); no
-    generic access-denial phrase in the body; and that the two bodies differ
-    (proof of two distinct records, not one static page repeated). All four
-    must hold, or this fails closed (returns None) -- a real ownership check
-    almost always denies with a non-2xx status, or an id-mismatch response,
-    for at least one of two unrelated values.
+    FR-FUZZ-712 (BUG-0734, CC-FUZZ-0712): the id is the value the target itself put in
+    this point -- the crawled link's, form's or path segment's captured value
+    (`Candidate.base_entries`, as `CrossAccountReplayStrategy` reads it) -- and the
+    probe is its numeric neighbour (+1, else -1), the manipulation OWASP WSTG-ATHZ-04
+    ("Testing for Insecure Direct Object References": change the value of the
+    parameter that references an object) and OWASP API Security Top 10 2023 API1
+    ("Broken Object Level Authorization": sequential ids replaced) describe. The fixed
+    synthetic ids of CC-FUZZ-0033 (``50172``/``88190475``, each required echoed back)
+    were fitted to lab cells that echo any id and are withdrawn. **No verdict**
+    (`UnplaceableLocation`) when the point carries no captured value or a value with
+    no numeric neighbour (a UUID, a slug): a stated miss, never a guessed id. A
+    ground-truth-point run carries no captured value, so it gives this mechanism no
+    verdict (an oracle diagnostic, PA-0660(4)); a crawl run carries it for query
+    links, forms and path segments the crawl saw a value for.
 
-    Known limitation, not silently swept under the rug: this cannot
-    authenticate as two different real identities (this project's lab targets
-    have no full session/auth system to drive yet -- see `FR-LAB-118`'s own
-    scoping note), so it only proves "arbitrary ids are accepted with no
-    ownership check", the IDOR/BOLA shape this project's own lab cells model --
-    not a genuine cross-tenant-access proof against a live multi-user app. It
-    can also false-positive on a legitimate endpoint that echoes an arbitrary
-    id back without that id gating access to anything sensitive (e.g. a
-    public lookup keyed by id rather than a private one); `R-ACCESS-CONTROL`
-    scopes the rule to GET/query id-shaped param names to bound that risk, not
-    eliminate it. This is the project's first strategy for this class and is
-    expected to need broader validation against a second, differently-shaped
-    target before being trusted beyond this lab (tracked as an open note in
-    `docs/components/07-fuzzing-harness-and-oracle/requirements.md`).
+    Confirms only when all of these hold (fp=0 safeguards):
+
+    * the captured id answers 200 **twice with the same body** -- the answer is keyed
+      by the id, not a page that differs on every load (PA-0117(2): the differential
+      replicates);
+    * the neighbour answers 200 with a body that is not empty (nor an empty JSON
+      value: ``null``, ``{}``, ``[]``, ``""``) and **differs** from the captured id's --
+      another object, not the same page;
+    * neither body carries a generic denial phrase.
+
+    Known limitation, not silently swept under the rug: this cannot authenticate as
+    two different real identities (`CrossAccountReplayStrategy` does, given peer
+    accounts), so it proves "the neighbouring object is served with no ownership
+    check", not a cross-tenant proof. It can also false-positive on a legitimately
+    public object keyed by id (a public profile or catalogue item);
+    `R-ACCESS-CONTROL` bounds that, it does not eliminate it.
     """
     vuln_class = "access_control"
     mechanism = "identity-differential"
@@ -1672,29 +1735,56 @@ class AccessControlIdorStrategy(ConfirmationStrategy):
 
     # \b-anchored per PA-0022 (avoid an accidental substring hit, e.g.
     # "unauthorized" inside "preauthorized"); a false collision here only
-    # costs a false negative (fails closed), never a false positive.
+    # costs a false negative (fails closed), never a false positive. "does not exist" /
+    # "no such": a neighbour that is no object (FR-FUZZ-712) answered 200 with a message.
     _DENIAL_MARKERS = re.compile(
-        r"\bforbidden\b|\bunauthorized\b|\baccess denied\b|\bnot found\b|\bpermission denied\b",
+        r"\bforbidden\b|\bunauthorized\b|\baccess denied\b|\bnot found\b"
+        r"|\bpermission denied\b|\bdoes not exist\b|\bno such\b",
         re.I,
     )
-    _ID_A = "50172"
-    _ID_B = "88190475"
+    #: A captured id with a numeric neighbour: decimal digits (a zero-padded width is kept).
+    _NUMERIC_ID = re.compile(r"[0-9]{1,18}")
+    _EMPTY_BODIES = frozenset({"", "null", "{}", "[]", '""'})
+
+    @classmethod
+    def neighbours(cls, value: str) -> list[str]:
+        """The captured id's numeric neighbours, +1 first, at its own width."""
+        if not cls._NUMERIC_ID.fullmatch(value or ""):
+            return []
+        n, width = int(value), len(value)
+        return [str(m).zfill(width) for m in (n + 1, n - 1) if m >= 0]
+
+    def _denied_or_empty(self, probe) -> bool:
+        text = probe.text or ""
+        return (probe.status != 200 or text.strip() in self._EMPTY_BODIES
+                or bool(self._DENIAL_MARKERS.search(text)))
 
     def confirm(self, candidate, sender):
-        a = self._send(sender, candidate, self._ID_A)
-        b = self._send(sender, candidate, self._ID_B)
-        if a.status != 200 or b.status != 200:
+        captured = dict(candidate.base_entries or ()).get(candidate.param)
+        if not isinstance(captured, str) or not captured:
+            raise UnplaceableLocation(
+                "access-control: the target gave this point no id value to start from")
+        neighbours = self.neighbours(captured)
+        if not neighbours:
+            raise UnplaceableLocation(
+                "access-control: the target's id has no numeric neighbour")
+        a = self._send(sender, candidate, captured)
+        if self._denied_or_empty(a):
             return None
-        if not a.text or not b.text:
-            return None
-        if self._DENIAL_MARKERS.search(a.text) or self._DENIAL_MARKERS.search(b.text):
-            return None
-        if self._ID_A not in a.text or self._ID_B not in b.text:
-            return None
-        if a.text == b.text:
-            return None
-        return Verdict(True, self.vuln_class, self.mechanism,
-                       {"probe_a": a.text[:120], "probe_b": b.text[:120]})
+        again = self._send(sender, candidate, captured)
+        if again.status != 200 or (again.text or "") != (a.text or ""):
+            return None                  # not keyed by the id alone: no differential
+        for neighbour in neighbours:
+            with trace.role("mutation"):              # FR-FUZZ-60
+                b = self._send(sender, candidate, neighbour)
+            if b.status != 200:
+                continue                 # e.g. 404 past the last object: try the other
+            if self._denied_or_empty(b) or (b.text or "") == (a.text or ""):
+                return None
+            return Verdict(True, self.vuln_class, self.mechanism,
+                           {"value_a": captured, "value_b": neighbour,
+                            "probe_a": a.text[:120], "probe_b": b.text[:120]})
+        return None
 
 
 #: How a JavaScript server renders an object it was sent (``String({...})``): the echo
@@ -2468,19 +2558,17 @@ class UnrestrictedFileUploadContentTypeTrustStrategy(ConfirmationStrategy):
 # side channel has something to observe. Distinct from the black-box strategies'
 # own probes above -- this one probe is purely to *generate* the signal, not to
 # read the HTTP response for a verdict (the verdict comes from coverage/db_fault).
-_GREYBOX_APP_ROOT = "/var/www/html"
 _GREYBOX_PROBE_PAYLOADS = {
     "sqli": "1' OR '1'='1' -- -",
     "xss": "<fzlgbx>",
 }
 
 
-def _greybox_sink_file(url: str, app_root: str = _GREYBOX_APP_ROOT) -> str:
-    """Map a candidate's URL to the app file expected to serve it (…/login.php)."""
-    from urllib.parse import urlparse
-    path = urlparse(url).path or "/"
-    base = path.rsplit("/", 1)[-1] or "index.php"
-    return app_root.rstrip("/") + "/" + base
+def _greybox_sink_file(url: str, coverage, app_root: str | None = None) -> str | None:
+    """The covered file that serves a candidate's URL, read from the coverage
+    (SP-145's `greybox.coverage.endpoint_file`, FR-FUZZ-710): no assumed document root;
+    ``app_root`` only when the operator gave one; None when no covered file maps."""
+    return endpoint_file(url, coverage, root=app_root)
 
 
 class GreyboxConfirmationStrategy(ConfirmationStrategy):
@@ -2512,7 +2600,7 @@ class GreyboxConfirmationStrategy(ConfirmationStrategy):
 
     def __init__(self, coverage: CoverageSource | None = None,
                  dbfault: DbFaultSource | None = None,
-                 app_root: str = _GREYBOX_APP_ROOT):
+                 app_root: str | None = None):
         self._coverage = coverage
         self._dbfault = dbfault
         self._app_root = app_root
@@ -2540,7 +2628,8 @@ class GreyboxConfirmationStrategy(ConfirmationStrategy):
                                              location=candidate.location)
         coverage = app_lines(self._coverage.lines_for(request_id)) \
             if self._coverage is not None else {}
-        sink_covered = _greybox_sink_file(candidate.url, self._app_root) in coverage
+        sink_covered = _greybox_sink_file(candidate.url, coverage, self._app_root) \
+            is not None
         db_fault = self._dbfault.fault_for(request_id).faulted \
             if self._dbfault is not None else False
         signal = GreyboxSignal(sink_covered=sink_covered, db_fault=db_fault)

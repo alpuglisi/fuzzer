@@ -122,6 +122,96 @@ def app_lines(coverage: Mapping[str, Iterable[int]], *,
     return out
 
 
+def _url_segments(url: str) -> tuple[list[str], bool]:
+    """A URL's decoded path segments, and whether it names a directory (ends in ``/``
+    or is the root)."""
+    from urllib.parse import unquote, urlsplit
+    path = urlsplit(url).path or "/"
+    segments = [unquote(s) for s in path.split("/") if s]
+    return segments, path.endswith("/") or not segments
+
+
+def _segments_of(path: str) -> list[str]:
+    return [s for s in path.split("/") if s]
+
+
+def _pick(matches: set[str]) -> str | None:
+    """One endpoint among files that end with the same URL segments: the single
+    shallowest (an included file of the same name sits deeper, ``includes/login.php``);
+    a tie is None."""
+    if not matches:
+        return None
+    depth = {f: len(_segments_of(f)) for f in matches}
+    least = min(depth.values())
+    shallowest = [f for f in matches if depth[f] == least]
+    return shallowest[0] if len(shallowest) == 1 else None
+
+
+def endpoint_file(url: str, coverage: Mapping[str, Iterable[int]],
+                  root: str | None = None) -> str | None:
+    """The covered file that serves ``url``, read from the coverage itself, or None.
+
+    SP-145 (FR-FUZZ-710, BUG-0732): the one owner of "which file is this request's
+    endpoint", read by the live grey-box run (`greybox.run`) and the M10 strategy
+    (`oracle.strategies.GreyboxConfirmationStrategy`). A server that maps a URL path
+    to a script maps it below its document root: RFC 3875 (CGI/1.1) section 4.1.13
+    (``SCRIPT_NAME``: the leading part of the URL path that names the script) and
+    section 4.1.5 (``PATH_INFO``: the rest); Apache httpd's ``DocumentRoot`` ("the
+    path from the URL is appended to the document root"). So the endpoint is the
+    covered file whose path **ends with** the URL path's whole segments, whatever the
+    root is -- never ``<an assumed root>/<the path's last segment>``:
+
+    * the longest leading run of the URL's segments that a covered file's path ends
+      with names the script; any segments after it are ``PATH_INFO``;
+    * a directory URL (``/`` or ``.../``) names that directory's index file
+      (Apache ``mod_dir`` ``DirectoryIndex``): a covered ``index.<ext>`` in it;
+    * under a known ``root`` (an operator's ``--app-root``, or the root a point's
+      baseline implied) only the file at ``root`` + the segments maps; with no root,
+      of several files ending with the same segments the single shallowest;
+    * no covered file maps (a front controller routing ``/users/5`` through
+      ``index.php``), or a tie: **None**, no verdict -- a stated miss, never a guess.
+    """
+    segments, directory = _url_segments(url)
+    files = {f: _segments_of(f) for f in coverage}
+    lead: int | None = None                  # the root's segment count, when known
+    if root is not None:
+        rs = _segments_of(root)
+        lead = len(rs)
+        files = {f: fs for f, fs in files.items() if fs[:lead] == rs}
+    if directory:
+        n = len(segments)
+        return _pick({f for f, fs in files.items()
+                      if len(fs) > n and fs[-1].startswith("index.")
+                      and fs[len(fs) - 1 - n:-1] == segments
+                      and (lead is None or len(fs) == lead + n + 1)})
+    for k in range(len(segments), 0, -1):
+        want = segments[:k]
+        matches = {f for f, fs in files.items() if len(fs) >= k and fs[-k:] == want
+                   and (lead is None or len(fs) == lead + k)}
+        if matches:
+            return _pick(matches)
+    return None
+
+
+def document_root(url: str, file: str) -> str | None:
+    """The document root ``file`` implies for ``url`` (RFC 3875 section 4.1.13: the
+    script's path is the root followed by ``SCRIPT_NAME``), with a trailing ``/`` --
+    the coverage filter's prefix (SP-145) -- or None when ``file`` does not map."""
+    segments, directory = _url_segments(url)
+    fs = [s for s in file.split("/") if s]
+    if directory:
+        keep = len(fs) - 1 - len(segments)
+    else:
+        k = next((k for k in range(len(segments), 0, -1)
+                  if len(fs) >= k and fs[-k:] == segments[:k]), 0)
+        if not k:
+            return None
+        keep = len(fs) - k
+    if keep < 0:
+        return None
+    return "/" + "".join(s + "/" for s in fs[:keep])
+
+
 class CoverageFrontier:
     """The union of application lines seen so far in a run."""
 

@@ -213,10 +213,11 @@ rewards) derives from it.
     instead escalates across `_REDOS_TEMPLATES` (several independent,
     single-nesting-level classic catastrophic-backtracking shapes) and
     confirms when **at least two** independently clear a robust-baseline
-    threshold (`Baseline.exceeds`, `floor`/`k` overridden per-strategy to
+    threshold (~~`Baseline.exceeds`, `floor`/`k` overridden per-strategy to
     this mechanism's own bounded, tens-to-low-hundreds-of-milliseconds
-    probe magnitude) — substituting "two independent evil shapes" for
-    "two requested durations."
+    probe magnitude~~ — *the threshold is superseded by FR-FUZZ-711*,
+    2026-11-20: structural controls and a jitter-derived margin) —
+    substituting "two independent evil shapes" for "two requested durations."
   - Stated limitation: this can only detect ReDoS when the target's own
     content already contains a run of the character class a template
     targets — inherently probabilistic against an arbitrary black-box
@@ -827,12 +828,15 @@ rewards) derives from it.
   paired with `FR-AUD-8`'s candidate-generation rule, closing `CC-LAB-0178`'s
   open question:
   - `AccessControlIdorStrategy` (`vuln_class="access_control"`,
-    `mechanism="identity-differential"`): sends two unrelated id values;
+    `mechanism="identity-differential"`): ~~sends two unrelated id values;
     confirms only when both return HTTP 200, echo the requested id back in
     a non-empty body, contain no generic denial phrase (`\b`-anchored,
     PA-0022), and the two bodies differ — else fails closed. A generic
     differential in the same family as `SqliBooleanStrategy`/
-    `SsrfInBandMarkerStrategy`, not a lab-specific hardcode.
+    `SsrfInBandMarkerStrategy`, not a lab-specific hardcode.~~ *Superseded
+    by FR-FUZZ-712* (2026-11-20, BUG-0734): the two fixed ids were fitted to
+    lab cells that echo any id; the strategy now starts from the target's own
+    captured id and its numeric neighbour.
   - `fuzzlab.core.runmode._VULN_TO_CATEGORY` gained
     `"access_control": "access-control"` — required for the rule/strategy
     to actually be selected by a ground-truth-driven run (the vuln_class
@@ -846,7 +850,10 @@ rewards) derives from it.
     narrowed rule scope (`FR-AUD-8`), not by the strategy itself. This is
     the project's first strategy for this class; broader validation
     against a second, differently-shaped target is expected before it is
-    trusted beyond this lab.
+    trusted beyond this lab. *(Open note superseded by FR-FUZZ-712,
+    2026-11-20: the probe is now the target's own id and the manipulation
+    OWASP WSTG-ATHZ-04 / API1:2023 describe; validation on independent
+    targets remains the lane's crawl measurement, not a lab's recall.)*
   - Verified live against Twitch's real booted twins
     (`test_real_boot_proves_the_access_control_idor_strategy_end_to_end`);
     Twitch's real, scored `multitarget` recall moves from 1/3 to 2/3.
@@ -2382,6 +2389,47 @@ rewards) derives from it.
   words it applies to control names are FR-CRAWL-680's cited set: a POST picker named
   `sort` or `per_page` is now fuzzed (read-only list modifiers; ORDER BY is an
   injection point), one named `locale`, `timezone` or `time_zone` is not.
+
+- **FR-FUZZ-710** *(the grey-box endpoint file is read from the coverage;
+  `CC-FUZZ-0710`, 2026-11-20, BUG-0732, SP-145).* Which covered file serves a point's
+  URL is decided by one owner, `fuzzlab.greybox.coverage.endpoint_file`, read by
+  `greybox.run.run_greybox` and `GreyboxConfirmationStrategy`: the covered file whose
+  path ends with the URL path's whole segments (RFC 3875 §4.1.13 `SCRIPT_NAME`,
+  §4.1.5 `PATH_INFO`; Apache `DocumentRoot`), a directory URL's `index.<ext>`
+  (Apache `mod_dir`), the single shallowest of several (or, under a known root, the
+  one directly below it). No covered file maps (a front controller) or a tie: the
+  sink is not covered, no M10 verdict. No document root is assumed: `run_greybox`'s
+  coverage filter is the operator's `--app-root` when given, else the root the point's
+  baseline endpoint file implies (`coverage.document_root`), else every non-excluded
+  file. The former `/var/www/html` default and `<root>/<last path segment or
+  index.php>` mapping are withdrawn.
+- **FR-FUZZ-711** *(the ReDoS threshold is the target's own; `CC-FUZZ-0711`,
+  2026-11-20, BUG-0733).* `RegexDosStrategy` sends each evil template beside its
+  structural control (`_REDOS_CONTROLS`: the same pattern minus the nested or
+  ambiguous quantifier, linear-time; PA-0117(1), PA-0630(1)) in `rounds` (3)
+  alternating-order rounds, after `baseline_samples` (5) benign samples. A template
+  counts only when **every** evil sample exceeds the slowest non-evil answer measured
+  so far (baseline and every control) by that pool's own jitter: its spread, or
+  `k` (4) robust sigmas, at least the client's measurement resolution
+  (`resolution_floor`, 5 ms, from a measured loopback distribution, not a target
+  figure). Two templates confirm (unchanged). Shapes cited to OWASP "Regular
+  expression Denial of Service - ReDoS", CWE-1333 and Davis et al. (ESEC/FSE 2018).
+  A target slow for every pattern of the shape (a compile or error path), a single
+  slow reading, or a uniformly 0-40 ms jittery endpoint never confirms (tested).
+- **FR-FUZZ-712** *(the IDOR probe is the target's own id and its neighbour;
+  `CC-FUZZ-0712`, 2026-11-20, BUG-0734; supersedes FR-FUZZ-20's fixed-id bullet and
+  open note).* `AccessControlIdorStrategy` reads the point's captured value
+  (`Candidate.base_entries[param]`, as `CrossAccountReplayStrategy` does) and sends
+  it twice, then its numeric neighbour (+1, else -1, zero-padded width kept): OWASP
+  WSTG-ATHZ-04, OWASP API Security Top 10 2023 API1 (BOLA). Confirms only when the
+  captured id answers 200 twice with the same body, the neighbour answers 200 with a
+  non-empty body (not an empty JSON value) that differs from it, and neither carries a
+  denial phrase (`\b`-anchored; now also "does not exist", "no such"). No captured
+  value, or one with no numeric neighbour (a UUID, a slug): `UnplaceableLocation`, no
+  verdict -- a stated miss. A ground-truth-point run carries no captured value (an
+  oracle diagnostic, PA-0660(4)); a crawl run carries one for query links, forms and
+  path segments the crawl saw a value for (`harness.auto` crawl point builder).
+
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
   finding must reproduce.

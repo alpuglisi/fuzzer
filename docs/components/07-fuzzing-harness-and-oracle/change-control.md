@@ -27,6 +27,175 @@ Newest first.
   - [x] FR-FUZZ-713; FR-FUZZ-43 amended — done
 - Effectiveness (assessed 2026-11-20, offline): as CC-CRAWL-0680; live effect pending
   the lane's measurement.
+
+### CC-FUZZ-0712 — IDOR probes the target's own id and its neighbour, never a fixed synthetic id (BUG-0734, FR-FUZZ-712) (2026-11-20)
+- Change: `fuzzlab/oracle/strategies.py::AccessControlIdorStrategy` (local rewrite of
+  its `confirm`; `_ID_A="50172"` / `_ID_B="88190475"` and the per-id echo check removed;
+  `neighbours()`, `_denied_or_empty()` added; two denial phrases added);
+  `tests/test_oracle_strategies_access_control.py` (`_cand` carries a captured id; seven
+  new tests); `tests/test_oracle_comparable_controls.py` (the strategy's control-reading
+  row restated); `tests/test_labgen_go_live_boot.py` (two IDOR live boots) and
+  `tests/test_labgen_spring_boot_account_billing_live_boot.py` (their candidates carry a
+  captured id); `tests/test_multitarget_category4.py` (ground-truth-run figures
+  re-derived). FR-FUZZ-712 (supersedes FR-FUZZ-20's fixed-id bullet and open note).
+- Provenance: CC-FUZZ-0033 (2026-09-23) built the strategy for CC-LAB-0178's Twitch
+  `go_net_http` cell, whose `no_ownership_check` template echoes any `channel_id`; the
+  "echo the requested id" check and the two arbitrary ids were added in its review to
+  raise precision on that cell's shape (CC-FUZZ-0033, adequacy pass item (b)). CC-FUZZ-0047
+  re-checked it against the Laravel photo-view template. Every confirmation it ever
+  recorded was a labgen cell that echoes any id (BUG-0734).
+- Mechanism (as specified): the id is the point's captured value
+  (`Candidate.base_entries[param]`, read as `CrossAccountReplayStrategy` reads it); the
+  probe is its numeric neighbour (+1, then -1 when +1 is not 200), zero-padded width
+  kept -- OWASP WSTG v4.2 WSTG-ATHZ-04 "Testing for Insecure Direct Object References"
+  (modify the value of a parameter that references an object) and OWASP API Security
+  Top 10 2023 API1 "Broken Object Level Authorization". The captured id is sent twice:
+  its body must replicate (PA-0117(2); replaces the echo check, which a short neighbour
+  such as `42` satisfies trivially). fp=0 safeguards kept: both 200, non-empty (and not
+  an empty JSON value), distinct bodies, no denial phrase. No captured value or no
+  numeric neighbour: `UnplaceableLocation` (no verdict, the oracle's existing "this
+  mechanism cannot place the point" path), never a guessed id.
+- Pipeline check (does a run supply the captured value?): a **crawl** run does --
+  `harness.auto` builds each crawl point's `base_entries` from the crawled link's query,
+  the form's entries, or a path segment's example, and `harness.pipeline._candidate_of`
+  copies `entries` into `Candidate.base_entries`. A **ground-truth-point** run does not
+  (the answer key has no example value): the strategy gives no verdict there (an oracle
+  diagnostic, PA-0660(4)).
+- Impact (other components / project): FUZZ only. Ground-truth-run (oracle diagnostic)
+  figures in `tests/test_multitarget_category4.py`: twitch-clone 11 -> 9 (TWCH-0003,
+  TWCH-0007), netflix-clone multi-cell 9/11 -> 8/11 (NFLX-0004); macro recall
+  re-derived. Crawl (detection) figures: the labgen go/spring sites link
+  `/channels/analytics`, `/channels/subscribers` and `/account/billing` with no id value
+  (`go_net_http/stack/skeleton/site.go:179-180`, `spring_boot/app_site.py:62`), so a crawl
+  of those apps captures no id for these points and this strategy gives no verdict there
+  either; the lane measures the crawl figure (labs with access-control points:
+  circlefeed CF-0001, netflix-clone NFLX-0004, nodegoat NGOAT-0005,
+  secdevlabs-ecommerce-api SDLEC-0001/0002, twitch-clone TWCH-0003/0007).
+- Risk (level; mitigation or accepted-risk justification): medium -- recall falls where
+  no crawl captured a numeric id (stated misses); precision rises. Documented
+  false-positive class kept: a legitimately public object keyed by id still confirms
+  (`test_documented_false_positive_class_a_public_echo_endpoint_does_confirm`).
+- Deliverables:
+  - [x] strategy, tests, live-boot candidates, multitarget figures — done
+  - [x] BUG-0734; FR-FUZZ-712; ERROR_LOG / CHANGELOG / PA-0730 text proposed to the lane
+    (sub-agent may not edit them) — done
+- Measured (2026-11-20, this worktree): `tests/test_oracle_strategies_access_control.py`
+  all pass (the vulnerable fake confirms on `41, 41, 42`; the 403 twin, the canned page,
+  the per-load nonce page and five empty/missing-neighbour bodies give no verdict; a
+  missing or UUID id raises `UnplaceableLocation` and sends nothing). Real Go and Spring
+  Boot live boots (vulnerable twin confirms from a captured `41`; secure twin 403 does
+  not) and the multitarget category-4 boots pass with the re-derived figures: 14 live/
+  multitarget files (go and spring live boots, category-4/category-1/expedia/node-bff
+  multitarget, navigability boots, `test_labgen_redos.py`) 100 passed, 4 skipped, 4
+  xfailed; the 12 unit/guard files (incl. `test_blackbox_detection.py`,
+  `test_pa_enforcement.py`, `test_shared_primitives.py`) 456 passed.
+- Effectiveness (assessed pending): the lane's crawl measurement on independent targets.
+
+### CC-FUZZ-0711 — ReDoS threshold from the target's own answers: structural controls, repeats, measured jitter (BUG-0733, FR-FUZZ-711) (2026-11-20)
+- Change: `fuzzlab/oracle/strategies.py` (`_REDOS_CONTROLS` added beside
+  `_REDOS_TEMPLATES`; `RegexDosStrategy`'s threshold and `confirm` rewritten locally:
+  `baseline_samples` 3 -> 5, `rounds = 3`, `resolution_floor = 0.005`, `_margin`; the
+  fixed `floor = 0.02` removed; docstring restated); `tests/test_oracle_redos.py` (five
+  new tests); `tests/test_labgen_redos.py` (two new real-Node strategy tests);
+  `tests/test_oracle_comparable_controls.py::_Timeouts` (the controls answer, so the
+  read-timeout pin still isolates the evil templates);
+  `docs/architecture/oracle-confirmation.md` (ReDoS bullet). FR-FUZZ-711 (FR-FUZZ-12's
+  threshold superseded in place).
+- Provenance: CC-FUZZ-0025 / CC-LAB-0076 (2026-09-22) set `floor = 0.02 s`, `k = 4`,
+  3 samples "to fit this mechanism's own bounded probe magnitude", calibrated on the
+  `node_express` `regex_highlight_match` cells (`LABGEN-RD-0001/0002`: ~55-70 ms vulnerable,
+  <1 ms secure); the class docstring: "observed at low-single-digit milliseconds in this
+  project's own calibration". No control of the probe's own shape existed.
+- Mechanism (as specified): (1) a per-template **structural control** -- the same group,
+  class and `$` anchor minus the nested or ambiguous quantifier (`(a+)+$` -> `(a+)$`,
+  `(a|a)*$` -> `(a)*$`, `(a|aa)+$` -> `(a)+$`, `([a-zA-Z]+)*$` -> `([a-zA-Z])*$`,
+  `(\d+)+$` -> `(\d)+$`), linear-time on a backtracking engine: PA-0117(1)/PA-0630(1);
+  (2) the evil template must exceed **both** the benign baseline and its control -- every
+  evil sample above the slowest non-evil answer measured so far; (3) **re-sent** in 3
+  alternating-order rounds, every round above; (4) the margin is the non-evil pool's own
+  spread or 4 robust sigmas, at least a 5 ms client-resolution floor (measured below, an
+  instrument figure, not a target's). Two templates still confirm. Sources: OWASP
+  "Regular expression Denial of Service - ReDoS" (Evil Regexes `(a+)+`, `([a-zA-Z]+)*`,
+  `(a|aa)+`); CWE-1333 "Inefficient Regular Expression Complexity"; J. Davis et al.,
+  "The Impact of Regular Expression Denial of Service (ReDoS) in Practice", ESEC/FSE 2018
+  (nested quantifiers, quantified overlapping alternation); R. Cox, "Regular Expression
+  Matching Can Be Simple And Fast" (2007) on backtracking blowup.
+- Impact (other components / project): FUZZ only. Requests per ReDoS candidate: a
+  non-vulnerable endpoint 5 + 5 x 2 = 15 (was 3 + 5 = 8); a vulnerable one confirming on
+  its first two templates 5 + 2 x 6 = 17 (was 3 + 2 = 5). Labs with ReDoS points:
+  meadowmart MMART-0003 (positive) / MMART-0004 (secure twin), labgen manifest
+  `lab/manifests/redos_node_sample.yaml` (`LABGEN-RD-0001/0002`).
+- Risk (level; mitigation or accepted-risk justification): low-medium -- a stricter rule
+  (false negatives on a target whose evil latency is under its own jitter spread, or
+  slow only once); false positives from jitter, from a slow regex compile/error path or
+  from one slow reading are removed (tested).
+- Deliverables:
+  - [x] controls, threshold, tests (fake and real Node) — done
+  - [x] BUG-0733; FR-FUZZ-711; architecture doc — done
+- Measured (2026-11-20, this host):
+  - Client resolution: loopback HTTP (`requests` to a local `http.server`), 500 GETs:
+    min 0.84 ms, p50 1.46 ms, p90 2.44 ms, p99 6.24 ms, max 8.24 ms; spread of a random
+    5-sample window p50 0.94 ms, p99 6.96 ms.
+  - Real Node (`tests/test_labgen_redos.py`'s in-process `hrtime` runner), per term x3,
+    `LABGEN-RD-0001`: benign 0.11-0.13 ms; `(a+)+$` 51-83 ms vs control `(a+)$` 0.11-0.16;
+    `(a|a)*$` 83-151 vs `(a)*$` 0.10; `([a-zA-Z]+)*$` 51-84 vs 0.21-0.26; `(a|aa)+$`
+    0.9-1.3 (not catastrophic on this content); `(\d+)+$` 0.1. `LABGEN-RD-0002` (escaped):
+    every term 0.11-0.21 ms.
+  - The strategy over the real Node runner, 5 runs: the vulnerable cell confirmed every
+    run on `(a+)+$` and `(a|a)*$` (evil 49-107 ms against a 5.2-5.4 ms threshold, max
+    control 0.2 ms, 17 probes); the secure cell never confirmed (15 probes).
+  - Monte-Carlo of the decision rule (non-vulnerable, every answer i.i.d.), 5 baseline
+    samples x 3 rounds: uniform 0-40 ms 0/200 000; exponential (mean 10 ms) 0/300 000;
+    log-normal 0/300 000; Pareto(1.5) 5/300 000. With the former 3 samples x 1 round,
+    uniform 0-40 ms: 0.63 %.
+- Effectiveness (assessed pending): the lane's measurement on meadowmart (MMART-0003/0004).
+
+### CC-FUZZ-0710 — Grey-box endpoint file read from the coverage, no assumed document root (BUG-0732, FR-FUZZ-710, SP-145) (2026-11-20)
+- Change: `fuzzlab/greybox/coverage.py` (new `endpoint_file`, `document_root`, with
+  `_url_segments`, `_segments_of`, `_pick`); `fuzzlab/greybox/run.py` (`_endpoint_file`
+  removed; `DEFAULT_APP_ROOT` `"/var/www/html"` -> `None`; `run_greybox`'s coverage filter
+  per point: the operator's `--app-root`, else the root its baseline's endpoint file
+  implies, else every non-excluded file; `sink_covered` through `endpoint_file`);
+  `fuzzlab/oracle/strategies.py` (`_GREYBOX_APP_ROOT` removed; `_greybox_sink_file`
+  delegates to `endpoint_file`; `GreyboxConfirmationStrategy(app_root=None)`);
+  `fuzzlab/greybox/greybox_cli.py` (`--app-root` help); tests in `tests/test_greybox.py`
+  (4), `tests/test_greybox_live.py` (3), `tests/test_oracle_greybox.py` (2). FR-FUZZ-710.
+- Provenance: CC-FUZZ-0016 (2026-09-21, T3.2-T3.7) built `run_greybox` with
+  `DEFAULT_APP_ROOT = "/var/www/html"` and `_endpoint_file` (`<root>/<last path segment or
+  index.php>`), matching CC-LAB-0009's instrumented PFF image (`pcov.directory=/var/www/html`,
+  a flat directory of PHP scripts); CC-FUZZ-0024 copied the mapping into the M10 strategy
+  (`_GREYBOX_APP_ROOT`, `_greybox_sink_file`). No requirement or record cites a public
+  convention for either; both fit the flat lab only.
+- Mechanism (as specified): the endpoint is the covered file whose path ends with the URL
+  path's whole segments, independent of the root -- RFC 3875 (CGI/1.1) §4.1.13
+  `SCRIPT_NAME` and §4.1.5 `PATH_INFO`; Apache httpd core `DocumentRoot` ("the path from
+  the URL is appended to the document root"); a directory URL's `index.<ext>` per Apache
+  `mod_dir` `DirectoryIndex`; several matches: the single shallowest, or under a known
+  root the one directly below it; none (a front controller) or a tie: no verdict. The
+  include filter derives from the coverage (`document_root`: the matched file minus the
+  URL's script path). No default root is kept (the official `php` Docker image's
+  `/var/www/html` DocumentRoot was not needed once the root is read from coverage).
+  Both call sites use the one helper (SP-145, proposed to the lane; this sub-agent may
+  not edit `docs/SHARED_PRIMITIVES.md`).
+- Impact (other components / project): FUZZ. `greybox-run` without `--app-root` now
+  derives each point's filter; on the flat PFF lab the derived root is `/var/www/html/`
+  (same as before), so its figures should not move. An app in a sub-directory or under
+  another root is now sink-covered where it was never before; a front-controller app is
+  never sink-covered (before: never either, by a wrong file). Not swept (component MUT, no
+  IDs): `fuzzlab/mutation/cli.py:38` and `fuzzlab/mutation/run.py:29` keep the same
+  `/var/www/html` default (reported to the lane).
+- Risk (level; mitigation or accepted-risk justification): low -- additive owner, two
+  call sites, explicit `--app-root` unchanged in meaning; ties and front controllers are
+  stated misses.
+- Deliverables:
+  - [x] `endpoint_file` / `document_root`, both call sites, tests — done
+  - [x] BUG-0732; FR-FUZZ-710; SP-145 row and MUT finding proposed to the lane — done
+- Measured (2026-11-20): unit/offline only (no docker labs in this sub-task): the
+  existing flat-root tests (`/var/www/html/login.php` for `/login.php`) pass unchanged; a
+  `/srv/shop/public/admin/product.php` app is sink-covered and its filter excludes
+  `/srv/shop/lib/`; `/users/5` through `index.php` maps nothing.
+- Effectiveness (assessed pending): the lane's grey-box measurement.
+
 ### CC-FUZZ-0633 — Black-box review of CC-FUZZ-0630..0632 (owner directive, 2026-11-20)
 - Change: `fuzzlab/oracle/strategies_jvm.py` (the `WEB-INF/web.xml` probe removed;
   docstrings state the evidence and the jar-classpath limit); `fuzzlab/oracle/

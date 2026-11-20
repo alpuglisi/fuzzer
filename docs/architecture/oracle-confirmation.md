@@ -117,10 +117,15 @@ recording precisely rather than glossing over:
   Confirmation requires **at least two** independent templates to each
   clear a robust-baseline threshold — substituting "two independent evil
   shapes" for `_confirm_timing`'s "two requested durations," since no
-  requested duration exists here. `floor`/`k` are overridden per-strategy
-  (`floor=0.02s`, `k=4.0`) to fit this mechanism's own, deliberately
-  bounded probe magnitude (tens-to-low-hundreds of milliseconds), never
-  `_confirm_timing`'s multi-second-tuned `floor=1.5`.
+  requested duration exists here. The threshold is the target's own
+  (FR-FUZZ-711, CC-FUZZ-0711, BUG-0733; the fixed `floor=0.02s`/`k=4.0`
+  of CC-FUZZ-0025, calibrated on this project's own cells, is withdrawn):
+  each template is sent in 3 alternating rounds beside its structural
+  control (`_REDOS_CONTROLS`, the same pattern minus the nested or
+  ambiguous quantifier -- the probe minus what it tests, PA-0117(1)), and
+  every evil sample must exceed the slowest benign or control answer by
+  that pool's own spread (or 4 robust sigmas), at least a 5 ms client
+  resolution floor.
 - **Nesting depth was tried and rejected.** Deepening a single evil shape
   by even one level (`(a+)+$` -> `((a+)+)+$`) was calibrated as an
   alternative escalation axis (so a fixed content run-length could still

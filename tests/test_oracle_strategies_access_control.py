@@ -13,10 +13,13 @@ from fuzzlab.oracle.probe import Candidate, Probe
 from fuzzlab.oracle.strategies import AccessControlIdorStrategy, default_strategies
 
 
-def _cand():
+def _cand(captured="41"):
+    """FR-FUZZ-712: the point carries the id the target itself gave (a crawled link's
+    value, `base_entries`), as a crawl run's candidate does."""
+    entries = None if captured is None else (("channel_id", captured),)
     return Candidate(url="http://h/channels/analytics", param="channel_id",
                      method="GET", location="query", vuln_class="access_control",
-                     category="access-control")
+                     category="access-control", base_entries=entries)
 
 
 class _NoOwnershipCheckSender:
@@ -177,3 +180,77 @@ def test_r_access_control_rule_does_not_match_a_body_or_post_point():
     rule = next(r for r in rules if r.id == "R-ACCESS-CONTROL")
     assert not matches(rule, _BodyPoint())
     assert not matches(rule, _PostPoint())
+
+
+# --- FR-FUZZ-712 (BUG-0734, CC-FUZZ-0712): the target's own id and its neighbour ----
+
+class _Recording:
+    """Records every value sent; answers like the vulnerable twin (any id echoed)."""
+
+    def __init__(self, answer=None):
+        self.sent = []
+        self.answer = answer or (lambda v: Probe(200, '{"id":"' + v + '","n":1}'))
+
+    def send(self, url, param, value, timing=False, method="GET", location="query",
+             content_type=None):
+        self.sent.append(value)
+        return self.answer(value)
+
+
+def test_sends_only_the_targets_id_and_its_neighbour():
+    """No synthetic id: the captured value twice (keyed-ness), then its +1 neighbour."""
+    sender = _Recording()
+    verdict = AccessControlIdorStrategy().confirm(_cand("41"), sender)
+    assert verdict is not None and verdict.confirmed
+    assert sender.sent == ["41", "41", "42"]
+    assert (verdict.evidence["value_a"], verdict.evidence["value_b"]) == ("41", "42")
+
+
+def test_no_verdict_when_the_target_gave_no_id():
+    """A ground-truth-point candidate carries no captured value: a stated miss
+    (UnplaceableLocation, no verdict), never a guessed id -- and nothing is sent."""
+    import pytest
+
+    from fuzzlab.oracle.probe import UnplaceableLocation
+    sender = _Recording()
+    with pytest.raises(UnplaceableLocation, match="no id value"):
+        AccessControlIdorStrategy().confirm(_cand(None), sender)
+    with pytest.raises(UnplaceableLocation, match="numeric neighbour"):
+        AccessControlIdorStrategy().confirm(
+            _cand("3f2a9c4e-7b1d-4c2a-9e8f-1a2b3c4d5e6f"), sender)
+    assert sender.sent == []
+
+
+def test_tries_the_lower_neighbour_when_the_upper_is_past_the_last_object():
+    def answer(v):
+        return Probe(404, "") if v == "42" else Probe(200, '{"id":"' + v + '"}')
+    sender = _Recording(answer)
+    verdict = AccessControlIdorStrategy().confirm(_cand("41"), sender)
+    assert verdict is not None and verdict.evidence["value_b"] == "40"
+
+
+def test_a_page_that_changes_on_every_load_never_confirms():
+    """PA-0117(2): the captured id's own answer must replicate; a body with a fresh
+    nonce per load is no id-keyed differential."""
+    import itertools
+    counter = itertools.count()
+    sender = _Recording(lambda v: Probe(200, f"<p>id {v}</p><i>{next(counter)}</i>"))
+    assert AccessControlIdorStrategy().confirm(_cand("41"), sender) is None
+
+
+def test_an_empty_or_missing_neighbour_never_confirms():
+    for body in ("null", "{}", "[]", "Item 42 does not exist", "No such record"):
+        sender = _Recording(lambda v, body=body: Probe(200, '{"id":"41"}') if v == "41"
+                            else Probe(200, body))
+        assert AccessControlIdorStrategy().confirm(_cand("41"), sender) is None, body
+
+
+def test_a_zero_padded_id_keeps_its_width():
+    assert AccessControlIdorStrategy.neighbours("0099") == ["0100", "0098"]
+    assert AccessControlIdorStrategy.neighbours("0") == ["1"]
+
+
+def test_no_fixed_synthetic_id_remains():
+    """BUG-0734: the former `_ID_A`/`_ID_B` constants are gone."""
+    assert not hasattr(AccessControlIdorStrategy, "_ID_A")
+    assert not hasattr(AccessControlIdorStrategy, "_ID_B")

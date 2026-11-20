@@ -365,10 +365,14 @@ def test_real_boot_proves_the_access_control_idor_strategy_end_to_end() -> None:
         strategy = AccessControlIdorStrategy()
         vuln_cand = Candidate(url="http://h/channels/analytics", param="channel_id",
                               method="GET", location="query",
-                              vuln_class="access_control", category="access-control")
+                              vuln_class="access_control", category="access-control",
+                              # FR-FUZZ-712: the id a crawl captured (the strategy starts from it)
+                              base_entries=(("channel_id", "41"),))
         secure_cand = Candidate(url="http://h/channels/analytics.labgen-go-0006", param="channel_id",
                                 method="GET", location="query",
-                                vuln_class="access_control", category="access-control")
+                                vuln_class="access_control", category="access-control",
+                                # FR-FUZZ-712: the id a crawl captured (the strategy starts from it)
+                                base_entries=(("channel_id", "41"),))
 
         verdict = strategy.confirm(vuln_cand, _HarnessSender("/channels/analytics"))
         assert verdict is not None and verdict.confirmed, "strategy failed to confirm the real vulnerable twin"
@@ -460,10 +464,14 @@ def test_real_boot_proves_the_access_control_idor_strategy_generalizes_to_subscr
         strategy = AccessControlIdorStrategy()
         vuln_cand = Candidate(url="http://h/channels/subscribers", param="channel_id",
                               method="GET", location="query",
-                              vuln_class="access_control", category="access-control")
+                              vuln_class="access_control", category="access-control",
+                              # FR-FUZZ-712: the id a crawl captured (the strategy starts from it)
+                              base_entries=(("channel_id", "41"),))
         secure_cand = Candidate(url="http://h/channels/subscribers.labgen-go-0014", param="channel_id",
                                 method="GET", location="query",
-                                vuln_class="access_control", category="access-control")
+                                vuln_class="access_control", category="access-control",
+                                # FR-FUZZ-712: the id a crawl captured (the strategy starts from it)
+                                base_entries=(("channel_id", "41"),))
 
         verdict = strategy.confirm(vuln_cand, _HarnessSender("/channels/subscribers"))
         assert verdict is not None and verdict.confirmed, "strategy failed to confirm the real vulnerable twin"

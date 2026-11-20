@@ -181,3 +181,19 @@ def test_oracle_confirm_greybox_noop_leaves_candidate_unconfirmed():
     oracle = Oracle()
     verdict = oracle.confirm(_sqli_cand(), _CorrelatingSender())
     assert verdict is None
+
+
+def test_confirms_xss_under_a_root_read_from_the_coverage():
+    """FR-FUZZ-710 (BUG-0732): no assumed `/var/www/html`; the endpoint is the covered
+    file ending with the URL's segments, wherever the app is installed."""
+    coverage = InMemoryCoverageSource({"req-1": {"/srv/site/public/search.php": [4]}})
+    strategy = GreyboxConfirmationStrategy(coverage=coverage, dbfault=None)
+    verdict = strategy.confirm(_xss_cand(), _CorrelatingSender())
+    assert verdict is not None and verdict.confirmed
+
+
+def test_no_verdict_when_no_covered_file_maps_the_url():
+    """A front controller (`index.php` serving `/search.php` by routing) maps nothing."""
+    coverage = InMemoryCoverageSource({"req-1": {"/srv/site/public/index.php": [4]}})
+    strategy = GreyboxConfirmationStrategy(coverage=coverage, dbfault=None)
+    assert strategy.confirm(_xss_cand(), _CorrelatingSender()) is None

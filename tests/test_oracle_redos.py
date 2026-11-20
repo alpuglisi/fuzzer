@@ -92,3 +92,77 @@ def test_redos_strategy_applies_to_its_own_category():
     other = Candidate(url="http://h/x", param="q", category="sql-injection")
     assert strategy.applies(matching) is True
     assert strategy.applies(other) is False
+
+
+# --- FR-FUZZ-711 (BUG-0733, CC-FUZZ-0711): the threshold is the target's own --------
+
+def test_every_template_has_a_structural_control_minus_its_ambiguity():
+    """PA-0117(1)/PA-0630(1): each control is its template with the nested or ambiguous
+    quantifier removed -- same group, same class, same `$` anchor, never the template."""
+    from fuzzlab.oracle.strategies import _REDOS_CONTROLS
+    assert set(_REDOS_CONTROLS) == set(_REDOS_TEMPLATES)
+    for evil, control in _REDOS_CONTROLS.items():
+        assert control != evil and control.endswith("$") and len(control) < len(evil)
+        assert control.startswith("(") and control.count("(") == evil.count("(")
+
+
+def test_redos_not_confirmed_when_any_regex_shaped_term_is_slow():
+    """A target slow for every pattern of this shape (a regex compile or an error path,
+    no backtracking) is slow on the control too: no verdict from the ambiguity."""
+    class _SlowForAnyPattern:
+        def send(self, url, param, value, timing=False, method="GET", location="query"):
+            return Probe(200, "ok", elapsed=0.06 if "(" in value else 0.001)
+
+    assert RegexDosStrategy().confirm(_cand(), _SlowForAnyPattern()) is None
+
+
+def test_redos_not_confirmed_when_the_slowness_does_not_repeat():
+    """Each evil template is re-sent `rounds` times; a slow first answer alone (a GC
+    pause, a cold cache) is not a finding."""
+    class _SlowOnce:
+        def __init__(self):
+            self.seen = set()
+
+        def send(self, url, param, value, timing=False, method="GET", location="query"):
+            if value in _REDOS_TEMPLATES and value not in self.seen:
+                self.seen.add(value)
+                return Probe(200, "ok", elapsed=0.06)
+            return Probe(200, "ok", elapsed=0.001)
+
+    assert RegexDosStrategy().confirm(_cand(), _SlowOnce()) is None
+
+
+def test_a_jittery_endpoint_that_is_not_vulnerable_never_confirms():
+    """Every answer -- benign, control and evil alike -- takes a uniformly random 0-40 ms
+    (twice the former fixed 20 ms floor): over 300 seeded runs, never a verdict."""
+    import random
+
+    class _Jittery:
+        def __init__(self, seed):
+            self.rng = random.Random(seed)
+
+        def send(self, url, param, value, timing=False, method="GET", location="query"):
+            return Probe(200, "ok", elapsed=self.rng.uniform(0.0, 0.040))
+
+    confirmed = [seed for seed in range(300)
+                 if RegexDosStrategy().confirm(_cand(), _Jittery(seed)) is not None]
+    assert confirmed == []
+
+
+def test_a_vulnerable_endpoint_behind_the_same_jitter_still_confirms():
+    """The same 0-40 ms jitter on every answer, with the evil templates 400 ms slower:
+    the threshold follows the measured spread and still confirms."""
+    import random
+
+    class _JitteryVulnerable:
+        def __init__(self, seed):
+            self.rng = random.Random(seed)
+
+        def send(self, url, param, value, timing=False, method="GET", location="query"):
+            extra = 0.4 if value in _REDOS_TEMPLATES else 0.0
+            return Probe(200, "ok", elapsed=extra + self.rng.uniform(0.0, 0.040))
+
+    for seed in range(50):
+        v = RegexDosStrategy().confirm(_cand(), _JitteryVulnerable(seed))
+        assert v is not None and v.confirmed, seed
+        assert all("control" in t for t in v.evidence["confirming_templates"])
