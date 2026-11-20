@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import html
 import itertools
+import json
 import re
 import secrets
 from dataclasses import dataclass
@@ -114,6 +115,68 @@ _TRAVERSAL_PAYLOADS = [
     "/etc/passwd",
     "../../../../etc/passwd%00",
 ]
+#: FR-FUZZ-640: a sink that *lists* a directory (bWAPP's directory_traversal_2, measured
+#: 2026-11-20: ``../../../../etc`` and ``/etc`` list it, an unknown name answers "doesn't
+#: exist", a file an opendir warning) shows no file content; it is probed for ``/etc``.
+_LISTING_PAYLOADS = ("../../../../../../../../etc", "/etc")
+#: Files of ``/etc`` that are not English words (FR-FUZZ-641, BUG-0641: ``group``,
+#: ``profile``, ``issue`` ... matched prose). Measured 2026-11-20 by ``ls -a /etc``: a
+#: Debian/Ubuntu container 20 of them, ``mariadb`` 22, ``mongo`` 20, ``mysql`` (Oracle
+#: Linux) 17, ``nginx:1.27-alpine`` 10.
+_ETC_ENTRIES = frozenset({
+    "passwd", "fstab", "mtab", "inittab", "crontab", "gshadow", "subuid", "subgid",
+    "securetty", "os-release", "resolv.conf", "nsswitch.conf", "ld.so.conf", "ld.so.cache",
+    "login.defs", "sysctl.conf", "bash.bashrc", "adduser.conf", "deluser.conf",
+    "debian_version", "alpine-release", "redhat-release", "issue.net", "hosts.allow",
+    "hosts.deny", "host.conf", "mke2fs.conf"})
+#: At least this many entries, each absent from the sibling control's answer, make a
+#: listing.
+LISTING_MIN_ENTRIES = 4
+_LINE_SPLIT = re.compile(r"\r?\n")
+
+
+def _listing_items(text: str) -> set[str]:
+    """The whole items a directory listing would show one per entry (FR-FUZZ-641): each
+    line of the text, each string of a JSON body, each text node of an HTML page, with a
+    directory's trailing ``/`` (or http.server's symlink ``@``) dropped. Measured on four implementations (2026-11-20):
+    ``os.listdir`` joined by lines, ``fs.readdirSync`` as a JSON array, Python's
+    ``http.server`` and nginx's autoindex (one ``<a>`` per entry), and bWAPP's PHP table.
+    A word inside a sentence is never an item."""
+    text = text or ""
+    items: set[str] = set()
+
+    def add(value: str) -> None:
+        value = value.strip()
+        if value:
+            # a directory's ``/``; http.server's ``@`` after a symlink (measured)
+            items.add(value[:-1] if value[-1] in "/@" and len(value) > 1 else value)
+
+    for line in _LINE_SPLIT.split(text):
+        add(line)
+    try:
+        data = json.loads(text)
+    except (ValueError, RecursionError):
+        data = None
+    stack = [data]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, str):
+            add(node)
+        elif isinstance(node, list):
+            stack.extend(node)
+        elif isinstance(node, dict):
+            stack.extend(node.values())
+    if "<" in text:
+        from bs4 import BeautifulSoup
+        for string in BeautifulSoup(text, "html.parser").stripped_strings:
+            add(string)
+    return items
+
+
+def _etc_entries(text: str) -> set[str]:
+    """The non-English ``/etc`` file names ``text`` shows as whole listing items
+    (`_listing_items`)."""
+    return _listing_items(text) & _ETC_ENTRIES
 
 
 def _ssti_payloads(expr: str) -> list[str]:
@@ -1337,6 +1400,42 @@ class PathTraversalFsPathReadStrategy(ConfirmationStrategy):
                         "not comparable: the control's follow-up got no observation")
                 continue    # the control was not observed alike (FR-FUZZ-49)
             evidence = {"payload": payload}
+            if _via_prg(probe):
+                evidence["observation"] = "prg"
+            return Verdict(True, self.vuln_class, self.mechanism, evidence)
+        return self._directory_listing(candidate, sender)
+
+    def _directory_listing(self, candidate, sender):
+        """FR-FUZZ-640/641: a sink that lists a directory instead of reading a file. Each
+        `_LISTING_PAYLOADS` value names ``/etc``; its answer must be 2xx and show at least
+        `LISTING_MIN_ENTRIES` non-English ``/etc`` file names, each a whole listing item
+        (`_etc_entries`), that a compared control does not show. The control is the same
+        value with ``etc`` replaced by a random sibling name (same separators, same depth),
+        so an app that answers any path-shaped value with another page (an error, a
+        trace) shows that page to the control too (BUG-0641). A control that is not the
+        application's answer gives no verdict (FR-FUZZ-63). +2 requests when nothing
+        lists; +1 control on a match."""
+        for payload in _LISTING_PAYLOADS:
+            with trace.role("mutation"):              # FR-FUZZ-60
+                probe = self._send(sender, candidate, payload)
+            seen = _observed(probe)
+            if not 200 <= (getattr(seen, "status", 0) or 0) < 300:
+                continue
+            listed = _etc_entries(seen.text or "")
+            if len(listed) < LISTING_MIN_ENTRIES:
+                continue
+            sibling = payload[:-len("etc")] + f"zq{_token()}"
+            control = self._compared(sender, candidate, sibling, role="control")
+            fresh = listed - _etc_entries(_observed(control).text or "")
+            if len(fresh) < LISTING_MIN_ENTRIES:
+                continue                            # shown without the directory
+            if _via_prg(probe) and not _via_prg(control):
+                if getattr(control, "prg", None) == PRG_UNOBSERVED:
+                    raise NotComparable(
+                        "not comparable: the control's follow-up got no observation")
+                continue
+            evidence = {"payload": payload, "control": sibling, "listing": sorted(fresh),
+                        "variant": "directory-listing"}
             if _via_prg(probe):
                 evidence["observation"] = "prg"
             return Verdict(True, self.vuln_class, self.mechanism, evidence)
