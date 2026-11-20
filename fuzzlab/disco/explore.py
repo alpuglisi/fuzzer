@@ -780,9 +780,18 @@ def has_captcha(fields: list[dict]) -> bool:
 
 
 def form_refusal(fields: list[dict], submitter: dict) -> str | None:
-    """Why a form is never submitted: it changes a credential. A CAPTCHA form is
-    submitted like any other (D71)."""
+    """Why a form is never submitted: it changes a credential, or it configures the
+    application -- a control or the submitter named or labelled by a settings word
+    (SP-120, `formnav.settings_word`, as the spider's form gates judge it; CC-CRAWL-0673:
+    a security-level form submitted by the explorer ran every later request at that
+    level). A CAPTCHA form is submitted like any other (D71)."""
+    from fuzzlab.tools.formnav import settings_word
     from fuzzlab.tools.store_adapter import credential_change_rule
+    for el in [*fields, submitter]:
+        for key in ("name", "id", "label"):
+            word = settings_word(str(el.get(key) or ""))
+            if word:
+                return f"settings:{word}"
     passwords = [f.get("name") or f.get("id") or "password" for f in fields
                  if f.get("type") == "password"]
     hidden = [f.get("name") for f in fields if f.get("type") == "hidden" and f.get("name")]

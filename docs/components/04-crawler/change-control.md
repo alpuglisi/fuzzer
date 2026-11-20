@@ -3,6 +3,23 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0673 — Disco never submits a settings form (SP-120 in the explorer's form refusal) (FR-CRAWL-674) (2026-11-20)
+- Placement: lane CRAWLCOV (item CRAWLCOV-DISCOSAFE), base 94fac7f; lane CRAWLSAFE's open
+  gap 2, handed to this lane by the orchestrator.
+- Change: `fuzzlab/disco/explore.py::form_refusal` refuses a form whose controls or
+  submitter carry a settings word in their name, id or label (`formnav.settings_word`,
+  SP-120's owner, as the spider's form gates judge it): `settings:<word>`.
+- Measured: lane CRAWLSAFE's live disco run on bWAPP: the explorer submitted the
+  security-level POST form and the 471 requests after it ran at that level (CC-CRAWL-0650's
+  record). The vocabulary is SP-120's, unchanged (no new word).
+- Impact (other components / project): the explorer submits fewer forms (settings ones);
+  every other refusal unchanged.
+- Risk (level; mitigation or accepted-risk justification): low; a form misjudged as
+  settings costs its coverage only.
+- Deliverables:
+  - [x] refusal, `tests/test_disco_settings_forms.py` — done
+  - [x] FR-CRAWL-674, SP-120 row (reader added), CHANGELOG — done
+
 ### CC-CRAWL-0672 — The route-shape budget splits a shape by a query name whose values select distinct pages (FR-CRAWL-673, SP-130) (2026-11-20)
 - Placement: lane CRAWLCOV (item CRAWLCOV-SPIDER), base 82910aa, after the orchestrator's
   go-ahead on `spider.py` (lane CRAWLSAFE touched only `core/urls.py`).

@@ -1913,6 +1913,10 @@ fuzzer.
   budgeted as its own route shape from then on (`spa.route_shape(url, routers)`). Values
   that give one structure stay one shape. Counted `frontier_routers`.
 
+- **FR-CRAWL-674 (the explorer never submits a settings form; CC-CRAWL-0673,
+  2026-11-20, SP-120)** `disco.explore.form_refusal` refuses a form whose controls or
+  submitter are named or labelled by a settings word (`formnav.settings_word`).
+
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive and state-switching actions (delete/logout/reset;
   toggle/enable/activate, an action slot naming a state verb: FR-CRAWL-650); default
