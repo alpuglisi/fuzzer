@@ -3,6 +3,37 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0690 — SP-04: a tunnel whose ticket another carried takes its spare admission (FR-CRAWL-690, BUG-0742) (2026-11-20)
+- Change: `fuzzlab/tools/navguard.py` (`_TunnelTicket.key`; `_claim` returns the ticket a
+  tunnel carries -- its own, or a live untouched one of the same key and kind --;
+  `_HeldTunnel._claim` carries it); `tests/test_enforcer_ticket_claim.py` (new);
+  `docs/SHARED_PRIMITIVES.md` SP-04 row (text and guard).
+- Reason (measured, §7): lane M6CONC measured SP-04 under concurrent M6 browsers
+  (CC-LAB-0440): Juice Shop's search page, 60 visits per arm: 1 enforcer `reuse` refusal at
+  3 browsers at once, 0 one at a time. Two sockets admitted together to one host:port
+  took one ticket at take time (the oldest's retry slot); the first tunnel claimed it and
+  the second was refused, its own admission left live (BUG-0742). A ``CONNECT`` cannot
+  tell a certificate error's retry from a second socket, so the choice moves to the
+  claim, where it is known.
+- SP sweep (SHARED_PRIMITIVES rule 2): `_take_tunnel`'s one caller (the enforcer
+  handler) unchanged; `_claim`'s one caller (`_HeldTunnel._claim`, used for a plain
+  ws:// socket, a WebSocket's first application record and a landing's check)
+  carries the returned ticket, so `self.ticket.landing` stays the kind it claimed (a
+  spare is always of the same kind); the http landing tickets (`_TICKETS`) are a count
+  per URL with no retry slot (interchangeable, unchanged). Consumers: every guarded
+  browser (spider, auditor fetcher, disco, browser login, M6) through the one
+  enforcer; the real-browser enforcer tests (`tests/test_browser_session_reach.py`,
+  `tests/test_navigation_aborts.py`, `tests/test_browser_scope.py`: 207 passed, 6
+  xfailed) and the deterministic test pass.
+- Impact: such a socket now opens; no admission is left for a stray ``CONNECT`` in that
+  case. No new host or unadmitted connection is reached: a spare is an admission the
+  guard issued for that host, port and kind.
+- Risk: low.
+- Deliverables:
+  - [x] fix, deterministic test, SP-04 row, BUG-0742, PA-0742 — done
+  - [x] measurement at 300 visits per arm — CC-LAB-0440
+- Effectiveness: see CC-LAB-0440.
+
 ### CC-CRAWL-0600 — The GraphQL reader names each variable's field argument and declared type (2026-11-20)
 - Placement: lane GQL (item GQL), base 2be7a50, pre-assigned CC-CRAWL-0600..0604. Not a
   change to `spider.py` or `navguard.py`.

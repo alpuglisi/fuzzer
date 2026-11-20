@@ -1872,6 +1872,13 @@ fuzzer.
   after the drain and before the refusing route is added. Measured: a page whose main
   thread is blocked answers neither, on both binaries, and answers stopping its load,
   the drain timer and its close.
+- **FR-CRAWL-690** *(CC-CRAWL-0690, BUG-0742)* **Each admitted tunnel carries its own
+  admission.** When a tunnel of SP-04's enforcer claims a ticket another tunnel already
+  carried, it carries a live ticket of the same host, port and kind that no tunnel has
+  opened on (a spare admission: two sockets admitted together, by one page or by
+  concurrent browsers), else it is closed as before. Take order is unchanged (a
+  certificate error's retry rides its admission); a tunnel carries one admission, and
+  only an admitted one.
 
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default

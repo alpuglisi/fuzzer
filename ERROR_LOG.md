@@ -18,6 +18,19 @@ Format per entry:
 
 ---
 
+## 2026-11-20 — SP-04 enforcer: the second of two sockets admitted together to one host:port was refused (BUG-0742)
+- **Symptom:** measuring concurrent M6 browsers on Juice Shop (60 visits per arm),
+  the enforcer refused one WebSocket as a reuse at 3 browsers at once, none one at a
+  time; verdicts identical.
+- **Root cause:** `_take_tunnel` handed the second ``CONNECT`` the oldest ticket's retry
+  slot while a fresh admission of the same key was live; the first tunnel claimed it
+  and the second was closed, its own ticket left live (pre-existing; a page with two
+  sockets to one host meets it too).
+- **Remediation:** the claim takes a spare untouched admission of the same key and kind
+  when its ticket is already carried (`navguard._claim`); deterministic test; measured
+  at 300 visits per arm (CC-CRAWL-0690, CC-LAB-0440, PA-0742).
+- **Status:** Fixed.
+
 ## 2026-11-20 — M6 concurrent waves: one wave's launch failures disabled M6; the last try dropped a sibling hit (BUG-0740, BUG-0741)
 - **Symptom:** on the lane M6CONC branch at dc4692d (never merged), with `--browser-workers`
   > 1, a transient launch failure during one candidate's wave set the browser unavailable

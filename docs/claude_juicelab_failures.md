@@ -2397,3 +2397,10 @@ Juice Shop lab is complete.
 - **Impact:** none merged; a narrow case (a sibling hit on a last-try page that then failed) would have been inconclusive instead of confirmed.
 - **Cause:** the consumers were not enumerated; the one missed is invisible to a name search.
 - **Status:** fixed (CC-FUZZ-0721, PA-0741, AST guard).
+
+### F-742 — The agent-built SP-04 tickets were measured with one admission per host at a time (BUG-0742)
+- **What:** the enforcer's tunnel tickets (BUG-0559, built and reviewed by this agent) bound a tunnel to the oldest admission at arrival; two sockets admitted together to one host and port shared one ticket and the second was refused. The review round that measured the tickets covered one admission's uses only.
+- **Evidence:** BUG-0742; `tests/test_enforcer_ticket_claim.py::test_two_sockets_admitted_together_each_carry_their_own_ticket` fails on 82910aae; CC-LAB-0440's 60-visit probe (1 reuse refusal at 3 browsers, 0 at 1).
+- **Impact:** a page's second WebSocket refused (fail-closed); an unused admission left live for the next CONNECT. No verdict changed in the measurement.
+- **Cause:** measured the guard's exception one browser, one admission at a time.
+- **Status:** fixed (CC-CRAWL-0690, PA-0742).

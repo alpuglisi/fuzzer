@@ -1826,11 +1826,12 @@ class _TunnelTicket:
     ``landing`` ticket's tunnel carries one exchange (`_HeldTunnel`); a WebSocket's, the
     socket's life."""
 
-    __slots__ = ("claimed", "expires", "first", "landing", "tunnels")
+    __slots__ = ("claimed", "expires", "first", "key", "landing", "tunnels")
 
-    def __init__(self, landing: bool, expires: float):
+    def __init__(self, landing: bool, expires: float, key: tuple | None = None):
         self.landing, self.expires, self.tunnels, self.claimed = landing, expires, 0, False
         self.first = 0.0                  # when its first tunnel opened
+        self.key = key                    # its host and port (`_socket_key`)
 
 
 def _admit_tunnel(url: str, *, landing: bool) -> None:
@@ -1847,8 +1848,8 @@ def _admit_tunnel(url: str, *, landing: bool) -> None:
     with _ENFORCE_LOCK:
         live = [t for t in _TUNNEL_TICKETS.get(key, ()) if t.expires > now and
                 not t.claimed]
-        _TUNNEL_TICKETS[key] = (live + [_TunnelTicket(landing,
-                                                      now + SOCKET_TICKET_TTL_S)])[-64:]
+        _TUNNEL_TICKETS[key] = (live + [_TunnelTicket(landing, now + SOCKET_TICKET_TTL_S,
+                                                      key)])[-64:]
 
 
 def admit_socket(url: str) -> None:
@@ -1935,14 +1936,26 @@ def _take_tunnel(host, port):
         return None
 
 
-def _claim(ticket: _TunnelTicket) -> bool:
-    """``ticket``'s traffic goes through the tunnel asking: False once another of its
-    tunnels has carried it."""
+def _claim(ticket: _TunnelTicket) -> _TunnelTicket | None:
+    """The ticket whose traffic the tunnel asking carries: ``ticket`` while no other of
+    its tunnels has carried it; once one has, another live ticket of the same host,
+    port and kind that no tunnel has opened on (BUG-0742: two connections admitted
+    together -- two WebSockets of a page, or of concurrent browsers, FR-FUZZ-720 -- whose
+    second ``CONNECT`` took the first ticket's retry slot: it carries its own admission,
+    never refused while that admission sits unused for the next ``CONNECT``); else None.
+    A tunnel never carries more than one admission, and only an admitted one."""
     with _ENFORCE_LOCK:
-        if ticket.claimed:
-            return False
-        ticket.claimed = True
-        return True
+        if not ticket.claimed:
+            ticket.claimed = True
+            return ticket
+        now = time.monotonic()
+        spare = next((t for t in _TUNNEL_TICKETS.get(ticket.key, ())
+                      if not t.claimed and t.tunnels == 0 and t.expires > now
+                      and t.landing == ticket.landing), None) \
+            if ticket.key is not None else None
+        if spare is not None:
+            spare.tunnels, spare.first, spare.claimed = 1, now, True
+        return spare
 
 
 def enforcer_refusals() -> dict:
@@ -2090,7 +2103,9 @@ class _HeldTunnel:
 
     def _claim(self) -> bool:
         if not self.claimed:
-            self.claimed = _claim(self.ticket)
+            carried = _claim(self.ticket)
+            if carried is not None:        # its own ticket, or a spare (BUG-0742)
+                self.ticket, self.claimed = carried, True
         return self.claimed
 
     def _admits(self, record: bytes) -> bool:
