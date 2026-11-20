@@ -84,6 +84,9 @@ CITED: dict[str, str] = {
                 "ids; Shopify Admin REST API ('order_id')",
     "product_id": "OWASP API Security Top 10 2023, API1 (BOLA); Shopify Admin REST "
                   "API ('product_id')",
+    "graphql": "GraphQL over HTTP specification (graphql/graphql-over-http, 'URL': "
+               "the conventional endpoint path is /graphql) and graphql.org 'Serving over "
+               "HTTP' (\"respond at a single endpoint, typically /graphql\")",
 }
 
 _TOKEN_SPLIT = re.compile(r"[/{}:.<>?#]+")
