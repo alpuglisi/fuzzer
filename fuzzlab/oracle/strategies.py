@@ -1693,32 +1693,41 @@ class SsrfOobStrategy(ConfirmationStrategy):
 
 class AccessControlIdorStrategy(ConfirmationStrategy):
     """Confirms broken object-level authorization (IDOR/BOLA, CWE-639/862) by a
-    differential: does the target return distinct, successful, id-keyed data for
-    two arbitrary, unrelated id values with nothing rejecting either?
+    differential over the target's **own** object id and its neighbour: does the
+    target hand back another object's data when the id it gave us is incremented or
+    decremented, with nothing rejecting it?
 
-    Sends two unrelated id values and requires, for *both* legs: HTTP 200; a
-    non-empty body that echoes the requested id value back (proving the
-    response is actually keyed by what was sent, not a canned page); no
-    generic access-denial phrase in the body; and that the two bodies differ
-    (proof of two distinct records, not one static page repeated). All four
-    must hold, or this fails closed (returns None) -- a real ownership check
-    almost always denies with a non-2xx status, or an id-mismatch response,
-    for at least one of two unrelated values.
+    FR-FUZZ-712 (BUG-0734, CC-FUZZ-0712): the id is the value the target itself put in
+    this point -- the crawled link's, form's or path segment's captured value
+    (`Candidate.base_entries`, as `CrossAccountReplayStrategy` reads it) -- and the
+    probe is its numeric neighbour (+1, else -1), the manipulation OWASP WSTG-ATHZ-04
+    ("Testing for Insecure Direct Object References": change the value of the
+    parameter that references an object) and OWASP API Security Top 10 2023 API1
+    ("Broken Object Level Authorization": sequential ids replaced) describe. The fixed
+    synthetic ids of CC-FUZZ-0033 (``50172``/``88190475``, each required echoed back)
+    were fitted to lab cells that echo any id and are withdrawn. **No verdict**
+    (`UnplaceableLocation`) when the point carries no captured value or a value with
+    no numeric neighbour (a UUID, a slug): a stated miss, never a guessed id. A
+    ground-truth-point run carries no captured value, so it gives this mechanism no
+    verdict (an oracle diagnostic, PA-0660(4)); a crawl run carries it for query
+    links, forms and path segments the crawl saw a value for.
 
-    Known limitation, not silently swept under the rug: this cannot
-    authenticate as two different real identities (this project's lab targets
-    have no full session/auth system to drive yet -- see `FR-LAB-118`'s own
-    scoping note), so it only proves "arbitrary ids are accepted with no
-    ownership check", the IDOR/BOLA shape this project's own lab cells model --
-    not a genuine cross-tenant-access proof against a live multi-user app. It
-    can also false-positive on a legitimate endpoint that echoes an arbitrary
-    id back without that id gating access to anything sensitive (e.g. a
-    public lookup keyed by id rather than a private one); `R-ACCESS-CONTROL`
-    scopes the rule to GET/query id-shaped param names to bound that risk, not
-    eliminate it. This is the project's first strategy for this class and is
-    expected to need broader validation against a second, differently-shaped
-    target before being trusted beyond this lab (tracked as an open note in
-    `docs/components/07-fuzzing-harness-and-oracle/requirements.md`).
+    Confirms only when all of these hold (fp=0 safeguards):
+
+    * the captured id answers 200 **twice with the same body** -- the answer is keyed
+      by the id, not a page that differs on every load (PA-0117(2): the differential
+      replicates);
+    * the neighbour answers 200 with a body that is not empty (nor an empty JSON
+      value: ``null``, ``{}``, ``[]``, ``""``) and **differs** from the captured id's --
+      another object, not the same page;
+    * neither body carries a generic denial phrase.
+
+    Known limitation, not silently swept under the rug: this cannot authenticate as
+    two different real identities (`CrossAccountReplayStrategy` does, given peer
+    accounts), so it proves "the neighbouring object is served with no ownership
+    check", not a cross-tenant proof. It can also false-positive on a legitimately
+    public object keyed by id (a public profile or catalogue item);
+    `R-ACCESS-CONTROL` bounds that, it does not eliminate it.
     """
     vuln_class = "access_control"
     mechanism = "identity-differential"
@@ -1726,29 +1735,56 @@ class AccessControlIdorStrategy(ConfirmationStrategy):
 
     # \b-anchored per PA-0022 (avoid an accidental substring hit, e.g.
     # "unauthorized" inside "preauthorized"); a false collision here only
-    # costs a false negative (fails closed), never a false positive.
+    # costs a false negative (fails closed), never a false positive. "does not exist" /
+    # "no such": a neighbour that is no object (FR-FUZZ-712) answered 200 with a message.
     _DENIAL_MARKERS = re.compile(
-        r"\bforbidden\b|\bunauthorized\b|\baccess denied\b|\bnot found\b|\bpermission denied\b",
+        r"\bforbidden\b|\bunauthorized\b|\baccess denied\b|\bnot found\b"
+        r"|\bpermission denied\b|\bdoes not exist\b|\bno such\b",
         re.I,
     )
-    _ID_A = "50172"
-    _ID_B = "88190475"
+    #: A captured id with a numeric neighbour: decimal digits (a zero-padded width is kept).
+    _NUMERIC_ID = re.compile(r"[0-9]{1,18}")
+    _EMPTY_BODIES = frozenset({"", "null", "{}", "[]", '""'})
+
+    @classmethod
+    def neighbours(cls, value: str) -> list[str]:
+        """The captured id's numeric neighbours, +1 first, at its own width."""
+        if not cls._NUMERIC_ID.fullmatch(value or ""):
+            return []
+        n, width = int(value), len(value)
+        return [str(m).zfill(width) for m in (n + 1, n - 1) if m >= 0]
+
+    def _denied_or_empty(self, probe) -> bool:
+        text = probe.text or ""
+        return (probe.status != 200 or text.strip() in self._EMPTY_BODIES
+                or bool(self._DENIAL_MARKERS.search(text)))
 
     def confirm(self, candidate, sender):
-        a = self._send(sender, candidate, self._ID_A)
-        b = self._send(sender, candidate, self._ID_B)
-        if a.status != 200 or b.status != 200:
+        captured = dict(candidate.base_entries or ()).get(candidate.param)
+        if not isinstance(captured, str) or not captured:
+            raise UnplaceableLocation(
+                "access-control: the target gave this point no id value to start from")
+        neighbours = self.neighbours(captured)
+        if not neighbours:
+            raise UnplaceableLocation(
+                "access-control: the target's id has no numeric neighbour")
+        a = self._send(sender, candidate, captured)
+        if self._denied_or_empty(a):
             return None
-        if not a.text or not b.text:
-            return None
-        if self._DENIAL_MARKERS.search(a.text) or self._DENIAL_MARKERS.search(b.text):
-            return None
-        if self._ID_A not in a.text or self._ID_B not in b.text:
-            return None
-        if a.text == b.text:
-            return None
-        return Verdict(True, self.vuln_class, self.mechanism,
-                       {"probe_a": a.text[:120], "probe_b": b.text[:120]})
+        again = self._send(sender, candidate, captured)
+        if again.status != 200 or (again.text or "") != (a.text or ""):
+            return None                  # not keyed by the id alone: no differential
+        for neighbour in neighbours:
+            with trace.role("mutation"):              # FR-FUZZ-60
+                b = self._send(sender, candidate, neighbour)
+            if b.status != 200:
+                continue                 # e.g. 404 past the last object: try the other
+            if self._denied_or_empty(b) or (b.text or "") == (a.text or ""):
+                return None
+            return Verdict(True, self.vuln_class, self.mechanism,
+                           {"value_a": captured, "value_b": neighbour,
+                            "probe_a": a.text[:120], "probe_b": b.text[:120]})
+        return None
 
 
 #: How a JavaScript server renders an object it was sent (``String({...})``): the echo

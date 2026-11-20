@@ -672,10 +672,15 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
     # offers (RFC 7519 / OIDC standard claims; the captured body's own leaves),
     # they no longer confirm these ground-truth-only points, which no crawl
     # captured a body for: an honest 14 -> 11 on this oracle diagnostic.
+    # BUG-0734 / FR-FUZZ-712 (lane HEUR, CC-FUZZ-0712): the IDOR strategy starts from
+    # the id the target gave (a crawl's captured value) and its numeric neighbour, never
+    # a fixed synthetic id; a ground-truth point carries no captured value, so
+    # TWCH-0003/TWCH-0007 get no verdict on this oracle diagnostic: 11 -> 9.
     twitch_report = by_name["twitch-clone"].report
-    assert twitch_report.tp == 11 and twitch_report.fp == 0
-    assert sorted(twitch_report.missed) == ["TWCH-0001", "TWCH-0004", "TWCH-0010", "TWCH-0012"]
-    assert round(twitch_report.recall, 4) == round(11 / 15, 4)
+    assert twitch_report.tp == 9 and twitch_report.fp == 0
+    assert sorted(twitch_report.missed) == ["TWCH-0001", "TWCH-0003", "TWCH-0004",
+                                            "TWCH-0007", "TWCH-0010", "TWCH-0012"]
+    assert round(twitch_report.recall, 4) == round(9 / 15, 4)
 
     # Netflix: insecure-deserialization (NFLX-0001) is now a real, confirmed
     # finding; XXE (NFLX-0002, which does have a rule/strategy, R-XXE/
@@ -736,7 +741,8 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
     # from 13/15 to 14/15.
     # BUG-0661 / PA-0660 (lane BBOX): Twitch 14 -> 11 once three strategies stopped
     # sending this generator's own field names.
-    assert round(summary["macro_recall"], 4) == round(((11 / 15) + (1 / 11)) / 2, 4)
+    # BUG-0734 (lane HEUR): Twitch 11 -> 9 (IDOR points carry no captured id here).
+    assert round(summary["macro_recall"], 4) == round(((9 / 15) + (1 / 11)) / 2, 4)
     # Both targets now show recall > 0 -- this project's own >= 2 "generalizes"
     # definition (transfer_summary's docstring) is met for the first time.
     assert summary["generalizes"] is True
@@ -937,8 +943,10 @@ def test_netflix_multi_cell_boot_confirms_all_positives(tmp_path_factory, tmp_pa
         # sent this generator's own `monthly_charge`/`plan_tier`) and NFLX-0008
         # (alg:none: its `channel_id` claim) are honest misses once the
         # strategies read only what a black-box target offers: 11/11 -> 9/11.
-        assert outcome.report.tp == 9 and outcome.report.fp == 0
-        assert sorted(outcome.report.missed) == ["NFLX-0005", "NFLX-0008"]
+        # BUG-0734 / FR-FUZZ-712 (lane HEUR): NFLX-0004 (IDOR) is a ground-truth point
+        # with no captured id, so the strategy gives no verdict: 9/11 -> 8/11.
+        assert outcome.report.tp == 8 and outcome.report.fp == 0
+        assert sorted(outcome.report.missed) == ["NFLX-0004", "NFLX-0005", "NFLX-0008"]
     finally:
         listener.stop()
         procutil.stop_server(server)

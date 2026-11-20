@@ -3,6 +3,69 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0712 — IDOR probes the target's own id and its neighbour, never a fixed synthetic id (BUG-0734, FR-FUZZ-712) (2026-11-20)
+- Change: `fuzzlab/oracle/strategies.py::AccessControlIdorStrategy` (local rewrite of
+  its `confirm`; `_ID_A="50172"` / `_ID_B="88190475"` and the per-id echo check removed;
+  `neighbours()`, `_denied_or_empty()` added; two denial phrases added);
+  `tests/test_oracle_strategies_access_control.py` (`_cand` carries a captured id; seven
+  new tests); `tests/test_oracle_comparable_controls.py` (the strategy's control-reading
+  row restated); `tests/test_labgen_go_live_boot.py` (two IDOR live boots) and
+  `tests/test_labgen_spring_boot_account_billing_live_boot.py` (their candidates carry a
+  captured id); `tests/test_multitarget_category4.py` (ground-truth-run figures
+  re-derived). FR-FUZZ-712 (supersedes FR-FUZZ-20's fixed-id bullet and open note).
+- Provenance: CC-FUZZ-0033 (2026-09-23) built the strategy for CC-LAB-0178's Twitch
+  `go_net_http` cell, whose `no_ownership_check` template echoes any `channel_id`; the
+  "echo the requested id" check and the two arbitrary ids were added in its review to
+  raise precision on that cell's shape (CC-FUZZ-0033, adequacy pass item (b)). CC-FUZZ-0047
+  re-checked it against the Laravel photo-view template. Every confirmation it ever
+  recorded was a labgen cell that echoes any id (BUG-0734).
+- Mechanism (as specified): the id is the point's captured value
+  (`Candidate.base_entries[param]`, read as `CrossAccountReplayStrategy` reads it); the
+  probe is its numeric neighbour (+1, then -1 when +1 is not 200), zero-padded width
+  kept -- OWASP WSTG v4.2 WSTG-ATHZ-04 "Testing for Insecure Direct Object References"
+  (modify the value of a parameter that references an object) and OWASP API Security
+  Top 10 2023 API1 "Broken Object Level Authorization". The captured id is sent twice:
+  its body must replicate (PA-0117(2); replaces the echo check, which a short neighbour
+  such as `42` satisfies trivially). fp=0 safeguards kept: both 200, non-empty (and not
+  an empty JSON value), distinct bodies, no denial phrase. No captured value or no
+  numeric neighbour: `UnplaceableLocation` (no verdict, the oracle's existing "this
+  mechanism cannot place the point" path), never a guessed id.
+- Pipeline check (does a run supply the captured value?): a **crawl** run does --
+  `harness.auto` builds each crawl point's `base_entries` from the crawled link's query,
+  the form's entries, or a path segment's example, and `harness.pipeline._candidate_of`
+  copies `entries` into `Candidate.base_entries`. A **ground-truth-point** run does not
+  (the answer key has no example value): the strategy gives no verdict there (an oracle
+  diagnostic, PA-0660(4)).
+- Impact (other components / project): FUZZ only. Ground-truth-run (oracle diagnostic)
+  figures in `tests/test_multitarget_category4.py`: twitch-clone 11 -> 9 (TWCH-0003,
+  TWCH-0007), netflix-clone multi-cell 9/11 -> 8/11 (NFLX-0004); macro recall
+  re-derived. Crawl (detection) figures: the labgen go/spring sites link
+  `/channels/analytics`, `/channels/subscribers` and `/account/billing` with no id value
+  (`go_net_http/stack/skeleton/site.go:179-180`, `spring_boot/app_site.py:62`), so a crawl
+  of those apps captures no id for these points and this strategy gives no verdict there
+  either; the lane measures the crawl figure (labs with access-control points:
+  circlefeed CF-0001, netflix-clone NFLX-0004, nodegoat NGOAT-0005,
+  secdevlabs-ecommerce-api SDLEC-0001/0002, twitch-clone TWCH-0003/0007).
+- Risk (level; mitigation or accepted-risk justification): medium -- recall falls where
+  no crawl captured a numeric id (stated misses); precision rises. Documented
+  false-positive class kept: a legitimately public object keyed by id still confirms
+  (`test_documented_false_positive_class_a_public_echo_endpoint_does_confirm`).
+- Deliverables:
+  - [x] strategy, tests, live-boot candidates, multitarget figures — done
+  - [x] BUG-0734; FR-FUZZ-712; ERROR_LOG / CHANGELOG / PA-0730 text proposed to the lane
+    (sub-agent may not edit them) — done
+- Measured (2026-11-20, this worktree): `tests/test_oracle_strategies_access_control.py`
+  all pass (the vulnerable fake confirms on `41, 41, 42`; the 403 twin, the canned page,
+  the per-load nonce page and five empty/missing-neighbour bodies give no verdict; a
+  missing or UUID id raises `UnplaceableLocation` and sends nothing). Real Go and Spring
+  Boot live boots (vulnerable twin confirms from a captured `41`; secure twin 403 does
+  not) and the multitarget category-4 boots pass with the re-derived figures: 14 live/
+  multitarget files (go and spring live boots, category-4/category-1/expedia/node-bff
+  multitarget, navigability boots, `test_labgen_redos.py`) 100 passed, 4 skipped, 4
+  xfailed; the 12 unit/guard files (incl. `test_blackbox_detection.py`,
+  `test_pa_enforcement.py`, `test_shared_primitives.py`) 456 passed.
+- Effectiveness (assessed pending): the lane's crawl measurement on independent targets.
+
 ### CC-FUZZ-0711 — ReDoS threshold from the target's own answers: structural controls, repeats, measured jitter (BUG-0733, FR-FUZZ-711) (2026-11-20)
 - Change: `fuzzlab/oracle/strategies.py` (`_REDOS_CONTROLS` added beside
   `_REDOS_TEMPLATES`; `RegexDosStrategy`'s threshold and `confirm` rewritten locally:

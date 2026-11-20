@@ -828,12 +828,15 @@ rewards) derives from it.
   paired with `FR-AUD-8`'s candidate-generation rule, closing `CC-LAB-0178`'s
   open question:
   - `AccessControlIdorStrategy` (`vuln_class="access_control"`,
-    `mechanism="identity-differential"`): sends two unrelated id values;
+    `mechanism="identity-differential"`): ~~sends two unrelated id values;
     confirms only when both return HTTP 200, echo the requested id back in
     a non-empty body, contain no generic denial phrase (`\b`-anchored,
     PA-0022), and the two bodies differ — else fails closed. A generic
     differential in the same family as `SqliBooleanStrategy`/
-    `SsrfInBandMarkerStrategy`, not a lab-specific hardcode.
+    `SsrfInBandMarkerStrategy`, not a lab-specific hardcode.~~ *Superseded
+    by FR-FUZZ-712* (2026-11-20, BUG-0734): the two fixed ids were fitted to
+    lab cells that echo any id; the strategy now starts from the target's own
+    captured id and its numeric neighbour.
   - `fuzzlab.core.runmode._VULN_TO_CATEGORY` gained
     `"access_control": "access-control"` — required for the rule/strategy
     to actually be selected by a ground-truth-driven run (the vuln_class
@@ -847,7 +850,10 @@ rewards) derives from it.
     narrowed rule scope (`FR-AUD-8`), not by the strategy itself. This is
     the project's first strategy for this class; broader validation
     against a second, differently-shaped target is expected before it is
-    trusted beyond this lab.
+    trusted beyond this lab. *(Open note superseded by FR-FUZZ-712,
+    2026-11-20: the probe is now the target's own id and the manipulation
+    OWASP WSTG-ATHZ-04 / API1:2023 describe; validation on independent
+    targets remains the lane's crawl measurement, not a lab's recall.)*
   - Verified live against Twitch's real booted twins
     (`test_real_boot_proves_the_access_control_idor_strategy_end_to_end`);
     Twitch's real, scored `multitarget` recall moves from 1/3 to 2/3.
@@ -2402,6 +2408,20 @@ rewards) derives from it.
   expression Denial of Service - ReDoS", CWE-1333 and Davis et al. (ESEC/FSE 2018).
   A target slow for every pattern of the shape (a compile or error path), a single
   slow reading, or a uniformly 0-40 ms jittery endpoint never confirms (tested).
+- **FR-FUZZ-712** *(the IDOR probe is the target's own id and its neighbour;
+  `CC-FUZZ-0712`, 2026-11-20, BUG-0734; supersedes FR-FUZZ-20's fixed-id bullet and
+  open note).* `AccessControlIdorStrategy` reads the point's captured value
+  (`Candidate.base_entries[param]`, as `CrossAccountReplayStrategy` does) and sends
+  it twice, then its numeric neighbour (+1, else -1, zero-padded width kept): OWASP
+  WSTG-ATHZ-04, OWASP API Security Top 10 2023 API1 (BOLA). Confirms only when the
+  captured id answers 200 twice with the same body, the neighbour answers 200 with a
+  non-empty body (not an empty JSON value) that differs from it, and neither carries a
+  denial phrase (`\b`-anchored; now also "does not exist", "no such"). No captured
+  value, or one with no numeric neighbour (a UUID, a slug): `UnplaceableLocation`, no
+  verdict -- a stated miss. A ground-truth-point run carries no captured value (an
+  oracle diagnostic, PA-0660(4)); a crawl run carries one for query links, forms and
+  path segments the crawl saw a value for (`harness.auto` crawl point builder).
+
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
   finding must reproduce.

@@ -739,7 +739,8 @@ CONTROL_READING = {
     "SsrfOobStrategy": ("callback", "an OOB callback; layer 1 waits"),
     "CrossAccountReplayStrategy": ("replay", "the owner's request, the other-value "
                                    "control and every replay are compared"),
-    "AccessControlIdorStrategy": ("positive", "two ids' own data; layer 1"),
+    "AccessControlIdorStrategy": ("positive", "the target's own id twice and its "
+                                  "neighbour (FR-FUZZ-712); layer 1"),
     "InsecureDeserializationTypeConfusionStrategy": ("positive", "two positive answers"),
     "XxeInBandMarkerStrategy": ("positive", "an HMAC proof; layer 1"),
     "XxeOobStrategy": ("callback", "an OOB callback; layer 1 waits"),

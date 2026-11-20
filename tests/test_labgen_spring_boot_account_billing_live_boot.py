@@ -108,7 +108,9 @@ def test_real_boot_proves_the_access_control_idor_strategy_generalizes_to_spring
 
     def _cand():
         return Candidate(url=f"http://h{_ROUTE}", param="account_id", method="GET", location="query",
-                         vuln_class="access_control", category="access-control")
+                         vuln_class="access_control", category="access-control",
+                         # FR-FUZZ-712: the id a crawl captured (the strategy starts from it)
+                         base_entries=(("account_id", "41"),))
 
     strategy = AccessControlIdorStrategy()
 
