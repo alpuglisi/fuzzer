@@ -3,8 +3,10 @@
 
 For each held-out lab (``lab/HOLDOUT.md``'s table, or ``--lab``), fresh:
 
-1. ``lab/labctl.sh reset <lab> --authorized`` -- start from nothing; the fixture's own
-   bootstrap creates/verifies the lab identities into a keyring private to this run;
+1. ``lab/labctl.sh reset <lab>`` -- start from nothing -- then, for a lab whose
+   accounts are its own seed, ``seed-credentials`` (the passwords the app publishes), and
+   ``lab/labctl.sh bootstrap <lab> --authorized``: the fixture's own bootstrap creates /
+   verifies the lab identities into a keyring private to this run;
 2. discovery only -- ``fuzzlab crawl`` (Playwright, from the app's start page, as the
    lab's identity when it has one) and ``fuzzlab disco capture`` (anonymous);
 3. ``fuzzlab auto --points crawl --score --authorized`` over both, with the answer key
@@ -261,10 +263,22 @@ class Runner:
         gt_dir = ROOT / "lab" / f"ground-truth-{self.lab}"
         start = time.monotonic()
         try:
-            res = self.labctl("reset", self.lab, "--authorized")
+            res = self.labctl("reset", self.lab)          # fresh, no traffic yet
             if res.returncode != 0:
                 return error_row(self.lab, time.monotonic() - start,
                                  f"labctl reset rc={res.returncode}: {res.stderr[-400:]}")
+            from fuzzlab.lab_fixtures.external import _PUBLISHED_CREDENTIALS
+            if self.lab in _PUBLISHED_CREDENTIALS:          # seeded accounts (FR-LAB-425)
+                sc = self._run([sys.executable, "-m", "fuzzlab.lab_fixtures.external",
+                                "seed-credentials", self.lab, "--authorized"], cwd=ROOT)
+                if sc.returncode != 0:
+                    return error_row(self.lab, time.monotonic() - start,
+                                     f"seed-credentials rc={sc.returncode}: {sc.stderr[-400:]}")
+            if self.meta.identity:
+                bs = self.labctl("bootstrap", self.lab, "--authorized")
+                if bs.returncode != 0:
+                    return error_row(self.lab, time.monotonic() - start,
+                                     f"labctl bootstrap rc={bs.returncode}: {bs.stderr[-400:]}")
             st = self.labctl("status", self.lab, timeout=300)
             if st.returncode != 0:
                 return error_row(self.lab, time.monotonic() - start,

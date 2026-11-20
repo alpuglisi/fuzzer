@@ -198,7 +198,9 @@ def test_a_benchmark_run_uses_crawl_points_only(tmp_path, monkeypatch):
     auto = autos[0]
     assert auto[auto.index("--points") + 1] == "crawl"
     assert "--authorized" in auto and "--score" in auto
-    assert calls[0][0].endswith("labctl.sh") and calls[0][1:3] == ["reset", lab]
+    assert calls[0][0].endswith("labctl.sh") and calls[0][1:] == ["reset", lab]
+    assert not any(a[0].endswith("labctl.sh") and "--authorized" in a and "reset" in a
+                   for a in calls)
     assert calls[-1][-2:] == ["down", lab]
 
 
@@ -838,6 +840,71 @@ def test_the_railsgoat_build_uses_the_pinned_base_and_installs_offline():
     assert web["read_only"] is True and web["cap_drop"] == ["ALL"]
     assert "cap_add" not in web and web["pids_limit"] and web["mem_limit"]
     assert web["ports"] == ["127.0.0.1:${RAILSGOAT_PORT:-3103}:3000"]
+
+
+def _rg_published_session(page: str, status: int = 200):
+    from types import SimpleNamespace
+
+    class S:
+        headers, trust_env, proxies = {}, True, {}
+
+        def request(self, method, url, **kw):
+            text = page if url.endswith("/tutorials/credentials") else ""
+            return SimpleNamespace(status_code=status, headers={}, text=text,
+                                   close=lambda: None)
+    return S
+
+
+class _MemKeyring:
+    def __init__(self, existing=None):
+        self.data = dict(existing or {})
+
+    def get(self, host, identity):
+        return self.data.get((host, identity))
+
+    def set(self, host, identity, username, password):
+        from types import SimpleNamespace
+        self.data[(host, identity)] = SimpleNamespace(username=username, password=password)
+
+
+_RG_TABLE = ("<table><tbody><tr>\n  <td style=\"x\">mike@metacorp.com</td>\n"
+             "  <td>m-pass</td>\n  <td>4-abc</td>\n</tr><tr>\n"
+             "  <td style=\"x\">ken@metacorp.com</td>\n  <td>k-pass</td>\n"
+             "  <td>5-def</td>\n</tr></tbody></table>")
+
+
+def test_railsgoat_seeded_passwords_are_read_from_its_own_page_into_the_keyring():
+    """FR-LAB-425: an unattended run (fresh keyring, no TTY) stores the passwords the
+    app publishes for each account it has none for, and only those."""
+    from fuzzlab.lab_fixtures import external as ext
+    kr = _MemKeyring()
+    stored = ext.seed_published_credentials(
+        "railsgoat", environ={}, keyring_store=kr,
+        session_factory=_rg_published_session(_RG_TABLE), deadline=5)
+    assert stored == ["railsgoat-user", "railsgoat-peer"]
+    assert kr.get("127.0.0.1", "railsgoat-user").password == "k-pass"
+    assert kr.get("127.0.0.1", "railsgoat-peer").username == "mike@metacorp.com"
+    again = ext.seed_published_credentials(
+        "railsgoat", environ={}, keyring_store=kr,
+        session_factory=_rg_published_session(""), deadline=5)
+    assert again == []                      # already stored: the page is not even read
+
+
+@pytest.mark.parametrize("page,status", [("<p>nothing</p>", 200), (_RG_TABLE, 500)])
+def test_railsgoat_seeding_refuses_a_page_without_the_account(page, status):
+    from fuzzlab.lab_fixtures import external as ext
+    kr = _MemKeyring()
+    with pytest.raises(ext.ExternalLabError):
+        ext.seed_published_credentials("railsgoat", environ={}, keyring_store=kr,
+                                       session_factory=_rg_published_session(page, status),
+                                       deadline=5)
+    assert kr.data == {}
+
+
+def test_seeding_refuses_a_lab_that_publishes_no_credentials():
+    from fuzzlab.lab_fixtures import external as ext
+    with pytest.raises(ext.ExternalLabError):
+        ext.seed_published_credentials("nodegoat", keyring_store=_MemKeyring())
 
 
 # --- end railsgoat ----------------------------------------------------------------------

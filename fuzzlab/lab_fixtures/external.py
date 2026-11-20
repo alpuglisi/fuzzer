@@ -1968,6 +1968,59 @@ def railsgoat_account_attributes(client: _LabClient, cred: ResolvedCredential
     return {"user_id": ids.pop()}
 
 
+_RAILSGOAT_CREDENTIAL_ROW = re.compile(
+    r"<tr>\s*<td[^>]*>\s*([^<\s]+@[^<\s]+)\s*</td>\s*<td[^>]*>\s*([^<]+?)\s*</td>")
+
+
+def railsgoat_published_credentials(client: _LabClient) -> dict[str, str]:
+    """``{email: password}`` of the seeded accounts, from the app's own
+    ``/tutorials/credentials`` table (upstream publishes them there, as NodeGoat's README
+    publishes its seed passwords)."""
+    r = client.request("GET", "/tutorials/credentials", anonymous=True)
+    if r.status_code != 200:
+        raise ExternalLabError(f"RailsGoat /tutorials/credentials: HTTP {r.status_code}")
+    return dict(_RAILSGOAT_CREDENTIAL_ROW.findall(r.text or ""))
+
+
+#: Labs whose accounts are the app's own seed (``may_generate_password=False``) and whose
+#: running app publishes their passwords: read from it into the keyring by
+#: `seed_published_credentials` (FR-LAB-425), so an unattended run (the held-out
+#: benchmark, a fresh keyring, no TTY) can bootstrap without a prompt.
+_PUBLISHED_CREDENTIALS = {"railsgoat": railsgoat_published_credentials}
+
+
+def seed_published_credentials(name: str, *, environ: Mapping[str, str] | None = None,
+                               host: str = "127.0.0.1", keyring_store: Any = None,
+                               session_factory: Callable[[], Any] | None = None,
+                               deadline: float = 180.0) -> list[str]:
+    """Store, for each of ``name``'s accounts the keyring has no credential for, the
+    password the running lab publishes for its default username. Returns the identities
+    stored. Refuses a lab that publishes none, and an account it does not list."""
+    meta = lab_meta(name)
+    reader = _PUBLISHED_CREDENTIALS.get(meta.name)
+    if reader is None:
+        raise ExternalLabError(f"{meta.name} publishes no seeded credentials")
+    if keyring_store is None:
+        from fuzzlab.core.credentials import CredentialStore
+        keyring_store = CredentialStore(allow_env=False)
+    client = _LabClient(base_url(meta, environ), session_factory=session_factory)
+    wait_ready(client, meta.ready_path, deadline=deadline)
+    published = None
+    stored = []
+    for account in meta.accounts():
+        if keyring_store.get(host, account.identity) is not None:
+            continue
+        if published is None:
+            published = reader(client)
+        pw = published.get(account.default_username)
+        if not pw:
+            raise ExternalLabError(f"{meta.name} publishes no password for "
+                                   f"{account.default_username!r}")
+        keyring_store.set(host, account.identity, account.default_username, pw)
+        stored.append(account.identity)
+    return stored
+
+
 _BOOTSTRAPS = {"bwapp": bootstrap_bwapp, "juice-shop": bootstrap_juice_shop,
                "mutillidae": bootstrap_mutillidae,
                "secdevlabs-gossip-world": bootstrap_secdevlabs_gossip_world,
@@ -2049,6 +2102,11 @@ def _build_parser() -> argparse.ArgumentParser:
     s.add_argument("lab")
     s.add_argument("--engine", required=True, choices=["docker", "podman"])
     s.add_argument("--project", required=True)
+    s = sub.add_parser("seed-credentials", help="store the seeded accounts' passwords the "
+                                                "running lab publishes (sends traffic: needs "
+                                                "--authorized)")
+    s.add_argument("lab")
+    s.add_argument("--authorized", action="store_true")
     s = sub.add_parser("bootstrap", help="install / register the lab identity "
                                          "(sends traffic: needs --authorized)")
     s.add_argument("lab")
@@ -2112,6 +2170,15 @@ def main(argv: list[str] | None = None) -> int:
             for line in problems:
                 print(f"EXPOSED: {line}", file=sys.stderr)
             return 3 if problems else 0
+        if args.cmd == "seed-credentials":
+            if not args.authorized:
+                print("seed-credentials sends traffic to the lab: pass --authorized",
+                      file=sys.stderr)
+                return 2
+            stored = seed_published_credentials(meta.name)
+            print(f"{meta.name}: published credentials stored for "
+                  f"{', '.join(stored) or 'no account (all already in the keyring)'}")
+            return 0
         if args.cmd == "bootstrap":
             if not args.authorized:
                 print("bootstrap sends traffic to the lab: pass --authorized "
