@@ -81,6 +81,11 @@ plus `set-up-database`); benign cited/illustrative links falsely refused 8/55 �
 (documentation and how-to pages, one render-only page); SecLists paths 2/147 → 13/147;
 generated-lab cells and ground-truth points 0/505 → 0/505.
 
+Live (CC-CRAWL-0650, baseline d492b9d → fixed 2ca7cc8): Mutillidae toggle requests
+received by the target 100 → 0 (spider) and 91 → 0 (disco); crawl sessions whose state
+the crawl changed 7/8 → 0/5 and 2/3 → 0/3; spider pages 271 → 345 (the https redirects
+gone). DVGA and bWAPP unchanged (residual; bWAPP's switch is a POST form).
+
 **Stated residuals** (each pinned in `tests/test_state_switch_urls.py`):
 DVGA `/difficulty/<level>` and `/start_over` (no second independent source; the
 noun-plus-value shape refused wapiti's own `form.php?level=1` fixture and other benign
