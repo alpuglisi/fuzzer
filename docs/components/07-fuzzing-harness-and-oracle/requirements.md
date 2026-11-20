@@ -727,7 +727,9 @@ rewards) derives from it.
     "jwt_algorithm_confusion"`, `mechanism="alg-none-bypass"`): a
     two-probe differential over a header-carried Bearer token. Probe A
     (an unsigned `alg:none` token, a freshly-minted marker carried in
-    its `channel_id` claim — the literal field the real sink echoes)
+    ~~its `channel_id` claim — the literal field the real sink echoes~~
+    the RFC 7519 / OIDC standard claims `sub`, `name`, `preferred_username`
+    -- *superseded by FR-FUZZ-660*, 2026-11-20)
     must return 200 with the marker echoed back; probe B (the same
     marker, claiming `HS256` with a garbage signature) must return a
     real auth-rejection status (401/403 specifically, not merely
@@ -2367,6 +2369,37 @@ rewards) derives from it.
   20, `mysql` (Oracle Linux) 17, `nginx:1.27-alpine` 10. Stated limits: a listing format
   that puts several names in one item (a comma list, `ls -l` columns) is not recognised; a
   base whose `/etc` holds fewer than 4 of the names is not confirmed.
+
+- **FR-FUZZ-660** *(strategies read only what a black-box target offers;
+  `CC-FUZZ-0660`, 2026-11-20, BUG-0661, PA-0660).* No confirmation strategy sends or
+  reads a field, claim, element, attribute or constant that only a lab supplied. Where a
+  strategy needs a name it takes it from the target (the captured request body's own
+  leaves, the response's own properties) or from a public standard, and it gives no
+  verdict when the target offers none (a stated miss, never a guess):
+  - `JwtAlgNoneConfusionStrategy` carries its marker in `STANDARD_CLAIMS` (RFC 7519
+    §4.1.2 `sub`; OIDC Core §5.1 `name`, `preferred_username`).
+  - `PredictableTokenSourceStrategy` reads every decimal JSON leaf of the response
+    and confirms a clock reading: an epoch count (s/ms/us/ns) near this host's time or
+    a nanosecond monotonic counter, each moving by no more than the measured window
+    around its two sends (an upper bound by causality).
+  - `MassAssignmentPrivilegedFieldStrategy` flips the response's own unsent
+    top-level `false` booleans and confirms one reading back `true`, with a
+    never-existing control property that must not come back.
+  - `PriceTrustDifferentialStrategy` varies the captured body's numeric leaves and
+    reads the response's leaf at the same path; no captured body, no verdict.
+  - `PriceIntegrityBypassStrategy` anchors its canary to a currency symbol or price
+    word within 40 characters, digit-bounded.
+  - `GoTemplateSstiStrategy` places a JSON point's expression in every string leaf
+    of the captured body; no captured body, no verdict.
+  - The XXE strategies reference the entity in the root element's text only.
+- **FR-FUZZ-661** *(the reported detection figure is a crawl run's; `CC-FUZZ-0661`,
+  2026-11-20, PA-0660).* `fuzzlab auto`'s score line names its points source: a crawl
+  run prints "detection score (crawl run, black-box)", a ground-truth-point run prints
+  "oracle diagnostic (ground-truth points: the answer key supplied the points; not a
+  detection figure)". The multi-target transfer summary labels each target's line
+  and its macro line the same way (`TargetOutcome.points_source`, summary key
+  `measures`: `detection` / `oracle-diagnostic` / `mixed`). Presentation only: no score
+  is computed differently.
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
   finding must reproduce.

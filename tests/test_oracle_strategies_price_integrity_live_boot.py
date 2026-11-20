@@ -46,7 +46,9 @@ def _cells() -> dict[str, object]:
 def _cand(base_url: str) -> Candidate:
     return Candidate(url=base_url + _ROUTE, param="body", method="POST", location="body",
                      vuln_class="price_integrity_bypass", category="price-integrity-bypass",
-                     content_type="application/json")
+                     content_type="application/json",
+                     # the app's own request, as a crawl captures it (PA-0660, BUG-0661)
+                     base_entries=((("plan_tier",), "standard"), (("monthly_charge",), 15.49)))
 
 
 def test_real_boot_proves_the_price_integrity_bypass_strategy_confirms_the_vulnerable_twin() -> None:

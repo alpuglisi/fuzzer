@@ -51,7 +51,7 @@ FILE_EXTENSIONS = frozenset({
     "xhtml", "txt", "text", "log", "md", "xml", "json", "yml", "yaml", "ini", "conf",
     "cfg", "config", "properties", "env", "csv", "tsv", "js", "css", "tpl", "tmpl",
     "twig", "jsp", "jspx", "asp", "aspx", "ascx", "cgi", "pl", "py", "rb", "sh", "sql",
-    "db", "bak", "old", "orig", "swp", "lang", "pdf", "doc", "docx", "xls", "xlsx",
+    "db", "bak", "old", "orig", "swp", "pdf", "doc", "docx", "xls", "xlsx",
     "png", "jpg", "jpeg", "gif", "svg", "ico", "bmp", "webp", "zip", "tar", "gz", "tgz",
 })
 #: A host name's last label is a two-letter (country-code shaped) label or one of these.
