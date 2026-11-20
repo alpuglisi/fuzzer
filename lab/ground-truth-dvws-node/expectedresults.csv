@@ -1,0 +1,36 @@
+# fuzzlab expected results (Benchmark-style) for DVWS-node at 4221c04f (held-out external lab
+# fixture lab/external/dvws-node, lab/HOLDOUT.md). Derived from labels.json; the loader
+# cross-checks the two. Single-location cases.
+case_id,url,method,param,location,category,expected_vulnerable,primary_endpoint,primary_role,related_endpoints,flow_variant
+DVWS-0001,/api/v2/passphrase/{username},GET,username,path,sqli,true,/api/v2/passphrase/{username},sink,,direct
+DVWS-0002,/api/v2/passphrase,POST,passphrase,body,sqli,true,/api/v2/passphrase,sink,,direct
+DVWS-0003,/api/v2/passphrase,POST,reminder,body,sqli,true,/api/v2/passphrase,sink,,direct
+DVWS-0004,/api/v2/notesearch,POST,search,body,ssjs,true,/api/v2/notesearch,sink,,direct
+DVWS-0005,/api/v2/login,POST,username,body,nosqli,true,/api/v2/login,sink,,direct
+DVWS-0006,/api/v2/sysinfo/{command},GET,command,path,command-injection,true,/api/v2/sysinfo/{command},sink,,direct
+DVWS-0007,/dvwsuserservice,POST,username,body,xxe,true,/dvwsuserservice,sink,,direct
+DVWS-0008,/api/v2/notes/import/xml,POST,xml,body,xxe,true,/api/v2/notes/import/xml,sink,,direct
+DVWS-0009,/xmlrpc,POST,body,body,ssrf,true,/xmlrpc,sink,,direct
+DVWS-0010,/api/v2/release/{release},GET,release,path,xpath_injection,true,/api/v2/release/{release},sink,,direct
+DVWS-0011,/api/v2/users/ldap-search,GET,user,query,ldap_injection,true,/api/v2/users/ldap-search,sink,,direct
+DVWS-0012,/api/v2/users/ldap-search,POST,user,body,ldap_injection,true,/api/v2/users/ldap-search,sink,,direct
+DVWS-0013,/api/download,POST,filename,body,path_traversal,true,/api/download,sink,,direct
+DVWS-0014,/api/v2/reports/monthly,GET,period,query,path_traversal,true,/api/v2/reports/monthly,sink,,direct
+DVWS-0015,/api/v2/greeter,GET,name,query,ssti,true,/api/v2/greeter,sink,,direct
+DVWS-0016,/api/v2/export,POST,data,body,insecure_deserialization,true,/api/v2/export,sink,,direct
+DVWS-0017,/api/v2/users/logout/{redirect},GET,redirect,path,open_redirect,true,/api/v2/users/logout/{redirect},sink,,direct
+DVWS-0018,/api/v2/notes/{noteId},GET,noteId,path,access_control,true,/api/v2/notes/{noteId},sink,,direct
+DVWS-0019,/api/v2/users/notification-preferences,PUT,admin,body,mass_assignment,true,/api/v2/users/notification-preferences,sink,,direct
+DVWS-0020,/api/v2/resource-store/orders,POST,quantity,body,price_integrity_bypass,true,/api/v2/resource-store/orders,sink,,direct
+DVWS-0021,/search,GET,body,body,xss-stored,true,/search,sink,,stored_second_order
+DVWS-0022,/graphql,POST,variables.reminder,body,sqli,false,/graphql,sink,,direct
+DVWS-0023,/api/v2/support/tickets,POST,subject,body,sqli,false,/api/v2/support/tickets,sink,,direct
+DVWS-0024,/api/v1/login,POST,username,body,nosqli,false,/api/v1/login,sink,,direct
+DVWS-0025,/graphql,POST,variables.username,body,nosqli,false,/graphql,sink,,direct
+DVWS-0026,/graphql,POST,variables.name,body,ssjs,false,/graphql,sink,,direct
+DVWS-0027,/api/v2/users/ldap-search,GET,user,query,command-injection,false,/api/v2/users/ldap-search,sink,,direct
+DVWS-0028,/api/v2/release/{release},GET,release,path,ldap_injection,false,/api/v2/release/{release},sink,,direct
+DVWS-0029,/api/v2/users/ldap-search,GET,user,query,xpath_injection,false,/api/v2/users/ldap-search,sink,,direct
+DVWS-0030,/api/v2/users/profile/import/xml,POST,xml,body,xxe,false,/api/v2/users/profile/import/xml,sink,,direct
+DVWS-0031,/api/v2/reports/activity,GET,limit,query,path_traversal,false,/api/v2/reports/activity,sink,,direct
+DVWS-0032,/api/v2/support/tickets,POST,message,body,ssti,false,/api/v2/support/tickets,sink,,direct

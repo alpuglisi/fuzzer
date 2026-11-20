@@ -201,7 +201,18 @@ tracked in the requirements files, not here.
   the first scored `command-injection` cases (FR-LAB-351); its measured gaps added the
   JVM read-sink strategies (`fuzzlab/oracle/strategies_jvm.py`, FR-FUZZ-630/631) and the
   open-redirect filter bypass (`fuzzlab/oracle/strategies_filters.py`, FR-FUZZ-632),
-  both registered after their category's own strategies.
+  both registered after their category's own strategies. **Held-out labs** (FR-LAB-420..425,
+  CC-LAB-0420..0426; `lab/HOLDOUT.md`): VAmPI (`vampi`, Flask REST + JWT, pinned image),
+  DVWS-node (`dvws-node`, Node REST / SOAP / XML-RPC / GraphQL over MongoDB + MySQL, pinned
+  source + npm lockfiles) and RailsGoat (`railsgoat`, Ruby on Rails, pinned source + gems by
+  the lock's checksums) are external labs nobody tunes detection against: no lane runs,
+  measures or reads their answer keys; only `scripts/holdout_score.py` runs them, by crawl
+  (discovery) runs only, and writes the baseline table
+  `docs/components/01-target-lab/holdout-scores.json`. The list is read only through
+  `fuzzlab/lab_fixtures/heldout.py` (SP-140); no test but `tests/test_holdout_benchmark.py`
+  names one, and the structural answer-key tests discover every key from the layout.
+  Seeded-account labs whose app publishes the passwords are bootstrapped unattended by
+  `seed-credentials` (FR-LAB-425).
   A discovery run asks a GraphQL endpoint the app used for its schema once (one bounded
   introspection request, `tools/gqlschema.py`) and fuzzes the schema's String/ID-argument
   operations as captured requests (FR-CRAWL-670/671, FR-AUD-690, FR-FUZZ-690).
