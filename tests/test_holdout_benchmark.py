@@ -85,6 +85,60 @@ def test_a_malformed_holdout_table_fails_closed(text):
         heldout.parse_holdout_table(text)
 
 
+_ONE_KEY = __import__("re").compile(r"ground-truth-[a-z0-9]")
+
+
+def answer_key_loop_offenders(source: str) -> list[int]:
+    """Lines where a loop over every answer key (its iterable names ``ground-truth*``)
+    compares against one lab's key -- a literal ``ground-truth-<lab>`` or a module name
+    bound to one (PA-0720: select by a property of the point, never by lab)."""
+    import ast
+    tree = ast.parse(source)
+    lab_names = set()
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+                isinstance(c, ast.Constant) and isinstance(c.value, str)
+                and _ONE_KEY.search(c.value) for c in ast.walk(node.value)):
+            lab_names |= {t.id for t in node.targets if isinstance(t, ast.Name)}
+    out = []
+    for loop in ast.walk(tree):
+        if not isinstance(loop, (ast.For, ast.comprehension)):
+            continue
+        if "ground-truth*" not in ast.unparse(loop.iter):
+            continue
+        body = loop.body if isinstance(loop, ast.For) else loop.ifs
+        for stmt in body:
+            for cmp in ast.walk(stmt):
+                if not isinstance(cmp, ast.Compare):
+                    continue
+                for part in ast.walk(cmp):
+                    if (isinstance(part, ast.Name) and part.id in lab_names) or (
+                            isinstance(part, ast.Constant) and isinstance(part.value, str)
+                            and _ONE_KEY.search(part.value)):
+                        out.append(cmp.lineno)
+    return sorted(set(out))
+
+
+def test_no_answer_key_loop_singles_out_a_lab():
+    """PA-0720 (BUG-0720): a test over every answer key never excepts one by name."""
+    found = {f.name: answer_key_loop_offenders(f.read_text(encoding="utf-8"))
+             for f in sorted(TESTS.glob("*.py"))}
+    assert {k: v for k, v in found.items() if v} == {}
+
+
+def test_the_answer_key_loop_guard_flags_synthetic_offenders():
+    bad = ("ONE = ROOT / 'lab' / 'ground-truth-acme'\n"
+           "for gt in sorted(ROOT.glob('ground-truth*/x.json')):\n"
+           "    if gt.parent == ONE:\n        continue\n"
+           "keys = [d for d in ROOT.glob('lab/ground-truth*') if d.name != 'ground-truth-zz']\n")
+    good = ("ONE = ROOT / 'lab' / 'ground-truth-acme'\n"
+            "for gt in sorted(ROOT.glob('ground-truth*/x.json')):\n"
+            "    if is_graphql(gt):\n        continue\n"
+            "def f():\n    return ONE == 1\n")
+    assert answer_key_loop_offenders(bad) == [3, 5]
+    assert answer_key_loop_offenders(good) == []
+
+
 def test_every_held_out_lab_has_its_fixture_and_answer_key():
     """The benchmark can run each listed lab: a compose file, a registered LabMeta and an
     answer key at ``lab/ground-truth-<lab>/`` (where PA-0660's guard reads it)."""
@@ -156,6 +210,24 @@ def test_a_lab_row_lists_every_fn_with_its_point_class_and_reach():
     md = m.render_markdown({"fuzzlab_commit": "abc", "detection_base": "e14c925",
                             "detection_identical": True, "generated": "now", "labs": [row]})
     assert "| lab-x | ok | 1 | 1 | 1 | 0 |" in md and "X-0002" in md
+
+
+def test_the_score_reads_what_the_run_sent_from_the_store(tmp_path):
+    """Requests are the run's own count (run_metrics.pipeline_requests, auto's
+    "requests:" line); the score is the run's findings against the key."""
+    from fuzzlab.core.store import Store
+    m = _score_mod()
+    lab = heldout.held_out_labs()[0].name
+    gt_dir = REPO / "lab" / f"ground-truth-{lab}"
+    store = tmp_path / "s.db"
+    with Store(str(store)) as s:
+        run = s.start_run("auto", "127.0.0.1")
+        s.conn.execute("INSERT INTO run_metrics (run_id, key, value) VALUES (?,?,?)",
+                       (run, "pipeline_requests", 464.0))
+        s.conn.commit()
+    gt, report, cands, used = m.score_store(store, gt_dir)
+    assert used == 464 and cands == []
+    assert report.tp == 0 and report.fn == len(gt.positives())
 
 
 def test_the_benchmark_refuses_without_authorized_and_unknown_labs(capsys):

@@ -188,8 +188,10 @@ def score_store(store_path: Path, gt_dir: Path):
     with Store(str(store_path)) as s:
         run = s.conn.execute("SELECT MAX(id) m FROM run").fetchone()["m"]
         report = score(detections_from_store(s, run), gt)
-        used = s.conn.execute("SELECT SUM(used) u FROM request_budget WHERE run_id = ?",
-                              (run,)).fetchone()["u"]
+        # what the run sent (auto's own "requests:" line: run_metrics.pipeline_requests)
+        row = s.conn.execute("SELECT value FROM run_metrics WHERE run_id = ? AND key = "
+                             "'pipeline_requests'", (run,)).fetchone()
+        used = row["value"] if row is not None else None
         cands = _candidates(s)
     return gt, report, cands, (int(used) if used is not None else None)
 

@@ -18,6 +18,21 @@ Format per entry:
 
 ---
 
+## 2026-11-20 — Test guard (HOLDOUT lane): the GraphQL-context guard failed on a second lab's GraphQL answer key (BUG-0720)
+- **Symptom:** after merging the held-out lab DVWS-node,
+  `tests/test_graphql_args.py::test_no_other_labs_ground_truth_point_has_a_graphql_context`
+  failed: `graphql_context.bindings(pt) != ()` on the new key's three GraphQL `variables.*`
+  negatives.
+- **Root cause:** the guard skipped GraphQL requests by naming the one lab that had them
+  (`gt.parent == DVGA_GT`) instead of by the body; its premise went stale with the second
+  GraphQL lab. PA-0001 (do not hard-code) was review-only.
+- **Remediation:** the guard skips a point whose `json_body.query` parses as an executable
+  GraphQL document (`is_graphql_request`, the auditor's own reader, SP-80), for every lab
+  (CC-AUD-0720); PA-0720 with an AST guard that no answer-key loop singles out a lab;
+  the static tests' hand-written answer-key list replaced by discovery (CC-LAB-0420).
+  See `docs/bugs/BUG-0720-a-whole-repo-graphql-guard-named-the-one-lab-allowed-graphql-points.md`.
+- **Status:** Fixed.
+
 ## 2026-11-20 — Cloud container (JAVA lane): gitleaks and Python Playwright missing; five navigation tests fail on this container's Chromium at the base tree too (environment)
 - **Symptom:** `scripts/verify_change.py --base 2be7a50` on f78ae08: 16 failures. Eight
   `test_cli_check_passes_end_to_end*` (`secret scanner: 'gitleaks' executable not found`,
