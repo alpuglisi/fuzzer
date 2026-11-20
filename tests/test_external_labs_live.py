@@ -24,6 +24,7 @@ import re
 import secrets
 import shutil
 import socket
+import time
 from contextlib import closing
 from pathlib import Path
 
@@ -479,3 +480,49 @@ def test_bwapp_fixture_scores_its_confirmed_rows(lab_factory, monkeypatch):
     assert bwapp_level_problems(_level_log_text(lab, controls), controls) == []
     gt, report, checked = _score(store, gt_dir)
     _assert_pass(gt, report, checked, BWAPP_CRAWL_FLOOR, "crawl")
+
+
+def _wait_ready(url: str, deadline: float = 180.0) -> None:
+    """Any HTTP answer at the lab's ready path means its web tier is up (PA-0050)."""
+    import requests
+    end = time.monotonic() + deadline
+    while time.monotonic() < end:
+        try:
+            _get(url)
+            return
+        except requests.RequestException:
+            time.sleep(2)
+    raise AssertionError(f"{url} never answered")
+
+
+def test_vulnerableapp_jvm_read_strategies_confirm_its_levels(lab_factory):
+    """CC-FUZZ-0630 / FR-FUZZ-630..631, live: on a fresh VulnerableApp (pinned digest),
+    the classpath traversal confirms PathTraversal LEVEL_1 and not its SECURE LEVEL_13;
+    the file: SSRF confirms SSRFVulnerability LEVEL_1 and not LEVEL_5 (its allowlist);
+    the OS-file traversal misses LEVEL_1 (the gap the classpath strategy closes)."""
+    from fuzzlab.oracle.probe import Candidate
+    from fuzzlab.oracle.strategies import PathTraversalFsPathReadStrategy
+    from fuzzlab.oracle.strategies_jvm import (PathTraversalClasspathResourceStrategy,
+                                               SsrfFileSchemeStrategy)
+    from fuzzlab.tools.probesender import RequestsProbeSender
+    lab = lab_factory("vulnerableapp")
+    _up(lab)
+    _wait_ready(lab.base + lab.meta.ready_path)
+    app = lab.base + lab.meta.app_path
+    sender = RequestsProbeSender()
+
+    def pt(level):
+        return Candidate(url=f"{app}PathTraversal/LEVEL_{level}", param="fileName",
+                         category="path-traversal")
+
+    def ssrf(level):
+        return Candidate(url=f"{app}SSRFVulnerability/LEVEL_{level}", param="fileurl",
+                         category="ssrf")
+
+    v = PathTraversalClasspathResourceStrategy().confirm(pt(1), sender)
+    assert v and v.confirmed and v.evidence["file"] == "application.properties", v
+    assert PathTraversalClasspathResourceStrategy().confirm(pt(13), sender) is None
+    assert PathTraversalFsPathReadStrategy().confirm(pt(1), sender) is None
+    v = SsrfFileSchemeStrategy().confirm(ssrf(1), sender)
+    assert v and v.confirmed, v
+    assert SsrfFileSchemeStrategy().confirm(ssrf(5), sender) is None

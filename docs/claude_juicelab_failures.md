@@ -2293,3 +2293,37 @@ Juice Shop lab is complete.
 - **Impact:** a run against a target with a runaway script never finished; found by an independent verifier, not by the suite.
 - **Cause:** the teardown was tested against work in flight, not against a page that cannot respond, and a liveness rule was written from the order of calls rather than from what each call waits on.
 - **Status:** fixed by CC-CRAWL-0641 (PA-0672); the callers' reads of such a page remain open (BUG-0673).
+### F-630 — I ran the JAVA lane's first baseline under the tool's 30-minute background cap, and lost it
+- **What:** on 2026-11-20 I started the first VulnerableApp baseline (`fuzzlab auto --points ground-truth --browser --oob --score`) as a background shell task, whose limit is 30 minutes, without measuring how long a run takes; it was killed at 08:29 UTC with 234 candidates stored and no score printed. I then had to restart it twice more (below and F-631) before a clean baseline ran (08:36-09:12, 2162 s).
+- **Evidence:** the task notification for `b674ksur9` ("stopped after reaching its background time limit"); `scratchpad/vapp/runs/base-gt.log` (empty) of that run; the detached runner `scratchpad/vapp/runbase.sh` used afterwards.
+- **Impact:** about 40 minutes of the lane's 4 h budget; no wrong number recorded.
+- **Cause:** I did not estimate the run's length (105 cases, timing strategies) before choosing how to run it.
+- **Status:** fixed: every later run is detached (`setsid nohup`) with its own `timeout`.
+
+### F-631 — I first labelled VulnerableApp's XSS levels as client-rendered from a curl probe that could not see what a browser gets
+- **What:** my first answer key marked the XSS levels `rendering: "js"` with notes saying the answers are `text/plain`, from curl probes sent with `Accept: */*`. Spring negotiates the String answer: a browser navigation (`Accept: text/html,...`) gets `text/html` and runs the markup. The baseline's first partial run then confirmed reflected XSS on the error-based SQLi levels, which my key had no case for; Chromium confirmed it is real (levels 1-4).
+- **Evidence:** `git show 2658271:lab/ground-truth-vulnerableapp/labels.json` (the `js` cases and the text/plain notes); the Chromium check in the lane transcript (title changed at Error-based LEVEL_1..4, not at 5..7, union or blind).
+- **Impact:** a restarted baseline (F-630) and 16 answer-key cases added or relabelled before any score was recorded; no wrong score reported.
+- **Cause:** I measured the response type on a channel (curl's default `Accept`) that could not carry the difference that mattered (what a browser is served), against PA-0311(2).
+- **Status:** fixed in the key (VAPP-0090..0105 added and the XSS notes name both `Accept` headers); the key's live check (`scratchpad/vapp/gen/verify_key.py`) and the Chromium checks back each verdict.
+
+### F-632 — I wrote a Juice Shop matched-case list from memory into CC-LAB-0352 before checking it
+- **What:** CC-LAB-0352's first text (commit e469856) said the regression runs matched JUICE-0002, 0004, 0006, 0007, 0012; the runs' scored stores matched JUICE-0002, 0003, 0004, 0006, 0007 on both sides. I wrote the list before reading it from the stores.
+- **Evidence:** `git show e469856 -- docs/components/01-target-lab/change-control.md`; `scratchpad/vapp/gen/score.py` on `runs/juice-base.sqlite` and `runs/juice-after.sqlite`.
+- **Impact:** a wrong id in a pushed record for one commit; the tp/fp/fn/tn numbers and the no-regression conclusion were right.
+- **Cause:** I recorded a detail ahead of the measurement that backs it.
+- **Status:** fixed in the next commit (the list read from the stores).
+
+### F-633 — My classpath traversal strategy opted into PRG observation by copying its sibling, against a reviewed set
+- **What:** `PathTraversalClasspathResourceStrategy` (CC-FUZZ-0630, pushed in 4cb11db) set `prg = True` because `PathTraversalFsPathReadStrategy` does. The opt-in set is pinned as reviewed (`tests/test_prg_observation.py::PRG_STRATEGIES`); two of its tests failed in the lane's first harness run.
+- **Evidence:** `scratchpad/vapp/verify/parallel.log` (f78ae08: `test_only_the_reviewed_strategies_opt_in`, `test_payload_independent_follow_ups_never_confirm_an_opt_in_strategy`); fixed in e44a94a.
+- **Impact:** a failed harness run and a re-run; on the lane branch only, never merged.
+- **Cause:** I copied a class attribute without checking which guard owns it, and ran only the oracle tests I picked before committing, not the harness.
+- **Status:** fixed (no opt-in; the reviewed set unchanged).
+
+### F-634 — I added a `WEB-INF/web.xml` probe to the classpath strategy with no measurement or source behind it
+- **What:** `PathTraversalClasspathResourceStrategy` (CC-FUZZ-0630, 4cb11db) also probed `../`*d + `WEB-INF/web.xml`, "for a servlet webapp", by analogy. Nothing measured it, no public corpus I cited lists it, and a later JDK 11 measurement showed that a resource read cannot go above the classpath root, while `web.xml` sits above `WEB-INF/classes`: the probe could never succeed as designed. Found when the owner's black-box directive made me check each relied-on behaviour.
+- **Evidence:** `git show 4cb11db -- fuzzlab/oracle/strategies_jvm.py` (`_WEB_XML_MARKER`, the second `CLASSPATH_FILES` entry); CC-FUZZ-0633 (the JDK measurement and the citation check).
+- **Impact:** up to 4 wasted requests per unconfirmed path-traversal candidate in this lane's runs; no false finding.
+- **Cause:** I generalised the design past what I had measured (§7: measure before design).
+- **Status:** fixed in CC-FUZZ-0633 (removed; only the measured file is probed).

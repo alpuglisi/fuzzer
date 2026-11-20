@@ -1109,13 +1109,15 @@ def test_a_crawled_hostname_is_never_sent(tmp_path):
 
 
 def test_ground_truth_cmdi_probes_are_unchanged():
-    from fuzzlab.oracle.strategies import _CMDI_TIMING_TEMPLATES, CommandInjectionStrategy
+    # a ground-truth point has no base value: the baseline's own value prefixes every
+    # payload (BUG-0630), the same list as before forms phase 2 otherwise
+    from fuzzlab.oracle.strategies import CommandInjectionStrategy, cmdi_timing_payloads
     app = _App(lambda req: _ok())
     CommandInjectionStrategy().confirm(Candidate(url="http://h/c.php", param="cmd"), app)
     sent = [r["value"] for r in app.requests]
     base = CommandInjectionStrategy.baseline_samples
     assert sent[:base] == ["1"] * base
-    assert sent[base:] == [t.format(d=2) for t in _CMDI_TIMING_TEMPLATES]
+    assert sent[base:] == [t.format(d=2) for t in cmdi_timing_payloads(None)]
 
 
 def test_an_empty_field_inherits_the_shape_of_its_namesake(tmp_path):

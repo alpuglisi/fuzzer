@@ -1345,6 +1345,23 @@ class PathTraversalFsPathReadStrategy(ConfirmationStrategy):
         return None
 
 
+#: The value a command-injection timing baseline sends when the point has none of its own.
+_CMDI_BASELINE = "1"
+
+
+def cmdi_timing_payloads(base: str | None) -> list[str]:
+    """The timing payloads for a point: each is the baseline's own value followed by a
+    template (BUG-0630), the base value when the point has one, else `_CMDI_BASELINE`; a
+    template that already starts with that value is not prefixed twice."""
+    prefix = _CMDI_BASELINE if base is None else base
+    out: list[str] = []
+    for t in _CMDI_TIMING_TEMPLATES:
+        p = t if base is None and t.startswith(prefix) else prefix + t
+        if p not in out:
+            out.append(p)
+    return out
+
+
 class CommandInjectionStrategy(ConfirmationStrategy):
     """M1 (timing): a shell `sleep` executes, latency rising with the requested delay."""
     vuln_class = "command-injection"
@@ -1355,11 +1372,12 @@ class CommandInjectionStrategy(ConfirmationStrategy):
         # FR-AUD-20: a point whose default was a host starts from loopback, so the app
         # never receives its own (third-party) host from us
         base = candidate.base_value
-        if base is None:
-            return self._confirm_timing(candidate, sender, _CMDI_TIMING_TEMPLATES)
-        return self._confirm_timing(candidate, sender,
-                                    [base + t for t in _CMDI_TIMING_TEMPLATES],
-                                    baseline_value=base)
+        # BUG-0630: every payload carries the value the baseline sent, so the command the
+        # baseline runs (VulnerableApp's `ping -c 2 <value>`: ~1 s) runs in the payload too
+        # and the added latency is the requested sleep's alone; a payload replacing it
+        # measured ~1 s short and never confirmed
+        return self._confirm_timing(candidate, sender, cmdi_timing_payloads(base),
+                                    baseline_value=_CMDI_BASELINE if base is None else base)
 
 
 class RegexDosStrategy(ConfirmationStrategy):
@@ -2944,9 +2962,21 @@ def default_strategies(browser: BrowserExecutor | None = None,
             PriceTrustDifferentialStrategy(),
             HttpHeaderInjectionCrlfStrategy(),
             PathTraversalFsPathReadStrategy(),
+            *_follow_on_strategies(),
             LdapFilterInjectionStrategy(), XPathInjectionStrategy(),
             GreyboxConfirmationStrategy(coverage, dbfault),
             SsjsEvaluationMarkerStrategy(), SsjsBooleanDifferentialStrategy()]
+
+
+def _follow_on_strategies() -> list[ConfirmationStrategy]:
+    """Strategies that run after their category's own (CC-FUZZ-0630/0632): the JVM read
+    sinks (FR-FUZZ-630/631) and the open-redirect filter bypass (FR-FUZZ-632). Imported
+    here, as their modules import this one."""
+    from fuzzlab.oracle.strategies_filters import OpenRedirectFilterBypassStrategy
+    from fuzzlab.oracle.strategies_jvm import (PathTraversalClasspathResourceStrategy,
+                                              SsrfFileSchemeStrategy)
+    return [PathTraversalClasspathResourceStrategy(), SsrfFileSchemeStrategy(),
+            OpenRedirectFilterBypassStrategy()]
 
 
 # Reference-style category -> the oracle vuln_class we have a strategy for.

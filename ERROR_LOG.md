@@ -18,6 +18,40 @@ Format per entry:
 
 ---
 
+## 2026-11-20 — Cloud container (JAVA lane): gitleaks and Python Playwright missing; five navigation tests fail on this container's Chromium at the base tree too (environment)
+- **Symptom:** `scripts/verify_change.py --base 2be7a50` on f78ae08: 16 failures. Eight
+  `test_cli_check_passes_end_to_end*` (`secret scanner: 'gitleaks' executable not found`,
+  the 2026-10-19 entry's recurrence); five in `tests/test_navigation_aborts.py`
+  (`DID NOT RAISE playwright Error` for a failed navigation to an empty error answer;
+  `KeyError` on the error page's URL); two in `tests/test_prg_observation.py` (a code
+  defect of this lane, fixed below). Earlier, `fuzzlab auto --browser` refused to start:
+  Python Playwright was not installed (the container ships Node's).
+- **Root cause:** the container image provides neither gitleaks nor Python Playwright
+  nor pytest-xdist. The five navigation tests fail identically on an untouched worktree
+  of 2be7a50 in this container (5 failed, 84 passed); this container's browser is
+  Chromium 157 (Playwright 1.63, `chromium_headless_shell-1243`), and the project's
+  navigation measurements name Chromium 141: the likely cause, not proven here. The two
+  PRG failures were the lane's classpath strategy opting into PRG observation, a
+  reviewed set (`PRG_STRATEGIES`).
+- **Remediation:** `apt-get install gitleaks`, `pip install playwright==1.63.0
+  pytest-xdist`, `pip install -e ".[web,dev,browser,disco,labgen,labgen-stats]"`; the
+  strategy's opt-in removed. The navigation failures are flagged to the orchestrator
+  (hot file `fuzzlab/tools/navguard.py`; outside this lane).
+- **Status:** Environment (gitleaks, Playwright, xdist); Fixed (PRG opt-in); Open,
+  flagged (navigation tests on Chromium 157, pre-existing at 2be7a50).
+
+## 2026-11-20 / FUZZ (oracle, command injection) — BUG-0630, PA-0630
+- **Symptom:** on SasanLabs VulnerableApp (CC-LAB-0350), `fuzzlab auto` confirmed
+  CommandInjection LEVEL_1/2 but never LEVEL_3..5, which curl showed injectable
+  (`127.0.0.1$(sleep 2)`: 3.02 s; `127.0.0.1|sleep 4`: 4.0 s). The run's trace: baseline
+  samples 1.02 s, payloads 2.01 s or 3 ms.
+- **Root cause:** with no base value, `CommandInjectionStrategy` timed a baseline of `1`
+  (the app pings it: ~1 s) but sent bare templates (`$(sleep 2)`), which leave ping no
+  host: the baseline's work was missing from the payload and the added latency measured
+  ~1 s, under the 1.5 s floor.
+- **Remediation:** every timing payload is the baseline's own value plus a template
+  (`cmdi_timing_payloads`, CC-FUZZ-0631); a discovery guard checks every timing strategy
+  for it (PA-0630). Live: LEVEL_3..5 confirm, LEVEL_6..8 (SECURE) do not.
 ## 2026-11-20 — session / probe sender (a routed login's auth gate judged the URL, not the request; BUG-0620)
 - **Symptom:** orchestrator review of lane PHPX: with `/index.php?page=login.php` recorded, `is_auth_endpoint("/index.php")` was False, so a crawled login form (route in its sibling entries) would be probed with the run's session.
 - **Root cause:** CC-SESS-0611 narrowed the gate for routed logins against ground-truth URLs only; `SeamProbeSender._send` judges the URL before binding the entries, and a URL naming no route defaulted to "not an auth endpoint".

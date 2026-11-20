@@ -2264,6 +2264,57 @@ rewards) derives from it.
   an object it was sent) with the tokens' reflected forms, so a page that re-renders the
   submitted leaf compares V with B; a server that stringifies every object still answers V
   and D alike and never confirms.
+- **FR-FUZZ-630 (a classpath-confined read is a path traversal, `CC-FUZZ-0630`,
+  2026-11-20)** `PathTraversalClasspathResourceStrategy` (`fuzzlab/oracle/
+  strategies_jvm.py`, category `path-traversal`, class `path_traversal`), after
+  `PathTraversalFsPathReadStrategy`: `../` * 1..4 + `application.properties` (the file
+  Spring Boot loads from the classpath root), confirmed when a Spring-defined key and `=`
+  is in the answer and absent from a compared control naming the file with no traversal.
+  At most 4 mutations and one control. Black-box (owner directive, 2026-11-20): the
+  behaviour is measured on two independent targets (VulnerableApp's resource read and a
+  standalone JDK 11 `getResourceAsStream`: `..` resolves inside a directory classpath,
+  never above its root). Stated limit: a jar classpath does not resolve `..` (measured),
+  so a packaged fat jar's read is a false negative.
+  - Enforced by: `tests/test_oracle_strategies_jvm.py` (confirms at depth; misses for the
+    OS-file strategy; a file served without traversal, a reflected payload and a confined
+    directory are not confirmed; only the root's file is probed; the marker's false-match
+    set), `tests/test_external_labs_live.py::test_vulnerableapp_jvm_read_strategies_confirm_its_levels`
+    (live, gated).
+- **FR-FUZZ-631 (an in-band SSRF through the `file:` scheme, `CC-FUZZ-0630`,
+  2026-11-20)** `SsrfFileSchemeStrategy` (category and class `ssrf`), after the OOB SSRF
+  strategies: `file:///etc/passwd` then `file:/etc/passwd`, confirmed when the passwd
+  marker comes back and is absent from a compared control sending the bare path. Needs
+  no OOB listener, so it decides where the target cannot reach the scanner's loopback
+  callback (a container). Black-box evidence: JDK 11 `URL.openStream` and CPython
+  `urllib.request.urlopen` both read both spellings and refuse the bare path (measured);
+  PayloadsAllTheThings lists `file:///etc/passwd` as an SSRF payload; VulnerableApp's
+  unfiltered SSRF level reads it, its filtered levels refuse it.
+  - Enforced by: `tests/test_oracle_strategies_jvm.py` (confirmed; refused; a page
+    always showing passwd text and a page reflecting the URL are not confirmed,
+    PA-0090(2)), the live test above.
+
+- **FR-FUZZ-632 (an open redirect past a prefix filter, `CC-FUZZ-0632`, 2026-11-20)**
+  `OpenRedirectFilterBypassStrategy` (`fuzzlab/oracle/strategies_filters.py`, class
+  `open_redirect`), after `OpenRedirectStrategy`: when the plain canary did not land, the
+  canary as `//host/cb`, `/\host/cb` and `@host/cb` (at most three probes), each judged by
+  where a browser lands (`browser_resolve`: C0 and space trimmed, tab and newline removed,
+  `\` read as `/` before the query after a special scheme, then `urljoin`), never a prefix
+  test. Black-box evidence: the spellings are PayloadsAllTheThings' (Open Redirect);
+  `browser_resolve` agrees with Chromium 157 on 10 of 10 `Location` shapes from a
+  synthetic loopback server independent of any lab (enforced below); on VulnerableApp the
+  filtered levels confirm and its own-origin and allowlisted levels do not.
+  - Enforced by: `tests/test_oracle_strategies_filters.py` (the resolver against the
+    measured readings; a prefix filter passed with a backslash; an app-prefixed origin
+    passed with userinfo; an own-origin-plus-slash shape, an allowlist, a body echo and a
+    redirect elsewhere carrying the canary are not confirmed;
+    `test_browser_resolve_agrees_with_chromium`, real Chromium).
+- **FR-FUZZ-633 (timing payloads carry the baseline's value, `CC-FUZZ-0631`,
+  2026-11-20, BUG-0630)** Every timing mutation is the value its baseline sent followed by
+  the part under test: `cmdi_timing_payloads(base)` prefixes each command-injection
+  template with the point's base value, or with `_CMDI_BASELINE` (`1`) when it has none.
+  - Enforced by: `tests/test_timing_payloads_carry_the_baseline.py` (discovery over every
+    default strategy running `_confirm_timing`, proven on a synthetic offender),
+    `tests/test_oracle_vectors.py::test_command_injection_confirms_past_a_filter_when_the_baseline_runs_a_command`.
 
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
