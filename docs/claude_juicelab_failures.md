@@ -2257,3 +2257,10 @@ Juice Shop lab is complete.
 - **Impact:** one wasted harness cycle; no result reported from it.
 - **Cause:** I installed the extras the runbook's Part B names, not every extra the suite's browser tests import under `FUZZLAB_REQUIRE_BROWSER=1`.
 - **Status:** remediated (mitmproxy installed, harness re-run).
+
+### F-643 — I shipped a directory-listing confirmer that matched English words anywhere against a control that dropped the probe's separators
+- **What:** CC-FUZZ-0640 (684fab9) confirmed path traversal on 4 of 25 `/etc` names found as tokens anywhere, seven of them common words, against a separator-free `etc` control, with the status unread; I measured only bWAPP's listing and called the names present "on every Linux base the labs run".
+- **Evidence:** BUG-0641: the reviewer's prose and error-page cases confirmed through the real oracle (reproduced 2026-11-20).
+- **Impact:** none merged (caught by the independent review); a false-positive path traversal on ordinary pages had it shipped.
+- **Cause:** I designed the signal from the one true positive I had, wrote no must-not-confirm fixture other than "always shows the names", and copied the file phase's control without checking PA-0117(1) for the new signal.
+- **Status:** fixed (CC-FUZZ-0641); PA-0641.

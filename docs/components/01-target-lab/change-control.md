@@ -3,6 +3,42 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0361 — The scored-run guard's review follow-ups; bWAPP re-scored crawl-first on the fixed listing phase (FR-LAB-363, BUG-0641) (2026-11-20)
+- Change: `tests/test_external_lab_scored_runs.py` (an `open:` reason names its tracking
+  record; matched ids are positives; tn/fp agree with the key's negatives; each check
+  proven on a synthetic offender); `docs/components/01-target-lab/external-lab-scores.json`
+  (every `open:` reason carries `[tracked: CC-LAB-0360]` or `[tracked: CC-LAB-0331]`;
+  bWAPP's entry is its run on 83e79c7); FR-LAB-361's citation names
+  `globocom/secDevLabs@10be438` and the upstream path.
+- Reason: the orchestrator's review of 2275dcb (BUG-0641's report): its follow-ups.
+- bWAPP runs on 83e79c7 (the BUG-0641 fix), lab up via `labctl.sh up bwapp --authorized`:
+  - crawl: `fuzzlab crawl --start http://127.0.0.1:8092/bWAPP/portal.php --engine playwright
+    --identity bwapp-bee --follow-selector-forms bug --no-reveal --db <spider.db>` (the
+    live test's crawl): 106 s, 13 endpoints, 71 parameters imported.
+  - crawl-fed: `FUZZLAB_BUDGET_TOTAL=20000 fuzzlab auto --base-url
+    http://127.0.0.1:8092/bWAPP/ --spider-db <spider.db> --ground-truth lab/ground-truth-bwapp
+    --points crawl --identity bwapp-bee --browser --authorized`: AFTER (83e79c7) tp=41 fp=0
+    fn=14 tn=3, 1516 requests, 705 s; BEFORE (2be7a50's tree, same spider DB): tp=41 fp=0 fn=14 tn=3, 1513 requests, 704 s -- the same misses; the listing phase cannot change a crawl pass (see Found), and 83e79c7 also carries lane NODE's merged code.
+    Without the live test's `--header-points User-Agent,Referer,bWAPP`: with them the
+    plan needs at least 9768 requests (148 pages x 3 headers), measured at about one
+    exchange a second, roughly 3 h per run; so the 8 header-located positives are missed
+    by construction here.
+  - ground truth (the runbook's command): tp=22 fp=0 fn=33 tn=3, 887 requests, 637 s
+    (BWAPP-0046 confirmed by the fixed listing phase; same as 684fab9).
+- Found (flagged, not built): neither traversal case can be reached by a crawl:
+  `R-PATH-TRAVERSAL` (default_rules.json) fires only on `sink_context_in: fs_path_read`, a
+  value only a ground-truth case supplies, so a crawled `directory`/`page` parameter gets
+  SQLi and XSS candidates only (BWAPP-0045/0046 are `[reach: gt]`, consistent). A
+  black-box selection (from the value's shape, `audit/value_shape.py`'s file and path
+  classes) is an AUD design item.
+- Impact (other components / project): tests and the record only.
+- Risk (level; mitigation or accepted-risk justification): low.
+- Deliverables:
+  - [x] guard checks with offenders; record updated; citation — done
+  - [x] bWAPP crawl-fed and ground-truth runs on the fixed tree — done
+- Effectiveness (assessed 2026-11-20): the guard passes on the record (14 tests) and fails
+  on each offender.
+
 ### CC-LAB-0360 — The 11 external labs re-measured with scored runs; two labs made measurable; the runs recorded (BUG-0640, FR-LAB-360..362) (2026-11-20)
 - Change: `fuzzlab/lab_fixtures/external.py` (`LAB_META` mongection: identity
   `sdl-mongection-user`; `bootstrap_secdevlabs_mongection`, `_mongection_login`);

@@ -3,6 +3,39 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0641 — The directory-listing phase judges whole listing items against a sibling control (FR-FUZZ-641, BUG-0641) (2026-11-20)
+- Change: `fuzzlab/oracle/strategies.py`: `_ETC_ENTRIES` (27 non-English `/etc` files,
+  was 25 names with seven English words), `_listing_items` (lines, JSON strings, HTML text
+  nodes; `/` and `@` suffixes dropped), `_etc_entries` (whole items only),
+  `_directory_listing` (2xx probe; control = the payload with `etc` replaced by
+  `zq<random>`, same separators and depth); `import json`.
+  `tests/test_path_traversal_directory_listing.py` rewritten (five measured shapes, prose,
+  error page, non-2xx, sibling control, whole-item matching).
+- Reason: BUG-0641 (the orchestrator's review of 2275dcb): prose and an error page shown
+  for any path-shaped value confirmed.
+- Measured (2026-11-20, loopback servers in this container, `scratchpad/measure/`): the
+  real strategy through `Oracle.confirm_outcome` and a plain HTTP sender confirms Python
+  `os.listdir` lines, Node 20 `fs.readdirSync` JSON and Python 3.13 `http.server`'s HTML
+  listing, and nginx 1.27-alpine autoindex (its real answers replayed, the path being the
+  URL there), each at 7 requests with 20 names; the sibling control answered 404 on each.
+  The name set by `ls -a /etc`: Debian/Ubuntu container 20, `mariadb` 22, `mongo` 20,
+  `mysql` (Oracle Linux) 17, `nginx:1.27-alpine` 10 (threshold 4). bWAPP: see
+  Effectiveness.
+- Impact (other components / project): the oracle only; same cost (+2 requests per
+  unconfirmed path-traversal candidate, +1 control on a match).
+- Risk (level; mitigation or accepted-risk justification): low. Stated limits: a format
+  putting several names in one item (a comma list, `ls -l` columns) is not recognised; a
+  base with fewer than 4 of the names is not confirmed. Residual (BUG-0641 sweep): the
+  file phases of this strategy and `PathTraversalStrategy` use a separator-free `passwd`
+  control; their `root:.*:0:0:` signal is structural, so prose cannot trigger it, but an
+  app printing a passwd-shaped line only for separator-holding values would; not changed
+  here.
+- Deliverables:
+  - [x] code, tests: run against 2275dcb's strategy (684fab9's listing code), the prose and
+    error-page tests fail (both confirm there) and 15 of 22 fail in all; all 22 pass here — done
+  - [x] BUG-0641, PA-0641, ERROR_LOG, F-643, FR-FUZZ-640 amended, FR-FUZZ-641 — done
+- Effectiveness (assessed 2026-11-20): see CC-LAB-0361 for bWAPP's runs on this tree.
+
 ### CC-FUZZ-0640 — A traversal sink that lists a directory is confirmed (FR-FUZZ-640) (2026-11-20)
 - Change: `fuzzlab/oracle/strategies.py`: `PathTraversalFsPathReadStrategy._directory_listing`
   (called when the `/etc/passwd` phase finds nothing), `_LISTING_PAYLOADS`, `_ETC_ENTRIES`,

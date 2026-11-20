@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-11-20 — FUZZ: the directory-listing traversal phase confirmed on prose and on an error page (fixed before merge; BUG-0641)
+- **Symptom:** the orchestrator's review of lane ACC (2275dcb): "Welcome to the group! Edit your profile. Report an issue. Shells and hosts." matched 4 `/etc` names; an error page for any `/`-holding value matched 5; both confirmed through `Oracle.confirm_outcome` (reproduced).
+- **Root cause:** names matched as words anywhere, seven of them English words; the control `etc` dropped the probe's separators as well as its target; the probe status was not read (a recurrence of BUG-0083/BUG-0117's class).
+- **Remediation:** whole listing items only, a non-English name set, a 2xx probe, a random-sibling control with the probe's separators (CC-FUZZ-0641, FR-FUZZ-641, PA-0641); measured on os.listdir, Node readdir, http.server, nginx autoindex and bWAPP.
+- **Status:** Fixed
+
 ## 2026-11-20 — target lab / external labs (gt-tagged secDevLabs positives no scored run could reach; BUG-0640)
 - **Symptom:** lane ACC's first scored ground-truth runs of the secDevLabs apps at 2be7a50: copy-n-paste tp=0 fn=3 (every probe answered `400 "All fields are required"`), mongection tp=0 fn=2 (every operator probe `Bad Credentials`), comment-killer's stored case never audited; all tagged `[reach: gt]`.
 - **Root cause:** reach tags were set from hand-made requests (all fields present, accounts created by hand, a store URL known), never from a scored run: copy-n-paste's points lacked the JSON body its handler requires, mongection's fresh tmpfs database has no account for its flaw to answer, comment-killer's case has no `source_url`.

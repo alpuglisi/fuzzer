@@ -90,9 +90,10 @@ def test_each_measured_listing_shape_confirms_against_a_sibling_control(body):
 
 
 def test_prose_naming_etc_files_is_not_a_listing():
-    """The reviewer's case: four words that are /etc names, in a sentence."""
-    verdict, _unsure, sent = _run(lambda value: Probe(200, NOT_FOUND if "zq" in value
-                                                      else PROSE, 0.0))
+    """The reviewer's case: four words that were /etc names (in 684fab9's set), in a
+    sentence, answered to the listing payloads and to nothing else."""
+    verdict, _unsure, sent = _run(lambda value: Probe(
+        200, PROSE if value in _LISTING_PAYLOADS else NOT_FOUND, 0.0))
     assert not _confirmed(verdict)
     assert not any("zq" in v for v in sent)           # no control without a listing
 

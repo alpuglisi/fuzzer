@@ -2253,19 +2253,30 @@ rewards) derives from it.
   submitted leaf compares V with B; a server that stringifies every object still answers V
   and D alike and never confirms.
 
-- **FR-FUZZ-640 (a traversal sink that lists a directory, `CC-FUZZ-0640`, 2026-11-20,
-  BUG-0640's lane)** `PathTraversalFsPathReadStrategy` (`path_traversal`, sink
+- **FR-FUZZ-640 (a traversal sink that lists a directory, `CC-FUZZ-0640`, 2026-11-20;
+  amended by FR-FUZZ-641)** `PathTraversalFsPathReadStrategy` (`path_traversal`, sink
   `fs_path_read`) confirms a sink that lists a directory instead of reading a file: when
   no `_TRAVERSAL_PAYLOADS` value shows `/etc/passwd` content, each `_LISTING_PAYLOADS`
-  value (`../../../../../../../../etc`, `/etc`) is sent, and the answer must show at least
-  `LISTING_MIN_ENTRIES` (4) well-known `/etc` entry names (`_etc_entries`: whole names,
-  never part of a path such as an echoed `/etc/passwd`, nor `passwd.bak`) that a compared
-  control naming `etc` with no separator does not show (FR-FUZZ-63: a control that is not
-  the application's answer gives no verdict). Evidence names the listed entries
-  (`variant: directory-listing`). Cost: +2 requests when nothing lists, +1 control on a
-  match; the file phase still runs first. Measured on bWAPP's `directory_traversal_2.php`
-  (2026-11-20): `../../../../etc` and `/etc` list `/etc`, an unknown name answers "This
-  directory doesn't exist!", a file an `opendir` warning; BWAPP-0046 is confirmed.
+  value (`../../../../../../../../etc`, `/etc`) is sent and judged by FR-FUZZ-641. Evidence
+  names the listed entries and the control (`variant: directory-listing`). Cost: +2
+  requests when nothing lists, +1 control on a match; the file phase still runs first.
+  First measured on bWAPP's `directory_traversal_2.php` (BWAPP-0046).
+- **FR-FUZZ-641 (what counts as a listing, `CC-FUZZ-0641`, 2026-11-20, BUG-0641,
+  PA-0641)** The probe's answer must be 2xx and show at least `LISTING_MIN_ENTRIES` (4)
+  names of `_ETC_ENTRIES` -- 27 `/etc` files that are not English words -- each a *whole
+  listing item* (`_listing_items`: a line, a string of a JSON body, an HTML text node; a
+  directory's trailing `/` and http.server's symlink `@` dropped), absent from a compared
+  control that is the same value with `etc` replaced by a random sibling name (same
+  separators, same depth). A word in a sentence, an echoed path (`/etc/passwd`) or another
+  file's name (`passwd.bak`) is not an item; a control that is not the application's
+  answer gives no verdict (FR-FUZZ-63). Measured 2026-11-20 on four independent listing
+  implementations, each confirmed through the real oracle at 7 requests: Python
+  `os.listdir` joined by lines (text/plain), Node `fs.readdirSync` as JSON, Python
+  `http.server`'s HTML listing, nginx 1.27-alpine autoindex (replayed); plus bWAPP's PHP
+  table. The name set by `ls -a /etc`: a Debian/Ubuntu container 20, `mariadb` 22, `mongo`
+  20, `mysql` (Oracle Linux) 17, `nginx:1.27-alpine` 10. Stated limits: a listing format
+  that puts several names in one item (a comma list, `ls -l` columns) is not recognised; a
+  base whose `/etc` holds fewer than 4 of the names is not confirmed.
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
   finding must reproduce.
