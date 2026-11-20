@@ -2306,3 +2306,10 @@ Juice Shop lab is complete.
 - **Impact:** one more wasted harness cycle; nothing reported from it.
 - **Cause:** I fixed the instance (one package) instead of the class (every optional dependency group the suite imports); F-642's own lesson, not applied.
 - **Status:** remediated (every extra in `pyproject.toml` installed).
+
+### F-645 — Correction to F-644: installing every Python extra did not fix the nine labgen failures; `gitleaks` was missing too
+- **What:** F-644 said the labgen failures were remediated by installing every extra. The harness re-run on 5e9f067 (`verify6`) still failed nine `test_cli_check_passes_end_to_end*` tests: the labgen check's secret-scanner gate needs the `gitleaks` executable. Lane NODE's ERROR_LOG entry (2026-11-20) had already named it; I did not read it before setting up.
+- **Evidence:** `verify6/parallel.log` (6284 passed, 14 failed: 9 "'gitleaks' executable not found on PATH", 5 navigation aborts).
+- **Impact:** another harness cycle; F-644's status line overstated the fix.
+- **Cause:** as F-642/F-644: I set up from the failures in front of me, not from the environment record another lane had written.
+- **Status:** `apt-get install gitleaks` (8.16.0); the harness is re-run on the next merge.
