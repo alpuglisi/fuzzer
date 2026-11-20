@@ -2297,6 +2297,15 @@ rewards) derives from it.
   submitted leaf compares V with B; a server that stringifies every object still answers V
   and D alike and never confirms.
 
+- **FR-FUZZ-700** *(the target's language reaches the audit; whole-body points from a
+  crawl; `CC-FUZZ-0700`, 2026-11-20).* The pipeline reads
+  `core.fingerprint.server_language` from its baseline probe, records it in the
+  `target` row's fingerprint JSON (`server_language`) and passes it to `evaluate`
+  (FR-AUD-706). A crawl run's points include a captured JSON/XML request's whole-body
+  point (FR-CORE-672); the greybox point reader skips it (it cannot place a raw body);
+  a whole-body candidate whose leaves need a fresh binding is inconclusive before any
+  send, as a JSON-leaf point is (BUG-0544 B4).
+
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
   finding must reproduce.

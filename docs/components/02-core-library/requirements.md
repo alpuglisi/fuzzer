@@ -1200,6 +1200,26 @@ plugin registry. It is the layer that makes the store the integration bus.
   (`_VULN_TO_CATEGORY`), so a run derives the category from an answer key's positives
   (D14) and scores its findings.
 
+- **FR-CORE-670** *(a content type's family; `CC-CORE-0670`, 2026-11-20, SP-135).*
+  `core.redaction.media_family`: `json` (`application/json`, `application/*+json`;
+  RFC 8259, RFC 6839), `xml` (`application/xml`, `text/xml`, `+xml`; RFC 7303), `form`,
+  `multipart`, else `None`; parameters ignored; total. `body_kind` reads its declared
+  part through it (unchanged behaviour: XML is still sniffed, never redacted as XML).
+- **FR-CORE-671** *(the server's language from its own answer; `CC-CORE-0671`,
+  2026-11-20, SP-136).* `core.fingerprint.server_language(headers, cookies)`: one of
+  `LANGUAGES` from `X-Powered-By` product tokens (Express, Next.js, PHP, ASP.NET, ...)
+  and default session cookie names (`connect.sid`, `koa.sess`, `sails.sid`,
+  `PHPSESSID`, `JSESSIONID`, ...), each cited; `None` when none or two disagree.
+- **FR-CORE-672** *(a captured request's whole body; `CC-CORE-0672`, 2026-11-20).* The
+  importer keeps a captured JSON or XML request's own media type as its `form` row's
+  `enctype` and adds one whole-body parameter (`store_adapter.WHOLE_BODY`, `body`,
+  location `body`), except for a body with a password leaf; an XML request (now
+  accepted, `request_xml`) stores no entries -- its body is never read or stored.
+  `core.forms.whole_body_media` reads those types; the crawl point builder gives that
+  point `body_content_type` and, for JSON, every leaf as `base_entries`. The spider's
+  capture boundary (`redact_captured_body`) still records no XML body: an XML request
+  reaches the store only from a disco capture (stated).
+
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers
   never block the writer (WAL).

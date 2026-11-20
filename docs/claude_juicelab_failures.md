@@ -2278,3 +2278,15 @@ Juice Shop lab is complete.
 - **Impact:** the labgen apps' recall overstated real detection: removing the lab names took twitch-clone 14 -> 11, netflix-clone 11 -> 9, booking-clone 3 -> 2 on ground-truth points. Other heuristics fitted to one lab or one framework remain (Angular Material selectors, bWAPP-measured settings words, the 8 `sink_context_in` rules that fire only from answer-key labels): listed open in the lane report.
 - **Status:** the named items fixed on the BBOX branch (CC-AUD-0660, CC-FUZZ-0660); PA-0660 and its guard added; the remaining items listed for the orchestrator.
 
+
+### F-710 — BUG-0121 was named by earlier agent sessions and never written up, owned or fixed
+- **What:** BUG-0122 (2026-10) and BUG-0124 named "BUG-0121 (open): unanchored name rules" and assigned it the audit rules' name patterns, but no `docs/bugs/BUG-0121-*.md`, no ERROR_LOG line and no PA was ever written; the audit engine kept `re.search` until 2026-11-20.
+- **Evidence:** `ls docs/bugs | grep 0121` is empty; BUG-0122's sweep table row "owned by BUG-0121 (open)"; `audit/rules.py::matches` before CC-AUD-0700.
+- **Impact:** a known false-nomination class (`ip` in `description`, `load` in `payload`) ran on every crawl for weeks; rule words were kept short to lean on it.
+- **Status:** the audit part fixed as BUG-0710 / PA-0710 (CC-AUD-0700); `session/detect.py::_USERNAME_HINT` stays open under BUG-0121.
+
+### F-711 — My first baseline brief gave the sub-agents a command that does not exist
+- **What:** lane RULESEL's baseline brief told three measurement sub-agents to run `python -m fuzzlab ...` and to pass `--authorized` to `fuzzlab crawl`; the package has no `__main__` and `crawl` takes no such flag.
+- **Evidence:** the NodeGoat/Mutillidae sub-agent's report (it built a wrapper, `meas/bin/fl`, and crawled without the flag).
+- **Impact:** none on the numbers (the wrapper imports the same package); time lost in each sub-agent.
+- **Status:** the after-run briefs point at the wrapper.

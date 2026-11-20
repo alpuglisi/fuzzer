@@ -1799,7 +1799,14 @@ tracked in the requirements files, not here.
   ground-truth contract — scores TP/FP. A crawl (discovery) run's score is the reported
   detection figure; a run on the answer key's own points is labelled an oracle diagnostic
   wherever it is shown (FR-FUZZ-661, PA-0660). Detection code holds no lab knowledge
-  (PA-0660, guarded by `tests/test_blackbox_detection.py`). The legacy `tools/blind_sqli_fuzzer.py`
+  (PA-0660, guarded by `tests/test_blackbox_detection.py`). Rule selection works on a
+  black-box target (lane RULESEL): name rules match whole tokens (FR-AUD-702, SP-137);
+  every class with a whole-body or sink-only strategy also has a crawl-observable rule --
+  a captured request's content type (`content_type_in`; the importer's whole-body point
+  per captured JSON/XML request, FR-CORE-672, SP-135), a value shape, a token endpoint
+  path or a price leaf of the target's own body (FR-AUD-700..705); and `R-SSJS` fires
+  only when the baseline answer names a JavaScript server (`target` fact
+  `server_language`, FR-AUD-706, FR-CORE-671, SP-136). The legacy `tools/blind_sqli_fuzzer.py`
   remains as the original single-class fuzzer.
 - **Oracle** `[built; M10 wiring layer built, live sources on-host]`: a
   **class-pluggable** deterministic confirmer (`oracle/oracle.py`,

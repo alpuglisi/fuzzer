@@ -788,6 +788,51 @@ budget where a vulnerability is plausible.
   for every query, body, JSON-leaf and path point (where `R-SQLI-PARAM` and `R-SSTI`
   apply): the value may reach `eval`, `new Function` or a `$where` whatever its name.
 
+- **FR-AUD-700** *(path traversal from what a crawl sees; `CC-AUD-0702`, 2026-11-20).*
+  `R-PATH-TRAVERSAL-NAME` (a name token of the file-inclusion vocabulary: file, path,
+  folder, dir..., page, doc..., template..., include..., load) and
+  `R-PATH-TRAVERSAL-VALUE` (a `filename` or `path` value shape) nominate
+  `path-traversal` on query, body and JSON-leaf points, never a whole body or a
+  fragment. Cited: OWASP WSTG-ATHZ-01, PortSwigger "Path traversal",
+  PayloadsAllTheThings. `R-PATH-TRAVERSAL` (the answer key's `fs_path_read`) stays.
+- **FR-AUD-701** *(whole-body rules read the captured content type; `CC-AUD-0701`,
+  2026-11-20).* The predicate `content_type_in` (`none`, `json`, `xml`, `multipart`,
+  `form`: `core.redaction.media_family` of the point's `body_content_type`, `none` when
+  it has none). `R-MASS-ASSIGNMENT-JSON` and `R-INSECURE-DESERIALIZATION-JSON` (a JSON
+  whole body, POST/PUT/PATCH), `R-XXE-XML-BODY` (an XML whole body),
+  `R-UNRESTRICTED-FILE-UPLOAD-MULTIPART` (a multipart body, POST/PUT). The leaf rules
+  (`R-SQLI-PARAM`, `R-XSS-REFLECT`, `R-SPEL-INJECTION`, `R-LDAP-INJECTION`,
+  `R-XPATH-INJECTION`, `R-SSJS`) require `none`: a field strategy never sends its probe
+  as a whole body. `R-SSTI` takes `none` and `json` (the Go-template strategy's JSON
+  body). Each rule's `basis` cites its sources.
+- **FR-AUD-702** *(name rules match whole tokens; `CC-AUD-0700`, 2026-11-20, BUG-0710,
+  PA-0710; supersedes the substring semantics of FR-AUD-22's `name_regex`).*
+  `name_token_regex` must fullmatch one whole token of the name
+  (`core.redaction.name_tokens`); `name_regex` must fullmatch the whole name. A word
+  never matches inside another (`ip` / `description`, `load` / `payload`); a compound is
+  spelled in the rule. No answer-key positive of a rule's own category is lost.
+- **FR-AUD-703** *(header injection from what a crawl sees; `CC-AUD-0702`, 2026-11-20).*
+  `R-HEADER-INJECTION-VALUE` (a `url` value shape) and `R-HEADER-INJECTION-NAME` (the
+  open-redirect name vocabulary) nominate `http-header-injection` on query and body
+  points (OWASP WSTG-INPV-15, PortSwigger). The `url` shape's categories add
+  `http-header-injection`, `filename`/`path` add `path-traversal`
+  (`value_shape.SHAPE_CATEGORIES`).
+- **FR-AUD-704** *(a token endpoint; `CC-AUD-0701`, 2026-11-20).* `path_token_regex`
+  matches one whole token of the point's URL path. `R-WEAK-TOKEN-ENTROPY-JSON`: a JSON
+  whole-body POST to a path with a `token(s)`, `session(s)`, `refresh`, `oauth`, `auth`
+  or `jwt` token (RFC 6749 §3.2/§5.1, OpenID Connect Core §3.1.3, OWASP Session
+  Management Cheat Sheet).
+- **FR-AUD-705** *(a price in the target's own body; `CC-AUD-0701`, 2026-11-20).*
+  `body_leaf_token_regex` matches one whole token of a whole-body point's own captured
+  leaf keys. `R-PRICE-TRUST-JSON`: a JSON whole-body POST/PUT/PATCH with a leaf named for
+  a price, amount, total, cost or charge (OWASP WSTG-BUSL-01, PortSwigger "Excessive
+  trust in client-side controls").
+- **FR-AUD-706** *(server-side JavaScript only on the target's evidence; `CC-AUD-0703`,
+  2026-11-20; narrows FR-AUD-610).* `server_language_in` reads the run's `target` fact
+  (`core.fingerprint.server_language` of the pipeline's baseline answer, FR-CORE-671);
+  it is never true without it. `R-SSJS` requires `javascript`. `matches(rule, point,
+  target)` and `evaluate(..., target=)` carry the fact.
+
 ## 4. Non-functional requirements
 - **NFR-AUD-explainable** Every candidate is traceable to the rule evidence that
   produced it; a candidate with no evidence is a bug.

@@ -18,6 +18,18 @@ Format per entry:
 
 ---
 
+## 2026-11-20 — auditor (name rules matched a word inside another word; BUG-0710)
+- **Symptom:** `ip` in `description`, `load` in `payload`, `next` in `nextid` drew command-injection, file-inclusion and open-redirect candidates (BUG-0121's audit part, open since BUG-0122).
+- **Root cause:** `audit/rules.py::matches` evaluated `name_regex` with unanchored `re.search`; no token-anchored primitive or guard existed.
+- **Remediation:** `name_token_regex` (fullmatch per whole token) and a fullmatch `name_regex`; six rules rewritten with their compounds spelled out; PA-0710, SP-137 (CC-AUD-0700).
+- **Status:** Fixed (`session/detect.py::_USERNAME_HINT` stays open under BUG-0121).
+
+## 2026-11-20 — tests (black-box guard failed on the integration merge; BUG-0711)
+- **Symptom:** `test_detection_code_names_no_lab_identifier` failed after merging the integration branch: `graphql` (DVGA's answer key) in GraphQL reader literals.
+- **Root cause:** a data-driven guard merged with new data without a re-run; a protocol term was not cited.
+- **Remediation:** `CITED["graphql"]` with the GraphQL-over-HTTP specification and graphql.org; PA-0711.
+- **Status:** Fixed.
+
 ## 2026-11-20 — oracle (seven strategies sent one labgen cell's own field names; BUG-0661)
 - **Symptom:** lane BBOX's black-box audit: `JwtAlgNoneConfusionStrategy` forged `channel_id`/`role` claims, `PredictableTokenSourceStrategy` read `session_token`, `MassAssignmentPrivilegedFieldStrategy` sent `is_partner`, `PriceTrustDifferentialStrategy` sent `monthly_charge`/`plan_tier`, `PriceIntegrityBypassStrategy` matched `data-charged-amount`, `GoTemplateSstiStrategy` sent `{"template": ...}`, and an XXE wrapper named `<title>`: each one generated cell's own names.
 - **Root cause:** no rule or guard kept lab knowledge out of detection logic; a docstring "convention" made the practice precedent.
