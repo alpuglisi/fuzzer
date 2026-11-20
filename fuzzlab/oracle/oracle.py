@@ -69,6 +69,12 @@ def _front_controller_route(url: str, param: str, entries=None) -> str:
     URL's own query names no route."""
     from urllib.parse import parse_qsl, quote, urlsplit
 
+    # Evidence for the router/route names read here (owner directive 2026-11-20, black
+    # box; the lists themselves are `session.detect`'s, BUG-0122, reviewed by lane BBOX):
+    # `route` -- OpenCart upload/system/library/url.php:93 (`index.php?route=` + route;
+    # its login route `account/login`) and phpMyAdmin src/Url.php:327; `r` -- the Yii 2
+    # routing guide (`/index.php?r=post%2Fview&id=100`). `page` is shown on Mutillidae
+    # only, `action`/`p`/`view` are uncited (CC-FUZZ-0622, CC-SESS-0611/0612).
     from fuzzlab.session.detect import _ROUTE_PARAMS, _ROUTER_SEGMENTS
     parts = urlsplit(url or "")
     segments = [s for s in parts.path.split("/") if s]

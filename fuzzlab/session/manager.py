@@ -604,6 +604,12 @@ def _same_routed_page(url: str, known: str) -> bool:
     request carries (a crawled point's sibling entries, a body), so it is the auth
     endpoint. Every other endpoint is compared by its path alone, as before. Same path
     is the caller's check."""
+    # Evidence for the router/route names read here (owner directive 2026-11-20, black
+    # box; the lists themselves are `session.detect`'s, BUG-0122, reviewed by lane BBOX):
+    # `route` -- OpenCart upload/system/library/url.php:93 (`index.php?route=` + route;
+    # its login route `account/login`) and phpMyAdmin src/Url.php:327; `r` -- the Yii 2
+    # routing guide (`/index.php?r=post%2Fview&id=100`). `page` is shown on Mutillidae
+    # only, `action`/`p`/`view` are uncited (CC-FUZZ-0622, CC-SESS-0611/0612).
     from urllib.parse import urlsplit
     parts = urlsplit(known)
     segments = [s for s in parts.path.split("/") if s]
