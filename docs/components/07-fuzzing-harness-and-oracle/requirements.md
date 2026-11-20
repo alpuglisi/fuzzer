@@ -841,7 +841,9 @@ rewards) derives from it.
     `"access_control": "access-control"` — required for the rule/strategy
     to actually be selected by a ground-truth-driven run (the vuln_class
     and category slugs genuinely differ here, unlike `ssrf`).
-  - **Documented, not eliminated, false-positive class**: a legitimate
+  - *(Superseded by FR-FUZZ-714, 2026-11-20, BUG-0735: a public id-keyed object
+    now gives no verdict -- the unauthenticated replay of the neighbour must be
+    refused.)* **Documented, not eliminated, false-positive class**: a legitimate
     endpoint that echoes an arbitrary id back without gating anything
     sensitive by ownership will still confirm (pinned by
     `test_documented_false_positive_class_a_public_echo_endpoint_does_
@@ -2416,6 +2418,20 @@ rewards) derives from it.
   expression Denial of Service - ReDoS", CWE-1333 and Davis et al. (ESEC/FSE 2018).
   A target slow for every pattern of the shape (a compile or error path), a single
   slow reading, or a uniformly 0-40 ms jittery endpoint never confirms (tested).
+- **FR-FUZZ-714** *(the IDOR verdict needs a protected object; `CC-FUZZ-0714`,
+  2026-11-20, BUG-0735).* `AccessControlIdorStrategy` confirms only when, in addition to
+  FR-FUZZ-712's checks, the same neighbour request sent with **no session** (the run's
+  unauthenticated sender, `PeerAccounts.anonymous`, the point's other fields bound as
+  every send binds them) is refused: non-200, an empty body or a denial phrase. A public
+  object keyed by id (a catalogue item, a public profile) answers it alike: no verdict.
+  Without an unauthenticated sender (no logged-in run, a hand-built oracle) the strategy
+  raises `UnplaceableLocation`: no verdict, never a guess. `fuzzlab auto` gives every
+  logged-in run that sender (an anonymous-only `PeerAccounts`; the cross-account
+  strategy stays off without `--peer-identity`). Sources: OWASP WSTG v4.2 WSTG-ATHZ-04
+  (access to objects that require authorisation), OWASP API Security Top 10 2023 API1
+  (BOLA: objects the user must not reach). Accepted loss: an object served with no
+  session at all (no authentication, not only no ownership check) is indistinguishable
+  from a public one and is a stated miss.
 - **FR-FUZZ-712** *(the IDOR probe is the target's own id and its neighbour;
   `CC-FUZZ-0712`, 2026-11-20, BUG-0734; supersedes FR-FUZZ-20's fixed-id bullet and
   open note).* `AccessControlIdorStrategy` reads the point's captured value

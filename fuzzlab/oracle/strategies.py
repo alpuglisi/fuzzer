@@ -1746,6 +1746,11 @@ class AccessControlIdorStrategy(ConfirmationStrategy):
     _NUMERIC_ID = re.compile(r"[0-9]{1,18}")
     _EMPTY_BODIES = frozenset({"", "null", "{}", "[]", '""'})
 
+    def __init__(self, anonymous: Sender | None = None):
+        #: The unauthenticated sender (`PeerAccounts.anonymous`): the public-object
+        #: control (FR-FUZZ-714). None: no verdict, never a guess.
+        self._anonymous = anonymous
+
     @classmethod
     def neighbours(cls, value: str) -> list[str]:
         """The captured id's numeric neighbours, +1 first, at its own width."""
@@ -1781,8 +1786,25 @@ class AccessControlIdorStrategy(ConfirmationStrategy):
                 continue                 # e.g. 404 past the last object: try the other
             if self._denied_or_empty(b) or (b.text or "") == (a.text or ""):
                 return None
+            # FR-FUZZ-714 (BUG-0735): the neighbour is an object the run's session may not
+            # be meant to see only if the endpoint protects it at all: the same request
+            # without a session must be refused (non-200, empty or a denial). A public
+            # object keyed by id (a catalogue item, a public profile) answers it alike --
+            # no verdict. OWASP WSTG-ATHZ-04 tests access to objects that require
+            # authorisation; OWASP API1:2023 BOLA concerns objects a user must not reach.
+            if self._anonymous is None:
+                raise UnplaceableLocation(
+                    "access-control: no unauthenticated sender for the public-object "
+                    "control")
+            from fuzzlab.oracle.oracle import _FormBoundSender
+            with trace.role("control"):          # the point's other fields bound, as
+                anon = self._send(_FormBoundSender(self._anonymous, candidate),  # SP-57
+                                  candidate, neighbour)
+            if not self._denied_or_empty(anon):
+                return None              # served without a session: public, or no auth
             return Verdict(True, self.vuln_class, self.mechanism,
                            {"value_a": captured, "value_b": neighbour,
+                            "anonymous_status": anon.status,
                             "probe_a": a.text[:120], "probe_b": b.text[:120]})
         return None
 
@@ -3015,7 +3037,8 @@ def default_strategies(browser: BrowserExecutor | None = None,
             PathTraversalStrategy(), CommandInjectionStrategy(),
             CommandInjectionOobStrategy(oob), RegexDosStrategy(),
             SsrfInBandMarkerStrategy(oob), SsrfOobStrategy(oob),
-            CrossAccountReplayStrategy(peer), AccessControlIdorStrategy(),
+            CrossAccountReplayStrategy(peer),
+            AccessControlIdorStrategy(peer.anonymous if peer is not None else None),
             InsecureDeserializationTypeConfusionStrategy(),
             XxeInBandMarkerStrategy(oob), XxeOobStrategy(oob),
             JwtAlgNoneConfusionStrategy(),

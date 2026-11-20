@@ -392,6 +392,13 @@ def _run_traced(p, args, store, run_id: int, plugins, selected, ground_truth) ->
         peer = PeerAccounts(sender=peer_sender,
                             owner=args.peer_names[0], peer_name=args.peer_names[1],
                             anonymous=RequestsProbeSender())
+    elif not no_login:
+        # FR-FUZZ-714 (BUG-0735): the unauthenticated replay is the IDOR strategy's
+        # public-object control in every logged-in run; with no owner name the
+        # cross-account strategy stays off (FR-FUZZ-55 needs `--peer-identity`)
+        from fuzzlab.oracle.strategies import PeerAccounts
+        peer = PeerAccounts(sender=None, owner="", peer_name="",
+                            anonymous=RequestsProbeSender())
     browser = None
     if args.browser:
         from fuzzlab.tools.browserexec import PlaywrightBrowserExecutor

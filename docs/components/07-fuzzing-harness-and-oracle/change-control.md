@@ -3,6 +3,18 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0714 — The IDOR verdict needs a protected object: an unauthenticated replay of the neighbour must be refused (BUG-0735, FR-FUZZ-714) (2026-11-20)
+- Placement: lane HEUR (item BUG-0735, spawned by HEUR-CD's CC-FUZZ-0712, caught in the lane's review before merge); pre-assigned CC-FUZZ-0710..0714.
+- Change: `fuzzlab/oracle/strategies.py::AccessControlIdorStrategy` takes an optional `anonymous` sender (local, additive: `__init__`, one control send after the neighbour's differential, `anonymous_status` in the evidence); `default_strategies` passes `peer.anonymous`. `fuzzlab/harness/auto_cli.py::_run_traced` builds an anonymous-only `PeerAccounts` (`RequestsProbeSender()`, empty owner) for every logged-in run without `--peer-identity`. Tests: `tests/test_oracle_strategies_access_control.py` (public echo and public catalogue now no verdict; no sender -> `UnplaceableLocation`; the replay carries the neighbour; wiring through `default_strategies`), `tests/test_labgen_go_live_boot.py` / `tests/test_labgen_spring_boot_account_billing_live_boot.py` (the three IDOR live boots pass the real unauthenticated sender).
+- Why: CC-FUZZ-0712 replaced the fixed ids with the captured id and its neighbour, and with that the former echo requirement (an arbitrary large id answered 200 and echoed) was gone: any public catalogue keyed by a numeric id (`?id=41` / `?id=42`: both 200, stable, distinct) would confirm. R-ACCESS-CONTROL nominates every id-shaped GET parameter since CC-AUD-0660, so on crawl runs this was a precision regression on every public id page.
+- Measured: real Go and Spring labgen boots (tests above): the vulnerable twins serve the neighbour with no session (their identity is a request header the strategy never has), so the unauthenticated control gives no verdict -- the IDOR live boots go from confirm to no verdict (an honest miss; such a cell is black-box indistinguishable from a public object). Unit fakes: a public echo endpoint and a public catalogue no verdict; a protected endpoint (anonymous 401/403) confirms. External-lab crawl runs: see the lane's table (CHANGELOG, lane HEUR).
+- Impact (other components / project): one more request per confirmed-shape candidate (the anonymous replay); `access_control` confirmations on crawl runs only where the endpoint refuses an unauthenticated caller. Labgen IDOR cells (no authentication) no longer confirm.
+- Risk (level; mitigation or accepted-risk justification): low. The control send carries no credential (the existing `RequestsProbeSender`, already the cross-account strategy's anonymous replay) and passes the same gates; fp can only fall.
+- Deliverables:
+  - [x] strategy + harness wiring + tests — done (lane, after reading HEUR-CD's diff)
+  - [x] FR-FUZZ-714; FR-FUZZ-20's documented-false-positive bullet marked superseded — done
+- Effectiveness (assessed 2026-11-20): unit and live-boot tests green; crawl-run effect in the lane's table.
+
 ### CC-FUZZ-0713 — A POST selector whose options pick a setting is not fuzzed; the settings words it checks are the cited set (FR-FUZZ-713, CC-CRAWL-0680, BUG-0731) (2026-11-20)
 - Placement: lane HEUR (item HEUR-B), base 82910aa; the component-07 half of
   CC-CRAWL-0680.

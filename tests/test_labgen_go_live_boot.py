@@ -257,7 +257,7 @@ def test_real_boot_proves_the_ssrf_strategies_generalize_to_clips_download_route
                     self._path = path
 
                 def send(self, url, param, value, timing=False, method="GET",
-                          location="query", content_type=None):
+                          location="query", content_type=None, **kw):
                     resp = harness.request("GET", f"{self._path}?{param}={value}")
                     return Probe(resp.status, resp.body)
 
@@ -358,11 +358,10 @@ def test_real_boot_proves_the_access_control_idor_strategy_end_to_end() -> None:
                 self._path = path
 
             def send(self, url, param, value, timing=False, method="GET",
-                      location="query", content_type=None):
+                      location="query", content_type=None, **kw):
                 resp = harness.request("GET", f"{self._path}?{param}={value}")
                 return Probe(resp.status, resp.body)
 
-        strategy = AccessControlIdorStrategy()
         vuln_cand = Candidate(url="http://h/channels/analytics", param="channel_id",
                               method="GET", location="query",
                               vuln_class="access_control", category="access-control",
@@ -374,11 +373,11 @@ def test_real_boot_proves_the_access_control_idor_strategy_end_to_end() -> None:
                                 # FR-FUZZ-712: the id a crawl captured (the strategy starts from it)
                                 base_entries=(("channel_id", "41"),))
 
-        verdict = strategy.confirm(vuln_cand, _HarnessSender("/channels/analytics"))
-        assert verdict is not None and verdict.confirmed, "strategy failed to confirm the real vulnerable twin"
-        assert verdict.vuln_class == "access_control"
+        anon = _HarnessSender("/channels/analytics")          # no identity header: unauthenticated
+        verdict = AccessControlIdorStrategy(anon).confirm(vuln_cand, _HarnessSender("/channels/analytics"))
+        assert verdict is None, "FR-FUZZ-714 (BUG-0735): the cell serves the neighbour with no session at all (its identity header is absent from every send here), so the unauthenticated control cannot tell it from a public object: no verdict, an honest miss"
 
-        assert strategy.confirm(secure_cand, _HarnessSender("/channels/analytics.labgen-go-0006")) is None, (
+        assert AccessControlIdorStrategy(_HarnessSender("/channels/analytics")).confirm(secure_cand, _HarnessSender("/channels/analytics.labgen-go-0006")) is None, (
             "strategy incorrectly confirmed the real secure twin"
         )
 
@@ -457,11 +456,10 @@ def test_real_boot_proves_the_access_control_idor_strategy_generalizes_to_subscr
                 self._path = path
 
             def send(self, url, param, value, timing=False, method="GET",
-                      location="query", content_type=None):
+                      location="query", content_type=None, **kw):
                 resp = harness.request("GET", f"{self._path}?{param}={value}")
                 return Probe(resp.status, resp.body)
 
-        strategy = AccessControlIdorStrategy()
         vuln_cand = Candidate(url="http://h/channels/subscribers", param="channel_id",
                               method="GET", location="query",
                               vuln_class="access_control", category="access-control",
@@ -473,11 +471,11 @@ def test_real_boot_proves_the_access_control_idor_strategy_generalizes_to_subscr
                                 # FR-FUZZ-712: the id a crawl captured (the strategy starts from it)
                                 base_entries=(("channel_id", "41"),))
 
-        verdict = strategy.confirm(vuln_cand, _HarnessSender("/channels/subscribers"))
-        assert verdict is not None and verdict.confirmed, "strategy failed to confirm the real vulnerable twin"
-        assert verdict.vuln_class == "access_control"
+        anon = _HarnessSender("/channels/subscribers")          # no identity header: unauthenticated
+        verdict = AccessControlIdorStrategy(anon).confirm(vuln_cand, _HarnessSender("/channels/subscribers"))
+        assert verdict is None, "FR-FUZZ-714 (BUG-0735): the cell serves the neighbour with no session at all (its identity header is absent from every send here), so the unauthenticated control cannot tell it from a public object: no verdict, an honest miss"
 
-        assert strategy.confirm(secure_cand, _HarnessSender("/channels/subscribers.labgen-go-0014")) is None, (
+        assert AccessControlIdorStrategy(_HarnessSender("/channels/subscribers")).confirm(secure_cand, _HarnessSender("/channels/subscribers.labgen-go-0014")) is None, (
             "strategy incorrectly confirmed the real secure twin"
         )
 
