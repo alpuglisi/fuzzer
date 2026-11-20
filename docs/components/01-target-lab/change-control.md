@@ -3,6 +3,25 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0362 — VulnerableApp's scored ground-truth run, re-run by lane ACC for the record (FR-LAB-362) (2026-11-20)
+- Change: `docs/components/01-target-lab/external-lab-scores.json` gains `vulnerableapp`
+  (PA-0640's guard covers every lab with a key; lane JAVA's CC-LAB-0350 records counts,
+  not the matched ids, so the run was repeated rather than the ids guessed).
+- Run: `fuzzlab auto --base-url http://127.0.0.1:3095 --ground-truth
+  lab/ground-truth-vulnerableapp --points ground-truth --browser --oob --score
+  --authorized`, the container restarted first, on the merged tree 7c6f8ca: tp=37 fp=0
+  fn=26 tn=42, 2480 requests, 2069 s -- CC-LAB-0350's AFTER counts. The same matched set
+  on da1a5d6's merge (2492 requests, 2073 s) before BBOX's strategy changes. 94fac7f
+  (CRAWLSAFE) changes no VulnerableApp point's `destructive_reason` /
+  `transaction_reason` (84 points compared under both versions: 0 differences).
+- Record: 21 gt-tagged misses are `open:` [tracked: CC-LAB-0350] (its "Open" list names
+  the measured causes); 5 are tagged unreachable. Headline (crawl, CC-LAB-0350): tp=0.
+- Impact (other components / project): the record only.
+- Risk (level; mitigation or accepted-risk justification): low; loopback lab.
+- Deliverables:
+  - [x] run, record entry; the guard passes (21 with the black-box guard) — done
+- Effectiveness (assessed 2026-11-20): as above.
+
 ### CC-LAB-0361 — The scored-run guard's review follow-ups; bWAPP re-scored crawl-first on the fixed listing phase (FR-LAB-363, BUG-0641) (2026-11-20)
 - Change: `tests/test_external_lab_scored_runs.py` (an `open:` reason names its tracking
   record; matched ids are positives; tn/fp agree with the key's negatives; each check
