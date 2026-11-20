@@ -52,6 +52,14 @@ Newest first.
 - Effectiveness (assessed 2026-11-20): NodeGoat NGOAT-0001..0004 confirmed in both the
   ground-truth and the crawl run, fp=0 on its negatives; Juice Shop's `$where` route
   confirmed without a crash and 0 findings on its other 8 points.
+  `scripts/verify_change.py --base 2be7a50` on e19f6fc: 193 files, 5970 passed, 14
+  failed, 9 skipped, 156 xfailed. Root-caused, none from this change: 9
+  `tests/test_labgen_*::test_cli_check_passes_end_to_end*` failed because the container
+  had no `gitleaks` (the labgen check's secret-scanner gate; installed, the nine pass);
+  5 in `tests/test_navigation_aborts.py` fail identically on untouched 2be7a50 in this
+  container (Chromium 157 from Playwright 1.63, where the expectations were measured on
+  Chromium 141: a navigation to an empty answer does not raise). The final commit's
+  harness is in the lane report.
 
 ### CC-FUZZ-0117 — M6's navigations settle a failure on the error page's load (BUG-0561) (2026-10-23)
 - Change: none in `fuzzlab/tools/browserexec.py` or the oracle. The executor's navigations go through SP-01, which now waits for a failed navigation's error page to load, not only to commit, before it raises (CC-CRAWL-0065).
