@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-11-20 — crawl/disco (store->render restated SP-41's write methods; lane CRAWLCOV)
+- **Symptom:** `verify_change.py --base da55f88` on 9d14ee9: 5582 passed, 1 failed -- `tests/test_put_patch.py::test_the_write_opt_in_methods_are_defined_once`.
+- **Root cause:** `disco/storerender.py` wrote its own `{"POST", "PUT", "PATCH"}` set instead of reading SP-41's owner (`store_adapter.WRITE_METHODS`).
+- **Remediation:** it reads the owner (`WRITE_METHODS | {"POST"}`, as `browserexec._store_plan` does). The guard caught it before any merge; no new rule (F-700's cause, same turn).
+- **Status:** Fixed.
+
 ## 2026-11-20 — crawl/import (lane CRAWLCOV's 0ae302d failed three whole-package guards; F-700)
 - **Symptom:** `scripts/verify_change.py --base f6b4790` on 0ae302d: 5442 passed, 8 failed -- 5 the known base failures of `tests/test_navigation_aborts.py` (lane NAV's fix), 3 new: `test_forms_phase2.py::test_only_core_forms_reads_form_enctype`, `test_cli_taxonomy.py::...[auto]`, `test_base_url_subpath_registry.py::test_every_base_url_function_is_registered`.
 - **Root cause:** the GraphQL schema step read `form.enctype` in its own SQL, added an `auto` flag without classifying it, and added a function taking `base_url` without registering its sub-path test; I pushed before the harness ran (the guards caught all three before any merge).

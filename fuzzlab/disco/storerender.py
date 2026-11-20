@@ -40,8 +40,11 @@ MAX_PAIRS = 200
 MAX_RENDERS_PER_LEAF = 3
 #: A response body is searched up to this many characters.
 MAX_BODY_CHARS = 262_144
-#: Methods whose request may store a value.
-WRITE_METHODS = frozenset({"POST", "PUT", "PATCH"})
+#: Methods whose request may store a value: POST and the write opt-in methods (SP-41's
+#: owner, `tools.store_adapter.WRITE_METHODS`, read here, never restated).
+def _storing_methods() -> frozenset[str]:
+    from fuzzlab.tools.store_adapter import WRITE_METHODS
+    return WRITE_METHODS | {"POST"}
 _HTML = ("text/html", "application/xhtml+xml")
 
 
@@ -70,7 +73,7 @@ def _usable(value) -> bool:
 def write_leaves(rec) -> list[tuple[str, str]]:
     """``(param, value)`` of every usable string leaf of a write's body, or ``[]``."""
     from fuzzlab.core import jsonbody
-    if (getattr(rec, "kind", None) != "http" or (rec.method or "").upper() not in WRITE_METHODS
+    if (getattr(rec, "kind", None) != "http" or (rec.method or "").upper() not in _storing_methods()
             or rec.status is None or rec.status >= 400 or not rec.req_body
             or rec.req_truncated):
         return []
