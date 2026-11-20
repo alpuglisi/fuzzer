@@ -1924,6 +1924,12 @@ fuzzer.
   route or a page's own script. The spider counts each refusal as
   `loads_refused[excluded]`. An invalid pattern is a usage error before any traffic.
 
+- **FR-CRAWL-676 (a menu of one element shape is explored; CC-CRAWL-0675, 2026-11-20,
+  SP-130)** The disco explorer acts on at most `max_same_signature` occurrences of one
+  element signature on a route until two of their actions led to states of different
+  structures (`values_select_pages`); from then on up to `max_menu_signature` occurrences
+  are acted on. Counted `menu_signatures`.
+
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive and state-switching actions (delete/logout/reset;
   toggle/enable/activate, an action slot naming a state verb: FR-CRAWL-650); default

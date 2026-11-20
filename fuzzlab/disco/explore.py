@@ -437,6 +437,9 @@ class ExploreOptions:
     nav_timeout_ms: int = 15000
     max_perturbations: int = 6
     max_same_signature: int = 2
+    #: occurrences of one signature acted on once its first ones led to pages of
+    #: different structures (a menu, not a list of records; FR-CRAWL-676)
+    max_menu_signature: int = 32
     max_states_per_route: int = 8
     deny: tuple[str, ...] = ()
     #: URL path/query patterns never loaded (`core.urls.compile_exclusions`; the
@@ -510,6 +513,9 @@ class ExploreReport:
     steps_abandoned: int = 0
     #: elements past `max_same_signature` of one signature in a state: not acted on
     same_signature_capped: int = 0
+    #: signature groups whose actions led to pages of different structures, so their
+    #: occurrences up to `max_menu_signature` were acted on (FR-CRAWL-676)
+    menu_signatures: int = 0
     #: perturbation passes not run again for a form (route and field set) already
     #: perturbed: a bound on value variations, never on a form's submission
     perturbations_folded: int = 0
@@ -640,6 +646,9 @@ class _Shared:
         self.optional: dict[str, str] = {}
         self.perturbed: set[tuple] = set()
         self.denied: set[tuple] = set()
+        #: FR-CRAWL-676: (route, element signature) -> {occurrence: the structural key
+        #: of the state its action led to}, the evidence that a repeated shape is a menu
+        self.signature_outcomes: dict[tuple, dict[int, str]] = {}
         self.report = report
         self.seq = 0
         self.busy = 0             # workers holding a state (or seeding the root)
@@ -2052,9 +2061,53 @@ class Explorer:
         if self.report.budget_hit is None:
             self.report.budget_hit = hit
 
+    def _menu_group(self, route: str, signature: str) -> bool:
+        """Whether the occurrences of ``signature`` on ``route`` already acted on led to
+        pages of different structures (FR-CRAWL-676, SP-130's decision,
+        `core.pathtemplate.values_select_pages`): a menu, each entry its own page, not a
+        list of one record template (whose pages share one structure)."""
+        from fuzzlab.core.pathtemplate import values_select_pages
+        with self._shared.lock:
+            seen = dict(self._shared.signature_outcomes.get((route, signature), {}))
+        return values_select_pages(seen)
+
+    def _note_outcome(self, route: str, signature: str, occurrence: int,
+                      structure: str) -> bool:
+        """Record where an action of ``signature`` led (FR-CRAWL-676); True the first
+        time the group's outcomes differ (counted as a menu)."""
+        from fuzzlab.core.pathtemplate import values_select_pages
+        with self._shared.lock:
+            seen = self._shared.signature_outcomes.setdefault((route, signature), {})
+            was = values_select_pages(seen)
+            seen[occurrence] = structure
+            if not was and values_select_pages(seen):
+                self.report.menu_signatures += 1
+                return True
+        return False
+
+    def _menu_steps(self, page, state: State, els: list[dict], route: str,
+                    signature: str) -> list[tuple[dict, Step]]:
+        """The steps of a group just shown to be a menu (FR-CRAWL-676) that the state's
+        plan left out (its occurrences past `max_same_signature`), registered as open
+        work as `_pending` registers its own."""
+        out = []
+        for el in els:
+            if el.get("signature") != signature or \
+                    el.get("occurrence", 0) < self.opts.max_same_signature:
+                continue
+            out += [(el, step) for step in self._steps_for(page, el, route)]
+        with self._shared.lock:
+            out = [(el, st) for el, st in out
+                   if self._shared.work.open(work_key(state.fp, st))]
+            for _el, st in out:
+                self._shared.work.add(work_key(state.fp, st))
+        return out
+
     def _steps_for(self, page, el: dict, route: str) -> list[Step]:
         occ = el["occurrence"]
-        if occ >= self.opts.max_same_signature:
+        if occ >= self.opts.max_menu_signature or (
+                occ >= self.opts.max_same_signature
+                and not self._menu_group(route, el["signature"])):
             self._bump("same_signature_capped")     # reported, never silent
             return []                     # a long list of one shape: its first few only
         if enter_submits(el):
@@ -2651,6 +2704,10 @@ class Explorer:
                     self._log_action(self._action_seq, state, el, step, None)
                 continue
             self._finish(key, SUCCEEDED)
+            if after.key != now.key and self._note_outcome(   # FR-CRAWL-676
+                    route, el_desc["signature"], step.occurrence, after.structure):
+                pending.extend(self._menu_steps(page, state, got.els, route,
+                                                el_desc["signature"]))
             self._observe(route, step, sent, now, after)
             self._gather(page)
             self._log_action(self._action_seq, state, el, step, after.key, url=page.url)

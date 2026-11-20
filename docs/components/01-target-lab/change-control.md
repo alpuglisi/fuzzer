@@ -3,6 +3,72 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0411 — Crawl coverage measured: Mutillidae and gossip-world before/after; every crawl false positive adjudicated (2026-11-20)
+- Placement: lane CRAWLCOV (item CRAWLCOV-MEAS2); measurement only.
+- Commands (each in a detached worktree, the lab reset before the crawl and each auto):
+  `crawl --start http://127.0.0.1:3093/ --identity mutillidae-user --max-depth 2
+  --workers 2 --db <db>`; `auto --base-url http://127.0.0.1:3093 --store <s> --spider-db
+  <db> --ground-truth lab/ground-truth-mutillidae --identity mutillidae-user --points crawl
+  [--browser] --oob --score --authorized`.
+- Mutillidae (39 cases, 28 positive), crawl tp/fp/fn/tn:
+  - f6b4790 (baseline): `--browser` 4/13/24/11 (121 pages failed after the spider
+    followed `toggle-enforce-ssl`);
+  - 94fac7f (lane CRAWLSAFE only): `--browser` 13/19/15/11; no browser 13/11/15/11;
+  - 32d2ccc (this lane): `--browser` 17/20/11/11 (1890 requests); no browser
+    17/11/11/11. The +4 (MUTL-0001/0003/0006/0010) are the user-info lookup forms
+    (CC-AUD-0692). Route shape: 3 routers found, `page=` values admitted 108 -> 120,
+    route-shape refusals 1149 -> 76 (CC-CRAWL-0672).
+  - Remaining misses: MUTL-0002/0007/0011 (password controls are never points, FR-FUZZ-44,
+    by design); 0028-0030 (user-poll: every test "unbound: its page sets a cookie this
+    session route cannot carry"); 0022 and 0032 (no xxe or path-traversal test reached a
+    crawl point); 0025 (ToolID: sqli confirmed, xss not); 0027 and 0033 (confirmed as
+    xss-dom only; without the browser unconfirmed -- see the oracle defect below).
+- Adjudication of every crawl false positive at 32d2ccc (20 with `--browser`, 11 without;
+  evidence per finding from the store, a hand reproduction, real Chromium and the lab's
+  PHP source with file:line, in the lane's measurement notes):
+  - (a) real, not in the key -- 11: styling-frame `page-to-frame`, password-generator
+    `username`, styling.php `page-title`, login.php `username` (sqli), add-to-your-blog
+    `blog_entry` (sqli; xss, in fact stored), source-viewer `phpfile`, test-connectivity
+    `ServerURL`, text-file-viewer `textfile`, set-background-color `background_color`,
+    content-security-policy `message` (borderline: the HTML injection is real, the page's
+    own CSP stops script execution in Chromium; `ReflectedXssStrategy` does not read CSP);
+  - (b) the same key case under another shape -- 9: eight `page` xss-dom on `/index.php`
+    and `/` = MUTL-0033, redirectandlog `forwardurl` xss-dom = MUTL-0027 (`DomXssStrategy`
+    labels any URL-placed execution `xss-dom`, server-reflected or not);
+  - (c) wrong detection -- 0.
+  - Found while adjudicating (an oracle defect outside this lane's files, flagged to the
+    orchestrator, not fixed here): `oracle/context.py::_raw_attr_quote` takes the last
+    `=` before the marker, so a marker inside a quoted value (`href="...&page=M"`,
+    `content="0;url=M"`) is judged unquoted and the breakout probe never leaves the value.
+- gossip-world (start `/gossip`): f6b4790 2/0/2/2 and 32d2ccc 2/0/2/2 (27 requests);
+  the root start still fails login (the session check fetches `/`, which redirects to
+  the login page) -- flagged, session manager.
+- Deliverables:
+  - [x] runs, adjudication, this record — done
+
+### CC-LAB-0413 — Crawl coverage baselines: VulnerableApp and Juice Shop at f6b4790 (2026-11-20)
+- Placement: lane CRAWLCOV (item CRAWLCOV-MEAS2); measurement only.
+- VulnerableApp (fixture from lane JAVA's branch in a scratch worktree, never
+  committed here; 105 cases, 63 positive): spider (`crawl --engine playwright
+  --max-depth 3 --workers 2`) then `auto --points crawl --browser --oob --score`: tp=0
+  fp=0 fn=63 tn=42 (609 requests); disco (`--workers 2 --deadline 300`) then auto: 0/0/63/42
+  (950 requests); ground truth: 26/0/37/42 (2414 requests; lane JAVA's detection changes
+  were not on f6b4790).
+  - Why: no query parameter is ever seen. The spider reaches every case URL bare (from
+    the sitemap) and the level forms are SPA templates loaded only by clicking href-less
+    menu `div`s; disco's 23 class menu entries share one element signature and the
+    same-signature cap (2) opened 3 classes (`same_signature_capped=254`) -> CC-CRAWL-0675.
+    Path templating also folds the class and the level segments (29 path parameters),
+    but without query points that changes no score.
+- Juice Shop (`juice-user`): spider (depth 2, workers 2, 2328 s, 148 pages) then auto:
+  tp=6 fp=0 fn=9 tn=3 (412 requests) -- a superset of the ground-truth run (5/0/10/3,
+  150 requests), JUICE-0001 found by the crawl only; JUICE-0005/0008 are detection misses
+  (points exist), the rest `[reach: none]`. Disco then auto: not scored -- killed at a
+  40-minute bound: the disco import keeps socket.io transport URLs (1147 of 1155
+  parameters on `/socket.io/`; the spider drops them), an open gap.
+- Deliverables:
+  - [x] runs, this record — done
+
 ### CC-LAB-0412 — A lab fixture names the crawl exclusions its state switches need (FR-LAB-410) (2026-11-20)
 - Placement: lane CRAWLCOV (item CRAWLCOV-EXCLUDE), base 94fac7f.
 - Change: `fuzzlab/lab_fixtures/external.py`: `LabMeta.crawl_exclude` (default empty),

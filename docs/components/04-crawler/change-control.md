@@ -3,6 +3,30 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0675 — The explorer opens a menu of one element shape past the same-signature cap (FR-CRAWL-676, SP-130) (2026-11-20)
+- Placement: lane CRAWLCOV (item CRAWLCOV-EXCLUDE's slot after it closed; part 1, SPA
+  request capture), base 94fac7f.
+- Change: `fuzzlab/disco/explore.py`: `_Shared.signature_outcomes` records, per (route,
+  element signature), the structural key of the state each performed action led to
+  (`_note_outcome`); `_menu_group` decides through SP-130's `values_select_pages`; once
+  two outcomes differ, the group's occurrences up to `ExploreOptions.max_menu_signature`
+  (32) are planned (`_steps_for`) and the current state's left-out ones are queued at
+  once (`_menu_steps`). A group whose outcomes share one structure (records of one
+  template) stays at `max_same_signature` (2). `ExploreReport.menu_signatures` counts the
+  groups lifted.
+- Measured (CC-LAB-0413): VulnerableApp's 23 vulnerability-class menu entries are
+  href-less `div`s of one signature; the cap opened 3 (`same_signature_capped=254`), so no
+  SQLi/XSS/command/path/redirect/SSRF/XXE level UI was rendered and the crawl found 0 of
+  63. The decision reads the target's own outcomes (no lab name); the confusable
+  alternative (a list of records) is pinned in real Chromium.
+- Impact (other components / project): more actions on menus; bounded by
+  `max_menu_signature`, `max_actions` and the deadline.
+- Risk (level; mitigation or accepted-risk justification): low-medium (more clicks;
+  every element refusal still applies to each).
+- Deliverables:
+  - [x] explorer, `tests/test_disco_menu_signatures.py` — done
+  - [x] FR-CRAWL-676, SP-130 row (reader added), CHANGELOG — done
+
 ### CC-CRAWL-0674 — Operator URL exclusions honoured by both crawlers (`--exclude`, `--exclude-lab`) (FR-CRAWL-675) (2026-11-20)
 - Placement: lane CRAWLCOV (item CRAWLCOV-EXCLUDE), base 94fac7f; lane CRAWLSAFE's open
   gap 1, handed to this lane by the orchestrator. `navguard.py` untouched.

@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-11-20 — oracle (attribute-quote misread; found by lane CRAWLCOV's adjudication, not fixed here)
+- **Symptom:** Mutillidae MUTL-0027 (`forwardurl` in a meta-refresh `content`) and MUTL-0033 (`page` in a quoted `href`) are confirmed only by the browser; without it the breakout probe never leaves the value.
+- **Root cause:** `fuzzlab/oracle/context.py::_raw_attr_quote` takes the last `=` before the marker, so a marker inside a quoted value (`href="...&page=M"`, `content="0;url=M"`) is judged unquoted and the probe is built without the quote (measured with `locate_reflection` on both shapes; CC-LAB-0411).
+- **Remediation:** none in lane CRAWLCOV (the oracle is outside its files): flagged to the orchestrator for a lane owning `oracle/context.py`, which owes the bug protocol.
+- **Status:** Open.
+
 ## 2026-11-20 — disco/forms (CC-CRAWL-0673 broke two disco tests; lane CRAWLCOV)
 - **Symptom:** `verify_change.py --base 94fac7f` on 32d2ccc: 6023 passed, 2 failed -- disco imported `tools.formnav` (D70 guard) and the e2e toolbar's `Theme` button was no longer acted on.
 - **Root cause:** CC-CRAWL-0673 imported SP-120 from its legacy-crawler owner and judged the submitter's label too, so a search box sharing a container with a `Theme` button was refused; I had run only its unit tests, not disco's guards and e2e, before pushing.
