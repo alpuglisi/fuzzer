@@ -3,6 +3,24 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0720 — The GraphQL-context guard tells a GraphQL request by its body, not by its lab (BUG-0720, PA-0720) (2026-11-20)
+- Change: `tests/test_graphql_args.py`: `is_graphql_request` (a point's `json_body.query`
+  parses as an executable GraphQL document, by `tools.apiop.graphql_variable_types`, the
+  auditor's own reader, SP-80); `test_no_other_labs_ground_truth_point_has_a_graphql_context`
+  skips such points for every lab instead of excepting `ground-truth-dvga`;
+  `test_the_graphql_request_test_is_a_property_of_the_body` pins the predicate. No product
+  code changed (`fuzzlab/audit/graphql_context.py` is untouched).
+- Reason: the held-out lab DVWS-node (CC-LAB-0422) has GraphQL negatives; the guard named
+  the one lab allowed GraphQL points and failed on a correct key (BUG-0720). A held-out lab
+  may not be named in this file (lab/HOLDOUT.md rule 4), so excepting it by name was not
+  open either.
+- Impact: the guard checks every non-GraphQL point of every key (DVGA's GraphQL points are
+  still skipped, now by their body); its point count stays above 50.
+- Risk: low (test only).
+- Deliverables:
+  - [x] guard, predicate pin, BUG-0720 / PA-0720 / ERROR_LOG — done
+- Effectiveness (assessed 2026-11-20): passes on the merged tree with two GraphQL labs'
+  worth of keys; PA-0720's AST guard flags the e14c925 version of this test (line 194).
 ### CC-AUD-0703 — `R-SSJS` fires only on the target's evidence that it runs JavaScript (FR-AUD-706) (2026-11-20)
 - Placement: lane RULESEL (item RULESEL2), pre-assigned CC-AUD-0700..0709.
 - Change: `audit/rules.py` (`server_language_in`, `matches(rule, point, target)`), `audit/engine.py` (`evaluate(..., target=)`), `default_rules.json` (`R-SSJS` requires `server_language_in: ["javascript"]`); the fact comes from `core.fingerprint.server_language` (CC-CORE-0671) through the pipeline (CC-FUZZ-0700).

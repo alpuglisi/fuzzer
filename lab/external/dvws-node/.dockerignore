@@ -1,0 +1,2 @@
+# the build reads only .cache/app (the pinned checkout with its git directory stays out)
+.cache/src

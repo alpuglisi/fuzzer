@@ -172,6 +172,241 @@ Component code: **LAB**. Entry format and required fields: see
 - Effectiveness (assessed 2026-11-20): effective for the two fixed labs (copy-n-paste
   tp 0→2, mongection tp 0→2, fp 0, from a fresh `up`); the guard passes on the record and
   fails on BUG-0640's shape.
+### CC-LAB-0428 — At the merge of the integration tip (94fac7f): PA-0660's guard reads the held-out names, and `user_id` is cited (2026-11-20)
+- Change: `tests/test_blackbox_detection.py`: `lab_tokens` adds every name `lab/HOLDOUT.md`
+  lists (through `fuzzlab.lab_fixtures.heldout`, SP-140), so the bare product word of a
+  held-out lab whose answer key never spells it as a token (`dvws`) is lab-only vocabulary
+  too, without that file naming a held-out lab (rule 4);
+  `test_the_held_out_labs_names_are_lab_identifiers` pins it. `CITED` gains `user_id`
+  (WordPress core schema `wp_usermeta.user_id`; OWASP API Security Top 10 2023 API1 /
+  API3).
+- Reason: the orchestrator's integration tip brought PA-0660's guard (lane BBOX). With the
+  held-out keys feeding it, RailsGoat's key made `user_id` lab vocabulary, and
+  `fuzzlab/tools/fetcher.py:89` (`PRIVILEGED_FIELDS`, a generic mass-assignment hint list
+  since 87c140c, 2026-10-20, before any held-out lab) names it. Removing it would change
+  detection, which this lane does not do; the word is generic, so it is cited with an
+  independent source, the guard's documented path. This closes CC-LAB-0420's open
+  deliverable (the product names), in this form instead of editing `LAB_PRODUCT_NAMES`.
+- Impact: none on detection; the guard's lab vocabulary grows by the held-out names.
+- Risk: low.
+- Deliverables:
+  - [x] guard reads the list, citation, pin — done
+- Effectiveness (assessed 2026-11-20): the harness with `--base 94fac7f` on the merge
+  (see the CHANGELOG line of this merge).
+
+### CC-LAB-0427 — The VAmPI and DVWS-node bootstraps check a differential, not a classified 401 (BUG-0721) (2026-11-20)
+- Change: `fuzzlab/lab_fixtures/external.py` (`bootstrap_vampi`, `bootstrap_dvws_node`): the
+  login is verified when the request answers 200 with the token and a client error (4xx)
+  without it, instead of exactly 401; `tests/test_holdout_benchmark.py`: the DVWS
+  differential test covers anonymous 200, 302 and 500.
+- Reason: BUG-0721 — a literal 401 outside `core.comparability` fails FR-CORE-507's guard,
+  and an allowance row would name held-out labs in that test file (lab/HOLDOUT.md rule 4).
+- Impact: none on the labs (both answer 401 anonymously, a 4xx); the baseline
+  (CC-LAB-0426, at 2ab5955) is unaffected: only the bootstrap's acceptance test changed,
+  and both labs bootstrapped there.
+- Risk: low.
+- Deliverables:
+  - [x] fix, tests, BUG-0721 / PA-0721 / ERROR_LOG — done
+- Effectiveness (assessed 2026-11-20): `scripts/verify_change.py --base e14c925` on the
+  lane's tip (CHANGELOG commit after f23bc81): 93 files, 4252 passed, 0 failed, 8 skipped
+  (seven live-lab tests gated by FUZZLAB_LIVE_EXTERNAL_LABS, as at the base; one RailsGoat
+  lock check needing the pinned checkout cache, which passes in the main tree where the
+  cache exists), 29 xfailed.
+
+### CC-LAB-0426 — The held-out baseline at e14c925's detection code (holdout-scores.json) (2026-11-20)
+- Change: new `docs/components/01-target-lab/holdout-scores.json` and `.md`, written by
+  `scripts/holdout_score.py --authorized` (CC-LAB-0424) at fuzzlab commit 2ab5955, whose
+  detection code is identical to e14c925 (the table checks it: `detection_identical: true`).
+- Results (crawl runs only; requests = auto's sends + crawl-recorded + disco exchanges):
+  - vampi: tp 0, fp 0, fn 4, tn 5; 8 requests, 13 s. fuzzlab's login failed (a JSON API
+    with no form: `SessionAuthError`), so the crawl ran anonymously; the app's root is JSON
+    with no links and its OpenAPI document is not linked, so discovery found no endpoint
+    and auto audited no point. Every fn: "no candidate".
+  - dvws-node: tp 0, fp 0, fn 21, tn 11; 139 requests, 59 s. The browser login could not be
+    verified (an SPA keeping its JWT in localStorage: "no request the app made after the
+    login click answers differently without the credential", FR-SESS-5), so crawl and auto
+    ran anonymously: one parameter discovered (the login's), 20 fns "no candidate", one
+    "no candidate for the class" (the login's NoSQL injection).
+  - railsgoat: tp 1 (RGOAT-0013, reflected XSS), fp 3, fn 12, tn 13; 792 requests, 539 s;
+    logged in as its identity throughout. Ten fns had no candidate (the jQuery-sent
+    `_method=patch` updates, signup, upload, forgot-password, DOM fragment, the id-in-path
+    access-control pages), one had no candidate for its class (path traversal on
+    `/download`), and one candidate was not checked (open redirect on `/sessions`,
+    inconclusive). False alarms: access control on `/users/{id}/messages`,
+    `/users/{id}/messages/4` and `/users/{id}/pay` — **not adjudicated** (a real flaw the key
+    lacks, or a false positive): re-examining the key after seeing a benchmark result would
+    tune the measure, so it is left to the owner (lab/HOLDOUT.md rule 3).
+- Reproducibility: the same command run twice (f8c0169's script with only the request
+  count fixed, then 2ab5955): identical tp / fp / fn / tn and identical fn and fp lists on
+  every lab.
+- Recorded, not fixed (lab/HOLDOUT.md rule 3; for the owner): fuzzlab cannot log into a
+  JSON-API login or verify an SPA's localStorage bearer session; the crawler does not read
+  an unlinked OpenAPI document; jQuery-sent forms and multipart uploads were not
+  discovered as points; `GET /createdb`-style destructive GETs are not refused by name.
+- Risk: none (a measurement).
+- Deliverables:
+  - [x] baseline table, this record — done
+- Effectiveness (assessed 2026-11-20): the table is the benchmark's first point; later
+  detection changes are compared with it by re-running the script.
+
+### CC-LAB-0425 — Seeded-account labs read their published passwords into the keyring (FR-LAB-425) (2026-11-20)
+- Change: `fuzzlab/lab_fixtures/external.py`: `railsgoat_published_credentials` (the app's
+  own `/tutorials/credentials` table), `_PUBLISHED_CREDENTIALS`, `seed_published_credentials`
+  (stores, for each account the keyring lacks, the password the running lab publishes for
+  its default username; refuses a lab that publishes none or an account it does not list)
+  and the CLI `seed-credentials <lab> --authorized`; tests in
+  `tests/test_holdout_benchmark.py` (railsgoat section) against a fake page and keyring.
+- Reason: RailsGoat's accounts are its own seed (`may_generate_password=False`, as
+  NodeGoat's); the benchmark runs each lab with a fresh private keyring and no TTY, so the
+  bootstrap could neither find nor prompt for the password. NodeGoat's live test stores its
+  seed password from test code, which a held-out lab may not do (lab/HOLDOUT.md rule 4).
+- Impact: the benchmark resets the lab without traffic, seeds, then bootstraps. No
+  password is committed; the app publishes them.
+- Risk: low. Checked live 2026-11-20: seeding stored both accounts, a second run stored
+  none, and `labctl.sh bootstrap railsgoat --authorized` then logged both in from the
+  keyring.
+- Deliverables:
+  - [x] hook, CLI, tests, benchmark wiring — done
+- Effectiveness (assessed 2026-11-20): the baseline run (CC-LAB-0426) bootstrapped
+  RailsGoat unattended.
+
+### CC-LAB-0424 — `scripts/holdout_score.py`, the held-out benchmark (FR-LAB-424) (2026-11-20)
+- Change: new `scripts/holdout_score.py`; offline tests in `tests/test_holdout_benchmark.py`
+  (reach tag, pipeline progress, the row and markdown, refusals, a faked run using crawl
+  points only, the anonymous fallback).
+- What it does, per held-out lab (or `--lab`): `labctl.sh reset` (no traffic), the
+  published-credential seeding where a lab has one (CC-LAB-0425), `labctl.sh bootstrap
+  --authorized` into a keyring private to the run, `labctl.sh status`; discovery only:
+  `fuzzlab crawl --engine playwright` from the app's start page as the lab's identity
+  (anonymously if that login fails, recorded) and `fuzzlab disco capture` (anonymous);
+  `fuzzlab auto --points crawl --score --browser --oob --authorized` over both, with the
+  answer key for scoring only (`--ground-truth`) and the identity / peer identity (the run
+  repeated anonymously if the logged-in run fails, recorded); then `labctl.sh down`. The
+  confusion matrix is the run's own findings against the key; each fn carries its point,
+  class, reach tag and how far the pipeline got (no candidate / no candidate for the class /
+  candidate not checked / checked, not confirmed). Requests = probe requests
+  (`request_budget.used`) + pages / requests the crawl recorded + disco exchanges.
+  The table records the fuzzlab commit and whether detection code equals
+  `--detection-base` (default e14c925).
+- Reason: lab/HOLDOUT.md rule 2 — the only way a held-out lab is run; never a
+  ground-truth-point run; the same crawl configuration for every lab, derived only from
+  `LabMeta` (start page, identities, fixed second origins), nothing tuned per lab.
+- Decisions: `--score` is passed as the lane brief names it (it trains the advisory
+  classifier, never labels; the TP/FP matrix comes from `--ground-truth`); both discovery
+  tools run, since `crawl` is deprecated but carries the identity and `disco` is anonymous
+  only (it takes a storage-state file, which nothing in the run produces).
+- Risk: sends traffic to loopback labs only, only with `--authorized`.
+- Deliverables:
+  - [x] script, tests — done
+- Effectiveness (assessed 2026-11-20): produced the baseline (CC-LAB-0426).
+
+### CC-LAB-0423 — RailsGoat, a held-out Ruby on Rails lab (FR-LAB-423) (2026-11-20)
+- Change: `lab/external/railsgoat/` (compose, Dockerfile), `lab/ground-truth-railsgoat/`,
+  `fuzzlab/lab_fixtures/external.py` (`RAILSGOAT_*` pins, `gemfile_lock_checksums`,
+  `fetch_rubygems`, `fetch_railsgoat`, `bootstrap_railsgoat`,
+  `railsgoat_account_attributes`, `LAB_META["railsgoat"]`), `.gitignore`, fixture tests in
+  `tests/test_holdout_benchmark.py`. Built by a subagent (worktree, commit b33eac7),
+  reviewed and merged by the orchestrator (2c1694f; two shared tail lines of the
+  external.py merge restored by hand, F-722).
+- Pins: OWASP/railsgoat at f5951f13 (upstream HEAD 2026-11-20), tracked files sha256
+  fe89ec5d…; base `ruby:3.4.1` by digest (its `.ruby-version`); every gem downloaded on the
+  host and checked against the Gemfile.lock's own CHECKSUMS sha256 (171 for x86_64 glibc;
+  bundler 4.0.4 by rubygems.org's published sha256); the image installs offline
+  (`build.network: none`). Development mode, as upstream runs it (production needs
+  `uglifier`, absent from its Gemfile); sqlite on tmpfs, `db:setup` at every start.
+- Safety: 127.0.0.1:3103 (`RAILSGOAT_PORT`), own bridge, every capability dropped,
+  no-new-privileges, read-only root, uid 10001.
+- Accounts: upstream's seed `ken@metacorp.com` (`railsgoat-user`, user 6) and
+  `mike@metacorp.com` (`railsgoat-peer`, user 5); login `POST /sessions` (CSRF not
+  enforced upstream); `user_id` stored as an account value.
+- Answer key: 26 cases (13 positives: SQLi 2, stored XSS 2, mass assignment 2, access
+  control 2, command injection, path traversal, reflected XSS, DOM XSS, open redirect; 13
+  negatives), each checked live by the subagent (`[prov: ...]` names the source and the
+  check). Dropped: `Marshal.load` on `/password_resets` (a destructive word, and a success
+  rewrites a password); a pay negative refused as a transaction URL.
+- Risk: low. Orchestrator re-check: the lab built, came up loopback-only, and the
+  bootstrap logged both accounts in.
+- Deliverables:
+  - [x] fixture, key, tests — done
+- Effectiveness (assessed 2026-11-20): runs in the baseline (CC-LAB-0426).
+
+### CC-LAB-0422 — DVWS-node, a held-out Node REST / SOAP / GraphQL lab (FR-LAB-422) (2026-11-20)
+- Change: `lab/external/dvws-node/` (compose, Dockerfile, .dockerignore),
+  `lab/ground-truth-dvws-node/`, `fuzzlab/lab_fixtures/external.py` (`DVWS_NODE_*` pins,
+  `fetch_dvws_node`, `bootstrap_dvws_node`, `dvws_node_account_attributes`,
+  `LAB_META["dvws-node"]`), `.gitignore`, fixture tests in `tests/test_holdout_benchmark.py`.
+  Built by a subagent (commit d41ba3a), reviewed and merged by the orchestrator (6dfb4e0).
+- Pins: snoopysecurity/dvws-node at 4221c04f (HEAD 2026-11-20), tracked files sha256
+  64de72b1…; npm packages from both lockfiles by `npm ci --ignore-scripts` on the host;
+  base `node:22-bookworm` by digest (upstream: unpinned); MongoDB and MySQL reuse the
+  already-pinned `SECDEVLABS_MONGO_IMAGE` / `MYSQL_IMAGE`; the build runs with no network
+  (bcrypt compiled from source).
+- Safety: everything on 127.0.0.1:3102 (`DVWS_PORT`; no fixed ports: the frontend calls its
+  own origin), databases on an internal network on tmpfs, capabilities dropped (databases
+  get back CHOWN/SETUID/SETGID/DAC_OVERRIDE), outside DNS off in the web container.
+- Accounts: our own `dvws-user` / `dvws-peer`, registered by the bootstrap (upstream's seed
+  drops every account at each start), JSON login `POST /api/v2/login` → Bearer JWT;
+  `note_id` stored as an account value.
+- Answer key: 32 cases (21 positives over 16 classes incl. XXE over SOAP, xpath, LDAP,
+  SSTI, deserialization, SSRF over XML-RPC, `$where` as ssjs; 11 negatives incl. three
+  GraphQL), each checked live by the subagent; uncoverable points (WebSocket, multipart
+  YAML/upload, JWT kid/jku) listed in its report, not in the key. Upstream's CHALLENGES.md
+  `alg:none` item measured not to work at this commit (jsonwebtoken 9).
+- Found: BUG-0720 (a test guard, CC-AUD-0720).
+- Risk: low. Orchestrator re-check: built, loopback-only, both accounts bootstrapped, SSTI
+  `Hello 1337` reproduced.
+- Deliverables:
+  - [x] fixture, key, tests — done
+- Effectiveness (assessed 2026-11-20): runs in the baseline (CC-LAB-0426).
+
+### CC-LAB-0421 — VAmPI, a held-out Flask REST API lab (FR-LAB-421) (2026-11-20)
+- Change: `lab/external/vampi/compose.yaml`, `lab/ground-truth-vampi/`,
+  `fuzzlab/lab_fixtures/external.py` (`VAMPI_IMAGE`, `VAMPI_COMMIT`, `bootstrap_vampi`,
+  `vampi_account_attributes`, `LAB_META["vampi"]`), `.gitignore`, fixture tests in
+  `tests/test_holdout_benchmark.py`. Built by a subagent (commit c56e73b), reviewed and
+  merged by the orchestrator (da3ea85).
+- Pin: `erev0s/vampi` by digest 0a5a224b…, its `/vampi` tree byte-identical to upstream
+  f16052dc (the image was built 39 s after that commit); `vulnerable=1`,
+  `tokentimetolive=3600` (upstream's compose value).
+- Safety: 127.0.0.1:3101 (`VAMPI_PORT`), own bridge, read-only root, SQLite on tmpfs,
+  every capability dropped.
+- Accounts: our own `vampi-user` / `vampi-peer`; the bootstrap calls `/createdb` only on an
+  empty database (it drops every table), registers, verifies `/me` 200 / 401, gives each
+  account a book; `book_title` and `username` stored as account values.
+- Answer key: 9 cases (SQLi on `/users/v1/{username}`, BOLA on books, an unauthorized
+  password change, mass assignment of `admin` at registration; 5 negatives), each checked
+  live by the subagent; JWT weak key, enumeration, ReDoS, data exposure not scoreable.
+- Risk: low. Hazards for any crawl, recorded: `GET /createdb` drops the tables (no
+  destructive rule flags it), `/users/v1/_debug` lists every password.
+- Deliverables:
+  - [x] fixture, key, tests — done
+- Effectiveness (assessed 2026-11-20): orchestrator re-check live (loopback status 0; SQLi
+  boolean 200 / 404; BOLA anonymous 401); runs in the baseline (CC-LAB-0426).
+
+### CC-LAB-0420 — Held-out labs: the list, the rule and its guard; answer keys discovered from the layout (FR-LAB-420) (2026-11-20)
+- Change: new `lab/HOLDOUT.md` (the rule and the table of held-out labs);
+  `fuzzlab/lab_fixtures/heldout.py` (reads the table, fails closed; SP-140);
+  `tests/test_holdout_benchmark.py` (the one test file allowed to name a held-out lab:
+  `test_no_other_test_file_names_a_held_out_lab` over every text file under `tests/`, a
+  synthetic offender, malformed tables, each listed lab's fixture and key;
+  PA-0720's answer-key-loop guard); `tests/test_external_labs_static.py`: `GT_DIRS` is
+  discovered from `lab/ground-truth-<lab>/` beside `lab/external/<lab>/compose.yaml`
+  instead of a hand-written list.
+- Reason: owner directive — every lab so far also tuned detection, which flatters the
+  numbers; held-out labs, scored only by crawl runs, measure real-world detection. The
+  static tests must check held-out keys without naming them. PA-0660's black-box guard
+  (lane BLACKBOX, `tests/test_blackbox_detection.py`) reads `lab/ground-truth*/`, so it
+  sees the held-out keys' directory names, target ids (`erev0s_vampi_…`,
+  `dvws_node_…`, `owasp_railsgoat_…`), paths and parameters.
+- Impact: every structural answer-key test covers the held-out labs; nothing else names
+  them.
+- Risk: low.
+- Deliverables:
+  - [x] list, reader, guard, discovery — done
+  - [ ] at the BLACKBOX merge: add `vampi`, `dvws`, `railsgoat` to that guard's
+        `LAB_PRODUCT_NAMES` (the bare word `dvws` is not an answer-key token) — flagged
+- Effectiveness (assessed 2026-11-20): the guard passes on the tree and flags its
+  synthetic offender.
 
 ### CC-LAB-0353 — VulnerableApp moves to 127.0.0.1:3095; a static guard against shared lab ports (FR-LAB-352) (2026-11-20)
 - Change: `lab/external/vulnerableapp/compose.yaml` (`${VAPP_PORT:-3095}`),
