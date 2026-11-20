@@ -255,6 +255,23 @@ NODEGOAT_REPO = "https://github.com/OWASP/NodeGoat"
 NODEGOAT_COMMIT = "c5cb68a7084e4ae7dcc60e6a98768720a81841e8"
 NODEGOAT_TREE_SHA256 = "78ac112b7bd5083bb065086c4642dcd8a3932a8d3052f9405503124c90a70fe3"
 
+#: OWASP RailsGoat (MIT), held out (lab/HOLDOUT.md): a Ruby on Rails 8 app. Checked out at
+#: this commit on the host (tracked files hashing to RAILSGOAT_TREE_SHA256); every gem is
+#: downloaded on the host and checked against its Gemfile.lock CHECKSUMS sha256
+#: (`fetch_railsgoat_gems`), and the bundler the lock names against rubygems.org's
+#: published sha256; the image installs them with no network. The base is the Ruby its
+#: .ruby-version and upstream's Dockerfile name (`ruby:3.4.1`), pinned here.
+RAILSGOAT_REPO = "https://github.com/OWASP/railsgoat"
+RAILSGOAT_COMMIT = "f5951f13089d85c979de09e7da3c8c0fb982f94a"
+RAILSGOAT_TREE_SHA256 = "fe89ec5d5dfec1075ae8bf1e72815e3def44d3d488c845b9ec4af184e1590e03"
+RAILSGOAT_RUBY_IMAGE = ("mirror.gcr.io/library/ruby:3.4.1@sha256:"
+                        "f78dc1bba60f85d40d6dc6d6722ca2cda0b5273fc179119badd0f7654d5d1d6e")
+RAILSGOAT_BUNDLER_GEM = ("bundler-4.0.4.gem",
+                         "d0f94b7ba176666896318e419f9a0cc55b698874bffec64cc33537611c61bd16")
+#: the lock's platforms the image (x86_64 glibc) can install
+RAILSGOAT_GEM_PLATFORMS = frozenset({"ruby", "x86_64-linux", "x86_64-linux-gnu"})
+PINNED_IMAGES = PINNED_IMAGES | {RAILSGOAT_RUBY_IMAGE}
+
 
 class ExternalLabError(RuntimeError):
     """A fixture operation failed; the message never carries a secret."""
@@ -352,6 +369,12 @@ LAB_META: dict[str, LabMeta] = {
     "vulnerableapp": LabMeta("vulnerableapp", "app", "VAPP_PORT", 3095, 9090,
                              "/VulnerableApp/", "/VulnerableApp/allEndPointJson", None, "",
                              False),
+    # held out (lab/HOLDOUT.md): two of upstream's seeded accounts (db/seeds.rb, re-seeded
+    # at every start; the app's own /tutorials/credentials page publishes their
+    # passwords): `/users/:user_id/work_info` shows any caller the user_id in the path
+    "railsgoat": LabMeta("railsgoat", "web", "RAILSGOAT_PORT", 3103, 3000, "/", "/login",
+                         "railsgoat-user", "ken@metacorp.com", False,
+                         (("railsgoat-peer", "mike@metacorp.com"),)),
 }
 
 
@@ -734,6 +757,102 @@ def fetch_nodegoat(*, root: Path = EXTERNAL_DIR, repo: str = NODEGOAT_REPO,
         shutil.rmtree(dest)
     shutil.copytree(src, dest, symlinks=True, ignore=shutil.ignore_patterns(".git"))
     npm_install(dest, timeout=timeout, production=True)
+    return dest
+
+
+_LOCK_CHECKSUM = re.compile(r"^  (\S+) \(([^)\s]+)\)(?: sha256=([0-9a-f]{64}))?\s*$")
+
+
+def gemfile_lock_checksums(text: str, platforms: Iterable[str] = RAILSGOAT_GEM_PLATFORMS
+                           ) -> dict[str, str]:
+    """``{gem file name: sha256}`` from a Gemfile.lock's CHECKSUMS section, for the gems
+    of ``platforms``. Fails closed: no section, or a selected gem without a sha256."""
+    lines = text.splitlines()
+    if "CHECKSUMS" not in lines:
+        raise ExternalLabError("Gemfile.lock has no CHECKSUMS section")
+    platforms = set(platforms)
+    pins: dict[str, str] = {}
+    for line in lines[lines.index("CHECKSUMS") + 1:]:
+        if not line.strip():
+            break
+        m = _LOCK_CHECKSUM.match(line)
+        if m is None:
+            raise ExternalLabError(f"unreadable CHECKSUMS line: {line.strip()[:80]!r}")
+        name, version, digest = m.groups()
+        platform = version.split("-", 1)[1] if "-" in version else "ruby"
+        if platform not in platforms:
+            continue
+        if digest is None:
+            raise ExternalLabError(f"{name} ({version}) has no sha256 in the lock")
+        pins[f"{name}-{version}.gem"] = digest
+    if not pins:
+        raise ExternalLabError("Gemfile.lock's CHECKSUMS names no gem for this platform")
+    return pins
+
+
+def fetch_rubygems(pins: Mapping[str, str], dest: Path, *, timeout: float = 600.0,
+                   get=_pypi_get, prune: bool = True) -> Path:
+    """Download each pinned gem (``{file name: sha256}``) from rubygems.org into ``dest``
+    on the host, so an image installs them offline (``bundle install --local``). The
+    bytes must hash to the pin; a cached file is re-hashed, never trusted; a mismatch
+    leaves nothing behind and raises. ``prune`` removes any other ``.gem`` there."""
+    from concurrent.futures import ThreadPoolExecutor
+    dest.mkdir(parents=True, exist_ok=True)
+    if prune:
+        for stale in dest.glob("*.gem"):
+            if stale.name not in pins:
+                stale.unlink()
+
+    def one(name: str) -> None:
+        path = dest / name
+        if path.is_file() and _sha256_file(path)[0] == pins[name]:
+            return
+        path.unlink(missing_ok=True)
+        try:
+            data = get(f"https://rubygems.org/gems/{name}", timeout)
+        except (OSError, ValueError) as exc:
+            raise ExternalLabError(f"{name}: download failed ({type(exc).__name__})") from None
+        if hashlib.sha256(data).hexdigest() != pins[name]:
+            raise ExternalLabError(f"{name}: sha256 differs from the pin")
+        tmp = dest / (name + ".part")
+        tmp.write_bytes(data)
+        tmp.replace(path)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        for fut in [pool.submit(one, n) for n in sorted(pins)]:
+            fut.result()
+    return dest
+
+
+def railsgoat_checkout(root: Path = EXTERNAL_DIR) -> Path:
+    """The pinned RailsGoat checkout (gitignored)."""
+    return root / "railsgoat" / ".cache" / "src"
+
+
+def fetch_railsgoat(*, root: Path = EXTERNAL_DIR, repo: str = RAILSGOAT_REPO,
+                    commit: str = RAILSGOAT_COMMIT, tree: str = RAILSGOAT_TREE_SHA256,
+                    bundler: tuple[str, str] = RAILSGOAT_BUNDLER_GEM,
+                    timeout: float = 900.0, get=_pypi_get) -> Path:
+    """RailsGoat at ``commit`` (its tracked files hashing to ``tree``), copied into
+    ``railsgoat/.cache/app`` without its git directory, with every gem its lock pins for
+    this platform in ``vendor/cache`` (`fetch_rubygems`, against the lock's CHECKSUMS)
+    and the lock's bundler in ``.cache/bundler``. The image builds from there offline."""
+    import shutil
+    src = checkout_pinned(railsgoat_checkout(root), repo, commit, timeout=timeout,
+                          label="RailsGoat")
+    got = tree_sha256(src)
+    if got != tree:
+        raise ExternalLabError(f"RailsGoat checkout's files hash to {got}, not {tree}")
+    pins = gemfile_lock_checksums((src / "Gemfile.lock").read_text("utf-8"))
+    gems = root / "railsgoat" / ".cache" / "gems"
+    fetch_rubygems(pins, gems, timeout=timeout, get=get)
+    fetch_rubygems(dict([bundler]), root / "railsgoat" / ".cache" / "bundler",
+                   timeout=timeout, get=get)
+    dest = root / "railsgoat" / ".cache" / "app"
+    if dest.exists():
+        shutil.rmtree(dest)
+    shutil.copytree(src, dest, symlinks=True, ignore=shutil.ignore_patterns(".git"))
+    shutil.copytree(gems, dest / "vendor" / "cache")
     return dest
 
 
@@ -1597,6 +1716,49 @@ def nodegoat_account_attributes(client: _LabClient, cred: ResolvedCredential
     return {"user_id": ids.pop()}
 
 
+_RAILSGOAT_USER_LINK = re.compile(r'href="/users/(\d+)/')
+
+
+def _railsgoat_login(client: _LabClient, cred: ResolvedCredential) -> Any:
+    # upstream's ApplicationController has protect_from_forgery commented out: the
+    # form's authenticity_token is not needed
+    return client.request("POST", "/sessions",
+                          data={"email": cred.username, "password": cred.password})
+
+
+def bootstrap_railsgoat(client: _LabClient, cred: ResolvedCredential, *,
+                        deadline: float = 180.0, clock: Callable[[], float] = time.monotonic,
+                        sleep: Callable[[float], None] = time.sleep) -> list[str]:
+    """Log in through the app's own form (POST /sessions: email, password) and verify it
+    by a positive differential: the login redirects to ``/dashboard/home``, which answers
+    200 with the session cookie and redirects to the login page without it. The accounts
+    are upstream's seed (re-created at every start), never registered here."""
+    meta = LAB_META["railsgoat"]
+    wait_ready(client, meta.ready_path, deadline=deadline, clock=clock, sleep=sleep)
+    r = _railsgoat_login(client, cred)
+    if r.status_code != 302 or not r.headers.get("Location", "").endswith("/dashboard/home"):
+        raise ExternalLabError(
+            f"RailsGoat login of {cred.username!r} failed: HTTP {r.status_code} (the seeded "
+            f"accounts are re-created at every start with db/seeds.rb's passwords)")
+    authed = client.request("GET", "/dashboard/home")
+    anon = client.request("GET", "/dashboard/home", anonymous=True)
+    if authed.status_code != 200 or anon.status_code != 302:
+        raise ExternalLabError(f"RailsGoat /dashboard/home: {anon.status_code} anonymous, "
+                               f"{authed.status_code} logged in (want 302 / 200)")
+    return ["login verified"]
+
+
+def railsgoat_account_attributes(client: _LabClient, cred: ResolvedCredential
+                                 ) -> dict[str, str]:
+    """The account's ``user_id``: the one ``/users/<id>/`` its own dashboard links to."""
+    _railsgoat_login(client, cred)
+    ids = set(_RAILSGOAT_USER_LINK.findall(client.request("GET", "/dashboard/home").text
+                                           or ""))
+    if len(ids) != 1:
+        raise ExternalLabError("RailsGoat's dashboard names no single /users/<id>/ link")
+    return {"user_id": ids.pop()}
+
+
 _BOOTSTRAPS = {"bwapp": bootstrap_bwapp, "juice-shop": bootstrap_juice_shop,
                "mutillidae": bootstrap_mutillidae,
                "secdevlabs-gossip-world": bootstrap_secdevlabs_gossip_world,
@@ -1606,6 +1768,8 @@ _BOOTSTRAPS = {"bwapp": bootstrap_bwapp, "juice-shop": bootstrap_juice_shop,
 #: FR-LAB-309): read after the verified login, stored with the credential.
 _ACCOUNT_ATTRIBUTES = {"secdevlabs-ecommerce-api": ecommerce_account_attributes,
                        "nodegoat": nodegoat_account_attributes}
+_BOOTSTRAPS["railsgoat"] = bootstrap_railsgoat
+_ACCOUNT_ATTRIBUTES["railsgoat"] = railsgoat_account_attributes
 
 
 def bootstrap(name: str, *, environ: Mapping[str, str] | None = None,
@@ -1702,6 +1866,11 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"NodeGoat at {NODEGOAT_COMMIT[:12]} (files sha256 "
                       f"{NODEGOAT_TREE_SHA256[:12]}) and its verified packages: "
                       f"{fetch_nodegoat()}")
+                return 0
+            if meta.name == "railsgoat":
+                print(f"RailsGoat at {RAILSGOAT_COMMIT[:12]} (files sha256 "
+                      f"{RAILSGOAT_TREE_SHA256[:12]}) and its lock-verified gems: "
+                      f"{fetch_railsgoat()}")
                 return 0
             if meta.name == "security-crawl-maze":
                 print(f"crawl maze source at {CRAWL_MAZE_COMMIT[:12]}: {fetch_crawl_maze()}")
