@@ -18,6 +18,21 @@ Format per entry:
 
 ---
 
+## 2026-11-20 — Session manager: the browser login's account-form refusal was fitted to one lab (BUG-0730, PA-0730)
+- **Symptom:** `browserlogin.ACCOUNT_WORDS` / `ACCOUNT_PAIRS` held `repeat`, `retype` and
+  `security question/answer`, taken from one lab's registration / forgot / change-password
+  control names with no source; a single-password sign-up form (`autocomplete="new-password"`,
+  no account word) was accepted as the login form.
+- **Root cause:** word tables in detection and refusal gates were accepted without a
+  per-word independent source; the PA-0660 guard cannot see a lab-fitted word that is also
+  common vocabulary; the target's own WHATWG autofill declaration was never read.
+- **Remediation:** `repeat`/`retype` removed (the password count and
+  `credential_change_reason` decide every such case), `new_password_reason` reads the
+  `new-password` autofill token, every remaining word cited to two independent sources,
+  tests on Django / Devise / Laravel / ASP.NET / WordPress form shapes (CC-SESS-0660,
+  FR-SESS-660).
+- **Status:** Fixed.
+
 ## 2026-11-20 — Cloud container (JAVA lane): gitleaks and Python Playwright missing; five navigation tests fail on this container's Chromium at the base tree too (environment)
 - **Symptom:** `scripts/verify_change.py --base 2be7a50` on f78ae08: 16 failures. Eight
   `test_cli_check_passes_end_to_end*` (`secret scanner: 'gitleaks' executable not found`,
