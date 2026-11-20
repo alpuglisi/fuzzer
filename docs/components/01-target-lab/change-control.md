@@ -12,6 +12,165 @@ Component code: **LAB**. Entry format and required fields: see
 - Deliverables:
   - [x] key rows; `tests/test_external_labs_static.py` green — done
 - Effectiveness (assessed 2026-11-20): the RULESEL after crawl run rescores 43/0/13/3 (it was 42/1/13/3 on the 58-case key).
+### CC-LAB-0362 — VulnerableApp's scored ground-truth run, re-run by lane ACC for the record (FR-LAB-362) (2026-11-20)
+- Change: `docs/components/01-target-lab/external-lab-scores.json` gains `vulnerableapp`
+  (PA-0640's guard covers every lab with a key; lane JAVA's CC-LAB-0350 records counts,
+  not the matched ids, so the run was repeated rather than the ids guessed).
+- Run: `fuzzlab auto --base-url http://127.0.0.1:3095 --ground-truth
+  lab/ground-truth-vulnerableapp --points ground-truth --browser --oob --score
+  --authorized`, the container restarted first, on the merged tree 7c6f8ca: tp=37 fp=0
+  fn=26 tn=42, 2480 requests, 2069 s -- CC-LAB-0350's AFTER counts. The same matched set
+  on da1a5d6's merge (2492 requests, 2073 s) before BBOX's strategy changes. 94fac7f
+  (CRAWLSAFE) changes no VulnerableApp point's `destructive_reason` /
+  `transaction_reason` (84 points compared under both versions: 0 differences).
+- Record: 21 gt-tagged misses are `open:` [tracked: CC-LAB-0350] (its "Open" list names
+  the measured causes); 5 are tagged unreachable. Headline (crawl, CC-LAB-0350): tp=0.
+- Impact (other components / project): the record only.
+- Risk (level; mitigation or accepted-risk justification): low; loopback lab.
+- Deliverables:
+  - [x] run, record entry; the guard passes (21 with the black-box guard) — done
+- Effectiveness (assessed 2026-11-20): as above.
+
+### CC-LAB-0361 — The scored-run guard's review follow-ups; bWAPP re-scored crawl-first on the fixed listing phase (FR-LAB-363, BUG-0641) (2026-11-20)
+- Change: `tests/test_external_lab_scored_runs.py` (an `open:` reason names its tracking
+  record; matched ids are positives; tn/fp agree with the key's negatives; each check
+  proven on a synthetic offender); `docs/components/01-target-lab/external-lab-scores.json`
+  (every `open:` reason carries `[tracked: CC-LAB-0360]` or `[tracked: CC-LAB-0331]`;
+  bWAPP's entry is its run on 83e79c7); FR-LAB-361's citation names
+  `globocom/secDevLabs@10be438` and the upstream path.
+- Reason: the orchestrator's review of 2275dcb (BUG-0641's report): its follow-ups.
+- bWAPP runs on 83e79c7 (the BUG-0641 fix), lab up via `labctl.sh up bwapp --authorized`:
+  - crawl: `fuzzlab crawl --start http://127.0.0.1:8092/bWAPP/portal.php --engine playwright
+    --identity bwapp-bee --follow-selector-forms bug --no-reveal --db <spider.db>` (the
+    live test's crawl): 106 s, 13 endpoints, 71 parameters imported.
+  - crawl-fed: `FUZZLAB_BUDGET_TOTAL=20000 fuzzlab auto --base-url
+    http://127.0.0.1:8092/bWAPP/ --spider-db <spider.db> --ground-truth lab/ground-truth-bwapp
+    --points crawl --identity bwapp-bee --browser --authorized`: AFTER (83e79c7) tp=41 fp=0
+    fn=14 tn=3, 1516 requests, 705 s; BEFORE (2be7a50's tree, same spider DB): tp=41 fp=0 fn=14 tn=3, 1513 requests, 704 s -- the same misses; the listing phase cannot change a crawl pass (see Found), and 83e79c7 also carries lane NODE's merged code.
+    Without the live test's `--header-points User-Agent,Referer,bWAPP`: with them the
+    plan needs at least 9768 requests (148 pages x 3 headers), measured at about one
+    exchange a second, roughly 3 h per run; so the 8 header-located positives are missed
+    by construction here.
+  - ground truth (the runbook's command): tp=22 fp=0 fn=33 tn=3, 887 requests, 637 s
+    (BWAPP-0046 confirmed by the fixed listing phase; same as 684fab9).
+- Found (flagged, not built): neither traversal case can be reached by a crawl:
+  `R-PATH-TRAVERSAL` (default_rules.json) fires only on `sink_context_in: fs_path_read`, a
+  value only a ground-truth case supplies, so a crawled `directory`/`page` parameter gets
+  SQLi and XSS candidates only (BWAPP-0045/0046 are `[reach: gt]`, consistent). A
+  black-box selection (from the value's shape, `audit/value_shape.py`'s file and path
+  classes) is an AUD design item.
+- Impact (other components / project): tests and the record only.
+- Risk (level; mitigation or accepted-risk justification): low.
+- Deliverables:
+  - [x] guard checks with offenders; record updated; citation — done
+  - [x] bWAPP crawl-fed and ground-truth runs on the fixed tree — done
+- Merge of the integration tip f6b4790 (lanes PHPX and GQL): `mutillidae` and `dvga` join
+  the record so PA-0640's guard covers them, each with its lane's recorded ground-truth run,
+  not re-run here: Mutillidae CC-LAB-0343 (tp=24 fp=0 fn=4 tn=11, 482 requests, 28 s;
+  crawl tp=6 fp=0 fn=22 tn=11), DVGA CC-LAB-0321 (tp=5 fp=0 fn=5 tn=5, 345 requests, 46 s;
+  crawl tp=1 fp=0). DVGA's matched ids are inferred as the positives CC-LAB-0321 does not
+  name as misses, equal to `tests/test_dvga_live.py`'s floor. Their gt-tagged misses are
+  `open:` with the tracking entry named.
+- Effectiveness (assessed 2026-11-20): the guard passes on the record (16 tests with the two
+  merged labs) and fails on each offender.
+
+### CC-LAB-0360 — The 11 external labs re-measured with scored runs; two labs made measurable; the runs recorded (BUG-0640, FR-LAB-360..362) (2026-11-20)
+- Change: `fuzzlab/lab_fixtures/external.py` (`LAB_META` mongection: identity
+  `sdl-mongection-user`; `bootstrap_secdevlabs_mongection`, `_mongection_login`);
+  `lab/ground-truth-secdevlabs-copy-n-paste/injection-points.json` (`json_body` on each
+  point; no case changed); `docs/components/01-target-lab/external-lab-scores.json` (new:
+  each lab's latest scored ground-truth run); `tests/test_external_labs_static.py`
+  (mongection bootstrap, copy-n-paste points); `tests/test_external_lab_scored_runs.py`
+  (new, PA-0640's guard).
+- Reason: lane ACC (owner's goal: detection accuracy on the existing 11 external labs).
+  Each lab was brought up (`lab/labctl.sh up <lab> --authorized`, docker 29, this
+  container) and scored at 2be7a50 with its recorded command; seven secDevLabs apps had
+  never been scored (their entries record manual checks only).
+- Commands (from the repo root; each with `--store <fresh db>`; `G=lab/ground-truth-`):
+  - bwapp: `fuzzlab auto --base-url http://127.0.0.1:8092 --ground-truth ${G}bwapp
+    --points ground-truth --identity bwapp-bee --browser --authorized`
+  - juice-shop: `... --base-url http://127.0.0.1:3000 --ground-truth ${G}juice-shop
+    --points ground-truth --identity juice-user --browser --oob --authorized`
+  - copy-n-paste 3071, sstype 3073, vinijr-blog 3075, amarelo-designs 3076, mongection
+    3077, comment-killer 3074: `... --base-url http://127.0.0.1:<port> --ground-truth
+    ${G}secdevlabs-<app> --points ground-truth --browser --authorized`
+  - gossip-world: `... 3072 ... --identity sdl-gossip-user --peer-identity
+    sdl-gossip-peer --browser --authorized`
+  - streaming: `... 3078 ... --browser --fuzz-json-writes --authorized` (CC-LAB-0314)
+  - ecommerce-api: `... 3079 ... --identity sdl-ecommerce-user --peer-identity
+    sdl-ecommerce-peer --auth-origin http://localhost:10005 --authorized` (CC-LAB-0316)
+- Results, BEFORE (2be7a50) → AFTER (684fab9), tp/fp/fn/tn, requests, wall s:
+
+  | lab | BEFORE | req | wall | AFTER | req | wall | recorded before |
+  | --- | --- | --- | --- | --- | --- | --- | --- |
+  | bwapp | 21/0/34/3 | 885 | 642 | 22/0/33/3 | 887 | 636 | tp=20 fp=0 tn=3 (runbook) |
+  | juice-shop | 5/0/10/3 | 150 | 50 | 5/0/10/3 | 150 | 46 | 5/0/10/3, 150, 57 s (CC-LAB-0317) |
+  | copy-n-paste | 0/0/3/1 | 67 | 0.5 | 2/0/1/1 | 25 | 2.5 | none |
+  | gossip-world | 0/0/4/2 (login failed) | 0 | 0.7 | same | 0 | 0.6 | none |
+  | sstype | 1/0/1/2 | 22 | 30 | 1/0/1/2 | 22 | 29 | none |
+  | vinijr-blog | 0/0/3/2 | 4 | 0.3 | 0/0/3/2 | 4 | 0.3 | none |
+  | amarelo-designs | 0/0/1/2 | 1 | 0.4 | 0/0/1/2 | 1 | 0.4 | none |
+  | mongection | 0/0/2/2 | 12 | 0.5 | 2/0/0/2 | 48 | 0.6 | none |
+  | comment-killer | 0/0/1/1 | 2 | 30 | 0/0/1/1 | 2 | 30 | none |
+  | streaming | 2/0/0/2 | 3 | 3.1 | 2/0/0/2 | 3 | 2.7 | 2/0/0/2, 3 (CC-LAB-0314) |
+  | ecommerce-api | 1/0/0/1 | 3 | 4.5 | 1/0/0/1 | 3 | 4.5 | 1/0/0/1 (CC-LAB-0316) |
+
+  Totals: tp 30 → 35, fp 0 → 0. No regression against any recorded number (bWAPP's
+  extra tp over the runbook is BWAPP-0056). Every fn and its reason is in the record
+  file; the reachable-tagged ones still open are listed below.
+- Measured (2026-11-20), each cited in BUG-0640 or the open list: copy-n-paste answers
+  `400 "All fields are required"` to a body missing `pass`, MariaDB 1064 with both;
+  mongection's `{"$ne": null}` login answers `Bad Credentials` with no account and logs in
+  once one exists; gossip-world's `/` redirects to `/login` with a valid session
+  (upstream `routes.py:73-75`), `/gossip` answers 200 with it; sstype renders
+  `{{961*977}}` as `938897` in `<h3>` and echoes it raw in `<title>`; bWAPP's
+  `directory_traversal_2.php` lists `/etc` (CC-FUZZ-0640); bWAPP's `sqli_1.php` echoes
+  `<zqxb..>` in `mysql_error()` for `x' AND <zqxb..>`, not for `'<zqxb..>`.
+- Open (reachable-tagged misses, not built; flagged to the orchestrator):
+  - gossip-world SDLGW-0001/0002/0003/0006: the session manager verifies a login at the
+    base URL and the app's root always redirects to `/login`; a fix is a change to
+    SP-61's stable-protected-resource choice (lane rule: flag a shared primitive).
+  - sstype SDLSST-0001: SP-25's echo disqualifier refuses an evaluation whose literal is
+    echoed elsewhere than a form control: BUG-0133's class one location further (a
+    shared-primitive change; recommended: judge the product outside every literal
+    occurrence, the two-sample attribution unchanged).
+  - amarelo SDLAD-0001: no cookie placement in the probe sender (a ground-truth cookie
+    point is skipped, misnamed "client-only/DOM").
+  - vinijr SDLVJ-0001..0003: points carry no XML body shape; the XXE strategies wrap their
+    entity in `<title>` or the root (CC-LAB-0307).
+  - comment-killer SDLCK-0001: no `source_url` (answer-key decision).
+  - bWAPP BWAPP-0057/0058: the reflected-XSS confirmer would need a quote prefix carried
+    through every break-out.
+  - copy-n-paste SDLCNP-0004 and Juice JUICE-0008: unchanged (register-then-login flow;
+    CSP).
+- Not done in this lane: the crawl-fed passes (spider/disco) of CC-LAB-0317 and the bWAPP
+  crawl pass (30 crawl-only positives); the scored runs are the ground-truth passes.
+- Impact (other components / project): FUZZ (CC-FUZZ-0640, the strategy); the lab
+  fixtures and one answer-key point file; a new record file read by a static test.
+- Risk (level; mitigation or accepted-risk justification): low. Loopback only; the
+  mongection bootstrap writes one account to the lab's tmpfs database; no case verdict,
+  id or count changed (PA-0044: the points' count and keys unchanged).
+- Deliverables:
+  - [x] all 11 labs up and scored BEFORE and AFTER (live, docker) — done
+  - [x] copy-n-paste points, mongection identity and bootstrap — done
+  - [x] record file, PA-0640 guard (proven on BUG-0640's shape) — done
+  - [x] BUG-0640, PA-0640, ERROR_LOG, F-640, F-641, F-642, FR-LAB-360..362,
+    ARCHITECTURE, CHANGELOG — done
+  - [x] `scripts/verify_change.py --base 2be7a50` on 5e1e7d1 (the code and records; later
+    commits change only docs): 143 files, 5512 passed, 5 failed, 5 skipped, 148 xfailed.
+    The 5 failures are `tests/test_navigation_aborts.py` (an aborted navigation does not
+    raise: "DID NOT RAISE"); the same 5 (and 3 more, from a missing `mitmproxy`, F-642)
+    fail on 2be7a50 in a clean worktree in this container. This container runs Chrome for
+    Testing 153.0.8010.12 with Playwright 1.63; the probes were measured on Chromium
+    141.0.7390.37 (BUG-0559). Attributed to that browser drift, not reproduced on 141
+    here; reported to the orchestrator, not fixed in this lane (navguard is a hot file).
+- Merge with lane NODE (78a24f2): `nodegoat` joins the record so PA-0640's guard covers
+  it, with lane NODE's recorded AFTER ground-truth run (CC-LAB-0331: tp=12 fp=0 fn=5 tn=7,
+  244 requests, 121 s; its crawl pass tp=12 fp=0, 282 requests), not re-run in this lane;
+  NGOAT-0008 is `open:` (the M6 store step's session, CC-LAB-0331's flag).
+- Effectiveness (assessed 2026-11-20): effective for the two fixed labs (copy-n-paste
+  tp 0→2, mongection tp 0→2, fp 0, from a fresh `up`); the guard passes on the record and
+  fails on BUG-0640's shape.
 
 ### CC-LAB-0353 — VulnerableApp moves to 127.0.0.1:3095; a static guard against shared lab ports (FR-LAB-352) (2026-11-20)
 - Change: `lab/external/vulnerableapp/compose.yaml` (`${VAPP_PORT:-3095}`),

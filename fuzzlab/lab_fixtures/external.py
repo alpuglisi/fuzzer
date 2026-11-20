@@ -322,8 +322,11 @@ LAB_META: dict[str, LabMeta] = {
     "secdevlabs-streaming": LabMeta("secdevlabs-streaming", "frontend", "SDL_STREAMING_PORT",
                                     3078, 80, "/", "/", None, "", False,
                                     fixed_ports=((8080, 8080),)),
+    # one account: the flaw (`$ne` in both login fields) answers an account, so a fresh
+    # lab (its database on tmpfs) needs one to be measurable (BUG-0640, FR-LAB-360)
     "secdevlabs-mongection": LabMeta("secdevlabs-mongection", "server", "SDL_MONGECTION_PORT",
-                                     3077, 10001, "/", "/", None, "", False),
+                                     3077, 10001, "/", "/", "sdl-mongection-user",
+                                     "fuzzlab_user@fuzzlab.lab", True),
     "secdevlabs-amarelo-designs": LabMeta("secdevlabs-amarelo-designs", "app",
                                           "SDL_AMARELO_PORT", 3076, 5000, "/", "/", None,
                                           "", False),
@@ -1443,6 +1446,42 @@ def ecommerce_account_attributes(client: _LabClient, cred: ResolvedCredential
     return {"user_id": user_id}
 
 
+def _mongection_login(client: _LabClient, email: str, password: str) -> str:
+    return client.request("POST", "/login",
+                          json={"email": email, "password": password}).text or ""
+
+
+def bootstrap_secdevlabs_mongection(client: _LabClient, cred: ResolvedCredential, *,
+                                    deadline: float = 180.0,
+                                    clock: Callable[[], float] = time.monotonic,
+                                    sleep: Callable[[float], None] = time.sleep) -> list[str]:
+    """Register the account through the app's JSON ``/register`` when its JSON ``/login``
+    fails, and verify it by a positive differential: the password answers the welcome
+    page naming the account, a wrong one ``Bad Credentials``. A fresh lab has no
+    account, and its NoSQL injection (an operator in both login fields) answers one:
+    without it the ground truth's positives cannot be observed (BUG-0640)."""
+    meta = LAB_META["secdevlabs-mongection"]
+    wait_ready(client, meta.ready_path, deadline=deadline, clock=clock, sleep=sleep)
+    notes: list[str] = []
+    welcome = "Hello, Welcome Again!"
+    if welcome not in _mongection_login(client, cred.username, cred.password):
+        reg = client.request("POST", "/register", json={
+            "name": "fuzzlab", "email": cred.username, "password": cred.password})
+        if "Welcome to Mongection System" not in (reg.text or ""):
+            raise ExternalLabError(
+                f"mongection registration failed: HTTP {reg.status_code} "
+                f"{(reg.text or '')[:60]!r} (an account of that email with another "
+                f"password? run `./labctl.sh reset secdevlabs-mongection --authorized`)")
+        notes.append("account registered")
+    good = _mongection_login(client, cred.username, cred.password)
+    bad = _mongection_login(client, cred.username, cred.password + "-wrong")
+    if welcome not in good or cred.username not in good or "Bad Credentials" not in bad:
+        raise ExternalLabError("mongection login: the password does not answer the welcome "
+                               "page naming the account, or a wrong one is not refused")
+    notes.append("login verified")
+    return notes
+
+
 def _mutillidae_login(client: _LabClient, cred: ResolvedCredential) -> bool:
     """Mutillidae's own login form: a 302 to ``popUpNotificationCode=AU1`` is a
     success, a 200 a failure. The form page is read first: a login on a request with no
@@ -1601,6 +1640,7 @@ _BOOTSTRAPS = {"bwapp": bootstrap_bwapp, "juice-shop": bootstrap_juice_shop,
                "mutillidae": bootstrap_mutillidae,
                "secdevlabs-gossip-world": bootstrap_secdevlabs_gossip_world,
                "secdevlabs-ecommerce-api": bootstrap_secdevlabs_ecommerce_api,
+               "secdevlabs-mongection": bootstrap_secdevlabs_mongection,
                "nodegoat": bootstrap_nodegoat}
 #: Labs whose accounts have values of their own a ground truth names (`account_value`,
 #: FR-LAB-309): read after the verified login, stored with the credential.

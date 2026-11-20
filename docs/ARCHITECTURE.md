@@ -176,7 +176,7 @@ tracked in the requirements files, not here.
   (FR-LAB-306, CC-LAB-0303: copied from one pinned checkout, dependencies verified on
   the host, built offline; `secdevlabs-copy-n-paste` first; nine built as of
   2026-10-19, `secdevlabs-streaming` the first planted through a JSON PUT, FR-FUZZ-56;
-  `secdevlabs-ecommerce-api` the first with per-account values, FR-LAB-309). OWASP
+  `secdevlabs-ecommerce-api` the first with per-account values, FR-LAB-309; all eleven external labs re-measured with scored ground-truth runs on 2026-11-20, each lab's latest run recorded in `docs/components/01-target-lab/external-lab-scores.json` and checked against its reach tags, FR-LAB-362/PA-0640). OWASP
   NodeGoat (`nodegoat`, FR-LAB-330/331, CC-LAB-0330/0331) is the first source pinned by
   commit plus a sha256 over its tracked files (`tree_sha256`), with production-only npm
   packages; its answer key carries the first server-side JavaScript injection cases
