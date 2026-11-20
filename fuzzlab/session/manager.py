@@ -588,6 +588,37 @@ def _requests_fetch_factory() -> Callable[[], Fetcher]:
     return factory
 
 
+def _names_a_route(url: str) -> bool:
+    """Does ``url``'s query name a front controller's route (``page=``, ``action=``...)?"""
+    from urllib.parse import parse_qsl, urlsplit
+    return any(k.lower() in detect._ROUTE_PARAMS
+               for k, _v in parse_qsl(urlsplit(url).query, keep_blank_values=True))
+
+
+def _same_routed_page(url: str, known: str) -> bool:
+    """CC-SESS-0611: True unless ``known`` is a front controller's routed page (its last
+    path segment a router, its query naming a route: the shapes `detect` reads a
+    query-routed login with) and ``url`` names **another** route: it must then carry
+    every query pair of ``known`` (`detect._same_login_url`). Fail closed (BUG-0620,
+    CC-SESS-0612): a URL that names no route at all may be routed by what else its
+    request carries (a crawled point's sibling entries, a body), so it is the auth
+    endpoint. Every other endpoint is compared by its path alone, as before. Same path
+    is the caller's check."""
+    # Evidence for the router/route names read here (owner directive 2026-11-20, black
+    # box; the lists themselves are `session.detect`'s, BUG-0122, reviewed by lane BBOX):
+    # `route` -- OpenCart upload/system/library/url.php:93 (`index.php?route=` + route;
+    # its login route `account/login`) and phpMyAdmin src/Url.php:327; `r` -- the Yii 2
+    # routing guide (`/index.php?r=post%2Fview&id=100`). `page` is shown on Mutillidae
+    # only, `action`/`p`/`view` are uncited (CC-FUZZ-0622, CC-SESS-0611/0612).
+    from urllib.parse import urlsplit
+    parts = urlsplit(known)
+    segments = [s for s in parts.path.split("/") if s]
+    routed = bool(segments) and \
+        segments[-1].lower().rsplit(".", 1)[0] in detect._ROUTER_SEGMENTS and \
+        _names_a_route(known)
+    return not routed or not _names_a_route(url) or detect._same_login_url(url, known)
+
+
 class SessionManager:
     def __init__(self, credentials, scope_hosts: list[str] | None = None,
                  fetch_factory: Callable[[], Fetcher] | None = None,
@@ -1539,9 +1570,12 @@ class SessionManager:
     def is_auth_endpoint(self, url: str) -> bool:
         """Is ``url`` one of this manager's sessions' auth endpoints (login page, form
         action, logout)? Compared by canonical origin and path (`url_key`, FR-SESS-20):
-        ``/login`` on another port of the same host is another app's, not ours."""
+        ``/login`` on another port of the same host is another app's, not ours. A
+        front controller's endpoint (``/index.php?page=login.php``) is that routed page
+        only: the URL must carry every query pair of it (`_same_routed_page`,
+        CC-SESS-0611); otherwise every page of the app would count as its login."""
         key = url_key(url)
-        return any(url_key(known) == key
+        return any(url_key(known) == key and _same_routed_page(url, known)
                    for known in self._auth_endpoints.get(canonical_origin(url), set()))
 
     def auth_endpoints(self, host: str) -> set[str]:
@@ -2072,7 +2106,35 @@ class SessionManager:
             form = detect.find_login_form(resp.text, page)
             if form is not None:
                 return form, page, challenge, page_floor
+            if url == base_url:
+                # CC-SESS-0610: a query-routed login (`index.php?page=login.php`) is on
+                # none of the fixed paths: the base page's own links that name a login
+                # page are tried after them, each through `_navigate` like the rest
+                candidates.extend(self._linked_login_urls(resp.text, page, candidates))
         return None, base_url, challenge, floor
+
+    #: CC-SESS-0610: at most this many of the base page's login links are fetched.
+    MAX_LINKED_LOGIN_PAGES = 3
+
+    @classmethod
+    def _linked_login_urls(cls, html: str, page_url: str,
+                           known: list[str]) -> list[str]:
+        """The base page's links (SP-39, `linkextract.html_urls`) on its own origin
+        (SP-05) that name a login page (SP-16, `detect.looks_like_login_url`: anchored,
+        a front controller's routing parameter included), in page order, not already
+        a candidate, at most `MAX_LINKED_LOGIN_PAGES` (CC-SESS-0610)."""
+        from fuzzlab.core.linkextract import html_urls
+        origin = canonical_origin(page_url)
+        out: list[str] = []
+        for link in html_urls(html or "", page_url):
+            link = link.split("#", 1)[0]
+            if (origin is None or canonical_origin(link) != origin or link in known
+                    or link in out or not detect.looks_like_login_url(link)):
+                continue
+            out.append(link)
+            if len(out) >= cls.MAX_LINKED_LOGIN_PAGES:
+                break
+        return out
 
     def _navigate(self, fetcher: Fetcher, url: str, base_url: str, floor_https: bool,
                   headers: dict | None = None,

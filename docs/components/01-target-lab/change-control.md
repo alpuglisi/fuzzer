@@ -3,6 +3,194 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0343 — Mutillidae II measured: BASELINE and AFTER, gaps recorded (2026-11-20)
+- Change: none to code; the measurement record of lane PHPX (item PHPX).
+- Results (scored against `lab/ground-truth-mutillidae`, 39 cases, 28 positives, 11
+  negatives):
+  - BASELINE (`2be7a50` in a detached worktree; only the answer key and its two schema values added so it loads): `auto --points ground-truth --identity mutillidae-user --oob`: aborts at login (SessionAuthError: no login form found), 0 cases scored, 4.9 s; the same run anonymous: tp=5 fp=5 fn=23 tn=11, 355 requests, 7.4 s (the 5 fp are true findings recorded at `/index.php`, which no routed case matches); `crawl --engine playwright --max-depth 2 --workers 4` (anonymous, 25 s) then `auto --points crawl`: tp=4 fp=10 fn=24 tn=11, 1441 requests, 18.8 s.
+  - AFTER (this change): `auto --base-url http://127.0.0.1:3093 --ground-truth lab/ground-truth-mutillidae --points ground-truth --identity mutillidae-user --oob --authorized`: tp=24 fp=0 fn=4 tn=11, 482 requests, 28.2 s (MCC 0.79); `crawl --identity mutillidae-user --max-depth 2 --workers 4` (17 s) then `auto --points crawl --spider-db ...`: tp=6 fp=0 fn=22 tn=11, 968 requests, 9.6 s.
+  - Regression check of the shared code this lane touched (finding URL, auth-endpoint
+    gate, login discovery): Juice Shop (`auto --points ground-truth --identity juice-user
+    --oob`) at `2be7a50` and after: tp=3 fp=0 fn=12 tn=3, 148 requests, both.
+- Gaps (open, each verified by hand): MUTL-0022 XXE read in band (`file:///etc/passwd`
+  is expanded and echoed; `XxeInBandMarkerStrategy` needs the OOB canary, which the
+  container cannot reach on the host's loopback; no file-read XXE strategy);
+  MUTL-0025 reflected XSS inside a `<script>` string (needs a `</script>` breakout);
+  MUTL-0027 XSS in the meta-refresh `content` attribute; MUTL-0033 the `page` value in
+  `href`/`title` attributes. Not scoreable: OS command injection (dns-lookup.php,
+  echo.php) -- no command-injection value in the labels schema, and
+  `CommandInjectionStrategy.vuln_class` is hyphenated (PA-0047(2)); left for a separate
+  change. Not present: HTTP header injection (redirectandlog.php's `header()` is
+  commented out; PHP refuses CR/LF in headers). Level-5 negatives: not usable in the key
+  (the level is session state, not part of a request), measured directly instead: both
+  new strategies give no verdict at level 5 (CC-FUZZ-0620).
+- Crawl (flagged to the orchestrator, not fixed here): the spider loads Mutillidae's
+  state-changing GET links (`index.php?do=toggle-security`, `do=toggle-enforce-ssl`,
+  `do=toggle-hints`): `core.urls.destructive_reason` (SP-09) refuses `do=logout` but
+  not `toggle`; after `toggle-enforce-ssl` the app redirects the crawl's session to
+  https, which the session manager rightly refuses (FR-SESS-20), so 121 pages stay
+  unresolved and the frontier's route-shape budget refuses 66 more (`index.php?page=X`
+  is one shape, FR-CRAWL-35). Both bound the crawl pass's reach.
+- Deliverables:
+  - [x] runs, this record — done
+
+### CC-LAB-0342 — Mutillidae II answer key (FR-LAB-342) (2026-11-20)
+- Change: `lab/ground-truth-mutillidae/` (labels, points, expected results; 39 cases:
+  28 positives, 11 negatives; `[reach:]` / `[prov:]` tags); `.gitignore` negation
+  (PA-0038); the static tests' GT list.
+- Reason: lane PHPX: a broad regression target on a PHP front controller, and the first
+  ground truth for LDAP and XPath injection.
+- Detail: every case checked against the app's own source in the pinned image (page,
+  line) and live; negatives are other classes on the same points (an LDAP probe on the
+  SQL and XPath pages, SQL on the LDAP and XPath pages, ...), the shape that tests the
+  new strategies' false positives. A point's URL carries the form's submit field as a
+  query sibling (the pages read `$_REQUEST`); its case is scored at the page
+  (`harness.scoring.case_key`, CC-FUZZ-0622). Six cases were added after the crawl pass
+  found them, each verified by hand (MUTL-0034..0039). The documented XPath bypass
+  (`' or 1=1 or ''='`) selects nothing in this version: set-up-database.php rewrites
+  `data/accounts.xml` as `<Account>` elements while the page queries `//Employee`
+  (measured); a union still selects nodes, so the flaw stays a positive.
+- Risk: low. user-poll.php's probes insert vote rows (lab-only).
+- Deliverables:
+  - [x] key, `tests/test_external_labs_static.py` entry, `tests/test_ldap_xpath.py`
+    key checks — done
+
+### CC-LAB-0341 — Mutillidae bootstrap: database, directory, account (FR-LAB-341) (2026-11-20)
+- Change: `fuzzlab/lab_fixtures/external.py` (`fetch_mutillidae_ldif`,
+  `load_mutillidae_directory`, `bootstrap_mutillidae`, `LAB_META["mutillidae"]`, the CLI's
+  fetch and bootstrap steps).
+- Reason: the app needs its database built (`set-up-database.php`, after every start:
+  the database is on tmpfs), its directory loaded (upstream's README: `ldapadd -c` of its
+  LDIF), and an account (its LDAP, SQL, command and XXE pages need a login).
+- Detail (each measured live): the LDIF is fetched from the pinned
+  webpwnized/mutillidae-docker commit and verified by sha256 and size, then sent on
+  `ldapadd`'s stdin through `<engine> exec` of the project's directory container (found
+  by its exact project and service labels; exit 68 "already exists" kept, 255 "slapd not
+  up yet" retried); `set-up-database.php` is retried until it reports the connection
+  (the gated live test's first run met MariaDB still starting); the account is registered
+  through the app's form and verified by a positive differential (`user-info.php` 200
+  with the session, 302 without); last, the conference-room lookup must list room 1F104.
+  A login is kept only on a request that already had a session cookie: the form page is
+  read first.
+- Risk: low. The admin bind password is upstream's published default (in its images),
+  passed in `ldapadd`'s argv inside the lab container only.
+- Deliverables:
+  - [x] code; `tests/test_mutillidae_fixture.py`; `tests/test_mutillidae_live.py`
+    (gated; passed live: reset, bootstrap, scored run, 39.9 s) — done
+
+### CC-LAB-0340 — OWASP Mutillidae II as an external lab (FR-LAB-340) (2026-11-20)
+- Change: `lab/external/mutillidae/compose.yaml` (project `fuzzlab-mutillidae`);
+  `fuzzlab/lab_fixtures/external.py` (the three image pins in `PINNED_IMAGES`).
+- Reason: lane PHPX (item PHPX): a PHP / MariaDB / OpenLDAP app with LDAP and XPath
+  injection, which fuzzlab had no strategy for.
+- Detail: upstream's own images (`webpwnized/mutillidae:www`, `:database`, `:ldap`),
+  Mutillidae 2.12.8 on PHP 8.5.11, MariaDB 13.0.2, OpenLDAP 2.4.57, pinned by digest;
+  phpMyAdmin and phpLDAPadmin left out. The web tier publishes 127.0.0.1:3093 only
+  (`MUTILLIDAE_PORT`); the database and directory are unpublished on internal networks,
+  reached by the service names upstream's code uses. Capabilities dropped; the directory
+  needs `KILL` and `NET_BIND_SERVICE` (its start script signals slapd and binds 389;
+  measured: without them it exits).
+- Risk: medium (the app runs OS commands for its users); contained by loopback-only
+  publishing, internal back-end networks, dropped capabilities, `no-new-privileges`.
+  The web tier's bridge has egress (as Juice Shop's; NFR-LAB-safety "not yet enforced").
+- Deliverables:
+  - [x] fixture; exposure check passed live (`labctl.sh up|status`) — done
+
+### CC-LAB-0332 — Juice Shop's `$where` route confirmed by the server-side JavaScript strategy, without crashing it (2026-11-20)
+- Change: none to code; a measurement record for CC-LAB-0317's open item.
+- Results (a disposable instance: `FUZZLAB_EXT_PROJECT_SUFFIX=-ssjs JUICE_PORT=3300
+  ./labctl.sh up juice-shop`, torn down after):
+  - By hand: `/rest/products/<v>/reviews` with `98765` and `98765||Math.abs(-3)==4`
+    answered 30 bytes (no review), `98765||Math.abs(-3)==3` 5198 bytes (every review);
+    the quoted-family probes (`98765+'||Math.abs(-3)==3&&'+98765`, its `"` twin) and the
+    marker (`Math.abs(-4817)/1000`) answered 30 bytes: valid JavaScript there, no crash.
+  - `fuzzlab auto --base-url http://127.0.0.1:3300 --ground-truth <scratch key: the one
+    path point /rest/products/{id}/reviews, ssjs positive> --points ground-truth
+    --score --authorized`: tp=1 fp=0, `js-boolean-differential` family `js-unquoted`,
+    22 requests, 1 s.
+  - `fuzzlab auto ... --ground-truth lab/ground-truth-juice-shop --mode manual
+    --categories server-side-javascript-injection`: 8 points probed, 0 findings (no
+    false positive), 41 requests.
+  - The container's `RestartCount` stayed 0 through all three. The scratch key is not
+    committed (adding the route to Juice Shop's answer key is lane ACC's file).
+- Impact (other components / project): none; evidence for FR-FUZZ-611's non-destructive
+  claim.
+- Risk (level; mitigation or accepted-risk justification): none (a record).
+- Deliverables:
+  - [x] runs and this record — done
+- Effectiveness (assessed 2026-11-20): CC-LAB-0317's "a server-side JavaScript / `$where`
+  injection strategy" is closed for this route; SQLi probes of the same route still crash
+  Juice Shop (ERROR_LOG 2026-10-19), outside this change.
+
+### CC-LAB-0331 — The NodeGoat answer key, measured BASELINE and AFTER (FR-LAB-331) (2026-11-20)
+- Change: `lab/ground-truth-nodegoat/` (`labels.json`, `injection-points.json`,
+  `expectedresults.csv`; `.gitignore` tracks its CSV); `fuzzlab/labels/schemas/
+  labels.schema.json` (class `ssjs`). Every case checked against NodeGoat's source at
+  c5cb68a7 and measured live before it was written (the notes cite each measurement).
+  Six `/profile` reflected-XSS cases and the `website` negative were added after the first
+  crawl run found the six fields reflected raw (unlabelled, they scored as false
+  positives); checked by hand, then labelled.
+- Measurements (live, 2026-11-20):
+  - Commands (lab reset before each; scratch keyring `FUZZLAB_KEYRING_PATH`; identities
+    stored with upstream's published passwords): `fuzzlab auto --base-url
+    http://127.0.0.1:3091 --ground-truth lab/ground-truth-nodegoat --points ground-truth
+    --identity nodegoat-user --peer-identity nodegoat-peer --browser --score
+    --authorized`; the crawl pass: `fuzzlab crawl --start http://127.0.0.1:3091/dashboard
+    --engine playwright --identity nodegoat-user --max-depth 3 --workers 4` (13 pages,
+    5 s) then the same `auto` with `--spider-db <crawl.db> --points crawl`. BASELINE ran
+    the tree of 2be7a50 with only the labels-schema enum taking `ssjs` (data, so the key
+    loads); AFTER ran this change.
+  - Answer key: 24 cases, 17 positives, 7 negatives.
+  - BASELINE ground truth: tp=7 fp=0 fn=10 tn=7, 45 requests, 118 s. AFTER: tp=12 fp=0
+    fn=5 tn=7, 244 requests, 121 s (gains NGOAT-0001/0002/0003/0004/0014).
+  - BASELINE crawl: tp=8 fp=0 fn=9 tn=7, 51 requests, 89 s. AFTER: tp=12 fp=0 fn=5
+    tn=7, 282 requests, 94 s (gains NGOAT-0001..0004).
+  - NodeGoat survived every run (`RestartCount` 0, never restarted mid-run).
+  - Remaining false negatives: NGOAT-0005 (IDOR; `[reach: none]`: the page names the
+    account by first and last name, never the username `CrossAccountReplayStrategy`
+    reads); NGOAT-0008 (stored XSS through `/profile`: the M6 store step answered 302,
+    see Open); NGOAT-0009 (crawl only); NGOAT-0011, NGOAT-0016 (`[reach: none]`).
+- Impact (other components / project): FUZZ (the classes scored here); the static
+  ground-truth tests now include `nodegoat`.
+- Risk (level; mitigation or accepted-risk justification): low; data only.
+- Open (not built, flagged): `tools/browserexec.py`'s stored-XSS store step sends its
+  request through `context.request.fetch`, which bypasses the guarded route that adds
+  the session's storage headers, so a session carried by those headers is not on the
+  store request (measured: the store `POST /profile` answered 302 to `/login` while the
+  run's own probes there answered 200). A fix touches the M6 executor and SP-74's
+  session-reach checks: flagged for the orchestrator, not done here. The IDOR owner
+  marker (a display name instead of the username) is a FUZZ/SESS design question.
+- Deliverables:
+  - [x] answer key, live checks, BASELINE and AFTER runs — done
+- Effectiveness (assessed 2026-11-20): the AFTER numbers above.
+
+### CC-LAB-0330 — OWASP NodeGoat as a loopback-only external lab (FR-LAB-330) (2026-11-20)
+- Placement: lane NODE (item NODE), branch `ccr-e5c7c0c6-r9ladz-nodegoat` from 2be7a50.
+- Change: `fuzzlab/lab_fixtures/external.py`: `NODEGOAT_REPO`, `NODEGOAT_COMMIT`
+  (c5cb68a7), `NODEGOAT_TREE_SHA256`, `NODEGOAT_NODE12_IMAGE` (in `PINNED_IMAGES`),
+  `tree_sha256`, `nodegoat_checkout`, `fetch_nodegoat`, `npm_install(production=)`
+  (`--omit=dev`; the default unchanged for secDevLabs), the `LAB_META["nodegoat"]` entry
+  (port 3091, two accounts), `bootstrap_nodegoat`, `nodegoat_account_attributes`, the
+  `fetch` CLI branch; `lab/external/nodegoat/` (`Dockerfile`, `compose.yaml`).
+- Measurements before design (2026-11-20): the app re-seeds admin/user1/user2 at every
+  start; `/login` takes `userName`/`password` form fields with no CSRF token (csurf is
+  commented out upstream) and redirects to `/dashboard`; `/dashboard` 302s anonymously;
+  the dashboard links `/allocations/<own id>`; upstream's development config injects a
+  livereload `<script>` (so `NODE_ENV=production`).
+- Impact (other components / project): none outside LAB; `npm_install`'s new keyword is
+  additive. Lab port 3091 (`NODEGOAT_PORT`) is new: the merge should check it against the
+  other lanes' new labs.
+- Risk (level; mitigation or accepted-risk justification): low. Loopback-only publish
+  (the exposure check passed on every `up`/`reset`); MongoDB on an internal network;
+  capabilities dropped, read-only root, no-new-privileges. The app's bridge has egress
+  (its `/research` page fetches any URL): accepted as for Juice Shop (NFR-LAB-safety
+  "not yet enforced"). The pre-change review gate was not run before implementation
+  (F-611).
+- Deliverables:
+  - [x] fixture, fetch with tree hash, bootstrap with account values, static tests — done
+  - [x] live bring-up (`./labctl.sh up|reset|bootstrap nodegoat --authorized`) — done
+  - [ ] gated live test (`FUZZLAB_LIVE_EXTERNAL_LABS=1`) — todo (as the secDevLabs labs)
+- Effectiveness (assessed 2026-11-20): built, bootstrapped and scored live (CC-LAB-0331).
 ### CC-LAB-0321 — DVGA re-measured after the lab-derived rules' removal; crawl is the headline (2026-11-20)
 - Placement: lane GQL (item GQL), review round 1; pre-assigned CC-LAB-0320..0324.
 - Change: `lab/ground-truth-dvga/` -- DVGA-0006 and DVGA-0011 (`systemDiagnostics`

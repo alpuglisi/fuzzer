@@ -176,6 +176,19 @@ tracked in the requirements files, not here.
   (FR-LAB-306, CC-LAB-0303: copied from one pinned checkout, dependencies verified on
   the host, built offline; `secdevlabs-copy-n-paste` first; nine built as of
   2026-10-19, `secdevlabs-streaming` the first planted through a JSON PUT, FR-FUZZ-56;
+  `secdevlabs-ecommerce-api` the first with per-account values, FR-LAB-309). OWASP
+  NodeGoat (`nodegoat`, FR-LAB-330/331, CC-LAB-0330/0331) is the first source pinned by
+  commit plus a sha256 over its tracked files (`tree_sha256`), with production-only npm
+  packages; its answer key carries the first server-side JavaScript injection cases
+  (`ssjs`: `eval` and a `$where`), confirmed by two non-destructive strategies
+  (FR-FUZZ-610/611, rule `R-SSJS` FR-AUD-610) whose every probe is valid JavaScript in
+  any quoting context, so an in-process `$where` (Juice Shop's) is never crashed.
+  OWASP Mutillidae II 2.12.8 (FR-LAB-340..343,
+  CC-LAB-0340..0343) is the first PHP front controller (`index.php?page=...`) and the first
+  with a directory (OpenLDAP): upstream's three images by digest, its LDIF loaded by the
+  bootstrap, ground truth `lab/ground-truth-mutillidae/` with the LDAP and XPath
+  injection classes (`fuzzlab/oracle/ldap_xpath.py`, FR-FUZZ-620/621); a routed page is
+  part of a finding's URL and scoring key (FR-FUZZ-622, SP-90).
   `secdevlabs-ecommerce-api` the first with per-account values, FR-LAB-309). The Damn
   Vulnerable GraphQL Application is the first GraphQL lab (FR-LAB-320, CC-LAB-0320:
   `dvga`, its image pinned by digest, 127.0.0.1:5013, no login): its answer key's points

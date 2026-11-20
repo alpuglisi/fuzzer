@@ -3021,3 +3021,26 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
   2. **The order of events a fix waits for is pinned by a deterministic test** -- a double that records each event, the wait and the return or raise, on a fake clock -- beside any real-browser test. A race of about 1% passes a handful of real repetitions on the old code.
   3. **A browser race is called fixed only after a measurement under each kind of host contention the harness meets (CPU and disk I/O), both arms in the same rounds, at a volume that can see the race's rate** (here at least 300 per arm), reported as counts per arm. (from BUG-0561)
   - Enforced by: tests/test_navigation_settle_load.py::test_a_failure_raises_only_after_its_error_page_has_loaded, tests/test_navigation_settle_load.py::test_an_error_page_that_never_loads_expires_within_the_budget_and_is_counted
+
+- **PA-0610** — Strengthens `PA-0133(2)` (from evaluation markers to every confirmer, and
+  from the input as sent to the input as rendered), after BUG-0610: the NoSQL operator
+  differential stripped the reflections of the strings it sent but not the echo of the
+  object it sent (`[object Object]`), so a login that re-renders the submitted name never
+  confirmed.
+  1. **A confirmer's normalisation covers every value it sends as the target renders it:**
+     a string in its reflected forms (`_reflection_forms`), and a non-string JSON value as
+     the server stringifies it (JavaScript's `String(object)`), each stripped from both
+     sides of a comparison.
+  2. **Every differential confirmer has a true-positive fixture whose page echoes the
+     submitted value**, beside the one that proves the normalisation keeps the
+     differential sound (a server that stringifies every object answers V and D alike).
+  3. **The sweep goes by what a confirmer sends, not by the failing page** (`PA-0002`):
+     every confirmer that sends a non-string value is listed with how it judges (BUG-0610
+     "Preventive action"). (from BUG-0610)
+  - Enforced by: tests/test_oracle_strategies_ssjs.py::test_nosql_confirms_a_login_that_echoes_the_submitted_leaf, tests/test_oracle_strategies_ssjs.py::test_nosql_still_refuses_a_server_that_stringifies_every_object
+
+- **PA-0620** — Strengthens `PA-0083` and `PA-0131`, after BUG-0620: a narrowed auth gate (a front controller's routed login) judged a crawled probe's bare URL, not the request its entries complete, and sent the login page's probes with the session. PA-0083 put the gate at the action and PA-0131 had it judge its whole input, but neither covered a request whose parts arrive separately, nor what narrowing a gate requires.
+  1. **A change that makes a safety gate refuse less judges the request as sent at every caller:** every part that can carry the decisive value (URL, sibling entries, body), checked by a test per caller.
+  2. **The narrowed rule refuses any input it cannot judge** (here: a router URL that names no route is the auth endpoint).
+  3. **It is measured live with the gate's own counter** on a run that exercises the narrowed shape. (from BUG-0620)
+  - Enforced by: tests/test_front_controller_routes.py::test_the_sender_judges_the_request_as_sent, tests/test_front_controller_routes.py::test_send_passes_the_requests_entries_to_the_gate, tests/test_front_controller_routes.py::test_a_router_url_that_names_no_route_is_the_auth_endpoint

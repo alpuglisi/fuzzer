@@ -3,6 +3,28 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0620 — Rules for LDAP and XPath injection (FR-AUD-620) (2026-11-20)
+- Change: `fuzzlab/audit/rules_data/default_rules.json` (`R-LDAP-INJECTION`,
+  `R-XPATH-INJECTION`: query, body and JSON points, references `ldap-injection` and
+  `xpath-injection`).
+- Reason: a category with no rule gets no candidate (CC-FUZZ-0620, CC-FUZZ-0621).
+- Impact: a run whose categories include them nominates every query/body/JSON point;
+  a ground-truth run selects them only for a key with such cases.
+- Risk: low.
+- Deliverables:
+  - [x] rules; `tests/test_ldap_xpath.py::test_both_classes_are_wired_end_to_end` — done
+
+### CC-AUD-0610 — `R-SSJS`: server-side JavaScript injection on every value point (FR-AUD-610) (2026-11-20)
+- Change: `fuzzlab/audit/rules_data/default_rules.json` (appended rule `R-SSJS`, category
+  `server-side-javascript-injection`, locations query, body, json, path).
+- Impact (other components / project): FUZZ's two new strategies (CC-FUZZ-0610) get
+  candidates; more requests on runs that include the category (see CC-FUZZ-0610).
+- Risk (level; mitigation or accepted-risk justification): low (a nomination; the
+  strategies decide). The pre-change review gate was not run (F-611).
+- Deliverables:
+  - [x] rule; `tests/test_oracle_strategies_ssjs.py::test_the_category_is_ruled_mapped_and_registered` — done
+- Effectiveness (assessed 2026-11-20): NodeGoat's `ssjs` positives were nominated in
+  both passes (CC-LAB-0331).
 ### CC-AUD-0602 — The DVGA-derived GraphQL command-injection rules are removed (black-box detection only) (2026-11-20)
 - Placement: lane GQL (item GQL), review round 1, base 2be7a50, pre-assigned
   CC-AUD-0600..0609.

@@ -3,6 +3,126 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0622 — A front controller's page is part of a finding's URL and of a case's scoring key (FR-FUZZ-622, SP-90) (2026-11-20)
+- Change: `fuzzlab/oracle/oracle.py` (`finding_url` keeps `?<route>=<page>` of a router
+  URL, from its query or a crawled point's sibling entries; `_front_controller_route`),
+  `fuzzlab/harness/scoring.py` (`case_key`: a case's URL through `finding_url`).
+- Reason: measured on Mutillidae: every page is `/index.php?page=X`; findings were all
+  recorded at `/index.php`, so user-info.php's SQL injection and user-info-xpath.php's
+  negative were one key, and no routed case could match (the anonymous BASELINE's 5 fp).
+  The SPA hash route already had this treatment (forms phase 3).
+- Impact: only a URL whose last segment is a router (`index`, `default`, `main`, as
+  `session.detect` reads a query-routed login) with a route parameter (`page`, `action`,
+  ...) whose value is a plain page name; never when the probed parameter is the route.
+  Every case of every earlier answer key keeps its key (guard test). The web site tree
+  is unchanged (its `path_key` drops the query).
+- Risk: medium -- a shared convention (PA-0003): **flagged to the orchestrator** before
+  merge. Readers swept: `harness.integration`/`scoring`, `web.sitetree` (calls
+  `finding_url`, then `path_key`), the plugin `on_finding` payload and the trace event.
+- Deliverables:
+  - [x] code; `tests/test_front_controller_routes.py`; SP-90 — done
+- Effectiveness: CC-LAB-0343 (scored AFTER run; Juice Shop unchanged).
+
+### CC-FUZZ-0621 — XPath injection: strategy (FR-FUZZ-621) (2026-11-20)
+- Change: `fuzzlab/oracle/ldap_xpath.py` (`XPathInjectionStrategy`, families
+  `string-predicate` and `string-union` on the shared differential engine), registered in
+  `default_strategies()` and `_CATEGORY_TO_CLASS` (`xpath-injection` -> `xpath_injection`).
+- Reason: lane PHPX: no strategy tested XPath injection.
+- Measured (Mutillidae user-info-xpath.php, live, before the design): the page
+  echoes the query; `' or string-length('abcd')=4 or 'a'='b` and `=5` both select nothing
+  (the document's elements are `<Account>`, the query's `//Employee`), the union
+  `'] | //*[string-length('abcd')=4 or 'a'='b` selects every node (153 655 bytes vs
+  85 724 for `=5`, the base 85 640), for both parameters; MariaDB answers both XPath
+  probes with a syntax error. A direct run of the strategy on the real page: confirmed
+  (string-union) on both parameters at level 0, no verdict at level 5; no verdict on the
+  SQL, LDAP and command pages; SQL's boolean probe gives none on the XPath page.
+- Impact: up to 42 requests per candidate (6 when both screens fail), only where the
+  `xpath-injection` category is active.
+- Risk: low; read-only queries.
+- Deliverables:
+  - [x] code; `tests/test_ldap_xpath.py` — done
+
+### CC-FUZZ-0620 — LDAP filter injection: strategy (FR-FUZZ-620) (2026-11-20)
+- Change: `fuzzlab/oracle/ldap_xpath.py` (new module: `LdapFilterInjectionStrategy`,
+  family `or-presence`, error signatures as corroboration only), registered in
+  `default_strategies()` and `_CATEGORY_TO_CLASS` (`ldap-injection` -> `ldap_injection`).
+- Reason: lane PHPX: no strategy tested LDAP injection.
+- Measured (Mutillidae conference-room-lookup.php, live, logged in, before the design):
+  filter `(|(cn=2F204)(cn=<v>))`; `zqx1` and `zqx1)(objectClass=zqx2` list 2F204 only,
+  `zqx1)(objectClass=*` and `*` list all nine entries, `zqx1)(` prints "ldap_search():
+  Search: Bad search filter", SQL's grammar probes list 2F204 only; repeated requests are
+  byte-identical; at level 5 every probe lists 2F204 only (encodeForLDAP). A direct run of
+  the strategy: confirmed at level 0, no verdict at level 5 and on the SQL, XPath and
+  command pages (the direct-run script and its output are in the lane's session record).
+- Impact: up to 21 requests per candidate (3 when the screen fails), only where the
+  `ldap-injection` category is active.
+- Risk: low; search filters only.
+- Deliverables:
+  - [x] code; `tests/test_ldap_xpath.py` — done
+  - [x] both strategies classified in `tests/test_oracle_comparable_controls.py`'s
+    `CONTROL_READING` (differential); its send guard now reads every strategy class in
+    the MRO, so a `confirm` in a shared base is checked; the finding-URL builder
+    (CC-FUZZ-0622) allowed in `tests/test_query_placement.py` (a record key, never
+    sent) — done
+
+### CC-FUZZ-0611 — The NoSQL operator differential compares a page that echoes the submitted leaf (FR-FUZZ-612, BUG-0610) (2026-11-20)
+- Change: `fuzzlab/oracle/strategies.py`: `_JS_OBJECT_STRING` and
+  `NoSqlOperatorStrategy.confirm.same()` strips its reflected forms with the tokens'.
+- Impact (other components / project): a JSON-leaf NoSQL point whose page re-renders the
+  submitted value is now decided; no other strategy changes.
+- Risk (level; mitigation or accepted-risk justification): low. Soundness is unchanged:
+  a server that stringifies every object answers V and D alike (pinned by a test). The
+  pre-change review gate was not run (F-611).
+- Deliverables:
+  - [x] fix, tests (`tests/test_oracle_strategies_ssjs.py`), ERROR_LOG, BUG-0610, PA-0610 — done
+- Effectiveness (assessed 2026-11-20): NodeGoat NGOAT-0014 confirmed live (operator
+  differential, 7 rounds); secDevLabs Mongection with one registered account: tp=2 fp=0
+  fn=0 tn=2, 48 requests on both 2be7a50 and this change (no regression).
+
+### CC-FUZZ-0610 — Server-side JavaScript injection: a non-destructive evaluation marker and boolean differential (FR-FUZZ-610, FR-FUZZ-611) (2026-11-20)
+- Change: `fuzzlab/oracle/strategies.py` (appended at the end; `default_strategies` and
+  `_CATEGORY_TO_CLASS` gain one entry each): `SsjsEvaluationMarkerStrategy`,
+  `SsjsBooleanDifferentialStrategy`, `_SSJS_FAMILIES` and helpers; category
+  `server-side-javascript-injection`, class `ssjs`. `tests/test_oracle_comparable_controls.py`
+  classifies both (`CONTROL_READING`).
+- Measurements before design (live, 2026-11-20, CLAUDE.md item 8): NodeGoat's
+  contributions `eval` renders `Math.abs(-4817)/1000` as `4.817 %` (only for 0..30, all
+  three fields numbers); its allocations `$where` answers 500 (no allocations) for
+  `98765` and `98765+'||Math.abs(-3)==4&&'+98765`, 200 with all three users for the
+  `==3` twin, 500 for the unquoted and double-quoted families; six identical true-branch
+  requests listed the users in three different orders (so the families compare by
+  length, F-610). Juice Shop's crash (ERROR_LOG 2026-10-19) is an uncaught ReferenceError
+  in an in-process `$where`: hence every probe is valid JavaScript in every context, and
+  names nothing but `Math.abs` (a Node check runs each probe in four contexts:
+  `tests/test_oracle_strategies_ssjs.py::test_every_probe_is_valid_javascript_in_every_context_by_node`).
+- Impact (other components / project): AUD (`R-SSJS`, CC-AUD-0610) nominates the category
+  on every query, body, JSON and path point, so a run whose categories include it (an
+  automatic run without an answer key, or a key with `ssjs` positives) spends about 9
+  requests per point whose screens all fail, 1 more for the marker: NodeGoat's
+  ground-truth run went from 45 to 244 requests (PERF lane, take note). A run derived from
+  an answer key without `ssjs` positives (D14) never runs them. CORE (`runmode`,
+  CC-CORE-0605); LAB (the class in the labels schema, CC-LAB-0331).
+- Risk (level; mitigation or accepted-risk justification): medium for false positives,
+  mitigated: the differential runs in the shared engine (`ENGINE_BOUND` per family, the
+  noise test confirms nothing in 200 draws); the marker needs two results, each in the
+  answer to its own probe, with the expression's reflections stripped (a parsing and a
+  reflecting fake confirm nothing). Destructiveness: none by construction (see above).
+  The pre-change review gate was not run (F-611).
+- Deliverables:
+  - [x] strategies, registration, tests (21 in `tests/test_oracle_strategies_ssjs.py`) — done
+  - [x] live NodeGoat runs (CC-LAB-0331) and Juice Shop (CC-LAB-0332) — done
+- Effectiveness (assessed 2026-11-20): NodeGoat NGOAT-0001..0004 confirmed in both the
+  ground-truth and the crawl run, fp=0 on its negatives; Juice Shop's `$where` route
+  confirmed without a crash and 0 findings on its other 8 points.
+  `scripts/verify_change.py --base 2be7a50` on e19f6fc: 193 files, 5970 passed, 14
+  failed, 9 skipped, 156 xfailed. Root-caused, none from this change: 9
+  `tests/test_labgen_*::test_cli_check_passes_end_to_end*` failed because the container
+  had no `gitleaks` (the labgen check's secret-scanner gate; installed, the nine pass);
+  5 in `tests/test_navigation_aborts.py` fail identically on untouched 2be7a50 in this
+  container (Chromium 157 from Playwright 1.63, where the expectations were measured on
+  Chromium 141: a navigation to an empty answer does not raise). The final commit's
+  harness is in the lane report.
+
 ### CC-FUZZ-0117 — M6's navigations settle a failure on the error page's load (BUG-0561) (2026-10-23)
 - Change: none in `fuzzlab/tools/browserexec.py` or the oracle. The executor's navigations go through SP-01, which now waits for a failed navigation's error page to load, not only to commit, before it raises (CC-CRAWL-0065).
 - Impact (other components / project):

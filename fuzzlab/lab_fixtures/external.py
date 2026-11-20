@@ -87,17 +87,32 @@ SECDEVLABS_MAVEN_IMAGE = ("mirror.gcr.io/library/maven:3.6.0-jdk-11-slim@sha256:
                           "4f0face24d2f79439a8fa394555b09be99c9ad537b9b19983fb8cc358818a42d")
 SECDEVLABS_NGINX_IMAGE = ("mirror.gcr.io/library/nginx:1.17.1-alpine@sha256:"
                           "17bd1698318e9c0f9ba2c5ed49f53d690684dab7fe3e8019b855c352528d57be")
+#: OWASP NodeGoat's upstream Dockerfile says `node:12-alpine` (unpinned): pinned here, from
+#: Google's Docker Hub mirror (CC-LAB-0330). Its database is SECDEVLABS_MONGO_IMAGE
+#: (upstream's compose says `mongo:4.4`).
+NODEGOAT_NODE12_IMAGE = ("mirror.gcr.io/library/node:12-alpine@sha256:"
+                         "d4b15b3d48f42059a15bd659be60afe21762aae9d6cbea6f124440895c27db68")
+#: OWASP Mutillidae II (CC-LAB-0340): upstream's own published images
+#: (webpwnized/mutillidae-docker), the app 2.12.8 on PHP 8.5 / Apache, MariaDB 13 and
+#: OpenLDAP 2.4, pinned by digest.
+MUTILLIDAE_WWW_IMAGE = ("docker.io/webpwnized/mutillidae:www@sha256:"
+                        "90d0cc2279e22592f993680775aff8da743a01191c73d2fabbf766f7ebde56b7")
+MUTILLIDAE_DATABASE_IMAGE = ("docker.io/webpwnized/mutillidae:database@sha256:"
+                             "5569286c0d4bc3436f28e91c2c029613910c02cd440ccd9e39dc11dddee9e6ec")
+MUTILLIDAE_LDAP_IMAGE = ("docker.io/webpwnized/mutillidae:ldap@sha256:"
+                         "bc98847a4cc53fff691b68e2e5b9358f00c3a2ef4ae4985e899ef8a7cf3116cf")
 #: Damn Vulnerable GraphQL Application (dolevf, MIT), CC-LAB-0320: the `latest` build of
 #: 2025-05-24 (its version.py says 2.1.2; the older `2.1.2` tag is another, 2022 build).
 DVGA_IMAGE = ("docker.io/dolevf/dvga:latest@sha256:"
               "040aa33c199d99f3380c9ff9a1ee5d725e9abca7b189c63a35a2a73bda79c957")
-PINNED_IMAGES = frozenset({BUSYBOX_IMAGE, PHP_IMAGE, MYSQL_IMAGE, JUICE_SHOP_IMAGE,
+PINNED_IMAGES = frozenset({BUSYBOX_IMAGE, MUTILLIDAE_WWW_IMAGE, MUTILLIDAE_DATABASE_IMAGE,
+                           MUTILLIDAE_LDAP_IMAGE, PHP_IMAGE, MYSQL_IMAGE, JUICE_SHOP_IMAGE,
                            CRAWL_MAZE_PYTHON_IMAGE, SECDEVLABS_GOLANG_IMAGE,
                            SECDEVLABS_MARIADB_IMAGE, SECDEVLABS_PYTHON38_IMAGE,
                            SECDEVLABS_PYTHON312_IMAGE, SECDEVLABS_PHP_IMAGE,
                            SECDEVLABS_NODE20_IMAGE, SECDEVLABS_MONGO_IMAGE,
                            SECDEVLABS_NODE13_IMAGE, SECDEVLABS_MAVEN_IMAGE,
-                           SECDEVLABS_NGINX_IMAGE, DVGA_IMAGE})
+                           SECDEVLABS_NGINX_IMAGE, NODEGOAT_NODE12_IMAGE, DVGA_IMAGE})
 
 BWAPP_ZIP_URL = "https://sourceforge.net/projects/bwapp/files/bWAPP/bWAPP_latest.zip/download"
 BWAPP_ZIP_NAME = "bWAPP_latest.zip"
@@ -127,6 +142,20 @@ CRAWL_MAZE_WHEELS = {
     "click-7.1.2-py2.py3-none-any.whl":
         "dacca89f4bfadd5de3d7489b7c8a566eee0d3676333fbb50030263894c38c0dc",
 }
+
+#: Mutillidae's directory starts empty; upstream's README loads this LDIF (its rooms
+#: and users) with ``ldapadd``. Fetched on the host from the pinned commit of
+#: webpwnized/mutillidae-docker, verified by sha256 and size (CC-LAB-0340).
+MUTILLIDAE_DOCKER_COMMIT = "b5920113ad30dd92c893b2f44230fb5bf99f3601"
+MUTILLIDAE_LDIF_URL = ("https://raw.githubusercontent.com/webpwnized/mutillidae-docker/"
+                       f"{MUTILLIDAE_DOCKER_COMMIT}/.build/ldap/configuration/ldif/"
+                       "mutillidae.ldif")
+MUTILLIDAE_LDIF_SHA256 = "82eb3b46b63463f978f887d5a427e96af7058d005e5449a1420bdd574c16d2e5"
+MUTILLIDAE_LDIF_SIZE = 2165
+#: The directory's admin bind: upstream's published default, baked into its LDAP image
+#: (LDAP_ADMIN_PASSWORD) and its www image (includes/ldap-config.inc); not a secret of
+#: ours (the directory is on an internal network and never published).
+MUTILLIDAE_LDAP_BIND = ("cn=admin,dc=mutillidae,dc=localhost", "mutillidae")
 
 LAB_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 PROJECT_LABEL = "com.docker.compose.project"
@@ -212,6 +241,16 @@ SECDEVLABS_PYPI = {
 }
 
 
+#: OWASP NodeGoat (Apache-2.0), CC-LAB-0330: a Node.js / Express / MongoDB app with
+#: server-side JavaScript injection (``eval`` of form inputs, a ``$where`` built from a
+#: query value). Checked out at this commit on the host; the checkout's tracked files
+#: must hash to NODEGOAT_TREE_SHA256 (`tree_sha256`); its production npm packages are
+#: installed on the host by ``npm ci`` against the lockfile; the image builds offline.
+NODEGOAT_REPO = "https://github.com/OWASP/NodeGoat"
+NODEGOAT_COMMIT = "c5cb68a7084e4ae7dcc60e6a98768720a81841e8"
+NODEGOAT_TREE_SHA256 = "78ac112b7bd5083bb065086c4642dcd8a3932a8d3052f9405503124c90a70fe3"
+
+
 class ExternalLabError(RuntimeError):
     """A fixture operation failed; the message never carries a secret."""
 
@@ -287,10 +326,20 @@ LAB_META: dict[str, LabMeta] = {
                                       3075, 80, "/", "/", None, "", False),
     "secdevlabs-sstype": LabMeta("secdevlabs-sstype", "server", "SDL_SSTYPE_PORT", 3073,
                                  10001, "/", "/", None, "", False),
+    # its pages are query-routed (index.php?page=...); an account of our own, registered
+    # by the bootstrap (FR-LAB-341)
+    "mutillidae": LabMeta("mutillidae", "www", "MUTILLIDAE_PORT", 3093, 80, "/",
+                          "/index.php?page=login.php", "mutillidae-user", "fuzzlab_user",
+                          True),
     "secdevlabs-gossip-world": LabMeta("secdevlabs-gossip-world", "app", "SDL_GOSSIP_PORT",
                                        3072, 10007, "/", "/login", "sdl-gossip-user",
                                        "fuzzlab_user", True,
                                        (("sdl-gossip-peer", "fuzzlab_peer"),)),
+    # two of upstream's seeded accounts (artifacts/db-reset.js, re-seeded at every start;
+    # their passwords are the ones NodeGoat's README publishes): `/allocations/:userId`
+    # shows any caller the allocations of the userId in the path (FR-LAB-330)
+    "nodegoat": LabMeta("nodegoat", "web", "NODEGOAT_PORT", 3091, 4000, "/", "/login",
+                        "nodegoat-user", "user1", False, (("nodegoat-peer", "user2"),)),
     # GraphQL over one endpoint (FR-LAB-320); no account: its resolvers take no session
     "dvga": LabMeta("dvga", "app", "DVGA_PORT", 5013, 5013, "/", "/", None, "", False),
 }
@@ -556,11 +605,12 @@ def maven_offline(pomdir: Path, repo: Path, *, timeout: float = 900.0) -> None:
                                f"{(res.stderr or res.stdout or '').strip()[-200:]}")
 
 
-def npm_install(pkgdir: Path, *, timeout: float = 900.0) -> None:
+def npm_install(pkgdir: Path, *, timeout: float = 900.0, production: bool = False) -> None:
     """Install a Node package's locked dependencies with the host's npm (``npm ci``:
     exactly the lockfile, each package checked against its ``integrity`` hash; no
     install scripts), so its image needs no registry. Raises when npm is missing or
-    the install fails (an integrity mismatch fails it)."""
+    the install fails (an integrity mismatch fails it). ``production`` leaves the
+    development packages out (``--omit=dev``: NodeGoat's test tooling, CC-LAB-0330)."""
     import shutil
 
     from fuzzlab.procutil import run_bounded
@@ -568,7 +618,8 @@ def npm_install(pkgdir: Path, *, timeout: float = 900.0) -> None:
     if npm is None:
         raise ExternalLabError("npm is not installed on this host: needed to install the "
                                "app's locked packages (checked against its lockfile)")
-    res = run_bounded([npm, "ci", "--ignore-scripts", "--no-audit", "--no-fund"],
+    res = run_bounded([npm, "ci", "--ignore-scripts", "--no-audit", "--no-fund",
+                       *(["--omit=dev"] if production else [])],
                       timeout=timeout, cwd=str(pkgdir))
     if res.returncode != 0 or not (pkgdir / "node_modules").is_dir():
         raise ExternalLabError(f"npm ci failed: {(res.stderr or res.stdout or '').strip()[-200:]}")
@@ -598,6 +649,81 @@ def fetch_secdevlabs_app(lab: str, *, root: Path = EXTERNAL_DIR, repo: str = SEC
     if lab in SECDEVLABS_PYPI:
         fetch_pypi_dists(SECDEVLABS_PYPI[lab], root / lab / ".cache" / "dists",
                          timeout=timeout)
+    return dest
+
+
+def mutillidae_ldif_path(root: Path = EXTERNAL_DIR) -> Path:
+    return root / "mutillidae" / ".cache" / "mutillidae.ldif"
+
+
+def fetch_mutillidae_ldif(*, dest: Path | None = None, timeout: float = 60.0,
+                          get: Callable[[str, float], bytes] | None = None,
+                          url: str = MUTILLIDAE_LDIF_URL,
+                          sha256: str = MUTILLIDAE_LDIF_SHA256,
+                          size: int = MUTILLIDAE_LDIF_SIZE) -> Path:
+    """Mutillidae's LDIF in the gitignored cache, verified by sha256 and size. A cached
+    file is re-hashed, never trusted; a mismatch leaves nothing behind and raises --
+    never a substitute. An anonymous public download (the host's proxy/CA apply)."""
+    dest = mutillidae_ldif_path() if dest is None else dest
+    if dest.is_file():
+        data = dest.read_bytes()
+        if len(data) == size and hashlib.sha256(data).hexdigest() == sha256:
+            return dest
+        dest.unlink()
+    try:
+        data = (get or _pypi_get)(url, timeout)
+    except (OSError, ValueError) as exc:
+        raise ExternalLabError(f"mutillidae.ldif: download failed "
+                               f"({type(exc).__name__})") from None
+    if len(data) != size or hashlib.sha256(data).hexdigest() != sha256:
+        raise ExternalLabError(f"mutillidae.ldif does not match the pin (sha256 "
+                               f"{hashlib.sha256(data).hexdigest()}, {len(data)} bytes)")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_suffix(".part")
+    tmp.write_bytes(data)
+    tmp.replace(dest)
+    return dest
+
+
+def tree_sha256(checkout: Path, *, timeout: float = 120.0) -> str:
+    """One sha256 over a git checkout's tracked files: each path (sorted, bytes) with
+    the sha256 of its content. Independent of git's own object format, of the
+    checkout's file times and of the git version (CC-LAB-0330)."""
+    from fuzzlab.procutil import run_bounded
+    res = run_bounded(["git", "-C", str(checkout), "ls-files", "-z"], timeout=timeout,
+                      text=False)
+    if res.returncode != 0:
+        raise ExternalLabError("git ls-files failed on the checkout")
+    out = res.stdout if isinstance(res.stdout, bytes) else res.stdout.encode("utf-8")
+    digest = hashlib.sha256()
+    for name in sorted(n for n in out.split(b"\0") if n):
+        content = (checkout / os.fsdecode(name)).read_bytes()
+        digest.update(name + b"\0" + hashlib.sha256(content).hexdigest().encode() + b"\n")
+    return digest.hexdigest()
+
+
+def nodegoat_checkout(root: Path = EXTERNAL_DIR) -> Path:
+    """The pinned NodeGoat checkout (gitignored)."""
+    return root / "nodegoat" / ".cache" / "src"
+
+
+def fetch_nodegoat(*, root: Path = EXTERNAL_DIR, repo: str = NODEGOAT_REPO,
+                   commit: str = NODEGOAT_COMMIT, tree: str = NODEGOAT_TREE_SHA256,
+                   timeout: float = 900.0) -> Path:
+    """NodeGoat at ``commit`` (its tracked files hashing to ``tree``), copied into
+    ``nodegoat/.cache/app`` without its git directory, with its production packages
+    installed on the host (`npm_install`). The image builds from there offline."""
+    import shutil
+    src = checkout_pinned(nodegoat_checkout(root), repo, commit, timeout=timeout,
+                          label="NodeGoat")
+    got = tree_sha256(src)
+    if got != tree:
+        raise ExternalLabError(f"NodeGoat checkout's files hash to {got}, not {tree}")
+    dest = root / "nodegoat" / ".cache" / "app"
+    if dest.exists():
+        shutil.rmtree(dest)
+    shutil.copytree(src, dest, symlinks=True, ignore=shutil.ignore_patterns(".git"))
+    npm_install(dest, timeout=timeout, production=True)
     return dest
 
 
@@ -1307,12 +1433,169 @@ def ecommerce_account_attributes(client: _LabClient, cred: ResolvedCredential
     return {"user_id": user_id}
 
 
+def _mutillidae_login(client: _LabClient, cred: ResolvedCredential) -> bool:
+    """Mutillidae's own login form: a 302 to ``popUpNotificationCode=AU1`` is a
+    success, a 200 a failure. The form page is read first: a login on a request with no
+    session cookie yet is not kept (measured, CC-LAB-0340)."""
+    client.request("GET", "/index.php?page=login.php")
+    r = client.request("POST", "/index.php?page=login.php",
+                       data={"username": cred.username, "password": cred.password,
+                             "login-php-submit-button": "Login"})
+    return r.status_code == 302 and "popUpNotificationCode=AU1" in r.headers.get(
+        "Location", "")
+
+
+def bootstrap_mutillidae(client: _LabClient, cred: ResolvedCredential, *,
+                         deadline: float = 180.0,
+                         clock: Callable[[], float] = time.monotonic,
+                         sleep: Callable[[float], None] = time.sleep) -> list[str]:
+    """Build Mutillidae's database when the app says it is offline (its own
+    ``set-up-database.php``; the database is on tmpfs, so after every start), then log
+    in through its form, registering the account the same way when the login fails, and
+    verify it by a positive differential: an authenticated page (``user-info.php``)
+    answers 200 with the session and redirects to the login without it. Last, the
+    directory is checked through the app: the conference-room lookup lists ``1F104``
+    (loaded by `load_mutillidae_directory`)."""
+    meta = LAB_META["mutillidae"]
+    wait_ready(client, meta.ready_path, deadline=deadline, clock=clock, sleep=sleep)
+    notes: list[str] = []
+    home = client.request("GET", "/")
+    if "database-offline.php" in client.location(home, "/"):
+        # the database starts after the web tier: retried until the script connects
+        end = clock() + deadline
+        while True:
+            setup = client.request("GET", "/set-up-database.php", timeout=120.0)
+            if setup.status_code == 200 and "Connected to MySQL server" in (setup.text or ""):
+                break
+            if clock() >= end:
+                raise ExternalLabError(f"mutillidae set-up-database.php did not connect to "
+                                       f"the database within {deadline:.0f}s (HTTP "
+                                       f"{setup.status_code})")
+            sleep(2.0)
+        notes.append("database built")
+    if not _mutillidae_login(client, cred):
+        reg = client.request("POST", "/index.php?page=register.php",
+                             data={"username": cred.username, "password": cred.password,
+                                   "confirm_password": cred.password,
+                                   "my_signature": "fuzzlab lab account",
+                                   "firstname": "Fuzz", "lastname": "Lab",
+                                   "register-php-submit-button": "Create Account"})
+        if f"Account created for {cred.username}" not in (reg.text or ""):
+            raise ExternalLabError(f"mutillidae registration failed: HTTP {reg.status_code}")
+        notes.append("account registered")
+        if not _mutillidae_login(client, cred):
+            raise ExternalLabError(
+                "mutillidae login failed after registration (an account of that name with "
+                "another password? run `./labctl.sh reset mutillidae --authorized`)")
+    page = "/index.php?page=user-info.php"
+    authed = client.request("GET", page)
+    anon = client.request("GET", page, anonymous=True)
+    if authed.status_code != 200 or anon.status_code != 302:
+        raise ExternalLabError(f"mutillidae {page}: {anon.status_code} anonymous, "
+                               f"{authed.status_code} logged in (want 302 / 200)")
+    notes.append("login verified")
+    rooms = client.request("POST", "/index.php?page=conference-room-lookup.php",
+                           data={"default_room_common_name": "1F104"})
+    if ">1F104<" not in (rooms.text or ""):
+        raise ExternalLabError("mutillidae: the directory has no room 1F104 (load it: "
+                               "`./labctl.sh bootstrap mutillidae --authorized`)")
+    notes.append("directory verified")
+    return notes
+
+
+def load_mutillidae_directory(engine: str, project: str, *,
+                              runner: Callable[..., Any] | None = None,
+                              ldif: Path | None = None, deadline: float = 120.0,
+                              clock: Callable[[], float] = time.monotonic,
+                              sleep: Callable[[float], None] = time.sleep) -> str:
+    """Load Mutillidae's LDIF into the project's directory container, as upstream's
+    README does (``ldapadd -c``, the admin bind, over the container's own loopback):
+    the file is re-verified against its pin and sent on stdin, so nothing is mounted.
+    Entries already there are kept (``-c``: exit 68, "already exists"); an exit 255
+    (slapd not answering yet) is retried until ``deadline``. The container
+    is found by the exact compose project and service labels. Sends nothing over the
+    network from this host; run only under ``--authorized`` (it changes the lab)."""
+    from fuzzlab.procutil import run_bounded
+    run = runner or run_bounded
+    path = fetch_mutillidae_ldif(dest=ldif) if ldif is None else ldif
+    data = path.read_bytes()
+    if hashlib.sha256(data).hexdigest() != MUTILLIDAE_LDIF_SHA256:
+        raise ExternalLabError("mutillidae.ldif does not match its pin")
+    res = run([engine, "ps", "-q", "--filter", f"label={PROJECT_LABEL}={project}",
+               "--filter", "label=com.docker.compose.service=directory"], timeout=30)
+    ids = (res.stdout or "").split()
+    if res.returncode != 0 or len(ids) != 1:
+        raise ExternalLabError(f"mutillidae: want one running directory container of "
+                               f"{project}, found {len(ids)}")
+    dn, password = MUTILLIDAE_LDAP_BIND
+    end = clock() + deadline
+    while True:
+        res = run([engine, "exec", "-i", ids[0], "ldapadd", "-c", "-x", "-H",
+                   "ldap://localhost", "-D", dn, "-w", password], timeout=60,
+                  input=data.decode("utf-8"))
+        # 255: slapd is not answering yet (it starts after the container does)
+        if res.returncode != 255 or clock() >= end:
+            break
+        sleep(2.0)
+    if res.returncode not in (0, 68):
+        raise ExternalLabError(f"mutillidae: ldapadd exited {res.returncode}: "
+                               f"{(res.stderr or '').strip()[-200:]}")
+    added = (res.stdout or "").count("adding new entry")
+    return f"directory loaded ({added} entries sent)"
+
+
+_NODEGOAT_ALLOCATIONS_LINK = re.compile(r'href="/allocations/(\d+)"')
+
+
+def _nodegoat_login(client: _LabClient, cred: ResolvedCredential) -> Any:
+    return client.request("POST", "/login",
+                          data={"userName": cred.username, "password": cred.password})
+
+
+def bootstrap_nodegoat(client: _LabClient, cred: ResolvedCredential, *,
+                       deadline: float = 180.0, clock: Callable[[], float] = time.monotonic,
+                       sleep: Callable[[float], None] = time.sleep) -> list[str]:
+    """Log in through the app's own form (no CSRF token: upstream's csurf is commented
+    out) and verify it by a positive differential: the login redirects to
+    ``/dashboard``, which answers 200 with the session and redirects to ``/login``
+    without it. The accounts are upstream's seed (re-created at every start), never
+    registered here."""
+    meta = LAB_META["nodegoat"]
+    wait_ready(client, meta.ready_path, deadline=deadline, clock=clock, sleep=sleep)
+    r = _nodegoat_login(client, cred)
+    if r.status_code != 302 or not r.headers.get("Location", "").endswith("/dashboard"):
+        raise ExternalLabError(
+            f"NodeGoat login of {cred.username!r} failed: HTTP {r.status_code} (the seeded "
+            f"accounts are re-created at every start with the README's passwords)")
+    authed = client.request("GET", "/dashboard")
+    anon = client.request("GET", "/dashboard", anonymous=True)
+    if authed.status_code != 200 or anon.status_code != 302:
+        raise ExternalLabError(f"NodeGoat /dashboard: {anon.status_code} anonymous, "
+                               f"{authed.status_code} logged in (want 302 / 200)")
+    return ["login verified"]
+
+
+def nodegoat_account_attributes(client: _LabClient, cred: ResolvedCredential
+                                ) -> dict[str, str]:
+    """The account's ``user_id``: the one ``/allocations/<id>`` link its own dashboard
+    shows (FR-LAB-330)."""
+    _nodegoat_login(client, cred)
+    ids = set(_NODEGOAT_ALLOCATIONS_LINK.findall(client.request("GET", "/dashboard").text
+                                                 or ""))
+    if len(ids) != 1:
+        raise ExternalLabError("NodeGoat's dashboard names no single allocations link")
+    return {"user_id": ids.pop()}
+
+
 _BOOTSTRAPS = {"bwapp": bootstrap_bwapp, "juice-shop": bootstrap_juice_shop,
+               "mutillidae": bootstrap_mutillidae,
                "secdevlabs-gossip-world": bootstrap_secdevlabs_gossip_world,
-               "secdevlabs-ecommerce-api": bootstrap_secdevlabs_ecommerce_api}
+               "secdevlabs-ecommerce-api": bootstrap_secdevlabs_ecommerce_api,
+               "nodegoat": bootstrap_nodegoat}
 #: Labs whose accounts have values of their own a ground truth names (`account_value`,
 #: FR-LAB-309): read after the verified login, stored with the credential.
-_ACCOUNT_ATTRIBUTES = {"secdevlabs-ecommerce-api": ecommerce_account_attributes}
+_ACCOUNT_ATTRIBUTES = {"secdevlabs-ecommerce-api": ecommerce_account_attributes,
+                       "nodegoat": nodegoat_account_attributes}
 
 
 def bootstrap(name: str, *, environ: Mapping[str, str] | None = None,
@@ -1402,6 +1685,14 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"secDevLabs at {SECDEVLABS_COMMIT[:12]}, {meta.name}'s app and its "
                       f"verified dependencies: {fetch_secdevlabs_app(meta.name)}")
                 return 0
+            if meta.name == "mutillidae":
+                print(f"mutillidae.ldif verified: {fetch_mutillidae_ldif()}")
+                return 0
+            if meta.name == "nodegoat":
+                print(f"NodeGoat at {NODEGOAT_COMMIT[:12]} (files sha256 "
+                      f"{NODEGOAT_TREE_SHA256[:12]}) and its verified packages: "
+                      f"{fetch_nodegoat()}")
+                return 0
             if meta.name == "security-crawl-maze":
                 print(f"crawl maze source at {CRAWL_MAZE_COMMIT[:12]}: {fetch_crawl_maze()}")
                 print(f"crawl maze wheels verified: {fetch_crawl_maze_wheels()}")
@@ -1432,6 +1723,9 @@ def main(argv: list[str] | None = None) -> int:
             host, port = "127.0.0.1", None
             if args.project and args.engine:
                 host, port = published_port(meta, args.project, args.engine)
+                if meta.name == "mutillidae":           # FR-LAB-341: before the login
+                    print(f"{meta.name}: "
+                          + load_mutillidae_directory(args.engine, args.project))
             res = bootstrap(meta.name, port=port, host=host, prompt=_tty_prompt())
             if res.identity is None:
                 print(f"{res.lab}: " + "; ".join(res.notes))
