@@ -46,7 +46,8 @@ GT_DIRS = {"bwapp": LAB / "ground-truth-bwapp", "juice-shop": LAB / "ground-trut
            "secdevlabs-mongection": LAB / "ground-truth-secdevlabs-mongection",
            "secdevlabs-comment-killer": LAB / "ground-truth-secdevlabs-comment-killer",
            "secdevlabs-streaming": LAB / "ground-truth-secdevlabs-streaming",
-           "secdevlabs-ecommerce-api": LAB / "ground-truth-secdevlabs-ecommerce-api"}
+           "secdevlabs-ecommerce-api": LAB / "ground-truth-secdevlabs-ecommerce-api",
+           "vulnerableapp": LAB / "ground-truth-vulnerableapp"}
 #: Labs scored by URL coverage, not an injection answer key: the lab serves its own
 #: expected set (the Crawl Maze: /fetch-expected-results, CC-LAB-0302).
 COVERAGE_LABS = {"security-crawl-maze"}

@@ -87,13 +87,17 @@ SECDEVLABS_MAVEN_IMAGE = ("mirror.gcr.io/library/maven:3.6.0-jdk-11-slim@sha256:
                           "4f0face24d2f79439a8fa394555b09be99c9ad537b9b19983fb8cc358818a42d")
 SECDEVLABS_NGINX_IMAGE = ("mirror.gcr.io/library/nginx:1.17.1-alpine@sha256:"
                           "17bd1698318e9c0f9ba2c5ed49f53d690684dab7fe3e8019b855c352528d57be")
+#: SasanLabs OWASP VulnerableApp 2.2.115 (Spring Boot, Java 17; CC-LAB-0350), built by
+#: upstream from commit 821b347 (2026-11-19): pinned by the digest its tag resolved to.
+VULNERABLEAPP_IMAGE = ("docker.io/sasanlabs/owasp-vulnerableapp:2.2.115@sha256:"
+                       "160bdbdf0490e27a5904d496c4a13b5e1541957dc4df5d05c611b1caec3b0193")
 PINNED_IMAGES = frozenset({BUSYBOX_IMAGE, PHP_IMAGE, MYSQL_IMAGE, JUICE_SHOP_IMAGE,
                            CRAWL_MAZE_PYTHON_IMAGE, SECDEVLABS_GOLANG_IMAGE,
                            SECDEVLABS_MARIADB_IMAGE, SECDEVLABS_PYTHON38_IMAGE,
                            SECDEVLABS_PYTHON312_IMAGE, SECDEVLABS_PHP_IMAGE,
                            SECDEVLABS_NODE20_IMAGE, SECDEVLABS_MONGO_IMAGE,
                            SECDEVLABS_NODE13_IMAGE, SECDEVLABS_MAVEN_IMAGE,
-                           SECDEVLABS_NGINX_IMAGE})
+                           SECDEVLABS_NGINX_IMAGE, VULNERABLEAPP_IMAGE})
 
 BWAPP_ZIP_URL = "https://sourceforge.net/projects/bwapp/files/bWAPP/bWAPP_latest.zip/download"
 BWAPP_ZIP_NAME = "bWAPP_latest.zip"
@@ -287,6 +291,10 @@ LAB_META: dict[str, LabMeta] = {
                                        3072, 10007, "/", "/login", "sdl-gossip-user",
                                        "fuzzlab_user", True,
                                        (("sdl-gossip-peer", "fuzzlab_peer"),)),
+    # a Spring Boot app under the /VulnerableApp context path; no login (CC-LAB-0350)
+    "vulnerableapp": LabMeta("vulnerableapp", "app", "VAPP_PORT", 3093, 9090,
+                             "/VulnerableApp/", "/VulnerableApp/allEndPointJson", None, "",
+                             False),
 }
 
 

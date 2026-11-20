@@ -1,0 +1,622 @@
+{
+ "version": 1,
+ "target": "vulnerableapp_2_2_115",
+ "points": [
+  {
+   "url": "/VulnerableApp/ErrorBasedSQLInjectionVulnerability/LEVEL_1",
+   "method": "GET",
+   "param": "id",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/ErrorBasedSQLInjectionVulnerability/LEVEL_2",
+   "method": "GET",
+   "param": "id",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/ErrorBasedSQLInjectionVulnerability/LEVEL_3",
+   "method": "GET",
+   "param": "id",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/ErrorBasedSQLInjectionVulnerability/LEVEL_4",
+   "method": "GET",
+   "param": "id",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/ErrorBasedSQLInjectionVulnerability/LEVEL_5",
+   "method": "GET",
+   "param": "id",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/ErrorBasedSQLInjectionVulnerability/LEVEL_6",
+   "method": "GET",
+   "param": "id",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/ErrorBasedSQLInjectionVulnerability/LEVEL_7",
+   "method": "GET",
+   "param": "id",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/UnionBasedSQLInjectionVulnerability/LEVEL_1",
+   "method": "GET",
+   "param": "id",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/UnionBasedSQLInjectionVulnerability/LEVEL_2",
+   "method": "GET",
+   "param": "id",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/UnionBasedSQLInjectionVulnerability/LEVEL_3",
+   "method": "GET",
+   "param": "id",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/UnionBasedSQLInjectionVulnerability/LEVEL_4",
+   "method": "GET",
+   "param": "id",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/UnionBasedSQLInjectionVulnerability/LEVEL_5",
+   "method": "GET",
+   "param": "id",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/UnionBasedSQLInjectionVulnerability/LEVEL_6",
+   "method": "GET",
+   "param": "id",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/UnionBasedSQLInjectionVulnerability/LEVEL_7",
+   "method": "GET",
+   "param": "id",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/UnionBasedSQLInjectionVulnerability/LEVEL_8",
+   "method": "GET",
+   "param": "id",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/UnionBasedSQLInjectionVulnerability/LEVEL_9",
+   "method": "GET",
+   "param": "id",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/BlindSQLInjectionVulnerability/LEVEL_1",
+   "method": "GET",
+   "param": "id",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/BlindSQLInjectionVulnerability/LEVEL_2",
+   "method": "GET",
+   "param": "id",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/BlindSQLInjectionVulnerability/LEVEL_3",
+   "method": "GET",
+   "param": "id",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/BlindSQLInjectionVulnerability/LEVEL_4",
+   "method": "GET",
+   "param": "id",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/BlindSQLInjectionVulnerability/LEVEL_5",
+   "method": "GET",
+   "param": "id",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/XSSWithHtmlTagInjection/LEVEL_1",
+   "method": "GET",
+   "param": "value",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/XSSWithHtmlTagInjection/LEVEL_2",
+   "method": "GET",
+   "param": "value",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/XSSWithHtmlTagInjection/LEVEL_3",
+   "method": "GET",
+   "param": "value",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/XSSWithHtmlTagInjection/LEVEL_4",
+   "method": "GET",
+   "param": "value",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/XSSWithHtmlTagInjection/LEVEL_5",
+   "method": "GET",
+   "param": "value",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/XSSInImgTagAttribute/LEVEL_1",
+   "method": "GET",
+   "param": "src",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/XSSInImgTagAttribute/LEVEL_2",
+   "method": "GET",
+   "param": "src",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/XSSInImgTagAttribute/LEVEL_3",
+   "method": "GET",
+   "param": "src",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/XSSInImgTagAttribute/LEVEL_4",
+   "method": "GET",
+   "param": "src",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/XSSInImgTagAttribute/LEVEL_5",
+   "method": "GET",
+   "param": "src",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/XSSInImgTagAttribute/LEVEL_6",
+   "method": "GET",
+   "param": "src",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/XSSInImgTagAttribute/LEVEL_7",
+   "method": "GET",
+   "param": "src",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/PersistentXSSInHTMLTagVulnerability/LEVEL_1",
+   "method": "GET",
+   "param": "comment",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/PersistentXSSInHTMLTagVulnerability/LEVEL_2",
+   "method": "GET",
+   "param": "comment",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/PersistentXSSInHTMLTagVulnerability/LEVEL_3",
+   "method": "GET",
+   "param": "comment",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/PersistentXSSInHTMLTagVulnerability/LEVEL_4",
+   "method": "GET",
+   "param": "comment",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/PersistentXSSInHTMLTagVulnerability/LEVEL_5",
+   "method": "GET",
+   "param": "comment",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/PersistentXSSInHTMLTagVulnerability/LEVEL_6",
+   "method": "GET",
+   "param": "comment",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/PersistentXSSInHTMLTagVulnerability/LEVEL_7",
+   "method": "GET",
+   "param": "comment",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/PersistentXSSInHTMLTagVulnerability/LEVEL_8",
+   "method": "GET",
+   "param": "comment",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/PersistentXSSInHTMLTagVulnerability/LEVEL_9",
+   "method": "GET",
+   "param": "comment",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/CommandInjection/LEVEL_1",
+   "method": "GET",
+   "param": "ipaddress",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/CommandInjection/LEVEL_2",
+   "method": "GET",
+   "param": "ipaddress",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/CommandInjection/LEVEL_3",
+   "method": "GET",
+   "param": "ipaddress",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/CommandInjection/LEVEL_4",
+   "method": "GET",
+   "param": "ipaddress",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/CommandInjection/LEVEL_5",
+   "method": "GET",
+   "param": "ipaddress",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/CommandInjection/LEVEL_6",
+   "method": "GET",
+   "param": "ipaddress",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/CommandInjection/LEVEL_7",
+   "method": "GET",
+   "param": "ipaddress",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/CommandInjection/LEVEL_8",
+   "method": "GET",
+   "param": "ipaddress",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/PathTraversal/LEVEL_1",
+   "method": "GET",
+   "param": "fileName",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/PathTraversal/LEVEL_2",
+   "method": "GET",
+   "param": "fileName",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/PathTraversal/LEVEL_3",
+   "method": "GET",
+   "param": "fileName",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/PathTraversal/LEVEL_4",
+   "method": "GET",
+   "param": "fileName",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/PathTraversal/LEVEL_5",
+   "method": "GET",
+   "param": "fileName",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/PathTraversal/LEVEL_6",
+   "method": "GET",
+   "param": "fileName",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/PathTraversal/LEVEL_7",
+   "method": "GET",
+   "param": "fileName",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/PathTraversal/LEVEL_8",
+   "method": "GET",
+   "param": "fileName",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/PathTraversal/LEVEL_9",
+   "method": "GET",
+   "param": "fileName",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/PathTraversal/LEVEL_10",
+   "method": "GET",
+   "param": "fileName",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/PathTraversal/LEVEL_11",
+   "method": "GET",
+   "param": "fileName",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/PathTraversal/LEVEL_12",
+   "method": "GET",
+   "param": "fileName",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/PathTraversal/LEVEL_13",
+   "method": "GET",
+   "param": "fileName",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/PathTraversal/LEVEL_14",
+   "method": "GET",
+   "param": "fileName",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/PathTraversal/LEVEL_15",
+   "method": "GET",
+   "param": "fileName",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/SSRFVulnerability/LEVEL_1",
+   "method": "GET",
+   "param": "fileurl",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/SSRFVulnerability/LEVEL_2",
+   "method": "GET",
+   "param": "fileurl",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/SSRFVulnerability/LEVEL_3",
+   "method": "GET",
+   "param": "fileurl",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/SSRFVulnerability/LEVEL_4",
+   "method": "GET",
+   "param": "fileurl",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/SSRFVulnerability/LEVEL_5",
+   "method": "GET",
+   "param": "fileurl",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/Http3xxStatusCodeBasedInjection/LEVEL_1",
+   "method": "GET",
+   "param": "returnTo",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/Http3xxStatusCodeBasedInjection/LEVEL_2",
+   "method": "GET",
+   "param": "returnTo",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/Http3xxStatusCodeBasedInjection/LEVEL_3",
+   "method": "GET",
+   "param": "returnTo",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/Http3xxStatusCodeBasedInjection/LEVEL_4",
+   "method": "GET",
+   "param": "returnTo",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/Http3xxStatusCodeBasedInjection/LEVEL_5",
+   "method": "GET",
+   "param": "returnTo",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/Http3xxStatusCodeBasedInjection/LEVEL_6",
+   "method": "GET",
+   "param": "returnTo",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/Http3xxStatusCodeBasedInjection/LEVEL_7",
+   "method": "GET",
+   "param": "returnTo",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/Http3xxStatusCodeBasedInjection/LEVEL_8",
+   "method": "GET",
+   "param": "returnTo",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/Http3xxStatusCodeBasedInjection/LEVEL_9",
+   "method": "GET",
+   "param": "returnTo",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/Http3xxStatusCodeBasedInjection/LEVEL_10",
+   "method": "GET",
+   "param": "returnTo",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/Http3xxStatusCodeBasedInjection/LEVEL_11",
+   "method": "GET",
+   "param": "returnTo",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/Http3xxStatusCodeBasedInjection/LEVEL_12",
+   "method": "GET",
+   "param": "returnTo",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/XXEVulnerability/LEVEL_1",
+   "method": "POST",
+   "param": "name",
+   "location": "body",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/XXEVulnerability/LEVEL_2",
+   "method": "POST",
+   "param": "name",
+   "location": "body",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/XXEVulnerability/LEVEL_3",
+   "method": "POST",
+   "param": "name",
+   "location": "body",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/XXEVulnerability/LEVEL_4",
+   "method": "POST",
+   "param": "name",
+   "location": "body",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/XXEVulnerability/LEVEL_5",
+   "method": "POST",
+   "param": "name",
+   "location": "body",
+   "rendering": "server"
+  },
+  {
+   "url": "/VulnerableApp/XXEVulnerability/LEVEL_7",
+   "method": "POST",
+   "param": "name",
+   "location": "body",
+   "rendering": "server"
+  }
+ ]
+}

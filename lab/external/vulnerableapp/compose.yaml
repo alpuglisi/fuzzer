@@ -1,0 +1,40 @@
+# SasanLabs OWASP VulnerableApp 2.2.115 (Apache-2.0; external lab fixture, CC-LAB-0350 /
+# FR-LAB-350). Lab-only. A Spring Boot (Java 17) app built for testing DAST scanners:
+# each vulnerability class is served at numbered levels (`/VulnerableApp/<Class>/
+# LEVEL_<n>`), UNSECURE or SECURE, and the app describes them itself at
+# `/VulnerableApp/allEndPointJson` and `/VulnerableApp/scanner/dast` (the answer key's
+# source, lab/ground-truth-vulnerableapp). Upstream commit 821b347 (2026-11-19) is the
+# source of this tag.
+#
+# Safety: published on LOOPBACK ONLY (127.0.0.1), on its own bridge network. The image
+# is pinned by digest (tag kept for readability; the digest is what resolves). Its
+# command-injection, SSRF, XXE and path-traversal levels run INSIDE this container:
+# contained by dropped capabilities, no-new-privileges, a read-only root filesystem and
+# the loopback-only publish. The bridge has egress (the SSRF levels fetch what they are
+# given; NFR-LAB-safety "Not yet enforced"). Its data is an in-memory H2 database:
+# reset = remove the container.
+#
+# Run through lab/labctl.sh:  ./labctl.sh up vulnerableapp [--authorized]
+name: fuzzlab-vulnerableapp
+
+x-podman:
+  in_pod: false
+
+services:
+  app:
+    image: docker.io/sasanlabs/owasp-vulnerableapp:2.2.115@sha256:160bdbdf0490e27a5904d496c4a13b5e1541957dc4df5d05c611b1caec3b0193
+    networks: [vulnerableapp-net]
+    ports:
+      # Loopback only. Never bind 0.0.0.0.
+      - "127.0.0.1:${VAPP_PORT:-3093}:9090"
+    read_only: true
+    # its log file, the upload levels and the scanner benchmark write under the workdir
+    tmpfs: [/tmp, /app/logs, /app/upload, /app/contentDispositionUpload, /app/benchmarks]
+    working_dir: /app
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 512
+    mem_limit: 1g
+
+networks:
+  vulnerableapp-net: {}
