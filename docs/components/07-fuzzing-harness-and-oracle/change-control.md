@@ -233,6 +233,24 @@ Newest first.
     the MRO, so a `confirm` in a shared base is checked; the finding-URL builder
     (CC-FUZZ-0622) allowed in `tests/test_query_placement.py` (a record key, never
     sent) — done
+### CC-FUZZ-0681 — Greybox carries its session whole or refuses it (FR-FUZZ-682, BUG-0690 sweep) (2026-11-20)
+- Change: `fuzzlab/greybox/greybox_cli.py::_cookie_for` reads `SessionManager.session_headers` and raises `SessionAuthError` (the CLI's usage error, before any side effect) for a session carrying any header but `Cookie`, or no cookie; it returned `None` (an anonymous run) before.
+- Measurements before design (CLAUDE.md item 8): code read (subagent sweep, verified): `session_header` returns the Cookie line or else Authorization; `_cookie_for` kept only a `Cookie: ` prefix.
+- Impact (other components / project): SESS (reads `session_headers`, unchanged). A bearer-session greybox run now stops loudly instead of probing anonymously.
+- Risk (level; mitigation or accepted-risk justification): low; refusing is PA-0545(1)'s sanctioned disposition. Carrying a bearer in the greybox sender is not built (open gap).
+- Deliverables:
+  - [x] fix, `tests/test_greybox_session_carry.py` (4 tests) — done
+- Effectiveness (assessed 2026-11-20): the four tests pass; existing greybox session tests unchanged.
+
+### CC-FUZZ-0680 — The M6 browser executor carries the run's session; an unlanded plant is not observed (FR-FUZZ-680, FR-FUZZ-681, BUG-0690) (2026-11-20)
+- Change: `fuzzlab/tools/browserexec.py`: `PlaywrightBrowserExecutor(session_route=)`, `_scope`, `_visit_session` (the route's session via `browserauth.browser_session`, before the driver starts), `_carried` (headers, header and cookie scope, `held_session_cookies`), `_api_headers` (the session's headers on its origins; another origin refused, NotObserved), `_plant_landed` (SP-56 class of the plant's answer; not the application's → NotObserved); the context adopts `context_options(session)` and `apply_to_context`; `guard_page` gets `header_scope`, `cookie_scope`, `session_cookies`; the API plant passes `checked_api_request(session_cookies=, cookie_scope=)` (`SessionHostUnreached` → NotObserved). `fuzzlab/harness/auto_cli.py`: `PlaywrightBrowserExecutor(session_route=getattr(sender, "browser_session_route", None))`. Tests: `tests/test_m6_session.py` (34), `tests/test_browser_context_session.py` (3 guards); three fake-Playwright doubles answer 200 (`test_browser_scope.py`, `test_destructive_urls.py`, `test_confirm_trace.py`), and the status-less double's test expects NotObserved.
+- Measurements before design (CLAUDE.md item 8): lane NODE, NodeGoat live: the plant `POST /profile` 302 → `/login`, the run's probes to it 200 (78a24f2); this lane's real-browser fixture measures the pre-fix executor's plant and observe arriving without the cookie (`[('POST', '/profile', False), ('GET', '/dashboard', False)]`); Playwright's `context.request` shares the context's cookie jar (the fixture's plant carries the adopted cookie) and bypasses `route` (headers added explicitly). Live before/after in CC-LAB-0395.
+- Impact (other components / project): SESS (`browser_session_route`, CC-SESS-0650); CRAWL/AUD unchanged (same adoption helper). A run with `--identity --browser` now logs the browser in through the run's manager (no second login); auth-endpoint and isolated-path visits stay anonymous. Lane PERF's SP-105 sentinel-wait edit is in another function (`_wait_for_token`): no overlap expected at merge.
+- Risk (level; mitigation or accepted-risk justification): medium (a session now goes to the browser): every gate is applied (route `header_scope`/`cookie_scope`, SP-74 reach, the sender's auth-endpoint and isolation gates), guarded by tests. `_plant_landed` reads SP-16's login URL rule without the session's own `login_url` (an unusual login path's redirect is not recognised: a remaining false negative, not a false positive). A query-location (GET) plant's answer is not classed.
+- Deliverables:
+  - [x] fix, tests, guards, ERROR_LOG, BUG-0690, PA-0690, SP-125 — done
+  - [x] live re-runs (CC-LAB-0395) — see there
+- Effectiveness (assessed 2026-11-20): NodeGoat ground truth tp 12 -> 13 (NGOAT-0008), fp 0; NodeGoat crawl unchanged tp=12 fp=0 (crawl builds no plant step: open gap); bWAPP plant 302 -> 200 with the session (CC-LAB-0395). Harness counts in the lane report.
 
 ### CC-FUZZ-0611 — The NoSQL operator differential compares a page that echoes the submitted leaf (FR-FUZZ-612, BUG-0610) (2026-11-20)
 - Change: `fuzzlab/oracle/strategies.py`: `_JS_OBJECT_STRING` and

@@ -2316,6 +2316,32 @@ rewards) derives from it.
   - Enforced by: `tests/test_timing_payloads_carry_the_baseline.py` (discovery over every
     default strategy running `_confirm_timing`, proven on a synthetic offender),
     `tests/test_oracle_vectors.py::test_command_injection_confirms_past_a_filter_when_the_baseline_runs_a_command`.
+- **FR-FUZZ-680** *(the M6 browser carries the run's session; `CC-FUZZ-0680`, BUG-0690).*
+  In a run with an identity, every M6 browser visit (a stored-XSS plant and its observe
+  page, a DOM-XSS load) carries the session the run's probes carry: `fuzzlab auto` builds
+  `PlaywrightBrowserExecutor(session_route=sender.browser_session_route)` (FR-SESS-650),
+  and the executor adopts the route's session with the one adoption helper
+  (`browserauth.browser_session` / `context_options` / `apply_to_context`, FR-CRAWL-14)
+  before the driver starts. Its guard gets the session's scoped headers, its cookie scope
+  and its cookies (SP-74); an API plant (form or JSON) passes `checked_api_request` with
+  the session's cookies and cookie scope, adds the session's headers on its own origins
+  only, and is refused (not observed, never sent) on another origin than the session's
+  (FR-SESS-20). The visit is anonymous only where the sender's own gates send a probe
+  anonymously (an auth endpoint, an isolated path) or the run has no session
+  (`--no-login`). A login failure propagates as from the sender. `storage_headers` and a
+  session route are exclusive.
+- **FR-FUZZ-681** *(an unlanded plant is not observed; `CC-FUZZ-0680`, BUG-0690).* A form
+  or JSON plant whose answer SP-56 does not class as the application's own (a credentialed
+  login redirect or 401, a throttle, a gateway, a policy block; facts from SP-16's
+  `login_facts`) raises `NotObserved`: no verdict for that payload, never "did not fire"
+  (it would be a negative an ML stage trains on). The executor never decides a session
+  loss.
+- **FR-FUZZ-682** *(greybox carries its session whole or refuses; `CC-FUZZ-0681`,
+  BUG-0690 sweep).* `greybox_cli._cookie_for` reads every session header
+  (`SessionManager.session_headers`); the greybox sender carries a Cookie only, so a
+  session that carries any other header (a bearer; a browser login's Authorization beside
+  its cookie) or no cookie is refused (`SessionAuthError`, a usage error before any side
+  effect), never probed anonymously or with half of it.
 
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed

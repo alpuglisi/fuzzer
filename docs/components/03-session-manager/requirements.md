@@ -744,6 +744,15 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     `form.action`, also for a `method=GET` or `multipart/form-data` form.
   - **Known limitation:** the first form with a password field is taken (a signup
     form before the login form would be chosen).
+- **FR-SESS-650 (the session a browser visit of the run carries, CC-SESS-0650, BUG-0690)**
+  `SeamProbeSender.browser_session_route(urls)` is the run's one decision of the session
+  an M6 browser visit of ``urls`` (its plant and observe URLs) carries: ``(manager,
+  identity, base_url)`` -- the sender's own manager and identity, ensured as for a probe
+  -- or None (anonymous) when the sender has no manager or an anonymous identity, or any
+  URL of the visit is an auth endpoint (`_identity_for`, BUG-0112) or an isolated path
+  (FR-FUZZ-44; a browser visit has no isolated copy). One context carries one session,
+  so one gated URL sends the whole visit anonymously. No second session is made: the
+  browser adopts the run manager's current state (`browserauth.browser_session`).
 
 ## 4. Non-functional requirements
 - **NFR-SESS-single-flight** Concurrent expiry triggers exactly one re-auth. *(Amended

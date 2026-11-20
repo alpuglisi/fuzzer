@@ -273,13 +273,17 @@ def test_each_store_kind_records_its_request(monkeypatch, tmp_path, site):
         assert any(lb.startswith(f"[store] {method} /") for lb in _labels(v))
     # a fetch that returns no status (a test double): never drawn as a reply
     from fuzzlab.tools.browserexec import PlaywrightBrowserExecutor
-    _fake_pw(monkeypatch)
+    _fake_pw(monkeypatch, answered=False)
     with Store(tmp_path / "double.db") as db:
         run = db.start_run("auto", "h")
         rec = trace.TraceRecorder(db, run)
         with trace.recording(rec), trace.test_scope("t1"), \
                 trace.strategy_scope(STRATEGY):
-            PlaywrightBrowserExecutor().run(_stored(site, "form"), "tok")
+            # FR-FUZZ-681 (BUG-0690): a plant with no answer stored nothing: not
+            # observed, and its trace still shows the request made
+            from fuzzlab.oracle.browser import NotObserved
+            with pytest.raises(NotObserved, match="the plant was not stored"):
+                PlaywrightBrowserExecutor().run(_stored(site, "form"), "tok")
         rec.close()
         (store,) = [b for *_x, b in _bodies(db, run) if b["step"] == "store"]
         steps = diagram.sequence(db.conn, run, "test:t1")["steps"]
@@ -506,8 +510,9 @@ def test_a_placement_refusal_ends_unplaceable_at_the_refusal(monkeypatch, tmp_pa
         assert labels[-1].startswith("not placed: unplaceable")
 
 
-def _fake_pw(monkeypatch, *, launch_error=None, enter_error=None):
-    """A fake Playwright whose API request returns no response object."""
+def _fake_pw(monkeypatch, *, launch_error=None, enter_error=None, answered=True):
+    """A fake Playwright whose API request answers 200 (``answered``), or returns no
+    response object (a plant with no answer is not observed, FR-FUZZ-681)."""
     import sys
 
     class Page:
@@ -527,7 +532,8 @@ def _fake_pw(monkeypatch, *, launch_error=None, enter_error=None):
             pass
 
     class Context:
-        request = types.SimpleNamespace(fetch=lambda *a, **k: None)
+        request = types.SimpleNamespace(fetch=lambda *a, **k: types.SimpleNamespace(
+            status=200, headers={}) if answered else None)
         pages: list = []
 
         def expose_binding(self, name, fn):
