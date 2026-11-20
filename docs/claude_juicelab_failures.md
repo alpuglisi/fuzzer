@@ -2299,3 +2299,10 @@ Juice Shop lab is complete.
 - **Impact:** none merged (caught by the independent review); a false-positive path traversal on ordinary pages had it shipped.
 - **Cause:** I designed the signal from the one true positive I had, wrote no must-not-confirm fixture other than "always shows the names", and copied the file phase's control without checking PA-0117(1) for the new signal.
 - **Status:** fixed (CC-FUZZ-0641); PA-0641.
+
+### F-644 — After F-642 I still installed only the extras one failure had named, and the next harness run lost ten tests to a missing `labgen` extra
+- **What:** after F-642 I added `mitmproxy` alone. Lanes PHPX and GQL then merged in, so the harness on 5e9f067 (`--base 7a1ef32`) selected 202 files, ten of them php_laravel labgen tests: their `--check` gate failed closed ("requires scikit-learn", the `labgen` extra), and some also hit a 240 s `composer install` limit under the parallel pass.
+- **Evidence:** `verify5/parallel.log` (6283 passed, 15 failed); one test re-run alone on the same commit showed the scikit-learn message; every extra then installed and the harness re-run.
+- **Impact:** one more wasted harness cycle; nothing reported from it.
+- **Cause:** I fixed the instance (one package) instead of the class (every optional dependency group the suite imports); F-642's own lesson, not applied.
+- **Status:** remediated (every extra in `pyproject.toml` installed).
