@@ -2231,3 +2231,10 @@ Juice Shop lab is complete.
 - **Impact:** a wrong id in a pushed record for one commit; the tp/fp/fn/tn numbers and the no-regression conclusion were right.
 - **Cause:** I recorded a detail ahead of the measurement that backs it.
 - **Status:** fixed in the next commit (the list read from the stores).
+
+### F-633 — My classpath traversal strategy opted into PRG observation by copying its sibling, against a reviewed set
+- **What:** `PathTraversalClasspathResourceStrategy` (CC-FUZZ-0630, pushed in 4cb11db) set `prg = True` because `PathTraversalFsPathReadStrategy` does. The opt-in set is pinned as reviewed (`tests/test_prg_observation.py::PRG_STRATEGIES`); two of its tests failed in the lane's first harness run.
+- **Evidence:** `scratchpad/vapp/verify/parallel.log` (f78ae08: `test_only_the_reviewed_strategies_opt_in`, `test_payload_independent_follow_ups_never_confirm_an_opt_in_strategy`); fixed in e44a94a.
+- **Impact:** a failed harness run and a re-run; on the lane branch only, never merged.
+- **Cause:** I copied a class attribute without checking which guard owns it, and ran only the oracle tests I picked before committing, not the harness.
+- **Status:** fixed (no opt-in; the reviewed set unchanged).
