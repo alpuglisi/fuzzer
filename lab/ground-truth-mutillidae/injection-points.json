@@ -1,0 +1,132 @@
+{
+  "version": 1,
+  "target": "mutillidae_2_12_8",
+  "points": [
+    {
+      "url": "/index.php?page=user-info.php&user-info-php-submit-button=View+Account+Details",
+      "method": "GET",
+      "param": "username",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/index.php?page=user-info.php&user-info-php-submit-button=View+Account+Details",
+      "method": "GET",
+      "param": "password",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/index.php?page=user-info-xpath.php&user-info-php-submit-button=View+Account+Details",
+      "method": "GET",
+      "param": "username",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/index.php?page=user-info-xpath.php&user-info-php-submit-button=View+Account+Details",
+      "method": "GET",
+      "param": "password",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/index.php?page=conference-room-lookup.php",
+      "method": "POST",
+      "param": "default_room_common_name",
+      "location": "body",
+      "rendering": "server"
+    },
+    {
+      "url": "/index.php?page=dns-lookup.php",
+      "method": "POST",
+      "param": "target_host",
+      "location": "body",
+      "rendering": "server"
+    },
+    {
+      "url": "/index.php?page=echo.php",
+      "method": "POST",
+      "param": "message",
+      "location": "body",
+      "rendering": "server"
+    },
+    {
+      "url": "/index.php?page=xml-validator.php&xml-validator-php-submit-button=Validate+XML",
+      "method": "POST",
+      "param": "xml",
+      "location": "body",
+      "rendering": "server"
+    },
+    {
+      "url": "/index.php?page=pen-test-tool-lookup.php&pen-test-tool-lookup-php-submit-button=Lookup+Tool",
+      "method": "POST",
+      "param": "ToolID",
+      "location": "body",
+      "rendering": "server"
+    },
+    {
+      "url": "/index.php?page=redirectandlog.php",
+      "method": "GET",
+      "param": "forwardurl",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/index.php?page=user-poll.php&user-poll-php-submit-button=Submit+Vote",
+      "method": "GET",
+      "param": "choice",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/index.php?page=user-poll.php&user-poll-php-submit-button=Submit+Vote",
+      "method": "GET",
+      "param": "initials",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/index.php?page=document-viewer.php",
+      "method": "GET",
+      "param": "PathToDocument",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/index.php",
+      "method": "GET",
+      "param": "page",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/hints-page-wrapper.php",
+      "method": "GET",
+      "param": "level1HintIncludeFile",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/includes/pop-up-help-context-generator.php",
+      "method": "GET",
+      "param": "pagename",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/index.php?page=view-account-profile.php",
+      "method": "GET",
+      "param": "uid",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/index.php?page=edit-account-profile.php",
+      "method": "GET",
+      "param": "uid",
+      "location": "query",
+      "rendering": "server"
+    }
+  ]
+}

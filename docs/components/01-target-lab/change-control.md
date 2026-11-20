@@ -3,6 +3,99 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0343 — Mutillidae II measured: BASELINE and AFTER, gaps recorded (2026-11-20)
+- Change: none to code; the measurement record of lane PHPX (item PHPX).
+- Results (scored against `lab/ground-truth-mutillidae`, 39 cases, 28 positives, 11
+  negatives):
+  - BASELINE (`2be7a50` in a detached worktree; only the answer key and its two schema values added so it loads): `auto --points ground-truth --identity mutillidae-user --oob`: aborts at login (SessionAuthError: no login form found), 0 cases scored, 4.9 s; the same run anonymous: tp=5 fp=5 fn=23 tn=11, 355 requests, 7.4 s (the 5 fp are true findings recorded at `/index.php`, which no routed case matches); `crawl --engine playwright --max-depth 2 --workers 4` (anonymous, 25 s) then `auto --points crawl`: tp=4 fp=10 fn=24 tn=11, 1441 requests, 18.8 s.
+  - AFTER (this change): `auto --base-url http://127.0.0.1:3093 --ground-truth lab/ground-truth-mutillidae --points ground-truth --identity mutillidae-user --oob --authorized`: tp=24 fp=0 fn=4 tn=11, 482 requests, 28.2 s (MCC 0.79); `crawl --identity mutillidae-user --max-depth 2 --workers 4` (17 s) then `auto --points crawl --spider-db ...`: tp=6 fp=0 fn=22 tn=11, 968 requests, 9.6 s.
+  - Regression check of the shared code this lane touched (finding URL, auth-endpoint
+    gate, login discovery): Juice Shop (`auto --points ground-truth --identity juice-user
+    --oob`) at `2be7a50` and after: tp=3 fp=0 fn=12 tn=3, 148 requests, both.
+- Gaps (open, each verified by hand): MUTL-0022 XXE read in band (`file:///etc/passwd`
+  is expanded and echoed; `XxeInBandMarkerStrategy` needs the OOB canary, which the
+  container cannot reach on the host's loopback; no file-read XXE strategy);
+  MUTL-0025 reflected XSS inside a `<script>` string (needs a `</script>` breakout);
+  MUTL-0027 XSS in the meta-refresh `content` attribute; MUTL-0033 the `page` value in
+  `href`/`title` attributes. Not scoreable: OS command injection (dns-lookup.php,
+  echo.php) -- no command-injection value in the labels schema, and
+  `CommandInjectionStrategy.vuln_class` is hyphenated (PA-0047(2)); left for a separate
+  change. Not present: HTTP header injection (redirectandlog.php's `header()` is
+  commented out; PHP refuses CR/LF in headers). Level-5 negatives: not usable in the key
+  (the level is session state, not part of a request), measured directly instead: both
+  new strategies give no verdict at level 5 (CC-FUZZ-0620).
+- Crawl (flagged to the orchestrator, not fixed here): the spider loads Mutillidae's
+  state-changing GET links (`index.php?do=toggle-security`, `do=toggle-enforce-ssl`,
+  `do=toggle-hints`): `core.urls.destructive_reason` (SP-09) refuses `do=logout` but
+  not `toggle`; after `toggle-enforce-ssl` the app redirects the crawl's session to
+  https, which the session manager rightly refuses (FR-SESS-20), so 121 pages stay
+  unresolved and the frontier's route-shape budget refuses 66 more (`index.php?page=X`
+  is one shape, FR-CRAWL-35). Both bound the crawl pass's reach.
+- Deliverables:
+  - [x] runs, this record — done
+
+### CC-LAB-0342 — Mutillidae II answer key (FR-LAB-342) (2026-11-20)
+- Change: `lab/ground-truth-mutillidae/` (labels, points, expected results; 39 cases:
+  28 positives, 11 negatives; `[reach:]` / `[prov:]` tags); `.gitignore` negation
+  (PA-0038); the static tests' GT list.
+- Reason: lane PHPX: a broad regression target on a PHP front controller, and the first
+  ground truth for LDAP and XPath injection.
+- Detail: every case checked against the app's own source in the pinned image (page,
+  line) and live; negatives are other classes on the same points (an LDAP probe on the
+  SQL and XPath pages, SQL on the LDAP and XPath pages, ...), the shape that tests the
+  new strategies' false positives. A point's URL carries the form's submit field as a
+  query sibling (the pages read `$_REQUEST`); its case is scored at the page
+  (`harness.scoring.case_key`, CC-FUZZ-0622). Six cases were added after the crawl pass
+  found them, each verified by hand (MUTL-0034..0039). The documented XPath bypass
+  (`' or 1=1 or ''='`) selects nothing in this version: set-up-database.php rewrites
+  `data/accounts.xml` as `<Account>` elements while the page queries `//Employee`
+  (measured); a union still selects nodes, so the flaw stays a positive.
+- Risk: low. user-poll.php's probes insert vote rows (lab-only).
+- Deliverables:
+  - [x] key, `tests/test_external_labs_static.py` entry, `tests/test_ldap_xpath.py`
+    key checks — done
+
+### CC-LAB-0341 — Mutillidae bootstrap: database, directory, account (FR-LAB-341) (2026-11-20)
+- Change: `fuzzlab/lab_fixtures/external.py` (`fetch_mutillidae_ldif`,
+  `load_mutillidae_directory`, `bootstrap_mutillidae`, `LAB_META["mutillidae"]`, the CLI's
+  fetch and bootstrap steps).
+- Reason: the app needs its database built (`set-up-database.php`, after every start:
+  the database is on tmpfs), its directory loaded (upstream's README: `ldapadd -c` of its
+  LDIF), and an account (its LDAP, SQL, command and XXE pages need a login).
+- Detail (each measured live): the LDIF is fetched from the pinned
+  webpwnized/mutillidae-docker commit and verified by sha256 and size, then sent on
+  `ldapadd`'s stdin through `<engine> exec` of the project's directory container (found
+  by its exact project and service labels; exit 68 "already exists" kept, 255 "slapd not
+  up yet" retried); `set-up-database.php` is retried until it reports the connection
+  (the gated live test's first run met MariaDB still starting); the account is registered
+  through the app's form and verified by a positive differential (`user-info.php` 200
+  with the session, 302 without); last, the conference-room lookup must list room 1F104.
+  A login is kept only on a request that already had a session cookie: the form page is
+  read first.
+- Risk: low. The admin bind password is upstream's published default (in its images),
+  passed in `ldapadd`'s argv inside the lab container only.
+- Deliverables:
+  - [x] code; `tests/test_mutillidae_fixture.py`; `tests/test_mutillidae_live.py`
+    (gated; passed live: reset, bootstrap, scored run, 39.9 s) — done
+
+### CC-LAB-0340 — OWASP Mutillidae II as an external lab (FR-LAB-340) (2026-11-20)
+- Change: `lab/external/mutillidae/compose.yaml` (project `fuzzlab-mutillidae`);
+  `fuzzlab/lab_fixtures/external.py` (the three image pins in `PINNED_IMAGES`).
+- Reason: lane PHPX (item PHPX): a PHP / MariaDB / OpenLDAP app with LDAP and XPath
+  injection, which fuzzlab had no strategy for.
+- Detail: upstream's own images (`webpwnized/mutillidae:www`, `:database`, `:ldap`),
+  Mutillidae 2.12.8 on PHP 8.5.11, MariaDB 13.0.2, OpenLDAP 2.4.57, pinned by digest;
+  phpMyAdmin and phpLDAPadmin left out. The web tier publishes 127.0.0.1:3093 only
+  (`MUTILLIDAE_PORT`); the database and directory are unpublished on internal networks,
+  reached by the service names upstream's code uses. Capabilities dropped; the directory
+  needs `KILL` and `NET_BIND_SERVICE` (its start script signals slapd and binds 389;
+  measured: without them it exits).
+- Risk: medium (the app runs OS commands for its users); contained by loopback-only
+  publishing, internal back-end networks, dropped capabilities, `no-new-privileges`.
+  The web tier's bridge has egress (as Juice Shop's; NFR-LAB-safety "not yet enforced").
+- Deliverables:
+  - [x] fixture; exposure check passed live (`labctl.sh up|status`) — done
+
 ### CC-LAB-0332 — Juice Shop's `$where` route confirmed by the server-side JavaScript strategy, without crashing it (2026-11-20)
 - Change: none to code; a measurement record for CC-LAB-0317's open item.
 - Results (a disposable instance: `FUZZLAB_EXT_PROJECT_SUFFIX=-ssjs JUICE_PORT=3300

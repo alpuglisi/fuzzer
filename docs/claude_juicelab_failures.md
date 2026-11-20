@@ -2237,3 +2237,18 @@ Juice Shop lab is complete.
 - **Impact:** the review the gate provides has not happened; the orchestrator's independent verification before the merge is the first review.
 - **Cause:** I followed the lane brief's work order (measure, build, re-measure) and did not stop to run the gate.
 - **Status:** open; flagged in the lane's final report for the orchestrator.
+
+### F-620 — Lane PHPX: two defects in my own Mutillidae bootstrap, caught only by my live runs, and the item ran past its 4 h budget
+- **What:** my first `load_mutillidae_directory` filtered containers with `--filter com.docker.compose.project=...` (no `label=`), so it found none; my first `bootstrap_mutillidae` called `set-up-database.php` once, which on a fresh boot answers 200 without connecting while MariaDB starts. Separately, I first wrote routed answer-key URLs expecting the scorer to match them, without checking how findings record a URL (path only), and the item (PHPX) passed its 4 h budget before the final report.
+- **Evidence:** the first `labctl.sh reset mutillidae --authorized` ("want one running directory container ..., found 0"); the gated live test's first run ("set-up-database.php: HTTP 200"); the anonymous BASELINE's 5 fp all recorded at `/index.php` (CC-LAB-0343).
+- **Impact:** none shipped: both bootstrap defects were fixed before the first commit, each with a fake-runner / fake-app test (`tests/test_mutillidae_fixture.py`); the URL finding became CC-FUZZ-0622. The budget overrun is reported to the orchestrator.
+- **Cause:** I wrote the container query from memory instead of from `extctl.sh`'s own `_ids` (which says `label=`), and tested the bootstrap first against a lab that had been up for minutes.
+- **Status:** fixed (CC-LAB-0341); budget overrun flagged in the lane report.
+
+### F-621 — Lane PHPX: I narrowed the auth-endpoint safety gate without checking what its callers pass (BUG-0620)
+- **What:** CC-SESS-0611 made a routed login an auth endpoint for its own page only, judged on the URL; a crawled point's route is in its entries, so its login form's probes would have gone out with the session. My own `_front_controller_route` docstring stated the entries fact.
+- **Evidence:** the orchestrator's review round 1 of `d321289`; BUG-0620's reproduction.
+- **Impact:** a safety regression on the pushed branch for crawled front-controller logins (not merged; not observed sending in a run).
+- **Cause:** I tested the narrowed rule on ground-truth URLs only and gave it a fail-open default; I swept the finding URL's readers but not the gate's callers.
+- **Status:** fixed (CC-SESS-0612); PA-0620.
+
