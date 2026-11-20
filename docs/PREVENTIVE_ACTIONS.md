@@ -3062,3 +3062,35 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
   2. **Enforced by discovery:** every default strategy that runs the shared timing engine is run with and without a base value, and every mutation must start with the value its baseline sent; the guard is proven on a synthetic offender (PA-0034(2)).
   3. **A fake application in a timing test costs time for the base value too** (a ping-shaped sender), so a payload that drops it is seen to miss. (from BUG-0630)
   - Enforced by: tests/test_timing_payloads_carry_the_baseline.py::test_every_timing_mutation_carries_the_baselines_value, tests/test_timing_payloads_carry_the_baseline.py::test_the_guard_flags_a_payload_that_drops_the_baseline_value, tests/test_oracle_vectors.py::test_command_injection_confirms_past_a_filter_when_the_baseline_runs_a_command
+- **PA-0650** — Strengthens `PA-0126(2)`, extends `PA-0551(2)` from discovery to
+  confirmation mechanisms, and strengthens `PA-0507(1)`, after BUG-0650: lane PERF's
+  quiet-settle early end (CC-FUZZ-0650) ended the M6 sentinel wait once a tracker saw no
+  pending timer, request or animation, and missed sinks run by SMIL animation events,
+  `scheduler.postTask`, message ports, `postMessage`, a meta refresh, media events and a
+  request held past SP-40's limit. PA-0126(2)'s one fixture (a timer sink) let a design
+  that tracks timers pass; the shadow run held 2 positives.
+  1. **A confirmation mechanism's observation window ends only on its evidence, its
+     deadline or an error**, never on a prediction that nothing more can happen (for M6:
+     the hit, `SETTLE_MS` from `load` within its cap, or a Playwright error).
+  2. **A change that shortens or skips part of an observation is tested against a
+     fixture built from the platform's ways of running work later**, not from the
+     change's own list (for a browser: timers, requests including long-held ones,
+     animation frames, SMIL and CSS animation events, the task-scheduling and
+     message-port APIs, `postMessage`, refresh navigation, media events, workers,
+     popups), each a real-browser test judged by the sentinel.
+  3. **A "no detection lost" claim states how many positive observations its evidence
+     holds**; a shadow or BEFORE/AFTER run with too few positives to see a miss is not
+     evidence that nothing is missed. (from BUG-0650)
+  - Enforced by: tests/test_m6_window_guard.py::test_the_wait_lasts_its_whole_window_without_a_hit, tests/test_m6_window_guard.py::test_the_guard_catches_an_early_end, tests/test_m6_window_guard.py::test_the_wait_takes_no_early_end_hook, tests/test_m6_slow_sinks.py::test_the_full_window_sees_a_late_sink, tests/test_m6_slow_sinks.py::test_the_fixture_really_is_late
+- **PA-0651** — *(SUPERSEDED by `PA-0671`, lane NAV, BUG-0671: a test launches the
+  product's binary and never chooses one by install path; rule (1) below, matching
+  every install layout, is withdrawn, and rule (2) is met by PA-0671's guard.)* Extends
+  `PA-0035` (probe the real operation) to how a test finds a pre-installed browser,
+  after BUG-0651: twelve lookups named `chrome-linux/chrome`, matched
+  nothing on a `chrome-linux64` image and silently fell back to Playwright's own lookup.
+  1. **A lookup of a pre-installed browser matches every layout the pinned Playwright
+     range installs** (`chromium-*/chrome-linux*/chrome`), never one spelled out.
+  2. **A lookup that finds nothing is a fall-back the code chose, not an accident:** a
+     helper that pins a binary says (by its result) whether it pinned one. (from BUG-0651)
+  - Enforced by: tests/test_browser_binary_choice.py::test_no_python_file_chooses_a_browser_binary_by_its_install_path, tests/test_browser_binary_choice.py::test_the_install_path_guard_catches_synthetic_offenders
+

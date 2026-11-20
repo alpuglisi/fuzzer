@@ -52,6 +52,36 @@ Format per entry:
 - **Remediation:** every timing payload is the baseline's own value plus a template
   (`cmdi_timing_payloads`, CC-FUZZ-0631); a discovery guard checks every timing strategy
   for it (PA-0630). Live: LEVEL_3..5 confirm, LEVEL_6..8 (SECURE) do not.
+## 2026-11-20 — superseded: the navigation-abort failures were a product defect on the headless shell (BUG-0670, BUG-0671)
+- **Symptom:** as below: five `tests/test_navigation_aborts.py` failures; my two entries below gave the cause first as Chromium drift, then as the tests running the headless shell.
+- **Root cause:** lane NAV (BUG-0670, BUG-0671): the product runs Playwright's headless shell, on which an empty-body 4xx/5xx loads as a page instead of an error page (SP-01 broken there); the tests' path glob had run full Chrome before Playwright's layout changed.
+- **Remediation:** NAV's navguard fix and binary-choice guard (merged at 9cabe61); my glob change (931311b, BUG-0651) dropped at that merge.
+- **Status:** Fixed (supersedes the two entries below on this question)
+
+## 2026-11-20 — correction: the five "known" navigation-abort failures were BUG-0651, not Chromium drift
+- **Symptom:** five `tests/test_navigation_aborts.py` tests failed in every harness run of lanes NODE, PHPX and PERF in this container; the entry below ("environment ... (b)") blamed Playwright 1.63 / Chromium 1243.
+- **Root cause:** BUG-0651: the tests' Chromium lookup matched nothing, so Playwright ran its headless shell instead of the full Chrome build, where the error-page behaviour differs. Measured: tree 2be7a50 with the full Chrome pinned passes 89/89.
+- **Remediation:** the lookup fixed (BUG-0651, PA-0651); the harness of d565523: 114 files, 4568 passed, 0 failed.
+- **Status:** Fixed (supersedes the "(b)" root cause and status of the environment entry below)
+
+## 2026-11-20 — tests / harness: no pre-installed Chromium lookup matched a `chrome-linux64` build (fixed, BUG-0651/PA-0651)
+- **Symptom:** in lane PERF's container the browser tests' `PLAYWRIGHT_CHROMIUM_EXECUTABLE` pin was never set: `/opt/pw-browsers/chromium-*/chrome-linux/chrome` matched nothing (the binary is `chromium-1243/chrome-linux64/chrome`).
+- **Root cause:** the lookup hard-coded Playwright's older install layout, in twelve copies; a miss fell through silently to Playwright's own lookup.
+- **Remediation:** every lookup globs `chrome-linux*/chrome`; a whole-package guard (`tests/test_chromium_glob_guard.py`).
+- **Status:** Fixed
+
+## 2026-11-20 — FUZZ: the M6 quiet-settle early end missed late sinks (fixed by withdrawal, BUG-0650/PA-0650)
+- **Symptom:** the orchestrator's independent verification of lane PERF (real Chromium, the real executor): XSS sinks run by an SVG animation's `onend`/`onbegin`, `scheduler.postTask` with a delay, a MessageChannel or `postMessage` chain, a meta refresh, a video's `timeupdate`, a fetch answered after 2.8-3.2 s, or a page that replaced `performance.now` were reported "not executed"; the 4 s wait caught each. A blocked main thread hung the probe.
+- **Root cause:** CC-FUZZ-0650's `PageQuiet` ended the wait when its tracker saw no pending timer, request or animation; the platform runs a page's script again by many sources it did not watch, and it was validated only on the sources it watched and on labs with 2 positive observations.
+- **Remediation:** the early end withdrawn (CC-FUZZ-0651): `browserexec.py` restored, `pagequiet.py` deleted, SP-105 withdrawn; the verifier's cases are regression tests; PA-0650.
+- **Status:** Fixed (never merged into the integration branch)
+
+## 2026-11-20 — environment (lane PERF's container: packaging tests, navigation-abort tests, two external labs)
+- **Symptom:** `verify_change.py --base 2be7a50` on 48609d1: (a) the six packaging tests failed with `ModuleNotFoundError: No module named 'setuptools'`; (b) five `tests/test_navigation_aborts.py` tests failed (`DID NOT RAISE playwright Error`; `KeyError` on a `missing0` mark); (c) bringing up two secDevLabs labs at once failed (`git remote failed: remote origin already exists`; `cannot change to .../.cache/secdevlabs/src`); (d) Gossip World's `crawl --identity sdl-gossip-user` raised `SessionAuthError` while the lab's bootstrap logged in.
+- **Root cause:** (a) the venv made for the lane (Python 3.13) carries no setuptools; (b) not this lane's change: the same five fail on tree 2be7a50 in this container, whose only Chromium is build 1243 with Playwright 1.63; SP-01's error-page behaviour was measured on Playwright 1.56 / Chromium 141 (CC-CRAWL-0065), and Playwright 1.56 cannot drive build 1243 here (34 failures); (c) the secDevLabs labs share one source checkout, fetched without a lock; (d) not investigated (outside lane PERF).
+- **Remediation:** (a) `pip install setuptools wheel` in the venv: the packaging tests pass (harness of the next commit); (b), (c), (d) none in this lane: reported to the orchestrator (a fix to (b) is in `navguard.py`, a hot file and SP-01; (c) worked around by bringing the labs up one at a time).
+- **Status:** (a) Environment (fixed outside the repo); (b), (c), (d) Open (flagged)
+
 ## 2026-11-20 — session / probe sender (a routed login's auth gate judged the URL, not the request; BUG-0620)
 - **Symptom:** orchestrator review of lane PHPX: with `/index.php?page=login.php` recorded, `is_auth_endpoint("/index.php")` was False, so a crawled login form (route in its sibling entries) would be probed with the run's session.
 - **Root cause:** CC-SESS-0611 narrowed the gate for routed logins against ground-truth URLs only; `SeamProbeSender._send` judges the URL before binding the entries, and a URL naming no route defaulted to "not an auth endpoint".

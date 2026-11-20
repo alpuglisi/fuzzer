@@ -121,6 +121,57 @@ Newest first.
   In the lab run (CC-LAB-0350): VAPP-0051/0052 and VAPP-0066 newly
   confirmed; no path-traversal or SSRF negative confirmed. Juice Shop regression:
   CC-LAB-0352.
+### CC-FUZZ-0651 — The quiet-settle early end withdrawn: M6 keeps its whole window (BUG-0650) (2026-11-20)
+- Change: `fuzzlab/tools/browserexec.py` restored to its 2be7a50 text; `fuzzlab/tools/
+  pagequiet.py` and `tests/test_pagequiet.py` deleted; the fakes of
+  `tests/test_confirm_trace.py` and `tests/test_m6_navigation_failures.py` restored;
+  `scripts/measure_scan_perf.py` loses `--shadow-quiet`; new `tests/test_m6_window_guard.py`
+  (PA-0650(1), proven on a synthetic offender) and `tests/test_m6_slow_sinks.py` (the
+  verifier's late sinks, each detected by the whole window); SP-105 withdrawn;
+  FR-FUZZ-650/651 superseded by FR-FUZZ-653; BUG-0650, PA-0650, F-652.
+- Reason: independent verification found CC-FUZZ-0650 missed XSS the 4 s wait caught
+  (BUG-0650). The owner's decision, through the orchestrator: detection beats speed.
+- Impact: M6 is back to 2be7a50's timing (CC-LAB-0371's BEFORE column); CC-FUZZ-0650's
+  speed-up is gone. Nothing else changed.
+- Risk: none beyond 2be7a50's.
+- Deliverables:
+  - [x] withdrawal, guard and regression tests, records — done
+  - [ ] a speed-up that keeps the whole window (FR-FUZZ-653) — open
+- Effectiveness (assessed 2026-11-20): the window guard passes on the restored executor
+  and fails a synthetic early end; see `tests/test_m6_slow_sinks.py` for the late sinks.
+
+### CC-FUZZ-0650 — The M6 sentinel wait ends once the page has gone quiet (SP-105) (2026-11-20)
+- Change: `fuzzlab/tools/pagequiet.py` (new: `PageQuiet`, `TRACKER_JS`, `QUIET_MS`);
+  `fuzzlab/tools/browserexec.py` (`EARLY_END`; `_in_browser` installs `PageQuiet`
+  before the first navigation; `_wait_for_token(..., quiet=)` breaks once settled,
+  after one more event pump); `tests/test_pagequiet.py` (new); the fake Playwright
+  contexts of `tests/test_confirm_trace.py` and `tests/test_m6_navigation_failures.py`
+  gain `add_init_script`; SP-105; FR-FUZZ-650..652.
+- Reason (measured, `scripts/measure_scan_perf.py`, CC-LAB-0370): the M6 browser was
+  600 of 621 s on bWAPP's ground truth and 659 of 842 s on its crawl; each observation
+  of a payload that does not fire waited the whole `SETTLE_MS` (4 s). The shadow run
+  (`--browser-timeline --shadow-quiet`: the whole wait kept, the early end recorded)
+  over Juice Shop gt/crawl, SSType gt, CopyNPaste crawl and bWAPP gt: 173
+  observations, every hit before the would-be end (0 after), every settled negative
+  settled at 0.52-0.56 s; Juice Shop's pages with socket.io's WebSocket kept the
+  whole window (7 of 15 observations).
+- Not built (measured): keeping one Playwright driver per run (FR-FUZZ-652). A held
+  sync driver broke later sync Playwright use on the thread (3 real-browser tests).
+- Impact: M6 only. Verdicts unchanged by construction (a hit still confirms; a page
+  that never loaded is still `NotObserved`); trace spans (`waited`) record the shorter
+  wait. SP-40 unchanged (a consumer).
+- Risk: medium -- an early end could miss a sink a tracker cannot see (FR-FUZZ-651);
+  mitigated: fail closed on any unreadable frame, streams and workers keep the whole
+  window, real-browser tests for sinks run by a request's answer, an interval, an
+  animation-frame loop and a timer chain, the shadow run on the labs.
+- Deliverables:
+  - [x] code, tests, SP-105, FR-FUZZ-650..652, ARCHITECTURE — done
+  - [x] BEFORE/AFTER on the labs (tp/fp/fn/tn identical) — done (CC-LAB-0371)
+- Effectiveness (assessed 2026-11-20): met. On ten lab configurations tp/fp/fn/tn and
+  the matched case ids were identical BEFORE and AFTER; wall time 620.9 -> 198.7 s
+  (bWAPP gt), 842.0 -> 391.4 s (bWAPP crawl), 43.7 -> 24.6 s (Juice Shop gt), 28.4 ->
+  7.9 s (SSType gt), 28.5 -> 7.9 s (CopyNPaste crawl); requests unchanged (CC-LAB-0371).
+
 ### CC-FUZZ-0622 — A front controller's page is part of a finding's URL and of a case's scoring key (FR-FUZZ-622, SP-90) (2026-11-20)
 - Change: `fuzzlab/oracle/oracle.py` (`finding_url` keeps `?<route>=<page>` of a router
   URL, from its query or a crawled point's sibling entries; `_front_controller_route`),
