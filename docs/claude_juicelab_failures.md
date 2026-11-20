@@ -2383,3 +2383,23 @@ Juice Shop lab is complete.
 - **Impact:** the labgen apps' recall overstated real detection: removing the lab names took twitch-clone 14 -> 11, netflix-clone 11 -> 9, booking-clone 3 -> 2 on ground-truth points. Other heuristics fitted to one lab or one framework remain (Angular Material selectors, bWAPP-measured settings words, the 8 `sink_context_in` rules that fire only from answer-key labels): listed open in the lane report.
 - **Status:** the named items fixed on the BBOX branch (CC-AUD-0660, CC-FUZZ-0660); PA-0660 and its guard added; the remaining items listed for the orchestrator.
 
+
+### F-730 — Earlier agent sessions fitted five more heuristics to single labs (found by lane HEUR)
+- **What:** agent-written gates and strategies carried lab knowledge the BBOX guard could not see: the browser login's `repeat` / `retype` account words (one lab's field names, CC-SESS-0021), the crawler's settings words (bWAPP's pickers plus reviewer intuition, CC-CRAWL-0013/0014), the grey-box `/var/www/html` flat mapping (CC-FUZZ-0016/0024), the ReDoS 20 ms threshold calibrated on the labgen cells (CC-FUZZ-0025), and the IDOR strategy's two invented ids with a lab-template echo check (CC-FUZZ-0033).
+- **Evidence:** BUG-0730..BUG-0734; CC-SESS-0660, CC-CRAWL-0680, CC-FUZZ-0710..0712.
+- **Impact:** gates whose refusals rested on no source, a grey-box mode that worked only on one image's layout, a timing confirmer with a 0.63 % false-confirm rate under 0-40 ms jitter, and an IDOR confirmer that could confirm only id-echoing apps.
+- **Status:** fixed in lane HEUR; PA-0730 (citation guards for word tables, target-derived facts, premise controls); remaining unsourced lists listed in PA-0730's sweep.
+
+### F-731 — A sub-agent's IDOR rewrite would have confirmed every public id-keyed page (BUG-0735)
+- **What:** the HEUR-CD sub-agent replaced the fixed ids with the captured id and its neighbour and kept the documented "public echo endpoint confirms" limitation as accepted, without seeing that the old non-existent ids had been the control against public objects; with R-ACCESS-CONTROL nominating every id-shaped GET parameter, every public catalogue page would have confirmed.
+- **Evidence:** BUG-0735; the sub-agent's commit e1e4c98 (docstring: "can also false-positive on a legitimately public object keyed by id"); fixed by CC-FUZZ-0714 before merge.
+- **Impact:** none shipped (caught in the lane's diff review); had it merged, a false-positive class on every crawl run.
+- **Cause:** the brief asked to keep the existing fp safeguards, not to name the implicit ones a value change removes; the sub-agent treated a pinned limitation as settled.
+- **Status:** fixed (CC-FUZZ-0714); PA-0730(4).
+
+### F-732 — I ran the first bWAPP ground-truth diagnostic on the wrong base URL
+- **What:** my measurement script ran bWAPP's ground-truth pass with the `/bWAPP/` sub-path base; the runbook says bWAPP's ground-truth base is the origin (BUG-0300). It scored tp=0.
+- **Evidence:** the lane's measurement logs (before/bwapp/auto_gt.log, first run: tp=0; rerun with the origin base after a reset: tp=21).
+- **Impact:** about 13 minutes of lab time; no wrong figure reported (the run was redone before any comparison).
+- **Cause:** I copied the crawl pass's base for the ground-truth pass without reading the runbook's line for it.
+- **Status:** corrected in the script; both before and after use the origin for the ground-truth pass.
