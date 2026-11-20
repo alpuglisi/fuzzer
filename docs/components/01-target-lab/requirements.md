@@ -6399,6 +6399,19 @@ lane) can submit a payload as
   answers an account, and the database is tmpfs: without one the positives SDLMG-0001/0002
   cannot be observed (measured 2026-11-20). `auto` needs no `--identity` for them.
 
+- **FR-LAB-370** *(scan performance probe; `CC-LAB-0370`, 2026-11-20).*
+  `scripts/measure_scan_perf.py` runs `fuzzlab auto` in-process against one running
+  external lab (`--lab`, `--points ground-truth|crawl`, a fresh `--store`, `--spider-db`
+  for crawl points, `--authorized` required; flags after `--` go to `auto`) and prints
+  one JSON document: tp/fp/fn/tn with the matched, missed and false-alarm case ids (the
+  live tests' scorer), the run's `run_metrics`, wall time, and wall-clock time per
+  phase (fingerprint baseline, audit, oracle confirmation, each strategy, the M6
+  browser executor split into driver start / session / driver stop, session login,
+  HTTP sends, `time.sleep`). `--browser-timeline` records each M6 observation's load,
+  hit, last network activity and timer activity (a timer-logging init script:
+  measurement only); `--cprofile OUT` adds a cProfile (CPU hot spots only: it
+  misattributes time across Playwright's greenlets). Lab only; nothing asserted.
+
 - **FR-LAB-340** *(OWASP Mutillidae II; `CC-LAB-0340`, 2026-11-20).* Mutillidae II
   2.12.8 is an external lab (`lab/external/mutillidae/`): upstream's www, database and
   directory images pinned by digest; the web tier on loopback only, the database and
@@ -6501,6 +6514,37 @@ lane) can submit a payload as
   client, so no cookie is shared) and stores each under its own identity, reporting
   them as `BootstrapResult.peers`. `secdevlabs-gossip-world` has a second account,
   `sdl-gossip-peer` (`fuzzlab_peer`), for `fuzzlab auto --peer-identity` (FR-FUZZ-55).
+- **FR-LAB-350** *(SasanLabs OWASP VulnerableApp, a Java / Spring Boot external lab;
+  `CC-LAB-0350`, 2026-11-20).* `lab/external/vulnerableapp/` runs
+  `sasanlabs/owasp-vulnerableapp:2.2.115` pinned by digest (`VULNERABLEAPP_IMAGE`; upstream
+  commit 821b347) on 127.0.0.1:3095 (`VAPP_PORT`; CC-LAB-0353), read-only root, every capability
+  dropped, its working-directory writes on tmpfs, no login (no bootstrap identity). Its
+  ground truth `lab/ground-truth-vulnerableapp/` (cases `VAPP-NNNN`) is derived from the
+  app's own scanner metadata (`/VulnerableApp/allEndPointJson`, `/scanner/dast`): each
+  level's UNSECURE / SECURE variant is the verdict, the SECURE levels the negatives, for
+  the classes fuzzlab scores (SQL injection error / union / blind, reflected and stored
+  XSS, command injection, path traversal, SSRF, open redirect, XXE). Where upstream's
+  own source contradicts its variant the case says so and follows the source (two
+  error-based SQLi levels that cannot be broken out of); where no request can reach a
+  positive (a same-directory file name, a redirect the browser keeps on the origin, an
+  entity-expansion bomb) it is `[reach: none - <measured reason>]`. Cases found live
+  beyond upstream's list are tagged so (the String answers are content-negotiated:
+  `text/html` for a browser, so a reflected SQL error is a reflected XSS). Every case
+  was checked live at bring-up (`[prov: ...]` names the source and the check).
+- **FR-LAB-351** *(command injection is a scoreable class; `CC-LAB-0351`, 2026-11-20).*
+  The labels schema's `vuln_class` enum holds `command-injection` (spelled as
+  `CommandInjectionStrategy.vuln_class` records it, so a finding's scoring key matches
+  the case) and `sink_context` holds `os_command` (the spelling lane GQL uses too). Additive: every existing ground truth
+  loads unchanged; `scoreable_classes()` (the static guard) admits it because a default
+  strategy records it and `R-COMMAND-INJECTION` rules its category. First used by
+  `lab/ground-truth-vulnerableapp/`.
+- **FR-LAB-352** *(no two external labs share a published host port; `CC-LAB-0353`,
+  2026-11-20).* Every external lab's default host ports (its `LabMeta` port and fixed
+  ports, and every loopback publish its compose file names) are distinct from every other
+  external lab's, and each compose file's port default is its `LabMeta` port, so any two
+  labs can run at once. Enforced by
+  `tests/test_external_labs_static.py::test_no_two_external_labs_publish_the_same_host_port`
+  (proven on a synthetic collision).
 - **FR-LAB-306** *(secDevLabs apps, one external lab each; `CC-LAB-0303`, 2026-10-18).*
   `fuzzlab/lab_fixtures/external.py` checks globocom/secDevLabs out at commit `10be438`
   once (`secdevlabs_checkout`, gitignored, HEAD verified by the shared

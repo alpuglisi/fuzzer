@@ -546,7 +546,10 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     *(CC-SESS-0024, BUG-0138:)* the base page and each login route are loaded through
     `navguard.navigate` (the commit, then a bounded load). A page whose script
     navigates to a refused URL while it is parsed is never waited out: with no form on
-    it, the login fails loudly, and fast.
+    it, the login fails loudly, and fast. *(CC-SESS-0640, BUG-0670:)* a login route
+    whose load fails (an empty 4xx/5xx answer is a failure on every binary) is ended by
+    `navguard.end_failed_load`, named by host among the refusals, and the next route is
+    tried; only the base page's failed load ends the login.
   - **The form.** On the base page, then on SPA routes (from the app's own scripts and
     links, hash or history mode) and same-origin links whose last segment is a login
     word (`detect._LOGIN_SEGMENTS`, whole segment), at most 5: the first rendered form
@@ -741,6 +744,15 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     `form.action`, also for a `method=GET` or `multipart/form-data` form.
   - **Known limitation:** the first form with a password field is taken (a signup
     form before the login form would be chosen).
+- **FR-SESS-650 (the session a browser visit of the run carries, CC-SESS-0650, BUG-0690)**
+  `SeamProbeSender.browser_session_route(urls)` is the run's one decision of the session
+  an M6 browser visit of ``urls`` (its plant and observe URLs) carries: ``(manager,
+  identity, base_url)`` -- the sender's own manager and identity, ensured as for a probe
+  -- or None (anonymous) when the sender has no manager or an anonymous identity, or any
+  URL of the visit is an auth endpoint (`_identity_for`, BUG-0112) or an isolated path
+  (FR-FUZZ-44; a browser visit has no isolated copy). One context carries one session,
+  so one gated URL sends the whole visit anonymously. No second session is made: the
+  browser adopts the run manager's current state (`browserauth.browser_session`).
 
 ## 4. Non-functional requirements
 - **NFR-SESS-single-flight** Concurrent expiry triggers exactly one re-auth. *(Amended

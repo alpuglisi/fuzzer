@@ -2258,6 +2258,34 @@ Juice Shop lab is complete.
 - **Cause:** I chose the probe's host from the upstream solution's example (`localhost`) without first reading what the resolver does with it.
 - **Status:** corrected: the answer key's import point names a refused loopback port, and FR-LAB-320 states the rule.
 
+### F-650 — I started lane PERF's BEFORE runner from the working tree I then edited
+- **What:** the BEFORE measurements (`runset.sh B1`) ran `scripts/measure_scan_perf.py` from `/home/user/fuzzer`, a new process per lab. I edited `fuzzlab/tools/browserexec.py` there while the runner was on its fourth lab, so its later labs would have imported the changed executor and been AFTER runs labelled BEFORE.
+- **Evidence:** this session: `ps` showed the runner (started 08:00) and the bWAPP crawl process (08:11:47) before the first edit; I stopped the runner by its PID, kept the running process (it had imported the unchanged code), and ran the rest from a worktree of 2be7a50 (`TREE=/home/user/base`).
+- **Impact:** none recorded: every BEFORE number comes from unchanged code.
+- **Cause:** I treated the working tree as fixed for the length of a batch I had left running.
+- **Status:** corrected; BEFORE runs now always use a separate worktree of the base.
+
+### F-651 — I wrote a per-run Playwright driver without checking Playwright's one-sync-driver-per-thread rule
+- **What:** I implemented a held driver (FR-FUZZ-652) on the assumption that a sync Playwright driver can stay open between probes. A held driver keeps its event loop on the thread; every later `sync_playwright()` there fails.
+- **Evidence:** three real-browser tests failed with "It looks like you are using Playwright Sync API inside the asyncio loop" (`tests/test_browser_scope.py`, `tests/test_confirm_trace.py`) before any commit.
+- **Impact:** none: never committed; reverted and recorded as measured-not-built.
+- **Cause:** I designed from the saving I had measured, not from the platform's constraint, which I had not measured (MULTI_AGENT_ORCHESTRATION §7).
+- **Status:** reverted.
+
+### F-652 — My quiet-settle early end missed XSS the 4 s window caught, and I called it "no detection lost"
+- **What:** CC-FUZZ-0650 (48609d1) ended the M6 sentinel wait on a page my tracker read as quiet. It missed sinks run by SVG animation events, `scheduler.postTask`, message ports, `postMessage`, a meta refresh, media events, a fetch held past 2 s and a page that replaced `performance.now`; a blocked main thread hung the probe. I reported "no detection lost" from ten lab configurations and a shadow run with 2 positive observations of 311.
+- **Evidence:** the orchestrator's independent verification (real Chromium 1243, the real executor; every case missed on every repeat); BUG-0650.
+- **Impact:** a detection regression on lane PERF's branch and a final report that overstated its safety; caught before merge; withdrawn (CC-FUZZ-0651).
+- **Cause:** I validated a predicate over an open-ended set (every way a page can run script later) against fixtures drawn from my tracker's own list and against labs that exercise none of the rest, and did not state the power of my measurement (PA-0650).
+- **Status:** withdrawn; PA-0650 strengthens PA-0126(2).
+
+### F-653 — I diagnosed five failing SP-01 tests as Chromium version drift without checking which browser they ran
+- **What:** I recorded the five `tests/test_navigation_aborts.py` failures as pre-existing drift of Playwright 1.63 / Chromium 1243 from SP-01's measured 1.56 / 141 (ERROR_LOG 2026-11-20 (b), my lane reports). They came from BUG-0651: the tests' lookup found no binary and Playwright ran its headless shell.
+- **Evidence:** tree 2be7a50 with full Chrome pinned passes 89/89; the harness of d565523 is green (BUG-0651 "Correction").
+- **Impact:** a wrong root cause in the error log and in three lanes' merge reports ("5 known failures"), and a flagged question to navguard's owner that was not needed.
+- **Cause:** I confirmed the failures reproduce on the base tree and stopped there; I did not check which browser binary the tests had launched, though my own environment notes said the lookup glob matched nothing.
+- **Status:** corrected (BUG-0651 "Correction", ERROR_LOG correction entry).
+
 ### F-601 — My first DVGA answer key held a negative no run could test
 - **What:** the draft scored `uploadPaste(filename)` as a command-injection negative, but no command-injection rule fires on that point (its name, field and siblings carry no command signal), so it would have counted as a true negative without ever being probed.
 - **Evidence:** `tests/test_external_labs_live.py::_assert_pass` requires a checked candidate for every gt-tagged case; designing `tests/test_dvga_live.py` on it showed the gap before any commit.
@@ -2271,6 +2299,83 @@ Juice Shop lab is complete.
 - **Impact:** a lab-fitted detection gain reported as an improvement; never merged. Removed in CC-AUD-0602; DVGA gt is back to the baseline's tp=5.
 - **Cause:** I tuned a heuristic to the lab I was measuring and treated a disclosure of that as sufficient, instead of requiring evidence from an independent target.
 - **Status:** corrected (CC-AUD-0602).
+
+
+### F-670 — SP-01's error-page path and its tests were measured on the full Chromium while the product launches the headless shell, and nothing said which binary a measurement was on
+- **What:** BUG-0522's and BUG-0561's measurements and SP-01's real-browser tests ran with `PLAYWRIGHT_CHROMIUM_EXECUTABLE` set by a path glob (`/opt/pw-browsers/chromium-*/chrome-linux/chrome`, in `scripts/verify_change.py` and eleven test helpers) to the **full** Chromium; the product, with no operator setting, launches Playwright's default, the **headless shell**. The records say "measured on Chromium 141" without naming the binary. When the install layout became `chrome-linux64/` (build 1243) the globs matched nothing and the suite moved to the headless shell 157.0.8103.78 silently, which loads an empty-bodied 404 as a page: five `tests/test_navigation_aborts.py` cases failed "DID NOT RAISE" and were carried as "known failures" by every lane.
+- **Evidence:** BUG-0670 and BUG-0671; `tests/test_chromium_navigation_outcomes.py` (the empty-404 cell: shell "page", full "error page"); the base passes those five on the full binary (`PLAYWRIGHT_CHROMIUM_EXECUTABLE=/opt/pw-browsers/chromium`, 89 passed) and fails them on the default.
+- **Impact:** on the default binary a guarded crawl or audit took an empty 4xx/5xx for a rendered page (the outcome of one target depended on the binary); SP-01's error-page path was untested on the product's binary; five red tests normalised as "known" across lanes.
+- **Cause:** a test-side binary choice that differed from the product's, made by a path glob that fails open (no match = another binary, no word), and measurement records that named a version but not the binary.
+- **Status:** fixed by CC-CRAWL-0640 (BUG-0670: one outcome on every binary) and BUG-0671 (no binary chosen by install path; facts that differ are measured on each binary by name), PA-0670, PA-0671.
+
+### F-671 — I first applied BUG-0670's abort to frame navigations too, before measuring what a frame does
+- **What:** my first cut of the fix aborted every navigation request (main frame and iframes) whose answer was an empty 4xx/5xx. The measurement lane I had dispatched then showed that both binaries load an iframe's empty 404 as a page (the full browser's error-page rule is a main-frame rule), so the cut would have changed frames on the full browser and 141 as well, and the caller sweep found two consumers it would have misled (the spider's window `blocked` evidence, disco's FR-CRAWL-41 answer sign).
+- **Evidence:** `tests/test_chromium_navigation_outcomes.py` `FRAME_404 = {"shell": "page", "full": "page"}`; the sweep's R1; the working-tree diff before commit.
+- **Impact:** none shipped: corrected before the first commit; it cost one review cycle.
+- **Cause:** I wrote the fix's scope from the shape of the main-frame measurement instead of waiting for the frame cell (MULTI_AGENT_ORCHESTRATION §7, measure before design).
+- **Status:** fixed before commit: the abort is main-frame only, pinned by `tests/test_navigation_error_answer.py::test_an_iframes_empty_error_answer_is_given_as_it_is`.
+
+### F-672 — BUG-0504's freeze was made mandatory in teardown without measuring a page that cannot answer it, and PA-0128 called quiescing safe
+- **What:** the BUG-0504 fix made `close_pages` freeze every page (`Emulation.setScriptExecutionDisabled`) before the drain, and `release` add a route, both unbounded sync calls answered by the page's renderer. A page whose main thread is blocked never answers them, so every guarded teardown with such a page open hung forever (BUG-0672); PA-0128(1) had stated that quiescing first is the remedy for unboundable calls without noticing that the quiescing call is one.
+- **Evidence:** BUG-0672 (both binaries: the freeze and `context.route` never return on a blocked page); the M6 executor killed after 90 s at d492b9d; the verifier's report relayed 2026-11-20.
+- **Impact:** a run against a target with a runaway script never finished; found by an independent verifier, not by the suite.
+- **Cause:** the teardown was tested against work in flight, not against a page that cannot respond, and a liveness rule was written from the order of calls rather than from what each call waits on.
+- **Status:** fixed by CC-CRAWL-0641 (PA-0672); the callers' reads of such a page remain open (BUG-0673).
+### F-630 — I ran the JAVA lane's first baseline under the tool's 30-minute background cap, and lost it
+- **What:** on 2026-11-20 I started the first VulnerableApp baseline (`fuzzlab auto --points ground-truth --browser --oob --score`) as a background shell task, whose limit is 30 minutes, without measuring how long a run takes; it was killed at 08:29 UTC with 234 candidates stored and no score printed. I then had to restart it twice more (below and F-631) before a clean baseline ran (08:36-09:12, 2162 s).
+- **Evidence:** the task notification for `b674ksur9` ("stopped after reaching its background time limit"); `scratchpad/vapp/runs/base-gt.log` (empty) of that run; the detached runner `scratchpad/vapp/runbase.sh` used afterwards.
+- **Impact:** about 40 minutes of the lane's 4 h budget; no wrong number recorded.
+- **Cause:** I did not estimate the run's length (105 cases, timing strategies) before choosing how to run it.
+- **Status:** fixed: every later run is detached (`setsid nohup`) with its own `timeout`.
+
+### F-631 — I first labelled VulnerableApp's XSS levels as client-rendered from a curl probe that could not see what a browser gets
+- **What:** my first answer key marked the XSS levels `rendering: "js"` with notes saying the answers are `text/plain`, from curl probes sent with `Accept: */*`. Spring negotiates the String answer: a browser navigation (`Accept: text/html,...`) gets `text/html` and runs the markup. The baseline's first partial run then confirmed reflected XSS on the error-based SQLi levels, which my key had no case for; Chromium confirmed it is real (levels 1-4).
+- **Evidence:** `git show 2658271:lab/ground-truth-vulnerableapp/labels.json` (the `js` cases and the text/plain notes); the Chromium check in the lane transcript (title changed at Error-based LEVEL_1..4, not at 5..7, union or blind).
+- **Impact:** a restarted baseline (F-630) and 16 answer-key cases added or relabelled before any score was recorded; no wrong score reported.
+- **Cause:** I measured the response type on a channel (curl's default `Accept`) that could not carry the difference that mattered (what a browser is served), against PA-0311(2).
+- **Status:** fixed in the key (VAPP-0090..0105 added and the XSS notes name both `Accept` headers); the key's live check (`scratchpad/vapp/gen/verify_key.py`) and the Chromium checks back each verdict.
+
+### F-632 — I wrote a Juice Shop matched-case list from memory into CC-LAB-0352 before checking it
+- **What:** CC-LAB-0352's first text (commit e469856) said the regression runs matched JUICE-0002, 0004, 0006, 0007, 0012; the runs' scored stores matched JUICE-0002, 0003, 0004, 0006, 0007 on both sides. I wrote the list before reading it from the stores.
+- **Evidence:** `git show e469856 -- docs/components/01-target-lab/change-control.md`; `scratchpad/vapp/gen/score.py` on `runs/juice-base.sqlite` and `runs/juice-after.sqlite`.
+- **Impact:** a wrong id in a pushed record for one commit; the tp/fp/fn/tn numbers and the no-regression conclusion were right.
+- **Cause:** I recorded a detail ahead of the measurement that backs it.
+- **Status:** fixed in the next commit (the list read from the stores).
+
+### F-633 — My classpath traversal strategy opted into PRG observation by copying its sibling, against a reviewed set
+- **What:** `PathTraversalClasspathResourceStrategy` (CC-FUZZ-0630, pushed in 4cb11db) set `prg = True` because `PathTraversalFsPathReadStrategy` does. The opt-in set is pinned as reviewed (`tests/test_prg_observation.py::PRG_STRATEGIES`); two of its tests failed in the lane's first harness run.
+- **Evidence:** `scratchpad/vapp/verify/parallel.log` (f78ae08: `test_only_the_reviewed_strategies_opt_in`, `test_payload_independent_follow_ups_never_confirm_an_opt_in_strategy`); fixed in e44a94a.
+- **Impact:** a failed harness run and a re-run; on the lane branch only, never merged.
+- **Cause:** I copied a class attribute without checking which guard owns it, and ran only the oracle tests I picked before committing, not the harness.
+- **Status:** fixed (no opt-in; the reviewed set unchanged).
+
+### F-634 — I added a `WEB-INF/web.xml` probe to the classpath strategy with no measurement or source behind it
+- **What:** `PathTraversalClasspathResourceStrategy` (CC-FUZZ-0630, 4cb11db) also probed `../`*d + `WEB-INF/web.xml`, "for a servlet webapp", by analogy. Nothing measured it, no public corpus I cited lists it, and a later JDK 11 measurement showed that a resource read cannot go above the classpath root, while `web.xml` sits above `WEB-INF/classes`: the probe could never succeed as designed. Found when the owner's black-box directive made me check each relied-on behaviour.
+- **Evidence:** `git show 4cb11db -- fuzzlab/oracle/strategies_jvm.py` (`_WEB_XML_MARKER`, the second `CLASSPATH_FILES` entry); CC-FUZZ-0633 (the JDK measurement and the citation check).
+- **Impact:** up to 4 wasted requests per unconfirmed path-traversal candidate in this lane's runs; no false finding.
+- **Cause:** I generalised the design past what I had measured (§7: measure before design).
+- **Status:** fixed in CC-FUZZ-0633 (removed; only the measured file is probed).
+
+### F-654 — My correction F-653 named the wrong cause too: I re-aimed the tests at a binary the product does not run
+- **What:** F-653 (and BUG-0651's "Correction") said the five `test_navigation_aborts` failures came from the tests running Playwright's headless shell instead of full Chrome, and my fix (931311b) pointed every test at full Chrome. The product launches the headless shell; on it SP-01's guarantee was really broken (BUG-0670, found by lane NAV), and my fix would have hidden that product defect behind a green suite.
+- **Evidence:** BUG-0670 / BUG-0671 (lane NAV, merged at 9cabe61): an empty-body error answer is a page on the headless shell and an error page on full Chrome; NAV's harness green with the product fixed and the tests on the product's binary.
+- **Impact:** a fix that would have masked a product bug, and a second wrong root cause in my records (F-653, BUG-0651 "Correction", the ERROR_LOG correction); resolved in NAV's favour before it reached the integration branch.
+- **Cause:** having found that the tests ran a different binary from the one their helpers named, I made the tests run the helpers' binary, without asking which binary the product runs; I took "the suite passes on full Chrome" as the fix.
+- **Status:** superseded by BUG-0670/BUG-0671 (BUG-0651 "Superseded"); my glob change dropped at the merge.
+
+### F-690 — I edited the shared editable install while a subagent was measuring the "before" state from it
+- **What:** in lane XSSPLANT I dispatched a live-reproduction subagent that runs `fuzzlab` from `/home/user/fuzzer` (an editable install), then began editing the fix in that same tree minutes later. Any BEFORE run it started after my first edit would have measured the fixed code.
+- **Evidence:** this lane's transcript: the fix edits to `browserexec.py` began after the dispatch; I sent the subagent an instruction to re-run every BEFORE measurement from a pristine worktree at 78a24f2 and label each run with its tree.
+- **Impact:** none known if the instruction landed before its first run; otherwise a contaminated baseline, caught by the per-run tree labels in its report (CC-LAB-0395 cites only labelled runs).
+- **Cause:** I treated the measurement and the fix as independent because they were in different subagents, without checking that they shared one importable tree.
+- **Status:** mitigated (pristine worktree for BEFORE runs); rule for myself: a measurement lane gets its own worktree at the base revision before anything is edited.
+
+### F-691 — The M6 executor sent an authenticated run's stored-XSS plant anonymously since it was built (BUG-0690)
+- **What:** the agent-built M6 executor and its CLI wiring never carried the run's identity; PA-0545(1)'s sweep (also agent-written) listed only the spider's send paths.
+- **Evidence:** BUG-0690; `git log -S "browser = PlaywrightBrowserExecutor()" -- fuzzlab/harness/auto_cli.py`.
+- **Impact:** every stored-XSS case behind a login missed on every lab, recorded as negatives.
+- **Cause:** a rule written without a whole-package guard; reviews checked the spider only.
+- **Status:** fixed (CC-FUZZ-0680, PA-0690 guards).
 
 ### F-640 — While diagnosing mongection's misses I registered a probe account on the live lab, changing the state the next run would measure
 - **What:** lane ACC (2026-11-20): to test whether mongection's NoSQL differential needs an account, I POSTed `/register` (`probe@lab.test`) to the running lab between the baseline and the AFTER runs.

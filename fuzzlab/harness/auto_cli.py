@@ -393,7 +393,11 @@ def _run_traced(p, args, store, run_id: int, plugins, selected, ground_truth) ->
     browser = None
     if args.browser:
         from fuzzlab.tools.browserexec import PlaywrightBrowserExecutor
-        browser = PlaywrightBrowserExecutor()
+        # FR-FUZZ-680 (BUG-0690): the browser's visits carry the run's session -- the
+        # sender's own, through its gates -- never a session of their own, never none
+        # while the probes carry one (``--no-login``: the plain sender has no route)
+        browser = PlaywrightBrowserExecutor(
+            session_route=getattr(sender, "browser_session_route", None))
     oob = None
     if args.oob:
         from fuzzlab.oracle.oob import OobListener
