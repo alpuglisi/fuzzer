@@ -3,6 +3,20 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0661 — `form_structure` and `values_select_pages`: does a value select a page? (FR-CORE-661, SP-130) (2026-11-20)
+- Placement: lane CRAWLCOV (item CRAWLCOV-SPIDER), base 82910aa.
+- Change: `fuzzlab/core/pathtemplate.py` (SP-45's owner, PA-0507(2): the variation
+  decisions in one module): `form_structure(html)` (a frozenset of each form's method and
+  sorted control names, at most `MAX_STRUCTURE_FORMS`; None without HTML) and
+  `values_select_pages(structures)` (two known structures differ). Read by the spider
+  frontier (CC-CRAWL-0672).
+- Measured: see CC-CRAWL-0672.
+- Impact (other components / project): new functions only.
+- Risk (level; mitigation or accepted-risk justification): low.
+- Deliverables:
+  - [x] functions, tests — done
+  - [x] FR-CORE-661, SP-130, CHANGELOG — done
+
 ### CC-CORE-0660 — `core.forms.form_enctypes`: the second store reader of `form.enctype` (FR-CORE-660) (2026-11-20)
 - Placement: lane CRAWLCOV, base f6b4790.
 - Change: `fuzzlab/core/forms.py::form_enctypes(conn, run_id)` -> `{form id: enctype}`;

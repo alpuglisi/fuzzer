@@ -1897,6 +1897,13 @@ fuzzer.
   sending it; its page is the exchange's own URL for an HTML document, else its
   same-origin `Referer`; a value any earlier response held is no evidence. Pure, bounded.
 
+- **FR-CRAWL-673 (query routers get their own route budgets; CC-CRAWL-0672,
+  2026-11-20, SP-130; amends FR-CRAWL-35)** The spider frontier observes each answered
+  page's form structure; a query name whose values, all else equal, gave two different
+  known structures is a router of its base route shape, and each of its values is
+  budgeted as its own route shape from then on (`spa.route_shape(url, routers)`). Values
+  that give one structure stay one shape. Counted `frontier_routers`.
+
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default
   to not clicking them. *(Built CC-CRAWL-0011, BUG-0111:)* the one rule is

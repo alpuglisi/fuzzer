@@ -111,6 +111,46 @@ def varying_is_parameter(values, *, code=frozenset(), data=None,
     return len(free) >= min_distinct
 
 
+#: At most this many forms are read from one page for its structure (`form_structure`).
+MAX_STRUCTURE_FORMS = 50
+
+
+def form_structure(html) -> frozenset | None:
+    """A page's structure as its forms show it (FR-CORE-661, CC-CORE-0661): the set of
+    ``(method, control names)`` of each form, names sorted; None when there is no HTML
+    to read (unknown, never equal to another page; PA-0547(2)). Values, text, actions
+    and attributes never count: two answers of one page that differ only in data
+    (another record, another search result) have one structure, while two pages a
+    router selects differ in the forms they offer. Measured on Mutillidae 2.12.8
+    (CC-CRAWL-0672): 11 ``index.php?page=X`` pages, each routed page its own forms;
+    ``username`` / ``author`` data values one structure; whole-page skeleton similarity
+    (0.41-0.64 for every page) could not tell the two apart."""
+    if not isinstance(html, str) or not html.strip():
+        return None
+    try:
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html, "html.parser")
+    except Exception:                    # noqa: BLE001 -- a parser failure is unknown
+        return None
+    out = set()
+    for form in soup.find_all("form", limit=MAX_STRUCTURE_FORMS):
+        names = sorted({str(el.get("name")) for el in
+                        form.find_all(["input", "select", "textarea", "button"])
+                        if el.get("name")})
+        out.add((str(form.get("method") or "get").lower(), tuple(names)))
+    return frozenset(out)
+
+
+def values_select_pages(structures) -> bool:
+    """The one decision whether the values of one URL position (a query value, all
+    else equal) select distinct pages rather than vary data (FR-CORE-661, beside
+    `varying_is_parameter`, SP-45): ``structures`` maps each value seen to its page's
+    `form_structure`; at least two known (non-None) structures differ. Unknown pages are
+    no evidence either way."""
+    known = {st for st in dict(structures).values() if st is not None}
+    return len(known) >= 2
+
+
 def _segments(url: str):
     """``(origin, decoded segments)`` of a crawlable URL, or None for an asset, a URL
     with no usable origin, or the root."""

@@ -1204,6 +1204,12 @@ plugin registry. It is the layer that makes the store the integration bus.
   `core.forms.form_enctypes(conn, run_id)` returns every `form` row's enctype by id; with
   `first_link_set` it is the only store reader of `form.enctype`.
 
+- **FR-CORE-661 (does a value select a page; CC-CORE-0661, 2026-11-20, SP-130)**
+  `core.pathtemplate.form_structure(html)` is a page's structure as its forms show it
+  (method and control names per form; None without HTML); `values_select_pages`
+  decides that the values of one URL position select distinct pages when at least two
+  known structures differ.
+
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers
   never block the writer (WAL).

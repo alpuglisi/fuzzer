@@ -229,12 +229,15 @@ def visit_key(url: str) -> str:
     return (origin or "") + tail + (f"#{frag}" if frag is not None else "")
 
 
-def route_shape(url: str) -> tuple:
+def route_shape(url: str, routers=frozenset()) -> tuple:
     """What the crawl frontier budgets variants by (FR-CRAWL-35, BUG-0545): the URL's
     canonical origin, its path with every id-shaped segment (`core.pathtemplate.id_shaped`,
     the one owner of that decision) as ``{}``, its sorted distinct query names, and the
     same shape of a SPA route fragment. Values never count: ``/cal?d=1`` and ``/cal?d=2``,
-    or ``/item/7`` and ``/item/8``, are one shape. Only the per-shape admission count reads
+    or ``/item/7`` and ``/item/8``, are one shape -- except a query name in ``routers``,
+    whose ``name=value`` is kept (FR-CRAWL-673: the frontier names a router once the
+    pages it loaded show its values select distinct pages, `core.pathtemplate.
+    values_select_pages`). Only the per-shape admission count reads
     it -- each URL keeps its own `visit_key` and is loaded as written. A tuple, never a
     URL: nothing is built from it."""
     from urllib.parse import unquote
@@ -244,8 +247,9 @@ def route_shape(url: str) -> tuple:
     def shape(path: str, query: str) -> tuple:
         segments = tuple("{}" if seg and id_shaped(unquote(seg)) else seg
                          for seg in (path or "/").split("/"))
-        names = tuple(sorted({part.partition("=")[0] for part in query.split("&")
-                              if part}))
+        names = tuple(sorted({part if part.partition("=")[0] in routers
+                              else part.partition("=")[0]
+                              for part in query.split("&") if part}))
         return segments, names
 
     parts = urlsplit(url or "")

@@ -3,6 +3,37 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0672 — The route-shape budget splits a shape by a query name whose values select distinct pages (FR-CRAWL-673, SP-130) (2026-11-20)
+- Placement: lane CRAWLCOV (item CRAWLCOV-SPIDER), base 82910aa, after the orchestrator's
+  go-ahead on `spider.py` (lane CRAWLSAFE touched only `core/urls.py`).
+- Change: `fuzzlab/tools/spider.py`: `_Frontier.observe(url, structure)` takes each
+  loaded page's `core.pathtemplate.form_structure` (`_visit`, answered pages only); per
+  (base route shape, query name, the URL's other pairs) it keeps the values seen
+  (at most `MAX_ROUTER_EVIDENCE`), and a name whose values give two known structures
+  (`values_select_pages`) becomes a router of that base shape: from then on
+  `_Frontier.append` budgets each of its values as its own shape (`_shape`). A URL
+  refused before is admitted when a later page links it again. `report()` and
+  `crawl_stats` carry `routers` / `frontier_routers`. `fuzzlab/tools/spa.py::route_shape`
+  takes `routers` (names whose `name=value` it keeps).
+- Measured (§7; `scratchpad/meas/probe-routes`, the lab's own session): Mutillidae
+  2.12.8, 11 `index.php?page=X` pages: each routed page has its own forms
+  (user-info, dns-lookup, echo, user-poll, blog pages), the others share the site-wide
+  form; data values (`username` admin/adrian/nobody-xyz, `author` admin/adrian) keep one
+  structure; whole-page skeleton similarity was 0.41-0.64 for every page and could not
+  separate the two. The baseline crawl (CC-LAB-0343 / CRAWLCOV baseline B) hit the
+  `page=X` shape's cap of 100 with 66 refusals (12 menu pages never admitted). Black-box:
+  the rule reads each target's own pages (no lab name; the form element's controls are
+  the HTML standard's), and the confusable alternative (data values) is measured on the
+  same target and pinned by a test.
+- Impact (other components / project): more admissions on sites with query routers,
+  bounded by the per-value budget, `max_per_origin` and `max_pages`; a site of data
+  values is unchanged.
+- Risk (level; mitigation or accepted-risk justification): low-medium: a site whose
+  data pages differ in forms by value gets per-value budgets (bounded as above).
+- Deliverables:
+  - [x] frontier, `route_shape`, `tests/test_route_shape_routers.py` — done
+  - [x] FR-CRAWL-673, SP-130, CHANGELOG — done
+
 ### CC-CRAWL-0671 — Store -> render pairs from a disco capture's own evidence (FR-CRAWL-672) (2026-11-20)
 - Placement: lane CRAWLCOV (part 5), base f6b4790. Not a change to `spider.py`.
 - Change: new `fuzzlab/disco/storerender.py` (pure): `store_render_pairs(records)` over a

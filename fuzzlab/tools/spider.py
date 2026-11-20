@@ -31,7 +31,7 @@ import threading
 import time
 from collections import Counter, deque
 from dataclasses import dataclass
-from urllib.parse import urldefrag, urljoin, urlparse
+from urllib.parse import urldefrag, urljoin, urlparse, urlsplit
 
 import requests
 from bs4 import BeautifulSoup
@@ -950,6 +950,10 @@ class FrontierLimits:
     max_url_length: int = 4096
 
 
+#: At most this many values per (base shape, query name, other pairs) are kept as
+#: router evidence (`_Frontier.observe`, FR-CRAWL-673).
+MAX_ROUTER_EVIDENCE = 64
+
 #: Why the frontier refused a URL, in the order it checks (`_Frontier.append`).
 FRONTIER_REASONS = ("url_length", "total", "origin", "route_shape", "pending")
 
@@ -991,6 +995,12 @@ class _Frontier:
         self._reserved: set = set()
         self._per_origin: Counter = Counter()
         self._per_shape: Counter = Counter()
+        # FR-CRAWL-673: the query names whose values select distinct pages, per base
+        # route shape, and the evidence for them: (base shape, name, the other pairs)
+        # -> {value: page structure}
+        self._routers: dict = {}
+        self._evidence: dict = {}
+        self.routers_found = 0
         self.admitted = 0
         self.duplicates = 0
         self.rejected: Counter = Counter()
@@ -1015,7 +1025,7 @@ class _Frontier:
                 self.duplicates += 1
                 return "duplicate"
             origin = canonical_origin(url) or ""
-            shape = spa.route_shape(url)
+            shape = self._shape(url)
             why = ("url_length" if len(url or "") > lim.max_url_length else
                    "total" if self.admitted >= lim.max_pages else
                    "origin" if self._per_origin[origin] >= lim.max_per_origin else
@@ -1035,6 +1045,46 @@ class _Frontier:
             queue.append((next(self._seq), tuple(item)))
             self.lock.notify_all()
             return None
+
+    def _shape(self, url):
+        """The URL's budget shape: `spa.route_shape` keeping the values of the query
+        names the loaded pages showed to be routers for its base shape (FR-CRAWL-673)."""
+        routers = self._routers.get(spa.route_shape(url))
+        return spa.route_shape(url, routers) if routers else spa.route_shape(url)
+
+    def observe(self, url, structure):
+        """What a loaded page showed (FR-CRAWL-673): its `core.pathtemplate.
+        form_structure` (None: unknown). Per query name, the values seen with every
+        other pair of the URL equal are compared through `core.pathtemplate.
+        values_select_pages`; a name whose values select distinct pages becomes a router
+        of the URL's base shape, so each of its values is budgeted as its own shape from
+        then on (an earlier refusal stays counted; the URL is admitted when found
+        again). Bounded: at most `MAX_ROUTER_EVIDENCE` values per key are kept."""
+        from urllib.parse import parse_qsl
+
+        from fuzzlab.core.pathtemplate import values_select_pages
+        if structure is None:
+            return
+        try:
+            pairs = parse_qsl(urlsplit(url or "").query, keep_blank_values=True)
+        except ValueError:
+            return
+        with self.lock:
+            base = spa.route_shape(url)
+            routers = self._routers.setdefault(base, set())
+            for i, (name, value) in enumerate(pairs):
+                if name in routers:
+                    continue
+                rest = tuple(sorted(pairs[:i] + pairs[i + 1:]))
+                seen = self._evidence.setdefault((base, name, rest), {})
+                if value not in seen and len(seen) >= MAX_ROUTER_EVIDENCE:
+                    continue
+                seen[value] = structure
+                if values_select_pages(seen):
+                    routers.add(name)
+                    self.routers_found += 1
+                    logging.info(f"route shape: query name {name!r} selects distinct "
+                                 f"pages; its values are budgeted apart (FR-CRAWL-673)")
 
     def take(self, first):
         """The next entry for a worker, with its attempt number: ``(url, depth, source,
@@ -1073,7 +1123,8 @@ class _Frontier:
         (only reasons that refused something)."""
         with self.lock:
             return {"admitted": self.admitted, "duplicates": self.duplicates,
-                    "rejected": {k: v for k, v in self.rejected.items() if v}}
+                    "rejected": {k: v for k, v in self.rejected.items() if v},
+                    "routers": self.routers_found}
 
 
 class LocalSpider:
@@ -4209,6 +4260,10 @@ class LocalSpider:
                 outcome=OUTCOME_PENDING, attempts=attempt,
             )
             visited = True
+            observe = getattr(queue, "observe", None)
+            if observe is not None and isinstance(status, int) and status < 400:
+                from fuzzlab.core.pathtemplate import form_structure
+                observe(current_url, form_structure(self._last_html))   # FR-CRAWL-673
             if source == spa.SEED_SOURCE and self._last_html is not None:
                 self.spa_counts["spa_query_seeded"] += 1       # rendered (PA-0110)
                 if spa.spa_fragment(current_url) is not None:
@@ -4384,8 +4439,8 @@ class LocalSpider:
     #: The crawl-wide counts `crawl_counts` always stores (FR-CRAWL-34..36), besides
     #: ``frontier_rejected[<reason>]`` for each `FRONTIER_REASONS` entry that refused and
     #: ``loads_refused[<reason>]`` for each `LOAD_REFUSALS` entry that refused.
-    CRAWL_COUNTS = ("frontier_admitted", "frontier_duplicates", "pages_retried",
-                    "pages_failed", "store_writer_waits", "session_host_unserved")
+    CRAWL_COUNTS = ("frontier_admitted", "frontier_duplicates", "frontier_routers",
+                    "pages_retried", "pages_failed", "store_writer_waits", "session_host_unserved")
 
     def crawl_counts(self):
         """What the frontier, the load gate, the retries, the static seam and the page
@@ -4395,6 +4450,7 @@ class LocalSpider:
             {"admitted": 0, "duplicates": 0, "rejected": {}}
         return {"frontier_admitted": report["admitted"],
                 "frontier_duplicates": report["duplicates"],
+                "frontier_routers": report.get("routers", 0),
                 **{f"frontier_rejected[{k}]": v for k, v in report["rejected"].items()},
                 **{f"loads_refused[{k}]": self._sh[f"loads_refused[{k}]"]
                    for k in LOAD_REFUSALS if self._sh.get(f"loads_refused[{k}]")},
