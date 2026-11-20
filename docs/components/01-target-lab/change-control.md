@@ -3,6 +3,28 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0353 — VulnerableApp moves to 127.0.0.1:3095; a static guard against shared lab ports (FR-LAB-352) (2026-11-20)
+- Change: `lab/external/vulnerableapp/compose.yaml` (`${VAPP_PORT:-3095}`),
+  `fuzzlab/lab_fixtures/external.py` (`LAB_META["vulnerableapp"].default_port = 3095`);
+  `tests/test_external_labs_static.py` (`lab_host_ports`, `port_collisions`,
+  `test_no_two_external_labs_publish_the_same_host_port`,
+  `test_the_port_guard_flags_a_synthetic_collision`); FR-LAB-350 restated, FR-LAB-352.
+- Reason: the orchestrator reported that lane PHPX's Mutillidae publishes 127.0.0.1:3093,
+  the port this lane chose; two labs on one port cannot run together (the second `up`
+  fails). 3095 is free across `LAB_META` and every compose file under `lab/` (checked:
+  NodeGoat 3091; DVGA's 5013 is not merged yet). No guard caught a shared port before.
+- Found while checking: the main lab's `PFF_WEB_PORT` default (8080) equals
+  secDevLabs Streaming's fixed 8080 (`LabMeta.fixed_ports`). The main lab is not an
+  external lab, so the new guard does not cover it; flagged to the orchestrator, not
+  changed here.
+- Impact: `labctl.sh up vulnerableapp` publishes 3095 (`VAPP_PORT` still overrides).
+  The lab runs recorded in CC-LAB-0350 used 3093; nothing else depends on the number.
+- Risk: low.
+- Deliverables:
+  - [x] port, guard, records — done
+- Effectiveness (assessed 2026-11-20): the guard passes on the merged registry and fails
+  on its synthetic collision; re-checked after the PHPX merge (see the merge commit).
+
 ### CC-LAB-0352 — Juice Shop regression check of CC-FUZZ-0630..0632 (2026-11-20)
 - Change: none to code; a measurement record. CC-FUZZ-0630..0632 change shared
   detection code (the default strategy list, the command-injection strategy); Juice

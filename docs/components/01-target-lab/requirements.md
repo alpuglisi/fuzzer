@@ -6444,7 +6444,7 @@ lane) can submit a payload as
 - **FR-LAB-350** *(SasanLabs OWASP VulnerableApp, a Java / Spring Boot external lab;
   `CC-LAB-0350`, 2026-11-20).* `lab/external/vulnerableapp/` runs
   `sasanlabs/owasp-vulnerableapp:2.2.115` pinned by digest (`VULNERABLEAPP_IMAGE`; upstream
-  commit 821b347) on 127.0.0.1:3093 (`VAPP_PORT`), read-only root, every capability
+  commit 821b347) on 127.0.0.1:3095 (`VAPP_PORT`; CC-LAB-0353), read-only root, every capability
   dropped, its working-directory writes on tmpfs, no login (no bootstrap identity). Its
   ground truth `lab/ground-truth-vulnerableapp/` (cases `VAPP-NNNN`) is derived from the
   app's own scanner metadata (`/VulnerableApp/allEndPointJson`, `/scanner/dast`): each
@@ -6465,6 +6465,13 @@ lane) can submit a payload as
   loads unchanged; `scoreable_classes()` (the static guard) admits it because a default
   strategy records it and `R-COMMAND-INJECTION` rules its category. First used by
   `lab/ground-truth-vulnerableapp/`.
+- **FR-LAB-352** *(no two external labs share a published host port; `CC-LAB-0353`,
+  2026-11-20).* Every external lab's default host ports (its `LabMeta` port and fixed
+  ports, and every loopback publish its compose file names) are distinct from every other
+  external lab's, and each compose file's port default is its `LabMeta` port, so any two
+  labs can run at once. Enforced by
+  `tests/test_external_labs_static.py::test_no_two_external_labs_publish_the_same_host_port`
+  (proven on a synthetic collision).
 - **FR-LAB-306** *(secDevLabs apps, one external lab each; `CC-LAB-0303`, 2026-10-18).*
   `fuzzlab/lab_fixtures/external.py` checks globocom/secDevLabs out at commit `10be438`
   once (`secdevlabs_checkout`, gitignored, HEAD verified by the shared

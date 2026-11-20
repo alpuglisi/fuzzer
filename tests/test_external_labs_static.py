@@ -1551,3 +1551,53 @@ def test_the_nodegoat_bootstrap_verifies_by_differential_and_stores_the_user_id(
     assert [a.identity for a in meta.accounts()] == ["nodegoat-user", "nodegoat-peer"]
     assert not meta.may_generate_password            # upstream's seeded accounts
 
+
+
+# --- published host ports: no two external labs share one (CC-LAB-0353) ------------------
+
+_PORT_DEFAULT = re.compile(r"127\.0\.0\.1:(?:\$\{(\w+):-(\d+)\}|(\d+)):\d+")
+
+
+def lab_host_ports(meta, compose_text: str) -> set[int]:
+    """Every host port a lab publishes by default: its `LabMeta` port and fixed ports,
+    and every loopback publish its compose file names (a `${VAR:-port}` default or a
+    literal port)."""
+    ports = {meta.default_port, *(host for host, _container in meta.fixed_ports)}
+    for var, default, literal in _PORT_DEFAULT.findall(compose_text):
+        ports.add(int(default or literal))
+    return ports
+
+
+def port_collisions(ports_by_lab: dict[str, set[int]]) -> list[str]:
+    seen: dict[int, str] = {}
+    out = []
+    for lab in sorted(ports_by_lab):
+        for port in sorted(ports_by_lab[lab]):
+            if port in seen:
+                out.append(f"{port}: {seen[port]} and {lab}")
+            else:
+                seen[port] = lab
+    return out
+
+
+def test_no_two_external_labs_publish_the_same_host_port():
+    """Two labs on one default port cannot run together, and the second `up` fails
+    (lane PHPX's Mutillidae and VulnerableApp both took 3093 before the merge)."""
+    labs = ext.discover_labs()
+    ports = {name: lab_host_ports(ext.LAB_META[name], compose.read_text(encoding="utf-8"))
+             for name, compose in labs.items()}
+    assert port_collisions(ports) == []
+    for name, compose in labs.items():           # the compose default is LabMeta's port
+        text = compose.read_text(encoding="utf-8")
+        meta = ext.LAB_META[name]
+        assert f"${{{meta.port_env}:-{meta.default_port}}}" in text, name
+
+
+def test_the_port_guard_flags_a_synthetic_collision():
+    from dataclasses import replace
+    a = ext.LAB_META["juice-shop"]
+    b = replace(a, name="other", default_port=3091, fixed_ports=((3000, 80),))
+    ports = {"juice-shop": lab_host_ports(a, '"127.0.0.1:${JUICE_PORT:-3000}:3000"'),
+             "other": lab_host_ports(b, '"127.0.0.1:${X:-3091}:80"\n"127.0.0.1:8080:8080"')}
+    assert ports["other"] == {3091, 3000, 8080}
+    assert port_collisions(ports) == ["3000: juice-shop and other"]

@@ -26,7 +26,7 @@ services:
     networks: [vulnerableapp-net]
     ports:
       # Loopback only. Never bind 0.0.0.0.
-      - "127.0.0.1:${VAPP_PORT:-3093}:9090"
+      - "127.0.0.1:${VAPP_PORT:-3095}:9090"
     read_only: true
     # its log file, the upload levels and the scanner benchmark write under the workdir
     tmpfs: [/tmp, /app/logs, /app/upload, /app/contentDispositionUpload, /app/benchmarks]

@@ -312,8 +312,9 @@ LAB_META: dict[str, LabMeta] = {
     # shows any caller the allocations of the userId in the path (FR-LAB-330)
     "nodegoat": LabMeta("nodegoat", "web", "NODEGOAT_PORT", 3091, 4000, "/", "/login",
                         "nodegoat-user", "user1", False, (("nodegoat-peer", "user2"),)),
-    # a Spring Boot app under the /VulnerableApp context path; no login (CC-LAB-0350)
-    "vulnerableapp": LabMeta("vulnerableapp", "app", "VAPP_PORT", 3093, 9090,
+    # a Spring Boot app under the /VulnerableApp context path; no login (CC-LAB-0350);
+    # 3095, not 3093, which lane PHPX's Mutillidae publishes (CC-LAB-0353)
+    "vulnerableapp": LabMeta("vulnerableapp", "app", "VAPP_PORT", 3095, 9090,
                              "/VulnerableApp/", "/VulnerableApp/allEndPointJson", None, "",
                              False),
 }
