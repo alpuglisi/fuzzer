@@ -58,6 +58,9 @@ MANUAL = "manual"
 _VULN_TO_CATEGORY = {
     "sqli": "sql-injection",
     "nosqli": "nosql-injection",
+    # `ssjs` (CC-FUZZ-0610): `R-SSJS` / the two server-side JavaScript strategies,
+    # verified live against NodeGoat (CC-LAB-0331)
+    "ssjs": "server-side-javascript-injection",
     "xss-reflected": "xss",
     "xss-stored": "xss",
     "xss-dom": "xss",
@@ -145,6 +148,12 @@ _VULN_TO_CATEGORY = {
     # (`fuzzlab/oracle/strategies.py`) before assuming either already had
     # an entry, per `BUG-0045`'s own lesson.
     "path_traversal": "path-traversal",
+    # `ldap_injection` / `xpath_injection` (CC-CORE-0610, FR-CORE-610): the same
+    # underscore/hyphen pairing, `R-LDAP-INJECTION`/`LdapFilterInjectionStrategy` and
+    # `R-XPATH-INJECTION`/`XPathInjectionStrategy`, verified live against Mutillidae II
+    # (CC-LAB-0340) through a scored `fuzzlab auto` run (PA-0042, PA-0047).
+    "ldap_injection": "ldap-injection",
+    "xpath_injection": "xpath-injection",
 }
 
 

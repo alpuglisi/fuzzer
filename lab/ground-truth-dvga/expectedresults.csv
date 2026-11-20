@@ -1,0 +1,19 @@
+# fuzzlab expected results (Benchmark-style) for the Damn Vulnerable GraphQL Application 2.1.2
+# (dolevf/dvga@sha256:040aa33c; external lab fixture lab/external/dvga), CC-LAB-0320.
+# Derived from labels.json; the loader cross-checks the two. Single-location cases.
+case_id,url,method,param,location,category,expected_vulnerable,primary_endpoint,primary_role,related_endpoints,flow_variant
+DVGA-0001,/graphql,POST,variables.arg,body,command-injection,true,/graphql,sink,,direct
+DVGA-0002,/graphql,POST,variables.path,body,command-injection,true,/graphql,sink,,direct
+DVGA-0003,/graphql,POST,variables.host,body,command-injection,true,/graphql,sink,,direct
+DVGA-0004,/graphql,POST,variables.scheme,body,command-injection,true,/graphql,sink,,direct
+DVGA-0005,/graphql,POST,variables.cmd,body,command-injection,true,/graphql,sink,,direct
+DVGA-0006,/graphql,POST,variables.username,body,sqli,false,/graphql,sink,,direct
+DVGA-0007,/graphql,POST,variables.filter,body,sqli,true,/graphql,sink,,direct
+DVGA-0008,/graphql,POST,variables.pasteTitle,body,sqli,false,/graphql,sink,,direct
+DVGA-0009,/graphql,POST,variables.keyword,body,sqli,false,/graphql,sink,,direct
+DVGA-0010,/graphql,POST,variables.content,body,sqli,false,/graphql,sink,,direct
+DVGA-0011,/graphql,POST,variables.password,body,sqli,false,/graphql,sink,,direct
+DVGA-0012,/public_pastes,GET,variables.title,body,xss-stored,true,/public_pastes,sink,,direct
+DVGA-0013,/public_pastes,GET,variables.content,body,xss-stored,true,/public_pastes,sink,,direct
+DVGA-0014,/graphql,POST,variables.host,body,ssrf,true,/graphql,sink,,direct
+DVGA-0015,/graphql,POST,variables.filename,body,path_traversal,true,/graphql,sink,,direct
