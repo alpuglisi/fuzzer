@@ -3,6 +3,34 @@
 Component code: **SESS**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SESS-0611 — A front controller's auth endpoint is its routed page only (2026-11-20)
+- Change: `fuzzlab/session/manager.py` (`is_auth_endpoint` with `_same_routed_page`).
+- Reason: measured on Mutillidae: with the login at `/index.php?page=login.php`, the
+  path-only comparison made every page an auth endpoint, so every probe of the run went
+  without the session (465 of 465, "auth-endpoint probes sent without the session").
+- Impact: only a recorded endpoint whose last segment is a router and whose query names a
+  route: a URL then matches when it carries every query pair of it (`detect.
+  _same_login_url`'s rule). Every other endpoint is compared by path as before (test).
+- Risk: medium -- the NFR-FUZZ-safe gate is narrowed for that shape; **flagged to the
+  orchestrator**. A probe of the login page itself, with any extra parameters, is still
+  sent without the session.
+- Deliverables:
+  - [x] code; `tests/test_front_controller_routes.py` — done
+- Note: no FR-SESS range was pre-assigned to this lane; FR-SESS-3 is amended in place.
+
+### CC-SESS-0610 — Login discovery tries the base page's own login links (2026-11-20)
+- Change: `fuzzlab/session/manager.py` (`_discover_login_form` appends
+  `_linked_login_urls` after its fixed candidates; `MAX_LINKED_LOGIN_PAGES = 3`).
+- Reason: measured on Mutillidae: the login form is only at `index.php?page=login.php`,
+  linked from the home page; `/login.php` served directly dies before its form. The
+  BASELINE run aborted ("no login form found").
+- Impact: at most 3 more GETs at login discovery, only when no fixed candidate had a form:
+  same-origin links (SP-39 extraction, SP-05 origin) that `detect.looks_like_login_url`
+  (SP-16) accepts, each through `_navigate` (every hop authorised).
+- Risk: low.
+- Deliverables:
+  - [x] code; `tests/test_front_controller_routes.py` — done
+
 ### CC-SESS-0031 — The browser login's failed navigations settle on the error page's load (BUG-0561) (2026-10-23)
 - Change: none in `fuzzlab/session/`. `session.browserlogin`'s navigations go through SP-01 (`navguard.navigate`), which now waits for a failed navigation's error page to load, not only to commit, before it raises (CC-CRAWL-0065).
 - Impact (other components / project): a login navigation that fails with a network error (an empty error answer) raises about 30 ms later at p50 (p95 about 45 ms more), inside the same 3 s budget as before; the next login navigation is no longer dropped by Chromium when it starts before that error page's load. No interface or store change.

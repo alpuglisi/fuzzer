@@ -3,6 +3,17 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0610 — The `ldap_injection` and `xpath_injection` classes (FR-CORE-610) (2026-11-20)
+- Change: `fuzzlab/core/runmode.py` (`_VULN_TO_CATEGORY`), `fuzzlab/labels/schemas/
+  labels.schema.json` (vuln classes `ldap_injection`, `xpath_injection`; sink contexts
+  `ldap`, `xpath`).
+- Reason: the classes' underscore spelling (labels) and hyphenated categories differ
+  (PA-0047); verified live through a scored run (PA-0042: CC-LAB-0343, MUTL-0006/0007/0013
+  matched).
+- Risk: low; additive enum values.
+- Deliverables:
+  - [x] code; `tests/test_ldap_xpath.py::test_both_classes_are_wired_end_to_end` — done
+
 ### CC-CORE-0076 — A secret in a URL is redacted wherever it sits: one walk over nested URLs, query strings, `;` pairs and path parameters (FR-CORE-537, BUG-0556) (2026-10-22)
 - Placement: pre-assigned to lane REDACTURL (item GAP-VALUES, audit Gap 5), base
   7393c90, with CC-AUD-0059 (the importer's callers). PA-0541: implemented first, no

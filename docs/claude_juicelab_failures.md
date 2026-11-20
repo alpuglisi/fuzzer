@@ -2210,3 +2210,10 @@ Juice Shop lab is complete.
 - **Cause:** I sized the wait to the symptom I had measured (being overtaken, which a commit cures), called it fixed on a volume and a load that could not see a race of about 1%, and wrote the rule's concrete clause from the fix instead of from the principle the rule stated.
 - **Status:** fixed by BUG-0561 / CC-CRAWL-0065 (lane NAVSETTLE); PA-0561 strengthens PA-0522 (landed means loaded; the order pinned by a deterministic test; a race measured under CPU and disk I/O contention at a volume that can see it).
 
+
+### F-620 — Lane PHPX: two defects in my own Mutillidae bootstrap, caught only by my live runs, and the item ran past its 4 h budget
+- **What:** my first `load_mutillidae_directory` filtered containers with `--filter com.docker.compose.project=...` (no `label=`), so it found none; my first `bootstrap_mutillidae` called `set-up-database.php` once, which on a fresh boot answers 200 without connecting while MariaDB starts. Separately, I first wrote routed answer-key URLs expecting the scorer to match them, without checking how findings record a URL (path only), and the item (PHPX) passed its 4 h budget before the final report.
+- **Evidence:** the first `labctl.sh reset mutillidae --authorized` ("want one running directory container ..., found 0"); the gated live test's first run ("set-up-database.php: HTTP 200"); the anonymous BASELINE's 5 fp all recorded at `/index.php` (CC-LAB-0343).
+- **Impact:** none shipped: both bootstrap defects were fixed before the first commit, each with a fake-runner / fake-app test (`tests/test_mutillidae_fixture.py`); the URL finding became CC-FUZZ-0622. The budget overrun is reported to the orchestrator.
+- **Cause:** I wrote the container query from memory instead of from `extctl.sh`'s own `_ids` (which says `label=`), and tested the bootstrap first against a lab that had been up for minutes.
+- **Status:** fixed (CC-LAB-0341); budget overrun flagged in the lane report.

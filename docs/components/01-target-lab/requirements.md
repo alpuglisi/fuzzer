@@ -6371,6 +6371,20 @@ lane) can submit a payload as
   targets (D10); bWAPP's page names carry class words, so NFR-LAB-no-leak does not hold
   for them and a model trained on runs against them would learn from the URL (recorded as
   not enforced under NFR-ML-no-leak; the training question is the operator's).
+- **FR-LAB-340** *(OWASP Mutillidae II; `CC-LAB-0340`, 2026-11-20).* Mutillidae II
+  2.12.8 is an external lab (`lab/external/mutillidae/`): upstream's www, database and
+  directory images pinned by digest; the web tier on loopback only, the database and
+  directory unpublished on internal networks.
+- **FR-LAB-341** *(Mutillidae bootstrap; `CC-LAB-0341`).* Under `--authorized` the
+  bootstrap loads upstream's LDIF (fetched from a pinned commit, verified by sha256)
+  into the directory, builds the database when the app reports it offline, and
+  registers and verifies the lab's own account (`mutillidae-user`).
+- **FR-LAB-342** *(Mutillidae answer key; `CC-LAB-0342`).* `lab/ground-truth-mutillidae/`
+  scores level 0: LDAP and XPath injection with cross-class negatives, plus SQL injection,
+  reflected XSS, XXE, open redirect and file inclusion (`path_traversal`) as a regression
+  target. Level 5 is session state and is not part of the key.
+- **FR-LAB-343** *(the measurement; `CC-LAB-0343`).* Its BASELINE / AFTER numbers and
+  open gaps are recorded with the exact commands.
 - **FR-LAB-309** *(per-account values; secDevLabs ecommerce-api; `CC-LAB-0315`,
   2026-10-19).* A lab bootstrap may read values of each account's own after its
   verified login (`_ACCOUNT_ATTRIBUTES`) and store them with the credential

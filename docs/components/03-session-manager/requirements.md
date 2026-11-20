@@ -28,6 +28,10 @@ data. Shared by all tools; a hard dependency for external validation (D10).
   *(FR-SESS-20, CC-SESS-0023:)* the session is keyed by host but **sent by origin**:
   `prepare` and `observe` resolve it by the request's canonical origin.
 - **FR-SESS-3 (login detection)** Detect a host's login dynamically: find the
+  *(Amended CC-SESS-0610/0611, 2026-11-20:)* after the fixed candidates, up to three of
+  the base page's own same-origin login links (a front controller's
+  `index.php?page=login.php`) are tried; such a routed login is an auth endpoint for
+  that page only, not for every page of the controller.
   login form (a form containing an enabled password field), carry its other fields
   (e.g. a CSRF `user_token`, the submit button's `name=value`, a select's default)
   through by re-fetching the form immediately before submit (fresh, never cached),

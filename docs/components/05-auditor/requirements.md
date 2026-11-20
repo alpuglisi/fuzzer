@@ -555,6 +555,8 @@ budget where a vulnerability is plausible.
   inside their line), and each complete line is decoded alone, never a partial read.
   A line that is not UTF-8 or not JSON is skipped and still numbered. For one run
   directory both paths give identical `(key, kind, scope, t, body)` and the same model.
+- **FR-AUD-620** *(LDAP and XPath injection rules; `CC-AUD-0620`, 2026-11-20).*
+  `R-LDAP-INJECTION` and `R-XPATH-INJECTION` nominate query, body and JSON points.
 - **FR-AUD-31** *(the importer keeps every request context; the engine writes it;
   `CC-AUD-0056`, 2026-10-21, BUG-0530, BUG-0544).* It supersedes FR-AUD-22's "the first
   one's leaf wins a name" and FR-FUZZ-43's link binding.

@@ -3,6 +3,17 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0620 — Rules for LDAP and XPath injection (FR-AUD-620) (2026-11-20)
+- Change: `fuzzlab/audit/rules_data/default_rules.json` (`R-LDAP-INJECTION`,
+  `R-XPATH-INJECTION`: query, body and JSON points, references `ldap-injection` and
+  `xpath-injection`).
+- Reason: a category with no rule gets no candidate (CC-FUZZ-0620, CC-FUZZ-0621).
+- Impact: a run whose categories include them nominates every query/body/JSON point;
+  a ground-truth run selects them only for a key with such cases.
+- Risk: low.
+- Deliverables:
+  - [x] rules; `tests/test_ldap_xpath.py::test_both_classes_are_wired_end_to_end` — done
+
 ### CC-AUD-0061 — The auditor's browser fetch settles a failed load on the error page's load (BUG-0561) (2026-10-23)
 - Change: none in `fuzzlab/tools/fetcher.py`. `ContentFetcher.fetch` navigates through SP-01 and ends a failed load with `end_failed_load`; SP-01 now waits for the failed navigation's error page to load before it raises (CC-CRAWL-0065). `end_failed_load`'s decision is unchanged (the settled commit is still recorded).
 - Impact (other components / project): a fetch that fails with a network error returns about 30 ms later at p50; the next fetch's navigation is no longer dropped when it would start before that error page's load. No interface or store change.
