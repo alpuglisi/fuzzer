@@ -49,8 +49,13 @@ Newest first.
   - [x] the probe cell in `tests/test_chromium_navigation_outcomes.py` — done
   - [x] BUG-0672, PA-0672, BUG-0673 (open), ERROR_LOG, FR-CRAWL-641, SP-38 and SP-115,
     ARCHITECTURE, CHANGELOG, F-672 — done
-  - [ ] the harness on the committed tree — in-progress
-- Effectiveness: pending.
+  - [x] the harness on the committed tree — done: 8fac049, `--base d492b9d`, 125 files,
+    4855 passed, 0 failed, 0 errors, 4 skipped (the opt-in live external labs), 39
+    xfailed
+- Effectiveness (assessed 2026-11-20): the verifier's hang is gone (7.3 s, one freeze
+  expiry counted); BUG-0504's refusal still holds with a blocked page in the context
+  (the refused URL never sent, both binaries). Not achieved here: the callers' reads
+  (BUG-0673, open).
 
 ### CC-CRAWL-0640 — An empty HTTP error answer fails a guarded navigation onto the error page on every Chromium binary; the raw-browser facts SP-01 relies on are measured per binary (FR-CRAWL-640, BUG-0670, BUG-0671, SP-01) (2026-11-20)
 - Placement: lane NAV (item NAV), base d492b9d, outcome branch
