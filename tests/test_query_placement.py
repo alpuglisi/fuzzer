@@ -1105,6 +1105,9 @@ ALLOWED: dict[tuple[str, str, str], tuple[int, str]] = {
             "owner like any value"),
     ("fuzzlab/oracle/oracle.py", "_front_controller_route", "S4 string built onto a query"):
         (1, "a finding's recorded URL (SP-90, FR-FUZZ-622): a key, never sent"),
+    ("fuzzlab/tools/probesender.py", "_as_sent", "S4 string built onto a query"):
+        (1, "the URLs an auth-endpoint check judges (BUG-0620): a decision input, never "
+            "sent"),
     ("fuzzlab/proxy/server.py", "target_from_request", "S4 string built onto a query"):
         (1, "the proxy forwards the client's own query verbatim"),
     ("fuzzlab/report/diagram.py", "finding_deep_link", "S4b a ?name= literal"):

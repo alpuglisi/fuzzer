@@ -23,6 +23,8 @@ Newest first.
 - Deliverables:
   - [x] code; `tests/test_front_controller_routes.py` (gate, per-entry shapes, AST pin
     of `_send`); BUG-0620, PA-0620, ERROR_LOG — done
+  - [x] `_as_sent` allowed in `tests/test_query_placement.py` (a decision input, never
+    sent) — done
 
 ### CC-SESS-0611 — A front controller's auth endpoint is its routed page only (2026-11-20)
 - Change: `fuzzlab/session/manager.py` (`is_auth_endpoint` with `_same_routed_page`).
