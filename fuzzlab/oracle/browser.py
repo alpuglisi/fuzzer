@@ -90,7 +90,7 @@ def observe_many(executor, items) -> list:
     for request, token in items:
         try:
             out.append(executor.run(request, token))
-        except BaseException as exc:  # noqa: BLE001 - the item's own result
+        except Exception as exc:  # noqa: BLE001 - the item's own result
             out.append(exc)
     return out
 

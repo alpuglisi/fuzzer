@@ -3,6 +3,92 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0721 — Two defects of CC-FUZZ-0720 fixed before merge (BUG-0740, BUG-0741) (2026-11-20)
+- Change: `fuzzlab/tools/browserexec.py` (`_in_wave` marks a worker's wave; `_launch_failed`
+  and `_stop_driver` count a wave's failures once: `_failed_wave`, `_stop_failed_wave`);
+  `fuzzlab/oracle/strategies.py` (`_failed_hit`, the one reader of a `NotObserved`'s
+  hits, called by `confirm` and `_last_try`); `fuzzlab/oracle/browser.py`
+  (`observe_many` hands back `Exception`s only); tests `tests/test_m6_concurrency.py`
+  (the failing tests of both, the stop-counter sweep) and the PA-0741 AST guard in
+  `tests/test_m6_concurrency_guard.py`.
+- Reason: the lane's adversarial tests found them on dc4692d: one wave's simultaneous
+  launch failures switched M6 off for the run (BUG-0740); a sibling hit on a last-try
+  page that then failed was dropped (BUG-0741).
+- Impact: at `workers` 1, none (one visit per wave: counted as before); a transient
+  failure during one wave no longer silences later candidates.
+- Risk: low.
+- Deliverables:
+  - [x] fixes, tests, guard, BUG-0740/0741, PA-0740/0741, ERROR_LOG, F-740/741 — done
+- Effectiveness (assessed 2026-11-20): the failing tests pass; the guard flags
+  dc4692d's `_last_try` and `confirm` and passes on the fix.
+
+### CC-FUZZ-0720 — M6 observations in bounded concurrent waves, one token per payload (FR-FUZZ-720..723) (2026-11-20)
+- Change: `fuzzlab/tools/browserexec.py` (`run` split into `_prepare` -- refusals and the
+  visit's session -- and `_observe` -- one visit with its own driver; new `run_many`,
+  `workers` 1..`MAX_WORKERS` = 3, default 3, a lock over the run-wide counters,
+  `ExecObservation.hits` and `NotObserved.hits` filled from the page's binding);
+  `fuzzlab/oracle/browser.py` (`ExecObservation.hits`, `observe_many`, `workers_of`);
+  `fuzzlab/oracle/strategies.py` (`_BrowserXssStrategy`: a token per payload, `_outcomes`
+  waves, `_hit` crediting the payload whose token fired, the decision replayed in payload
+  order; `DomXssStrategy`/`StoredXssStrategy` build an `ExecRequest` in `_exec_request`;
+  local and additive); `fuzzlab/harness/auto_cli.py` (`--browser-workers N`);
+  `scripts/measure_scan_perf.py` (a `browser_batch` phase; a phase a tree lacks is
+  skipped); tests `tests/test_m6_concurrency.py` (45 offline and 14 real-browser cases, by
+  the lane's adversarial-test subagent) and `tests/test_m6_concurrency_guard.py` (SP-150).
+- Reason: lane PERF measured the M6 settle as 81-99% of scan wall time where M6 runs
+  (bWAPP GT 600 of 621 s, CC-LAB-0370): each payload that does not fire waits out
+  `SETTLE_MS`, one after another. The window may not be shortened (FR-FUZZ-653,
+  PA-0650); concurrency is the remaining lever.
+- Measured before design (§7; this container, 4 CPUs, Chromium build 1243 headless
+  shell, Playwright 1.63):
+  - N concurrent `run` calls of one executor, each thread its own `sync_playwright()`,
+    over `tests/test_m6_slow_sinks.py`'s 8 late sinks and their 8 escaping twins (20
+    visits per N): wall 69.3 / 35.0 / 20.6 / 13.8 s at N = 1 / 2 / 4 / 8, mean visit
+    3.47 / 3.43 / 3.59 / 4.27 s; 0 wrong verdicts and 0 errors at every N. Separate
+    drivers per thread work; per-visit time grows past the CPU count.
+  - Risks resolved (PERF's list):
+    - (a) re-login: `browserauth.browser_session` calls `SessionManager.ensure` on every
+      visit (single-flight per identity; re-logs in only on an invalid or expired
+      state), and a browser login refuses a second live worker for one identity
+      (`browserlogin._LIVE`). So the session is resolved once per scope per wave on the
+      calling thread (FR-FUZZ-723), never from a worker. Nothing else sends during a
+      wave: the oracle's strategy loop and `run_targets` are single-threaded, the caller
+      blocks on the wave, the executor never logs in itself (`_plant_landed` only marks
+      a lost session not observed). A session lost server-side mid-wave is what one at a
+      time also meets (the manager's state stays valid until a sender's answer shows
+      the loss): its pages are not observed or not executed, never a hit. Tested:
+      `test_each_wave_resolves_the_session_once_on_the_caller_thread` (material 1 then 2
+      across waves, never mixed), `test_a_login_failure_starts_no_visit_of_its_wave`.
+    - (b) cross-talk: one token per payload; a hit credited by token (FR-FUZZ-721).
+      Tested offline (`test_a_siblings_token_on_another_page_is_credited_to_the_sibling`,
+      `test_another_candidates_token_never_confirms_this_one`) and in the real browser
+      (`test_real_stored_crosstalk_is_credited_to_a_really_planted_token`).
+    - (c) navguard / SP-04: the enforcer is one `ThreadingTCPServer` per process; its
+      tickets (`_TICKETS`, `_TUNNEL_TICKETS`) are keyed by landing URL or host:port,
+      issued per admission and consumed per connection under `_ENFORCE_LOCK`, so the
+      visits of one wave (one scope) draw interchangeable tickets of identical scope;
+      the pinned orphan-ticket gap (BUG-0559) is unchanged in kind. Measured under
+      concurrency in CC-LAB-0440. No navguard change.
+    - (d) trace: `trace` is contextvars, and `TraceRecorder` writes its store on its
+      own thread only: visits are created and emitted on the calling thread, workers
+      only note (`test_every_visit_of_a_wave_is_traced_from_the_caller_thread`).
+    - (e) rate: no rate bound applies to browser loads today; the pool caps loads in
+      flight at 3 (FR-FUZZ-722).
+  - Browser or context reuse on a dedicated executor thread: not built. A held driver
+    breaks later sync Playwright use on its thread (F-651, FR-FUZZ-652); the driver
+    start is 0.31 s of a ~4.7 s visit (CC-LAB-0370), so the saving is small next to the
+    wave's.
+- Impact: a candidate whose payloads do not fire takes 2 waves instead of 6 visits; a
+  hit on payload 0 costs up to 2 extra visits (requests reported in CC-LAB-0440).
+  `--browser-workers 1` is the old behaviour (identical loads).
+- Risk: medium (concurrency in the oracle path); bounded by the equivalence test over
+  all 4096 per-payload outcome vectors at workers 1, 2 and 3, the slow-sink cases in
+  waves of 3 in the real browser, and the lab BEFORE/AFTER (CC-LAB-0440).
+- Deliverables:
+  - [x] executor, strategy, CLI, tests, SP-150, requirements, ARCHITECTURE — done
+  - [x] lab BEFORE/AFTER — CC-LAB-0440
+- Effectiveness: see CC-LAB-0440.
+
 ### CC-FUZZ-0633 — Black-box review of CC-FUZZ-0630..0632 (owner directive, 2026-11-20)
 - Change: `fuzzlab/oracle/strategies_jvm.py` (the `WEB-INF/web.xml` probe removed;
   docstrings state the evidence and the jar-classpath limit); `fuzzlab/oracle/

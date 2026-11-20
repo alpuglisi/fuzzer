@@ -2383,3 +2383,17 @@ Juice Shop lab is complete.
 - **Impact:** the labgen apps' recall overstated real detection: removing the lab names took twitch-clone 14 -> 11, netflix-clone 11 -> 9, booking-clone 3 -> 2 on ground-truth points. Other heuristics fitted to one lab or one framework remain (Angular Material selectors, bWAPP-measured settings words, the 8 `sink_context_in` rules that fire only from answer-key labels): listed open in the lane report.
 - **Status:** the named items fixed on the BBOX branch (CC-AUD-0660, CC-FUZZ-0660); PA-0660 and its guard added; the remaining items listed for the orchestrator.
 
+
+### F-740 — Concurrent M6 visits counted one wave's launch failures as several "in a row" (BUG-0740)
+- **What:** making the M6 executor concurrent (lane M6CONC), the agent locked its run-wide failure counters but did not restate what they count when visits overlap; one wave's three simultaneous launch failures switched M6 off for the run, where one at a time it was one failure. The driver-stop counter had the same flaw.
+- **Evidence:** BUG-0740; `tests/test_m6_concurrency.py::test_one_candidates_transient_launch_failure_does_not_switch_m6_off[3]` failed on dc4692d (pushed to the lane branch).
+- **Impact:** none merged; caught by the lane's adversarial tests before any measurement relied on it.
+- **Cause:** checked the change for lost updates, not for changed meaning.
+- **Status:** fixed (CC-FUZZ-0721, PA-0740).
+
+### F-741 — The agent added a field to `NotObserved` and read it in one of its two consumers (BUG-0741)
+- **What:** the per-payload token change made a failed page carry the tokens that fired; the agent read them in the M6 main loop and not in `_last_try`, which catches the exception by its base class.
+- **Evidence:** BUG-0741; `tests/test_m6_concurrency.py::test_the_last_try_credits_a_sibling_seen_before_its_page_failed` failed on dc4692d.
+- **Impact:** none merged; a narrow case (a sibling hit on a last-try page that then failed) would have been inconclusive instead of confirmed.
+- **Cause:** the consumers were not enumerated; the one missed is invisible to a name search.
+- **Status:** fixed (CC-FUZZ-0721, PA-0741, AST guard).

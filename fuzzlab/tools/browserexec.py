@@ -378,6 +378,10 @@ class PlaywrightBrowserExecutor:
         self.workers = workers
         #: the run-wide counters below are shared by `run_many`'s workers
         self._lock = threading.Lock()
+        #: a `run_many` worker's wave (`_in_wave`), and the last wave whose launch
+        #: failure was counted (BUG-0740)
+        self._local = threading.local()
+        self._failed_wave = self._stop_failed_wave = None
         self._headless = headless
         self._timeout = timeout_ms
         self._headers = storage_headers or {}
@@ -498,9 +502,10 @@ class PlaywrightBrowserExecutor:
             if todo:
                 with ThreadPoolExecutor(max_workers=min(self.workers, len(todo)),
                                         thread_name_prefix="fuzzlab-m6") as pool:
+                    wave = object()                    # BUG-0740: one failure per wave
                     futures = [(i, pool.submit(contextvars.copy_context().run,
-                                               self._captured, self._observe, request,
-                                               token, visit, session))
+                                               self._in_wave, wave, request, token,
+                                               visit, session))
                                for i, request, token, visit, session in todo]
                     for i, future in futures:
                         results[i] = future.result()
@@ -515,8 +520,17 @@ class PlaywrightBrowserExecutor:
         """``fn(*args)``'s result, or the exception it raised (a `run_many` item's)."""
         try:
             return fn(*args)
-        except BaseException as exc:  # noqa: BLE001 - handed back to the caller
+        except Exception as exc:  # noqa: BLE001 - handed back to the caller
             return exc
+
+    def _in_wave(self, wave, request, token, visit, session):
+        """A `run_many` worker: one visit, its thread marked as part of ``wave`` so its
+        launch failures count once per wave (BUG-0740, `_launch_failed`)."""
+        self._local.wave = wave
+        try:
+            return self._captured(self._observe, request, token, visit, session)
+        finally:
+            self._local.wave = None
 
     def _prepare(self, request: ExecRequest, visit: _VisitTrace | None,
                  sessions: dict | None = None):
@@ -699,6 +713,7 @@ class PlaywrightBrowserExecutor:
             self._launch_failed(exc)
         with self._lock:
             self._failures = 0
+            self._failed_wave = None
         context = page = None
         hits = set() if hits is None else hits
         load_ms = min(self.LOAD_WAIT_MS, self._timeout)
@@ -863,8 +878,11 @@ class PlaywrightBrowserExecutor:
         except error as exc:
             logging.warning(f"M6: the Playwright driver did not stop cleanly "
                             f"({type(exc).__name__})")
+            wave = getattr(self._local, "wave", None)
             with self._lock:
-                self._stop_failures += 1
+                if wave is None or wave is not self._stop_failed_wave:  # BUG-0740
+                    self._stop_failures += 1
+                    self._stop_failed_wave = wave
                 if self._stop_failures >= self.MAX_LAUNCH_FAILURES:
                     self._unavailable = (f"browser unavailable: the Playwright driver "
                                          f"did not stop cleanly {self._stop_failures} "
@@ -874,6 +892,7 @@ class PlaywrightBrowserExecutor:
             return
         with self._lock:
             self._stop_failures = 0
+            self._stop_failed_wave = None
 
     #: Launch failures in a row before the browser mechanisms are off for the run: one
     #: transient failure (memory pressure) does not silence M6 (reviewer A).
@@ -885,8 +904,14 @@ class PlaywrightBrowserExecutor:
         `MAX_LAUNCH_FAILURES` in a row it is remembered for the run, so later probes do
         not retry; the reason reaches every such candidate's inconclusive record."""
         why = f"browser unavailable: {str(exc).splitlines()[0][:160] if str(exc) else exc!r}"
+        wave = getattr(self._local, "wave", None)
         with self._lock:
-            self._failures += 1
+            # BUG-0740: the visits of one wave start together, so their launch failures
+            # are one failure "in a row", not one per visit: a transient failure during
+            # one candidate's wave never switches M6 off for the run
+            if wave is None or wave is not self._failed_wave:
+                self._failures += 1
+                self._failed_wave = wave
             if self._failures >= self.MAX_LAUNCH_FAILURES:
                 self._unavailable = why
                 logging.warning(f"M6 browser execution disabled for this run: {why}")

@@ -87,3 +87,66 @@ def test_the_guards_catch_synthetic_offenders():
     assert _thread_starts(pool.replace("confirm", "run_many"), OWNER[0]) == []
     direct = "def f(self):\n    self._executor.run_many([])\n    self._executor.run(1, 2)\n"
     assert _executor_calls(direct, "s.py") == ["s.py:run_many"]
+
+
+# --- PA-0741 (BUG-0741): every reader of a NotObserved outcome reads its hits -----------
+#: What catches a `NotObserved`: itself and its bases (`oracle.browser`).
+_CATCHES_NOT_OBSERVED = {"NotObserved", "UnplaceableLocation", "Exception", "BaseException"}
+#: Methods whose handlers store an outcome for a later reader (never read it here).
+_STORES = {"_outcomes"}
+
+
+def _unread_not_observed(src: str) -> list[str]:
+    """Every handler of a method that is the first in its ``try`` to catch a
+    `NotObserved` (by name or by a base: `UnplaceableLocation`, ``Exception``, a bare
+    ``except``) and does not hand the exception to ``self._failed_hit``: a page that
+    failed after one of the candidate's tokens fired would be dropped there (BUG-0741:
+    `_last_try` dropped it in an ``except UnplaceableLocation``)."""
+    out = []
+    for cls in (n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.ClassDef)):
+        for fn in (f for f in cls.body if isinstance(f, ast.FunctionDef)):
+            if fn.name in _STORES:
+                continue
+            for node in (t for t in ast.walk(fn) if isinstance(t, ast.Try)):
+                for handler in node.handlers:
+                    types = ([] if handler.type is None else handler.type.elts
+                             if isinstance(handler.type, ast.Tuple) else [handler.type])
+                    names = {getattr(t, "id", None) for t in types}
+                    if handler.type is not None and not names & _CATCHES_NOT_OBSERVED:
+                        continue
+                    reads = handler.name is not None and any(
+                        isinstance(c, ast.Call)
+                        and getattr(c.func, "attr", None) == "_failed_hit"
+                        and any(getattr(a, "id", None) == handler.name for a in c.args)
+                        for c in ast.walk(handler))
+                    if not reads:
+                        out.append(f"{cls.name}.{fn.name}")
+                    break                    # later handlers never see a NotObserved
+    return sorted(set(out))
+
+
+def test_every_not_observed_reader_credits_a_sibling_it_saw():
+    src = (REPO / "fuzzlab/oracle/strategies.py").read_text()
+    tree = ast.parse(src)
+    cls = next(n for n in ast.walk(tree)
+               if isinstance(n, ast.ClassDef) and n.name == "_BrowserXssStrategy")
+    assert _unread_not_observed(ast.unparse(cls)) == []
+    # and the class really has readers (the guard is not vacuous)
+    assert ast.unparse(cls).count("except NotObserved") >= 2
+
+
+def test_the_not_observed_guard_catches_a_synthetic_offender():
+    offender = ("class S:\n    def _last_try(self, get):\n        try:\n            get(1)\n"
+                "        except NotObserved:\n            pass\n")
+    assert _unread_not_observed(offender) == ["S._last_try"]
+    fixed = offender.replace("except NotObserved:\n            pass",
+                             "except NotObserved as exc:\n            self._failed_hit(exc)")
+    assert _unread_not_observed(fixed) == []
+    # BUG-0741's own shape: a base class's handler catches it unread
+    base = offender.replace("except NotObserved:", "except UnplaceableLocation:")
+    assert _unread_not_observed(base) == ["S._last_try"]
+    # a NotObserved handler first, then the base: the base never sees one
+    both = fixed.replace("            self._failed_hit(exc)\n",
+                         "            self._failed_hit(exc)\n"
+                         "        except UnplaceableLocation:\n            pass\n")
+    assert _unread_not_observed(both) == []

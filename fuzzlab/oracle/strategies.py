@@ -2635,6 +2635,19 @@ class _BrowserXssStrategy(ConfirmationStrategy):
             evidence["observed_with"] = payloads[index]
         return Verdict(True, self.vuln_class, self.mechanism, evidence)
 
+    def _failed_hit(self, exc, payload, payloads, tokens):
+        """The verdict of a page that could not be observed (`NotObserved`) but saw one
+        of this candidate's tokens before it failed (``exc.hits``), credited to the
+        lowest payload whose token fired; else None. Every reader of a `NotObserved`
+        outcome -- the main loop and `_last_try` -- uses it (BUG-0741)."""
+        fired = set(getattr(exc, "hits", ()) or ()) & set(tokens)
+        credited = next((j for j, t in enumerate(tokens) if t in fired), None)
+        if credited is None:
+            return None
+        return Verdict(True, self.vuln_class, self.mechanism,
+                       {"payload": payloads[credited], "detail": "playwright",
+                        "observed_with": payload})
+
     def _outcomes(self, candidate, payloads, tokens):
         """``get(i, fill)``: payload ``i``'s outcome, observed on first need. Not yet
         observed: a wave of ``i`` and, with ``fill``, the next unobserved payloads after
@@ -2684,7 +2697,12 @@ class _BrowserXssStrategy(ConfirmationStrategy):
         if nxt is not None:
             try:
                 obs = get(nxt, fill=False)
-            except UnplaceableLocation:              # NotObserved, or no browser now
+            except NotObserved as exc:               # BUG-0741: a sibling it saw counts
+                verdict = self._failed_hit(exc, payloads[nxt], payloads, tokens)
+                if verdict is not None:
+                    return verdict
+                obs = None
+            except UnplaceableLocation:              # no browser now
                 obs = None
             if obs is not None:
                 verdict = self._hit(obs, nxt, payloads, tokens)
@@ -2718,12 +2736,9 @@ class _BrowserXssStrategy(ConfirmationStrategy):
                 # BUG-0137 review (Z1): this payload's page could not be observed; the
                 # next payload is still tried. A browser that cannot start
                 # (`UnplaceableLocation`) or a placement refusal stops at once.
-                hits = set(getattr(exc, "hits", ()) or ()) & set(tokens)
-                if hits:                             # a sibling fired before the error
-                    credited = next(j for j, t in enumerate(tokens) if t in hits)
-                    return Verdict(True, self.vuln_class, self.mechanism,
-                                   {"payload": payloads[credited], "detail": "playwright",
-                                    "observed_with": payload})
+                verdict = self._failed_hit(exc, payload, payloads, tokens)
+                if verdict is not None:              # a sibling fired before the error
+                    return verdict
                 not_observed = not_observed or str(exc)
                 misses += 1
                 if misses >= self.MAX_NOT_OBSERVED:  # cost bound (FR-FUZZ-48)

@@ -18,6 +18,19 @@ Format per entry:
 
 ---
 
+## 2026-11-20 — M6 concurrent waves: one wave's launch failures disabled M6; the last try dropped a sibling hit (BUG-0740, BUG-0741)
+- **Symptom:** on the lane M6CONC branch at dc4692d (never merged), with `--browser-workers`
+  > 1, a transient launch failure during one candidate's wave set the browser unavailable
+  for the rest of the run; and a last-try page that failed after a sibling payload's
+  token fired was left inconclusive. Found by the lane's adversarial tests.
+- **Root cause:** run-wide "in a row" counters incremented once per concurrent visit
+  (BUG-0740); a new field of `NotObserved` (`hits`) read in the main loop only, not in
+  `_last_try`, which catches it by its base class (BUG-0741).
+- **Remediation:** a wave's failures count once (`_in_wave`, `_failed_wave`,
+  `_stop_failed_wave`); one reader `_failed_hit` for both handlers; tests and an AST
+  guard (CC-FUZZ-0721, PA-0740, PA-0741).
+- **Status:** Fixed.
+
 ## 2026-11-20 — Cloud container (JAVA lane): gitleaks and Python Playwright missing; five navigation tests fail on this container's Chromium at the base tree too (environment)
 - **Symptom:** `scripts/verify_change.py --base 2be7a50` on f78ae08: 16 failures. Eight
   `test_cli_check_passes_end_to_end*` (`secret scanner: 'gitleaks' executable not found`,

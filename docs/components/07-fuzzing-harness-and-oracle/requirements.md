@@ -2900,3 +2900,39 @@ and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
   less work outside the window), and each such sink stays a real-browser regression
   test (`tests/test_m6_slow_sinks.py`).
 
+- **FR-FUZZ-720** *(M6 payloads observed in bounded concurrent waves; `CC-FUZZ-0720`,
+  2026-11-20).* `_BrowserXssStrategy.confirm` observes a candidate's payloads in waves of
+  the executor's `workers` (`oracle.browser.workers_of`; `observe_many`;
+  `PlaywrightBrowserExecutor.run_many`): a wave is the next unobserved payloads in order.
+  Each visit keeps the whole observation window (FR-FUZZ-653) in its own worker thread
+  with its own driver, browser and context (never a held driver, FR-FUZZ-652). The
+  decision walks the outcomes in payload order with the one-at-a-time rules (stop on a
+  hit, `MAX_NOT_OBSERVED`, `_last_try` costs no load its wave already made), so a
+  vector of per-payload outcomes decides the same at every `workers`; at `workers` 1 the
+  loads are exactly the one-at-a-time loads. In a wave, an item that fails before any
+  browser starts (a placement refusal, a login failure), or a browser already
+  unavailable, leaves the items after it unobserved (one refusal recorded, as before).
+- **FR-FUZZ-721** *(one token per payload, a hit credited to the payload whose token
+  fired; `CC-FUZZ-0720`, BUG-0741).* Each payload carries its own fresh sentinel token;
+  the executor reports every token-shaped value that fired on the page
+  (`ExecObservation.hits`; on `NotObserved`, `exc.hits`). A hit is credited to the page's
+  own payload when its token fired, else to the lowest payload of the candidate whose
+  token fired (`observed_with` names the page's payload), including on a page that then
+  failed (`_failed_hit`, the one reader). Another candidate's token never confirms a
+  candidate.
+- **FR-FUZZ-722** *(the pool is bounded and configurable; `CC-FUZZ-0720`).* `workers` is
+  1..`MAX_WORKERS` = 3 (`fuzzlab auto --browser-workers N`, default 3): the bound keeps
+  FR-FUZZ-48's cost rule (an unloadable page costs at most `MAX_NOT_OBSERVED` + 1 = 3
+  loads) and caps the browser loads in flight to the target at 3. No other rate bound
+  applies to browser loads (none exists for them: `RequestBudget` and the timing lock
+  govern the HTTP senders).
+- **FR-FUZZ-723** *(a wave's session and trace stay on the calling thread;
+  `CC-FUZZ-0720`, BUG-0740).* `run_many` resolves the visit session (`_visit_session`,
+  which ensures the run's session and may log in, FR-SESS-19) once per scope per wave on
+  the calling thread before any worker starts: every visit of a wave carries the same
+  session material and no login runs while a visit is in flight (the scan is
+  single-threaded, the caller blocks on the wave, and the executor never logs in
+  itself). Each visit's trace is created there (the test and strategy are visible) and
+  emitted there after the join (a recorder writes its store on its own thread). Workers
+  run in a copy of the caller's `contextvars`. The run-wide failure counters count a
+  wave's simultaneous failures once (BUG-0740).
