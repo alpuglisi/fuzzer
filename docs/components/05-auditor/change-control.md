@@ -3,6 +3,32 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0602 — The DVGA-derived GraphQL command-injection rules are removed (black-box detection only) (2026-11-20)
+- Placement: lane GQL (item GQL), review round 1, base 2be7a50, pre-assigned
+  CC-AUD-0600..0609.
+- Change: `R-COMMAND-INJECTION-GRAPHQL-FIELD` and `R-COMMAND-INJECTION-GRAPHQL-SIBLING`
+  removed from `default_rules.json`, with their `when` keys (`graphql_field_regex`,
+  `graphql_sibling_regex`) and `graphql_context.field_names` / `sibling_names`. Kept:
+  the variable-binding reader, a variable judged by its argument's name as well as its
+  own under the generic rules (FR-AUD-600 as edited), and the document / Int-Float-
+  Boolean skip (FR-AUD-601): both come from the GraphQL grammar and spec, not from a
+  target.
+- Reason: the owner's directive (relayed by the orchestrator's review, 2026-11-20): no
+  rule may depend on names, paths, parameters or values taken from a lab; a behaviour a
+  rule relies on must be shown on two independent targets or a public corpus. The field
+  regex's words came from DVGA's own field names (CC-AUD-0600 said so; F-602).
+- Effectiveness (live, 2026-11-20): DVGA gt back to tp=5 fp=0 fn=5 tn=5, 345 requests,
+  46 s (the 2be7a50 baseline's numbers): systemDebug(arg), importPaste(path, scheme)
+  are misses again -- their argument names carry no generic command signal. Crawl: see
+  CC-LAB-0321 (the headline measure).
+- Impact (other components / project): none outside GraphQL requests.
+- Risk (level; mitigation or accepted-risk justification): low (a removal).
+- Deliverables:
+  - [x] rules and predicates removed; tests assert no rule reads a GraphQL field
+    (`tests/test_graphql_args.py::test_no_rule_names_a_field_argument_or_value_of_any_target`)
+    — done
+  - [x] FR-AUD-600 edited in place, CHANGELOG, F-602 — done
+
 ### CC-AUD-0601 — A GraphQL request's document and its non-string scalar variables are not data points (2026-11-20)
 - Placement: lane GQL (item GQL), base 2be7a50, pre-assigned CC-AUD-0600..0609.
 - Change: `fuzzlab/audit/graphql_context.py::not_a_data_point` (FR-AUD-601), checked

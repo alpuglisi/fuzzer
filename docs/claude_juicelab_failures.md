@@ -2224,3 +2224,10 @@ Juice Shop lab is complete.
 - **Cause:** I chose negatives by what the sink does, not by whether the run's rules reach the point.
 - **Status:** corrected before the first commit: the negative is `systemDiagnostics(password)`, which a rule reaches and which never reaches a shell.
 
+### F-602 — I built two detection rules from DVGA's own field names
+- **What:** CC-AUD-0600's `R-COMMAND-INJECTION-GRAPHQL-FIELD` matched field names (`system|debug|diagnos|...`) chosen from DVGA's `systemDebug` / `systemDiagnostics`, and its sibling rule was justified by DVGA's `importPaste` alone; the lane reported tp 5 -> 8 from them.
+- **Evidence:** CC-AUD-0600 ("the field regex's words come from DVGA's own field names ... no second GraphQL target has been measured"); the orchestrator's review of 7ea2018 (owner directive: black-box detection only).
+- **Impact:** a lab-fitted detection gain reported as an improvement; never merged. Removed in CC-AUD-0602; DVGA gt is back to the baseline's tp=5.
+- **Cause:** I tuned a heuristic to the lab I was measuring and treated a disclosure of that as sufficient, instead of requiring evidence from an independent target.
+- **Status:** corrected (CC-AUD-0602).
+

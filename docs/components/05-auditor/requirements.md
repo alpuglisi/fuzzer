@@ -728,14 +728,12 @@ budget where a vulnerability is plausible.
   evaluation is still recorded. A body whose `query` is no GraphQL document is
   unaffected.
 - **FR-AUD-600** *(GraphQL variables judged by the argument they feed; `CC-AUD-0600`,
-  2026-11-20).* For a JSON-leaf point under `variables`, `audit.graphql_context`
-  reads the `(field, argument, siblings)` its variable feeds in the request's own
-  document (FR-CRAWL-600). `name_regex` matches the leaf's name or any bound argument's
-  name; `graphql_field_regex` matches the field's name; `graphql_sibling_regex` matches
-  (whole name) another argument of the same field call; both are false for a point with
-  no binding and must compile at load. Rules `R-COMMAND-INJECTION-GRAPHQL-FIELD` and
-  `R-COMMAND-INJECTION-GRAPHQL-SIBLING` use them (DVGA: `systemDebug(arg)`,
-  `importPaste(path, scheme)`).
+  edited by `CC-AUD-0602`, 2026-11-20).* For a JSON-leaf point under `variables`,
+  `audit.graphql_context` reads the `(field, argument, siblings)` its variable feeds in
+  the request's own document (FR-CRAWL-600); `name_regex` matches the leaf's name or any
+  bound argument's name, so a GraphQL variable gets exactly the generic rules a JSON
+  string leaf of that name gets. No rule reads a field's or a sibling argument's name
+  (the lab-derived rules of CC-AUD-0600 were removed; black-box detection only).
 - **FR-AUD-25** *(an id-shaped path segment; `CC-AUD-0046`, 2026-10-19, FR-FUZZ-57).*
   `R-ACCESS-CONTROL-PATH` fires on a GET `path` point whose name is `id`, `uuid` or
   `guid`, ends in `_id`/`-id` (or `_uuid`/`-guid`…), or is camelCase `…Id`/`…Uuid`
