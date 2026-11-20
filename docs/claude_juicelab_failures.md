@@ -2224,3 +2224,10 @@ Juice Shop lab is complete.
 - **Impact:** a restarted baseline (F-630) and 16 answer-key cases added or relabelled before any score was recorded; no wrong score reported.
 - **Cause:** I measured the response type on a channel (curl's default `Accept`) that could not carry the difference that mattered (what a browser is served), against PA-0311(2).
 - **Status:** fixed in the key (VAPP-0090..0105 added and the XSS notes name both `Accept` headers); the key's live check (`scratchpad/vapp/gen/verify_key.py`) and the Chromium checks back each verdict.
+
+### F-632 — I wrote a Juice Shop matched-case list from memory into CC-LAB-0352 before checking it
+- **What:** CC-LAB-0352's first text (commit e469856) said the regression runs matched JUICE-0002, 0004, 0006, 0007, 0012; the runs' scored stores matched JUICE-0002, 0003, 0004, 0006, 0007 on both sides. I wrote the list before reading it from the stores.
+- **Evidence:** `git show e469856 -- docs/components/01-target-lab/change-control.md`; `scratchpad/vapp/gen/score.py` on `runs/juice-base.sqlite` and `runs/juice-after.sqlite`.
+- **Impact:** a wrong id in a pushed record for one commit; the tp/fp/fn/tn numbers and the no-regression conclusion were right.
+- **Cause:** I recorded a detail ahead of the measurement that backs it.
+- **Status:** fixed in the next commit (the list read from the stores).
