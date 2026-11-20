@@ -2934,7 +2934,16 @@ def default_strategies(browser: BrowserExecutor | None = None,
             PriceTrustDifferentialStrategy(),
             HttpHeaderInjectionCrlfStrategy(),
             PathTraversalFsPathReadStrategy(),
+            *_jvm_read_strategies(),
             GreyboxConfirmationStrategy(coverage, dbfault)]
+
+
+def _jvm_read_strategies() -> list[ConfirmationStrategy]:
+    """The JVM read-sink strategies (FR-FUZZ-630/631), each after its category's own:
+    imported here, as their module imports this one."""
+    from fuzzlab.oracle.strategies_jvm import (PathTraversalClasspathResourceStrategy,
+                                              SsrfFileSchemeStrategy)
+    return [PathTraversalClasspathResourceStrategy(), SsrfFileSchemeStrategy()]
 
 
 # Reference-style category -> the oracle vuln_class we have a strategy for.

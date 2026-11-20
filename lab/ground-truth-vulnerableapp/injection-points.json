@@ -388,13 +388,6 @@
    "rendering": "server"
   },
   {
-   "url": "/VulnerableApp/PathTraversal/LEVEL_6",
-   "method": "GET",
-   "param": "fileName",
-   "location": "query",
-   "rendering": "server"
-  },
-  {
    "url": "/VulnerableApp/PathTraversal/LEVEL_7",
    "method": "GET",
    "param": "fileName",
@@ -416,21 +409,7 @@
    "rendering": "server"
   },
   {
-   "url": "/VulnerableApp/PathTraversal/LEVEL_10",
-   "method": "GET",
-   "param": "fileName",
-   "location": "query",
-   "rendering": "server"
-  },
-  {
    "url": "/VulnerableApp/PathTraversal/LEVEL_11",
-   "method": "GET",
-   "param": "fileName",
-   "location": "query",
-   "rendering": "server"
-  },
-  {
-   "url": "/VulnerableApp/PathTraversal/LEVEL_12",
    "method": "GET",
    "param": "fileName",
    "location": "query",
@@ -529,13 +508,6 @@
   },
   {
    "url": "/VulnerableApp/Http3xxStatusCodeBasedInjection/LEVEL_6",
-   "method": "GET",
-   "param": "returnTo",
-   "location": "query",
-   "rendering": "server"
-  },
-  {
-   "url": "/VulnerableApp/Http3xxStatusCodeBasedInjection/LEVEL_7",
    "method": "GET",
    "param": "returnTo",
    "location": "query",

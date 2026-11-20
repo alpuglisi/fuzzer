@@ -750,6 +750,10 @@ CONTROL_READING = {
                                         "from a compared control"),
     "PathTraversalFsPathReadStrategy": ("negative-control", "the marker must be absent "
                                         "from a compared control"),
+    "PathTraversalClasspathResourceStrategy": ("negative-control", "the file's marker "
+                                               "must be absent from a compared control"),
+    "SsrfFileSchemeStrategy": ("negative-control", "the marker must be absent from a "
+                               "compared bare-path control"),
     "GreyboxConfirmationStrategy": ("positive", "coverage through `send_correlated`; "
                                     "layer 1"),
 }
