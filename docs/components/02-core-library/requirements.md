@@ -294,6 +294,25 @@ plugin registry. It is the layer that makes the store the integration bus.
   - **Users:** the crawler and auditor (NFR-CRAWL-safe), every probe sender
     (FR-FUZZ-40), and login discovery's hop check (FR-SESS-13).
 
+- **FR-CORE-650** *(state switches; `CC-CORE-0650`, 2026-11-20, BUG-0680).* The
+  destructive rule (FR-CORE-28) also refuses a URL or text that **switches**
+  application state:
+  - the tokens `enable`, `activate`, `toggle` (beside `disable`, `deactivate`);
+  - an action slot (`ACTION_SLOTS`: `action`, `op`, `do`, `cmd`, `task`, `mode`,
+    `method`, `func`) followed by a state verb (`SLOT_VERBS`: `update`, `upgrade`,
+    `toggle`, `enable`, `activate`, `resume`, `stop`, `switch`) -- a verb too common to
+    list alone is refused only there;
+  - a destructive verb fused with its object in one token (`COMPOUND_STEMS` as a token
+    prefix, e.g. `resetbutton`), unless the remainder is an inflection (`deleted`,
+    `toggles`, `resetting`).
+  Every word or shape the rule gains from now on is shown on at least two independent
+  apps in the cited corpus `tests/data/state_change_corpus/`, one of them not the lab
+  it was found on (PA-0680, the black-box rule); every cited state-changing GET link in
+  the corpus is refused or a stated residual, and the benign links it refuses are
+  pinned (`tests/test_state_switch_urls.py`). Stated residuals: a setting noun plus
+  value (`/difficulty/hard`), flag values (`?phpids=on`), per-session `lang`/`locale`/
+  `theme` switches.
+
 - **FR-CORE-29** *(forms; `CC-CORE-0039`, 2026-10-13).*
   - `core/forms.form_record` describes a scraped form: action, method, enctype,
     controls, the browser-default entry list with password and sensitive values

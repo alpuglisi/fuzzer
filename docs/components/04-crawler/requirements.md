@@ -1833,6 +1833,15 @@ fuzzer.
     `test_a_document_reads_as_chromium_decodes_it_under_every_whatwg_label`,
     `test_the_static_engine_reads_a_page_whatever_charset_it_names`.
 
+- **FR-CRAWL-650 (a crawl never follows a state switch; CC-CRAWL-0650, BUG-0680)** A link
+  or redirect whose URL toggles, enables, activates or otherwise switches application
+  state (FR-CORE-650) is refused by every crawl gate, exactly as a destructive one: the
+  spider's static queue and redirect hops, the browser route (`navguard`), disco's
+  explorer and the store importer all read SP-09, so nothing in the crawler re-derives
+  it. Measured live (CC-CRAWL-0650): Mutillidae's three `?do=toggle-*` header links
+  are no longer requested and the lab's state is unchanged by a crawl. Stated gap:
+  DVGA's `/difficulty/<level>` and `/start_over` are not refused by a word rule that
+  meets the black-box rule; the crawler has no operator-supplied exclusion list yet.
 - **FR-CRAWL-600 (which field argument a GraphQL variable feeds; CC-CRAWL-0600,
   2026-11-20, SP-80)** `tools/apiop.py::graphql_variable_bindings(text, operation_name)`
   answers `{variable: [(field, argument, sibling arguments), ...]}` for the operation the
@@ -1905,7 +1914,8 @@ fuzzer.
   that give one structure stay one shape. Counted `frontier_routers`.
 
 ## 4. Non-functional requirements
-- **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default
+- **NFR-CRAWL-safe** Deny-list destructive and state-switching actions (delete/logout/reset;
+  toggle/enable/activate, an action slot naming a state verb: FR-CRAWL-650); default
   to not clicking them. *(Built CC-CRAWL-0011, BUG-0111:)* the one rule is
   `core.urls.destructive_reason` (FR-CORE-28). A destructive URL is never queued,
   never reached through a redirect (the static engine follows redirects by hand, each

@@ -2224,6 +2224,13 @@ Juice Shop lab is complete.
 - **Impact:** an overstated picture of real-world detection for about an hour; nothing lab-fitted was merged (GQL had not been merged).
 - **Cause:** I took the lanes' chosen headline (the oracle diagnostic) as the progress measure, and reviewed the GQL rules for correctness and safety but not for where their evidence came from.
 - **Status:** corrected: crawl runs are now the headline measure; GQL sent back to remove or independently justify the DVGA-derived words; every lane given the black-box rule; a black-box audit lane queued to sweep existing detection code and add the rule (PA) with a guard.
+
+### F-680 — I told the crawl subagent the fix caught `start over` after I had decided to drop it
+- **What:** on 2026-11-20 (lane CRAWLSAFE) my instruction to the live-crawl subagent said the working-tree fix catches "'start over'". I then removed that pair (it has one independent source, DVGA, so it fails the black-box rule) and did not correct the instruction.
+- **Evidence:** the subagent's report: "Your note said 'start over' is caught; … the underscore form is not"; `destructive_reason('/start_over')` is None at 2ca7cc8.
+- **Impact:** none on the measurement (the subagent measured the committed tree and reported the discrepancy); a stale claim reached a delegate.
+- **Cause:** I described an uncommitted, still-changing rule to a delegate instead of pointing it at a commit.
+- **Status:** corrected: the fixed crawl ran on commit 2ca7cc8 and the records state DVGA's `/start_over` as a residual.
 ### F-610 — I designed the server-side JavaScript differential to compare answers by text without measuring whether the true branch answers the same twice
 - **What:** lane NODE's first `SsjsBooleanDifferentialStrategy` ran its families with `exact=True` (status and text after stripping reflections). NodeGoat's `$where` true branch lists the matched users in the order their lookups finish, so two identical D requests differed and every round failed: NGOAT-0004 (`threshold`) was missed in the first AFTER run.
 - **Evidence:** the AFTER run's trace (screen passed: B 500, D 200, V 500; round 1 failed on "D same as the first D"); six identical true-branch requests by hand listed the three users in three orders (CC-FUZZ-0610).

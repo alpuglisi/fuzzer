@@ -29,6 +29,13 @@ Format per entry:
 - **Root cause:** the GraphQL schema step read `form.enctype` in its own SQL, added an `auto` flag without classifying it, and added a function taking `base_url` without registering its sub-path test; I pushed before the harness ran (the guards caught all three before any merge).
 - **Remediation:** `core.forms.form_enctypes` is the reader (CC-CORE-0660); `no_graphql_schema` classified; `graphql_schema_discovery` registered with `test_a_subpath_base_joins_stored_endpoints_to_its_origin_only`. No BUG/PA: the existing guards are the enforcement and they worked pre-merge.
 - **Status:** Fixed.
+## 2026-11-20 — core / crawler (the destructive rule missed state toggles; two lab crawls changed the lab's state; BUG-0680)
+- **Symptom:** the lab-expansion lanes' crawls fetched Mutillidae's `index.php?do=toggle-security`, `?do=toggle-enforce-ssl`, `?do=toggle-hints` (after the SSL toggle the session went to https and 121 pages stayed unresolved) and DVGA's `/difficulty/hard` and `/start_over` (global mode flipped, state reset).
+- **Root cause:** SP-09 (`core.urls.destructive_reason`) was grown one lab spelling at a time and only checked against our own labs; it had no state-switch class (`disable` listed, `enable` not; action slots knew only `update`/`upgrade`).
+- **Remediation:** `enable`/`activate`/`toggle`, action-slot state verbs and fused verb-object compounds are refused, measured against a cited independent corpus (cited GET state changes refused 8/33 → 18/33, lab cells/points refused 0/505 → 0/505); DVGA's two links are stated residuals (no second independent source). CC-CORE-0650, CC-CRAWL-0650; BUG-0680, PA-0680, PA-0681.
+- **Status:** Fixed (Mutillidae toggles); DVGA `/difficulty/<level>`, `/start_over` open as stated residuals
+
+---
 ## 2026-11-20 — Cloud container (JAVA lane): gitleaks and Python Playwright missing; five navigation tests fail on this container's Chromium at the base tree too (environment)
 - **Symptom:** `scripts/verify_change.py --base 2be7a50` on f78ae08: 16 failures. Eight
   `test_cli_check_passes_end_to_end*` (`secret scanner: 'gitleaks' executable not found`,
