@@ -3,6 +3,25 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0414 — The crawl exclusions move to a pure module (`lab_fixtures/exclusions.py`) (2026-11-20)
+- Placement: lane CRAWLCOV, fixing CC-CRAWL-0674/CC-LAB-0412's two harness failures on
+  5eca8b7.
+- Change: the lists and the CLI merge move to `fuzzlab/lab_fixtures/exclusions.py`
+  (`CRAWL_EXCLUDE`, `crawl_exclusions`, `exclusions_for`, `UnknownLab`; no I/O);
+  `LabMeta.crawl_exclude` reads `CRAWL_EXCLUDE`; both crawlers' argument parsing imports
+  the pure module. `--exclude-lab` naming a lab without a list is a usage error.
+  `fuzzlab/web/projects.py::OPTION_CLASS` classifies `crawl:exclude` / `crawl:exclude_lab`
+  as not paths.
+- Measured: `verify_change.py --base 94fac7f` on 5eca8b7: 6529 passed, 2 failed --
+  `tests/test_web_store_locks.py::test_no_web_process_module_opens_a_store_file_except_through_sqlite`
+  (the spider's import of `lab_fixtures.external` put its 16 raw file opens in the web
+  process's import closure, PA-0535) and `tests/test_web_projects.py::
+  test_every_str_option_of_every_spec_is_classified`. After: both green (206 passed with
+  the exclusion and taxonomy tests).
+- Deliverables:
+  - [x] module, callers, classification — done
+  - [x] ERROR_LOG, CHANGELOG — done
+
 ### CC-LAB-0411 — Crawl coverage measured: Mutillidae and gossip-world before/after; every crawl false positive adjudicated (2026-11-20)
 - Placement: lane CRAWLCOV (item CRAWLCOV-MEAS2); measurement only.
 - Commands (each in a detached worktree, the lab reset before the crawl and each auto):

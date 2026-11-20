@@ -10,8 +10,8 @@ from __future__ import annotations
 import pytest
 
 from fuzzlab.core.urls import MAX_EXCLUSIONS, compile_exclusions, exclusion_reason
-from fuzzlab.lab_fixtures.external import (LAB_META, ExternalLabError, crawl_exclusions,
-                                           exclusions_for)
+from fuzzlab.lab_fixtures.exclusions import UnknownLab, crawl_exclusions, exclusions_for
+from fuzzlab.lab_fixtures.external import LAB_META
 from fuzzlab.tools import spider as sp
 from tests.test_spider_frontier import _page, _Site, _stats
 
@@ -33,8 +33,8 @@ def test_a_bad_exclusion_list_is_refused(bad):
 def test_every_lab_fixture_exclusion_compiles_and_the_cli_merges_them():
     for name, meta in LAB_META.items():
         compile_exclusions(meta.crawl_exclude)
-    assert crawl_exclusions("dvga")
-    with pytest.raises(ExternalLabError):
+    assert crawl_exclusions("dvga") == LAB_META["dvga"].crawl_exclude
+    with pytest.raises(UnknownLab):
         crawl_exclusions("no-such-lab")
     args = type("A", (), {"exclude": ["^/x"], "exclude_lab": "dvga"})()
     assert exclusions_for(args) == ("^/x", *crawl_exclusions("dvga"))

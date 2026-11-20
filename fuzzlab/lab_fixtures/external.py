@@ -43,6 +43,8 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 from urllib.parse import urljoin, urlsplit
 
+from fuzzlab.lab_fixtures.exclusions import CRAWL_EXCLUDE
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EXTERNAL_DIR = REPO_ROOT / "lab" / "external"
 
@@ -354,10 +356,9 @@ LAB_META: dict[str, LabMeta] = {
     "nodegoat": LabMeta("nodegoat", "web", "NODEGOAT_PORT", 3091, 4000, "/", "/login",
                         "nodegoat-user", "user1", False, (("nodegoat-peer", "user2"),)),
     # GraphQL over one endpoint (FR-LAB-320); no account: its resolvers take no session
-    # `/difficulty/<level>` switches every resolver's checks; `/start_over` wipes the
-    # data (lane CRAWLSAFE measured both followed by a crawl; FR-LAB-410)
+    # its crawl exclusions live in `lab_fixtures.exclusions` (FR-LAB-410)
     "dvga": LabMeta("dvga", "app", "DVGA_PORT", 5013, 5013, "/", "/", None, "", False,
-                    crawl_exclude=(r"^/difficulty/", r"^/start_over")),
+                    crawl_exclude=CRAWL_EXCLUDE["dvga"]),
     # a Spring Boot app under the /VulnerableApp context path; no login (CC-LAB-0350);
     # 3095, not 3093, which lane PHPX's Mutillidae publishes (CC-LAB-0353)
     "vulnerableapp": LabMeta("vulnerableapp", "app", "VAPP_PORT", 3095, 9090,
@@ -1810,21 +1811,10 @@ if __name__ == "__main__":  # pragma: no cover
     sys.exit(main())
 
 
+
 def crawl_exclusions(name: str) -> tuple[str, ...]:
     """A bundled lab's crawl exclusions (`LabMeta.crawl_exclude`, FR-LAB-410); raises
     `ExternalLabError` for a lab with no entry."""
     if name not in LAB_META:
         raise ExternalLabError(f"external lab {name!r} has no LAB_META entry")
     return LAB_META[name].crawl_exclude
-
-
-def exclusions_for(args) -> tuple[str, ...]:
-    """A crawl's URL exclusions from its CLI arguments (FR-CRAWL-675; `fuzzlab crawl` and
-    `fuzzlab disco capture`): every ``--exclude`` pattern, then the named lab's own list
-    (``--exclude-lab``, `crawl_exclusions`)."""
-    out = list(getattr(args, "exclude", None) or [])
-    lab = getattr(args, "exclude_lab", None)
-    if lab:
-        out.extend(crawl_exclusions(lab))
-    return tuple(out)
-

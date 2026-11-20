@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-11-20 — crawl exclusions (two web guards failed on 5eca8b7; lane CRAWLCOV)
+- **Symptom:** `verify_change.py --base 94fac7f` on 5eca8b7: 6529 passed, 2 failed (web store-file guard, web option classification).
+- **Root cause:** CC-CRAWL-0674 made the spider import `lab_fixtures.external` (file opens) for `--exclude-lab`, and added two `crawl` options the web launcher's table did not classify; I had not run the web guards.
+- **Remediation:** a pure `lab_fixtures/exclusions.py` (CC-LAB-0414); the options classified. Both green. No new PA: the guards caught it pre-merge (F-702).
+- **Status:** Fixed.
+
 ## 2026-11-20 — oracle (attribute-quote misread; found by lane CRAWLCOV's adjudication, not fixed here)
 - **Symptom:** Mutillidae MUTL-0027 (`forwardurl` in a meta-refresh `content`) and MUTL-0033 (`page` in a quoted `href`) are confirmed only by the browser; without it the breakout probe never leaves the value.
 - **Root cause:** `fuzzlab/oracle/context.py::_raw_attr_quote` takes the last `=` before the marker, so a marker inside a quoted value (`href="...&page=M"`, `content="0;url=M"`) is judged unquoted and the probe is built without the quote (measured with `locate_reflection` on both shapes; CC-LAB-0411).

@@ -188,10 +188,10 @@ def _capture(ns) -> int:
     if not 1 <= ns.workers <= MAX_WORKERS:
         return _fail(f"--workers must be 1..{MAX_WORKERS}")
     from fuzzlab.core.urls import compile_exclusions
-    from fuzzlab.lab_fixtures.external import ExternalLabError, exclusions_for
+    from fuzzlab.lab_fixtures.exclusions import exclusions_for
     try:
         compile_exclusions(exclusions_for(ns))              # FR-CRAWL-675
-    except (ValueError, ExternalLabError) as exc:
+    except ValueError as exc:                       # UnknownLab is a ValueError
         return _fail(str(exc))
     opts = ExploreOptions(max_states=ns.max_states, max_actions=ns.max_actions,
                           workers=ns.workers, max_harvest=ns.max_harvest,

@@ -4628,7 +4628,7 @@ def spider_kwargs(args, session_manager=None) -> dict:
 
 
 def _exclusions_for(args):
-    from fuzzlab.lab_fixtures.external import exclusions_for    # one place (FR-CRAWL-675)
+    from fuzzlab.lab_fixtures.exclusions import exclusions_for  # one place (FR-CRAWL-675)
     return exclusions_for(args)
 
 
@@ -4648,10 +4648,10 @@ def parse_args(argv=None):
     if not 1 <= args.workers <= MAX_WORKERS:
         p.error(f"--workers must be 1..{MAX_WORKERS}")
     from fuzzlab.core.urls import compile_exclusions
-    from fuzzlab.lab_fixtures.external import ExternalLabError, exclusions_for
+    from fuzzlab.lab_fixtures.exclusions import exclusions_for
     try:
         compile_exclusions(exclusions_for(args))          # FR-CRAWL-675, before anything
-    except (ValueError, ExternalLabError) as exc:
+    except ValueError as exc:                       # UnknownLab is a ValueError
         p.error(str(exc))
     if args.auth_origin:                 # a usage error before any side effect (R5)
         from fuzzlab.session.manager import parse_auth_origins

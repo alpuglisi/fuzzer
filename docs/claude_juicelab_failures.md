@@ -2445,3 +2445,10 @@ Juice Shop lab is complete.
 - **Cause:** I did not read disco's isolation guard or run its e2e suite before pushing a disco change.
 - **Status:** corrected (CC-CORE-0663).
 
+### F-702 — My crawl-exclusion change broke two web-process guards
+- **What:** 9f6f630 imported the lab-lifecycle module (raw file opens) into the crawler's argument parsing, which the web process imports, and left the new options unclassified for the web launcher.
+- **Evidence:** ERROR_LOG 2026-11-20 (crawl exclusions); harness on 5eca8b7.
+- **Impact:** a red lane tip until 2026-11-20's follow-up; nothing merged.
+- **Cause:** the third time this session (F-700, F-701) I pushed a change before reading the whole-package guards that cover the files it touches; the harness, not my own check, found each.
+- **Status:** corrected (CC-LAB-0414). My own rule from here: run the harness before pushing a change to a new file area.
+

@@ -128,6 +128,8 @@ OPTION_CLASS: dict[tuple[str, str], tuple[str, str]] = {
     **{(s, d): (NOT_PATH, "") for s, d in (
         ("crawl", "start"), ("crawl", "identity"), ("crawl", "follow_selector_forms"),
         ("crawl", "submit_spa_forms"), ("audit", "identity"), ("audit", "base_url"),
+        # URL patterns and a bundled lab's name (FR-CRAWL-675): not paths
+        ("crawl", "exclude"), ("crawl", "exclude_lab"),
         ("fuzz", "url"), ("fuzz", "param"), ("fuzz", "identity"), ("auto", "base_url"),
         ("auto", "categories"), ("auto", "identity"), ("auto", "peer_identity"),
         ("auto", "header_points"),
