@@ -2369,3 +2369,16 @@ Juice Shop lab is complete.
 - **Cause:** I wrote the step without first reading which whole-package guards cover the store, the CLI and base URLs, and treated "commit and push" as more urgent than "verify".
 - **Status:** corrected in the follow-up commit (CC-CORE-0660, CC-FUZZ-0691).
 
+### F-690 — I edited the shared editable install while a subagent was measuring the "before" state from it
+- **What:** in lane XSSPLANT I dispatched a live-reproduction subagent that runs `fuzzlab` from `/home/user/fuzzer` (an editable install), then began editing the fix in that same tree minutes later. Any BEFORE run it started after my first edit would have measured the fixed code.
+- **Evidence:** this lane's transcript: the fix edits to `browserexec.py` began after the dispatch; I sent the subagent an instruction to re-run every BEFORE measurement from a pristine worktree at 78a24f2 and label each run with its tree.
+- **Impact:** none known if the instruction landed before its first run; otherwise a contaminated baseline, caught by the per-run tree labels in its report (CC-LAB-0395 cites only labelled runs).
+- **Cause:** I treated the measurement and the fix as independent because they were in different subagents, without checking that they shared one importable tree.
+- **Status:** mitigated (pristine worktree for BEFORE runs); rule for myself: a measurement lane gets its own worktree at the base revision before anything is edited.
+
+### F-691 — The M6 executor sent an authenticated run's stored-XSS plant anonymously since it was built (BUG-0690)
+- **What:** the agent-built M6 executor and its CLI wiring never carried the run's identity; PA-0545(1)'s sweep (also agent-written) listed only the spider's send paths.
+- **Evidence:** BUG-0690; `git log -S "browser = PlaywrightBrowserExecutor()" -- fuzzlab/harness/auto_cli.py`.
+- **Impact:** every stored-XSS case behind a login missed on every lab, recorded as negatives.
+- **Cause:** a rule written without a whole-package guard; reviews checked the spider only.
+- **Status:** fixed (CC-FUZZ-0680, PA-0690 guards).

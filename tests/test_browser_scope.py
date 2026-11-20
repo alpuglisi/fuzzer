@@ -415,7 +415,8 @@ def test_the_m6_browser_is_launched_scoped_and_plants_without_redirects(monkeypa
 
     class Context:
         request = types.SimpleNamespace(
-            fetch=lambda url, **kw: seen["posts"].append((url, kw)))
+            fetch=lambda url, **kw: (seen["posts"].append((url, kw)),
+                                     types.SimpleNamespace(status=200, headers={}))[1])
 
         def add_init_script(self, s):
             pass

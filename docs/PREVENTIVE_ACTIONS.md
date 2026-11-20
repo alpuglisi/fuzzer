@@ -3094,3 +3094,27 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
      helper that pins a binary says (by its result) whether it pinned one. (from BUG-0651)
   - Enforced by: tests/test_browser_binary_choice.py::test_no_python_file_chooses_a_browser_binary_by_its_install_path, tests/test_browser_binary_choice.py::test_the_install_path_guard_catches_synthetic_offenders
 
+- **PA-0690** — Strengthens and supersedes the enforcement of `PA-0545(1)`, after BUG-0690:
+  in `fuzzlab auto --identity --browser` the M6 executor's browser context adopted no
+  session and the CLI built the executor with none, so a stored-XSS plant and its observe
+  page went out anonymously while every probe carried the identity (NodeGoat's profile
+  plant answered 302 to `/login`); and the greybox CLI ran a bearer session anonymously.
+  PA-0545(1) said every send path carries the identity or refuses, but it was enforced
+  only by the spider's own tests, and the SP-74 wiring guard reads only modules that
+  already adopt a session -- a send path that never adopts one was invisible to both.
+  1. **Every browser context fuzzlab opens adopts the session through the one adoption
+     helper, or is declared anonymous with its reason** (a login, a credential form
+     submitted without the session, a replay that takes no identity). A whole-package AST
+     guard lists every browser `new_context(...)` and fails on one that is neither.
+  2. **A component a run builds that sends to the target gets its session from the run's
+     own sender, never a second login and never none:** the M6 executor's route is the
+     sender's `browser_session_route` (SP-125), so its gates (auth endpoint, isolated
+     path) and its manager are the probes'. Every `PlaywrightBrowserExecutor` fuzzlab
+     builds passes ``session_route=``.
+  3. **A send path that can carry only part of a session refuses the rest loudly, before
+     any probe** (greybox: Cookie only; a bearer or an extra header is a usage error),
+     never carries the part it can and drops the rest.
+  4. **A step whose answer is not the application's own did not happen** (SP-56): a plant
+     answered with a login redirect, a throttle, a gateway or a block is not observed --
+     no verdict -- never a negative. (from BUG-0690)
+  - Enforced by: tests/test_browser_context_session.py::test_every_browser_context_adopts_the_session_or_is_declared_anonymous, tests/test_browser_context_session.py::test_every_m6_executor_fuzzlab_builds_gets_the_runs_session_route, tests/test_browser_context_session.py::test_the_guards_catch_synthetic_offenders, tests/test_greybox_session_carry.py::test_a_bearer_session_is_refused_never_run_anonymously, tests/test_greybox_session_carry.py::test_a_cookie_and_authorization_session_is_refused_never_half_carried, tests/test_m6_session.py::test_the_plant_and_the_observe_page_carry_the_runs_session, tests/test_m6_session.py::test_a_credentialed_plant_answered_by_a_login_redirect_is_not_observed, tests/test_m6_session.py::test_every_auto_cli_executor_is_built_with_a_session_route

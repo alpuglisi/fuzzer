@@ -377,6 +377,18 @@ Component code: **LAB**. Entry format and required fields: see
   The web tier's bridge has egress (as Juice Shop's; NFR-LAB-safety "not yet enforced").
 - Deliverables:
   - [x] fixture; exposure check passed live (`labctl.sh up|status`) — done
+### CC-LAB-0395 — Lane XSSPLANT's live before/after of the M6 plant's session on NodeGoat and bWAPP (BUG-0690) (2026-11-20)
+- Change: none to the labs; measurements only (pristine worktrees: BEFORE 78a24f2, AFTER 04c91ca; identities in a scratch keyring, nodegoat-user/peer, bwapp-bee).
+- Measurements (2026-11-20, `--identity --browser`, labs reset before each NodeGoat run):
+  - NodeGoat crawl (headline; `crawl --start /dashboard --engine playwright --identity nodegoat-user --max-depth 3`, then `auto --points crawl --browser --score`): BEFORE tp=12 fp=0 fn=5 tn=7 (285 requests), AFTER tp=12 fp=0 fn=5 tn=7 (282). Unchanged: crawl mode builds no plant step for a stored-XSS candidate (no store URL), so M6 never plants there (open gap).
+  - NodeGoat ground truth (oracle diagnostic): BEFORE tp=12 fp=0 fn=5 tn=7 (244); AFTER tp=13 fp=0 fn=4 tn=7 (247): NGOAT-0008 confirmed. Trace: BEFORE each of 6 plants `POST /profile` 302 (to `/login`), observe "200" (the login page, end of the redirect chain), not executed; AFTER plant 200, sentinel fired on `/dashboard`, executed.
+  - bWAPP (a second cookie-session target; uncommitted one-case key recasting BWAPP-0037's blog as stored, plant and observe `xss_stored_1.php`): BEFORE plant 302 (to `login.php`); AFTER plant 200 with the session. Not executed either way: the app stores only when the form's `entry_add` submitter is posted, and a `StoreStep` carries one field (open gap). Juice Shop: no answer-key row has a store URL, so no plant (not measurable here).
+  - fp stayed 0 in every run.
+- Impact (other components / project): FUZZ (CC-FUZZ-0680). Open gaps for the orchestrator: (1) crawl-mode stored-XSS planting (CRAWL/AUD/FUZZ); (2) a plant carries no sibling form entries; (3) the trace records the end of a redirect chain as the observe status.
+- Risk (level; mitigation or accepted-risk justification): none (measurement only, loopback labs).
+- Deliverables:
+  - [x] BEFORE/AFTER runs, per-visit plant evidence — done
+- Effectiveness (assessed 2026-11-20): as above; the session now reaches the plant on two independent cookie-session targets.
 
 ### CC-LAB-0332 — Juice Shop's `$where` route confirmed by the server-side JavaScript strategy, without crashing it (2026-11-20)
 - Change: none to code; a measurement record for CC-LAB-0317's open item.

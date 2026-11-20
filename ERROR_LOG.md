@@ -92,6 +92,11 @@ Format per entry:
 - **Root cause:** CC-SESS-0611 narrowed the gate for routed logins against ground-truth URLs only; `SeamProbeSender._send` judges the URL before binding the entries, and a URL naming no route defaulted to "not an auth endpoint".
 - **Remediation:** the gate fails closed for a router URL naming no route; the sender judges the URL with its entries' route pairs (CC-SESS-0612; BUG-0620, PA-0620). Live: login-page probes anonymous (65 with a login point vs 34 without; crawl run 36), scores unchanged.
 - **Status:** Fixed
+## 2026-11-20 — FUZZ/SESS: the M6 browser planted stored XSS without the run's session (fixed, BUG-0690/PA-0690)
+- **Symptom:** NodeGoat NGOAT-0008 (profile stored XSS) missed in `fuzzlab auto --identity nodegoat-user --browser`: the plant `POST /profile` got 302 → `/login` while the run's other probes to the URL got 200.
+- **Root cause:** `auto_cli` built `PlaywrightBrowserExecutor()` with no session and the executor's context adopted none, so plant and observe went out anonymously; the plant's login-redirect answer was taken as a stored payload ("did not fire"). Same class in greybox: a non-Cookie session ran anonymous.
+- **Remediation:** the executor takes the run's sender's `browser_session_route` (SP-125) and adopts that session the one way (CC-FUZZ-0680, CC-SESS-0650); an unlanded plant is not observed; greybox refuses a session it cannot carry whole (CC-FUZZ-0681); whole-package guards (PA-0690).
+- **Status:** Fixed.
 
 ## 2026-11-20 — environment: lane NODE's container lacked the harness's tools; five navigation tests fail on its newer Chromium (fixed / open)
 - **Symptom:** `scripts/verify_change.py --base 2be7a50` on e19f6fc: 9 `tests/test_labgen_*::test_cli_check_passes_end_to_end*` failed (the labgen check's secret-scanner gate: `'gitleaks' executable not found on PATH`), and 5 in `tests/test_navigation_aborts.py` (`DID NOT RAISE playwright Error`, a `KeyError` on an error page's URL). Before that, `keyring`, `playwright` and `pytest-xdist` were not installed, and the first pip-installed Playwright looked for Chromium build 1255 where the preinstalled one is 1243.
