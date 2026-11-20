@@ -3,6 +3,32 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0372 — Lane PERF: the cost of `R-SSJS` on two labs that do not need it (2026-11-20)
+- Change: none to code; a measurement on the merged tree 4cc25dd (lane NODE's
+  CC-FUZZ-0610 rule), asked by the orchestrator as a candidate for lane PERF's next cut.
+- How: `scripts/measure_scan_perf.py --authorized --lab <lab> --points ground-truth
+  -- --browser [--oob] --mode manual --categories <the categories automatic mode plans
+  for the lab>`, then the same with `server-side-javascript-injection` added. Juice
+  Shop: insecure-deserialization, open-redirect, path-traversal,
+  server-side-template-injection, sql-injection, ssrf, xss, xxe (with `--oob`);
+  bWAPP (`--base-url http://127.0.0.1:8092`): open-redirect, path-traversal,
+  sql-injection, xss. In automatic mode the rule runs only where the key labels a
+  `ssjs` case (NodeGoat), so neither lab pays it today.
+- Results (tp/fp/fn/tn identical with and without it: Juice Shop 5/0/10/3, bWAPP
+  21/0/34/3):
+  - Juice Shop: +8 candidates (30 -> 38), requests 150 -> 190 (+40, 5 per candidate),
+    wall 24.6 -> 24.2 s (within run-to-run noise).
+  - bWAPP: +48 candidates (102 -> 150), requests 888 -> 1285 (+397, +45%, about 8.3
+    per candidate), wall 195.7 -> 200.2 s.
+  - No finding and no false positive from it on either lab.
+- Candidate cut (not built): `R-SSJS` fires on every query, body, JSON and path point;
+  a value-shape or technology gate (a fingerprint or answer that names a JavaScript
+  server) would keep the cost off PHP apps like bWAPP. That is NODE's rule: a change
+  to it is lane NODE's or the orchestrator's decision.
+- Deliverables:
+  - [x] runs; this record — done
+- Effectiveness: n/a (a record).
+
 ### CC-LAB-0371 — Lane PERF: BEFORE and AFTER on five external labs (2026-11-20)
 - Change: none to code; the measurement record of CC-FUZZ-0650 (FR-FUZZ-650).
 - How (this container, docker, sequentially, nothing else running beside a timed

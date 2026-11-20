@@ -5,6 +5,7 @@ Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
 ## 2026-11-20
+- **What:** measured what lane NODE's `R-SSJS` rule costs on two labs that have no server-side JavaScript case (CC-LAB-0372): +40 requests on Juice Shop's ground truth and +397 (+45%) on bWAPP's, with no finding or false positive. **Why:** the orchestrator asked for it as a candidate for lane PERF's next cut.
 - **What:** lane PERF's BEFORE/AFTER record on Juice Shop, bWAPP, SSType, CopyNPaste and Mongection (CC-LAB-0371): tp/fp/fn/tn identical on all ten configurations; bWAPP gt 621 -> 199 s, bWAPP crawl 842 -> 391 s. **Why:** the hard constraint of FR-FUZZ-650's change is no detection lost.
 - **What:** the M6 browser's sentinel wait ends once the page has gone quiet -- no request in flight (SP-40), no timer due, interval, animation frame or running animation in any frame, no stream or worker -- for 500 ms, instead of always waiting 4 s (SP-105, FR-FUZZ-650/651; CC-FUZZ-0650). **Why:** the wait was 600 of 621 s on bWAPP's ground truth; a shadow run on five lab configurations saw every hit before the early end. A per-run Playwright driver was measured and not built (FR-FUZZ-652).
 - **What:** `scripts/measure_scan_perf.py`, a scored, per-phase wall-clock profile of one `fuzzlab auto` run against a running external lab (CC-LAB-0370, FR-LAB-370). **Why:** lane PERF cuts scan cost without losing detection; its first measurements put the M6 browser's settle wait at 600 of 621 s on bWAPP's ground truth.
